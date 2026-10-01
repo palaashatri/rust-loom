@@ -30,6 +30,8 @@ mod command_dispatch_tests;
 mod export_operation_journeys;
 #[path = "main_tests/grid_interaction_tests.rs"]
 mod grid_interaction_tests;
+#[path = "main_tests/grid_pointer_tests.rs"]
+mod grid_pointer_tests;
 #[path = "main_tests/layout_tests.rs"]
 mod layout_tests;
 #[path = "main_tests/open_operation_journeys.rs"]

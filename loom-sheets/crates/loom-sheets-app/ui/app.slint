@@ -19,6 +19,7 @@ import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "foundation.slint";
+export { GridPointer } from "grid_pointer.slint";
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
@@ -338,10 +339,7 @@ export component SheetsApp inherits Window {
             }
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
-                // Objects and chart data both claim F6. F6 leaves object
-                // navigation, and from the grid it enters the anchored objects
-                // when the sheet has any, otherwise chart data. Chart data keeps
-                // its own F6 to return to the grid.
+                // F6: leave objects, else enter objects, else chart data.
                 if (root.object-state != 0) { root.object-state = 0; grid-surface.focus-grid(); }
                 else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
                 else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }

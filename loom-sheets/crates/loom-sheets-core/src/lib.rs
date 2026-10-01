@@ -53,6 +53,11 @@ pub struct CellRef {
     pub col: u32,
 }
 
+/// The last column (XFD) and row an A1 reference can name, as in other
+/// spreadsheets. Longer text is not a cell reference.
+const MAX_COLUMNS: u32 = 16_384;
+const MAX_ROWS: u32 = 1_048_576;
+
 impl CellRef {
     /// Parse an A1-style reference like "B3" (col letter(s), then row number).
     pub fn parse(s: &str) -> Option<Self> {
@@ -62,6 +67,9 @@ impl CellRef {
         let mut i = 0;
         while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
             col = col * 26 + (bytes[i] - b'A' + 1) as u32;
+            if col > MAX_COLUMNS {
+                return None;
+            }
             i += 1;
         }
         if col == 0 {
@@ -72,7 +80,7 @@ impl CellRef {
             return None;
         }
         let row: u32 = row_str.parse().ok()?;
-        if row == 0 {
+        if row == 0 || row > MAX_ROWS {
             return None;
         }
         Some(Self {

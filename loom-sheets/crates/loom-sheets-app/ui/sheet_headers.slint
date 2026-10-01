@@ -1,0 +1,176 @@
+import { LoomCanvasHandle } from "foundation.slint";
+import { GridPointer } from "grid_pointer.slint";
+import { Theme } from "theme.slint";
+
+/// The pinned column and row headers and the select-all corner. They follow the
+/// scroll offset but never leave the top and left edges, as in every
+/// mainstream spreadsheet. Clicking a header selects the whole column or row;
+/// dragging its edge resizes it.
+export component SheetHeaders inherits Rectangle {
+    in property <[int]> rows: [];
+    in property <[int]> cols: [];
+    in property <[string]> column-headers: [];
+    in property <[string]> row-headers: [];
+    in property <int> view-row-origin: 0;
+    in property <int> view-col-origin: 0;
+    in property <int> selected-row: 0;
+    in property <int> selected-col: 0;
+    in property <int> selection-start-row: 0;
+    in property <int> selection-start-col: 0;
+    in property <int> selection-end-row: 0;
+    in property <int> selection-end-col: 0;
+    in property <float> zoom-factor: 1.0;
+    in property <length> grid-col-offset: 0px;
+    in property <length> grid-row-offset: 0px;
+    in property <length> grid-visible-width: 640px;
+    in property <length> grid-visible-height: 360px;
+    in property <[length]> grid-column-widths: [];
+    in property <[length]> grid-row-heights: [];
+    in property <length> grid-scroll-x: 0px;
+    in property <length> grid-scroll-y: 0px;
+    callback cell-clicked(int, int);
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 36px;
+        height: 26px;
+        background: Theme.palette().surface-sunken;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+
+        LoomCanvasHandle {
+            label: "Table select handle";
+            selected: root.selected-row == 0 && root.selected-col == 0;
+            picked => { root.cell-clicked(0, 0); }
+        }
+    }
+
+    Rectangle {
+        x: 36px;
+        y: 0px;
+        width: max(1px, parent.width - 36px);
+        height: 26px;
+        clip: true;
+
+        HorizontalLayout {
+            x: root.grid-scroll-x + root.grid-col-offset;
+            y: 0px;
+            width: root.grid-visible-width;
+            height: 26px;
+            spacing: 0px;
+
+            for c in root.cols : Rectangle {
+                min-width: root.grid-column-widths[c];
+                max-width: root.grid-column-widths[c];
+                property <bool> is-col-selected: c + root.view-col-origin == root.selected-col;
+                property <bool> in-col-range: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col;
+                clip: true;
+                Rectangle {
+                    x: -1px;
+                    y: -1px;
+                    width: parent.width + 1px;
+                    height: parent.height + 1px;
+                    background: in-col-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: is-col-selected ? Theme.palette().selection : Theme.palette().border;
+                }
+                Text {
+                    text: root.column-headers[c];
+                    font-size: Theme.type.caption * root.zoom-factor;
+                    font-weight: is-col-selected ? 700 : 500;
+                    color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            GridPointer.header-pressed(false, c + root.view-col-origin, event.modifiers.shift);
+                        }
+                    }
+                }
+                TouchArea {
+                    x: parent.width - 6px;
+                    width: 6px;
+                    mouse-cursor: MouseCursor.col-resize;
+                    property <length> press-pos;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            self.press-pos = self.absolute-position.x + self.mouse-x;
+                        } else if (event.kind == PointerEventKind.up) {
+                            GridPointer.header-resized(false, c + root.view-col-origin, self.absolute-position.x + self.mouse-x - self.press-pos, true);
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) { GridPointer.header-resized(false, c + root.view-col-origin, self.absolute-position.x + self.mouse-x - self.press-pos, false); }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: 26px;
+        width: 36px;
+        height: max(1px, parent.height - 26px);
+        clip: true;
+
+        VerticalLayout {
+            x: 0px;
+            y: root.grid-scroll-y + root.grid-row-offset;
+            width: 36px;
+            height: root.grid-visible-height;
+            spacing: 0px;
+
+            for r in root.rows : Rectangle {
+                min-height: root.grid-row-heights[r];
+                max-height: root.grid-row-heights[r];
+                property <bool> is-row-selected: r + root.view-row-origin == root.selected-row;
+                property <bool> in-row-range: r + root.view-row-origin >= root.selection-start-row && r + root.view-row-origin <= root.selection-end-row;
+                clip: true;
+                Rectangle {
+                    x: -1px;
+                    y: -1px;
+                    width: parent.width + 1px;
+                    height: parent.height + 1px;
+                    background: in-row-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: is-row-selected ? Theme.palette().selection : Theme.palette().border;
+                }
+                Text {
+                    text: root.row-headers[r];
+                    font-size: Theme.type.caption * root.zoom-factor;
+                    font-weight: is-row-selected ? 700 : 500;
+                    color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            GridPointer.header-pressed(true, r + root.view-row-origin, event.modifiers.shift);
+                        }
+                    }
+                }
+                TouchArea {
+                    y: parent.height - 6px;
+                    height: 6px;
+                    mouse-cursor: MouseCursor.row-resize;
+                    property <length> press-pos;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            self.press-pos = self.absolute-position.y + self.mouse-y;
+                        } else if (event.kind == PointerEventKind.up) {
+                            GridPointer.header-resized(true, r + root.view-row-origin, self.absolute-position.y + self.mouse-y - self.press-pos, true);
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) { GridPointer.header-resized(true, r + root.view-row-origin, self.absolute-position.y + self.mouse-y - self.press-pos, false); }
+                    }
+                }
+            }
+        }
+    }
+}

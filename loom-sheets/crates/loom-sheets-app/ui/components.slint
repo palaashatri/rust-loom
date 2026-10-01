@@ -1,10 +1,12 @@
 import {
     LoomButton, LoomIconButton, LoomTextField, LoomSearchField, LoomSegmentedControl,
     LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider, LoomOverflowButton,
-    LoomSectionHeader, LoomTabStrip, LoomCanvasHandle,
+    LoomSectionHeader, LoomTabStrip,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { GridPointer } from "grid_pointer.slint";
+import { SheetHeaders } from "sheet_headers.slint";
 
 export component SheetTabs inherits Rectangle {
     in property <[string]> sheets: ["Sheet 1"];
@@ -57,6 +59,8 @@ export component FormulaNameBar inherits Rectangle {
     in property <bool> show-quick-formulas: false;
     in-out property <string> formula-edit-buffer: "";
     in property <bool> is-editing: false;
+    in-out property <string> name-text: "A1";
+    changed selection-range => { root.name-text = root.selection-range; }
     callback commit(string);
     callback commit-advance(string, int, int);
     callback cancel;
@@ -75,23 +79,15 @@ export component FormulaNameBar inherits Rectangle {
         padding-right: Theme.tokens.space.md;
         cross-axis-alignment: center;
 
-        // Coordinate pill
-        Rectangle {
-            width: 68px;
-            height: 24px;
-            border-radius: Theme.tokens.metrics.radius-small;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface-sunken;
-            Text {
-                text: root.selection-range;
-                font-weight: 600;
-                font-size: Theme.type.caption;
-                color: Theme.palette().ink;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
+        // Name box: shows the selection; type a cell or range and press Enter to go there.
+        LoomTextField {
+            label: "Cell reference";
+            placeholder: "A1";
+            value <=> root.name-text;
+            min-width: 84px;
+            max-width: 84px;
+            accepted(text) => { GridPointer.goto-cell(text); }
+            cancelled => { root.name-text = root.selection-range; }
         }
 
         Text {
@@ -162,13 +158,24 @@ export component FormulaNameBar inherits Rectangle {
 export component SheetSelectionOverlay inherits Rectangle {
     in property <bool> active: false;
     in property <bool> in-selection: false;
+    // Which sides of the cell lie on the selected range's outline. A range is
+    // drawn as one outline, not an outline on every cell.
+    in property <bool> edge-top: false;
+    in property <bool> edge-right: false;
+    in property <bool> edge-bottom: false;
+    in property <bool> edge-left: false;
     callback fill-selection;
 
     x: 0px;
     y: 0px;
     background: transparent;
-    border-width: root.active ? 2px : root.in-selection ? 1px : 0px;
+    border-width: root.active ? 2px : 0px;
     border-color: Theme.palette().selection;
+
+    if !root.active && root.in-selection && root.edge-top : Rectangle { y: 0px; width: parent.width; height: 2px; background: Theme.palette().selection; }
+    if !root.active && root.in-selection && root.edge-bottom : Rectangle { y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.palette().selection; }
+    if !root.active && root.in-selection && root.edge-left : Rectangle { x: 0px; width: 2px; height: parent.height; background: Theme.palette().selection; }
+    if !root.active && root.in-selection && root.edge-right : Rectangle { x: parent.width - 2px; width: 2px; height: parent.height; background: Theme.palette().selection; }
 
     if root.active : Rectangle {
         x: -2.5px;
@@ -336,6 +343,8 @@ export component SheetTable inherits Rectangle {
     in-out property <length> grid-scroll-x: 0px;
     in-out property <length> grid-scroll-y: 0px;
     callback cell-clicked(int, int);
+    callback cell-pressed(int, int, bool);
+    callback cell-double-clicked;
     callback fill-selection;
     callback grid-scrolled;
     callback grid-viewport-changed(length, length);
@@ -362,6 +371,8 @@ export component SheetTable inherits Rectangle {
             // The scrolled area holds cells only. Column letters and row
             // numbers are drawn outside it, below, so they stay pinned.
             grid-flick := Flickable {
+                // Dragging selects cells; the wheel and the scrollbars scroll.
+                interactive: false;
                 x: 36px;
                 y: 26px;
                 width: max(1px, parent.width - 36px);
@@ -426,7 +437,7 @@ export component SheetTable inherits Rectangle {
                                     : fill-idx == 4 ? #BFDBFE
                                     : fill-idx == 5 ? #DDD6FE
                                     : fill-idx == 6 ? #E5E7EB
-                                    : in-selection && !is-active ? readable-line
+                                    : in-selection && !is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : readable-line)
                                     : Theme.palette().paper;
                                 border-width: is-bordered ? 2px : 1px;
                                 border-color: is-bordered ? Theme.palette().ink : Theme.palette().paper-line;
@@ -488,115 +499,55 @@ export component SheetTable inherits Rectangle {
                                 height: parent.height;
                                 active: is-active;
                                 in-selection: in-selection;
+                                edge-top: global-row == root.selection-start-row;
+                                edge-bottom: global-row == root.selection-end-row;
+                                edge-left: global-col == root.selection-start-col;
+                                edge-right: global-col == root.selection-end-col;
                                 fill-selection => { root.fill-selection(); }
                             }
 
                             TouchArea {
                                 clicked => { root.cell-clicked(global-row, global-col); }
+                                double-clicked => { root.cell-double-clicked(); }
+                                pointer-event(event) => {
+                                    if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                                        root.cell-pressed(global-row, global-col, event.modifiers.shift);
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) { GridPointer.cell-dragged(global-row, global-col, self.mouse-x, self.mouse-y); }
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Pinned headers. They follow the scroll offset but never leave the
-            // top and left edges, as in every mainstream spreadsheet.
-            Rectangle {
-                x: 0px;
-                y: 0px;
-                width: 36px;
-                height: 26px;
-                background: Theme.palette().surface-sunken;
-                border-width: 1px;
-                border-color: Theme.palette().border;
-
-                LoomCanvasHandle {
-                    label: "Table select handle";
-                    selected: root.selected-row == 0 && root.selected-col == 0;
-                    picked => { root.cell-clicked(0, 0); }
-                }
-            }
-
-            Rectangle {
-                x: 36px;
-                y: 0px;
-                width: max(1px, parent.width - 36px);
-                height: 26px;
-                clip: true;
-
-                HorizontalLayout {
-                    x: root.grid-scroll-x + root.grid-col-offset;
-                    y: 0px;
-                    width: root.grid-visible-width;
-                    height: 26px;
-                    spacing: 0px;
-
-                    for c in root.cols : Rectangle {
-                        min-width: root.grid-column-widths[c];
-                        max-width: root.grid-column-widths[c];
-                        property <bool> is-col-selected: c + root.view-col-origin == root.selected-col;
-                        property <bool> in-col-range: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col;
-                        clip: true;
-                        Rectangle {
-                            x: -1px;
-                            y: -1px;
-                            width: parent.width + 1px;
-                            height: parent.height + 1px;
-                            background: in-col-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
-                            border-width: 1px;
-                            border-color: is-col-selected ? Theme.palette().selection : Theme.palette().border;
-                        }
-                        Text {
-                            text: root.column-headers[c];
-                            font-size: Theme.type.caption * root.zoom-factor;
-                            font-weight: is-col-selected ? 700 : 500;
-                            color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                x: 0px;
-                y: 26px;
-                width: 36px;
-                height: max(1px, parent.height - 26px);
-                clip: true;
-
-                VerticalLayout {
-                    x: 0px;
-                    y: root.grid-scroll-y + root.grid-row-offset;
-                    width: 36px;
-                    height: root.grid-visible-height;
-                    spacing: 0px;
-
-                    for r in root.rows : Rectangle {
-                        min-height: root.grid-row-heights[r];
-                        max-height: root.grid-row-heights[r];
-                        property <bool> is-row-selected: r + root.view-row-origin == root.selected-row;
-                        property <bool> in-row-range: r + root.view-row-origin >= root.selection-start-row && r + root.view-row-origin <= root.selection-end-row;
-                        clip: true;
-                        Rectangle {
-                            x: -1px;
-                            y: -1px;
-                            width: parent.width + 1px;
-                            height: parent.height + 1px;
-                            background: in-row-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
-                            border-width: 1px;
-                            border-color: is-row-selected ? Theme.palette().selection : Theme.palette().border;
-                        }
-                        Text {
-                            text: root.row-headers[r];
-                            font-size: Theme.type.caption * root.zoom-factor;
-                            font-weight: is-row-selected ? 700 : 500;
-                            color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
+            SheetHeaders {
+                width: parent.width;
+                height: parent.height;
+                rows: root.rows;
+                cols: root.cols;
+                column-headers: root.column-headers;
+                row-headers: root.row-headers;
+                view-row-origin: root.view-row-origin;
+                view-col-origin: root.view-col-origin;
+                selected-row: root.selected-row;
+                selected-col: root.selected-col;
+                selection-start-row: root.selection-start-row;
+                selection-start-col: root.selection-start-col;
+                selection-end-row: root.selection-end-row;
+                selection-end-col: root.selection-end-col;
+                zoom-factor: root.zoom-factor;
+                grid-col-offset: root.grid-col-offset;
+                grid-row-offset: root.grid-row-offset;
+                grid-visible-width: root.grid-visible-width;
+                grid-visible-height: root.grid-visible-height;
+                grid-column-widths: root.grid-column-widths;
+                grid-row-heights: root.grid-row-heights;
+                grid-scroll-x: root.grid-scroll-x;
+                grid-scroll-y: root.grid-scroll-y;
+                cell-clicked(row, col) => { root.cell-clicked(row, col); }
             }
 
             SheetScrollbars {
@@ -812,6 +763,11 @@ export component SheetGridSurface inherits Rectangle {
             grid-focus.focus();
             root.cell-clicked(row, col);
         }
+        cell-pressed(row, col, shift) => {
+            grid-focus.focus();
+            GridPointer.cell-pressed(row, col, shift);
+        }
+        cell-double-clicked => { root.begin-edit(root.selection-formula); }
         fill-selection => { root.fill-selection(); }
         grid-scrolled => { root.grid-scrolled(); }
         grid-viewport-changed(width, height) => { root.grid-viewport-changed(width, height); }

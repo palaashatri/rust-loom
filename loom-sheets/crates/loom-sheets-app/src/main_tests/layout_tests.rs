@@ -102,7 +102,7 @@ fn text_scale_change_reapplies_responsive_state_without_resizing() {
 }
 
 #[test]
-fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
+fn grid_geometry_uses_the_core_default_sizes_at_any_workbook_size() {
     assert_eq!(GRID_COL_WIDTH, DEFAULT_COL_WIDTH);
     assert_eq!(GRID_ROW_HEIGHT, DEFAULT_ROW_HEIGHT);
 
@@ -111,10 +111,9 @@ fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
     let dimensions = editor_dimensions(&small, CellRef::parse("A1").unwrap(), None);
     assert_eq!(dimensions, SheetDimensions::new(15, 8));
 
-    let fitted = grid_default_col_width(&small, 1_000.0);
-    assert_eq!(fitted, 120.5);
+    let fitted = GRID_COL_WIDTH;
     let viewport = SheetViewport::new(4, 8);
-    let geometry = grid_geometry(&small, dimensions, viewport, 1_000.0, 1.0);
+    let geometry = grid_geometry(&small, dimensions, viewport, 1.0);
     assert_eq!(geometry.column_widths.len(), 8);
     assert!(geometry.column_widths.iter().all(|width| *width == fitted));
     assert_eq!(geometry.content_width, 8.0 * fitted);
@@ -123,7 +122,6 @@ fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
     sparse.set_str("AZ1000", "tail");
     let sparse_dimensions = editor_dimensions(&sparse, CellRef::parse("A1").unwrap(), None);
     assert_eq!(sparse_dimensions, SheetDimensions::new(1_000, 52));
-    assert_eq!(grid_default_col_width(&sparse, 1_000.0), GRID_COL_WIDTH);
 }
 
 #[test]
@@ -183,7 +181,7 @@ fn grid_geometry_retains_persisted_row_and_column_dimensions() {
     sheet.set_row_height(2, 40.0);
     let dimensions = editor_dimensions(&sheet, CellRef::parse("A1").unwrap(), None);
     let viewport = SheetViewport::new(4, 3);
-    let geometry = grid_geometry(&sheet, dimensions, viewport, 640.0, 1.0);
+    let geometry = grid_geometry(&sheet, dimensions, viewport, 1.0);
     assert_eq!(geometry.column_widths, vec![80.0, 140.0, 80.0]);
     assert_eq!(geometry.row_heights, vec![24.0, 24.0, 40.0, 24.0]);
     assert_eq!(geometry.content_width, 8.0 * 80.0 + 60.0);
@@ -208,8 +206,8 @@ fn zoom_scales_geometry_and_cycles_through_presets() {
     sheet.set_row_height(2, 40.0);
     let dimensions = editor_dimensions(&sheet, CellRef::parse("A1").unwrap(), None);
     let viewport = SheetViewport::new(4, 3);
-    let unscaled = grid_geometry(&sheet, dimensions, viewport, 640.0, 1.0);
-    let scaled = grid_geometry(&sheet, dimensions, viewport, 640.0, 1.5);
+    let unscaled = grid_geometry(&sheet, dimensions, viewport, 1.0);
+    let scaled = grid_geometry(&sheet, dimensions, viewport, 1.5);
     assert_eq!(
         scaled.column_widths,
         unscaled

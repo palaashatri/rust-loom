@@ -43,6 +43,7 @@ pub mod formatting;
 
 mod analysis;
 mod grid_navigation;
+mod grid_pointer;
 use analysis::{plan_chart, plan_chart_in_range};
 
 mod assets;
@@ -129,7 +130,6 @@ pub(crate) const GRID_ROW_HEIGHT: f32 = DEFAULT_ROW_HEIGHT;
 pub(crate) const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
 const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
 const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
-const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
 const INSPECTOR_WIDTH: f32 = 320.0;
 const TABLE_HORIZONTAL_MARGIN: f32 = 0.0;
 const SHELL_VERTICAL_CHROME: f32 = 220.0;
@@ -267,21 +267,6 @@ fn editor_dimensions(
     fill: Option<(u32, u32)>,
 ) -> SheetDimensions {
     editor_dimensions_with_width(sheet, selected, fill, GRID_COL_WIDTH)
-}
-
-/// Return the default width used by the projected grid. Small workbooks (at
-/// most 8 used columns, no custom widths) stretch to the available table
-/// width up to a comfortable cap; everything else keeps the persisted 80px
-/// default so horizontal scrolling stays useful. The fit keys off *used*
-/// columns (not the fill-expanded addressable grid) so navigating or
-/// auto-filling the void never fattens cells.
-pub(crate) fn grid_default_col_width(sheet: &Sheet, viewport_width: f32) -> f32 {
-    if !sheet.col_widths.is_empty() || sheet.dimensions().cols > DEFAULT_VISIBLE_COLS {
-        return GRID_COL_WIDTH;
-    }
-    let available = (viewport_width - GRID_ROW_HEADER_WIDTH).max(0.0);
-    let fitted = available / DEFAULT_VISIBLE_COLS as f32;
-    fitted.clamp(GRID_COL_WIDTH, FIT_COLUMN_MAX_WIDTH)
 }
 
 fn valid_dimension(value: f32, fallback: f32) -> f32 {
@@ -590,16 +575,9 @@ fn grid_geometry(
     sheet: &Sheet,
     dimensions: SheetDimensions,
     viewport: SheetViewport,
-    viewport_width: f32,
     zoom: f32,
 ) -> GridGeometry {
-    grid_geometry_fit(
-        sheet,
-        dimensions,
-        viewport,
-        grid_default_col_width(sheet, viewport_width),
-        zoom,
-    )
+    grid_geometry_fit(sheet, dimensions, viewport, GRID_COL_WIDTH, zoom)
 }
 
 /// Geometry for a known unscaled default column width. Scrolling reuses the
@@ -691,11 +669,11 @@ fn viewport_from_app(
         sheet,
         selected,
         window_fill(app, zoom),
-        grid_default_col_width(sheet, viewport_width),
+        GRID_COL_WIDTH,
         zoom,
         preview,
     );
-    let default_col_width = grid_default_col_width(sheet, viewport_width) * zoom;
+    let default_col_width = GRID_COL_WIDTH * zoom;
     let default_row_height = GRID_ROW_HEIGHT * zoom;
     // Zoom scales rendered geometry uniformly; the persisted model keeps
     // unscaled pixels so Save/Set-140px round-trips are zoom-independent.
@@ -934,16 +912,11 @@ fn project_sheet_inner_with_preview(
     let selected = selection.focus;
     let dimensions = sheet.dimensions();
     let zoom = zoom_factor(app);
-    let viewport_width = if app.get_grid_viewport_width() > 1.0 {
-        app.get_grid_viewport_width()
-    } else {
-        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
-    };
     let editor_dimensions = editor_dimensions_with_preview(
         sheet,
         selected,
         window_fill(app, zoom),
-        grid_default_col_width(sheet, viewport_width),
+        GRID_COL_WIDTH,
         zoom,
         preview,
     );
@@ -966,13 +939,7 @@ fn project_sheet_inner_with_preview(
         "{}%",
         (zoom * 100.0).round() as i32
     )));
-    let geometry = grid_geometry(
-        sheet,
-        editor_dimensions,
-        viewport,
-        app.get_grid_viewport_width(),
-        zoom,
-    );
+    let geometry = grid_geometry(sheet, editor_dimensions, viewport, zoom);
     // Flickable coordinates are negative because its content is translated
     // opposite to the positive worksheet scroll offset. Preserve fractional
     // wheel/touchpad offsets while snapping only when selection auto-reveal
@@ -2646,6 +2613,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_cell_clicked(move |r, c| {
+            if grid_pointer::take_swallowed_click() {
+                return;
+            }
             if let Some(app) = app_ref.upgrade() {
                 select_cell(&app, &state.current.borrow(), r, c);
                 project_current(&app, &state);
@@ -2712,6 +2682,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_grid_scrolled(move || {
             if let Some(app) = app_ref.upgrade() {
                 scroll_projection::project_scroll(&app, &state);
+                scroll_projection::settle_after_scroll(&app_ref, &state);
             }
         });
     }

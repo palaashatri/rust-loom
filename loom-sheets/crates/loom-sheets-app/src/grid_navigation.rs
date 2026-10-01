@@ -46,9 +46,8 @@ pub(crate) fn destination(
 use loom_sheets_core::SheetViewport;
 
 use crate::{
-    dimension_size, grid_default_col_width, zoom_factor, SheetsApp, DEFAULT_VISIBLE_COLS,
-    DEFAULT_VISIBLE_ROWS, GRID_COLUMN_HEADER_HEIGHT, GRID_COL_WIDTH, GRID_ROW_HEADER_WIDTH,
-    GRID_ROW_HEIGHT,
+    dimension_size, zoom_factor, SheetsApp, DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS,
+    GRID_COLUMN_HEADER_HEIGHT, GRID_COL_WIDTH, GRID_ROW_HEADER_WIDTH, GRID_ROW_HEIGHT,
 };
 
 /// Scroll `viewport` just far enough to show `selected` completely, counting
@@ -72,7 +71,7 @@ pub(crate) fn reveal_selected(
                 GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT,
             )
         };
-    let default_col_width = grid_default_col_width(sheet, width) * zoom;
+    let default_col_width = GRID_COL_WIDTH * zoom;
     let cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()

@@ -123,7 +123,7 @@ fn scrolled_viewport(
     app: &SheetsApp,
     sheet: &Sheet,
     zoom: f32,
-) -> (SheetViewport, SheetDimensions) {
+) -> (SheetViewport, SheetDimensions, bool) {
     let mut dimensions = SheetDimensions::new(
         app.get_workbook_rows().max(1) as u32,
         app.get_workbook_cols().max(1) as u32,
@@ -150,29 +150,33 @@ fn scrolled_viewport(
         .iter()
         .map(|(&row, &height)| (row, height * zoom))
         .collect();
-    let viewport = viewport_from_dimensions(
-        (
-            (-app.get_grid_scroll_x()).max(0.0),
-            (-app.get_grid_scroll_y()).max(0.0),
-        ),
-        (
-            (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
-            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
-        ),
-        dimensions,
-        default_col_width,
-        &scaled_rows,
-        &scaled_cols,
-    );
+    let window_at = |dimensions| {
+        viewport_from_dimensions(
+            (
+                (-app.get_grid_scroll_x()).max(0.0),
+                (-app.get_grid_scroll_y()).max(0.0),
+            ),
+            (
+                (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
+                (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
+            ),
+            dimensions,
+            default_col_width,
+            &scaled_rows,
+            &scaled_cols,
+        )
+    };
     // Scrolling toward the end of the sheet makes more of it: a spreadsheet
-    // has no last row to hit.
-    let grown = grown_dimensions(dimensions, viewport);
-    if grown != dimensions {
+    // has no last row to hit. The window is then worked out again against the
+    // longer sheet, so it reaches the new rows instead of stopping short.
+    let grown = grown_dimensions(dimensions, window_at(dimensions));
+    let did_grow = grown != dimensions;
+    if did_grow {
         app.set_workbook_rows(grown.rows as i32);
         app.set_workbook_cols(grown.cols as i32);
         dimensions = grown;
     }
-    (viewport, dimensions)
+    (window_at(dimensions), dimensions, did_grow)
 }
 
 /// Rows and columns the grid keeps beyond the last visible one.
@@ -202,8 +206,11 @@ fn grown_dimensions(dimensions: SheetDimensions, viewport: SheetViewport) -> She
 pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     let sheet = state.current.borrow();
     let zoom = zoom_factor(app);
-    let (viewport, dimensions) = scrolled_viewport(app, &sheet, zoom);
-    let window_moved = viewport.first_row as i32 != app.get_view_row_origin()
+    let (viewport, dimensions, grew) = scrolled_viewport(app, &sheet, zoom);
+    // New rows change the scrollable extent, which only a full grid update
+    // publishes.
+    let window_moved = grew
+        || viewport.first_row as i32 != app.get_view_row_origin()
         || viewport.first_col as i32 != app.get_view_col_origin()
         || viewport.visible_rows as usize != app.get_rows().row_count()
         || viewport.visible_cols as usize != app.get_cols().row_count();
@@ -272,4 +279,26 @@ mod tail_tests {
         );
         assert_eq!((grown.rows, grown.cols), (MAX_GRID_ROWS, MAX_GRID_COLS));
     }
+}
+
+thread_local! {
+    static SETTLE: slint::Timer = slint::Timer::default();
+}
+
+/// Project once more shortly after scrolling stops. A burst of wheel events can
+/// leave the window one step behind the final position, which shows as a blank
+/// strip at the edge; this catches the window up to wherever the scroll ended.
+pub(crate) fn settle_after_scroll(app: &slint::Weak<SheetsApp>, state: &std::rc::Rc<GuiState>) {
+    let (app, state) = (app.clone(), state.clone());
+    SETTLE.with(|timer| {
+        timer.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(50),
+            move || {
+                if let Some(app) = app.upgrade() {
+                    project_scroll(&app, &state);
+                }
+            },
+        );
+    });
 }

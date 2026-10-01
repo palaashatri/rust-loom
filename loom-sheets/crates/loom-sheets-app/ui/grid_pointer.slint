@@ -1,0 +1,15 @@
+// Pointer gestures on the grid that the controller owns: selecting by press and
+// drag, whole row and column selection, resizing from a header edge and the
+// name box. A global keeps them out of the window's own callback list.
+export global GridPointer {
+    // Row, column, shift held.
+    callback cell-pressed(int, int, bool);
+    // Origin row and column, then the pointer's position relative to that cell.
+    callback cell-dragged(int, int, length, length);
+    // Is a row header, index, shift held.
+    callback header-pressed(bool, int, bool);
+    // Is a row header, index, pointer travel since the press, gesture finished.
+    callback header-resized(bool, int, length, bool);
+    // Text typed in the name box.
+    callback goto-cell(string);
+}

@@ -72,14 +72,13 @@ pub(crate) fn anchor_after_drag(
     delta_x: f32,
     delta_y: f32,
     zoom: f32,
-    viewport_width: f32,
 ) -> CellRef {
     let zoom = if zoom.is_finite() && zoom > 0.0 {
         zoom.clamp(0.5, 3.0)
     } else {
         1.0
     };
-    let default_col_width = crate::grid_default_col_width(sheet, viewport_width) * zoom;
+    let default_col_width = crate::GRID_COL_WIDTH * zoom;
     let default_row_height = crate::GRID_ROW_HEIGHT * zoom;
     let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
@@ -189,11 +188,7 @@ fn reveal_object(app: &SheetsApp, state: &Rc<GuiState>, index: usize) {
         .iter()
         .map(|(&row, &height)| (row, height * zoom))
         .collect();
-    let x = crate::dimension_offset(
-        anchor.col,
-        crate::grid_default_col_width(&sheet, app.get_grid_viewport_width()) * zoom,
-        &columns,
-    );
+    let x = crate::dimension_offset(anchor.col, crate::GRID_COL_WIDTH * zoom, &columns);
     let y = crate::dimension_offset(anchor.row, crate::GRID_ROW_HEIGHT * zoom, &rows);
     app.set_grid_scroll_x(-x);
     app.set_grid_scroll_y(-y);
@@ -591,7 +586,6 @@ fn update_gesture(
                     delta_x,
                     delta_y,
                     crate::zoom_factor(app),
-                    app.get_grid_viewport_width(),
                 );
                 if gesture.preview_anchor == anchor {
                     false
@@ -656,6 +650,16 @@ pub(crate) fn register_object_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    {
+        // Leaving object navigation: show the selected cell the address box names.
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_reveal_selected_requested(move || {
+            if let Some(app) = app_ref.upgrade() {
+                project_current(&app, &state);
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -810,7 +814,7 @@ mod tests {
         sheet.set_row_height(1, 40.0);
         let start = CellRef { row: 1, col: 2 };
 
-        let moved = anchor_after_drag(&sheet, start, 120.0, -100.0, 1.0, 640.0);
+        let moved = anchor_after_drag(&sheet, start, 120.0, -100.0, 1.0);
 
         assert_eq!(moved, CellRef { row: 0, col: 3 });
     }
