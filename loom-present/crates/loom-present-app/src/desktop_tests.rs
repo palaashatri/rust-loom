@@ -1117,3 +1117,106 @@ fn mid_transition_frames_are_dimmed_for_dissolve_and_shifted_for_push() {
         "the settled slide is actually drawn"
     );
 }
+
+#[test]
+fn presenter_view_follows_the_deck_and_drives_navigation() {
+    use slint::platform::WindowEvent;
+
+    set_platform();
+    presenter::forget();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(test_state());
+    {
+        let mut session = state.session.borrow_mut();
+        session.document.slides[0].title = "Opening".into();
+        session.document.slides[0].speaker_notes =
+            "  Welcome everyone.\nIntroduce the topic.  ".into();
+        session.document.add_slide("Middle", "content");
+        session.document.add_slide("Finale", "content");
+        session.document.select_slide(0);
+    }
+    wire_app_callbacks(&app, &state);
+    refresh(&app, &state);
+    assert!(
+        presenter::with_window(|_| ()).is_none(),
+        "no presenter window exists until it is asked for"
+    );
+
+    // Starting a slideshow and pressing P opens the presenter view.
+    app.show().expect("show");
+    app.set_is_preview_mode(true);
+    app.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "p".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "p".into() });
+    let read =
+        |f: fn(&PresenterWindow) -> String| presenter::with_window(f).expect("presenter exists");
+    assert_eq!(read(|w| w.get_position_text().to_string()), "Slide 1 of 3");
+    assert_eq!(read(|w| w.get_slide_title().to_string()), "Opening");
+    assert_eq!(
+        read(|w| w.get_notes().to_string()),
+        "Welcome everyone.\nIntroduce the topic.",
+        "notes are shown trimmed"
+    );
+    assert_eq!(read(|w| w.get_next_title().to_string()), "Middle");
+    assert_eq!(
+        presenter::with_window(|w| (w.get_has_previous(), w.get_has_next())),
+        Some((false, true))
+    );
+
+    // The presenter's own Next button moves the real deck and its own view.
+    presenter::with_window(|w| w.invoke_next_slide());
+    assert_eq!(state.session.borrow().document.active_index, 1);
+    assert_eq!(app.get_active_slide_index(), 1);
+    assert_eq!(read(|w| w.get_position_text().to_string()), "Slide 2 of 3");
+    assert_eq!(
+        read(|w| w.get_notes().to_string()),
+        "",
+        "a slide without notes shows none"
+    );
+    assert_eq!(read(|w| w.get_next_title().to_string()), "Finale");
+    presenter::with_window(|w| w.invoke_next_slide());
+    assert_eq!(
+        presenter::with_window(|w| (w.get_has_previous(), w.get_has_next())),
+        Some((true, false))
+    );
+    presenter::with_window(|w| w.invoke_next_slide());
+    assert_eq!(
+        state.session.borrow().document.active_index,
+        2,
+        "Next on the last slide stays put"
+    );
+    presenter::with_window(|w| w.invoke_previous_slide());
+    assert_eq!(read(|w| w.get_slide_title().to_string()), "Middle");
+
+    // Moving from the main window updates the presenter too.
+    app.invoke_prev_slide();
+    assert_eq!(read(|w| w.get_slide_title().to_string()), "Opening");
+
+    // Edits to notes in the main window reach the presenter.
+    app.invoke_notes_edited("Fresh notes".into());
+    assert_eq!(read(|w| w.get_notes().to_string()), "Fresh notes");
+
+    // The clock can be paused and reset from the presenter window.
+    presenter::with_window(|w| w.invoke_toggle_timer());
+    assert_eq!(
+        presenter::with_window(|w| w.get_timer_running()),
+        Some(false),
+        "Pause stops the clock"
+    );
+    presenter::with_window(|w| w.invoke_reset_timer());
+    assert_eq!(read(|w| w.get_elapsed().to_string()), "00:00");
+    presenter::with_window(|w| w.invoke_toggle_timer());
+    assert_eq!(
+        presenter::with_window(|w| w.get_timer_running()),
+        Some(true),
+        "Resume restarts it"
+    );
+
+    presenter::with_window(|w| w.invoke_close_presenter());
+    assert!(
+        presenter::with_window(|w| w.window().is_visible()) == Some(false),
+        "Close hides the presenter window"
+    );
+    presenter::forget();
+}

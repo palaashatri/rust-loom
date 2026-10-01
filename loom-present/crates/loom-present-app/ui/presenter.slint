@@ -1,0 +1,168 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+
+// The presenter's own window: notes, what comes next, and a clock. It is a
+// separate window so it can sit on a second display while the slideshow fills
+// the audience screen; on one display it is simply a rehearsal view.
+export component PresenterWindow inherits Window {
+    title: "Presenter View";
+    default-font-family: "Inter";
+    min-width: 640px;
+    min-height: 420px;
+    preferred-width: 960px;
+    preferred-height: 600px;
+    background: Theme.palette().canvas;
+
+    in property <string> position-text: "Slide 1 of 1";
+    in property <string> slide-title: "";
+    in property <string> notes: "";
+    in property <string> next-title: "";
+    in property <string> elapsed: "00:00";
+    in property <bool> timer-running: true;
+    in property <bool> has-next: false;
+    in property <bool> has-previous: false;
+
+    callback next-slide();
+    callback previous-slide();
+    callback toggle-timer();
+    callback reset-timer();
+    callback close-presenter();
+
+    init => { keys.focus(); }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close-presenter(); }
+            else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == " " || event.text == Key.Return) { root.next-slide(); }
+            else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.previous-slide(); }
+            return accept;
+        }
+
+        VerticalLayout {
+            padding: Theme.tokens.space.xl;
+            spacing: Theme.tokens.space.lg;
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: root.position-text;
+                        font-size: Theme.type.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink-secondary;
+                        accessible-role: text;
+                    }
+                    Text {
+                        text: root.slide-title;
+                        font-size: Theme.type.heading;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        overflow: elide;
+                        accessible-role: text;
+                        accessible-label: "Current slide: " + root.slide-title;
+                    }
+                }
+                Text {
+                    text: root.elapsed;
+                    font-size: Theme.type.heading;
+                    font-weight: 600;
+                    color: root.timer-running ? Theme.palette().ink : Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-label: "Elapsed time " + root.elapsed + (root.timer-running ? "" : ", paused");
+                }
+                LoomButton {
+                    label: root.timer-running ? "Pause" : "Resume";
+                    clicked => { root.toggle-timer(); }
+                }
+                LoomButton {
+                    label: "Reset";
+                    clicked => { root.reset-timer(); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.lg;
+                vertical-stretch: 1;
+
+                Rectangle {
+                    horizontal-stretch: 3;
+                    background: Theme.palette().surface;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    clip: true;
+                    VerticalLayout {
+                        padding: Theme.tokens.space.lg;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Notes";
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        Text {
+                            text: root.notes == "" ? "No notes for this slide." : root.notes;
+                            wrap: word-wrap;
+                            font-size: Theme.type.body-large * 1.25;
+                            color: root.notes == "" ? Theme.palette().ink-secondary : Theme.palette().ink;
+                            vertical-stretch: 1;
+                            accessible-role: text;
+                            accessible-label: "Speaker notes: " + (root.notes == "" ? "none" : root.notes);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 2;
+                    background: Theme.palette().surface;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    VerticalLayout {
+                        padding: Theme.tokens.space.lg;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Next";
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        Text {
+                            text: root.has-next ? root.next-title : "End of slideshow";
+                            wrap: word-wrap;
+                            font-size: Theme.type.heading;
+                            font-weight: 600;
+                            color: root.has-next ? Theme.palette().ink : Theme.palette().ink-secondary;
+                            accessible-role: text;
+                            accessible-label: root.has-next ? "Next slide: " + root.next-title : "No next slide";
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                LoomButton {
+                    label: "Previous";
+                    enabled: root.has-previous;
+                    clicked => { root.previous-slide(); }
+                }
+                LoomButton {
+                    label: "Next";
+                    variant: "primary";
+                    enabled: root.has-next;
+                    clicked => { root.next-slide(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                LoomButton {
+                    label: "Close";
+                    clicked => { root.close-presenter(); }
+                }
+            }
+        }
+    }
+}

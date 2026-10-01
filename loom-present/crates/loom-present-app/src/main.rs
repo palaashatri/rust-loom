@@ -551,6 +551,7 @@ fn refresh_without_recovery(app: &PresentApp, state: &GuiState) {
 fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     let session = state.session.borrow();
     let document = &session.document;
+    presenter::sync(&session);
     app.set_deck_title(document.title.as_str().into());
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
@@ -1609,6 +1610,8 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
                 return slint::CloseRequestResponse::KeepWindowShown;
             }
         }
+        // The presenter window must not keep the process alive after the deck closes.
+        presenter::close();
         slint::CloseRequestResponse::HideWindow
     });
 }
@@ -1618,6 +1621,7 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
         Some(PendingReplacement::NewDeck) => replace_with_empty_deck(app, state),
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
         Some(PendingReplacement::CloseWindow) => {
+            presenter::close();
             let _ = slint::ComponentHandle::hide(app);
         }
         None => {}
@@ -2395,6 +2399,19 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         });
     }
     {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_open_presenter(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = presenter::open(&app, &state.session.borrow()) {
+                    app.set_status_left(
+                        format!("Could not open the presenter view: {error}").into(),
+                    );
+                }
+            }
+        });
+    }
+    {
         let app_ref = app.as_weak();
         app.on_toggle_preview_mode(move || {
             if let Some(app) = app_ref.upgrade() {
@@ -2559,6 +2576,7 @@ enum PaletteAction {
     AddText,
     ExportPdf,
     TogglePreview,
+    OpenPresenter,
     PrevSlide,
     NextSlide,
     ApplyTemplate(i32),
@@ -2639,6 +2657,12 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.preview",
             label: "Start or Exit Slideshow",
             shortcut: "F5",
+        },
+        PaletteCommand {
+            action: PaletteAction::OpenPresenter,
+            id: "present.presenter-view",
+            label: "Open Presenter View",
+            shortcut: "P",
         },
         PaletteCommand {
             action: PaletteAction::PrevSlide,
@@ -2820,6 +2844,7 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddText => app.invoke_add_text(),
                         PaletteAction::TogglePreview => app.invoke_toggle_preview_mode(),
+                        PaletteAction::OpenPresenter => app.invoke_open_presenter(),
                         PaletteAction::PrevSlide => app.invoke_prev_slide(),
                         PaletteAction::NextSlide => app.invoke_next_slide(),
                         PaletteAction::ExportPdf => app.invoke_export_pdf(),
@@ -2838,4 +2863,5 @@ mod audit_tests;
 mod desktop_tests;
 
 mod local_menu;
+mod presenter;
 mod window_chrome;

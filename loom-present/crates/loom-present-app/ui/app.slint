@@ -14,6 +14,7 @@ import {
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "foundation.slint";
+export { PresenterWindow } from "presenter.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
@@ -170,6 +171,7 @@ export component PresentApp inherits Window {
     callback choose-theme-category(int);
     callback toggle-inspector;
     callback toggle-preview-mode;
+    callback open-presenter;
     public function close-toolbar-overflow() {
         root.toolbar-overflow-open = false;
     }
@@ -248,6 +250,7 @@ export component PresentApp inherits Window {
             if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open) { return reject; }
             if (root.is-preview-mode) {
                 if (event.text == Key.Escape) { root.toggle-preview-mode(); }
+                else if (event.text == "p" || event.text == "P") { root.open-presenter(); }
                 else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == Key.Return || event.text == " ") { root.next-slide(); }
                 else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.prev-slide(); }
                 return accept;
