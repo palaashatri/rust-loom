@@ -644,9 +644,9 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_category("format")
             .with_order(101),
         // Insert — a real document edit; enabled for any open document.
-        CommandSpec::new("writer.table.insert", "Insert Table")
-            .with_undo_label("Insert Table")
-            .with_description("Insert a table at the caret")
+        CommandSpec::new("writer.table.insert", "Insert Markdown Table (text)")
+            .with_undo_label("Insert Markdown Table")
+            .with_description("Insert a Markdown table at the caret; its cells are edited as text")
             .with_category("insert")
             .with_order(20),
         // Utility/palette/inspector — always enabled
@@ -912,7 +912,7 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         PaletteCommand {
             action: PaletteAction::InsertTable,
             id: "writer.table.insert",
-            label: "Insert Table",
+            label: "Insert Markdown Table (text)",
             shortcut: "",
         },
         PaletteCommand {

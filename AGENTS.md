@@ -1330,7 +1330,7 @@ Sheets pushes its existing `--text-scale` value into `Theme.text-scale` through 
 **Done when:** Click every visible template card in the native chooser and create it. Its heading, content, page style, and status agree with the selected card. A test that reorders the descriptors must not change which document an ID creates. Save/reopen one nonblank result. Check pointer and keyboard selection independently.
 ### UI-13 — Make the table command honest about its editing model
 
-**P2 · Writer · OPEN · Rendered limitation.** Insert Table renders pipe-separated Markdown text on the page instead of a table with aligned cells and borders. The generic “Insert Table” command promises a visual editing object the current renderer does not provide.
+**P2 · Writer · NEEDS_REVIEW (first bounded repair landed 2026-10-01).** Insert Table renders pipe-separated Markdown text on the page instead of a table with aligned cells and borders. The menu/palette command is now named “Insert Markdown Table (text)” with the description “its cells are edited as text”, so it no longer promises a visual cell editor; the 84 Writer app tests pass. The toolbar button still reads “Table” (the shared button has no tooltip property), the page still shows literal pipes, and visual table editing remains unimplemented.
 
 **Evidence:** `writer/05-inspector.png`, `08-inspector-wide.png`; the wide capture shows populated rows as literal pipes. This audit did not verify pointer-based cell editing.
 
