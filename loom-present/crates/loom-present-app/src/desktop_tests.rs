@@ -998,3 +998,122 @@ fn slideshow_keys_navigate_and_escape_exits() {
     press(&char::from(slint::platform::Key::RightArrow).to_string());
     assert_eq!(next.get(), 4);
 }
+
+#[test]
+fn slideshow_plays_the_arrival_slides_transition_and_the_editor_never_animates() {
+    use std::time::Duration;
+
+    fn settle(app: &PresentApp) -> f32 {
+        // Rendering a frame is what runs pending `changed` handlers.
+        snapshot_component(app, 1280.0, 800.0, 1.0).expect("render frame");
+        slint::platform::update_timers_and_animations();
+        app.get_transition_progress()
+    }
+    fn play_to_end(app: &PresentApp) {
+        for _ in 0..200 {
+            if settle(app) >= 1.0 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    app.show().expect("show");
+    app.window()
+        .set_size(slint::LogicalSize::new(1280.0, 800.0));
+
+    // Editing: moving to another slide with a transition set does not animate.
+    app.set_transition_index(1);
+    app.set_active_slide_index(1);
+    assert!(
+        (settle(&app) - 1.0).abs() < f32::EPSILON,
+        "editor must not animate"
+    );
+
+    app.set_is_preview_mode(true);
+    for (index, transition, name) in [(2, 1, "dissolve"), (3, 2, "push"), (4, 3, "morph")] {
+        app.set_transition_index(transition);
+        app.set_active_slide_index(index);
+        let started = settle(&app);
+        assert!(
+            started < 0.5,
+            "{name} starts near the beginning, got {started}"
+        );
+        std::thread::sleep(Duration::from_millis(120));
+        let midway = settle(&app);
+        assert!(
+            midway > started && midway < 1.0,
+            "{name} is mid-flight after 120 ms, got {midway}"
+        );
+        play_to_end(&app);
+        assert!((settle(&app) - 1.0).abs() < f32::EPSILON, "{name} finishes");
+    }
+
+    // A slide with no transition appears at once.
+    app.set_transition_index(0);
+    app.set_active_slide_index(5);
+    assert!(
+        (settle(&app) - 1.0).abs() < f32::EPSILON,
+        "None does not animate"
+    );
+
+    // Leaving the slideshow mid-transition snaps to the finished state.
+    app.set_transition_index(1);
+    app.set_active_slide_index(6);
+    assert!(settle(&app) < 1.0);
+    app.set_is_preview_mode(false);
+    assert!(
+        (settle(&app) - 1.0).abs() < f32::EPSILON,
+        "exit cancels the animation"
+    );
+}
+
+#[test]
+fn mid_transition_frames_are_dimmed_for_dissolve_and_shifted_for_push() {
+    fn lit_pixels(width: u32, raw: &[u8], x_range: std::ops::Range<u32>) -> usize {
+        raw.chunks_exact(4)
+            .enumerate()
+            .filter(|(index, pixel)| {
+                x_range.contains(&(*index as u32 % width))
+                    && (pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32) > 120
+            })
+            .count()
+    }
+    fn brightness(raw: &[u8]) -> u64 {
+        raw.chunks_exact(4)
+            .map(|pixel| pixel[0] as u64 + pixel[1] as u64 + pixel[2] as u64)
+            .sum()
+    }
+
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    app.show().expect("show");
+    app.set_is_preview_mode(true);
+    app.set_active_slide_index(0);
+    let frame = |reveal: f32, transition: i32| {
+        app.set_transition_index(transition);
+        app.set_reveal(reveal);
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render frame")
+    };
+
+    let settled = frame(1.0, 1);
+    let dissolve = frame(0.3, 1);
+    assert!(
+        brightness(dissolve.as_raw()) < brightness(settled.as_raw()) * 9 / 10,
+        "a dissolve in progress is dimmer than the settled slide"
+    );
+
+    let settled = frame(1.0, 2);
+    let push = frame(0.3, 2);
+    assert!(
+        lit_pixels(push.width(), push.as_raw(), 0..400)
+            < lit_pixels(settled.width(), settled.as_raw(), 0..400) / 2,
+        "a push in progress has not yet reached the left side of the screen"
+    );
+    assert!(
+        lit_pixels(settled.width(), settled.as_raw(), 0..1280) > 10_000,
+        "the settled slide is actually drawn"
+    );
+}

@@ -39,7 +39,7 @@ export component PresentApp inherits Window {
     min-height: 720px;
     preferred-width: 1280px;
     preferred-height: 800px;
-    background: Theme.palette().canvas;
+    background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
 
     in property <bool> show-inspector: false;
     in property <bool> icon-only-toolbar: false;
@@ -105,8 +105,31 @@ export component PresentApp inherits Window {
     in-out property <bool> show-notes-drawer: false;
     in-out property <bool> is-preview-mode: false;
     full-screen: root.is-preview-mode;
-    changed is-preview-mode => { app-focus.focus(); }
+    changed is-preview-mode => {
+        app-focus.focus();
+        if !root.is-preview-mode {
+            root.reveal = 1.0;
+        }
+    }
     init => { app-focus.focus(); }
+
+    // Slide transition playback. Arriving at a slide whose transition is not
+    // "None" restarts `reveal` at 0; the timer walks it to 1 over ~450 ms.
+    // Dissolve and Morph fade the slide in from black; Push slides it in from
+    // the right edge. Editing never animates.
+    in-out property <float> reveal: 1.0;
+    out property <float> transition-progress: root.reveal;
+    property <float> reveal-eased: 1.0 - (1.0 - root.reveal) * (1.0 - root.reveal);
+    changed active-slide-index => {
+        if root.is-preview-mode && root.transition-index != 0 {
+            root.reveal = 0.0;
+        }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.reveal < 1.0;
+        triggered => { root.reveal = min(1.0, root.reveal + 0.036); }
+    }
     in-out property <int> active-template-index: 1;
     in-out property <int> inspector-tab: 0;
     in-out property <int> transition-index: 0;
@@ -352,7 +375,16 @@ export component PresentApp inherits Window {
                     horizontal-stretch: 1;
                     spacing: 0px;
 
+                    Rectangle {
+                      vertical-stretch: 1;
+                      horizontal-stretch: 1;
+                      clip: true;
                     PresentSlideCanvas {
+                        x: root.is-preview-mode && root.transition-index == 2 ? (1.0 - root.reveal-eased) * parent.width : 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        opacity: root.is-preview-mode && root.transition-index != 2 ? root.reveal-eased : 1.0;
                         editing-enabled: !root.is-preview-mode;
                         fit-screen: root.is-preview-mode;
                         background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
@@ -389,6 +421,7 @@ export component PresentApp inherits Window {
                         handle-moved(idx, kind, dx, dy) => { root.handle-moved(idx, kind, dx, dy); }
                         handle-released(idx, kind) => { root.handle-released(idx, kind); }
                         handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
+                    }
                     }
 
                     // Speaker Notes Collapsible Drawer
