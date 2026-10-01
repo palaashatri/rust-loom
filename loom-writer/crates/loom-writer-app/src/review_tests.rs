@@ -704,3 +704,136 @@ fn double_and_triple_clicks_on_the_page_select_a_word_and_a_paragraph() {
     app.invoke_pointer_released(x, y);
     assert_eq!(selection(), (0, 16), "a third click selects the paragraph");
 }
+
+#[test]
+fn pasted_tabs_become_spaces_and_line_endings_become_paragraphs() {
+    let mut document = WriterDocument::new("paste", "Paste");
+    document.replace_paragraphs("one\r\n\ttabbed\rthird");
+    assert_eq!(document.editor_text(), "one\n    tabbed\nthird");
+    assert_eq!(document.blocks.len(), 3);
+    assert!(!document.editor_text().contains('\t'));
+}
+
+#[test]
+fn tab_inserts_spaces_at_the_caret_replaces_a_selection_and_undoes() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("abcdef"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::caret(3));
+    app.invoke_insert_tab();
+    assert_eq!(state.current.borrow().editor_text(), "abc    def");
+    let selection = state.current.borrow().selection();
+    assert_eq!(
+        (selection.anchor, selection.focus),
+        (7, 7),
+        "caret follows the spaces"
+    );
+
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::range(0, 3));
+    app.invoke_insert_tab();
+    assert_eq!(
+        state.current.borrow().editor_text(),
+        "        def",
+        "a selection is replaced"
+    );
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().editor_text(), "abc    def");
+}
+
+#[test]
+fn the_page_scrolls_to_keep_the_caret_in_view() {
+    let long = (1..=120)
+        .map(|n| {
+            format!("Paragraph number {n} lorem ipsum dolor sit amet, consectetur adipiscing elit.")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document(&long), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    // The view height is measured from the laid-out window.
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    assert!(
+        app.get_page_view_height() > 300.0,
+        "the page area has a measured height"
+    );
+    assert_eq!(state.viewport.borrow().scroll_y, 0.0);
+
+    // Jump to the end of the document (Ctrl+End): the page must follow.
+    let end = state.current.borrow().editor_text().len() as i32;
+    app.invoke_selection_changed(end, end);
+    let scrolled = state.viewport.borrow().scroll_y;
+    assert!(
+        scrolled > 1000.0,
+        "the end of a 120-paragraph document is far down, got {scrolled}"
+    );
+    assert_eq!(
+        app.get_page_scroll_y(),
+        scrolled,
+        "the view is told the same offset"
+    );
+
+    // Back to the start: the page returns to the top.
+    app.invoke_selection_changed(0, 0);
+    assert_eq!(state.viewport.borrow().scroll_y, 0.0);
+
+    // A caret that is already visible does not move the page.
+    app.invoke_selection_changed(5, 5);
+    assert_eq!(state.viewport.borrow().scroll_y, 0.0);
+}
+
+#[test]
+fn page_down_and_page_up_move_the_caret_a_screen_and_shift_extends() {
+    let long = (1..=120)
+        .map(|n| {
+            format!("Paragraph number {n} lorem ipsum dolor sit amet, consectetur adipiscing elit.")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document(&long), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    let focus = || state.current.borrow().selection().focus;
+    let anchor = || state.current.borrow().selection().anchor;
+
+    app.invoke_selection_changed(0, 0);
+    app.invoke_page_move(1, false);
+    let first = focus();
+    assert!(
+        first > 200,
+        "Page Down moves well past the first lines, got {first}"
+    );
+    assert_eq!(anchor(), first, "a plain move collapses the selection");
+    assert!(
+        state.viewport.borrow().scroll_y > 0.0,
+        "and the page scrolls with it"
+    );
+
+    app.invoke_page_move(1, false);
+    assert!(focus() > first, "a second Page Down goes further");
+
+    app.invoke_page_move(-1, false);
+    app.invoke_page_move(-1, false);
+    assert_eq!(focus(), 0, "two Page Ups return to the start");
+    assert_eq!(state.viewport.borrow().scroll_y, 0.0);
+
+    // Shift keeps the anchor and extends the selection.
+    app.invoke_page_move(1, true);
+    assert_eq!(anchor(), 0);
+    assert!(focus() > 200);
+
+    // At the end of the document Page Down stays at the end.
+    let end = state.current.borrow().editor_text().len();
+    app.invoke_selection_changed(end as i32, end as i32);
+    app.invoke_page_move(1, false);
+    assert_eq!(focus(), end);
+}

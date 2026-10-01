@@ -229,6 +229,13 @@ export component WriterPageCanvas inherits Rectangle {
     in-out property <float> page-zoom: 1.0;
     in-out property <length> page-scroll-x: 0px;
     in-out property <length> page-scroll-y: 0px;
+    // Height of the visible page area, so the controller can keep the caret in view.
+    in-out property <length> view-height: 0px;
+    // The Flickable's offsets are negative when scrolled; the controller works
+    // with the positive distance scrolled, so the sign flips at this boundary.
+    private property <length> native-x;
+    private property <length> native-y;
+    private property <length> measured-height: page-scroll.height;
     in property <int> page-count: 1;
     in property <length> page-stack-height: 842px;
     in property <float> page-width-pt: 595.0;
@@ -249,6 +256,17 @@ export component WriterPageCanvas inherits Rectangle {
     horizontal-stretch: 1;
     vertical-stretch: 1;
 
+    init => { root.view-height = page-scroll.height; }
+    changed measured-height => { root.view-height = root.measured-height; }
+    changed native-x => { root.page-scroll-x = -root.native-x; }
+    changed native-y => { root.page-scroll-y = -root.native-y; }
+    changed page-scroll-x => {
+        root.native-x = -max(0px, min(root.page-scroll-x, page-scroll.viewport-width - page-scroll.width));
+    }
+    changed page-scroll-y => {
+        root.native-y = -max(0px, min(root.page-scroll-y, page-scroll.viewport-height - page-scroll.height));
+    }
+
     page-scroll := Flickable {
         x: 0px;
         y: 0px;
@@ -256,9 +274,9 @@ export component WriterPageCanvas inherits Rectangle {
         height: parent.height;
         viewport-width: max(parent.width, page.width + 48px);
         viewport-height: max(parent.height, page.height + 48px);
-        viewport-x <=> root.page-scroll-x;
-        viewport-y <=> root.page-scroll-y;
-        flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
+        viewport-x <=> root.native-x;
+        viewport-y <=> root.native-y;
+        flicked => { root.page-scroll-changed(-self.viewport-x, -self.viewport-y); }
 
         page := Rectangle {
             // Page geometry is pushed from the document's page setup

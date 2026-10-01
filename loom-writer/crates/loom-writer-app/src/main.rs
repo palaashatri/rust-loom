@@ -9,6 +9,7 @@
     windows_subsystem = "windows"
 )]
 
+mod caret_scroll;
 mod document_formatting;
 mod local_menu;
 mod multi_click;
@@ -2189,6 +2190,43 @@ fn project_selection_event(
     true
 }
 
+/// Scroll the page so the caret is visible after typing, pasting, undo or a
+/// keyboard move. Scrolling by wheel or scrollbar never calls this.
+fn reveal_caret(app: &WriterApp, state: &GuiState) {
+    let view_height = app.get_page_view_height();
+    let (top, bottom) = {
+        let current = state.current.borrow();
+        let style = current.page.page_style();
+        let viewport = *state.viewport.borrow();
+        let layout_viewport = PageViewport {
+            width: style.width_pt,
+            height: style.height_pt,
+            zoom: normalize_page_zoom(viewport.zoom, 1.0),
+            scroll_x: normalize_page_scroll(viewport.scroll_x),
+            scroll_y: normalize_page_scroll(viewport.scroll_y),
+        };
+        let Ok(layout) = current.layout(&style, layout_viewport) else {
+            return;
+        };
+        let caret = TextSelection::caret(current.selection().focus);
+        let rects = current.selection_rectangles_for(&layout, &style, &caret);
+        let Some(rect) = rects.first() else { return };
+        (
+            rect.rect.y + caret_scroll::PAGE_TOP_INSET,
+            rect.rect.y + rect.rect.height + caret_scroll::PAGE_TOP_INSET,
+        )
+    };
+    let scroll = state.viewport.borrow().scroll_y;
+    let next = caret_scroll::scroll_to_reveal(scroll, top, bottom, view_height);
+    if (next - scroll).abs() < 0.5 {
+        return;
+    }
+    state.viewport.borrow_mut().scroll_y = next;
+    app.set_page_scroll_y(next);
+    let current = state.current.borrow().clone();
+    refresh_writer_render_projection(app, &current, *state.viewport.borrow());
+}
+
 fn refresh_writer_registry(app: &WriterApp, state: &GuiState) {
     let doc = state.current.borrow().clone();
     let history = state.history.borrow();
@@ -2611,6 +2649,7 @@ fn wire_writer_shared_callbacks(
                 if let Some(prev) = previous {
                     *state.current.borrow_mut() = prev;
                     apply_state(&app, &state);
+                    reveal_caret(&app, &state);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
                 }
             }
@@ -2637,12 +2676,82 @@ fn wire_writer_shared_callbacks(
                 if let Some(next) = next {
                     *state.current.borrow_mut() = next;
                     apply_state(&app, &state);
+                    reveal_caret(&app, &state);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
                 }
             }
         });
     }
 
+    {
+        // Page Up / Page Down move the caret one screen (Shift extends the
+        // selection); the caret-follow logic then scrolls the page.
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_page_move(move |direction, extend| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let target = {
+                let current = state.current.borrow();
+                let style = current.page.page_style();
+                let viewport = *state.viewport.borrow();
+                let zoom = normalize_page_zoom(viewport.zoom, 1.0);
+                let layout_viewport = PageViewport {
+                    width: style.width_pt,
+                    height: style.height_pt,
+                    zoom,
+                    scroll_x: normalize_page_scroll(viewport.scroll_x),
+                    scroll_y: normalize_page_scroll(viewport.scroll_y),
+                };
+                let Ok(layout) = current.layout(&style, layout_viewport) else {
+                    return;
+                };
+                let Some(base) = layout.page_bounds.first().copied() else {
+                    return;
+                };
+                let caret = TextSelection::caret(current.selection().focus);
+                let rects = current.selection_rectangles_for(&layout, &style, &caret);
+                let Some(rect) = rects.first() else { return };
+                let step =
+                    (app.get_page_view_height() - 96.0).max(48.0) * direction.signum() as f32;
+                let x = rect.rect.x - base.x - style.margin_left_pt * zoom;
+                let y = rect.rect.y - base.y - style.margin_top_pt * zoom
+                    + rect.rect.height / 2.0
+                    + step;
+                writer_pointer_offset(&current, viewport, x, y)
+            };
+            let Some(offset) = target else { return };
+            let anchor = if extend {
+                state.current.borrow().selection().anchor
+            } else {
+                offset
+            };
+            app.invoke_selection_changed(
+                anchor.min(i32::MAX as usize) as i32,
+                offset.min(i32::MAX as usize) as i32,
+            );
+        });
+    }
+    {
+        // Tab inserts spaces at the caret (replacing a selection), through the
+        // normal typing path so it is undoable and recovered like any edit.
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_insert_tab(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let (text, selection) = {
+                let current = state.current.borrow();
+                (current.editor_text(), current.selection())
+            };
+            let start = selection.anchor.min(selection.focus).min(text.len());
+            let end = selection.anchor.max(selection.focus).min(text.len());
+            if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+                return;
+            }
+            let edited = format!("{}    {}", &text[..start], &text[end..]);
+            let caret = (start + 4).min(i32::MAX as usize) as i32;
+            app.invoke_document_edited(edited.into(), caret, caret);
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2681,6 +2790,7 @@ fn wire_writer_shared_callbacks(
                     apply_state(&app, &state);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
                 }
+                reveal_caret(&app, &state);
             }
         });
     }
@@ -3037,6 +3147,7 @@ fn wire_writer_shared_callbacks(
                     );
                     // Accessible announcement already updated via project_selection_event;
                     // keep menu check states honest via toolbar/registry sync.
+                    reveal_caret(&app, &state);
                 }
             }
         });

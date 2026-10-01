@@ -1249,8 +1249,12 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
     value
 }
 
+/// Line endings become `\n`. There are no tab stops, and the page font has no
+/// glyph for a tab (it draws as a box), so a tab becomes four spaces.
 fn normalize_editor_text(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\t', "    ")
 }
 
 fn normalized_grapheme_range(text: &str, selection: &TextSelection) -> (usize, usize) {
