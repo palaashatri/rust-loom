@@ -949,6 +949,8 @@ fn slideshow_keys_navigate_and_escape_exits() {
         });
     }
     app.show().expect("show");
+    app.window()
+        .set_size(slint::LogicalSize::new(1280.0, 800.0));
     let press = |text: &str| {
         let text: slint::SharedString = text.into();
         app.window()
@@ -976,9 +978,23 @@ fn slideshow_keys_navigate_and_escape_exits() {
     }
     assert_eq!(prev.get(), 2, "left arrow and backspace go back");
 
+    // Mouse: click advances, right-click goes back.
+    assert!(app.get_is_preview_mode());
+    let click = |button: slint::platform::PointerEventButton| {
+        let position = slint::LogicalPosition::new(300.0, 300.0);
+        app.window()
+            .dispatch_event(WindowEvent::PointerPressed { position, button });
+        app.window()
+            .dispatch_event(WindowEvent::PointerReleased { position, button });
+    };
+    click(slint::platform::PointerEventButton::Left);
+    assert_eq!(next.get(), 4, "left click advances");
+    click(slint::platform::PointerEventButton::Right);
+    assert_eq!(prev.get(), 3, "right click goes back");
+
     // Escape leaves the slideshow and navigation keys no longer advance slides.
     press(&char::from(slint::platform::Key::Escape).to_string());
     assert!(!app.get_is_preview_mode());
     press(&char::from(slint::platform::Key::RightArrow).to_string());
-    assert_eq!(next.get(), 3);
+    assert_eq!(next.get(), 4);
 }

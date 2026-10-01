@@ -579,6 +579,20 @@ export component PresentApp inherits Window {
         }
     }
 
+    // Slideshow: click advances, right-click goes back.
+    if root.is-preview-mode : TouchArea {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                if (event.button == PointerEventButton.right) { root.prev-slide(); }
+                else if (event.button == PointerEventButton.left) { root.next-slide(); }
+            }
+        }
+    }
+
     LoomWindowResizeEdges {
         x: 0px;
         y: 0px;
