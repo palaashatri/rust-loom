@@ -86,6 +86,7 @@ export component WriterApp inherits Window {
     in-out property <length> page-view-height: 0px;
     in-out property <int> page-count: 1;
     in-out property <length> page-stack-height: 842px;
+    in-out property <float> page-gap-pt: 24.0;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in-out property <bool> document-dirty: false;
@@ -125,6 +126,7 @@ export component WriterApp inherits Window {
     callback save-doc;
     callback save-as-doc;
     callback export-pdf;
+    callback export-docx;
     callback undo;
     callback redo;
     callback document-edited(string, int, int);
@@ -391,6 +393,7 @@ export component WriterApp inherits Window {
                     view-height <=> root.page-view-height;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
+                    page-gap-pt: root.page-gap-pt;
                     page-width-pt: root.page-width-pt;
                     page-height-pt: root.page-height-pt;
                     page-margin-pt: root.page-margin-pt;
@@ -482,6 +485,7 @@ export component WriterApp inherits Window {
                     view-height <=> root.page-view-height;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
+                    page-gap-pt: root.page-gap-pt;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }

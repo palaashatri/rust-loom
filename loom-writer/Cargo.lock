@@ -3142,6 +3142,7 @@ dependencies = [
  "loom-package",
  "loom-pdf",
  "loom-text",
+ "roxmltree",
  "unicode-segmentation",
 ]
 

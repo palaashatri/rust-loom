@@ -1281,3 +1281,123 @@ fn the_save_prompt_says_closing_only_when_the_window_is_closing() {
     ));
     assert!(app.get_save_changes_closing(), "closing says closing");
 }
+
+#[test]
+fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
+    use slint::Model;
+
+    set_platform();
+    presenter::forget();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(test_state());
+    {
+        let mut session = state.session.borrow_mut();
+        session.document.slides[0].title = "Opening".into();
+        session.document.add_slide("Middle", "content");
+        session.document.add_slide("Finale", "content");
+        for (index, slide) in session.document.slides.iter_mut().enumerate() {
+            if slide.elements.is_empty() {
+                slide.add_element(SlideElement {
+                    id: format!("e{index}"),
+                    element_type: ElementType::BodyText,
+                    content: String::new(),
+                    x: 100.0,
+                    y: 200.0,
+                    width: 600.0,
+                    height: 120.0,
+                    rotation_deg: 0.0,
+                    action: None,
+                });
+            }
+            for element in slide.elements.iter_mut() {
+                element.content = format!("slide {} text", index + 1);
+            }
+        }
+        session.document.select_slide(0);
+    }
+    wire_app_callbacks(&app, &state);
+    refresh(&app, &state);
+    presenter::open(&app, &state.session.borrow()).expect("open presenter");
+
+    let first_content = |rows: fn(&PresenterWindow) -> ThumbRows| {
+        presenter::with_window(|w| rows(w).contents.row_data(0).map(|s| s.to_string())).flatten()
+    };
+    let count = |rows: fn(&PresenterWindow) -> ThumbRows| {
+        presenter::with_window(|w| rows(w).contents.row_count()).expect("presenter")
+    };
+    assert_eq!(
+        first_content(|w| w.get_next_rows()),
+        Some("slide 2 text".into())
+    );
+    assert_eq!(
+        first_content(|w| w.get_current_rows()),
+        Some("slide 1 text".into())
+    );
+
+    // The presenter's Next button moves both thumbnails.
+    presenter::with_window(|w| w.invoke_next_slide());
+    assert_eq!(
+        first_content(|w| w.get_next_rows()),
+        Some("slide 3 text".into())
+    );
+    assert_eq!(
+        first_content(|w| w.get_current_rows()),
+        Some("slide 2 text".into())
+    );
+
+    // The last slide has no next thumbnail.
+    app.invoke_next_slide();
+    assert_eq!(count(|w| w.get_next_rows()), 0);
+    assert_eq!(presenter::with_window(|w| w.get_has_next()), Some(false));
+    assert_eq!(
+        first_content(|w| w.get_current_rows()),
+        Some("slide 3 text".into())
+    );
+
+    // Going back from the main window brings the thumbnail back.
+    app.invoke_prev_slide();
+    assert_eq!(
+        first_content(|w| w.get_next_rows()),
+        Some("slide 3 text".into())
+    );
+
+    // A live edit of the active slide reaches the current thumbnail.
+    app.invoke_update_element_content("edited live".into());
+    refresh(&app, &state);
+    let current = presenter::with_window(|w| {
+        w.get_current_rows()
+            .contents
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    })
+    .expect("presenter");
+    assert!(
+        current.iter().any(|text| text == "edited live"),
+        "{current:?}"
+    );
+
+    // Render the presenter window and look at it: slide paper stays white.
+    Theme::get(&app).set_active_theme(Theme::get(&app).get_active_theme());
+    for (width, height, name) in [(960.0, 600.0, "960x600"), (640.0, 420.0, "640x420")] {
+        let image = presenter::with_window(|w| {
+            snapshot_component(w, width, height, 1.0).expect("render presenter")
+        })
+        .expect("presenter");
+        let right = image.width() * 3 / 5;
+        let white = image
+            .pixels()
+            .enumerate()
+            .filter(|(i, p)| (*i as u32 % image.width()) >= right && p.0 == [255, 255, 255, 255])
+            .count();
+        assert!(
+            white > 500,
+            "{name}: the next-slide thumbnail shows paper ({white})"
+        );
+        if let Ok(dir) = std::env::var("LOOM_PRESENTER_PNG_DIR") {
+            let path = Path::new(&dir).join(format!("presenter-{name}.png"));
+            loom_test_support::png::save_png(&path, &image).expect("save png");
+        }
+    }
+    presenter::forget();
+}

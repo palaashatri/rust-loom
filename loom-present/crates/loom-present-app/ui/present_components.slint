@@ -466,6 +466,7 @@ export component PresentToolbarOverflow inherits Rectangle {
     callback toggle-preview;
     callback toggle-inspector;
     callback export-pdf;
+    callback export-pptx;
     callback close-requested;
 
     min-width: 220px;
@@ -530,6 +531,12 @@ export component PresentToolbarOverflow inherits Rectangle {
             label: "Export PDF";
             variant: "ghost";
             clicked => { root.export-pdf(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "export";
+            label: "Export PowerPoint";
+            variant: "ghost";
+            clicked => { root.export-pptx(); root.close-requested(); }
         }
     }
 }

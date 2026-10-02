@@ -4,47 +4,15 @@
 //! byte ceiling. Public names are re-exported from the crate root so the
 //! public API surface is unchanged.
 
-use crate::{xml_escape_text, WriterDocument};
-use loom_package::zip::PackageArchive;
+use crate::WriterDocument;
 
-/// Exports a document to a minimal valid `.docx` archive: each block becomes one `<w:p>`
-/// paragraph; heading blocks carry `<w:pStyle w:val="HeadingN"/>`. Round-trips through
+/// Exports a document to a `.docx` archive Word opens directly; see
+/// [`crate::export_docx`] for what is carried over. Round-trips through
 /// [`extract_docx_blocks`] preserving kinds and texts.
 pub fn export_document_as_docx(
     doc: &WriterDocument,
 ) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
-    let mut body = String::new();
-    for block in &doc.blocks {
-        if block.text.as_str().trim().is_empty() {
-            continue;
-        }
-        // "heading3" -> "Heading3"; anything else exports as a plain paragraph.
-        let style = if let Some(digits) = block.kind.strip_prefix("heading") {
-            if digits.chars().all(|c| c.is_ascii_digit()) {
-                let mut styled = String::from("Heading");
-                styled.push_str(digits);
-                format!("<w:pPr><w:pStyle w:val=\"{styled}\"/></w:pPr>")
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        body.push_str(&format!(
-            "<w:p>{style}<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
-            xml_escape_text(block.text.as_str())
-        ));
-    }
-    let document_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
-         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
-         <w:body>{body}</w:body></w:document>"
-    );
-    let mut arch = PackageArchive::new();
-    arch.add("[Content_Types].xml", br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.to_vec())?;
-    arch.add("_rels/.rels", br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_vec())?;
-    arch.add("word/document.xml", document_xml.into_bytes())?;
-    arch.to_bytes()
+    crate::docx::export_docx(doc).map(|export| export.bytes)
 }
 
 /// One laid-out line: an optional list marker, then `text`, which is the

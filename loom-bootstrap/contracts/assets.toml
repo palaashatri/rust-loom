@@ -85,6 +85,18 @@ commercial = true
 redistributable = true
 attribution_required = false
 
+# Sheets import fixtures: small workbooks authored with Microsoft Excel
+# automation (loom-sheets-core/tests/excel/author_import_fixtures.ps1). They
+# contain only synthetic cells, a generated chart, a 1x1 pixel PNG and a plain
+# rectangle written for the test; no third-party content.
+[[allow]]
+glob = "loom-sheets/crates/loom-sheets-core/tests/fixtures/*.xlsx"
+origin = "Loom-generated test fixture authored with Microsoft Excel automation"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
 [allowed_external_license_families]
 values = [
   "CC0-1.0",

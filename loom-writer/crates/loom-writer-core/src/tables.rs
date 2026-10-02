@@ -72,6 +72,26 @@ fn block_insert_index(document: &WriterDocument, offset: usize) -> usize {
     document.blocks.len()
 }
 
+/// Splits a row body on pipes that are not escaped with a backslash, so a
+/// cell holding a literal `|` (written `\|`) stays in one cell.
+fn split_cells(inner: &str) -> Vec<&str> {
+    let mut cells = Vec::new();
+    let mut start = 0;
+    let mut escaped = false;
+    for (index, c) in inner.char_indices() {
+        match c {
+            '\\' => escaped = !escaped,
+            '|' if !escaped => {
+                cells.push(&inner[start..index]);
+                start = index + 1;
+            }
+            _ => escaped = false,
+        }
+    }
+    cells.push(&inner[start..]);
+    cells
+}
+
 /// Parses a Markdown table written by [`WriterTable::to_markdown`]. The
 /// header separator row is skipped; escaped pipes restore to literal pipes.
 pub fn parse_table_markdown(markdown: &str) -> WriterTable {
@@ -83,8 +103,8 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
             continue;
         }
         let inner = &trimmed[1..trimmed.len() - 1];
-        let cells: Vec<String> = inner
-            .split('|')
+        let cells: Vec<String> = split_cells(inner)
+            .into_iter()
             .map(|cell| cell.trim().replace("\\|", "|"))
             .collect();
         if cells.iter().all(|cell| {
@@ -107,6 +127,17 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
 mod tests {
     use super::*;
     use crate::TextSelection;
+
+    #[test]
+    fn escaped_pipes_stay_inside_their_cell() {
+        let mut table = WriterTable::new("t", 2, 2);
+        table.set(0, 0, "a | b");
+        table.set(1, 1, "c\\d");
+        let parsed = parse_table_markdown(&table.to_markdown());
+        assert_eq!(parsed.rows[0], vec!["a | b".to_string(), String::new()]);
+        assert_eq!(parsed.rows[1][1], "c\\d");
+        assert_eq!(parsed.columns(), 2);
+    }
 
     fn document() -> WriterDocument {
         let mut document = WriterDocument::new("doc", "Doc");

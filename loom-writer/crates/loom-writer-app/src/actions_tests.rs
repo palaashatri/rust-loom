@@ -679,6 +679,7 @@ fn writer_menu_disables_unhandled_controller_commands() {
         "file.save",
         "file.save_as",
         "file.export_pdf",
+        "file.export_docx",
         "edit.undo",
         "edit.redo",
         "app.palette",

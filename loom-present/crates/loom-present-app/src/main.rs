@@ -15,9 +15,9 @@ use loom_desktop::{
     NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    calculate_smart_snapping, export_pdf, load_presentation_session, normalize_angle_degrees,
-    save_presentation_session, ElementType, PresentationDocument, PresentationSession,
-    SlideElement, SnapGuide, TransitionKind,
+    calculate_smart_snapping, export_pdf, export_pptx, load_presentation_session,
+    normalize_angle_degrees, save_presentation_session, ElementType, PresentationDocument,
+    PresentationSession, SlideElement, SnapGuide, TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
@@ -31,6 +31,7 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "presentation.loomdeck";
 const EXPORT_FILENAME: &str = "presentation.pdf";
+const PPTX_EXPORT_FILENAME: &str = "presentation.pptx";
 
 loom_production::define_snapshot_recovery!(PRESENT_RECOVERY, "org.loom.present", "loom.present/1");
 
@@ -370,7 +371,7 @@ fn active_body(session: &PresentationSession) -> String {
 /// Stable scene-type ids consumed by the Slint canvas projection. Keep this
 /// mapping local to the view model so the domain enum remains independent of
 /// UI rendering details.
-fn element_type_index(element_type: &ElementType) -> i32 {
+pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
     match element_type {
         ElementType::Title => 0,
         ElementType::Subtitle => 1,
@@ -922,6 +923,16 @@ fn export_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
+fn export_pptx_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Loom Present to PowerPoint".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(PPTX_EXPORT_FILENAME.to_string()),
+        filters: vec![FileFilter::new("PowerPoint presentation", ["pptx"])
+            .expect("static pptx filter is valid")],
+    }
+}
+
 fn replace_opened_deck(
     app: &PresentApp,
     state: &GuiState,
@@ -1435,11 +1446,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 fn build_present_menu_bar() -> MenuBar {
     let mut menu_bar = build_standard_menu_bar(
         "Loom Present",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_pdf",
-            "Export to PDF...",
-            MenuShortcut::primary("E"),
-        )],
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_pdf",
+                "Export to PDF...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_pptx", "Export to PowerPoint..."),
+        ],
         vec![],
         vec![MenuItem::check("view.inspector", "Format Inspector", false)],
         vec![Menu::new(
@@ -1546,6 +1560,7 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "file.save" => app.invoke_save_deck(),
         "file.save_as" => app.invoke_save_as_deck(),
         "file.export_pdf" => app.invoke_export_pdf(),
+        "file.export_pptx" => app.invoke_export_pptx(),
         "edit.undo" => app.invoke_undo(),
         "edit.redo" => app.invoke_redo(),
         "slide.new" => app.invoke_add_slide(),
@@ -1568,6 +1583,7 @@ fn is_present_menu_command(id: &str) -> bool {
             | "file.save"
             | "file.save_as"
             | "file.export_pdf"
+            | "file.export_pptx"
             | "edit.undo"
             | "edit.redo"
             | "slide.new"
@@ -2541,6 +2557,28 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_export_pptx(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match state.dialogs.save_file(&export_pptx_request(&state)) {
+                    Ok(Some(path)) => {
+                        let result = export_pptx(&state.session.borrow()).and_then(|bytes| {
+                            loom_storage::atomic_write(&path, &bytes)
+                                .map_err(|error| error.to_string())
+                        });
+                        match result {
+                            Ok(()) => set_status(&app, format!("Exported {}", path.display())),
+                            Err(error) => set_status(&app, format!("Export failed: {error}")),
+                        }
+                    }
+                    Ok(None) => set_status(&app, "Export cancelled"),
+                    Err(error) => set_status(&app, format!("Export dialog failed: {error}")),
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_export_pdf(move || {
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.save_file(&export_request(&state)) {
@@ -2618,6 +2656,7 @@ enum PaletteAction {
     Redo,
     AddText,
     ExportPdf,
+    ExportPptx,
     TogglePreview,
     OpenPresenter,
     PrevSlide,
@@ -2724,6 +2763,12 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.export-pdf",
             label: "Export PDF",
             shortcut: "Ctrl+E",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportPptx,
+            id: "present.export-pptx",
+            label: "Export PowerPoint (.pptx)",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::ApplyTemplate(0),
@@ -2891,6 +2936,7 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::PrevSlide => app.invoke_prev_slide(),
                         PaletteAction::NextSlide => app.invoke_next_slide(),
                         PaletteAction::ExportPdf => app.invoke_export_pdf(),
+                        PaletteAction::ExportPptx => app.invoke_export_pptx(),
                         PaletteAction::ApplyTemplate(index) => app.invoke_apply_template(index),
                         PaletteAction::SetTransition(index) => app.invoke_set_transition(index),
                     }
@@ -2904,8 +2950,11 @@ fn wire_palette(app: &PresentApp) {
 mod audit_tests;
 #[cfg(test)]
 mod desktop_tests;
+#[cfg(test)]
+mod export_pptx_tests;
 
 mod local_menu;
 mod model_sync;
 mod presenter;
+mod presenter_thumbs;
 mod window_chrome;

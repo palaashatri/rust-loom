@@ -242,6 +242,7 @@ export component WriterPageCanvas inherits Rectangle {
     private property <length> measured-height: page-scroll.height;
     in property <int> page-count: 1;
     in property <length> page-stack-height: 842px;
+    in property <float> page-gap-pt: 24.0;
     in property <float> page-width-pt: 595.0;
     in property <float> page-height-pt: 842.0;
     in property <float> page-margin-pt: 72.0;
@@ -277,7 +278,7 @@ export component WriterPageCanvas inherits Rectangle {
         width: parent.width;
         height: parent.height;
         viewport-width: max(parent.width, page.width + 48px);
-        viewport-height: max(parent.height, page.height + 48px);
+        viewport-height: max(parent.height, page.y + page.height + max(24px, page.gap));
         viewport-x <=> root.native-x;
         viewport-y <=> root.native-y;
         flicked => { root.page-scroll-changed(-self.viewport-x, -self.viewport-y); }
@@ -288,21 +289,46 @@ export component WriterPageCanvas inherits Rectangle {
             private property <length> raw-width: root.page-width-pt * 1px;
             private property <length> raw-height: root.page-height-pt * 1px;
             private property <length> page-padding: root.page-margin-pt * 1px * root.page-zoom;
+            // Gap between sheets, from the same constant the layout uses.
+            property <length> gap: root.page-gap-pt * 1px * root.page-zoom;
 
             x: max(24px, (page-scroll.width - self.width) / 2);
             y: 24px;
             width: self.raw-width * root.page-zoom;
+            // The container spans the whole stack; the paper itself is drawn
+            // one sheet per page below, at the pitch the layout projects.
             height: root.page-count > 1
-                ? (root.page-stack-height + 160px) * root.page-zoom
+                ? root.page-stack-height * root.page-zoom
                 : self.raw-height * root.page-zoom;
-            border-radius: Theme.tokens.metrics.radius-small;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().paper;
-            drop-shadow-blur: 24px;
-            drop-shadow-offset-y: 8px;
-            drop-shadow-color: Theme.palette().shadow;
-            clip: true;
+            background: transparent;
+
+            for index in root.page-count : Rectangle {
+                x: 0px;
+                y: index * (page.raw-height * root.page-zoom + page.gap);
+                width: page.width;
+                height: page.raw-height * root.page-zoom;
+                border-radius: Theme.tokens.metrics.radius-small;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                background: Theme.palette().paper;
+                // A tight shadow: it must not reach the sheet above across the gap.
+                drop-shadow-blur: 8px;
+                drop-shadow-offset-y: 1px;
+                drop-shadow-color: Theme.palette().shadow;
+                accessible-role: none;
+            }
+            for index in root.page-count : Text {
+                x: 0px;
+                y: index * (page.raw-height * root.page-zoom + page.gap) + page.raw-height * root.page-zoom;
+                width: page.width;
+                height: page.gap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                text: "Page " + (index + 1) + " of " + root.page-count;
+                font-size: min(14px, max(9px, Theme.tokens.typography.caption * root.page-zoom));
+                color: Theme.palette().ink-secondary;
+                accessible-role: text;
+            }
 
             VerticalLayout {
                 padding-top: page.page-padding;

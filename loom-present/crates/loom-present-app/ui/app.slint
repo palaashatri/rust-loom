@@ -14,7 +14,7 @@ import {
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "foundation.slint";
-export { PresenterWindow } from "presenter.slint";
+export { PresenterWindow, ThumbRows } from "presenter.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
@@ -530,6 +530,7 @@ export component PresentApp inherits Window {
                 toggle-preview => { root.toggle-preview-mode(); }
                 toggle-inspector => { root.toggle-inspector(); }
                 export-pdf => { root.export-pdf(); }
+                export-pptx => { root.export-pptx(); }
                 close-requested => { root.close-toolbar-overflow(); }
             }
         }

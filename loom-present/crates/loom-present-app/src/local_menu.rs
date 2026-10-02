@@ -11,6 +11,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.save",
     "file.save_as",
     "file.export_pdf",
+    "file.export_pptx",
     "edit.undo",
     "edit.redo",
     "slide.new",

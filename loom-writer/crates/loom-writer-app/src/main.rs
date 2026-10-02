@@ -11,6 +11,7 @@
 
 mod caret_scroll;
 mod document_formatting;
+mod docx_export;
 mod find_bar;
 mod local_menu;
 mod multi_click;
@@ -355,6 +356,7 @@ enum PaletteAction {
     SaveDoc,
     SaveAsDoc,
     ExportPdf,
+    ExportDocx,
     Undo,
     Redo,
     ToggleBold,
@@ -378,6 +380,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "file.save" | "writer.save" => app.invoke_save_doc(),
         "file.save_as" | "writer.save-as" => app.invoke_save_as_doc(),
         "file.export_pdf" | "writer.export-pdf" => app.invoke_export_pdf(),
+        "file.export_docx" | "writer.export-docx" => app.invoke_export_docx(),
         "edit.undo" | "writer.undo" => app.invoke_undo(),
         "edit.redo" | "writer.redo" => app.invoke_redo(),
         "app.palette" => app.invoke_open_palette(),
@@ -434,6 +437,7 @@ fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
         PaletteAction::SaveDoc => dispatch_command(app, "writer.save"),
         PaletteAction::SaveAsDoc => dispatch_command(app, "writer.save-as"),
         PaletteAction::ExportPdf => dispatch_command(app, "writer.export-pdf"),
+        PaletteAction::ExportDocx => dispatch_command(app, "writer.export-docx"),
         PaletteAction::Undo => dispatch_command(app, "writer.undo"),
         PaletteAction::Redo => dispatch_command(app, "writer.redo"),
         PaletteAction::ToggleBold => dispatch_command(app, "writer.style.bold-all"),
@@ -485,6 +489,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_category("file")
             .with_order(50)
             .with_shortcut("Ctrl+E"),
+        CommandSpec::new("file.export_docx", "Export Word Document (.docx)")
+            .with_undo_label("Export Word Document")
+            .with_description("Export the current document for Microsoft Word")
+            .with_category("file")
+            .with_order(52),
         // Edit — undo/redo
         CommandSpec::new("edit.undo", "Undo")
             .with_undo_label("Undo")
@@ -695,6 +704,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_category("file")
             .with_order(51)
             .with_shortcut("Ctrl+E"),
+        CommandSpec::new("writer.export-docx", "Export Word Document (.docx)")
+            .with_undo_label("Export Word Document")
+            .with_description("Export the current document for Microsoft Word")
+            .with_category("file")
+            .with_order(53),
         CommandSpec::new("writer.undo", "Undo")
             .with_undo_label("Undo")
             .with_description("Undo the last document change")
@@ -814,7 +828,12 @@ fn sync_writer_registry_enablement(
     ] {
         registry.set_enabled(&CommandId::new(id), true);
     }
-    for id in ["file.export_pdf", "writer.export-pdf"] {
+    for id in [
+        "file.export_pdf",
+        "writer.export-pdf",
+        "file.export_docx",
+        "writer.export-docx",
+    ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
     // App utility commands are always reachable.
@@ -881,6 +900,12 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "writer.export-pdf",
             label: "Export PDF",
             shortcut: "Ctrl+E",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportDocx,
+            id: "writer.export-docx",
+            label: "Export Word Document (.docx)",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -1386,6 +1411,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     app.set_page_count(page_count);
     app.set_page_stack_height(page_stack_height);
+    app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
     let page_style = doc.page.page_style();
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
@@ -1453,6 +1479,7 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
     let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
     app.set_page_count(page_count);
     app.set_page_stack_height(page_stack_height);
+    app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
     let page_style = doc.page.page_style();
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
@@ -3129,6 +3156,15 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_export_docx(move || {
+            if let Some(app) = app_ref.upgrade() {
+                docx_export::run(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_selection_changed(move |anchor, focus| {
             if let Some(app) = app_ref.upgrade() {
                 if state.syncing_editor.get() {
@@ -3622,11 +3658,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     let mut menu_bar = build_standard_menu_bar(
         "Loom Writer",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_pdf",
-            "Export to PDF...",
-            MenuShortcut::primary("E"),
-        )],
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_pdf",
+                "Export to PDF...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_docx", "Export to Word..."),
+        ],
         vec![],
         vec![MenuItem::check("view.inspector", "Format Inspector", false)],
         vec![Menu::new(
@@ -4783,6 +4822,10 @@ fn wire_palette(app: &WriterApp) {
 mod actions_tests;
 #[cfg(test)]
 mod audit_tests;
+#[cfg(test)]
+mod docx_export_tests;
+#[cfg(test)]
+mod page_stack_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

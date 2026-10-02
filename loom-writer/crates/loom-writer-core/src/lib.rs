@@ -14,12 +14,14 @@ use loom_text::ParagraphStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod comments;
+mod docx;
 mod export;
 mod page_setup;
 mod style_json;
 mod tables;
 mod text_metrics;
 
+pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
 pub use page_setup::PageSetup;
 use style_json::{
@@ -2263,14 +2265,6 @@ impl Clone for ContentParser {
     }
 }
 
-/// Escapes text for XML element content: &, <, > become entities.
-pub(crate) fn xml_escape_text(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 /// Save a document to a `.loomdoc` byte buffer (ZIP + manifest).
 pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
     let mut arch = PackageArchive::new();
@@ -3019,6 +3013,10 @@ impl PageRect {
     }
 }
 
+/// Vertical gap between consecutive pages in the page stack, in points.
+/// Layout, projection and the canvas drawing all use this one value.
+pub const PAGE_GAP_PT: f32 = 24.0;
+
 /// Viewport state used by the headless page layout and by the Slint canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PageViewport {
@@ -3629,7 +3627,7 @@ impl WriterDocument {
         let scroll_y = viewport.scroll_y.max(0.0);
         let page_width = style.width_pt * zoom;
         let page_height = style.height_pt * zoom;
-        let page_gap = 24.0 * zoom;
+        let page_gap = PAGE_GAP_PT * zoom;
         let body_line_height = style.body_font_size_pt * style.line_height * zoom;
         let viewport_rect = PageRect {
             x: 0.0,

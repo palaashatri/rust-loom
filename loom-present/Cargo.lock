@@ -3099,6 +3099,7 @@ dependencies = [
  "loom-document",
  "loom-package",
  "loom-pdf",
+ "roxmltree",
  "serde",
  "serde_json",
 ]
