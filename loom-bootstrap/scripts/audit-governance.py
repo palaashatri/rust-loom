@@ -16,6 +16,9 @@ TRUTH_END = "<!-- CURRENT TRUTH END -->"
 APPS = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
 OWNER_AUTHORIZED_MARKDOWN = {
     Path(".agents/skills/linux-desktop-input/SKILL.md"),
+    # Owner 2026-10-02: archive of repair cards and reference docs, kept out of
+    # AGENTS.md so the live instructions fit a small model's context window.
+    Path("docs/archive/AGENTS-ARCHIVE.md"),
 }
 errors: list[str] = []
 workflow: dict = {}
