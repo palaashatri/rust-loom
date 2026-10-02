@@ -14,6 +14,7 @@ pub use charts::{
     ChartKind, ChartPlacement, ChartSeries, ChartSpec, ChartUpdatePolicy, SheetChart,
 };
 
+pub mod dates;
 pub mod functions;
 pub mod interop;
 pub mod objects;

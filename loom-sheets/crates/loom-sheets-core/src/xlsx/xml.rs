@@ -69,13 +69,6 @@ pub(super) struct XmlElement<'a> {
     pub(super) body: &'a str,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct XmlSpan<'a> {
-    pub(super) open_start: usize,
-    pub(super) open_end: usize,
-    pub(super) attrs: &'a str,
-}
-
 pub(super) fn elements<'a>(xml: &'a str, wanted: &str) -> std::vec::IntoIter<XmlElement<'a>> {
     let mut found = Vec::new();
     let mut cursor = 0;
@@ -120,35 +113,6 @@ pub(super) fn elements<'a>(xml: &'a str, wanted: &str) -> std::vec::IntoIter<Xml
         }
     }
     found.into_iter()
-}
-
-pub(super) fn elements_with_offsets<'a>(xml: &'a str, wanted: &str) -> Vec<XmlSpan<'a>> {
-    let mut found = Vec::new();
-    let mut cursor = 0;
-    while let Some(relative) = xml[cursor..].find('<') {
-        let start = cursor + relative;
-        let Some(end_relative) = xml[start..].find('>') else {
-            break;
-        };
-        let end = start + end_relative + 1;
-        let raw = &xml[start + 1..end - 1];
-        if raw.starts_with('/') || raw.starts_with('!') || raw.starts_with('?') {
-            cursor = end;
-            continue;
-        }
-        let name_end = raw
-            .find(|character: char| character.is_whitespace() || character == '/')
-            .unwrap_or(raw.len());
-        if local_name(&raw[..name_end]) == wanted {
-            found.push(XmlSpan {
-                open_start: start,
-                open_end: end,
-                attrs: raw[name_end..].trim_end_matches('/').trim(),
-            });
-        }
-        cursor = end;
-    }
-    found
 }
 
 fn matching_close(xml: &str, body_start: usize, wanted: &str) -> Option<(usize, usize)> {

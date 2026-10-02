@@ -1,11 +1,22 @@
 //! Rich XLSX interop for the worksheet model.
 
 mod cell_refs;
+#[cfg(test)]
+mod excel_conformance_tests;
 mod export;
+mod formula_import;
+mod formula_text;
 mod import;
+mod import_audit;
+#[cfg(test)]
+mod import_tests;
+mod number_formats;
 mod package_parts;
+mod sheet_reader;
+mod style_import;
 mod styles;
 mod warnings;
+mod worksheet_xml;
 mod xml;
 
 pub use export::export_xlsx_sheets;
@@ -148,8 +159,12 @@ mod tests {
         let bytes = export_xlsx_sheets(&[sheet]).expect("rich export");
         let archive = PackageArchive::from_bytes(&bytes).expect("zip");
         let worksheet = String::from_utf8_lossy(archive.get("xl/worksheets/sheet1.xml").unwrap());
-        assert!(worksheet.contains("<drawing xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"rId1\"/>")
-        );
+        // The relationship prefix is bound on the worksheet root, where Excel
+        // itself declares it, and the drawing element uses it.
+        assert!(worksheet.contains(
+            " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+        ));
+        assert!(worksheet.contains("<drawing r:id=\"rId1\"/>"));
 
         let chart = String::from_utf8_lossy(archive.get("xl/charts/chart1.xml").unwrap());
         assert!(chart.contains("'R&amp;D'!$A$2:$A$2"));
@@ -281,32 +296,6 @@ mod tests {
         assert!(imported
             .warnings
             .contains(&XlsxImportWarning::DataValidation));
-    }
-
-    #[test]
-    fn xlsx_import_reports_frozen_panes() {
-        let bytes = test_xlsx_with_xml(
-            "xl/worksheets/sheet1.xml",
-            "</worksheet>",
-            "<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" state=\"frozen\"/></sheetView></sheetViews>",
-        );
-
-        let imported = import_xlsx_sheets(&bytes).expect("import workbook");
-        assert!(imported.warnings.contains(&XlsxImportWarning::FrozenPanes));
-    }
-
-    #[test]
-    fn xlsx_import_reports_custom_row_and_column_sizes() {
-        let bytes = test_xlsx_with_xml(
-            "xl/worksheets/sheet1.xml",
-            "</worksheet>",
-            "<cols><col min=\"1\" max=\"1\" width=\"22\" customWidth=\"1\"/></cols><sheetData><row r=\"1\" ht=\"26\" customHeight=\"1\"/></sheetData>",
-        );
-
-        let imported = import_xlsx_sheets(&bytes).expect("import workbook");
-        assert!(imported
-            .warnings
-            .contains(&XlsxImportWarning::CustomRowColumnSizes));
     }
 
     #[test]

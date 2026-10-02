@@ -1,6 +1,6 @@
 //! Write worksheet models to supported XLSX workbook parts.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use loom_package::zip::PackageArchive;
 
@@ -8,28 +8,31 @@ use crate::style::{CellAlignment, CellStyle};
 use crate::{CellRef, ChartKind, Sheet, SheetChart, SheetObject, SheetObjectKind};
 
 use super::cell_refs::{chart_sheet_reference, column_letters};
-use super::styles::{apply_exported_styles, render_styles_xml, rgb_for_fill, XfKey};
+use super::styles::{render_styles_xml, rgb_for_fill, XfKey};
+use super::worksheet_xml::{render_worksheet, SharedStrings, WorksheetInput};
 use super::xml::{xml_escape_attr, xml_escape_text};
-use super::{CHART_NS, DRAWINGML_NS, DRAWING_NS, EMU_PER_PIXEL, PACKAGE_REL_NS, REL_NS};
+use super::{CHART_NS, DRAWINGML_NS, DRAWING_NS, EMU_PER_PIXEL, MAIN_NS, PACKAGE_REL_NS, REL_NS};
 
 /// Export every worksheet with formulas, cell formatting, and supported
-/// drawing objects represented in OOXML parts. The legacy exporter supplies
-/// the well-tested cell/value package; this layer adds the richer parts and
-/// rewrites the package without losing the base workbook metadata.
+/// drawing objects represented in OOXML parts. The package is written the way
+/// Microsoft Excel writes it (typed cached values, array formulas, sizes,
+/// frozen panes, the reserved style entries) because Excel silently repairs,
+/// or refuses, packages that break its rules.
 pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
     if sheets.is_empty() {
         return Err("xlsx export needs at least one sheet".to_string());
     }
     let evaluated = crate::workbook::evaluate_workbook(sheets);
-    let data = sheets
-        .iter()
-        .zip(evaluated.iter())
-        .map(|(sheet, values)| crate::sheet_to_xlsx_data(sheet, values))
-        .collect::<Vec<_>>();
-    let exported_sheet_names = crate::unique_xlsx_sheet_names(&data)?.names;
-    let base = crate::export_xlsx_workbook(&data)?;
-    let base_archive = PackageArchive::from_bytes(&base)
-        .map_err(|e| format!("xlsx export base archive failed: {e}"))?;
+    let names = crate::unique_xlsx_sheet_names(
+        &sheets
+            .iter()
+            .map(|sheet| crate::XlsxSheetData {
+                name: sheet.name.clone(),
+                grid: Vec::new(),
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    let exported_sheet_names = names.names;
 
     let mut style_keys = vec![XfKey {
         style: CellStyle::default(),
@@ -52,118 +55,113 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
         .enumerate()
         .map(|(id, key)| (*key, id))
         .collect::<Vec<_>>();
-    let styles_xml = render_styles_xml(&style_keys);
-    let mut replacements = BTreeMap::<String, Vec<u8>>::new();
-    let mut extras = BTreeMap::<String, Vec<u8>>::new();
+    let mut archive = PackageArchive::new();
+    let mut add = |path: &str, bytes: Vec<u8>| {
+        archive
+            .add(path, bytes)
+            .map_err(|e| format!("xlsx export failed: {e}"))
+    };
+    let mut strings = SharedStrings::default();
     let mut image_extensions = BTreeSet::new();
+    let mut sheet_parts: Vec<(String, String)> = Vec::new();
 
     for (index, sheet) in sheets.iter().enumerate() {
-        let sheet_path = format!("xl/worksheets/sheet{}.xml", index + 1);
-        let sheet_xml = base_archive
-            .get(&sheet_path)
-            .ok_or_else(|| format!("missing generated worksheet part {sheet_path}"))?;
-        let sheet_xml = std::str::from_utf8(sheet_xml)
-            .map_err(|_| format!("{sheet_path} is not valid UTF-8"))?;
-        let styled_xml = apply_exported_styles(sheet_xml, sheet, &style_ids);
         let has_drawing = sheet.chart.is_some() || !sheet.objects.is_empty();
+        let worksheet = render_worksheet(
+            &WorksheetInput {
+                sheet,
+                values: &evaluated[index],
+                style_ids: &style_ids,
+                sheet_names: &names.formula_mapping,
+                selected: index == 0,
+                has_drawing,
+            },
+            &mut strings,
+        );
+        sheet_parts.push((format!("xl/worksheets/sheet{}.xml", index + 1), worksheet));
         if has_drawing {
-            let drawing_number = index + 1;
+            let number = index + 1;
             let (drawing_xml, drawing_rels, chart_parts, image_parts, extensions) =
-                render_drawing_parts(sheet, index + 1, &exported_sheet_names[index])?;
+                render_drawing_parts(sheet, number, &exported_sheet_names[index])?;
             image_extensions.extend(extensions);
-            extras.insert(
-                format!("xl/drawings/drawing{drawing_number}.xml"),
+            add(
+                &format!("xl/drawings/drawing{number}.xml"),
                 drawing_xml.into_bytes(),
-            );
-            extras.insert(
-                format!("xl/drawings/_rels/drawing{drawing_number}.xml.rels"),
+            )?;
+            add(
+                &format!("xl/drawings/_rels/drawing{number}.xml.rels"),
                 drawing_rels.into_bytes(),
-            );
+            )?;
             for (path, xml) in chart_parts {
-                extras.insert(path, xml.into_bytes());
+                add(&path, xml.into_bytes())?;
             }
             for (path, bytes) in image_parts {
-                extras.insert(path, bytes);
+                add(&path, bytes)?;
             }
-            // `worksheet` is generated by the legacy exporter without the
-            // office-document relationship namespace. Declare it on the
-            // element that owns `r:id` so independent OOXML parsers can
-            // resolve the prefix.
-            let drawing_relationship = format!("<drawing xmlns:r=\"{REL_NS}\" r:id=\"rId1\"/>");
-            let with_drawing = styled_xml.replace(
-                "</worksheet>",
-                &format!("{drawing_relationship}</worksheet>"),
-            );
-            extras.insert(
-                format!("xl/worksheets/_rels/sheet{}.xml.rels", index + 1),
-                worksheet_drawing_rels(drawing_number).into_bytes(),
-            );
-            replacements.insert(sheet_path, with_drawing.into_bytes());
-        } else {
-            replacements.insert(sheet_path, styled_xml.into_bytes());
+            add(
+                &format!("xl/worksheets/_rels/sheet{number}.xml.rels"),
+                worksheet_drawing_rels(number).into_bytes(),
+            )?;
         }
     }
-
-    let content_types = base_archive
-        .get("[Content_Types].xml")
-        .ok_or_else(|| "generated xlsx is missing [Content_Types].xml".to_string())?;
-    let content_types = std::str::from_utf8(content_types)
-        .map_err(|_| "[Content_Types].xml is not valid UTF-8".to_string())?;
-    replacements.insert(
-        "[Content_Types].xml".to_string(),
-        render_content_types(content_types, sheets, &image_extensions).into_bytes(),
-    );
-    let workbook_relationships = base_archive
-        .get("xl/_rels/workbook.xml.rels")
-        .ok_or_else(|| "generated xlsx is missing workbook relationships".to_string())?;
-    let workbook_relationships = std::str::from_utf8(workbook_relationships)
-        .map_err(|_| "workbook relationships are not valid UTF-8".to_string())?;
-    // The base exporter assigns rId1..N to sheets and rId(N+1) to shared strings.
-    replacements.insert(
-        "xl/_rels/workbook.xml.rels".to_string(),
-        add_styles_relationship(workbook_relationships, sheets.len() + 2)?.into_bytes(),
-    );
-    extras.insert("xl/styles.xml".to_string(), styles_xml.into_bytes());
-
-    let mut archive = PackageArchive::new();
-    for path in base_archive.paths() {
-        if let Some(bytes) = replacements.remove(path) {
-            archive
-                .add(path, bytes)
-                .map_err(|e| format!("xlsx export failed: {e}"))?;
-        } else if path != "xl/styles.xml" {
-            archive
-                .add(path, base_archive.get(path).unwrap_or_default().to_vec())
-                .map_err(|e| format!("xlsx export failed: {e}"))?;
-        }
+    for (path, xml) in sheet_parts {
+        add(&path, xml.into_bytes())?;
     }
-    for (path, bytes) in replacements {
-        archive
-            .add(&path, bytes)
-            .map_err(|e| format!("xlsx export failed: {e}"))?;
-    }
-    for (path, bytes) in extras {
-        archive
-            .add(&path, bytes)
-            .map_err(|e| format!("xlsx export failed: {e}"))?;
-    }
+    add(
+        "[Content_Types].xml",
+        render_content_types(sheets, &image_extensions).into_bytes(),
+    )?;
+    add("_rels/.rels", ROOT_RELATIONSHIPS.as_bytes().to_vec())?;
+    add(
+        "xl/workbook.xml",
+        render_workbook(&exported_sheet_names).into_bytes(),
+    )?;
+    add(
+        "xl/_rels/workbook.xml.rels",
+        render_workbook_relationships(sheets.len()).into_bytes(),
+    )?;
+    add("xl/sharedStrings.xml", strings.render().into_bytes())?;
+    add("xl/styles.xml", render_styles_xml(&style_keys).into_bytes())?;
     archive
         .to_bytes()
         .map_err(|e| format!("xlsx export failed: {e}"))
 }
 
-fn add_styles_relationship(xml: &str, relationship_id: usize) -> Result<String, String> {
-    let Some(root_end) = xml.rfind("</Relationships>") else {
-        return Err("generated workbook relationships have no closing element".to_string());
-    };
-    let relationship = format!(
-        "<Relationship Id=\"rId{relationship_id}\" Type=\"{REL_NS}/styles\" Target=\"styles.xml\"/>"
-    );
-    let mut result = String::with_capacity(xml.len() + relationship.len());
-    result.push_str(&xml[..root_end]);
-    result.push_str(&relationship);
-    result.push_str(&xml[root_end..]);
-    Ok(result)
+const ROOT_RELATIONSHIPS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>";
+
+fn render_workbook(sheet_names: &[String]) -> String {
+    let sheets = sheet_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            format!(
+                "<sheet name=\"{}\" sheetId=\"{1}\" r:id=\"rId{1}\"/>",
+                xml_escape_attr(name),
+                index + 1
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"{MAIN_NS}\" xmlns:r=\"{REL_NS}\"><workbookPr/><bookViews><workbookView xWindow=\"0\" yWindow=\"0\" windowWidth=\"28800\" windowHeight=\"12300\" activeTab=\"0\"/></bookViews><sheets>{sheets}</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>"
+    )
+}
+
+fn render_workbook_relationships(sheet_count: usize) -> String {
+    let mut items = (1..=sheet_count)
+        .map(|part| {
+            format!(
+                "<Relationship Id=\"rId{part}\" Type=\"{REL_NS}/worksheet\" Target=\"worksheets/sheet{part}.xml\"/>"
+            )
+        })
+        .collect::<String>();
+    items.push_str(&format!(
+        "<Relationship Id=\"rId{}\" Type=\"{REL_NS}/sharedStrings\" Target=\"sharedStrings.xml\"/><Relationship Id=\"rId{}\" Type=\"{REL_NS}/styles\" Target=\"styles.xml\"/>",
+        sheet_count + 1,
+        sheet_count + 2
+    ));
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"{PACKAGE_REL_NS}\">{items}</Relationships>"
+    )
 }
 
 type DrawingParts = (
@@ -197,12 +195,20 @@ fn render_drawing_parts(
             format!("xl/charts/chart{sheet_number}.xml"),
             render_chart_xml(sheet, chart, exported_sheet_name),
         ));
+        // The model keeps no chart position. Start two columns past the data
+        // (column D at the smallest) so the chart never covers cells.
+        let chart_col = sheet
+            .used_range()
+            .map_or(3, |(_, _, max_col, _)| (max_col + 2).max(3));
         drawing.push_str(&one_cell_anchor(
-            CellRef { row: 0, col: 3 },
+            CellRef {
+                row: 0,
+                col: chart_col,
+            },
             560,
             320,
             &format!(
-                "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{object_id}\" name=\"Chart {object_id}\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri=\"{CHART_GRAPHIC_URI}\"><c:chart r:id=\"{chart_rel}\"/></a:graphicData></a:graphic></xdr:graphicFrame>"
+                "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{object_id}\" name=\"Chart {object_id}\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"{CHART_GRAPHIC_URI}\"><c:chart r:id=\"{chart_rel}\"/></a:graphicData></a:graphic></xdr:graphicFrame>"
             ),
         ));
         object_id += 1;
@@ -216,7 +222,7 @@ fn render_drawing_parts(
                     object.width,
                     object.height,
                     &format!(
-                        "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"{object_id}\" name=\"Shape {object_id}\" descr=\"{}\"/><xdr:cNvSpPr txBox=\"0\"/></xdr:nvSpPr><xdr:spPr><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill><a:ln/></xdr:spPr><xdr:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang=\"en-US\"/><a:t>{}</a:t></a:r></a:p></xdr:txBody></xdr:sp>",
+                        "<xdr:sp><xdr:nvSpPr><xdr:cNvPr id=\"{object_id}\" name=\"Shape {object_id}\" descr=\"{}\"/><xdr:cNvSpPr txBox=\"0\"/></xdr:nvSpPr><xdr:spPr><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill><a:ln w=\"9525\"><a:solidFill><a:srgbClr val=\"9CA3AF\"/></a:solidFill></a:ln></xdr:spPr><xdr:txBody><a:bodyPr vertOverflow=\"clip\" wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"/><a:lstStyle/><a:p><a:pPr algn=\"ctr\"/><a:r><a:rPr lang=\"en-US\" sz=\"1100\"><a:solidFill><a:srgbClr val=\"1F2937\"/></a:solidFill></a:rPr><a:t>{}</a:t></a:r></a:p></xdr:txBody></xdr:sp>",
                         xml_escape_attr(&object.label),
                         rgb_for_fill(object.fill),
                         xml_escape_text(&object.label),
@@ -332,16 +338,13 @@ fn worksheet_drawing_rels(drawing_number: usize) -> String {
     )
 }
 
-fn render_content_types(
-    base: &str,
-    sheets: &[Sheet],
-    image_extensions: &BTreeSet<String>,
-) -> String {
+fn render_content_types(sheets: &[Sheet], image_extensions: &BTreeSet<String>) -> String {
     let mut additions = String::new();
-    additions.push_str(
-        "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
-    );
     for (index, sheet) in sheets.iter().enumerate() {
+        additions.push_str(&format!(
+            "<Override PartName=\"/xl/worksheets/sheet{}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>",
+            index + 1
+        ));
         if sheet.chart.is_some() || !sheet.objects.is_empty() {
             additions.push_str(&format!(
                 "<Override PartName=\"/xl/drawings/drawing{}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>",
@@ -355,6 +358,7 @@ fn render_content_types(
             ));
         }
     }
+    let mut defaults = String::new();
     for extension in image_extensions {
         let mime = match extension.as_str() {
             "jpg" | "jpeg" => "image/jpeg",
@@ -363,11 +367,13 @@ fn render_content_types(
             "svg" => "image/svg+xml",
             _ => "image/png",
         };
-        additions.push_str(&format!(
+        defaults.push_str(&format!(
             "<Default Extension=\"{extension}\" ContentType=\"{mime}\"/>"
         ));
     }
-    base.replace("</Types>", &format!("{additions}</Types>"))
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>{defaults}<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>{additions}</Types>"
+    )
 }
 
 const DRAWING_REL_TYPE: &str =

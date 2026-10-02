@@ -178,7 +178,9 @@ impl CellStyle {
                 NumberFormat::Currency => format_number_currency(num, "$", decimals),
                 NumberFormat::Percentage => format_number_percentage(num, decimals),
                 NumberFormat::Scientific => format!("{:e}", num),
-                NumberFormat::DateIso => raw.to_string(),
+                NumberFormat::DateIso => {
+                    crate::dates::serial_to_iso(num).unwrap_or_else(|| raw.to_string())
+                }
             }
         } else {
             format_cell_display(raw, self.number_format)

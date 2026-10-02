@@ -1,36 +1,12 @@
-//! Read and write worksheet cell styles.
+//! Write worksheet cell styles and map the Loom fill swatches to colours.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::style::{CellAlignment, CellStyle, FillColor};
 use crate::{CellRef, Sheet};
 
-use super::cell_refs::parse_cell_ref;
-use super::xml::{
-    attr, contains_element, elements, elements_with_offsets, xml_escape_attr, xml_unescape,
-};
+use super::xml::xml_escape_attr;
 use super::MAIN_NS;
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct XfDef {
-    pub(super) style: CellStyle,
-    pub(super) alignment: CellAlignment,
-}
-
-impl Default for XfDef {
-    fn default() -> Self {
-        Self {
-            style: CellStyle::default(),
-            alignment: CellAlignment::General,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub(super) struct StyleTable {
-    pub(super) xfs: Vec<XfDef>,
-    pub(super) num_formats: BTreeMap<u32, String>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct XfKey {
@@ -51,257 +27,6 @@ impl XfKey {
     }
 }
 
-pub(super) fn apply_imported_styles(sheet: &mut Sheet, sheet_xml: &str, styles: &StyleTable) {
-    if styles.xfs.is_empty() {
-        return;
-    }
-    for cell in elements(sheet_xml, "c") {
-        let Some(reference) = attr(cell.attrs, "r") else {
-            continue;
-        };
-        let Some(cell_ref) = parse_cell_ref(&reference) else {
-            continue;
-        };
-        let style_id = attr(cell.attrs, "s")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let xf = styles.xfs.get(style_id).copied().unwrap_or_default();
-        sheet.set_cell_style(cell_ref, xf.style);
-        sheet.set_cell_alignment(cell_ref, xf.alignment);
-    }
-}
-
-pub(super) fn parse_styles(xml: &str) -> StyleTable {
-    let mut table = StyleTable::default();
-    let custom_formats = elements(xml, "numFmt")
-        .filter_map(|tag| {
-            Some((
-                attr(tag.attrs, "numFmtId")?.parse::<u32>().ok()?,
-                xml_unescape(&attr(tag.attrs, "formatCode")?),
-            ))
-        })
-        .collect::<BTreeMap<_, _>>();
-    table.num_formats = custom_formats;
-
-    let fonts = elements(xml, "font")
-        .map(|tag| {
-            let size = elements(tag.body, "sz")
-                .next()
-                .and_then(|value| attr(value.attrs, "val"))
-                .and_then(|value| value.parse::<f32>().ok())
-                .and_then(|points| {
-                    if (points - 11.0).abs() < 0.01 {
-                        None
-                    } else {
-                        Some((points * 4.0 / 3.0).round().clamp(1.0, 255.0) as u8)
-                    }
-                });
-            (
-                contains_element(tag.body, "b"),
-                contains_element(tag.body, "i"),
-                contains_element(tag.body, "u"),
-                size,
-            )
-        })
-        .collect::<Vec<_>>();
-    let fills = elements(xml, "fill")
-        .map(|tag| {
-            elements(tag.body, "fgColor")
-                .next()
-                .and_then(|color| attr(color.attrs, "rgb"))
-                .map(|value| fill_from_rgb(&value))
-                .unwrap_or(FillColor::None)
-        })
-        .collect::<Vec<_>>();
-    let borders = elements(xml, "border")
-        .map(|tag| {
-            ["left", "right", "top", "bottom"].iter().any(|side| {
-                elements(tag.body, side)
-                    .next()
-                    .and_then(|value| attr(value.attrs, "style"))
-                    .is_some_and(|value| !value.eq_ignore_ascii_case("none"))
-            })
-        })
-        .collect::<Vec<_>>();
-    let Some(cell_xfs) = elements(xml, "cellXfs").next() else {
-        return table;
-    };
-    for xf in elements(cell_xfs.body, "xf") {
-        let font_id = attr(xf.attrs, "fontId")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let fill_id = attr(xf.attrs, "fillId")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let border_id = attr(xf.attrs, "borderId")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let num_fmt_id = attr(xf.attrs, "numFmtId")
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0);
-        let (bold, italic, underline, font_size) = fonts
-            .get(font_id)
-            .copied()
-            .unwrap_or((false, false, false, None));
-        let format_code = table
-            .num_formats
-            .get(&num_fmt_id)
-            .map(String::as_str)
-            .or_else(|| builtin_format_code(num_fmt_id));
-        let (number_format, decimal_places) = parse_number_format(format_code);
-        let style = CellStyle {
-            bold,
-            italic,
-            underline,
-            number_format,
-            decimal_places,
-            border: borders.get(border_id).copied().unwrap_or(false),
-            fill: fills.get(fill_id).copied().unwrap_or(FillColor::None),
-            font_size,
-        };
-        let alignment = elements(xf.body, "alignment")
-            .next()
-            .and_then(|alignment| attr(alignment.attrs, "horizontal"))
-            .map(|value| match value.to_ascii_lowercase().as_str() {
-                "left" => CellAlignment::Left,
-                "center" | "centercontinuous" => CellAlignment::Center,
-                "right" => CellAlignment::Right,
-                _ => CellAlignment::General,
-            })
-            .unwrap_or(CellAlignment::General);
-        table.xfs.push(XfDef { style, alignment });
-    }
-    table
-}
-
-fn parse_number_format(code: Option<&str>) -> (crate::NumberFormat, Option<u8>) {
-    let Some(code) = code else {
-        return (crate::NumberFormat::General, None);
-    };
-    let lower = code.to_ascii_lowercase();
-    let decimals = lower
-        .split(';')
-        .next()
-        .and_then(|section| section.split('.').nth(1))
-        .map(|fraction| {
-            fraction
-                .chars()
-                .take_while(|c| matches!(c, '0' | '#'))
-                .count()
-        })
-        .filter(|count| *count > 0)
-        .map(|count| count.min(u8::MAX as usize) as u8);
-    if lower.contains('%') {
-        (crate::NumberFormat::Percentage, decimals)
-    } else if lower.contains('e') && lower.contains('0') {
-        (crate::NumberFormat::Scientific, decimals)
-    } else if lower.contains('y') || lower.contains('d') && lower.contains("mm") {
-        (crate::NumberFormat::DateIso, decimals)
-    } else if lower.contains('$') || lower.contains('€') || lower.contains('£') {
-        (crate::NumberFormat::Currency, decimals)
-    } else if lower == "@" {
-        (crate::NumberFormat::PlainText, None)
-    } else if lower == "general" {
-        (crate::NumberFormat::General, None)
-    } else {
-        (crate::NumberFormat::Number, decimals)
-    }
-}
-
-fn builtin_format_code(id: u32) -> Option<&'static str> {
-    match id {
-        0 => Some("General"),
-        1 => Some("0"),
-        2 => Some("0.00"),
-        3 => Some("#,##0"),
-        4 => Some("#,##0.00"),
-        9 => Some("0%"),
-        10 => Some("0.00%"),
-        11 => Some("0.00E+00"),
-        14 => Some("m/d/yy"),
-        49 => Some("@"),
-        _ => None,
-    }
-}
-
-pub(super) fn apply_exported_styles(
-    xml: &str,
-    sheet: &Sheet,
-    style_ids: &[(XfKey, usize)],
-) -> String {
-    let mut styled_cells = BTreeMap::<CellRef, usize>::new();
-    for cell in sheet
-        .styles
-        .keys()
-        .chain(sheet.alignments.keys())
-        .copied()
-        .collect::<BTreeSet<_>>()
-    {
-        let key = XfKey::from_sheet(sheet, cell);
-        if !key.is_default() {
-            if let Some((_, id)) = style_ids.iter().find(|(candidate, _)| *candidate == key) {
-                styled_cells.insert(cell, *id);
-            }
-        }
-    }
-    if styled_cells.is_empty() {
-        return xml.to_string();
-    }
-    let mut output = String::with_capacity(xml.len() + styled_cells.len() * 16);
-    let mut cursor = 0;
-    let mut present = BTreeSet::new();
-    for tag in elements_with_offsets(xml, "c") {
-        output.push_str(&xml[cursor..tag.open_start]);
-        let Some(reference) = attr(tag.attrs, "r") else {
-            output.push_str(&xml[tag.open_start..tag.open_end]);
-            cursor = tag.open_end;
-            continue;
-        };
-        let Some(cell_ref) = parse_cell_ref(&reference) else {
-            output.push_str(&xml[tag.open_start..tag.open_end]);
-            cursor = tag.open_end;
-            continue;
-        };
-        if let Some(style_id) = styled_cells.get(&cell_ref) {
-            present.insert(cell_ref);
-            let open = &xml[tag.open_start..tag.open_end];
-            if open.contains(" s=") || open.contains(" s=\"") {
-                output.push_str(open);
-            } else if let Some(close) = open.rfind('>') {
-                output.push_str(&open[..close]);
-                output.push_str(&format!(" s=\"{style_id}\">"));
-            } else {
-                output.push_str(open);
-            }
-        } else {
-            output.push_str(&xml[tag.open_start..tag.open_end]);
-        }
-        cursor = tag.open_end;
-    }
-    output.push_str(&xml[cursor..]);
-
-    let missing = styled_cells
-        .iter()
-        .filter(|(cell, _)| !present.contains(cell))
-        .map(|(cell, style_id)| {
-            (
-                cell.row,
-                format!(
-                    "<row r=\"{}\"><c r=\"{}\" s=\"{}\"/></row>",
-                    cell.row + 1,
-                    cell.to_a1(),
-                    style_id
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return output;
-    }
-    let rows = missing.into_iter().map(|(_, row)| row).collect::<String>();
-    output.replace("</sheetData>", &format!("{rows}</sheetData>"))
-}
-
 pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
     let mut fonts = Vec::<(bool, bool, bool, Option<u8>)>::new();
     let mut fills = Vec::<FillColor>::new();
@@ -313,7 +38,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
         if !fonts.contains(&font) {
             fonts.push(font);
         }
-        if !fills.contains(&style.fill) {
+        if style.fill != FillColor::None && !fills.contains(&style.fill) {
             fills.push(style.fill);
         }
         if !borders.contains(&style.border) {
@@ -341,27 +66,31 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                 flags.push_str("<u/>");
             }
             let points = size.map(|px| (px as f32 * 0.75).max(1.0)).unwrap_or(11.0);
-            format!("<font>{flags}<sz val=\"{points:.2}\"/><name val=\"Aptos\"/></font>")
+            format!(
+                "<font>{flags}<sz val=\"{points:.2}\"/><color theme=\"1\"/><name val=\"Calibri\"/><family val=\"2\"/></font>"
+            )
         })
         .collect::<String>();
+    // Excel reserves the first two fills: "none", then the "gray125" hatch.
+    // A solid fill placed second would be replaced by that hatch on load.
     let fill_xml = fills
         .iter()
         .map(|fill| {
-            if *fill == FillColor::None {
-                "<fill><patternFill patternType=\"none\"/></fill>".to_string()
-            } else {
-                format!(
-                    "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF{}\"/><bgColor indexed=\"64\"/></patternFill></fill>",
-                    rgb_for_fill(*fill)
-                )
-            }
+            format!(
+                "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF{}\"/><bgColor indexed=\"64\"/></patternFill></fill>",
+                rgb_for_fill(*fill)
+            )
         })
-        .collect::<String>();
+        .fold(
+            "<fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>"
+                .to_string(),
+            |all, fill| all + &fill,
+        );
     let border_xml = borders
         .iter()
         .map(|border| {
             if *border {
-                "<border><left style=\"thin\"/><right style=\"thin\"/><top style=\"thin\"/><bottom style=\"thin\"/><diagonal/></border>".to_string()
+                "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border>".to_string()
             } else {
                 "<border><left/><right/><top/><bottom/><diagonal/></border>".to_string()
             }
@@ -391,7 +120,10 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                         )
                 })
                 .unwrap_or(0);
-            let fill_id = fills.iter().position(|fill| *fill == key.style.fill).unwrap_or(0);
+            let fill_id = fills
+                .iter()
+                .position(|fill| *fill == key.style.fill)
+                .map_or(0, |position| position + 2);
             let border_id = borders
                 .iter()
                 .position(|border| *border == key.style.border)
@@ -410,39 +142,59 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                 CellAlignment::Right => "<alignment horizontal=\"right\"/>",
                 CellAlignment::General => "",
             };
-            let apply_alignment = if alignment.is_empty() {
-                ""
-            } else {
-                " applyAlignment=\"1\""
-            };
+            let mut apply = String::new();
+            for (flag, used) in [
+                ("applyNumberFormat", num_fmt_id != 0),
+                ("applyFont", font_id != 0),
+                ("applyFill", fill_id != 0),
+                ("applyBorder", border_id != 0),
+                ("applyAlignment", !alignment.is_empty()),
+            ] {
+                if used {
+                    apply.push_str(&format!(" {flag}=\"1\""));
+                }
+            }
             format!(
-                "<xf numFmtId=\"{num_fmt_id}\" fontId=\"{font_id}\" fillId=\"{fill_id}\" borderId=\"{border_id}\" xfId=\"0\"{apply_alignment}>{alignment}</xf>"
+                "<xf numFmtId=\"{num_fmt_id}\" fontId=\"{font_id}\" fillId=\"{fill_id}\" borderId=\"{border_id}\" xfId=\"0\"{apply}>{alignment}</xf>"
             )
         })
         .collect::<String>();
+    let num_fmts = if formats.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<numFmts count=\"{}\">{num_fmt_xml}</numFmts>",
+            formats.len()
+        )
+    };
     format!(
-        "<?xml version=\"1.0\"?><styleSheet xmlns=\"{MAIN_NS}\"><numFmts count=\"{}\">{num_fmt_xml}</numFmts><fonts count=\"{}\">{font_xml}</fonts><fills count=\"{}\">{fill_xml}</fills><borders count=\"{}\">{border_xml}</borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"{}\">{xf_xml}</cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>",
-        formats.len(),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"{MAIN_NS}\">{num_fmts}<fonts count=\"{}\">{font_xml}</fonts><fills count=\"{}\">{fill_xml}</fills><borders count=\"{}\">{border_xml}</borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"{}\">{xf_xml}</cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles><dxfs count=\"0\"/><tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/></styleSheet>",
         fonts.len(),
-        fills.len(),
+        fills.len() + 2,
         borders.len(),
         keys.len()
     )
 }
 
-fn number_format_code(style: CellStyle) -> String {
+pub(super) fn number_format_code(style: CellStyle) -> String {
     let decimals = style.decimal_places.unwrap_or(match style.number_format {
         crate::NumberFormat::Currency => 2,
         crate::NumberFormat::Percentage => 1,
         crate::NumberFormat::Number | crate::NumberFormat::Scientific => 2,
         _ => 0,
     });
+    // Excel rejects a trailing decimal point, so zero decimals drop the dot.
+    let fraction = if decimals == 0 {
+        String::new()
+    } else {
+        format!(".{}", "0".repeat(decimals as usize))
+    };
     match style.number_format {
         crate::NumberFormat::General => "General".to_string(),
-        crate::NumberFormat::Currency => format!("$#,##0.{}", "0".repeat(decimals as usize)),
-        crate::NumberFormat::Percentage => format!("0.{}%", "0".repeat(decimals as usize)),
-        crate::NumberFormat::Number => format!("#,##0.{}", "0".repeat(decimals as usize)),
-        crate::NumberFormat::Scientific => format!("0.{}E+00", "0".repeat(decimals as usize)),
+        crate::NumberFormat::Currency => format!("$#,##0{fraction}"),
+        crate::NumberFormat::Percentage => format!("0{fraction}%"),
+        crate::NumberFormat::Number => format!("#,##0{fraction}"),
+        crate::NumberFormat::Scientific => format!("0{fraction}E+00"),
         crate::NumberFormat::DateIso => "yyyy-mm-dd".to_string(),
         crate::NumberFormat::PlainText => "@".to_string(),
     }

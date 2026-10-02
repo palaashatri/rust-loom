@@ -143,8 +143,17 @@ pub enum XlsxImportWarning {
     ExternalLinks,
     ConditionalFormatting,
     DataValidation,
-    FrozenPanes,
-    CustomRowColumnSizes,
+    MergedCells,
+    HiddenContent,
+    ArrayFormulas,
+    UnsupportedNumberFormats,
+    ApproximatedFormatting,
+    RichTextRuns,
+    TextReadAsValue,
+    NotesAndLinks,
+    TablesAndFilters,
+    FormulaResultsDiffer,
+    Date1904System,
     MultipleChartsOnSheet,
     MissingDrawingParts,
     AbsoluteDrawingAnchors,
@@ -162,8 +171,27 @@ impl XlsxImportWarning {
             Self::ExternalLinks => "links to other workbooks",
             Self::ConditionalFormatting => "conditional formatting rules",
             Self::DataValidation => "data validation rules",
-            Self::FrozenPanes => "frozen rows or columns",
-            Self::CustomRowColumnSizes => "custom row heights or column widths",
+            Self::MergedCells => "merged cells (they import as separate cells)",
+            Self::HiddenContent => "hidden sheets, rows or columns (they import visible)",
+            Self::ArrayFormulas => {
+                "array formulas over several cells (only the first cell keeps the formula)"
+            }
+            Self::UnsupportedNumberFormats => {
+                "time, fraction or non-dollar currency number formats (shown as plain numbers or dates)"
+            }
+            Self::ApproximatedFormatting => {
+                "fonts, text colours, wrapped text, exact fill colours and border styles"
+            }
+            Self::RichTextRuns => "formatting inside part of a cell's text",
+            Self::NotesAndLinks => "cell comments, notes and hyperlinks",
+            Self::TablesAndFilters => "Excel tables and filters",
+            Self::TextReadAsValue => {
+                "text cells that look like numbers, TRUE/FALSE or formulas (Loom reads them as those values)"
+            }
+            Self::FormulaResultsDiffer => {
+                "formulas Loom cannot calculate yet or calculates differently from Excel"
+            }
+            Self::Date1904System => "the 1904 date system (dates may be off by four years)",
             Self::MultipleChartsOnSheet => "additional charts on the same sheet",
             Self::MissingDrawingParts => "drawing objects with missing linked parts",
             Self::AbsoluteDrawingAnchors => "objects positioned with absolute anchors",
@@ -191,6 +219,13 @@ pub(super) fn detect_import_warnings(
         }
         if nodes.iter().any(|node| {
             is_spreadsheet_namespace(&node.namespace)
+                && node.name == "workbookPr"
+                && matches!(node.attribute("date1904"), Some("1") | Some("true"))
+        }) {
+            warnings.insert(XlsxImportWarning::Date1904System);
+        }
+        if nodes.iter().any(|node| {
+            is_spreadsheet_namespace(&node.namespace)
                 && (node.name == "pivotTableParts" || node.name == "pivotSource")
         }) {
             warnings.insert(XlsxImportWarning::PivotTables);
@@ -211,6 +246,16 @@ pub(super) fn detect_import_warnings(
             .any(|path| path.starts_with("xl/externalLinks/"))
     {
         warnings.insert(XlsxImportWarning::ExternalLinks);
+    }
+    let paths = archive.paths();
+    if paths
+        .iter()
+        .any(|path| path.starts_with("xl/comments") || path.starts_with("xl/threadedComments/"))
+    {
+        warnings.insert(XlsxImportWarning::NotesAndLinks);
+    }
+    if paths.iter().any(|path| path.starts_with("xl/tables/")) {
+        warnings.insert(XlsxImportWarning::TablesAndFilters);
     }
     if workbook_relationships.iter().any(|relationship| {
         relationship.kind.ends_with("/pivotTable")
@@ -234,27 +279,14 @@ pub(super) fn detect_import_warnings(
             {
                 warnings.insert(XlsxImportWarning::ConditionalFormatting);
             }
+            if is_main && node.name == "hyperlink" {
+                warnings.insert(XlsxImportWarning::NotesAndLinks);
+            }
+            if is_main && node.name == "autoFilter" {
+                warnings.insert(XlsxImportWarning::TablesAndFilters);
+            }
             if (is_main || is_x14) && node.name == "dataValidation" {
                 warnings.insert(XlsxImportWarning::DataValidation);
-            }
-            if is_main && node.name == "pane" {
-                let split = ["xSplit", "ySplit"]
-                    .iter()
-                    .filter_map(|attribute| node.attribute(attribute))
-                    .filter_map(|value| value.parse::<f64>().ok())
-                    .any(|value| value != 0.0);
-                let frozen = node
-                    .attribute("state")
-                    .is_some_and(|state| state == "frozen" || state == "frozenSplit");
-                if split || frozen {
-                    warnings.insert(XlsxImportWarning::FrozenPanes);
-                }
-            }
-            if is_main
-                && ((node.name == "col" && node.attribute("width").is_some())
-                    || (node.name == "row" && node.attribute("ht").is_some()))
-            {
-                warnings.insert(XlsxImportWarning::CustomRowColumnSizes);
             }
         }
 

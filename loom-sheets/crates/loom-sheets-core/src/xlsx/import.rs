@@ -1,16 +1,59 @@
 //! Turn the supported parts of an XLSX workbook into worksheet models.
 
+use std::collections::BTreeSet;
+
 use loom_package::zip::PackageArchive;
 
 use crate::style::FillColor;
-use crate::{CellRef, ChartKind, Sheet, SheetChart, SheetObject};
+use crate::{Cell, CellRef, ChartKind, Sheet, SheetChart, SheetObject};
 
-use super::cell_refs::column_index;
+use super::cell_refs::{column_index, parse_cell_ref};
+use super::formula_import::{loom_formula, DefinedNames};
+use super::import_audit::formula_results_differ;
 use super::package_parts::{parent_path, relationship_map, relationship_part_path, resolve_target};
-use super::styles::{apply_imported_styles, fill_from_rgb, parse_styles};
+use super::sheet_reader::{
+    parse_shared_strings, parse_worksheet, Cached, FormulaKind, ParsedSheet, SharedStrings,
+};
+use super::style_import::{parse_styles, StyleTable};
+use super::styles::fill_from_rgb;
 use super::warnings::{chart_plot_groups, imported_chart_group_index, XlsxImportWarning};
 use super::xml::{attr, elements, xml_unescape};
 use super::EMU_PER_PIXEL;
+
+/// Excel stores column widths as a count of the default font's digits (7 px
+/// for Calibri 11, padding included) and row heights in points.
+const PIXELS_PER_CHARACTER: f32 = 7.0;
+const POINTS_PER_PIXEL: f32 = 0.75;
+/// Excel's default row height in points, used when the sheet names none.
+const EXCEL_DEFAULT_ROW_POINTS: f32 = 15.0;
+/// A `<col>` range covering the whole sheet is limited to the first columns.
+const MAX_COLUMNS_PER_SIZE_RANGE: u32 = 256;
+/// Cross-checking formula results costs one extra evaluation of the
+/// workbook, so very large formula sets are not compared.
+const MAX_FORMULAS_TO_COMPARE: usize = 500_000;
+/// Functions Loom spills over neighbouring cells, like Excel's dynamic arrays.
+const SPILL_FUNCTIONS: &[&str] = &["SEQUENCE", "TRANSPOSE", "SORT", "UNIQUE", "FILTER"];
+
+fn is_spill_formula(body: &str) -> bool {
+    let upper = body.trim().to_ascii_uppercase();
+    let name = upper
+        .strip_prefix("_XLFN._XLWS.")
+        .or_else(|| upper.strip_prefix("_XLFN."))
+        .unwrap_or(&upper);
+    SPILL_FUNCTIONS
+        .iter()
+        .any(|function| name.starts_with(&format!("{function}(")))
+}
+
+/// Text that Loom, which has no separate text type for cells, reads as a
+/// number, a boolean or a formula.
+fn looks_like_value(text: &str) -> bool {
+    let text = text.trim();
+    text.parse::<f64>().is_ok()
+        || text.eq_ignore_ascii_case("true")
+        || text.eq_ignore_ascii_case("false")
+        || text.starts_with('=')
+}
 
 /// Parsed worksheet model plus known features that will be omitted by import.
 #[derive(Debug, Clone)]
@@ -24,6 +67,8 @@ pub(super) struct SheetPart {
     pub(super) name: String,
     pub(super) path: String,
     pub(super) xml: String,
+    /// `state="hidden"` or `"veryHidden"` in `workbook.xml`.
+    pub(super) hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,74 +78,251 @@ struct DrawingAnchor {
     height: u32,
 }
 
+struct Extracted {
+    sheets: Vec<Sheet>,
+    /// Features found while reading cells, formats and layout.
+    warnings: BTreeSet<XlsxImportWarning>,
+}
+
 /// Import an `.xlsx` workbook into the full worksheet model used by the app.
 ///
-/// The importer keeps formulas and cached values from the existing worksheet
-/// reader, then adds the OOXML features represented by the Loom model:
-/// cell styles, alignments, basic charts, shapes, and embedded images. Excel
+/// The importer keeps formulas and cell values, then adds the OOXML features
+/// represented by the Loom model: cell styles, alignments, column widths, row
+/// heights, frozen panes, basic charts, shapes, and embedded images. Excel
 /// pivot caches remain usable as their cached worksheet cells, because Loom's
 /// native pivot model is formula-backed rather than an OOXML cache object.
 pub fn extract_xlsx_sheets(xlsx_bytes: &[u8]) -> Result<Vec<Sheet>, String> {
     let archive = PackageArchive::from_bytes(xlsx_bytes)
         .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
-    extract_xlsx_sheets_from_archive(xlsx_bytes, &archive)
+    Ok(extract_from_archive(&archive)?.sheets)
 }
 
-fn extract_xlsx_sheets_from_archive(
-    xlsx_bytes: &[u8],
-    archive: &PackageArchive,
-) -> Result<Vec<Sheet>, String> {
-    let basic = crate::extract_xlsx_workbook(xlsx_bytes)?;
+/// Read `<definedName>` entries as `(name, refersTo, has_sheet_scope)`.
+fn defined_name_entries(archive: &PackageArchive) -> Vec<(String, String, bool)> {
+    let Some(workbook) = archive
+        .get("xl/workbook.xml")
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+    else {
+        return Vec::new();
+    };
+    elements(workbook, "definedName")
+        .filter_map(|tag| {
+            Some((
+                xml_unescape(&attr(tag.attrs, "name")?),
+                xml_unescape(tag.body.trim()),
+                attr(tag.attrs, "localSheetId").is_some(),
+            ))
+        })
+        .collect()
+}
+
+fn cached_text(value: &Cached) -> Option<String> {
+    match value {
+        Cached::Empty => None,
+        Cached::Text(text) | Cached::Error(text) => Some(text.clone()),
+        Cached::Number(number) => Some(format!("{number}")),
+        Cached::Bool(flag) => Some(if *flag { "TRUE" } else { "FALSE" }.to_string()),
+    }
+}
+
+/// Fill `sheet` from the parsed part. Returns the formula cells with the
+/// value Excel last calculated for them.
+fn fill_sheet(
+    sheet: &mut Sheet,
+    parsed: &ParsedSheet,
+    styles: &StyleTable,
+    names: &DefinedNames,
+    warnings: &mut BTreeSet<XlsxImportWarning>,
+) -> Vec<(CellRef, Cached)> {
+    let mut shared_formulas = crate::interop::SharedFormulaIndex::default();
+    for cell in &parsed.cells {
+        if let Some(formula) = &cell.formula {
+            if let (Some(id), Some(body)) = (formula.shared_id, formula.body.as_deref()) {
+                if formula.kind == FormulaKind::Shared {
+                    shared_formulas.insert_master(id, cell.at, &loom_formula(body, names));
+                }
+            }
+        }
+    }
+    // A dynamic-array formula (`=SEQUENCE(2,2)`) is stored with the values it
+    // spilled. Loom spills such formulas itself, and stored values in the
+    // spill range would block it, so the spilled cells are not imported.
+    let mut spilled = std::collections::HashSet::new();
+    for cell in &parsed.cells {
+        let Some(formula) = cell
+            .formula
+            .as_ref()
+            .filter(|f| f.kind == FormulaKind::Array)
+        else {
+            continue;
+        };
+        let (Some(body), Some((first, last))) = (
+            formula.body.as_deref(),
+            formula.array_ref.as_deref().and_then(|r| r.split_once(':')),
+        ) else {
+            continue;
+        };
+        let spills = is_spill_formula(body);
+        if let (true, Some(a), Some(b)) = (spills, parse_cell_ref(first), parse_cell_ref(last)) {
+            for row in a.row..=b.row {
+                for col in a.col..=b.col {
+                    spilled.insert(CellRef { row, col });
+                }
+            }
+            spilled.remove(&cell.at);
+        }
+    }
+    let mut calculated = Vec::new();
+    for cell in &parsed.cells {
+        let formula_text = cell.formula.as_ref().and_then(|formula| {
+            if formula.kind == FormulaKind::Array
+                && formula
+                    .array_ref
+                    .as_deref()
+                    .is_some_and(|reference| reference.split_once(':').is_some_and(|(a, b)| a != b))
+                && !spilled.contains(&cell.at)
+                && formula
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| !is_spill_formula(body))
+            {
+                warnings.insert(XlsxImportWarning::ArrayFormulas);
+            }
+            match (formula.kind, formula.shared_id, formula.body.as_deref()) {
+                (FormulaKind::Shared, Some(id), _) => shared_formulas
+                    .resolve(id, cell.at)
+                    .map(|text| text.trim_start_matches('=').to_string()),
+                (_, _, Some(body)) => Some(loom_formula(body, names)),
+                _ => None,
+            }
+        });
+        let raw = match formula_text {
+            Some(text) => {
+                calculated.push((cell.at, cell.value.clone()));
+                Some(format!("={}", text.trim()))
+            }
+            None if cell.formula.is_none() && spilled.contains(&cell.at) => None,
+            None => {
+                if matches!(&cell.value, Cached::Text(text) if looks_like_value(text)) {
+                    warnings.insert(XlsxImportWarning::TextReadAsValue);
+                }
+                cached_text(&cell.value)
+            }
+        };
+        if let Some(raw) = raw {
+            sheet.cells.insert(cell.at, Cell { raw });
+        }
+        let xf = styles.xfs.get(cell.style).copied().unwrap_or_default();
+        if !xf.style.is_default() {
+            sheet.set_cell_style(cell.at, xf.style);
+        }
+        if xf.alignment != crate::CellAlignment::General {
+            sheet.set_cell_alignment(cell.at, xf.alignment);
+        }
+        if xf.number_lossy {
+            warnings.insert(XlsxImportWarning::UnsupportedNumberFormats);
+        }
+        if xf.approximated {
+            warnings.insert(XlsxImportWarning::ApproximatedFormatting);
+        }
+    }
+
+    for column in &parsed.columns {
+        if column.hidden {
+            warnings.insert(XlsxImportWarning::HiddenContent);
+            continue;
+        }
+        if let (true, Some(width)) = (column.custom, column.width) {
+            let last = column
+                .last
+                .min(column.first.saturating_add(MAX_COLUMNS_PER_SIZE_RANGE - 1));
+            for col in column.first..=last {
+                sheet.set_col_width(col, width * PIXELS_PER_CHARACTER);
+            }
+        }
+    }
+    let default_points = parsed
+        .default_row_height
+        .unwrap_or(EXCEL_DEFAULT_ROW_POINTS);
+    for row in &parsed.rows {
+        if row.hidden {
+            warnings.insert(XlsxImportWarning::HiddenContent);
+            continue;
+        }
+        if let Some(height) = row.height {
+            if row.custom || (height - default_points).abs() > 0.01 {
+                sheet.set_row_height(row.row, height / POINTS_PER_PIXEL);
+            }
+        }
+    }
+    sheet.freeze_panes(parsed.frozen_rows, parsed.frozen_columns);
+    if parsed.merged_ranges > 0 {
+        warnings.insert(XlsxImportWarning::MergedCells);
+    }
+    calculated
+}
+
+fn extract_from_archive(archive: &PackageArchive) -> Result<Extracted, String> {
     let parts = workbook_sheet_parts(archive)?;
     if parts.is_empty() {
         return Err("xlsx workbook has no worksheets".to_string());
     }
+    let shared = match archive.get("xl/sharedStrings.xml") {
+        Some(bytes) => parse_shared_strings(
+            std::str::from_utf8(bytes)
+                .map_err(|_| "xl/sharedStrings.xml is not valid UTF-8".to_string())?,
+        )?,
+        None => SharedStrings::default(),
+    };
     let styles = archive
         .get("xl/styles.xml")
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .map(parse_styles)
         .unwrap_or_default();
+    let names = DefinedNames::from_entries(defined_name_entries(archive));
 
+    let mut warnings = BTreeSet::new();
+    if shared.rich {
+        warnings.insert(XlsxImportWarning::RichTextRuns);
+    }
     let mut sheets = Vec::with_capacity(parts.len());
-    for (index, part) in parts.iter().enumerate() {
-        let (basic_name, grid) = basic
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| (part.name.clone(), Vec::new()));
-        let name = if part.name.trim().is_empty() {
-            basic_name
-        } else {
-            part.name.clone()
-        };
-        let mut sheet = Sheet::new(&name);
-        for (row, values) in grid.iter().enumerate() {
-            for (col, value) in values.iter().enumerate() {
-                if !value.is_empty() {
-                    sheet.set_raw(
-                        CellRef {
-                            row: row as u32,
-                            col: col as u32,
-                        },
-                        value,
-                    );
-                }
-            }
+    let mut calculated = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let parsed = parse_worksheet(&part.path, &part.xml, &shared)?;
+        let mut sheet = Sheet::new(&part.name);
+        if part.hidden {
+            warnings.insert(XlsxImportWarning::HiddenContent);
         }
-        apply_imported_styles(&mut sheet, &part.xml, &styles);
+        calculated.push(fill_sheet(
+            &mut sheet,
+            &parsed,
+            &styles,
+            &names,
+            &mut warnings,
+        ));
         import_drawings(&mut sheet, &part.xml, &part.path, archive)?;
         sheets.push(sheet);
     }
-    Ok(sheets)
+    let formula_count: usize = calculated.iter().map(Vec::len).sum();
+    if formula_count <= MAX_FORMULAS_TO_COMPARE && formula_results_differ(&sheets, &calculated) {
+        warnings.insert(XlsxImportWarning::FormulaResultsDiffer);
+    }
+    Ok(Extracted { sheets, warnings })
 }
 
 /// Parse an XLSX workbook and list model features that cannot be preserved.
 pub fn import_xlsx_sheets(xlsx_bytes: &[u8]) -> Result<XlsxImport, String> {
     let archive = PackageArchive::from_bytes(xlsx_bytes)
         .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
-    let warnings = super::warnings::detect_import_warnings(&archive)?;
+    let mut warnings: BTreeSet<XlsxImportWarning> =
+        super::warnings::detect_import_warnings(&archive)?
+            .into_iter()
+            .collect();
+    let extracted = extract_from_archive(&archive)?;
+    warnings.extend(extracted.warnings);
     Ok(XlsxImport {
-        sheets: extract_xlsx_sheets_from_archive(xlsx_bytes, &archive)?,
-        warnings,
+        sheets: extracted.sheets,
+        warnings: warnings.into_iter().collect(),
     })
 }
 
@@ -116,6 +338,7 @@ pub(super) fn workbook_sheet_parts(archive: &PackageArchive) -> Result<Vec<Sheet
             name: "Sheet1".to_string(),
             path: sheet_path.to_string(),
             xml: xml.to_string(),
+            hidden: false,
         }]);
     };
     let workbook_xml = std::str::from_utf8(workbook_bytes)
@@ -147,6 +370,10 @@ pub(super) fn workbook_sheet_parts(archive: &PackageArchive) -> Result<Vec<Sheet
             name,
             path,
             xml: xml.to_string(),
+            hidden: matches!(
+                attr(tag.attrs, "state").as_deref(),
+                Some("hidden") | Some("veryHidden")
+            ),
         });
     }
     Ok(parts)
@@ -263,30 +490,28 @@ fn parse_drawing_anchor(body: &str) -> DrawingAnchor {
         .next()
         .map(|tag| parse_marker(tag.body))
         .unwrap_or(CellRef { row: 0, col: 0 });
-    let (mut width, mut height) = elements(body, "ext")
-        .next()
-        .map(|tag| {
+    // Excel's drawing XML holds several `a:ext` elements: the real size is the
+    // one with `cx`/`cy`; `a:ext uri=...` extension entries have neither.
+    let emu = |tag: &super::xml::XmlElement<'_>, name: &str| {
+        attr(tag.attrs, name)
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| *value > 0.0)
+            .map(|value| (value / EMU_PER_PIXEL).round().max(1.0) as u32)
+    };
+    let sized = elements(body, "ext").find_map(|tag| Some((emu(&tag, "cx")?, emu(&tag, "cy")?)));
+    let (width, height) = match (sized, elements(body, "to").next()) {
+        (Some(size), _) => size,
+        (None, Some(to)) => {
+            let end = parse_marker(to.body);
             (
-                attr(tag.attrs, "cx")
-                    .and_then(|value| value.parse::<f32>().ok())
-                    .map(|value| (value / EMU_PER_PIXEL).round().max(1.0) as u32)
-                    .unwrap_or(240),
-                attr(tag.attrs, "cy")
-                    .and_then(|value| value.parse::<f32>().ok())
-                    .map(|value| (value / EMU_PER_PIXEL).round().max(1.0) as u32)
-                    .unwrap_or(112),
+                ((end.col.saturating_sub(cell.col) + 1) as f32 * crate::DEFAULT_COL_WIDTH).round()
+                    as u32,
+                ((end.row.saturating_sub(cell.row) + 1) as f32 * crate::DEFAULT_ROW_HEIGHT).round()
+                    as u32,
             )
-        })
-        .unwrap_or((240, 112));
-    if let Some(to) = elements(body, "to").next() {
-        let end = parse_marker(to.body);
-        if !elements(body, "ext").next().is_some() {
-            width = ((end.col.saturating_sub(cell.col) + 1) as f32 * crate::DEFAULT_COL_WIDTH)
-                .round() as u32;
-            height = ((end.row.saturating_sub(cell.row) + 1) as f32 * crate::DEFAULT_ROW_HEIGHT)
-                .round() as u32;
         }
-    }
+        (None, None) => (240, 112),
+    };
     DrawingAnchor {
         cell,
         width: width.max(1),
