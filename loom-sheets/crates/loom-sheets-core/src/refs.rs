@@ -107,6 +107,22 @@ pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32)
             }
         }
 
+        // A word directly followed by `(` is a function name (`LOG10(`,
+        // `STDEV.S(`), never a cell reference, whatever its letters and digits.
+        if chars[i].is_ascii_alphabetic() && !(i > 0 && chars[i - 1].is_ascii_alphanumeric()) {
+            let mut j = i;
+            while j < chars.len()
+                && (chars[j].is_ascii_alphanumeric() || chars[j] == '_' || chars[j] == '.')
+            {
+                j += 1;
+            }
+            if chars.get(j) == Some(&'(') {
+                result.extend(&chars[i..j]);
+                i = j;
+                continue;
+            }
+        }
+
         // Check for start of cell reference (optional '$' followed by letters then optional '$' then digits)
         let is_ref_start = if chars[i] == '$' {
             i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic()

@@ -867,7 +867,7 @@ fn successful_save_clears_the_edited_status() {
     assert_eq!(app.get_status_right(), "Edited");
 
     assert_eq!(save_current_deck(&app, &state, true), Ok(true));
-    assert_eq!(app.get_status_right(), "");
+    assert_eq!(app.get_status_right(), "Saved");
 
     state
         .session
@@ -1244,14 +1244,14 @@ fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
         "a recovered deck must read as unsaved, so closing asks first"
     );
     assert!(
-        presentation_documents_match(&baseline.document, &sample_session().document),
+        presentation_documents_match(&baseline.document, &empty_session().document),
         "the baseline is what a start without recovery would show"
     );
 
     let (_, baseline) = startup_sessions(Some(b"not a deck"), None).expect("corrupt recovery");
     assert!(
-        presentation_documents_match(&baseline.document, &sample_session().document),
-        "unreadable recovery data falls back to the sample"
+        presentation_documents_match(&baseline.document, &empty_session().document),
+        "unreadable recovery data falls back to the blank deck"
     );
 }
 

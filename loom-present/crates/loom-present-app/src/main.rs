@@ -15,7 +15,7 @@ use loom_desktop::{
     NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    calculate_smart_snapping, export_pdf, export_pptx, load_presentation_session,
+    calculate_smart_snapping, export_pdf, export_pptx, load_presentation_session, lock_aspect,
     normalize_angle_degrees, save_presentation_session, ElementType, PresentationDocument,
     PresentationSession, SlideElement, SnapGuide, TransitionKind,
 };
@@ -214,7 +214,7 @@ fn startup_sessions(
         let session = load_session(path)?;
         return Ok((session.clone(), session));
     }
-    let fresh = sample_session();
+    let fresh = empty_session();
     Ok(
         match recovered.and_then(|bytes| load_presentation_session(bytes).ok()) {
             Some(draft) => (draft, fresh),
@@ -334,6 +334,7 @@ fn cancel_drag(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PendingReplacement {
     NewDeck,
+    NewSampleDeck,
     OpenDeck,
     /// Closing the window with unsaved changes.
     CloseWindow,
@@ -379,6 +380,7 @@ pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
         ElementType::ShapeRectangle => 3,
         ElementType::ShapeCircle => 4,
         ElementType::StatCard => 5,
+        ElementType::Picture => 6,
     }
 }
 
@@ -562,6 +564,28 @@ fn element_type_name(kind: &ElementType) -> &'static str {
         ElementType::ShapeRectangle => "Rectangle",
         ElementType::ShapeCircle => "Circle",
         ElementType::StatCard => "Stat card",
+        ElementType::Picture => "Picture",
+    }
+}
+
+/// The text a slide element shows or is named by: its text, or a picture's file name.
+fn element_text(document: &PresentationDocument, element: &SlideElement) -> String {
+    if element.element_type == ElementType::Picture {
+        picture_view::picture_name(document, element)
+    } else {
+        element.content.clone()
+    }
+}
+
+/// "Edited" while there are changes since the last save, "Saved" once the deck
+/// has been written or opened from a file and nothing changed since.
+fn deck_status_text(state: &GuiState) -> &'static str {
+    if deck_is_dirty(state) {
+        "Edited"
+    } else if state.save_path.borrow().is_some() {
+        "Saved"
+    } else {
+        ""
     }
 }
 
@@ -602,13 +626,13 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
                     format!(
                         "Selected {} · {}",
                         element_type_name(&element.element_type),
-                        element.content
+                        element_text(document, element)
                     )
                 } else {
                     format!(
                         "{} · {}",
                         element_type_name(&element.element_type),
-                        element.content
+                        element_text(document, element)
                     )
                 })
             })
@@ -619,7 +643,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             slide
                 .elements
                 .iter()
-                .map(|element| SharedString::from(element.content.as_str()))
+                .map(|element| SharedString::from(element_text(document, element)))
                 .collect::<Vec<_>>(),
         ));
         app.set_element_xs(synced(
@@ -702,7 +726,8 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
                 .get(selected)
                 .expect("selected element index comes from active slide");
             app.set_active_element_label(element_type_name(&element.element_type).into());
-            app.set_active_element_content(element.content.as_str().into());
+            app.set_active_element_content(element_text(document, element).into());
+            app.set_active_element_content_editable(element.element_type != ElementType::Picture);
             app.set_element_x(element.x);
             app.set_element_y(element.y);
             app.set_element_width(element.width);
@@ -740,7 +765,8 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
         n => format!("{} {slides} · {n} issues to fix", document.len()),
     };
     app.set_status_left(SharedString::from(status));
-    app.set_status_right(if deck_is_dirty(state) { "Edited" } else { "" }.into());
+    app.set_status_right(deck_status_text(state).into());
+    picture_view::sync(app, document);
     let drag = state.drag_state.borrow();
     app.set_snap_guides_x(synced(
         app.get_snap_guides_x(),
@@ -958,6 +984,17 @@ fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
     set_status(app, "Created unsaved presentation");
 }
 
+fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
+    let session = sample_session();
+    *state.last_saved.borrow_mut() = session.document.clone();
+    *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
+    *state.session.borrow_mut() = session;
+    *state.save_path.borrow_mut() = None;
+    state.selected_element.set(0);
+    refresh(app, state);
+    set_status(app, "Created unsaved presentation from the sample deck");
+}
+
 /// Open and validate a candidate deck before replacing the live session.
 /// Cancelled or invalid opens leave the current deck untouched.
 fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
@@ -1000,7 +1037,7 @@ fn save_current_deck(
     *state.save_path.borrow_mut() = Some(path.clone());
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
-    app.set_status_right("".into());
+    app.set_status_right(deck_status_text(state).into());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(
@@ -1452,6 +1489,7 @@ fn build_present_menu_bar() -> MenuBar {
                 "Export to PDF...",
                 MenuShortcut::primary("E"),
             ),
+            MenuItem::action("file.new_sample", "New from Sample Deck"),
             MenuItem::action("file.export_pptx", "Export to PowerPoint..."),
         ],
         vec![],
@@ -1464,6 +1502,7 @@ fn build_present_menu_bar() -> MenuBar {
                     "New Slide",
                     MenuShortcut::primary_shift("N"),
                 ),
+                MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
                 MenuItem::Separator,
@@ -1556,6 +1595,8 @@ fn sync_menu_state(menu_service: &NativeMenuBar, app: &PresentApp, state: &GuiSt
 fn dispatch_command(app: &PresentApp, id: &str) -> bool {
     match id {
         "file.new" => app.invoke_new_deck(),
+        "file.new_sample" => app.invoke_new_sample_deck(),
+        "slide.insert_image" => app.invoke_add_picture(),
         "file.open" => app.invoke_open_deck(),
         "file.save" => app.invoke_save_deck(),
         "file.save_as" => app.invoke_save_as_deck(),
@@ -1579,6 +1620,8 @@ fn is_present_menu_command(id: &str) -> bool {
     matches!(
         id,
         "file.new"
+            | "file.new_sample"
+            | "slide.insert_image"
             | "file.open"
             | "file.save"
             | "file.save_as"
@@ -1677,6 +1720,7 @@ fn end_session_recovery() {
 fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
     match state.pending_replacement.take() {
         Some(PendingReplacement::NewDeck) => replace_with_empty_deck(app, state),
+        Some(PendingReplacement::NewSampleDeck) => replace_with_sample_deck(app, state),
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
         Some(PendingReplacement::CloseWindow) => {
             presenter::close();
@@ -1688,6 +1732,26 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 }
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_new_sample_deck(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if !request_deck_replacement(&app, &state, PendingReplacement::NewSampleDeck) {
+                    replace_with_sample_deck(&app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_add_picture(move || {
+            if let Some(app) = app_ref.upgrade() {
+                picture_view::insert_from_picker(&app, &state);
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -1995,6 +2059,14 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     .and_then(|slide| slide.elements.get(selected))
                     .is_some()
                 {
+                    let is_picture = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.get(selected))
+                        .is_some_and(|element| element.element_type == ElementType::Picture);
+                    if is_picture {
+                        return;
+                    }
                     session.checkpoint();
                     let is_title = if let Some(element) = session
                         .document
@@ -2244,8 +2316,27 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     let changed = session.set_element_rotation_no_checkpoint(&element.id, rotation);
                     (element.x, element.y, element.width, element.height, changed)
                 } else {
-                    let ((x, y, width, height), guides) =
+                    let ((mut x, mut y, mut width, mut height), guides) =
                         resize_targets(&session, &element, mode, dx, dy);
+                    let is_picture = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
+                        .is_some_and(|item| item.element_type == ElementType::Picture);
+                    if is_picture {
+                        (x, y, width, height) = lock_aspect(
+                            (element.x, element.y, element.width, element.height),
+                            (x, y, width, height),
+                            matches!(
+                                mode,
+                                HandleKind::ResizeNorthWest | HandleKind::ResizeSouthWest
+                            ),
+                            matches!(
+                                mode,
+                                HandleKind::ResizeNorthWest | HandleKind::ResizeNorthEast
+                            ),
+                        );
+                    }
                     let changed = session
                         .document
                         .active_slide()
@@ -2414,6 +2505,8 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let right_arrow: SharedString = slint::platform::Key::RightArrow.into();
         let up_arrow: SharedString = slint::platform::Key::UpArrow.into();
         let down_arrow: SharedString = slint::platform::Key::DownArrow.into();
+        let delete_key: SharedString = slint::platform::Key::Delete.into();
+        let backspace_key: SharedString = slint::platform::Key::Backspace.into();
         app.on_canvas_key_pressed(move |key, _shift, modified| {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_is_preview_mode() || modified {
@@ -2430,6 +2523,14 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 } else {
                     (0.0, 0.0)
                 };
+                if key == delete_key || key == backspace_key {
+                    let removed = state.session.borrow_mut().remove_selected_elements();
+                    if removed > 0 {
+                        state.selected_element.set(0);
+                        refresh(&app, &state);
+                        return EventResult::Accept;
+                    }
+                }
                 if (dx, dy) != (0.0, 0.0) {
                     let mut session = state.session.borrow_mut();
                     if nudge_selected(&mut session, dx, dy) {
@@ -2655,6 +2756,8 @@ enum PaletteAction {
     Undo,
     Redo,
     AddText,
+    AddPicture,
+    NewSampleDeck,
     ExportPdf,
     ExportPptx,
     TogglePreview,
@@ -2732,6 +2835,18 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::AddText,
             id: "present.add-text",
             label: "Add Text",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddPicture,
+            id: "present.insert-image",
+            label: "Insert Image...",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::NewSampleDeck,
+            id: "present.new-sample",
+            label: "New from Sample Deck",
             shortcut: "",
         },
         PaletteCommand {
@@ -2931,6 +3046,8 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddText => app.invoke_add_text(),
+                        PaletteAction::AddPicture => app.invoke_add_picture(),
+                        PaletteAction::NewSampleDeck => app.invoke_new_sample_deck(),
                         PaletteAction::TogglePreview => app.invoke_toggle_preview_mode(),
                         PaletteAction::OpenPresenter => app.invoke_open_presenter(),
                         PaletteAction::PrevSlide => app.invoke_prev_slide(),
@@ -2952,9 +3069,12 @@ mod audit_tests;
 mod desktop_tests;
 #[cfg(test)]
 mod export_pptx_tests;
+#[cfg(test)]
+mod picture_tests;
 
 mod local_menu;
 mod model_sync;
+mod picture_view;
 mod presenter;
 mod presenter_thumbs;
 mod window_chrome;

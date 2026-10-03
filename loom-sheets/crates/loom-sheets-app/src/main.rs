@@ -42,8 +42,10 @@ slint::include_modules!();
 pub mod formatting;
 
 mod analysis;
+mod grid_gestures;
 mod grid_navigation;
 mod grid_pointer;
+mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
 
 mod assets;
@@ -1740,6 +1742,8 @@ pub(crate) struct GuiState {
     pub(crate) worker_revision: Cell<u64>,
     /// Highest workbook revision whose worker submission was accepted.
     pub(crate) last_queued_worker_revision: Cell<u64>,
+    /// Excel-style Tab/Enter run tracking.
+    pub(crate) tab_run: tab_run::TabRun,
     /// A failed worker submission leaves the UI model ahead of canonical worker
     /// state. Only a later accepted full replacement can clear this marker.
     worker_submission_failure: RefCell<Option<(u64, String)>>,
@@ -1803,6 +1807,7 @@ impl GuiState {
             workbook_worker: RefCell::new(None),
             worker_revision: Cell::new(0),
             last_queued_worker_revision: Cell::new(0),
+            tab_run: tab_run::TabRun::default(),
             worker_submission_failure: RefCell::new(None),
             worker_input_failure: RefCell::new(None),
             worker_full_resync_revision: Cell::new(None),
@@ -2495,8 +2500,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     register_cell_edit_action(&app, &state, &menu_service);
     {
         let app_ref = app.as_weak();
+        let state = state.clone();
         app.on_cancel_selected_cell(move || {
             if let Some(app) = app_ref.upgrade() {
+                state.tab_run.reset();
                 app.invoke_reset_formula_edit_buffer();
                 app.set_formula_feedback("Edit cancelled".into());
             }
@@ -2622,16 +2629,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_navigate_selection(move |row_delta, col_delta| {
-            if let Some(app) = app_ref.upgrade() {
-                navigate_selection(&app, &state.current.borrow(), row_delta, col_delta);
-                project_current(&app, &state);
-            }
-        });
-    }
+    tab_run::register_navigation(&app, &state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();

@@ -1,7 +1,7 @@
 use super::*;
 use slint::Model;
 
-fn projected(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
+pub(super) fn projected(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
     let mut sheet = Sheet::new("Data");
@@ -40,7 +40,7 @@ fn projected(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
     (app, state)
 }
 
-fn selected(app: &SheetsApp) -> String {
+pub(super) fn selected(app: &SheetsApp) -> String {
     selection_from_app(app).label()
 }
 

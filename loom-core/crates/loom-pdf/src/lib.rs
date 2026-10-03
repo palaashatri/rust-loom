@@ -5,12 +5,16 @@
 //!
 //! * Pages with text (built-in Helvetica, WinAnsi/Latin-1 encodable text),
 //!   rectangles, lines, RGB fill and stroke colors.
-//! * No images, no fonts embedding, no compression, no interactive features.
+//! * JPEG and raw RGB(A) images (see [`PdfImage`]); no font embedding, no stream
+//!   compression, no interactive features.
 //! * Deterministic output: no timestamps are written unless the caller
 //!   provides one (`PdfDocument::set_creation_date`).
 //!
 //! The output is validated in tests by re-parsing the xref table and object
 //! bodies, and by round-tripping the text operators.
+
+mod image;
+pub use image::PdfImage;
 
 use std::collections::BTreeMap;
 
@@ -75,6 +79,8 @@ struct Page {
     width_pt: f32,
     height_pt: f32,
     ops: Vec<String>,
+    /// Indexes of the document images this page draws.
+    images: Vec<usize>,
 }
 
 /// A handle to a page being built.
@@ -86,6 +92,7 @@ pub struct PageIndex(pub usize);
 pub struct PdfDocument {
     pages: Vec<Page>,
     creation_date: String,
+    images: Vec<PdfImage>,
 }
 
 impl PdfDocument {
@@ -95,6 +102,7 @@ impl PdfDocument {
         Self {
             pages: Vec::new(),
             creation_date: "(D:20260101000000Z)".to_string(),
+            images: Vec::new(),
         }
     }
 
@@ -110,6 +118,7 @@ impl PdfDocument {
             width_pt,
             height_pt,
             ops: Vec::new(),
+            images: Vec::new(),
         });
         PageIndex(self.pages.len() - 1)
     }
@@ -284,6 +293,20 @@ impl PdfDocument {
         let first_font_ref = 3 + n;
         let stream_ref = |i: usize| 7 + n + i as i64;
         let info_ref = 7 + 2 * n;
+        // Image XObjects follow the info object; soft masks follow the images.
+        let image_ref = |i: usize| 8 + 2 * n + i as i64;
+        let mut next_mask = 8 + 2 * n + self.images.len() as i64;
+        let mask_refs: Vec<Option<i64>> = self
+            .images
+            .iter()
+            .map(|image| {
+                image.needs_mask().then(|| {
+                    let this = next_mask;
+                    next_mask += 1;
+                    this
+                })
+            })
+            .collect();
 
         let mut objects: Vec<Vec<u8>> = Vec::new();
         objects.push(format!("<< /Type /Catalog /Pages {pages_ref} 0 R >>").into_bytes());
@@ -291,7 +314,7 @@ impl PdfDocument {
             objects.push(
                 format!(
                     "<< /Type /Page /Parent {pages_ref} 0 R /MediaBox [0 0 {:.2} {:.2}] \
-                     /Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >> >> \
+                     /Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >>{} >> \
                      /Contents {} 0 R >>",
                     p.width_pt,
                     p.height_pt,
@@ -299,6 +322,16 @@ impl PdfDocument {
                     first_font_ref + 1,
                     first_font_ref + 2,
                     first_font_ref + 3,
+                    if p.images.is_empty() {
+                        String::new()
+                    } else {
+                        let list: Vec<String> = p
+                            .images
+                            .iter()
+                            .map(|i| format!("/Im{i} {} 0 R", image_ref(*i)))
+                            .collect();
+                        format!(" /XObject << {} >>", list.join(" "))
+                    },
                     stream_ref(i)
                 )
                 .into_bytes(),
@@ -341,6 +374,13 @@ impl PdfDocument {
             .into_bytes(),
         );
         let _ = (catalog_ref, info_ref);
+        let mut masks: Vec<Vec<u8>> = Vec::new();
+        for (image, mask_ref) in self.images.iter().zip(&mask_refs) {
+            let (object, mask) = image.objects(*mask_ref);
+            objects.push(object);
+            masks.extend(mask);
+        }
+        objects.extend(masks);
 
         // Assemble with an xref table.
         let mut out = Vec::new();

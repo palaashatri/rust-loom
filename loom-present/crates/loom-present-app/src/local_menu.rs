@@ -7,6 +7,7 @@ use crate::PresentApp;
 /// Commands Present's menu bar enables; the same list gates the native menu.
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.new",
+    "file.new_sample",
     "file.open",
     "file.save",
     "file.save_as",
@@ -15,6 +16,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "edit.undo",
     "edit.redo",
     "slide.new",
+    "slide.insert_image",
     "slide.duplicate",
     "slide.delete",
     "slide.prev",

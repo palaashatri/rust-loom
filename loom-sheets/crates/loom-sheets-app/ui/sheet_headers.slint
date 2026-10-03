@@ -28,7 +28,6 @@ export component SheetHeaders inherits Rectangle {
     in property <[length]> grid-row-heights: [];
     in property <length> grid-scroll-x: 0px;
     in property <length> grid-scroll-y: 0px;
-    callback cell-clicked(int, int);
 
     Rectangle {
         x: 0px;
@@ -42,7 +41,7 @@ export component SheetHeaders inherits Rectangle {
         LoomCanvasHandle {
             label: "Table select handle";
             selected: root.selected-row == 0 && root.selected-col == 0;
-            picked => { root.cell-clicked(0, 0); }
+            picked => { GridPointer.corner-pressed(); }
         }
     }
 
@@ -95,6 +94,7 @@ export component SheetHeaders inherits Rectangle {
                     width: 6px;
                     mouse-cursor: MouseCursor.col-resize;
                     property <length> press-pos;
+                    double-clicked => { GridPointer.header-autofit(false, c + root.view-col-origin); }
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
                             self.press-pos = self.absolute-position.x + self.mouse-x;
@@ -159,6 +159,7 @@ export component SheetHeaders inherits Rectangle {
                     height: 6px;
                     mouse-cursor: MouseCursor.row-resize;
                     property <length> press-pos;
+                    double-clicked => { GridPointer.header-autofit(true, r + root.view-row-origin); }
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
                             self.press-pos = self.absolute-position.y + self.mouse-y;

@@ -174,7 +174,7 @@ fn each_page_is_drawn_as_its_own_sheet_with_a_gap_at_every_zoom() {
 }
 
 #[test]
-fn the_gap_between_sheets_shows_the_canvas_and_a_page_label() {
+fn the_gap_between_sheets_is_empty_canvas_with_no_text() {
     let style = PageStyle::default();
     let (app, _state) = multi_page();
     let image = pixels!(snapshot_component(&app, 1280.0, 2000.0, 1.0).expect("render"));
@@ -183,17 +183,16 @@ fn the_gap_between_sheets_shows_the_canvas_and_a_page_label() {
     assert!(sheets.len() >= 2, "runs: {runs:?}");
     let gap_top = sheets[0].0 + sheets[0].1;
     let gap_bottom = sheets[1].0;
-    // The label is chrome text centred in the gap: some pixel there is ink.
-    let mut darkest = 255u8;
-    for y in gap_top..gap_bottom {
-        for x in 0..image.width {
-            darkest = darkest.min(image.at(x, y)[0]);
-        }
+    // The gap holds nothing but canvas colour: every pixel across its full
+    // width (outside the sheets' borders and shadow rows) is one flat colour.
+    let reference = image.at(2, (gap_top + gap_bottom) / 2);
+    for x in 0..image.width {
+        assert_eq!(
+            image.at(x, (gap_top + gap_bottom) / 2),
+            reference,
+            "no text or ink in the gap at x={x}"
+        );
     }
-    assert!(
-        darkest < 170,
-        "the gap should contain the page label text, darkest pixel was {darkest}"
-    );
     // And it is not paper: the gap row away from the label is canvas coloured.
     let x = image.width - 3;
     let mid = image.at(x, (gap_top + gap_bottom) / 2);
@@ -471,5 +470,47 @@ fn a_find_match_on_page_three_is_selected_and_revealed() {
         scroll > 0.0 && abs >= scroll && abs + height <= scroll + app.get_page_view_height() + 1.0,
         "the match at {abs} must be revealed in view {scroll}..{}",
         scroll + app.get_page_view_height()
+    );
+}
+
+#[test]
+fn a_click_in_the_gap_between_pages_goes_to_the_nearest_page() {
+    let (_app, state) = multi_page();
+    let doc = state.current.borrow().clone();
+    let style = doc.page.page_style();
+    let viewport = unit_viewport(&style);
+    let layout = doc.layout(&style, viewport).unwrap();
+    let last_of_page_one = layout.pages[0].fragments.last().unwrap();
+    let first_of_page_two = layout.pages[1].fragments.first().unwrap();
+    let offset_of = |block_id, within: usize| {
+        let mut cursor = 0;
+        for block in &doc.blocks {
+            if block.id == block_id {
+                return cursor + within;
+            }
+            cursor += block.text.as_str().len() + 1;
+        }
+        unreachable!()
+    };
+    let end_one = offset_of(last_of_page_one.block_id, last_of_page_one.end);
+    let start_two = offset_of(first_of_page_two.block_id, first_of_page_two.start);
+    // Gap rows in the editor's coordinates: just under the first sheet's
+    // bottom edge and just above the second sheet's top edge.
+    let sheet_bottom = style.height_pt - style.margin_top_pt;
+    let near_first = writer_pointer_offset(&doc, viewport, 40.0, sheet_bottom + 4.0);
+    let near_second = writer_pointer_offset(
+        &doc,
+        viewport,
+        40.0,
+        sheet_bottom + loom_writer_core::PAGE_GAP_PT + style.margin_top_pt - 4.0,
+    );
+    let (near_first, near_second) = (near_first.expect("hit"), near_second.expect("hit"));
+    assert!(
+        near_first <= end_one,
+        "{near_first} should stay on page one (<= {end_one})"
+    );
+    assert!(
+        near_second >= start_two,
+        "{near_second} should reach page two (>= {start_two})"
     );
 }

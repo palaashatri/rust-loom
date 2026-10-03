@@ -28,6 +28,7 @@ pub(crate) fn register_cell_edit_action(
             }
             crate::object_actions::cancel_active_gesture(&app, &state);
             if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
+                state.tab_run.note_commit(cell);
                 let committed = {
                     let mut current = state.current.borrow_mut();
                     let mut undo = state.undo_stack.borrow_mut();

@@ -187,8 +187,8 @@ fn dirty_close_dialog_exposes_save_or_cancel_with_close_copy() {
     let discard: Vec<_> =
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Discard").collect();
     assert!(
-        discard.is_empty(),
-        "close dialog must not offer recovery-unsafe Discard"
+        !discard.is_empty(),
+        "close dialog must offer Discard now that it clears recovery"
     );
     let save: Vec<_> =
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Save and close")
@@ -1036,4 +1036,138 @@ fn dirty_close_prompt_names_the_created_template() {
         app.window().is_visible(),
         "Cancel must keep the workbook open"
     );
+}
+
+/// Files in either recovery store, ignoring the lock files that stay behind.
+fn recovery_files(directory: &Path) -> Vec<String> {
+    let versioned = crate::cell_edit_recovery::versioned_directory_for(directory).unwrap();
+    let mut found = Vec::new();
+    for store in [directory.to_path_buf(), versioned] {
+        let Ok(entries) = std::fs::read_dir(&store) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != ".checkpoint.lock" && name != ".sheets-writer.lock" {
+                found.push(name);
+            }
+        }
+    }
+    found
+}
+
+fn edited_workbook_with_recovery(
+    recovery: &Path,
+    save_path: Option<PathBuf>,
+) -> (SheetsApp, Rc<GuiState>) {
+    let (app, state) = close_test_app([]);
+    attach_worker(&app, &state, recovery, true);
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+    close_operations::wire_save_changes_callbacks(&app, &state, &menu_service);
+    close_operations::wire_window_close_handler(&app, &state);
+    *state.save_path.borrow_mut() = save_path;
+    app.invoke_commit_selected_cell("discard me".into());
+    // Wait until the edit is journaled, so the recovery store really holds it.
+    let revision = state.last_queued_worker_revision.get();
+    pump_worker_until(&app, &state, || {
+        state.applied_worker_result_revision.get() >= revision
+    });
+    app.window().show().expect("show root window");
+    (app, state)
+}
+
+#[test]
+fn discard_on_close_hides_the_window_and_clears_recovery_so_it_does_not_return() {
+    let recovery = ScratchDirectory::new();
+    let dir = recovery.0.join("state");
+    let (app, state) = edited_workbook_with_recovery(&dir, None);
+    assert!(
+        !recovery_files(&dir).is_empty(),
+        "the edit must be in recovery before closing"
+    );
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    assert_eq!(
+        state.close_state.get(),
+        close_operations::CloseState::DirtyDecision
+    );
+    assert!(app.get_save_changes_open());
+    app.invoke_save_changes_discard();
+
+    assert!(!app.window().is_visible(), "Discard closes the window");
+    assert!(!app.get_save_changes_open());
+    assert_eq!(
+        recovery_files(&dir),
+        Vec::<String>::new(),
+        "discarded work must not stay in recovery"
+    );
+    // The next launch finds nothing to restore.
+    drop(state.workbook_worker.borrow_mut().take());
+    let (_next, restored) = crate::cell_edit_recovery::CellEditRecovery::open_at(&dir)
+        .expect("reopen recovery after discard");
+    assert!(restored.is_none(), "no discarded draft comes back");
+}
+
+#[test]
+fn a_crash_without_an_intentional_close_leaves_recovery_intact() {
+    let recovery = ScratchDirectory::new();
+    let dir = recovery.0.join("state");
+    let (_app, state) = edited_workbook_with_recovery(&dir, None);
+    // Process death: the worker stops without any close handling.
+    drop(state.workbook_worker.borrow_mut().take());
+    let (_next, restored) = crate::cell_edit_recovery::CellEditRecovery::open_at(&dir)
+        .expect("reopen recovery after a crash");
+    let payload = restored.expect("the unsaved edit survives a crash");
+    let workbook = crate::workbook_io::restore_workbook_from_snapshot(&payload).unwrap();
+    assert_eq!(
+        workbook.sheets[0].raw(CellRef::parse("A1").unwrap()),
+        Some("discard me")
+    );
+}
+
+#[test]
+fn save_and_close_does_not_leave_the_saved_workbook_as_an_unsaved_draft() {
+    let recovery = ScratchDirectory::new();
+    let dir = recovery.0.join("state");
+    let output = ScratchDirectory::new();
+    let saved = output.0.join("kept.loomtable");
+    let (app, state) = edited_workbook_with_recovery(&dir, Some(saved.clone()));
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    pump_worker_until(&app, &state, || {
+        state.close_state.get() == close_operations::CloseState::DirtyDecision
+    });
+    app.invoke_save_changes_save();
+    pump_worker_until(&app, &state, || !app.window().is_visible());
+
+    assert!(saved.exists(), "the workbook was saved");
+    assert_eq!(recovery_files(&dir), Vec::<String>::new());
+    drop(state.workbook_worker.borrow_mut().take());
+    let (_next, restored) = crate::cell_edit_recovery::CellEditRecovery::open_at(&dir)
+        .expect("reopen recovery after save and close");
+    assert!(
+        restored.is_none(),
+        "a saved workbook must not return as a recovered unsaved draft"
+    );
+}
+
+#[test]
+fn closing_a_clean_workbook_also_clears_recovery() {
+    let recovery = ScratchDirectory::new();
+    let dir = recovery.0.join("state");
+    let (app, state) = close_test_app([]);
+    attach_worker(&app, &state, &dir, true);
+    wire_close_actions(&app, &state);
+    app.window().show().expect("show root window");
+    assert!(
+        !recovery_files(&dir).is_empty(),
+        "startup checkpoint exists"
+    );
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    pump_worker_until(&app, &state, || !app.window().is_visible());
+    assert_eq!(recovery_files(&dir), Vec::<String>::new());
 }

@@ -678,6 +678,25 @@ impl CellEditRecovery {
         self.failed = Some(error);
     }
 
+    /// Delete every recovery file in both stores after the user intentionally
+    /// closed the workbook (saved it, or chose Discard). The lock files stay so
+    /// another process cannot create a competing lock during deletion. This
+    /// object must not record again afterwards.
+    pub(crate) fn discard_all(&mut self) -> Result<(), String> {
+        let versioned = versioned_directory_for(&self.legacy_directory)?;
+        {
+            let _lock = lock_recovery_directory(&versioned)
+                .map_err(|error| format!("lock versioned Sheets recovery directory: {error}"))?;
+            remove_store_entries(&versioned, &[WRITER_LOCK_FILE, ".checkpoint.lock"])?;
+        }
+        // The legacy directory is already locked by this object for its lifetime.
+        remove_store_entries(&self.legacy_directory, &[".checkpoint.lock"])?;
+        self.identity = None;
+        self.last_sequence = 0;
+        self.pending_legacy_migration = None;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn set_migration_limits_for_test(
         &mut self,
@@ -748,6 +767,32 @@ fn is_recovery_capacity_refusal(error: &ProductionError) -> bool {
     ]
     .iter()
     .any(|prefix| reason.starts_with(prefix))
+}
+
+fn remove_store_entries(directory: &Path, keep: &[&str]) -> Result<(), String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("read Sheets recovery directory: {error}")),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read Sheets recovery entry: {error}"))?;
+        if keep.iter().any(|name| entry.file_name() == *name) {
+            continue;
+        }
+        let path = entry.path();
+        let is_dir = fs::symlink_metadata(&path)
+            .map_err(|error| format!("inspect Sheets recovery entry: {error}"))?
+            .file_type()
+            .is_dir();
+        let removed = if is_dir {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        removed.map_err(|error| format!("remove Sheets recovery entry: {error}"))?;
+    }
+    Ok(())
 }
 
 pub(crate) fn versioned_directory_for(legacy_directory: &Path) -> Result<PathBuf, String> {

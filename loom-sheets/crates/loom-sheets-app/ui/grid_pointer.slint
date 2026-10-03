@@ -12,4 +12,12 @@ export global GridPointer {
     callback header-resized(bool, int, length, bool);
     // Text typed in the name box.
     callback goto-cell(string);
+    // Ctrl+Arrow: row direction, column direction, shift held.
+    callback jump(int, int, bool);
+    // The top-left header corner.
+    callback corner-pressed();
+    // Double-click on a header's resize edge: is a row header, index.
+    callback header-autofit(bool, int);
+    // The mouse button that selected cells was released.
+    callback drag-ended();
 }

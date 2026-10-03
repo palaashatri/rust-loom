@@ -1,43 +1,7 @@
 import { Theme } from "theme.slint";
 import { LoomButton } from "foundation.slint";
-import { PresentSlideCanvas } from "present_components.slint";
-
-/// Per-element rows of one slide, in the form the slide canvas draws.
-export struct ThumbRows {
-    labels: [string],
-    contents: [string],
-    xs: [float],
-    ys: [float],
-    widths: [float],
-    heights: [float],
-    rotations: [float],
-    types: [int],
-}
-
-/// A miniature slide: the editor's own slide canvas at thumbnail size, drawn
-/// on the slide's paper colour (document artwork, not UI theme).
-component MiniSlide inherits Rectangle {
-    in property <ThumbRows> rows;
-    in property <string> description;
-    height: self.width * 0.5625;
-    accessible-role: image;
-    accessible-label: root.description;
-    PresentSlideCanvas {
-        width: 100%;
-        height: 100%;
-        editing-enabled: false;
-        fit-screen: true;
-        background: transparent;
-        element-labels: root.rows.labels;
-        element-contents: root.rows.contents;
-        element-xs: root.rows.xs;
-        element-ys: root.rows.ys;
-        element-widths: root.rows.widths;
-        element-heights: root.rows.heights;
-        element-rotations: root.rows.rotations;
-        element-types: root.rows.types;
-    }
-}
+import { ThumbRows, MiniSlide } from "present_components.slint";
+export { ThumbRows } from "present_components.slint";
 
 // The presenter's own window: notes, what comes next, and a clock. It is a
 // separate window so it can sit on a second display while the slideshow fills

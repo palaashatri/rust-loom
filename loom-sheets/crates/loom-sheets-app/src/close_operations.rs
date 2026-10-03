@@ -5,7 +5,8 @@ use slint::{CloseRequestResponse, ComponentHandle, SharedString};
 use crate::file_operation_completions::{CompletionDrain, FileOperationStatus};
 use crate::{GuiState, SheetsApp};
 
-const DIRTY_CLOSE_STATUS: &str = "Unsaved changes — choose Save or Cancel before closing.";
+const DIRTY_CLOSE_STATUS: &str =
+    "Unsaved changes — choose Save and close, Discard, or Cancel before closing.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum CloseState {
@@ -281,7 +282,25 @@ fn request_close(app: &SheetsApp, state: &GuiState) -> CloseRequestResponse {
         show_dirty_decision(app, state);
         return CloseRequestResponse::KeepWindowShown;
     }
-    CloseRequestResponse::HideWindow
+    match clear_recovery_for_intentional_close(state) {
+        Ok(()) => CloseRequestResponse::HideWindow,
+        Err(error) => {
+            app.set_status_left(SharedString::from(format!(
+                "Close stopped: {error}. Close again to retry."
+            )));
+            CloseRequestResponse::KeepWindowShown
+        }
+    }
+}
+
+/// An intentional close (nothing unsaved, saved, or discarded) ends this
+/// workbook's recovery data so the next launch does not offer it back as an
+/// unsaved draft. A crash never reaches this, so its recovery stays intact.
+pub(crate) fn clear_recovery_for_intentional_close(state: &GuiState) -> Result<(), String> {
+    match state.workbook_worker.borrow().as_ref() {
+        Some(worker) => worker.discard_recovery(),
+        None => Ok(()),
+    }
 }
 
 pub(crate) fn save_for_close(app: &SheetsApp, state: &GuiState) -> Result<bool, String> {
@@ -322,9 +341,28 @@ pub(crate) fn cancel_close(app: &SheetsApp, state: &GuiState) {
     app.set_status_left("Close cancelled; the workbook remains open.".into());
 }
 
+/// Close without saving: the unsaved work is dropped on purpose, so its
+/// recovery data goes with it.
 pub(crate) fn discard_for_close(app: &SheetsApp, state: &GuiState) {
-    if state.close_state.get() == CloseState::DirtyDecision {
-        app.set_status_left("Discard is unavailable when closing; choose Save or Cancel.".into());
+    if state.close_state.get() != CloseState::DirtyDecision {
+        return;
+    }
+    match clear_recovery_for_intentional_close(state) {
+        Ok(()) => {
+            app.set_save_changes_open(false);
+            app.set_save_changes_close_mode(false);
+            set_state(app, state, CloseState::Idle);
+            if let Err(error) = app.window().hide() {
+                app.set_status_left(SharedString::from(format!(
+                    "Close failed: the window could not be hidden: {error}"
+                )));
+            }
+        }
+        Err(error) => {
+            app.set_status_left(SharedString::from(format!(
+                "Discard failed: {error}. The workbook is still open."
+            )));
+        }
     }
 }
 
@@ -399,6 +437,13 @@ pub(crate) fn process_tick(
         return;
     }
 
+    if let Err(error) = clear_recovery_for_intentional_close(state) {
+        set_state(app, state, CloseState::Idle);
+        app.set_status_left(SharedString::from(format!(
+            "Close stopped: {error}. Close again to retry."
+        )));
+        return;
+    }
     set_state(app, state, CloseState::Idle);
     match app.window().hide() {
         Ok(()) => {}

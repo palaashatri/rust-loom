@@ -512,7 +512,7 @@ export component SheetTable inherits Rectangle {
                                 pointer-event(event) => {
                                     if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
                                         root.cell-pressed(global-row, global-col, event.modifiers.shift);
-                                    }
+                                    } else if (event.kind == PointerEventKind.up) { GridPointer.drag-ended(); }
                                 }
                                 moved => {
                                     if (self.pressed) { GridPointer.cell-dragged(global-row, global-col, self.mouse-x, self.mouse-y); }
@@ -547,7 +547,6 @@ export component SheetTable inherits Rectangle {
                 grid-row-heights: root.grid-row-heights;
                 grid-scroll-x: root.grid-scroll-x;
                 grid-scroll-y: root.grid-scroll-y;
-                cell-clicked(row, col) => { root.cell-clicked(row, col); }
             }
 
             SheetScrollbars {
@@ -649,6 +648,10 @@ export component SheetGridSurface inherits Rectangle {
                     if (event.modifiers.shift) { root.extend-selection(2100000000, 2100000000); }
                     else { root.navigate-selection(2100000000, 2100000000); }
                     return accept;
+            }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow)) {
+                GridPointer.jump(event.text == Key.UpArrow ? -1 : event.text == Key.DownArrow ? 1 : 0, event.text == Key.LeftArrow ? -1 : event.text == Key.RightArrow ? 1 : 0, event.modifiers.shift);
+                return accept;
             }
             if (event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
                 return reject;

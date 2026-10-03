@@ -31,6 +31,8 @@ export component PresentInspector inherits LoomPanel {
     in property <bool> aspect-ratio-wide: true;
     in property <string> active-element-label: "No element selected";
     in property <string> active-element-content: "";
+    /// False for a picture: its content is image data, not text.
+    in property <bool> content-editable: true;
     in property <int> active-element-index: 0;
     in property <int> element-count: 0;
     in property <int> selection-count: 0;
@@ -101,7 +103,7 @@ export component PresentInspector inherits LoomPanel {
                 }
             }
 
-            if root.selection-count > 0 : InspectorPropertyRow {
+            if root.selection-count > 0 && root.content-editable : InspectorPropertyRow {
                 label: "Content";
                 Rectangle {
                     height: Theme.tokens.metrics.control-height;

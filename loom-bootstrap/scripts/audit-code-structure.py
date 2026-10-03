@@ -29,7 +29,7 @@ for path in ROOT.rglob("*"):
     if cap is None:
         continue
     rel = path.relative_to(ROOT).as_posix()
-    size = path.stat().st_size
+    size = len(path.read_bytes().replace(bytes([13, 10]), bytes([10])))
     if rel in legacy:
         if size > legacy[rel]:
             errors.append(f"legacy source grew: {rel}: {size} > {legacy[rel]} bytes")

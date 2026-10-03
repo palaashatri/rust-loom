@@ -109,6 +109,17 @@ component WriterDocumentEditor inherits Rectangle {
             background: Theme.palette().content-accent-soft;
             accessible-role: none;
         }
+        // Secondary highlights for the other find matches; the current match
+        // is the ordinary selection drawn after them.
+        for found in FindBar.match-rects : Rectangle {
+            x: found.x * root.page-zoom;
+            y: found.y * root.page-zoom;
+            width: max(1px, found.width * root.page-zoom);
+            height: max(1px, found.height * root.page-zoom);
+            border-radius: 2px;
+            background: Theme.palette().warning.with-alpha(0.35);
+            accessible-role: none;
+        }
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;
             y: selection.y * root.page-zoom;
@@ -317,19 +328,6 @@ export component WriterPageCanvas inherits Rectangle {
                 drop-shadow-color: Theme.palette().shadow;
                 accessible-role: none;
             }
-            for index in root.page-count : Text {
-                x: 0px;
-                y: index * (page.raw-height * root.page-zoom + page.gap) + page.raw-height * root.page-zoom;
-                width: page.width;
-                height: page.gap;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                text: "Page " + (index + 1) + " of " + root.page-count;
-                font-size: min(14px, max(9px, Theme.tokens.typography.caption * root.page-zoom));
-                color: Theme.palette().ink-secondary;
-                accessible-role: text;
-            }
-
             VerticalLayout {
                 padding-top: page.page-padding;
                 padding-bottom: page.page-padding;

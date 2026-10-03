@@ -103,8 +103,8 @@ fn math_and_statistical_functions_evaluate_correctly() {
     sheet.set_str("A1", "=SQRT(16)");
     sheet.set_str("A2", "=POWER(2, 8)");
     sheet.set_str("A3", "=MOD(17, 5)");
-    sheet.set_str("A4", "=FLOOR(3.7)");
-    sheet.set_str("A5", "=CEILING(3.2)");
+    sheet.set_str("A4", "=FLOOR(3.7, 1)");
+    sheet.set_str("A5", "=CEILING(3.2, 1)");
     sheet.set_str("A6", "=MEDIAN(10, 20, 30, 40, 50)");
 
     let evaluated = evaluate(&sheet);

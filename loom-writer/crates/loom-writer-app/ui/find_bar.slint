@@ -1,5 +1,14 @@
-import { LoomButton, LoomTextField } from "foundation.slint";
+import { LoomButton, LoomTextField, LoomToggle } from "foundation.slint";
 import { Theme } from "theme.slint";
+
+/// One page-space rectangle of a find match that is not the current match
+/// (page points, from the top-left of the page content area).
+export struct FindRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
 
 /// Find and replace state shared between the window and the controller. A
 /// global keeps it out of the window's own property and callback lists.
@@ -9,6 +18,11 @@ export global FindBar {
     in-out property <string> query: "";
     in-out property <string> replacement: "";
     in-out property <string> status: "";
+    /// Case-sensitive matching.
+    in-out property <bool> match-case: false;
+    /// Secondary highlights for every match but the current one; empty while
+    /// the bar is closed.
+    in-out property <[FindRect]> match-rects: [];
     /// Raised each time the bar is asked for, so an open bar takes focus again.
     in-out property <int> focus-tick: 0;
     /// Raised when the bar closes, so the page takes focus back.
@@ -45,6 +59,10 @@ export component FindBarOverlay inherits Rectangle {
         // Escape closes the bar wherever focus is inside it.
         key-pressed(event) => {
             if (event.text == Key.Escape) { FindBar.close(); return accept; }
+            if (event.text == Key.F3) {
+                if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
+                return accept;
+            }
             return reject;
         }
 
@@ -76,6 +94,15 @@ export component FindBarOverlay inherits Rectangle {
             LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
             LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
             LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
+        }
+
+        LoomToggle {
+            label: "Match case";
+            checked: FindBar.match-case;
+            toggled(value) => {
+                FindBar.match-case = value;
+                FindBar.query-changed(FindBar.query);
+            }
         }
 
         if FindBar.show-replace : HorizontalLayout {

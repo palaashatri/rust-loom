@@ -89,7 +89,7 @@ export component SaveChangesDialog inherits Rectangle {
                             variant: "secondary";
                             clicked => { root.cancel(); }
                         }
-                        if !root.close-mode : LoomButton {
+                        LoomButton {
                             label: "Discard";
                             variant: "danger";
                             clicked => { root.discard(); }

@@ -25,6 +25,7 @@ const FUTURE_FUNCTIONS: &[&str] = &[
     "TEXTSPLIT",
     "LET",
     "IFNA",
+    "XOR",
     "DAYS",
     "NUMBERVALUE",
     // Excel 2010 statistical and math names.
@@ -174,5 +175,40 @@ mod tests {
             excel_formula("=SUM(A1:A3)+TRANSPOSE(B1)", &[]),
             "SUM(A1:A3)+TRANSPOSE(B1)"
         );
+    }
+
+    #[test]
+    fn every_post_2007_function_round_trips_through_the_file_prefix() {
+        use super::super::formula_import::{loom_formula, DefinedNames};
+        let calls = [
+            "IFS(A1,1)",
+            "SWITCH(A1,1,2)",
+            "XLOOKUP(A1,B1:B2,C1:C2)",
+            "XOR(A1,B1)",
+            "IFNA(A1,0)",
+            "STDEV.S(A1:A3)",
+            "STDEV.P(A1:A3)",
+            "VAR.S(A1:A3)",
+            "VAR.P(A1:A3)",
+            "MODE.SNGL(A1:A3)",
+            "RANK.EQ(A1,A1:A3)",
+            "CONCAT(A1,B1)",
+            "TEXTJOIN(\",\",TRUE,A1:A3)",
+            "MAXIFS(A1:A3,B1:B3,1)",
+            "MINIFS(A1:A3,B1:B3,1)",
+            "UNIQUE(A1:A3)",
+            "SEQUENCE(3)",
+            "DAYS(A1,B1)",
+        ];
+        for call in calls {
+            let in_file = excel_formula(&format!("={call}"), &[]);
+            assert!(in_file.starts_with("_xlfn."), "{call} -> {in_file}");
+            assert_eq!(loom_formula(&in_file, &DefinedNames::default()), call);
+        }
+        for call in ["FILTER(A1:A3,B1:B3)", "SORT(A1:A3)"] {
+            let in_file = excel_formula(&format!("={call}"), &[]);
+            assert!(in_file.starts_with("_xlfn._xlws."), "{call} -> {in_file}");
+            assert_eq!(loom_formula(&in_file, &DefinedNames::default()), call);
+        }
     }
 }

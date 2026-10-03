@@ -102,11 +102,12 @@ fn excel_number_formats_and_dates_map_to_loom_formats() {
 }
 
 #[test]
-fn excel_formulas_loom_cannot_calculate_are_reported() {
-    // NA(), TEXT() and the & operator all calculate in Excel; Loom shows
-    // errors for them, so the import must say so before replacing a workbook.
+fn excel_formulas_loom_now_calculates_agree_with_excels_stored_results() {
+    // NA(), TEXT() and the & operator calculate in Loom like in Excel, so the
+    // audit that compares Excel's stored results finds no difference. The
+    // reporting path itself is covered in `import_audit` unit tests.
     let import = fixture("excel_basic");
-    assert!(has(&import, XlsxImportWarning::FormulaResultsDiffer));
+    assert!(!has(&import, XlsxImportWarning::FormulaResultsDiffer));
 }
 
 #[test]
@@ -242,9 +243,10 @@ fn excel_newer_functions_dynamic_arrays_and_quoted_sheet_names() {
 #[test]
 fn excel_unrepresentable_values_and_formats_are_reported() {
     let import = fixture("excel_edge");
-    // STDEV.S is not a Loom function; the text "=not a formula" would be read
-    // as a formula; a time of day cannot be shown.
-    assert!(has(&import, XlsxImportWarning::FormulaResultsDiffer));
+    // STDEV.S calculates in Loom (same result as Excel's stored value); the
+    // text "=not a formula" would be read as a formula; a time of day cannot
+    // be shown.
+    assert!(!has(&import, XlsxImportWarning::FormulaResultsDiffer));
     assert!(has(&import, XlsxImportWarning::TextReadAsValue));
     assert!(has(&import, XlsxImportWarning::UnsupportedNumberFormats));
     let sheet = &import.sheets[0];

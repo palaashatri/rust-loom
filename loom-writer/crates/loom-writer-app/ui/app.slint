@@ -15,7 +15,7 @@ import {
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "foundation.slint";
-export { FindBar } from "find_bar.slint";
+export { FindBar, FindRect } from "find_bar.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
@@ -267,6 +267,10 @@ export component WriterApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open) { return reject; }
+            if (event.text == Key.F3) {
+                if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
+                return accept;
+            }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();

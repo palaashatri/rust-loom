@@ -28,10 +28,14 @@ mod close_operation_journeys;
 mod command_dispatch_tests;
 #[path = "main_tests/export_operation_journeys.rs"]
 mod export_operation_journeys;
+#[path = "main_tests/grid_gesture_tests.rs"]
+mod grid_gesture_tests;
 #[path = "main_tests/grid_interaction_tests.rs"]
 mod grid_interaction_tests;
 #[path = "main_tests/grid_pointer_tests.rs"]
 mod grid_pointer_tests;
+#[path = "main_tests/grid_tab_enter_tests.rs"]
+mod grid_tab_enter_tests;
 #[path = "main_tests/layout_tests.rs"]
 mod layout_tests;
 #[path = "main_tests/open_operation_journeys.rs"]

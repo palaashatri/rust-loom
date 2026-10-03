@@ -19,10 +19,11 @@
 //! written.
 
 use crate::{
-    normalize_angle_degrees, ElementType, PresentationSession, Slide, SlideElement, TransitionKind,
-    SLIDE_HEIGHT, SLIDE_WIDTH,
+    normalize_angle_degrees, ElementType, PresentationDocument, PresentationSession, Slide,
+    SlideElement, TransitionKind, SLIDE_HEIGHT, SLIDE_WIDTH,
 };
 use loom_package::zip::PackageArchive;
+use std::collections::{BTreeMap, BTreeSet};
 
 const EMU_PER_UNIT: f64 = 12_192.0;
 /// 1 editor px (on an 840 px wide slide) in hundredths of a point.
@@ -240,6 +241,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 heading_font: false,
             },
         ),
+        // Pictures are written by `picture_shape`.
+        ElementType::Picture => return String::new(),
         ElementType::StatCard => (
             "rect",
             Some(STAT_FILL),
@@ -269,6 +272,22 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
     format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr><p:spPr>{xf}<a:prstGeom prst=\"{geometry}\"><a:avLst/></a:prstGeom>{fill_xml}<a:ln><a:noFill/></a:ln></p:spPr>{}</p:sp>",
         text_body(&element.content, &text)
+    )
+}
+
+/// A `p:pic` element for a picture; `rid` is the slide relationship to its media part.
+fn picture_shape(id: u32, element: &SlideElement, rid: &str, alt: &str) -> String {
+    format!(
+        "<p:pic><p:nvPicPr><p:cNvPr id=\"{id}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>",
+        esc(&element.id),
+        esc(alt),
+        xfrm(
+            element.x,
+            element.y,
+            element.width,
+            element.height,
+            element.rotation_deg
+        )
     )
 }
 
@@ -302,7 +321,12 @@ fn transition_xml(kind: &TransitionKind) -> &'static str {
     }
 }
 
-fn slide_xml(slide: &Slide, transition: &TransitionKind) -> String {
+fn slide_xml(
+    document: &PresentationDocument,
+    slide: &Slide,
+    transition: &TransitionKind,
+    picture_rids: &BTreeMap<String, String>,
+) -> String {
     let background = hex_color(&slide.bg_color, "FFFFFF");
     let has_title = slide
         .elements
@@ -318,7 +342,18 @@ fn slide_xml(slide: &Slide, transition: &TransitionKind) -> String {
     for element in &slide.elements {
         let title_ph = element.element_type == ElementType::Title && !placeholder_used;
         placeholder_used |= title_ph;
-        shapes.push_str(&element_shape(next_id, element, &background, title_ph));
+        if element.element_type == ElementType::Picture {
+            let rid = picture_rids
+                .get(&element.id)
+                .map(String::as_str)
+                .unwrap_or("rId1");
+            let alt = document
+                .asset_for(element)
+                .map_or("Picture", |asset| asset.name.as_str());
+            shapes.push_str(&picture_shape(next_id, element, rid, alt));
+        } else {
+            shapes.push_str(&element_shape(next_id, element, &background, title_ph));
+        }
         next_id += 1;
     }
     format!(
@@ -541,6 +576,9 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
         format!("{XML_DECL}<a:tblStyleLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" def=\"{{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}}\"/>"),
     );
 
+    let mut media: BTreeSet<String> = BTreeSet::new();
+    let mut media_parts: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut media_types: BTreeMap<&str, &str> = BTreeMap::new();
     for (index, slide) in document.slides.iter().enumerate() {
         let number = index + 1;
         let transition = session
@@ -548,16 +586,33 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
             .get(&slide.id)
             .cloned()
             .unwrap_or_default();
+        let mut picture_rids = BTreeMap::new();
+        let mut picture_rels: Vec<(String, String)> = Vec::new();
+        for element in &slide.elements {
+            let Some(asset) = document.asset_for(element) else {
+                continue;
+            };
+            let rid = format!("rId{}", 10 + picture_rels.len());
+            picture_rids.insert(element.id.clone(), rid.clone());
+            picture_rels.push((rid, format!("../media/{}", asset.id)));
+            if media.insert(asset.id.clone()) {
+                media_parts.push((format!("ppt/media/{}", asset.id), asset.bytes.to_vec()));
+                media_types.insert(asset.format.extension(), asset.format.mime());
+            }
+        }
         add(
             &format!("ppt/slides/slide{number}.xml"),
             Some(format!("{CT}.slide+xml")),
-            slide_xml(slide, &transition),
+            slide_xml(document, slide, &transition, &picture_rids),
         );
         let mut rels = vec![(
             "rId1",
             "slideLayout",
             "../slideLayouts/slideLayout1.xml".to_string(),
         )];
+        for (rid, target) in &picture_rels {
+            rels.push((rid.as_str(), "image", target.clone()));
+        }
         if !slide.speaker_notes.trim().is_empty() {
             rels.push((
                 "rId2",
@@ -610,6 +665,11 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
     let mut content_types = format!(
         "{XML_DECL}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>"
     );
+    for (extension, mime) in &media_types {
+        content_types.push_str(&format!(
+            "<Default Extension=\"{extension}\" ContentType=\"{mime}\"/>"
+        ));
+    }
     for (part, ct) in &overrides {
         content_types.push_str(&format!(
             "<Override PartName=\"{part}\" ContentType=\"{ct}\"/>"
@@ -636,6 +696,11 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
     put("_rels/.rels", &root_rels)?;
     for (path, xml) in &parts {
         put(path, xml)?;
+    }
+    for (path, bytes) in media_parts {
+        archive
+            .add(&path, bytes)
+            .map_err(|e| format!("pptx export failed: {e}"))?;
     }
     archive
         .to_bytes()

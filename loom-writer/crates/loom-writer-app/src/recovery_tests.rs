@@ -294,6 +294,7 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 inspector: false,
                 comment: None,
                 table: false,
+                sample: false,
             };
             let error = run_gui_with_dialogs(
                 &args,

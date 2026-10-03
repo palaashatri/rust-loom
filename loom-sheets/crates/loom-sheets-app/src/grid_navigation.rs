@@ -194,3 +194,102 @@ mod reveal_tests {
         assert_eq!(fit_count(0, 5.0, |_| 24.0), 1);
     }
 }
+
+/// Where Ctrl+Arrow takes the active cell, as in Excel. `(row_dir, col_dir)`
+/// is one of (-1,0), (1,0), (0,-1), (0,1). From a filled cell whose neighbour
+/// is filled it runs to the last filled cell of that block; otherwise it goes
+/// to the next filled cell in that direction. With none, it stops at the sheet
+/// edge: row 1 or column A going up or left, the used extent going down or
+/// right.
+pub(crate) fn data_edge(sheet: &Sheet, from: CellRef, (row_dir, col_dir): (i32, i32)) -> CellRef {
+    let used = sheet.dimensions();
+    let vertical = row_dir != 0;
+    let forward = if vertical { row_dir > 0 } else { col_dir > 0 };
+    let at = |position: u32| {
+        if vertical {
+            CellRef {
+                row: position,
+                col: from.col,
+            }
+        } else {
+            CellRef {
+                row: from.row,
+                col: position,
+            }
+        }
+    };
+    let filled = |position: u32| sheet.raw(at(position)).is_some_and(|raw| !raw.is_empty());
+    let start = if vertical { from.row } else { from.col };
+    let last = if vertical { used.rows } else { used.cols }
+        .saturating_sub(1)
+        .max(start);
+    let edge = if forward { last } else { 0 };
+    if start == edge {
+        return from;
+    }
+    let step = |position: u32| if forward { position + 1 } else { position - 1 };
+    let mut position = step(start);
+    if filled(start) && filled(position) {
+        while position != edge && filled(step(position)) {
+            position = step(position);
+        }
+        return at(position);
+    }
+    while !filled(position) && position != edge {
+        position = step(position);
+    }
+    at(position)
+}
+
+#[cfg(test)]
+mod data_edge_tests {
+    use super::*;
+
+    fn at(a1: &str) -> CellRef {
+        CellRef::parse(a1).unwrap()
+    }
+
+    fn sheet() -> Sheet {
+        let mut sheet = Sheet::new("edge");
+        for cell in ["B2", "B3", "B4", "B7", "B8", "E2", "G2", "H2", "B12"] {
+            sheet.set_str(cell, "x");
+        }
+        sheet
+    }
+
+    #[test]
+    fn a_block_runs_to_its_last_filled_cell_down_and_back_up() {
+        assert_eq!(data_edge(&sheet(), at("B2"), (1, 0)), at("B4"));
+        assert_eq!(data_edge(&sheet(), at("B4"), (-1, 0)), at("B2"));
+        assert_eq!(data_edge(&sheet(), at("B3"), (1, 0)), at("B4"));
+    }
+
+    #[test]
+    fn from_the_end_of_a_block_it_jumps_to_the_next_block() {
+        assert_eq!(data_edge(&sheet(), at("B4"), (1, 0)), at("B7"));
+        assert_eq!(data_edge(&sheet(), at("B8"), (1, 0)), at("B12"));
+        assert_eq!(data_edge(&sheet(), at("B7"), (-1, 0)), at("B4"));
+    }
+
+    #[test]
+    fn from_an_empty_cell_it_finds_the_next_filled_cell_or_the_edge() {
+        assert_eq!(data_edge(&sheet(), at("B5"), (1, 0)), at("B7"));
+        assert_eq!(data_edge(&sheet(), at("B5"), (-1, 0)), at("B4"));
+        // Nothing below B12 in column B: the last used row.
+        assert_eq!(data_edge(&sheet(), at("B12"), (1, 0)), at("B12"));
+        assert_eq!(data_edge(&sheet(), at("D5"), (1, 0)), at("D12"));
+        // Nothing above in column D: row 1.
+        assert_eq!(data_edge(&sheet(), at("D5"), (-1, 0)), at("D1"));
+    }
+
+    #[test]
+    fn sideways_moves_follow_the_same_rules() {
+        assert_eq!(data_edge(&sheet(), at("A2"), (0, 1)), at("B2"));
+        assert_eq!(data_edge(&sheet(), at("B2"), (0, 1)), at("E2"));
+        assert_eq!(data_edge(&sheet(), at("G2"), (0, 1)), at("H2"));
+        assert_eq!(data_edge(&sheet(), at("H2"), (0, -1)), at("G2"));
+        assert_eq!(data_edge(&sheet(), at("H2"), (0, 1)), at("H2"));
+        assert_eq!(data_edge(&sheet(), at("B5"), (0, -1)), at("A5"));
+        assert_eq!(data_edge(&sheet(), at("C5"), (0, 1)), at("H5"));
+    }
+}

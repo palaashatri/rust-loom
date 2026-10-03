@@ -19,6 +19,7 @@ export component PresentActionToolbar inherits LoomToolbar {
     callback add-slide;
     callback add-text;
     callback add-shape;
+    callback add-picture;
     callback toggle-preview;
     callback toggle-inspector;
     callback export-pdf;
@@ -63,6 +64,12 @@ export component PresentActionToolbar inherits LoomToolbar {
             label: "Shape";
             tooltip: "Add shape";
             clicked => { root.add-shape(); }
+        }
+        LoomIconButton {
+            icon: "image";
+            label: "Image";
+            tooltip: "Insert image (PNG or JPEG)";
+            clicked => { root.add-picture(); }
         }
         LoomIconButton {
             icon: "format";

@@ -5,9 +5,11 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+mod pictures;
 mod pptx_export;
 mod pptx_titles;
 mod session_history;
+pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use pptx_export::export_pptx;
 pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_pptx};
 use session_history::Snapshot;
@@ -24,6 +26,8 @@ pub enum ElementType {
     ShapeRectangle,
     ShapeCircle,
     StatCard,
+    /// An embedded raster picture; `content` is the id of an [`ImageAsset`].
+    Picture,
 }
 
 /// Interactive click action trigger for presentation slides and elements.
@@ -1074,6 +1078,9 @@ pub struct PresentationDocument {
     pub theme: String,
     pub slides: Vec<Slide>,
     pub active_index: usize,
+    /// Embedded picture data keyed by asset id; stored as package parts, not in the JSON.
+    #[serde(skip)]
+    pub assets: std::collections::BTreeMap<String, ImageAsset>,
 }
 
 impl PresentationDocument {
@@ -1085,6 +1092,7 @@ impl PresentationDocument {
             theme: "Modern Clean".to_string(),
             slides: Vec::new(),
             active_index: 0,
+            assets: Default::default(),
         };
         let mut cover = Slide::new("slide-1", "Title Slide", "cover");
         cover.add_element(SlideElement {
@@ -1253,19 +1261,21 @@ pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> 
     let mut arch = PackageArchive::new();
     arch.add("content/presentation.json", json.clone())
         .map_err(|e| e.to_string())?;
+    let mut entries = vec![ManifestEntry {
+        path: "content/presentation.json".into(),
+        mime: MimeType::parse("application/vnd.loom.deck-content")
+            .map_err(|e| format!("invalid built-in presentation MIME type: {e}"))?,
+        size: json.len() as u64,
+        sha256: Checksum::from_bytes(zip::sha256(&json)),
+    }];
+    pictures::write_assets(doc, &mut arch, &mut entries)?;
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Present,
         id: doc.id.clone(),
         title: doc.title.clone(),
         app_version: env!("CARGO_PKG_VERSION").to_string(),
-        entries: vec![ManifestEntry {
-            path: "content/presentation.json".into(),
-            mime: MimeType::parse("application/vnd.loom.deck-content")
-                .map_err(|e| format!("invalid built-in presentation MIME type: {e}"))?,
-            size: json.len() as u64,
-            sha256: Checksum::from_bytes(zip::sha256(&json)),
-        }],
+        entries,
     };
     arch.add("manifest.json", pkg_json::write(&manifest).into_bytes())
         .map_err(|e| e.to_string())?;
@@ -1289,12 +1299,16 @@ pub fn load_presentation(bytes: &[u8]) -> Result<PresentationDocument, String> {
     let content = arch
         .get("content/presentation.json")
         .ok_or_else(|| "missing presentation.json".to_string())?;
-    serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
+    let mut document: PresentationDocument =
+        serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))?;
+    pictures::read_assets(&mut document, &arch)?;
+    Ok(document)
 }
 
 pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     use loom_pdf::{PathStyle, PdfDocument, TextStyle};
     let mut pdf = PdfDocument::new();
+    let mut pdf_images: std::collections::BTreeMap<String, usize> = Default::default();
     let style_title = TextStyle {
         size_pt: 18.0,
         bold: true,
@@ -1380,6 +1394,21 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
                         &style_title,
                         transform,
                     );
+                }
+                ElementType::Picture => {
+                    if let Some(asset) = doc.asset_for(elem) {
+                        let index = match pdf_images.get(&asset.id) {
+                            Some(index) => Some(*index),
+                            None => pictures::pdf_image(asset).ok().map(|image| {
+                                let index = pdf.add_image(image);
+                                pdf_images.insert(asset.id.clone(), index);
+                                index
+                            }),
+                        };
+                        if let Some(index) = index {
+                            pdf.draw_image_with_transform(page, index, (width, height), transform);
+                        }
+                    }
                 }
                 ElementType::Subtitle | ElementType::BodyText => {
                     pdf.draw_text_with_transform(
@@ -1692,6 +1721,34 @@ impl PresentationSession {
             .elements
             .remove(index);
         true
+    }
+
+    /// Removes every selected element from the active slide as one undoable step.
+    /// Returns how many were removed; nothing changes (and no history is added) when none is.
+    pub fn remove_selected_elements(&mut self) -> usize {
+        let selected = self.selected_elements.clone();
+        let Some(slide) = self.document.active_slide() else {
+            return 0;
+        };
+        if !slide
+            .elements
+            .iter()
+            .any(|element| selected.contains(&element.id))
+        {
+            return 0;
+        }
+        self.checkpoint();
+        let slide = self
+            .document
+            .active_slide_mut()
+            .expect("active slide remains");
+        let before = slide.elements.len();
+        slide
+            .elements
+            .retain(|element| !selected.contains(&element.id));
+        let removed = before - slide.elements.len();
+        self.selected_elements.clear();
+        removed
     }
 
     /// Moves and resizes an element, clamped to the 1000×562.5 authoring plane.
@@ -2055,19 +2112,21 @@ pub fn save_presentation_session(session: &PresentationSession) -> Result<Vec<u8
     archive
         .add("content/presentation-session.json", json.clone())
         .map_err(|error| error.to_string())?;
+    let mut entries = vec![ManifestEntry {
+        path: "content/presentation-session.json".into(),
+        mime: MimeType::parse("application/vnd.loom.deck-session")
+            .map_err(|error| format!("invalid built-in presentation MIME type: {error}"))?,
+        size: json.len() as u64,
+        sha256: Checksum::from_bytes(zip::sha256(&json)),
+    }];
+    pictures::write_assets(&session.document, &mut archive, &mut entries)?;
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Present,
         id: session.document.id.clone(),
         title: session.document.title.clone(),
         app_version: env!("CARGO_PKG_VERSION").to_string(),
-        entries: vec![ManifestEntry {
-            path: "content/presentation-session.json".into(),
-            mime: MimeType::parse("application/vnd.loom.deck-session")
-                .map_err(|error| format!("invalid built-in presentation MIME type: {error}"))?,
-            size: json.len() as u64,
-            sha256: Checksum::from_bytes(zip::sha256(&json)),
-        }],
+        entries,
     };
     archive
         .add("manifest.json", pkg_json::write(&manifest).into_bytes())
@@ -2094,7 +2153,9 @@ pub fn load_presentation_session(bytes: &[u8]) -> Result<PresentationSession, St
     if let Some(content) = archive.get("content/presentation-session.json") {
         let persisted: PersistedPresentationSession = serde_json::from_slice(content)
             .map_err(|error| format!("parse presentation session: {error}"))?;
-        let mut session = PresentationSession::new(persisted.document);
+        let mut document = persisted.document;
+        pictures::read_assets(&mut document, &archive)?;
+        let mut session = PresentationSession::new(document);
         session.theme = persisted.theme;
         session.transitions = persisted.transitions;
         return Ok(session);
@@ -2413,6 +2474,7 @@ fn element_type_marker(element_type: &ElementType) -> &'static str {
         ElementType::ShapeRectangle => "shape-rectangle",
         ElementType::ShapeCircle => "shape-circle",
         ElementType::StatCard => "stat-card",
+        ElementType::Picture => "picture",
     }
 }
 

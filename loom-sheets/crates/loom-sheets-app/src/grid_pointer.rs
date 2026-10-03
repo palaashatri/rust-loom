@@ -18,7 +18,7 @@ use crate::{
     DEFAULT_VISIBLE_ROWS,
 };
 
-const COL_WIDTH_RANGE: (f32, f32) = (24.0, 600.0);
+pub(crate) const COL_WIDTH_RANGE: (f32, f32) = (24.0, 600.0);
 const ROW_HEIGHT_RANGE: (f32, f32) = (12.0, 400.0);
 
 /// A header edge being dragged: the sheet as it was and the size it started at.
@@ -104,7 +104,21 @@ pub(crate) fn header_selection(
 
 fn cell_pressed(app: &SheetsApp, state: &GuiState, row: i32, col: i32, shift: bool) {
     GESTURE.with(|gesture| gesture.borrow_mut().swallow_click = shift);
-    if !shift || row < 0 || col < 0 {
+    if row < 0 || col < 0 {
+        return;
+    }
+    let pressed = CellRef {
+        row: row as u32,
+        col: col as u32,
+    };
+    // A shift-press extends the existing selection, so its drag keeps that
+    // anchor; a plain press starts a new one here.
+    crate::grid_gestures::begin_drag(if shift {
+        selection_from_app(app).anchor
+    } else {
+        pressed
+    });
+    if !shift {
         return;
     }
     let target = CellRef {
@@ -130,10 +144,12 @@ fn cell_dragged(app: &SheetsApp, state: &GuiState, origin: (i32, i32), local: (f
         col_origin + index_at(&widths, (origin.1 - col_origin).max(0) as usize, local.0) as i32;
     let row =
         row_origin + index_at(&heights, (origin.0 - row_origin).max(0) as usize, local.1) as i32;
-    let start = CellRef {
+    // The pressed cell, remembered in Rust: the grid recycles its elements
+    // while it scrolls, so the cell that reports the drag may be another one.
+    let start = crate::grid_gestures::drag_anchor().unwrap_or(CellRef {
         row: origin.0 as u32,
         col: origin.1 as u32,
-    };
+    });
     let target = CellRef {
         row: row as u32,
         col: col as u32,
@@ -229,6 +245,25 @@ fn header_resized(
         project_current_without_reveal(app, state);
         return;
     }
+    commit_resize(
+        app,
+        state,
+        menu_service,
+        before,
+        after,
+        &format!("{label}: {size:.0} px"),
+    );
+}
+
+/// Record a finished size change as one undoable step.
+pub(crate) fn commit_resize(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &NativeMenuBar,
+    before: Sheet,
+    after: Sheet,
+    status: &str,
+) {
     commit_transaction(
         &mut state.current.borrow_mut(),
         &mut state.undo_stack.borrow_mut(),
@@ -240,7 +275,7 @@ fn header_resized(
     );
     apply_sheet(app, state);
     sync_menu_state(menu_service, app, state);
-    app.set_status_left(SharedString::from(format!("{label}: {size:.0} px")));
+    app.set_status_left(SharedString::from(status));
 }
 
 /// Where a reference typed in the name box goes: a cell or a range such as
@@ -267,6 +302,7 @@ fn goto_cell(app: &SheetsApp, state: &GuiState, text: &str) {
 }
 
 pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
+    crate::grid_gestures::wire(app, state, menu_service);
     let pointer = app.global::<GridPointer>();
     {
         let (state, app_ref) = (state.clone(), app.as_weak());
@@ -281,6 +317,7 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
         pointer.on_cell_dragged(move |row, col, x, y| {
             if let Some(app) = app_ref.upgrade() {
                 cell_dragged(&app, &state, (row, col), (x, y));
+                crate::grid_gestures::after_drag(&app_ref, &state, (row, col), (x, y));
             }
         });
     }

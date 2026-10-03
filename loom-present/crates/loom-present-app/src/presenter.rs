@@ -124,7 +124,10 @@ pub(crate) fn sync(session: &PresentationSession) {
                 window.set_notes(SharedString::new());
             }
         }
-        window.set_current_rows(crate::presenter_thumbs::rows_for(document.active_slide()));
+        window.set_current_rows(crate::picture_view::rows_for(
+            document,
+            document.active_slide(),
+        ));
         window.set_next_rows(crate::presenter_thumbs::next_rows(document));
         let next = crate::presenter_thumbs::next_index(index, document.len())
             .and_then(|next| document.slides.get(next));

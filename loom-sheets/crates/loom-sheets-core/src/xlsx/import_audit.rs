@@ -83,8 +83,10 @@ mod tests {
             (at("D1"), Cached::Error("#DIV/0!".into())),
         ]];
         assert!(!formula_results_differ(&sheets, &ok));
-        // The concatenation operator is not a Loom operator: Excel says "2x".
-        let bad = vec![vec![(at("C1"), Cached::Text("2x".into()))]];
+        // Loom now evaluates `&` like Excel; a differing cached text is reported.
+        let same = vec![vec![(at("C1"), Cached::Text("2x".into()))]];
+        assert!(!formula_results_differ(&sheets, &same));
+        let bad = vec![vec![(at("C1"), Cached::Text("2y".into()))]];
         assert!(formula_results_differ(&sheets, &bad));
         let wrong = vec![vec![(at("B1"), Cached::Number(5.0))]];
         assert!(formula_results_differ(&sheets, &wrong));

@@ -106,6 +106,18 @@ impl ImageAsset {
             bytes: Arc::new(bytes),
         })
     }
+    /// Decodes the picture to straight RGBA, scaled down (keeping its aspect ratio) when
+    /// either side exceeds `max_side`. Used for drawing; the stored bytes are untouched.
+    pub fn preview_rgba(&self, max_side: u32) -> Result<(u32, u32, Vec<u8>), String> {
+        let mut decoded = image::load_from_memory(&self.bytes)
+            .map_err(|error| format!("could not decode picture '{}': {error}", self.name))?;
+        if max_side > 0 && decoded.width().max(decoded.height()) > max_side {
+            decoded = decoded.resize(max_side, max_side, image::imageops::FilterType::Triangle);
+        }
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        Ok((width, height, rgba.into_raw()))
+    }
 }
 
 impl PresentationDocument {
@@ -284,4 +296,53 @@ pub(crate) fn read_assets(
         document.assets.insert(id, asset);
     }
     Ok(())
+}
+
+/// Longest side, in pixels, of a decoded picture written to a PDF (PDF images are stored
+/// uncompressed unless they are JPEG, so large pictures are scaled down first).
+const PDF_MAX_SIDE: u32 = 1600;
+
+/// Builds the PDF image for an asset. JPEG files with gray or RGB data are embedded as they
+/// are; everything else is decoded to RGB(A) and scaled down when larger than
+/// [`PDF_MAX_SIDE`].
+pub(crate) fn pdf_image(asset: &ImageAsset) -> Result<loom_pdf::PdfImage, String> {
+    use image::ImageDecoder;
+    if asset.format == ImageFormat::Jpeg {
+        if let Ok(decoder) =
+            image::codecs::jpeg::JpegDecoder::new(Cursor::new(asset.bytes.as_slice()))
+        {
+            let components = match decoder.color_type() {
+                image::ColorType::L8 => Some(1),
+                image::ColorType::Rgb8 => Some(3),
+                _ => None,
+            };
+            if let Some(components) = components {
+                return loom_pdf::PdfImage::jpeg(
+                    asset.width,
+                    asset.height,
+                    components,
+                    asset.bytes.as_ref().clone(),
+                );
+            }
+        }
+    }
+    let mut decoded = image::load_from_memory(&asset.bytes)
+        .map_err(|error| format!("could not decode picture '{}': {error}", asset.name))?;
+    if decoded.width().max(decoded.height()) > PDF_MAX_SIDE {
+        decoded = decoded.resize(
+            PDF_MAX_SIDE,
+            PDF_MAX_SIDE,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
+    let mut alpha = Vec::with_capacity(rgba.len() / 4);
+    for pixel in rgba.pixels() {
+        rgb.extend_from_slice(&pixel.0[..3]);
+        alpha.push(pixel.0[3]);
+    }
+    let alpha = alpha.iter().any(|a| *a != 255).then_some(alpha);
+    loom_pdf::PdfImage::rgb(width, height, rgb, alpha)
 }

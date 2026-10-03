@@ -72,6 +72,8 @@ struct Args {
     inspector: bool,
     comment: Option<String>,
     table: bool,
+    /// Capture the Quick Start sample instead of a blank document.
+    sample: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -97,6 +99,7 @@ where
         inspector: false,
         comment: None,
         table: false,
+        sample: false,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -147,6 +150,7 @@ where
                 args.comment = Some(body);
             }
             "--table" => args.table = true,
+            "--sample" => args.sample = true,
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
@@ -295,7 +299,41 @@ fn blank_document() -> WriterDocument {
     template_document(TemplateId::Blank)
 }
 
-/// A sample document used by `--smoke`, screenshots, and first launch.
+/// What a first launch opens: an empty, untitled document the user owns.
+fn blank_startup_document() -> WriterDocument {
+    WriterDocument::new("untitled", "Untitled")
+}
+
+/// Hint shown in the status bar (not in the document) on a fresh blank start.
+const START_HINT: &str = "Start typing, or press Ctrl+K for commands";
+
+fn apply_startup_hint(app: &WriterApp, document: &WriterDocument, restored_or_requested: bool) {
+    if !restored_or_requested && document.is_empty() {
+        app.set_status_left(START_HINT.into());
+    }
+}
+
+/// Headless captures use the Quick Start sample only when `--sample` asks.
+fn headless_default(args: &Args) -> WriterDocument {
+    if args.sample {
+        sample_document()
+    } else {
+        blank_startup_document()
+    }
+}
+
+/// Replace the current document with the Quick Start sample (explicit command).
+fn open_quick_start_sample(app: &WriterApp, state: &GuiState) {
+    let sample = sample_document();
+    *state.last_saved.borrow_mut() = sample.clone();
+    *state.current.borrow_mut() = sample;
+    *state.save_path.borrow_mut() = None;
+    *state.history.borrow_mut() = EditorHistory::new();
+    apply_state(app, state);
+    app.set_status_left("Opened the Quick Start sample".into());
+}
+
+/// The Quick Start sample: reachable from the palette and `--sample` captures only.
 fn sample_document() -> WriterDocument {
     let mut d = WriterDocument::new("quick-start", "Loom Writer — Quick Start");
     d.push(RichBlock::new(
@@ -352,6 +390,7 @@ fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
 #[derive(Debug, Clone)]
 enum PaletteAction {
     NewDoc,
+    NewFromSample,
     OpenDoc,
     SaveDoc,
     SaveAsDoc,
@@ -433,6 +472,8 @@ fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
         }
         PaletteAction::InsertTable => dispatch_command(app, "writer.table.insert"),
         PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
+        // Needs the document state; handled where the palette is wired.
+        PaletteAction::NewFromSample => false,
         PaletteAction::OpenDoc => dispatch_command(app, "writer.open"),
         PaletteAction::SaveDoc => dispatch_command(app, "writer.save"),
         PaletteAction::SaveAsDoc => dispatch_command(app, "writer.save-as"),
@@ -465,6 +506,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_category("file")
             .with_order(10)
             .with_shortcut("Ctrl+N"),
+        CommandSpec::new("writer.new-sample", "New from Quick Start sample")
+            .with_undo_label("New from Quick Start sample")
+            .with_description("Replace the document with the Quick Start sample")
+            .with_category("file")
+            .with_order(15),
         CommandSpec::new("file.open", "Open Document")
             .with_undo_label("Open Document")
             .with_description("Open an existing .loomdoc file")
@@ -822,6 +868,7 @@ fn sync_writer_registry_enablement(
         "file.save",
         "file.save_as",
         "writer.new",
+        "writer.new-sample",
         "writer.open",
         "writer.save",
         "writer.save-as",
@@ -876,6 +923,12 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "writer.new",
             label: "New Document",
             shortcut: "Ctrl+N",
+        },
+        PaletteCommand {
+            action: PaletteAction::NewFromSample,
+            id: "writer.new-sample",
+            label: "New from Quick Start sample",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::OpenDoc,
@@ -1242,6 +1295,7 @@ struct GuiState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PendingReplacement {
     NewDocument,
+    QuickStartSample,
     OpenDocument,
     /// Closing the window with unsaved changes.
     CloseWindow,
@@ -1416,6 +1470,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
     app.set_page_margin_pt(page_style.margin_top_pt);
+    find_bar::publish_match_rects(app, doc);
     app.set_page_paper_index(match doc.page.paper {
         loom_writer_core::PaperSize::A4 => 0,
         loom_writer_core::PaperSize::Letter => 1,
@@ -1484,6 +1539,7 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
     app.set_page_margin_pt(page_style.margin_top_pt);
+    find_bar::publish_match_rects(app, doc);
 }
 
 /// Project the authoritative rich-text model into the display-only StyledText
@@ -2497,7 +2553,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         None => args
             .template
             .map(template_document)
-            .unwrap_or_else(sample_document),
+            .unwrap_or_else(|| headless_default(args)),
     };
     apply_capture_seeds(&mut doc, args);
     apply_document(&app, &doc);
@@ -2609,6 +2665,7 @@ fn continue_pending_replacement(
 ) {
     match state.pending_replacement.take() {
         Some(PendingReplacement::NewDocument) => begin_new_document(app),
+        Some(PendingReplacement::QuickStartSample) => open_quick_start_sample(app, state),
         Some(PendingReplacement::OpenDocument) => {
             open_document_from_picker(app, state, &Some(menu_service.clone()))
         }
@@ -3586,7 +3643,7 @@ fn startup_documents(
         Some(path) => load_file(Path::new(path))?,
         None => template
             .map(template_document)
-            .unwrap_or_else(sample_document),
+            .unwrap_or_else(blank_startup_document),
     };
     Ok(match recovered {
         Some(draft) => (draft, fresh),
@@ -3770,6 +3827,18 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         .nth(index as usize)
                 };
                 if let Some(command) = command {
+                    if command.id == "writer.new-sample" {
+                        drop(registry);
+                        app.set_palette_open(false);
+                        if !request_document_replacement(
+                            &app,
+                            &state_for_palette,
+                            PendingReplacement::QuickStartSample,
+                        ) {
+                            open_quick_start_sample(&app, &state_for_palette);
+                        }
+                        return;
+                    }
                     // Palette source shares handler with toolbar/menu/shortcut/a11y
                     let _ = registry.invoke(&CommandInvocation::new(
                         command.id,
@@ -4126,6 +4195,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // sharing explicitly).
 
     apply_state(&app, &state);
+    apply_startup_hint(
+        &app,
+        &state.current.borrow(),
+        recovered.is_some() || args.open.is_some() || args.template.is_some(),
+    );
     if args.template_chooser {
         app.set_template_chooser_open(true);
     }
@@ -4213,7 +4287,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         None => args
             .template
             .map(template_document)
-            .unwrap_or_else(sample_document),
+            .unwrap_or_else(|| headless_default(args)),
     };
     if initial_document.is_empty() {
         initial_document.push(RichBlock::new(1, "paragraph", "Draft"));
@@ -4824,6 +4898,8 @@ mod actions_tests;
 mod audit_tests;
 #[cfg(test)]
 mod docx_export_tests;
+#[cfg(test)]
+mod find_tests;
 #[cfg(test)]
 mod page_stack_tests;
 #[cfg(test)]

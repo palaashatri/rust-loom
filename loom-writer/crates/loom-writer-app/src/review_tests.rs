@@ -537,7 +537,7 @@ fn successful_save_clears_the_unsaved_marker() {
 
 #[test]
 fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
-    // Nothing recovered: the sample is both the document and the baseline.
+    // Nothing recovered: the blank start is both the document and the baseline.
     let (document, saved) = startup_documents(None, None, None).expect("fresh start");
     assert!(document_content_equal(&document, &saved));
 
@@ -557,7 +557,7 @@ fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
 
     // A recovered draft identical to the baseline has nothing to lose.
     let (document, saved) =
-        startup_documents(Some(sample_document()), None, None).expect("identical draft");
+        startup_documents(Some(blank_startup_document()), None, None).expect("identical draft");
     assert!(document_content_equal(&document, &saved));
 
     // The baseline follows the requested template, not always the sample.
@@ -836,4 +836,42 @@ fn page_down_and_page_up_move_the_caret_a_screen_and_shift_extends() {
     app.invoke_selection_changed(end as i32, end as i32);
     app.invoke_page_move(1, false);
     assert_eq!(focus(), end);
+}
+
+#[test]
+fn first_launch_opens_a_blank_untitled_document_with_a_hint_outside_it() {
+    let (document, saved) = startup_documents(None, None, None).expect("fresh start");
+    assert_eq!(document.title, "Untitled");
+    assert!(
+        document.blocks.iter().all(|block| block.text.is_empty()),
+        "the user's document must start without any product text"
+    );
+    assert!(document_content_equal(&document, &saved));
+
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let (app, state) = test_state(document, dialogs);
+    apply_state(&app, &state);
+    apply_startup_hint(&app, &state.current.borrow(), false);
+    assert_eq!(app.get_doc_title().as_str(), "Untitled");
+    assert!(!app.get_doc_content().as_str().contains("Welcome"));
+    assert!(app.get_status_left().as_str().contains("Ctrl+K"));
+    assert!(!document_is_dirty(&state), "a fresh blank is not unsaved");
+
+    // A recovered draft keeps its own status and still reads as unsaved.
+    let mut draft = blank_startup_document();
+    draft.replace_paragraphs("recovered words");
+    let (recovered, baseline) = startup_documents(Some(draft), None, None).expect("recovered");
+    assert!(!document_content_equal(&recovered, &baseline));
+}
+
+#[test]
+fn the_quick_start_sample_is_only_reachable_on_request() {
+    let sample = sample_document();
+    assert!(sample.title.contains("Quick Start"));
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let (app, state) = test_state(blank_startup_document(), dialogs);
+    open_quick_start_sample(&app, &state);
+    assert!(state.current.borrow().title.contains("Quick Start"));
+    assert!(app.get_doc_content().as_str().contains("Welcome"));
+    assert!(state.save_path.borrow().is_none());
 }

@@ -50,6 +50,49 @@ pub fn serial_to_iso(serial: f64) -> Option<String> {
     Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
+/// Largest valid 1900-system serial (9999-12-31).
+pub(crate) const MAX_SERIAL: i64 = 2_958_465;
+
+/// Calendar date `(year, month, day)` of a whole 1900-system serial, with
+/// Excel's phantom 1900-02-29 at serial 60 and serial 0 as "1900-01-00".
+pub(crate) fn serial_to_ymd(serial: i64) -> Option<(i64, i64, i64)> {
+    match serial {
+        0 => Some((1900, 1, 0)),
+        60 => Some((1900, 2, 29)),
+        1..=MAX_SERIAL => {
+            let epoch = days_from_civil(1899, 12, 31);
+            Some(civil_from_days(
+                epoch + if serial > 60 { serial - 1 } else { serial },
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Serial of a date; month and day may overflow or be zero/negative and roll
+/// into neighbouring months and years like Excel's `DATE`.
+pub(crate) fn ymd_to_serial(year: i64, month: i64, day: i64) -> Option<i64> {
+    if (year, month, day) == (1900, 2, 29) {
+        return Some(60);
+    }
+    let months = year.checked_mul(12)?.checked_add(month - 1)?;
+    let (year, month) = (months.div_euclid(12), months.rem_euclid(12) + 1);
+    let days = days_from_civil(year, month, 1).checked_add(day - 1)?;
+    let plain = days - days_from_civil(1899, 12, 31);
+    let serial = if plain >= 60 { plain + 1 } else { plain };
+    (0..=MAX_SERIAL).contains(&serial).then_some(serial)
+}
+
+/// Days in a calendar month.
+pub(crate) fn days_in_month(year: i64, month: i64) -> i64 {
+    let next = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    days_from_civil(next.0, next.1, 1) - days_from_civil(year, month, 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::serial_to_iso;

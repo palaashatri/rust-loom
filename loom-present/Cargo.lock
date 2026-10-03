@@ -3074,7 +3074,9 @@ name = "loom-present-app"
 version = "0.1.0"
 dependencies = [
  "i-slint-backend-winit",
+ "image",
  "loom-desktop",
+ "loom-package",
  "loom-present-core",
  "loom-production",
  "loom-storage",
@@ -3095,6 +3097,7 @@ dependencies = [
 name = "loom-present-core"
 version = "0.1.0"
 dependencies = [
+ "image",
  "loom-command",
  "loom-document",
  "loom-package",

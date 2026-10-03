@@ -12,6 +12,7 @@ loom-command.workspace = true
 loom-pdf.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
 roxmltree = "0.21"

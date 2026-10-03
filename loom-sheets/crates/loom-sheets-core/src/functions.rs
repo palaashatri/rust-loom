@@ -11,6 +11,27 @@ pub(crate) fn eval_extended_function(
     raw_args: &[crate::Expr],
     lookup: &dyn Fn(CellRef) -> Value,
 ) -> Option<Value> {
+    if let Some(v) = crate::functions_math::eval_math_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_stats::eval_stats_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_text::eval_text_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_logic::eval_logic_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_lookup::eval_lookup_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_finance::eval_finance_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = crate::functions_date::eval_date_function(name, raw_args, lookup) {
+        return Some(v);
+    }
     match name {
         "VLOOKUP" => {
             if raw_args.len() < 3 || raw_args.len() > 4 {
@@ -195,9 +216,9 @@ pub(crate) fn eval_extended_function(
             if raw_args.len() != 1 {
                 return Some(Value::Error(CalcError::Value));
             }
-            Some(Value::Text(
-                eval_expr(&raw_args[0], lookup).display().trim().to_string(),
-            ))
+            Some(Value::Text(excel_trim(
+                &eval_expr(&raw_args[0], lookup).display(),
+            )))
         }
         "IFERROR" => {
             if raw_args.len() != 2 {
@@ -636,7 +657,7 @@ fn today_serial() -> f64 {
 }
 
 /// Cell coordinates of a Range or single-Cell argument, in row-major order.
-fn expand_cells(expr: &crate::Expr) -> Option<Vec<CellRef>> {
+pub(crate) fn expand_cells(expr: &crate::Expr) -> Option<Vec<CellRef>> {
     match expr {
         crate::Expr::Range { start, end } => {
             let mut cells = Vec::new();
@@ -655,7 +676,7 @@ fn expand_cells(expr: &crate::Expr) -> Option<Vec<CellRef>> {
 /// Whether a looked-up cell value satisfies a SUMIF/COUNTIF-style criteria
 /// string: optional `>=`, `<=`, `<>`, `>`, `<`, `=` operator prefix, then a
 /// number, text, or `*`/`?` wildcard pattern (wildcards apply to `=`/`<>`).
-fn criteria_matches(value: &Value, criteria: &str) -> bool {
+pub(crate) fn criteria_matches(value: &Value, criteria: &str) -> bool {
     let criteria = criteria.trim();
     let (op, operand) = if let Some(rest) = criteria.strip_prefix(">=") {
         (">=", rest)
@@ -715,7 +736,7 @@ fn criteria_matches(value: &Value, criteria: &str) -> bool {
 }
 
 /// Case-insensitive wildcard match: `*` spans any run, `?` one character.
-fn wildcard_match(pattern: &str, text: &str) -> bool {
+pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.to_uppercase().chars().collect();
     let text: Vec<char> = text.to_uppercase().chars().collect();
     fn go(pattern: &[char], text: &[char]) -> bool {
@@ -895,6 +916,14 @@ fn sort_key_order(left: &Value, right: &Value) -> std::cmp::Ordering {
             .to_uppercase()
             .cmp(&right.display().to_uppercase()),
     }
+}
+
+/// Excel TRIM: strip leading/trailing spaces and collapse inner space runs.
+fn excel_trim(text: &str) -> String {
+    text.split(' ')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

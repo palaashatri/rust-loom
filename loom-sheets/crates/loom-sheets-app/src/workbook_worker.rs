@@ -149,6 +149,7 @@ enum WorkerMessage {
     Batch(PendingBatch),
     Checkpoint(CheckpointRequest),
     Export(crate::export_operations::ExportOperation),
+    DiscardRecovery(SyncSender<Result<(), String>>),
     #[cfg(test)]
     TestGate {
         entered: mpsc::Sender<()>,
@@ -395,6 +396,27 @@ impl WorkbookWorker {
         Ok(())
     }
 
+    /// Delete this session's recovery stores after every accepted edit has been
+    /// journaled (the request queues behind them) and wait for the result. Used
+    /// only on an intentional close; a crash never reaches it.
+    pub(crate) fn discard_recovery(&self) -> Result<(), String> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        {
+            let mut mailbox = self
+                .shared
+                .mailbox
+                .lock()
+                .map_err(|_| "workbook worker mailbox is unavailable".to_string())?;
+            mailbox
+                .queue
+                .push_back(WorkerMessage::DiscardRecovery(reply));
+        }
+        self.shared.work_available.notify_one();
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .map_err(|error| format!("clear Sheets recovery: {error}"))?
+    }
+
     /// Queue an export barrier at its accepted worker revision.
     pub(crate) fn queue_export(&self, operation: ExportOperation) -> Result<(), String> {
         let mut mailbox = self
@@ -559,6 +581,7 @@ enum WorkerAction {
     Batch(PendingBatch),
     Checkpoint(CheckpointRequest),
     Export(ExportOperation),
+    DiscardRecovery(SyncSender<Result<(), String>>),
     #[cfg(test)]
     TestGate {
         entered: mpsc::Sender<()>,
@@ -576,6 +599,7 @@ fn next_action(shared: &Shared) -> WorkerAction {
                 WorkerMessage::Batch(batch) => WorkerAction::Batch(batch),
                 WorkerMessage::Checkpoint(req) => WorkerAction::Checkpoint(req),
                 WorkerMessage::Export(operation) => WorkerAction::Export(operation),
+                WorkerMessage::DiscardRecovery(reply) => WorkerAction::DiscardRecovery(reply),
                 #[cfg(test)]
                 WorkerMessage::TestGate { entered, release } => {
                     WorkerAction::TestGate { entered, release }
@@ -938,6 +962,17 @@ fn run_worker(
             WorkerAction::TestGate { entered, release } => {
                 let _ = entered.send(());
                 let _ = release.recv();
+            }
+            WorkerAction::DiscardRecovery(reply) => {
+                let result = match recovery.as_mut() {
+                    Some(store) => store.discard_all(),
+                    None => Ok(()),
+                };
+                if result.is_ok() {
+                    // The store is gone on purpose; nothing may recreate it.
+                    *recovery = None;
+                }
+                let _ = reply.send(result);
             }
             WorkerAction::Stop => return,
         }

@@ -21,3 +21,7 @@ i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
 [build-dependencies]
 slint-build = "1.7"
+
+[dev-dependencies]
+loom-package.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
