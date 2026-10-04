@@ -112,20 +112,6 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     for page_data in &pages {
         let page = pdf.add_page(page_style.width_pt, page_style.height_pt);
         let mut y = page_style.height_pt - page_style.margin_top_pt;
-        if page_data.index == 0 {
-            pdf.draw_text(
-                page,
-                page_style.margin_left_pt,
-                y,
-                &doc.title,
-                &TextStyle {
-                    size_pt: 20.0,
-                    bold: true,
-                    ..Default::default()
-                },
-            );
-            y -= page_style.body_font_size_pt * page_style.line_height + 8.0;
-        }
 
         let mut previous_block_id = None;
         for fragment in &page_data.fragments {
@@ -304,5 +290,67 @@ mod tests {
             !text.contains('\u{c3}'),
             "no UTF-8 lead byte may reach the PDF"
         );
+    }
+
+    #[test]
+    fn export_pdf_does_not_inject_title_into_body() {
+        let mut document = WriterDocument::new("title-test", "Untitled");
+        document.push(RichBlock::new(document.next_id(), "paragraph", "Hello"));
+
+        let pdf_bytes = export_pdf(&document);
+        let pdf = String::from_utf8_lossy(&pdf_bytes);
+
+        // The PDF should contain "Hello" exactly once
+        assert_eq!(
+            pdf.matches("Hello").count(),
+            1,
+            "body text Hello must appear exactly once in PDF"
+        );
+
+        // The PDF should NOT contain "Untitled" because it's not a body block
+        assert_eq!(
+            pdf.matches("Untitled").count(),
+            0,
+            "title 'Untitled' must not appear in PDF body text"
+        );
+    }
+
+    #[test]
+    fn export_pdf_multi_page_does_not_duplicate_text() {
+        let mut document = WriterDocument::new("multi-test", "My Document");
+        document.push(RichBlock::new(
+            document.next_id(),
+            "paragraph",
+            "unique-text-marker-AAA",
+        ));
+        for i in 0..75 {
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                &format!("Line number {i:03}"),
+            ));
+        }
+
+        let pdf_bytes = export_pdf(&document);
+        let pdf = String::from_utf8_lossy(&pdf_bytes);
+
+        // "My Document" should not appear at all (title not in body)
+        assert_eq!(
+            pdf.matches("My Document").count(),
+            0,
+            "title must not appear in PDF body"
+        );
+
+        // Marker should appear exactly once
+        assert_eq!(
+            pdf.matches("unique-text-marker-AAA").count(),
+            1,
+            "unique marker must appear exactly once"
+        );
+
+        // Spot-check that some lines appear
+        assert!(pdf.contains("Line number 000"), "first line");
+        assert!(pdf.contains("Line number 050"), "middle line");
+        assert!(pdf.contains("Line number 074"), "last line");
     }
 }

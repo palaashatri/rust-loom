@@ -692,7 +692,7 @@ Sheets pushes its existing `--text-scale` value into `Theme.text-scale` through 
 
 ### UI-11 — Keep product help out of the user's document
 
-**P2 · Writer · OPEN · Rendered and source-confirmed.** The default sample page contains product claims about an “inspectable” package, deterministic PDF export, and fully wired undo. It looks like editable document content because it is document content. This is a poor starting point for writing and makes unverified engineering claims part of the user's file.
+**P2 · Writer · FIXED (2026-10-04: first launch is a blank untitled document; the sample is the palette item 'New from Quick Start sample'; verified live and by test). Original finding:** The default sample page contains product claims about an “inspectable” package, deterministic PDF export, and fully wired undo. It looks like editable document content because it is document content. This is a poor starting point for writing and makes unverified engineering claims part of the user's file.
 
 **Evidence:** `writer/01-1440x900-light.png`, `02-1024x720-light.png`. Native launch opens a chooser; the screenshot path shows the sample. Do not claim every native launch bypasses the chooser.
 

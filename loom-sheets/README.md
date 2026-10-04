@@ -2,6 +2,28 @@
 
 Loom Sheets is a local-first spreadsheet application for editing workbooks, formulas, and charts on your computer.
 
+Status: **functional, `ACCEPTANCE_BLOCKED`**. The features below were exercised in real windows on Windows 11 and (earlier builds) Linux under WSLg. Not yet verified: screen-reader output and a full keyboard-only pass, recovery for very large workbooks (REC-02), broad Excel/LibreOffice interoperability beyond the tested fixtures, the full viewport/theme/text-scale matrix, and native macOS. The audit sections further down are dated evidence, not a current acceptance record; the live ledger is the current-truth section of the repository `AGENTS.md`.
+
+## What works
+
+Hand-checked on 2026-10-04 (Windows): typing with Tab/Enter (Enter after a Tab run returns to the column where the run began), formulas and the new functions, Ctrl+Arrow data-edge jumps, text overflow into empty neighbouring cells, wide numbers shrinking decimals / scientific / `####`, the three-way close prompt with Discard clearing recovery, and a restart showing no restored draft.
+
+- **Grid**: a growing sheet (no last row), pinned headers, mouse range selection, Shift-click and header click selection, Ctrl+A / the corner select the used range, Ctrl+Arrow and Ctrl+Shift+Arrow, Page Up/Down, Home, Ctrl+Home/End, name box (`D50`, `B2:C3`), drag past the edge auto-scrolls, double-click a column edge to autofit, drag edges to resize (undoable).
+- **Editing**: formula bar and in-cell mirror, Enter/Tab/Shift+Tab/Escape commit and cancel, Fill down, copy/cut/paste through the real system clipboard (tab-separated; formulas keep their references shifted), undo/redo for every edit.
+- **Formulas**: over 100 Excel-compatible functions: math (`INT`, `ROUND*`, `MOD`, `LOG`, `SUMPRODUCT`, …), statistics (`LARGE`, `RANK.EQ`, `STDEV.S`, `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, …), text (`TEXT`, `SUBSTITUTE`, `FIND`, `SEARCH`, `VALUE`, …), logic (`IFS`, `SWITCH`, `XOR`, `IFNA`, `IS*`), lookup (`VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`), dates (`DATE`, `EDATE`, `EOMONTH`, `WEEKDAY`, …), finance (`PMT`, `FV`, `PV`, `NPV`, `IRR`, `NPER`, `RATE`) and dynamic arrays (`FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`). Operators `+ - * / ^ & %` and comparisons follow Excel precedence. Cross-sheet references, absolute `$` references and cycle detection work. Values were derived by hand or from Excel semantics, not compared against Excel itself.
+- **Formatting and display**: cell styles, alignment, number formats; text overflows into empty neighbours; numbers that do not fit never appear cut off.
+- **Objects**: charts tied to a cell range, anchored shapes and images, with keyboard and pointer manipulation.
+- **Files**: native `.loomtable` Open / Save / Save As, CSV import/export, XLSX import/export (opens in Microsoft Excel in the tested fixtures; known unsupported XLSX features are listed in a warning before the current workbook is replaced), templates, in-window menu on Windows/Linux and native menu on macOS, command palette (Ctrl+K), crash recovery with an explicit Discard.
+- **Responsiveness**: formula calculation, Open, Save and exports run on background workers; scrolling updates cells in place.
+
+## Known limitations
+
+- Only the first series of a chart round-trips through XLSX; PivotTables import as their cached cells.
+- Formula results were not diffed against real Excel; `FV`/`PV`-style edge cases and `TRIM` of interior spaces follow Excel's documentation only.
+- On Linux a file-dialog helper (`xdg-desktop-portal` or `zenity`) is required.
+- Recovery storage for million-cell workbooks is slow and not yet bounded (REC-02, open).
+- Unsigned downloadable builds for Linux, Windows and macOS are published by CI as the `nightly` release.
+
 ## Screenshots
 
 ![Loom Sheets main window — Linux](docs/screenshot-linux.png)

@@ -4765,6 +4765,19 @@ mod tests {
     }
 
     #[test]
+    fn markdown_export_does_not_inject_title() {
+        let mut doc = WriterDocument::new("test-doc", "Untitled");
+        doc.push(RichBlock::new(doc.next_id(), "paragraph", "Hello"));
+
+        let md = doc.to_markdown();
+        assert!(
+            !md.contains("Untitled"),
+            "title must not appear in markdown"
+        );
+        assert!(md.contains("Hello"), "body must appear in markdown");
+    }
+
+    #[test]
     fn save_load_roundtrip() {
         let d = demo_doc();
         let bytes = save_document(&d).unwrap();

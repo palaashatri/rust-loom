@@ -5,21 +5,40 @@ Loom Writer is a calm, professional local-first word processor engineered for pr
 ![Loom Writer main window](docs/screenshot.png)
 *macOS native window capture (`screencapture -l`) of the current build. A pixel-reproducible renderer capture of the same state is at [docs/screenshot-deterministic.png](docs/screenshot-deterministic.png) (`cargo run -p loom-writer-app -- --screenshot docs/screenshot-deterministic.png --size 1280x800 --theme light`).*
 
-## Core Capabilities
+Status: **functional, `ACCEPTANCE_BLOCKED`**. Features below were exercised in real windows on Windows 11 (and earlier Linux/WSLg builds). Screen-reader output, a full keyboard-only pass, comment anchors that follow edits (CODE-17), a visual table editor, and the macOS/Linux native-desktop matrix are not yet verified; see the current-truth section of the repository `AGENTS.md`.
+
+## What works (hand-checked 2026-10-04 unless noted)
+
+- **Blank start**: first launch opens an empty "Untitled" document with the caret ready and a hint in the status bar. The Quick Start sample is only available as "New from Quick Start sample" in the command palette; New opens the template chooser.
+- **Typing and editing**: Unicode text, bold/italic/underline/strike, alignment, undo/redo (Ctrl+Z/Ctrl+Y also inside the page), clipboard in both directions, Tab inserts spaces, Page Up/Down, wheel scrolling that follows the caret.
+- **Find and replace**: Ctrl+F opens the bar (typing replaces the pre-filled selection), every match on screen is highlighted and the current one is selected, Next/Previous, F3 and Shift+F3 (also with the bar closed), a Match case toggle, Ctrl+H for Replace / Replace all (one undo step).
+- **Pages**: each page is its own sheet with a gap between pages; zoom; page setup (paper, orientation, margins).
+- **Files**: native Open / Save / Save As; the title bar follows the saved file name; close with unsaved changes asks Save / Discard / Cancel; an unsaved draft is offered back after a crash and cleared by an intentional close. The command palette (Ctrl+K) and menus share the same commands; running New Document from the palette with unsaved text correctly shows the Save prompt (a lock bug that froze the window was fixed on 2026-10-04).
+- **Export**: PDF (all pages, WinAnsi text with accents, bold/italic/underline runs), Markdown, Word `.docx`.
+- **Also implemented and covered by automated tests, not re-checked by hand**: lists, comments, Markdown-text tables, templates, double/triple-click word and paragraph selection.
+
+## Known limitations
+
+- Tables are Markdown text, not a cell grid; no inline images, headers/footers, footnotes or spell checking.
+- PDF/Word export do not carry colours, font sizes or super/subscript; CJK text is not exported to PDF.
+- The Linux build needs an `xdg-desktop-portal` or `zenity` for file dialogs.
+- Downloadable unsigned builds for Linux x86-64, Windows x86-64 and macOS are published by CI as the `nightly` release.
+
+## Capability inventory (historical, 2026-09-06)
 
 - **Rich Text Editing**: Paragraph and heading styles (`Body`, `Title`, `H1`–`H3`), font families and sizes, inline `[B][I][U][S]` controls, alignment, indent, and line spacing — every edit undoable and persisted.
 - **Lists**: Bulleted and numbered lists with hanging markers in the page margin; numbering restarts after interrupts and both list kinds export to Markdown and PDF.
 - **Comments**: Anchored comment threads on any text range (or the whole block from a caret), with resolve/reopen/delete, undo history, and `.loomdoc` persistence.
 - **Tables**: Markdown-native table blocks inserted at the caret; the block text is the table, so cells edit as text and tables export verbatim to Markdown and PDF.
 - **Page Setup**: Per-document paper size (A4 / US Letter), orientation, and margin presets — undoable, persisted, and reflected in layout, the canvas, and the exported PDF page size.
-- **Document Chrome & Toolbars**: Distraction-free chrome, native global menu bar (macOS NSMenu / Linux DBusMenu), responsive action toolbar, command palette, and a scrollable Format inspector.
+- **Document Chrome & Toolbars**: Distraction-free chrome, native menu bar on macOS, in-window menu on Windows and Linux, responsive action toolbar, command palette, and a scrollable Format inspector.
 - **Visual Template Chooser**: Categorized template selection modal with true A4/Letter portrait previews (`Blank`, `Report`, `Letter`, `CV`).
 - **Open Package Format**: Inspectable versioned `.loomdoc` storage with zero telemetry or cloud dependency.
 - **Export & Recovery**: Deterministic PDF and Markdown export, DOCX interoperability, and atomic snapshot journal crash recovery.
 
 ## Visual QA Status
 
-- **Status**: **PASS** (section 13 acceptance evidence pass, 2026-09-06).
+- **Status (historical, 2026-09-06)**: renderer evidence only; not an acceptance record.
 - **Evidence**: an 18-capture viewport/theme matrix (1024×720 – 1920×1200 × light/dark/high-contrast) independently reviewed with no clipping, ellipsized labels, or contrast defects; native macOS `screencapture` QA across nine live states; an end-to-end GUI journey covering typing, formatting, lists, comments, tables, page setup, undo/redo, save/reopen, and export.
 - **Remaining gate items**: explicit human visual sign-off and representative performance budgets (see the root [current-truth section](../AGENTS.md#current-truth)).
 
