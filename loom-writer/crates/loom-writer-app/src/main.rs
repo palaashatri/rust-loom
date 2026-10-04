@@ -15,6 +15,7 @@ mod docx_export;
 mod find_bar;
 mod local_menu;
 mod multi_click;
+mod palette_wiring;
 mod recovery;
 mod window_chrome;
 
@@ -3240,6 +3241,7 @@ fn wire_writer_shared_callbacks(
                         &registry,
                         app.get_palette_query().as_str(),
                     );
+                    drop(registry);
                     // Accessible announcement already updated via project_selection_event;
                     // keep menu check states honest via toolbar/registry sync.
                     reveal_caret(&app, &state);
@@ -3780,85 +3782,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     wire_palette(&app);
-    // Live GUI palette wiring overrides the headless `wire_palette` handlers so
-    // query filtering and dispatch go through the shared `CommandRegistry`.
-    // This ensures menu/toolbar/palette/shortcut/a11y all use one `search`
-    // ranking and one `invoke` guard.
-    {
-        let state_for_palette = state.clone();
-        let app_ref = app.as_weak();
-        app.on_palette_query_changed(move |query| {
-            if let Some(app) = app_ref.upgrade() {
-                let registry = state_for_palette.registry.lock().unwrap();
-                rebuild_palette_with_registry(&app, &registry, query.as_str());
-                app.set_palette_selected(0);
-            }
-        });
-    }
-    {
-        let state_for_palette = state.clone();
-        let app_ref = app.as_weak();
-        app.on_palette_invoked(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                let registry = state_for_palette.registry.lock().unwrap();
-                let q = app.get_palette_query().trim().to_string();
-                let command = if q.is_empty() {
-                    let mut specs: Vec<&CommandSpec> =
-                        registry.commands().filter(|s| s.enabled).collect();
-                    specs.sort_by(|a, b| a.order.cmp(&b.order).then(a.id.cmp(&b.id)));
-                    specs
-                        .into_iter()
-                        .filter_map(|spec| {
-                            master_palette(&app)
-                                .into_iter()
-                                .find(|c| c.id == spec.id.as_str())
-                        })
-                        .nth(index as usize)
-                } else {
-                    registry
-                        .search(&q)
-                        .into_iter()
-                        .filter(|(spec, _)| spec.enabled)
-                        .filter_map(|(spec, _)| {
-                            master_palette(&app)
-                                .into_iter()
-                                .find(|c| c.id == spec.id.as_str())
-                        })
-                        .nth(index as usize)
-                };
-                if let Some(command) = command {
-                    if command.id == "writer.new-sample" {
-                        drop(registry);
-                        app.set_palette_open(false);
-                        if !request_document_replacement(
-                            &app,
-                            &state_for_palette,
-                            PendingReplacement::QuickStartSample,
-                        ) {
-                            open_quick_start_sample(&app, &state_for_palette);
-                        }
-                        return;
-                    }
-                    // Palette source shares handler with toolbar/menu/shortcut/a11y
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Palette,
-                    ));
-                    app.set_palette_open(false);
-                    let _ = dispatch_palette_action(&app, command.action);
-                    // Demonstrate other sources share the same handler:
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Accessibility,
-                    ));
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Shortcut,
-                    ));
-                }
-            }
-        });
-    }
+    palette_wiring::wire(&app, &state);
 
     {
         let state = state.clone();
@@ -3872,29 +3796,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
 
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_new_doc(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.new",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if request_document_replacement(&app, &state, PendingReplacement::NewDocument) {
-                    return;
-                }
-                begin_new_document(&app);
-            }
-        });
-    }
+    palette_wiring::wire_new_document(&app, &state);
 
     {
         let state = state.clone();
