@@ -1,263 +1,105 @@
-import {
-    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
-    LoomButton, LoomIconButton, LoomOverflowButton,
-} from "foundation.slint";
+import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "toolkit.slint";
+import { LoomOverflowButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
-export component SheetActionToolbar inherits LoomToolbar {
-    in property <bool> rtl: Theme.rtl;
-    in property <bool> wide: false;
-    in property <bool> icon-only: false;
-    in property <bool> overflow: false;
-    in property <bool> inspector-available: true;
+/// One icon-over-label row in three groups: View/Zoom/Add Sheet on the
+/// reading-start side, Chart/Table/Text/Shape/Image in the middle, and
+/// Export plus the two inspector tabs on the reading-end side. Items that
+/// open a menu report their window x through `toggle-menu`; every direct item
+/// sends a command id through `command`.
+export component SheetActionToolbar inherits LabeledToolbar {
     in property <bool> inspector-visible: false;
-    in property <bool> labeled-export: false;
-    in property <bool> can-undo: false;
-    in property <bool> can-redo: false;
-    in property <string> zoom-level: "125%";
-    in property <bool> cell-bold: false;
-    in property <bool> cell-italic: false;
-    in property <bool> cell-underline: false;
-    in property <int> cell-alignment: 0;
+    in property <int> inspector-tab: 0;
+    /// 0 = none, 1 = View, 2 = Zoom, 3 = Table, 4 = Text, 5 = Export.
+    in property <int> menu-kind: 0;
+    /// Window y just below the toolbar, where menus open.
+    out property <length> bottom-y: root.absolute-position.y + root.height;
 
-    callback undo;
-    callback redo;
-    callback new-sheet;
-    callback open-sheet;
-    callback save-sheet;
-    callback save-as-sheet;
-    callback open-palette;
-    callback toggle-inspector;
-    callback export-csv;
+    // Take the labeled slot's minimum height; the sheet needs the room.
+    max-height: Theme.tokens.metrics.labeled-toolbar-min-height;
+
+    callback command(string);
+    callback toggle-menu(int, length);
+    callback show-inspector-tab(int);
     callback overflow-requested;
-    callback zoom-clicked;
-    callback toggle-bold;
-    callback toggle-italic;
-    callback toggle-underline;
-    callback set-cell-alignment(int);
-    callback add-row;
-    callback add-col;
-    callback insert-chart;
-    callback organize;
+
+    /// Return keyboard focus to the Format item (after the inspector closes).
+    public function focus-inspector-trigger() { format-item.focus-item(); }
     public function focus-overflow-trigger() { overflow-button.grab-focus(); }
 
-    public function focus-inspector-trigger() {
-        if (root.icon-only) {
-            inspector-icon-button.grab-focus();
-        } else {
-            inspector-button.grab-focus();
-        }
-    }
-
     changed inspector-visible => {
-        if (!root.inspector-visible) {
-            root.focus-inspector-trigger();
-        }
+        if (!root.inspector-visible) { root.focus-inspector-trigger(); }
     }
 
-    // File commands stay on the local toolbar so Linux users can discover
-    // the core workflow without relying on a native menu host or shortcuts.
-    LoomToolbarGroup {
-        if root.wide : LoomButton {
-            icon: "plus";
-            label: "New";
-            variant: "ghost";
-            clicked => { root.new-sheet(); }
-        }
-        if !root.wide : LoomIconButton {
-            icon: "plus";
-            label: "New workbook";
-            tooltip: "Start a new workbook. Confirm before replacing unsaved changes.";
-            clicked => { root.new-sheet(); }
-        }
-        if root.wide : LoomButton {
-            icon: "open";
-            label: "Open";
-            variant: "ghost";
-            clicked => { root.open-sheet(); }
-        }
-        if !root.wide : LoomIconButton {
-            icon: "open";
-            label: "Open workbook";
-            tooltip: "Choose a workbook file to open.";
-            clicked => { root.open-sheet(); }
-        }
-        if root.wide : LoomButton {
-            icon: "save";
-            label: "Save";
-            variant: "ghost";
-            clicked => { root.save-sheet(); }
-        }
-        if !root.wide : LoomIconButton {
-            icon: "save";
-            label: "Save workbook";
-            tooltip: "Save changes to the current workbook.";
-            clicked => { root.save-sheet(); }
-        }
-        if root.wide : LoomButton {
-            icon: "save-as";
-            label: "Save As";
-            variant: "ghost";
-            clicked => { root.save-as-sheet(); }
-        }
-        if !root.wide : LoomIconButton {
-            icon: "save-as";
-            label: "Save workbook as";
-            tooltip: "Choose a file and save the current workbook there.";
-            clicked => { root.save-as-sheet(); }
-        }
-        if root.wide : LoomButton {
-            icon: "search";
-            label: "Commands";
-            variant: "ghost";
-            clicked => { root.open-palette(); }
-        }
-        if !root.wide : LoomIconButton {
-            icon: "search";
-            label: "Command palette";
-            tooltip: "Open the command palette to search for and run commands.";
-            clicked => { root.open-palette(); }
-        }
+    IconOverLabelToolbarItem {
+        icon: "view";
+        label: "View";
+        checked: root.menu-kind == 1;
+        clicked => { root.toggle-menu(1, self.absolute-position.x); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "zoom-fit";
+        label: "Zoom";
+        checked: root.menu-kind == 2;
+        clicked => { root.toggle-menu(2, self.absolute-position.x); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "plus";
+        label: "Add Sheet";
+        clicked => { root.command("sheets.add_sheet"); }
     }
 
-    LoomToolbarDivider { }
+    ToolbarSpacer { }
 
-    LoomToolbarGroup {
-        LoomButton {
-            icon: "zoom-in";
-            label: root.zoom-level;
-            variant: "ghost";
-            clicked => { root.zoom-clicked(); }
-        }
-        LoomIconButton {
-            icon: "undo";
-            label: "Undo";
-            tooltip: "Undo the most recent workbook change.";
-            enabled: root.can-undo;
-            clicked => { root.undo(); }
-        }
-        LoomIconButton {
-            icon: "redo";
-            label: "Redo";
-            tooltip: "Redo the last undone workbook change.";
-            enabled: root.can-redo;
-            clicked => { root.redo(); }
-        }
+    IconOverLabelToolbarItem {
+        icon: "chart";
+        label: "Chart";
+        clicked => { root.command("sheets.insert_chart"); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "table";
+        label: "Table";
+        checked: root.menu-kind == 3;
+        clicked => { root.toggle-menu(3, self.absolute-position.x); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "text";
+        label: "Text";
+        checked: root.menu-kind == 4;
+        clicked => { root.toggle-menu(4, self.absolute-position.x); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "shape";
+        label: "Shape";
+        clicked => { root.command("sheets.insert_shape"); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "image";
+        label: "Image";
+        clicked => { root.command("sheets.insert_image"); }
     }
 
-    LoomToolbarDivider { }
+    ToolbarSpacer { }
 
-    LoomToolbarGroup {
-        LoomIconButton {
-            icon: "bold";
-            label: "Toggle bold formatting (toolbar)";
-            tooltip: "Turn bold formatting on or off for selected cells from the toolbar.";
-            selected: root.cell-bold;
-            clicked => { root.toggle-bold(); }
-        }
-        LoomIconButton {
-            icon: "italic";
-            label: "Toggle italic formatting (toolbar)";
-            tooltip: "Turn italic formatting on or off for selected cells from the toolbar.";
-            selected: root.cell-italic;
-            clicked => { root.toggle-italic(); }
-        }
-        LoomIconButton {
-            icon: "underline";
-            label: "Toggle underline formatting (toolbar)";
-            tooltip: "Turn underline formatting on or off for selected cells from the toolbar.";
-            selected: root.cell-underline;
-            clicked => { root.toggle-underline(); }
-        }
+    IconOverLabelToolbarItem {
+        icon: "export";
+        label: "Export";
+        checked: root.menu-kind == 5;
+        clicked => { root.toggle-menu(5, self.absolute-position.x); }
     }
-
-    LoomToolbarDivider { }
-
-    LoomToolbarGroup {
-        LoomIconButton {
-            icon: "align-left";
-            label: "Align selected cells left";
-            tooltip: "Set horizontal alignment of selected cells to left.";
-            selected: root.cell-alignment == 0;
-            clicked => { root.set-cell-alignment(0); }
-        }
-        LoomIconButton {
-            icon: "align-center";
-            label: "Align selected cells center";
-            tooltip: "Set horizontal alignment of selected cells to center.";
-            selected: root.cell-alignment == 1;
-            clicked => { root.set-cell-alignment(1); }
-        }
-        LoomIconButton {
-            icon: "align-right";
-            label: "Align selected cells right";
-            tooltip: "Set horizontal alignment of selected cells to right.";
-            selected: root.cell-alignment == 2;
-            clicked => { root.set-cell-alignment(2); }
-        }
+    format-item := IconOverLabelToolbarItem {
+        icon: "format";
+        label: "Format";
+        checked: root.inspector-visible && root.inspector-tab == 1;
+        clicked => { root.show-inspector-tab(1); }
     }
-
-    LoomToolbarDivider { }
-
-    LoomToolbarGroup {
-        if !root.overflow : LoomButton {
-            icon: "plus";
-            label: "Row";
-            variant: "ghost";
-            clicked => { root.add-row(); }
-        }
-        if !root.overflow : LoomButton {
-            icon: "plus";
-            label: "Col";
-            variant: "ghost";
-            clicked => { root.add-col(); }
-        }
-        if !root.overflow : LoomButton {
-            icon: "chart";
-            label: "Chart";
-            variant: "ghost";
-            clicked => { root.insert-chart(); }
-        }
+    IconOverLabelToolbarItem {
+        icon: "organize";
+        label: "Organize";
+        checked: root.inspector-visible && root.inspector-tab == 0;
+        clicked => { root.show-inspector-tab(0); }
     }
-
-    LoomToolbarSpacer { }
-
-    LoomToolbarGroup {
-        if !root.overflow : LoomButton {
-            icon: "export";
-            label: root.labeled-export ? "Export" : "";
-            accessible-label: "Export CSV";
-            accessible-description: "Export the active worksheet as CSV";
-            variant: "ghost";
-            clicked => { root.export-csv(); }
-        }
-        inspector-icon-button := LoomIconButton {
-            visible: root.icon-only;
-            icon: "format";
-            label: "Format inspector";
-            tooltip: "Open or close the format inspector.";
-            selected: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        inspector-button := LoomButton {
-            visible: !root.icon-only;
-            icon: "format";
-            label: "Format";
-            variant: root.inspector-visible ? "primary" : "ghost";
-            selected: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        if !root.overflow : LoomButton {
-            icon: "organize";
-            label: "Sort";
-            variant: "ghost";
-            clicked => { root.organize(); }
-        }
-        overflow-button := LoomOverflowButton {
-            visible: root.overflow;
-            clicked => { root.overflow-requested(); }
-        }
+    overflow-button := LoomOverflowButton {
+        clicked => { root.overflow-requested(); }
     }
 }

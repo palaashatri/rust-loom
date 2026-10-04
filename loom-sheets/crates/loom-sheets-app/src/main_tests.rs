@@ -48,6 +48,8 @@ mod open_operation_journeys;
 mod save_operations_journeys;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
+#[path = "main_tests/toolbar_tests.rs"]
+mod toolbar_tests;
 #[path = "main_tests/workbook_interop_tests.rs"]
 mod workbook_interop_tests;
 #[path = "main_tests/workbook_state_tests.rs"]

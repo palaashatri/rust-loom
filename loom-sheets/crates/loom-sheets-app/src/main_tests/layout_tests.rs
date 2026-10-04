@@ -331,112 +331,93 @@ fn assert_inspector_and_toolbar_fit(
         );
     }
 
-    let icon_only = width / text_scale.max(1.0) < 1180.0;
-    let mut always_visible = vec![
-        "Undo",
-        "Redo",
-        "Toggle bold formatting (toolbar)",
-        "Toggle italic formatting (toolbar)",
-        "Toggle underline formatting (toolbar)",
-        "Align selected cells left",
-        "Align selected cells center",
-        "Align selected cells right",
-        if icon_only {
-            "Format inspector"
-        } else {
-            "Format"
-        },
-    ];
-    if app.get_labeled_toolbar() {
-        always_visible.extend(["New", "Open", "Save", "Save As", "Commands"]);
-    } else {
-        always_visible.extend([
-            "New workbook",
-            "Open workbook",
-            "Save workbook",
-            "Save workbook as",
-            "Command palette",
-        ]);
-    }
-    for label in always_visible {
+    // The toolbar is always the icon-over-label row; every item must stay inside
+    // the window at every scale, and the More actions menu holds the rest.
+    for label in [
+        "View",
+        "Zoom",
+        "Add Sheet",
+        "Chart",
+        "Table",
+        "Text",
+        "Shape",
+        "Image",
+        "Export",
+        "Format",
+        "Organize",
+        "More actions",
+    ] {
         assert_control_inside(&app, width, height, text_scale, theme, label);
     }
 
-    if app.get_overflow_toolbar() {
-        assert_control_inside(&app, width, height, text_scale, theme, "More actions");
-        app.set_toolbar_overflow_open(true);
-        let _ = snapshot_component(&app, width, height, 1.0).expect("render toolbar overflow");
-        let actions = [
-            "Add row",
-            "Add column",
-            "Insert chart",
-            "Export CSV",
-            "Export Excel",
-            "Sort",
-        ];
-        let mut previous_bottom = None;
-        for label in actions {
-            assert_control_inside(&app, width, height, text_scale, theme, label);
-            let control = assert_control_inside_component(
-                &app,
-                "SheetToolbarOverflow::popup-panel",
-                label,
-                width,
-                height,
-                text_scale,
-                theme,
+    app.set_toolbar_overflow_open(true);
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render toolbar overflow");
+    let actions = ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
+    let mut previous_bottom = None;
+    for label in actions {
+        let control = assert_control_inside_component(
+            &app,
+            "SheetToolbarOverflow::popup-panel",
+            label,
+            width,
+            height,
+            text_scale,
+            theme,
+        );
+        let position = control.absolute_position();
+        if let Some(bottom) = previous_bottom {
+            assert!(
+                bottom <= position.y + 1.0,
+                "overflow action {label:?} overlaps the previous entry at {text_scale}x in {theme} at {width}x{height}"
             );
-            let position = control.absolute_position();
-            if let Some(bottom) = previous_bottom {
-                assert!(
-                    bottom <= position.y + 1.0,
-                    "overflow action {label:?} overlaps the previous entry at {text_scale}x in {theme} at {width}x{height}"
-                );
-            }
-            previous_bottom = Some(position.y + control.size().height);
         }
-    } else {
-        for label in ["Row", "Col", "Chart", "Export CSV", "Sort"] {
-            assert_control_inside(&app, width, height, text_scale, theme, label);
-        }
+        previous_bottom = Some(position.y + control.size().height);
     }
 }
 
 #[test]
-fn compact_overflow_entries_dispatch_their_actions() {
-    use std::{cell::RefCell, rc::Rc};
-
+fn more_actions_entries_run_their_commands() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
+    toolbar_commands::wire(&app);
     let calls = Rc::new(RefCell::new(Vec::new()));
-    let action_calls = calls.clone();
-    app.on_add_row(move || action_calls.borrow_mut().push("row"));
-    let action_calls = calls.clone();
-    app.on_add_table_col(move || action_calls.borrow_mut().push("column"));
-    let action_calls = calls.clone();
-    app.on_insert_chart(move || action_calls.borrow_mut().push("chart"));
-    let action_calls = calls.clone();
-    app.on_export_csv(move || action_calls.borrow_mut().push("csv"));
-    let action_calls = calls.clone();
-    app.on_export_xlsx(move || action_calls.borrow_mut().push("xlsx"));
-    let action_calls = calls.clone();
-    app.on_organize(move || action_calls.borrow_mut().push("sort"));
-
+    for (name, handler) in [
+        ("new", 0),
+        ("open", 1),
+        ("save", 2),
+        ("save-as", 3),
+        ("palette", 4),
+        ("undo", 5),
+        ("redo", 6),
+    ] {
+        let calls = calls.clone();
+        let record = move || calls.borrow_mut().push(name);
+        match handler {
+            0 => app.on_new_sheet(record),
+            1 => app.on_open_sheet(record),
+            2 => app.on_save_sheet(record),
+            3 => app.on_save_as_sheet(record),
+            4 => {}
+            5 => app.on_undo(record),
+            _ => app.on_redo(record),
+        }
+    }
+    app.set_can_undo(true);
+    app.set_can_redo(true);
     app.set_template_text_scale(2.0);
     apply_layout_breakpoints(&app, 1024);
-    assert!(app.get_overflow_toolbar());
     for (label, expected) in [
-        ("Add row", "row"),
-        ("Add column", "column"),
-        ("Insert chart", "chart"),
-        ("Export CSV", "csv"),
-        ("Export Excel", "xlsx"),
-        ("Sort", "sort"),
+        ("Undo", "undo"),
+        ("Redo", "redo"),
+        ("New", "new"),
+        ("Open", "open"),
+        ("Save", "save"),
+        ("Save As", "save-as"),
     ] {
         app.set_toolbar_overflow_open(true);
         let _ = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render toolbar overflow");
         let action = ElementHandle::find_by_accessible_label(&app, label)
-            .next()
+            .find(|e| e.accessible_role() == Some(AccessibleRole::ListItem))
             .unwrap_or_else(|| panic!("overflow entry {label:?} is accessible"));
         action.invoke_accessible_default_action();
         assert_eq!(calls.borrow().last(), Some(&expected));
@@ -448,16 +429,17 @@ fn compact_overflow_entries_dispatch_their_actions() {
 }
 
 #[test]
-fn compact_overflow_keyboard_activation_and_escape_restore_trigger_focus() {
+fn more_actions_keyboard_activation_and_escape_restore_trigger_focus() {
     use std::{cell::Cell, rc::Rc};
 
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
+    toolbar_commands::wire(&app);
     app.set_template_text_scale(2.0);
     apply_layout_breakpoints(&app, 1024);
-    let rows = Rc::new(Cell::new(0));
-    let row_calls = rows.clone();
-    app.on_add_row(move || row_calls.set(row_calls.get() + 1));
+    let news = Rc::new(Cell::new(0));
+    let new_calls = news.clone();
+    app.on_new_sheet(move || new_calls.set(new_calls.get() + 1));
     let render =
         || snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render keyboard overflow journey");
     let press = |key: slint::platform::Key| {
@@ -474,8 +456,9 @@ fn compact_overflow_keyboard_activation_and_escape_restore_trigger_focus() {
         .invoke_accessible_default_action();
     let _ = render();
     assert!(app.get_toolbar_overflow_open());
+    // Undo and Redo are disabled in a new window, so New is the first live row.
     press(slint::platform::Key::Return);
-    assert_eq!(rows.get(), 1, "Return activates the first popup entry");
+    assert_eq!(news.get(), 1, "Return runs the first enabled popup entry");
     assert!(!app.get_toolbar_overflow_open());
 
     let _ = render();
@@ -485,9 +468,8 @@ fn compact_overflow_keyboard_activation_and_escape_restore_trigger_focus() {
         app.get_toolbar_overflow_open(),
         "focus returns to More actions"
     );
-    press(slint::platform::Key::Tab);
     press(slint::platform::Key::Escape);
-    assert!(!app.get_toolbar_overflow_open(), "Escape works after Tab");
+    assert!(!app.get_toolbar_overflow_open(), "Escape closes the menu");
     let _ = render();
     press(slint::platform::Key::Return);
     let _ = render();
@@ -495,7 +477,7 @@ fn compact_overflow_keyboard_activation_and_escape_restore_trigger_focus() {
         app.get_toolbar_overflow_open(),
         "Escape restores trigger focus"
     );
-    assert_eq!(rows.get(), 1, "reopening must not activate a popup entry");
+    assert_eq!(news.get(), 1, "reopening must not run a popup entry");
 }
 
 fn assert_control_inside(

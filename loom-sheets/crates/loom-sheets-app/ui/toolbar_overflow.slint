@@ -1,21 +1,39 @@
-import { LoomButton } from "foundation.slint";
+import { LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
 
+/// The "More actions" menu: file and history commands that have no toolbar
+/// item. Up/Down move over the enabled rows, Return or Space run the selected
+/// one, Escape closes. Every row sends a command id through `command`.
 export component SheetToolbarOverflow inherits Rectangle {
     in property <bool> open: false;
     in property <bool> available: false;
     in property <bool> rtl: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
     in property <length> content-width: 0px;
     in property <length> content-height: 0px;
+    in property <length> menu-y: 0px;
     callback close-requested;
-    callback add-row;
-    callback add-column;
-    callback insert-chart;
-    callback export-csv;
-    callback export-xlsx;
-    callback organize;
+    callback command(string);
     public function focus-first-action() {
-        if (root.open && root.available) { first-action.grab-focus(); }
+        if (root.open && root.available) {
+            root.selected = root.can-undo ? 0 : root.can-redo ? 1 : 2;
+            menu-focus.focus();
+        }
+    }
+
+    property <int> selected: 2;
+    property <[string]> labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
+    property <[string]> ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette"];
+    property <[string]> shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K"];
+    pure function enabled-at(idx: int) -> bool {
+        return idx == 0 ? root.can-undo : idx == 1 ? root.can-redo : true;
+    }
+    /// The next enabled row in `delta` direction (Undo and Redo may be off).
+    function step(delta: int) {
+        root.selected = Math.mod(root.selected + delta + 7, 7);
+        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + 7, 7); }
+        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + 7, 7); }
     }
 
     visible: root.open && root.available;
@@ -26,15 +44,10 @@ export component SheetToolbarOverflow inherits Rectangle {
     TouchArea { clicked => { root.close-requested(); } }
 
     popup-panel := Rectangle {
-        x: root.rtl ? 8px : max(8px, root.content-width - 272px);
-        y: Theme.tokens.metrics.header-height
-            + Theme.tokens.metrics.sheet-tab-height
-            + Theme.tokens.metrics.toolbar-height + 8px;
-        width: 256px;
-        height: min(popup-layout.preferred-height, root.content-height
-            - Theme.tokens.metrics.header-height
-            - Theme.tokens.metrics.sheet-tab-height
-            - Theme.tokens.metrics.toolbar-height - 16px);
+        x: root.rtl ? 8px : max(8px, root.content-width - 248px);
+        y: root.menu-y + 8px;
+        width: 240px;
+        height: min(popup-layout.preferred-height, root.content-height - root.menu-y - 16px);
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -43,66 +56,27 @@ export component SheetToolbarOverflow inherits Rectangle {
         drop-shadow-offset-y: 4px;
         drop-shadow-color: Theme.palette().shadow;
 
-        FocusScope {
+        menu-focus := FocusScope {
             enabled: root.open && root.available;
             key-pressed(event) => {
-                if (event.text == Key.Escape) {
-                    root.close-requested();
+                if (event.text == Key.Escape) { root.close-requested(); return accept; }
+                if (event.text == Key.DownArrow) { root.step(1); return accept; }
+                if (event.text == Key.UpArrow) { root.step(-1); return accept; }
+                if (event.text == Key.Return || event.text == " ") {
+                    if (root.enabled-at(root.selected)) { root.command(root.ids[root.selected]); }
                     return accept;
                 }
                 return reject;
             }
             popup-layout := VerticalLayout {
-                spacing: Theme.tokens.space.sm;
-                padding: Theme.tokens.space.md;
-
-                first-action := LoomButton {
-                    icon: "plus";
-                    label: "Add row";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.add-row(); }
-                }
-                LoomButton {
-                    icon: "plus";
-                    label: "Add column";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.add-column(); }
-                }
-                LoomButton {
-                    icon: "chart";
-                    label: "Insert chart";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.insert-chart(); }
-                }
-                LoomButton {
-                    icon: "export";
-                    label: "Export CSV";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.export-csv(); }
-                }
-                LoomButton {
-                    icon: "export";
-                    label: "Export Excel";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.export-xlsx(); }
-                }
-                LoomButton {
-                    icon: "organize";
-                    label: "Sort";
-                    variant: "ghost";
-                    leading: true;
-                    horizontal-stretch: 1;
-                    clicked => { root.organize(); }
+                spacing: 2px;
+                padding: Theme.tokens.space.sm;
+                for label[idx] in root.labels : LoomMenuItem {
+                    label: label;
+                    shortcut: root.shortcuts[idx];
+                    enabled: root.enabled-at(idx);
+                    selected: idx == root.selected;
+                    activated => { root.command(root.ids[idx]); }
                 }
             }
         }

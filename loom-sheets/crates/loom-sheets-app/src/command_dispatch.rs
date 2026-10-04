@@ -58,6 +58,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.freeze_header" | "sheets.freeze-header" => app.invoke_freeze_panes(),
         "table.unfreeze_panes" | "sheets.unfreeze-panes" => app.invoke_unfreeze_panes(),
         "sheets.delete_sheet" => app.invoke_delete_sheet(),
+        "sheets.add_sheet" => app.invoke_add_sheet(),
         "sheets.organize" => app.invoke_organize(),
         "format.bold" | "sheets.bold" => app.invoke_toggle_bold(),
         "format.italic" | "sheets.italic" => app.invoke_toggle_italic(),

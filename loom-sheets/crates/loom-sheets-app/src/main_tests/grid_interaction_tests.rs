@@ -656,7 +656,7 @@ fn typing_is_mirrored_inside_the_active_cell() {
         // Only A1's pixels: below the pinned column header, right of the row
         // header, and clear of the formula bar so its own text cannot count.
         let mut pixels = Vec::new();
-        for y in 132..156 {
+        for y in 178..198 {
             for x in 38..114 {
                 pixels.push(image.get_pixel(x, y).0);
             }

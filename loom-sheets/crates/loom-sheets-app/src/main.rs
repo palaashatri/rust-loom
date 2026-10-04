@@ -121,6 +121,7 @@ mod system_clipboard;
 use actions::*;
 
 mod command_dispatch;
+mod toolbar_commands;
 use command_dispatch::*;
 
 mod cell_actions;
@@ -1697,12 +1698,6 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     app.set_wide_toolbar(state.labeled);
     app.set_labeled_export(state.labeled);
     app.set_overflow_toolbar(state.overflow);
-    if !state.overflow && app.get_toolbar_overflow_open() {
-        app.invoke_close_toolbar_overflow();
-    }
-    if !state.overflow {
-        app.set_toolbar_overflow_open(false);
-    }
     // Keep Format available at every width. The UI moves it into a drawer
     // when the window is compact instead of disabling the action.
     app.set_inspector_available(true);
@@ -2395,6 +2390,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
+    toolbar_commands::start_with_inspector_open(&app);
+    toolbar_commands::wire(&app);
 
     let save_operations = save_operations::SaveOperations::default();
     let save_completion_sender = save_operations.sender();

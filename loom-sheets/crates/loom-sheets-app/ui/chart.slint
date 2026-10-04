@@ -229,7 +229,7 @@ export component SheetChart inherits Rectangle {
             // Reserve enough height for the labels and a scaled bar area before
             // the percentage cap, so a short panel at a large text scale cannot
             // collapse the plot onto its own captions.
-            min-height: max(20px + 61px * max(1.0, root.text-scale), min(112px * max(1.0, root.text-scale), root.height * 0.20));
+            min-height: max(20px + 57px * max(1.0, root.text-scale), min(112px * max(1.0, root.text-scale), root.height * 0.20));
 
             if root.point-count == 0 : Text {
                 x: Theme.tokens.space.lg;

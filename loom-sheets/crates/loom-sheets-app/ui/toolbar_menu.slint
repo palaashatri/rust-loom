@@ -1,0 +1,80 @@
+import { LoomMenuItem } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// The menu that opens under a toolbar item, with its click-away scrim and
+/// keyboard handling (Up/Down move, Return or Space run, Escape closes).
+/// Every row sends a command id through `command`; the shared Rust dispatcher
+/// performs it.
+export component SheetToolbarMenu inherits Rectangle {
+    /// 1 = View, 2 = Zoom, 3 = Table, 4 = Text, 5 = Export; 0 hides the menu.
+    in property <int> kind: 0;
+    in property <length> menu-x: 0px;
+    in property <length> menu-y: 0px;
+    in property <bool> inspector-visible: false;
+    in property <bool> cell-bold: false;
+    in property <bool> cell-italic: false;
+    in property <bool> cell-underline: false;
+    in property <int> cell-alignment: 0;
+    callback command(string);
+    callback close-requested;
+    public function focus-menu() { menu-focus.focus(); }
+
+    property <int> selected: 0;
+    property <[string]> labels: root.kind == 1 ? ["Format Inspector", "Command Palette"]
+        : root.kind == 2 ? ["Zoom In", "Zoom Out", "Actual Size"]
+        : root.kind == 3 ? ["Add Row", "Add Column", "Sort"]
+        : root.kind == 4 ? ["Bold", "Italic", "Underline", "Align Left", "Align Center", "Align Right"]
+        : root.kind == 5 ? ["Export CSV", "Export Excel"] : [];
+    property <[string]> ids: root.kind == 1 ? ["view.inspector", "app.palette"]
+        : root.kind == 2 ? ["view.zoom_in", "view.zoom_out", "view.zoom_actual"]
+        : root.kind == 3 ? ["table.add_row", "table.add_col", "sheets.organize"]
+        : root.kind == 4 ? ["format.bold", "format.italic", "format.underline", "format.align_left", "format.align_center", "format.align_right"]
+        : root.kind == 5 ? ["file.export_csv", "file.export_xlsx"] : [];
+    property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false]
+        : root.kind == 4 ? [root.cell-bold, root.cell-italic, root.cell-underline,
+            root.cell-alignment == 0, root.cell-alignment == 1, root.cell-alignment == 2] : [];
+
+    changed kind => { root.selected = 0; }
+
+    visible: root.kind != 0;
+    background: transparent;
+    TouchArea { clicked => { root.close-requested(); } }
+
+    menu-focus := FocusScope {
+        enabled: root.kind != 0;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            if (event.text == Key.DownArrow) { root.selected = Math.mod(root.selected + 1, root.labels.length); return accept; }
+            if (event.text == Key.UpArrow) { root.selected = Math.mod(root.selected + root.labels.length - 1, root.labels.length); return accept; }
+            if (event.text == Key.Return || event.text == " ") {
+                if (root.selected < root.ids.length) { root.command(root.ids[root.selected]); }
+                return accept;
+            }
+            return reject;
+        }
+    }
+    Rectangle {
+        x: max(0px, min(root.menu-x, root.width - self.width - 8px));
+        y: root.menu-y;
+        width: 220px;
+        height: items.preferred-height;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: Theme.palette().shadow;
+
+        items := VerticalLayout {
+            spacing: 2px;
+            padding: Theme.tokens.space.sm;
+            for label[idx] in root.labels : LoomMenuItem {
+                label: label;
+                checked: idx < root.checks.length && root.checks[idx];
+                selected: idx == root.selected;
+                activated => { root.command(root.ids[idx]); }
+            }
+        }
+    }
+}

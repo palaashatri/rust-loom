@@ -285,7 +285,9 @@ fn sheets_inspector_menu_check_tracks_live_window_state() {
 }
 
 #[test]
-fn expanding_past_overflow_breakpoint_closes_menu() {
+fn the_more_actions_menu_stays_open_when_the_window_widens() {
+    // The menu holds file and history commands that have no toolbar item, so
+    // it is offered at every width and widening must not close it.
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
     apply_layout_breakpoints(&app, 1024);
@@ -295,7 +297,7 @@ fn expanding_past_overflow_breakpoint_closes_menu() {
     apply_layout_breakpoints(&app, 1320);
 
     assert!(!app.get_overflow_toolbar());
-    assert!(!app.get_toolbar_overflow_open());
+    assert!(app.get_toolbar_overflow_open());
 }
 
 #[test]

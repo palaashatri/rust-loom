@@ -142,7 +142,7 @@ export component SheetInspector inherits LoomPanel {
         }
 
         LoomTabStrip {
-            items: ["Table", "Cell"];
+            items: ["Organize", "Format"];
             current <=> root.inspector-tab;
             selected(idx) => { root.inspector-context-changed(idx); }
         }

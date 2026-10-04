@@ -13,6 +13,7 @@ pub(super) fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let (w, h) = args.size;
     app.window().set_size(PhysicalSize::new(w, h));
     apply_layout_breakpoints(&app, w);
+    toolbar_commands::start_with_inspector_open(&app);
     if args.inspector {
         app.set_inspector_preference(true);
         app.set_show_inspector(true);

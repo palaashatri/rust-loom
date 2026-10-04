@@ -96,17 +96,15 @@ export component ToolbarGroup inherits Rectangle {
 
 export component ToolbarSpacer inherits Rectangle { horizontal-stretch: 1; background: transparent; }
 
-/// Canonical Loom toolbar item: icon on top, label below.
-///
-/// This neutral primitive is the sole state/geometry implementation. The
-/// historical `AppleToolbarItem` spelling below is compatibility-only so the
-/// product identity is not coupled to a third-party brand.
+/// Canonical Loom toolbar item: icon on top, label below. `AppleToolbarItem`
+/// below is a compatibility alias only.
 export component IconOverLabelToolbarItem inherits Rectangle {
     in property <string> icon: "generic";
     in property <string> label: "";
     in property <bool> enabled: true;
     in property <bool> checked: false;
     callback clicked;
+    public function focus-item() { focus.focus(); }
 
     min-width: max(48px, label-text.preferred-width + 16px);
     preferred-width: max(48px, label-text.preferred-width + 16px);

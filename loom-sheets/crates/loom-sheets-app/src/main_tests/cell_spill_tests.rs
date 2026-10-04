@@ -115,8 +115,8 @@ fn rendered_text_crosses_empty_cells_but_is_clipped_at_a_filled_one() {
     );
 }
 
-/// Row 1 in a 1280x800 window starts below the menu, toolbar, formula bar and
+/// Row 1 in a 1280x800 window starts below the menu, toolbar, sheet tabs, formula bar and
 /// column headers (inspected in a captured image).
 fn row_band(_app: &SheetsApp) -> (u32, u32) {
-    (136, 156)
+    (180, 196)
 }

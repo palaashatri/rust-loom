@@ -2,6 +2,8 @@ use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use std::collections::HashSet;
 
+// The toolbar is icon-over-label items and menu rows; its accessible names
+// are checked in `toolbar_tests.rs`. These are the remaining icon buttons.
 const SHARED_ACTIONS: &[(&str, &str)] = &[
     ("Add sheet", "Add a worksheet to this workbook."),
     (
@@ -11,46 +13,6 @@ const SHARED_ACTIONS: &[(&str, &str)] = &[
     (
         "Cancel formula edit",
         "Discard formula bar changes and keep the current cell value.",
-    ),
-    (
-        "New workbook",
-        "Start a new workbook. Confirm before replacing unsaved changes.",
-    ),
-    ("Open workbook", "Choose a workbook file to open."),
-    ("Save workbook", "Save changes to the current workbook."),
-    (
-        "Save workbook as",
-        "Choose a file and save the current workbook there.",
-    ),
-    (
-        "Command palette",
-        "Open the command palette to search for and run commands.",
-    ),
-    ("Undo", "Undo the most recent workbook change."),
-    ("Redo", "Redo the last undone workbook change."),
-    (
-        "Toggle bold formatting (toolbar)",
-        "Turn bold formatting on or off for selected cells from the toolbar.",
-    ),
-    (
-        "Toggle italic formatting (toolbar)",
-        "Turn italic formatting on or off for selected cells from the toolbar.",
-    ),
-    (
-        "Toggle underline formatting (toolbar)",
-        "Turn underline formatting on or off for selected cells from the toolbar.",
-    ),
-    (
-        "Align selected cells left",
-        "Set horizontal alignment of selected cells to left.",
-    ),
-    (
-        "Align selected cells center",
-        "Set horizontal alignment of selected cells to center.",
-    ),
-    (
-        "Align selected cells right",
-        "Set horizontal alignment of selected cells to right.",
     ),
     (
         "Hide chart panel",
@@ -214,11 +176,8 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
     })
     .sum::<usize>();
     let semantic_action_count = SHARED_ACTIONS.len() + TABLE_ACTIONS.len() + CELL_ACTIONS.len();
-    // Format has one labeled button and one compact icon-button implementation;
-    // the responsive variants are one action and only one is visible at a time.
     assert_eq!(
-        source_instances,
-        semantic_action_count + 1,
+        source_instances, semantic_action_count,
         "update this accessibility contract when adding or removing a Sheets icon action"
     );
 
