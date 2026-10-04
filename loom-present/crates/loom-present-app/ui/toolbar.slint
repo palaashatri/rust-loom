@@ -1,117 +1,148 @@
-import {
-    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
-    LoomButton, LoomIconButton, LoomOverflowButton,
-} from "foundation.slint";
+import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "components.slint";
+import { LoomOverflowButton, LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
 
-export component PresentActionToolbar inherits LoomToolbar {
-    in property <bool> rtl: Theme.rtl;
-    in property <bool> wide: false;
+/// One icon-over-label row in three groups: View/Zoom/Add Slide on the
+/// reading-start side, Insert/Text/Shape in the middle, Play and the three
+/// inspector tabs on the reading-end side.
+export component PresentActionToolbar inherits LabeledToolbar {
     in property <bool> overflow: false;
     in property <bool> inspector-visible: false;
-    in property <bool> notes-visible: false;
+    in property <int> inspector-tab: 0;
+    in property <bool> view-menu-open: false;
+    in property <bool> zoom-menu-open: false;
     in property <bool> is-preview-mode: false;
-    in property <bool> can-undo: false;
-    in property <bool> can-redo: false;
+    /// Window x of the View and Zoom items, so their menus open beneath them.
+    out property <length> view-x: view-item.absolute-position.x;
+    out property <length> zoom-x: zoom-item.absolute-position.x;
 
-    callback toggle-notes;
-    callback open-theme-chooser;
+    callback toggle-view-menu;
+    callback toggle-zoom-menu;
     callback add-slide;
     callback add-text;
     callback add-shape;
     callback add-picture;
     callback toggle-preview;
-    callback toggle-inspector;
-    callback export-pdf;
+    callback show-inspector-tab(int);
     callback overflow-requested;
-    callback undo;
-    callback redo;
 
-    LoomToolbarGroup {
-        LoomIconButton {
-            icon: "undo";
-            label: "Undo";
-            tooltip: "Undo last edit (Cmd+Z)";
-            enabled: root.can-undo;
-            clicked => { root.undo(); }
-        }
-        LoomIconButton {
-            icon: "redo";
-            label: "Redo";
-            tooltip: "Redo last edit (Cmd+Shift+Z)";
-            enabled: root.can-redo;
-            clicked => { root.redo(); }
-        }
-        LoomIconButton {
-            icon: "plus";
-            label: "Add Slide";
-            tooltip: "Add a new slide";
-            clicked => { root.add-slide(); }
-        }
+    view-item := IconOverLabelToolbarItem {
+        icon: "view";
+        label: "View";
+        checked: root.view-menu-open;
+        clicked => { root.toggle-view-menu(); }
+    }
+    zoom-item := IconOverLabelToolbarItem {
+        icon: "zoom-fit";
+        label: "Zoom";
+        checked: root.zoom-menu-open;
+        clicked => { root.toggle-zoom-menu(); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "slide";
+        label: "Add Slide";
+        clicked => { root.add-slide(); }
     }
 
-    LoomToolbarDivider { }
+    ToolbarSpacer { }
 
-    LoomToolbarGroup {
-        LoomIconButton {
-            icon: "text";
-            label: "Text";
-            tooltip: "Add text box";
-            clicked => { root.add-text(); }
-        }
-        LoomIconButton {
-            icon: "shape";
-            label: "Shape";
-            tooltip: "Add shape";
-            clicked => { root.add-shape(); }
-        }
-        LoomIconButton {
-            icon: "image";
-            label: "Image";
-            tooltip: "Insert image (PNG or JPEG)";
-            clicked => { root.add-picture(); }
-        }
-        LoomIconButton {
-            icon: "format";
-            label: "Theme";
-            tooltip: "Choose presentation theme";
-            clicked => { root.open-theme-chooser(); }
-        }
-        LoomIconButton {
-            icon: "eye";
-            label: "Notes";
-            tooltip: "Toggle speaker notes drawer";
-            selected: root.notes-visible;
-            clicked => { root.toggle-notes(); }
-        }
+    IconOverLabelToolbarItem {
+        icon: "image";
+        label: "Insert";
+        clicked => { root.add-picture(); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "text";
+        label: "Text";
+        clicked => { root.add-text(); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "shape";
+        label: "Shape";
+        clicked => { root.add-shape(); }
     }
 
-    LoomToolbarSpacer { }
+    ToolbarSpacer { }
 
-    LoomToolbarGroup {
-        LoomIconButton {
-            icon: "play";
-            label: "Play";
-            tooltip: "Start slideshow (F5)";
-            selected: root.is-preview-mode;
-            clicked => { root.toggle-preview(); }
+    IconOverLabelToolbarItem {
+        icon: "play";
+        label: "Play";
+        checked: root.is-preview-mode;
+        clicked => { root.toggle-preview(); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "format";
+        label: "Format";
+        checked: root.inspector-visible && root.inspector-tab == 0;
+        clicked => { root.show-inspector-tab(0); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "sparkle";
+        label: "Animate";
+        checked: root.inspector-visible && root.inspector-tab == 1;
+        clicked => { root.show-inspector-tab(1); }
+    }
+    IconOverLabelToolbarItem {
+        icon: "document";
+        label: "Document";
+        checked: root.inspector-visible && root.inspector-tab == 2;
+        clicked => { root.show-inspector-tab(2); }
+    }
+    if root.overflow : LoomOverflowButton {
+        tooltip: "More presentation commands";
+        clicked => { root.overflow-requested(); }
+    }
+}
+
+/// The small menu under the View and Zoom toolbar items.
+export component PresentToolbarMenu inherits Rectangle {
+    /// 0 = View (pane toggles), 1 = Zoom (slide size).
+    in property <int> kind: 0;
+    in property <bool> navigator-visible: true;
+    in property <bool> notes-visible: false;
+    in property <int> zoom-index: 0;
+    callback toggle-navigator;
+    callback toggle-notes;
+    callback choose-zoom(int);
+    callback close-requested;
+
+    width: 200px;
+    height: menu-items.preferred-height + 2 * Theme.tokens.space.sm;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    menu-items := VerticalLayout {
+        spacing: 2px;
+        padding: Theme.tokens.space.sm;
+        if root.kind == 0 : LoomMenuItem {
+            label: "Navigator";
+            checked: root.navigator-visible;
+            activated => { root.toggle-navigator(); root.close-requested(); }
         }
-        LoomIconButton {
-            icon: "format";
-            label: "Inspector";
-            tooltip: "Format Inspector (Cmd+Option+I)";
-            selected: root.inspector-visible;
-            clicked => { root.toggle-inspector(); }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Speaker Notes";
+            checked: root.notes-visible;
+            activated => { root.toggle-notes(); root.close-requested(); }
         }
-        LoomIconButton {
-            icon: "export";
-            label: "Export PDF";
-            tooltip: "Export presentation as PDF (Cmd+E)";
-            clicked => { root.export-pdf(); }
+        if root.kind == 1 : LoomMenuItem {
+            label: "Fit";
+            checked: root.zoom-index == 0;
+            activated => { root.choose-zoom(0); root.close-requested(); }
         }
-        if root.overflow : LoomOverflowButton {
-            tooltip: "More presentation commands";
-            clicked => { root.overflow-requested(); }
+        if root.kind == 1 : LoomMenuItem {
+            label: "75%";
+            checked: root.zoom-index == 1;
+            activated => { root.choose-zoom(1); root.close-requested(); }
+        }
+        if root.kind == 1 : LoomMenuItem {
+            label: "50%";
+            checked: root.zoom-index == 2;
+            activated => { root.choose-zoom(2); root.close-requested(); }
         }
     }
 }

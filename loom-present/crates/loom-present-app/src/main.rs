@@ -1539,7 +1539,11 @@ fn build_present_menu_bar() -> MenuBar {
             MenuItem::action("file.export_pptx", "Export to PowerPoint..."),
         ],
         vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        vec![
+            MenuItem::check("view.navigator", "Navigator", true),
+            MenuItem::check("view.notes", "Speaker Notes", false),
+            MenuItem::check("view.inspector", "Format Inspector", false),
+        ],
         vec![Menu::new(
             "Slide",
             vec![
@@ -1597,6 +1601,7 @@ fn menu_projection(
     inspector.enabled = state.inspector_available.get();
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
+    view_state::project(&mut projection, app);
 
     let mut slide_delete = projection.get("slide.delete").cloned().ok_or_else(|| {
         DesktopError::InvalidRequest("Present menu is missing slide.delete".into())
@@ -1656,6 +1661,7 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "slide.prev" => app.invoke_prev_slide(),
         "slide.next" => app.invoke_next_slide(),
         "view.inspector" => app.invoke_toggle_inspector(),
+        id if view_state::dispatch(app, id) => {}
         "app.palette" => app.invoke_open_palette(),
         _ => return false,
     }
@@ -1681,6 +1687,8 @@ fn is_present_menu_command(id: &str) -> bool {
             | "slide.prev"
             | "slide.next"
             | "view.inspector"
+            | "view.navigator"
+            | "view.notes"
             | "app.palette"
     )
 }
@@ -1784,6 +1792,7 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 }
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
+    view_state::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3132,9 +3141,12 @@ mod model_sync;
 mod picture_view;
 mod presenter;
 mod presenter_thumbs;
+mod view_state;
 mod window_chrome;
 
 #[cfg(test)]
 mod frame_bench_tests;
 #[cfg(test)]
 mod text_scale_tests;
+#[cfg(test)]
+mod toolbar_tests;

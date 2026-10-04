@@ -66,16 +66,13 @@ export component PresentStatusBar inherits LoomStatusBar {
     }
 }
 
+/// Commands that have no toolbar item of their own.
 export component PresentToolbarOverflow inherits Rectangle {
-    in property <bool> inspector-visible: false;
-    callback toggle-notes;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    callback undo;
+    callback redo;
     callback open-theme-chooser;
-    callback add-slide;
-    callback add-text;
-    callback add-shape;
-    callback add-picture;
-    callback toggle-preview;
-    callback toggle-inspector;
     callback export-pdf;
     callback export-pptx;
     callback close-requested;
@@ -96,52 +93,24 @@ export component PresentToolbarOverflow inherits Rectangle {
         padding: Theme.tokens.space.sm;
 
         LoomButton {
-            icon: "eye";
-            label: "View speaker notes";
+            icon: "undo";
+            label: "Undo";
             variant: "ghost";
-            clicked => { root.toggle-notes(); root.close-requested(); }
+            enabled: root.can-undo;
+            clicked => { root.undo(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "redo";
+            label: "Redo";
+            variant: "ghost";
+            enabled: root.can-redo;
+            clicked => { root.redo(); root.close-requested(); }
         }
         LoomButton {
             icon: "format";
             label: "Choose theme";
             variant: "ghost";
             clicked => { root.open-theme-chooser(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "plus";
-            label: "Add slide";
-            variant: "ghost";
-            clicked => { root.add-slide(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "text";
-            label: "Add text";
-            variant: "ghost";
-            clicked => { root.add-text(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "shape";
-            label: "Add shape";
-            variant: "ghost";
-            clicked => { root.add-shape(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "image";
-            label: "Insert image";
-            variant: "ghost";
-            clicked => { root.add-picture(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "play";
-            label: "Start slideshow";
-            variant: "ghost";
-            clicked => { root.toggle-preview(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "format";
-            label: "Format inspector";
-            variant: root.inspector-visible ? "primary" : "ghost";
-            clicked => { root.toggle-inspector(); root.close-requested(); }
         }
         LoomButton {
             icon: "export";

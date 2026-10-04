@@ -4,7 +4,7 @@ import {
     PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor, ThumbRows,
     PresentStatusBar, PresentToolbarOverflow
 } from "present_components.slint";
-import { PresentActionToolbar } from "toolbar.slint";
+import { PresentActionToolbar, PresentToolbarMenu } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
 import { PresentThemeChooser } from "theme_chooser.slint";
 import {
@@ -42,7 +42,34 @@ export component PresentApp inherits Window {
     preferred-height: 800px;
     background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
 
-    in property <bool> show-inspector: false;
+    /// Right inspector; open by default where the window is wide enough.
+    in-out property <bool> show-inspector: false;
+    in-out property <bool> show-navigator: true;
+    in-out property <bool> view-menu-open: false;
+    in-out property <bool> zoom-menu-open: false;
+    in-out property <int> zoom-index: 0;
+    property <length> menu-x: 0px;
+    property <float> zoom-factor: root.zoom-index == 1 ? 0.75 : root.zoom-index == 2 ? 0.5 : 1.0;
+    /// Pane toggles changed; the menu bar re-reads their checked state.
+    callback view-state-changed;
+    changed show-inspector => { root.view-state-changed(); }
+    changed show-navigator => { root.view-state-changed(); }
+    changed show-notes-drawer => { root.view-state-changed(); }
+    /// Toolbar Format/Animate/Document: open that tab, or close the inspector
+    /// when its tab is already showing.
+    public function show-inspector-tab(tab: int) {
+        if (root.show-inspector && root.inspector-tab == tab) {
+            root.show-inspector = false;
+        } else {
+            root.inspector-tab = tab;
+            root.show-inspector = true;
+        }
+    }
+    function close-view-menus() {
+        root.view-menu-open = false;
+        root.zoom-menu-open = false;
+        root.focus-editor();
+    }
     in property <bool> icon-only-toolbar: false;
     in property <bool> labeled-toolbar: false;
     in property <bool> labeled-export: false;
@@ -270,7 +297,7 @@ export component PresentApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open || root.view-menu-open || root.zoom-menu-open) { return reject; }
             if (root.is-preview-mode) {
                 if (event.text == Key.Escape) { root.toggle-preview-mode(); }
                 else if (event.text == "p" || event.text == "P") { root.open-presenter(); }
@@ -330,29 +357,31 @@ export component PresentApp inherits Window {
                 }
             }
 
-            if !root.is-preview-mode : PresentActionToolbar {
-                rtl: root.rtl;
+            if !root.is-preview-mode : action-toolbar := PresentActionToolbar {
                 overflow: root.overflow-toolbar;
                 inspector-visible: root.show-inspector;
-                notes-visible: root.show-notes-drawer;
+                inspector-tab: root.inspector-tab;
+                view-menu-open: root.view-menu-open;
+                zoom-menu-open: root.zoom-menu-open;
                 is-preview-mode: root.is-preview-mode;
-                can-undo: root.can-undo;
-                can-redo: root.can-redo;
-                undo => { root.undo(); }
-                redo => { root.redo(); }
-                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
-                open-theme-chooser => {
-                    root.theme-selected = 0;
-                    root.theme-category = 0;
-                    root.theme-chooser-open = true;
+                toggle-view-menu => {
+                    root.zoom-menu-open = false;
+                    root.menu-x = self.view-x;
+                    root.view-menu-open = !root.view-menu-open;
+                    if (root.view-menu-open) { view-menu-focus.focus(); } else { root.focus-editor(); }
+                }
+                toggle-zoom-menu => {
+                    root.view-menu-open = false;
+                    root.menu-x = self.zoom-x;
+                    root.zoom-menu-open = !root.zoom-menu-open;
+                    if (root.zoom-menu-open) { view-menu-focus.focus(); } else { root.focus-editor(); }
                 }
                 add-slide => { root.add-slide(); }
                 add-text => { root.add-text(); }
                 add-shape => { root.add-shape(); }
                 add-picture => { root.add-picture(); }
                 toggle-preview => { root.toggle-preview-mode(); }
-                toggle-inspector => { root.toggle-inspector(); }
-                export-pdf => { root.export-pdf(); }
+                show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
                 overflow-requested => {
                     if (root.toolbar-overflow-open) {
                         root.close-toolbar-overflow();
@@ -388,9 +417,10 @@ export component PresentApp inherits Window {
                     apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
+                    open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
                 }
 
-                if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                if !root.rtl && !root.is-preview-mode && root.show-navigator : PresentSlideStrip {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
@@ -416,6 +446,7 @@ export component PresentApp inherits Window {
                         opacity: root.is-preview-mode && root.transition-index != 2 ? root.reveal-eased : 1.0;
                         editing-enabled: !root.is-preview-mode;
                         fit-screen: root.is-preview-mode;
+                        zoom: root.zoom-factor;
                         background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
                         aspect-ratio-wide: root.aspect-ratio-wide;
                         element-labels: root.element-labels;
@@ -498,7 +529,7 @@ export component PresentApp inherits Window {
                     }
                 }
 
-                if root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                if root.rtl && !root.is-preview-mode && root.show-navigator : PresentSlideStrip {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
@@ -527,6 +558,7 @@ export component PresentApp inherits Window {
                     apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
+                    open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
                 }
             }
 
@@ -545,24 +577,50 @@ export component PresentApp inherits Window {
         background: transparent;
         TouchArea { clicked => { root.close-toolbar-overflow(); } }
         VerticalLayout {
-            padding-top: Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
+            padding-top: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + Theme.tokens.space.sm;
             padding-left: Theme.tokens.space.lg;
             padding-right: Theme.tokens.space.lg;
             cross-axis-alignment: end;
             PresentToolbarOverflow {
-                inspector-visible: root.show-inspector;
-                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                undo => { root.undo(); }
+                redo => { root.redo(); }
                 open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
-                add-slide => { root.add-slide(); }
-                add-text => { root.add-text(); }
-                add-shape => { root.add-shape(); }
-                add-picture => { root.add-picture(); }
-                toggle-preview => { root.toggle-preview-mode(); }
-                toggle-inspector => { root.toggle-inspector(); }
                 export-pdf => { root.export-pdf(); }
                 export-pptx => { root.export-pptx(); }
                 close-requested => { root.close-toolbar-overflow(); }
             }
+        }
+    }
+
+    // View and Zoom menus under their toolbar items.
+    view-menu-focus := FocusScope {
+        enabled: root.view-menu-open || root.zoom-menu-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-view-menus();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    if (root.view-menu-open || root.zoom-menu-open) && !root.is-preview-mode : Rectangle {
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        TouchArea { clicked => { root.close-view-menus(); } }
+        PresentToolbarMenu {
+            kind: root.zoom-menu-open ? 1 : 0;
+            x: max(0px, min(root.menu-x, root.width - self.width - 8px));
+            y: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height;
+            navigator-visible: root.show-navigator;
+            notes-visible: root.show-notes-drawer;
+            zoom-index: root.zoom-index;
+            toggle-navigator => { root.show-navigator = !root.show-navigator; }
+            toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+            choose-zoom(idx) => { root.zoom-index = idx; }
+            close-requested => { root.close-view-menus(); }
         }
     }
 

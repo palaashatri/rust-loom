@@ -22,6 +22,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "slide.prev",
     "slide.next",
     "view.inspector",
+    "view.navigator",
+    "view.notes",
     "app.palette",
 ];
 

@@ -19,6 +19,8 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <bool> editing-enabled: true;
     /// Slideshow mode: the slide fills the window and text scales with it.
     in property <bool> fit-screen: false;
+    /// Editor zoom: 1.0 fits the pane, smaller values shrink the slide.
+    in property <float> zoom: 1.0;
     in property <[float]> snap-guides-x: [];
     in property <[float]> snap-guides-y: [];
     in property <float> marquee-x: 0;
@@ -60,10 +62,10 @@ export component PresentSlideCanvas inherits Rectangle {
         slide := Rectangle {
             property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
             property <length> margin: root.fit-screen ? 0px : Theme.tokens.space.xxl;
-            property <float> text-scale: root.fit-screen ? self.width / 840px : 1.0;
+            property <float> text-scale: root.fit-screen || root.zoom < 1.0 ? self.width / 840px : 1.0;
             x: max(self.margin, (parent.width - self.width) / 2);
             y: max(self.margin, (parent.height - self.height) / 2);
-            width: min(root.fit-screen ? 100000px : 840px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio)));
+            width: min(root.fit-screen ? 100000px : 840px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * root.zoom;
             height: min(parent.height - self.margin * 2, self.width * self.slide-ratio);
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
