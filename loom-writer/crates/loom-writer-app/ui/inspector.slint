@@ -30,6 +30,10 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> list-style-index: 0;
     in property <[WriterCommentEntry]> comment-entries: [];
     in property <bool> active: false;
+    /// 0 = Format, 1 = Document (page setup and comments).
+    in-out property <int> inspector-tab: 0;
+    /// Set to put the keyboard caret in the new-comment field.
+    in-out property <bool> comment-focus-pending: false;
     in-out property <string> comment-draft: "";
     in property <string> status-left: "";
     in property <int> word-count: 83;
@@ -60,12 +64,12 @@ export component WriterInspector inherits LoomPanel {
     callback close-requested;
 
     public function focus-first-control() {
-        heading-control.grab-focus();
+        tab-control.grab-focus();
     }
 
     changed active => {
-        if (root.active) {
-            heading-control.grab-focus();
+        if (root.active && !root.comment-focus-pending) {
+            tab-control.grab-focus();
         }
     }
 
@@ -90,22 +94,20 @@ export component WriterInspector inherits LoomPanel {
             spacing: Theme.tokens.space.md;
 
             HorizontalLayout {
-                height: Theme.tokens.metrics.control-height;
                 padding-left: Theme.tokens.space.md;
                 padding-right: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.sm;
                 cross-axis-alignment: center;
-                Text {
-                    text: "Format";
-                    font-size: Theme.type.body;
-                    font-weight: 600;
-                    color: Theme.palette().ink;
+                tab-control := LoomSegmentedControl {
                     horizontal-stretch: 1;
-                    vertical-alignment: center;
+                    items: ["Format", "Document"];
+                    current <=> root.inspector-tab;
+                    label: "Inspector tab";
                 }
-                LoomButton {
+                LoomIconButton {
                     icon: "close";
-                    label: "Close format panel";
-                    variant: "ghost";
+                    label: "Close inspector";
+                    tooltip: "Close inspector";
                     clicked => { root.close-requested(); }
                 }
             }
@@ -120,14 +122,13 @@ export component WriterInspector inherits LoomPanel {
             padding: Theme.tokens.space.md;
             alignment: start;
 
-            // TAB 0: STYLE
-            VerticalLayout {
-            spacing: Theme.tokens.space.md;
+            if root.inspector-tab == 0 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
 
             LoomSectionHeader { title: "Paragraph Style"; }
 
             heading-control := LoomSegmentedControl {
-                items: ["Body", "Title", "Sub", "H1", "H2", "H3"];
+                items: ["Body", "H1", "H2", "H3"];
                 current <=> root.heading-level;
                 label: "Heading Style";
                 selected(idx) => { root.select-heading(idx); }
@@ -274,9 +275,25 @@ export component WriterInspector inherits LoomPanel {
                 }
             }
 
+            LoomSectionHeader { title: "Lists"; }
+
+            LoomSegmentedControl {
+                items: ["None", "Bulleted", "Numbered"];
+                current <=> root.list-style-index;
+                label: "List Style";
+                selected(idx) => { root.select-list-style(idx); }
+            }
+            }
+
+            if root.inspector-tab == 1 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                property <bool> focus-pending: root.comment-focus-pending;
+                init => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; } }
+                changed focus-pending => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; } }
+
             LoomSectionHeader { title: "Comments"; }
 
-            LoomTextField {
+            comment-field := LoomTextField {
                 label: "New comment";
                 placeholder: "Comment on the selection…";
                 value <=> root.comment-draft;
@@ -348,15 +365,6 @@ export component WriterInspector inherits LoomPanel {
                 }
             }
 
-            LoomSectionHeader { title: "Lists"; }
-
-            LoomSegmentedControl {
-                items: ["None", "Bulleted", "Numbered"];
-                current <=> root.list-style-index;
-                label: "List Style";
-                selected(idx) => { root.select-list-style(idx); }
-            }
-
             LoomSectionHeader { title: "Page Setup"; }
 
             LoomSegmentedControl {
@@ -379,8 +387,7 @@ export component WriterInspector inherits LoomPanel {
                 label: "Margins";
                 selected(idx) => { root.select-margins(idx); }
             }
-
-        }
+            }
         }
         }
 

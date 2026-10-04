@@ -15,10 +15,14 @@ mod docx_export;
 mod file_title;
 mod find_bar;
 mod local_menu;
+mod markdown_export;
 mod multi_click;
+mod outline;
 mod palette_wiring;
 mod projection;
 mod recovery;
+mod toolbar_commands;
+mod view_state;
 mod window_chrome;
 
 use std::cell::{Cell, RefCell};
@@ -74,6 +78,10 @@ struct Args {
     template: Option<TemplateId>,
     template_chooser: bool,
     inspector: bool,
+    /// Capture with the Document tab showing in the inspector.
+    document_tab: bool,
+    /// Capture with the outline navigator showing.
+    navigator: bool,
     comment: Option<String>,
     table: bool,
     /// Capture the Quick Start sample instead of a blank document.
@@ -102,6 +110,8 @@ where
         template: None,
         template_chooser: false,
         inspector: false,
+        document_tab: false,
+        navigator: false,
         comment: None,
         table: false,
         sample: false,
@@ -161,6 +171,8 @@ where
             "--inspector" => {
                 args.inspector = true;
             }
+            "--document-tab" => args.document_tab = true,
+            "--navigator" => args.navigator = true,
             "--comment" => {
                 let body = it.next().ok_or("--comment needs a body")?;
                 args.comment = Some(body);
@@ -437,11 +449,13 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "file.save_as" | "writer.save-as" => app.invoke_save_as_doc(),
         "file.export_pdf" | "writer.export-pdf" => app.invoke_export_pdf(),
         "file.export_docx" | "writer.export-docx" => app.invoke_export_docx(),
+        "file.export_md" => app.invoke_export_markdown(),
         "edit.undo" | "writer.undo" => app.invoke_undo(),
         "edit.redo" | "writer.redo" => app.invoke_redo(),
         "app.palette" => app.invoke_open_palette(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "view.inspector" => app.invoke_toggle_inspector(),
+        id if view_state::dispatch(app, id) => {}
         "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
         "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
         "format.underline" | "writer.style.underline-all" => app.invoke_toggle_underline(),
@@ -557,6 +571,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Export the current document for Microsoft Word")
             .with_category("file")
             .with_order(52),
+        CommandSpec::new("file.export_md", "Export Markdown (.md)")
+            .with_undo_label("Export Markdown")
+            .with_description("Export the current document as Markdown text")
+            .with_category("file")
+            .with_order(54),
         // Edit — undo/redo
         CommandSpec::new("edit.undo", "Undo")
             .with_undo_label("Undo")
@@ -736,6 +755,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Toggle the format inspector")
             .with_category("view")
             .with_order(20),
+        CommandSpec::new("view.navigator", "Outline Navigator")
+            .with_undo_label("Toggle Outline")
+            .with_description("Show or hide the heading outline beside the page")
+            .with_category("view")
+            .with_order(25),
         // Legacy aliases for file commands used by palette/desktop menus
         CommandSpec::new("writer.new", "New Document")
             .with_undo_label("New Document")
@@ -897,6 +921,7 @@ fn sync_writer_registry_enablement(
         "writer.export-pdf",
         "file.export_docx",
         "writer.export-docx",
+        "file.export_md",
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
@@ -1499,6 +1524,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     refresh_writer_render_projection(app, doc, viewport);
+    outline::publish(app, doc);
     app.set_page_paper_index(match doc.page.paper {
         loom_writer_core::PaperSize::A4 => 0,
         loom_writer_core::PaperSize::Letter => 1,
@@ -2187,6 +2213,7 @@ fn menu_projection(
     inspector.enabled = app.get_inspector_available();
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
+    view_state::project(&mut projection, app);
 
     Ok(projection)
 }
@@ -2403,7 +2430,17 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_capture_seeds(&mut doc, args);
     apply_document(&app, &doc);
     app.set_template_chooser_open(args.template_chooser);
-    app.set_show_inspector(args.inspector);
+    toolbar_commands::start_with_inspector_open(&app, args.size.0);
+    if args.inspector || args.document_tab {
+        app.set_show_inspector(true);
+    }
+    if args.document_tab {
+        app.set_inspector_tab(1);
+    }
+    if args.navigator {
+        app.set_show_navigator(true);
+        outline::publish(&app, &doc);
+    }
     if args.palette {
         app.set_palette_query(SharedString::from("ex"));
         rebuild_palette(&app, "ex");
@@ -2545,6 +2582,9 @@ fn wire_writer_shared_callbacks(
     menu_service: Option<Arc<NativeMenuBar>>,
 ) {
     find_bar::wire(app, state);
+    toolbar_commands::wire(app);
+    outline::wire(app, state);
+    view_state::wire(app, state, menu_service.clone());
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3076,6 +3116,15 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_export_markdown(move || {
+            if let Some(app) = app_ref.upgrade() {
+                markdown_export::run(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_selection_changed(move |anchor, focus| {
             if let Some(app) = app_ref.upgrade() {
                 if state.syncing_editor.get() {
@@ -3577,9 +3626,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 MenuShortcut::primary("E"),
             ),
             MenuItem::action("file.export_docx", "Export to Word..."),
+            MenuItem::action("file.export_md", "Export to Markdown..."),
         ],
         vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        vec![
+            MenuItem::check("view.inspector", "Format Inspector", false),
+            MenuItem::check("view.navigator", "Outline Navigator", false),
+        ],
         vec![Menu::new(
             "Format",
             vec![
@@ -3958,6 +4011,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if args.template_chooser {
         app.set_template_chooser_open(true);
     }
+    toolbar_commands::start_with_inspector_open(&app, args.size.0);
     if args.inspector {
         app.set_show_inspector(true);
     }
@@ -4672,3 +4726,6 @@ mod review_tests;
 
 #[cfg(test)]
 mod text_scale_tests;
+
+#[cfg(test)]
+mod toolbar_tests;

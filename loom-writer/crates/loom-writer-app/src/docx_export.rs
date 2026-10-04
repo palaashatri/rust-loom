@@ -18,6 +18,11 @@ const FALLBACK_NAME: &str = "loom-writer-export";
 /// File name offered by the save dialog: the document title made safe for a
 /// file system, with the `.docx` extension.
 pub(crate) fn suggested_name(title: &str) -> String {
+    format!("{}.docx", file_stem(title))
+}
+
+/// The document title made safe for a file system, without an extension.
+pub(crate) fn file_stem(title: &str) -> String {
     let cleaned: String = title
         .chars()
         .map(|c| match c {
@@ -27,12 +32,11 @@ pub(crate) fn suggested_name(title: &str) -> String {
         })
         .collect();
     let cleaned = cleaned.trim().trim_end_matches('.').trim();
-    let stem = if cleaned.is_empty() {
-        FALLBACK_NAME
+    if cleaned.is_empty() {
+        FALLBACK_NAME.to_string()
     } else {
-        cleaned
-    };
-    format!("{stem}.docx")
+        cleaned.to_string()
+    }
 }
 
 fn export_request(state: &GuiState) -> Result<SaveFileRequest, String> {

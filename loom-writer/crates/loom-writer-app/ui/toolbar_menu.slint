@@ -1,0 +1,128 @@
+import { LoomMenuItem } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// The menu that opens under a toolbar item, with its click-away scrim and
+/// keyboard handling (Up/Down move, Return or Space run, Escape closes).
+/// Every row sends a command id through `command`; Rust performs it.
+export component WriterToolbarMenu inherits Rectangle {
+    /// 1 View, 2 Zoom, 3 Insert, 4 Text, 5 Style, 6 List, 7 Export, 8 More;
+    /// 0 hides the menu.
+    in property <int> kind: 0;
+    in property <length> menu-x: 0px;
+    in property <length> menu-y: 0px;
+    in property <bool> inspector-visible: false;
+    in property <bool> navigator-visible: false;
+    in property <float> page-zoom: 1.0;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> is-bold: false;
+    in property <bool> is-italic: false;
+    in property <bool> is-underline: false;
+    in property <bool> is-strikethrough: false;
+    in property <int> text-alignment: 0;
+    in property <int> heading-level: 0;
+    in property <int> list-style-index: 0;
+    callback command(string);
+    callback close-requested;
+    public function focus-menu() { menu-focus.focus(); }
+
+    property <int> selected: 0;
+    /// Each row: the command id it runs, its label and shortcut, whether it shows
+    /// a check mark, and whether it can run now.
+    property <[{ id: string, label: string, shortcut: string, checked: bool, enabled: bool }]> rows:
+        root.kind == 1 ? [
+            { id: "view.inspector", label: "Format Inspector", shortcut: "", checked: root.inspector-visible, enabled: true },
+            { id: "view.navigator", label: "Outline Navigator", shortcut: "", checked: root.navigator-visible, enabled: true },
+            { id: "app.palette", label: "Command Palette", shortcut: "Ctrl+K", checked: false, enabled: true },
+        ]
+        : root.kind == 2 ? [
+            { id: "view.zoom_in", label: "Zoom In", shortcut: "", checked: false, enabled: root.page-zoom < 1.99 },
+            { id: "view.zoom_out", label: "Zoom Out", shortcut: "", checked: false, enabled: root.page-zoom > 0.51 },
+            { id: "view.zoom_actual", label: "Actual Size", shortcut: "", checked: Math.abs(root.page-zoom - 1.0) < 0.01, enabled: true },
+        ]
+        : root.kind == 3 ? [
+            { id: "insert.table", label: "Table", shortcut: "", checked: false, enabled: true },
+            { id: "insert.comment", label: "Comment", shortcut: "", checked: false, enabled: true },
+        ]
+        : root.kind == 4 ? [
+            { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
+            { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
+            { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
+            { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
+            { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
+            { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
+            { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
+        ]
+        : root.kind == 5 ? [
+            { id: "paragraph.body", label: "Body", shortcut: "", checked: root.heading-level == 0, enabled: true },
+            { id: "paragraph.h1", label: "Heading 1", shortcut: "", checked: root.heading-level == 1, enabled: true },
+            { id: "paragraph.h2", label: "Heading 2", shortcut: "", checked: root.heading-level == 2, enabled: true },
+            { id: "paragraph.h3", label: "Heading 3", shortcut: "", checked: root.heading-level == 3, enabled: true },
+        ]
+        : root.kind == 6 ? [
+            { id: "list.none", label: "No List", shortcut: "", checked: root.list-style-index == 0, enabled: true },
+            { id: "list.bulleted", label: "Bulleted List", shortcut: "", checked: root.list-style-index == 1, enabled: true },
+            { id: "list.numbered", label: "Numbered List", shortcut: "", checked: root.list-style-index == 2, enabled: true },
+        ]
+        : root.kind == 7 ? [
+            { id: "file.export_pdf", label: "PDF", shortcut: "Ctrl+E", checked: false, enabled: true },
+            { id: "file.export_md", label: "Markdown", shortcut: "", checked: false, enabled: true },
+            { id: "file.export_docx", label: "Word (.docx)", shortcut: "", checked: false, enabled: true },
+        ]
+        : root.kind == 8 ? [
+            { id: "edit.undo", label: "Undo", shortcut: "Ctrl+Z", checked: false, enabled: root.can-undo },
+            { id: "edit.redo", label: "Redo", shortcut: "Ctrl+Shift+Z", checked: false, enabled: root.can-redo },
+            { id: "file.new", label: "New", shortcut: "Ctrl+N", checked: false, enabled: true },
+            { id: "file.open", label: "Open", shortcut: "Ctrl+O", checked: false, enabled: true },
+            { id: "file.save", label: "Save", shortcut: "Ctrl+S", checked: false, enabled: true },
+            { id: "file.save_as", label: "Save As", shortcut: "Ctrl+Shift+S", checked: false, enabled: true },
+            { id: "edit.find", label: "Find", shortcut: "Ctrl+F", checked: false, enabled: true },
+        ]
+        : [];
+
+    changed kind => { root.selected = 0; }
+
+    visible: root.kind != 0;
+    background: transparent;
+    TouchArea { clicked => { root.close-requested(); } }
+
+    menu-focus := FocusScope {
+        enabled: root.kind != 0;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            if (event.text == Key.DownArrow) { root.selected = Math.mod(root.selected + 1, root.rows.length); return accept; }
+            if (event.text == Key.UpArrow) { root.selected = Math.mod(root.selected + root.rows.length - 1, root.rows.length); return accept; }
+            if (event.text == Key.Return || event.text == " ") {
+                if (root.selected < root.rows.length && root.rows[root.selected].enabled) { root.command(root.rows[root.selected].id); }
+                return accept;
+            }
+            return reject;
+        }
+    }
+    Rectangle {
+        x: max(0px, min(root.menu-x, root.width - self.width - 8px));
+        y: root.menu-y;
+        width: 240px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
+        height: items.preferred-height;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: Theme.palette().shadow;
+
+        items := VerticalLayout {
+            spacing: 2px;
+            padding: Theme.tokens.space.sm;
+            for row[idx] in root.rows : LoomMenuItem {
+                label: row.label;
+                shortcut: row.shortcut;
+                checked: row.checked;
+                enabled: row.enabled;
+                selected: idx == root.selected;
+                activated => { root.command(row.id); }
+            }
+        }
+    }
+}

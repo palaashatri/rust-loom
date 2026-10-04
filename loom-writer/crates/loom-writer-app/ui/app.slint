@@ -8,9 +8,9 @@ import { Icon } from "icons.slint";
 import { FindBar, FindBarOverlay } from "find_bar.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
-    WriterActionToolbar, WriterToolbarBody, WriterPageCanvas,
-    WriterStatusBar, WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect,
-    WriterCommentRect
+    WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
+    WriterStatusBar, WriterRenderBlock, WriterSelectionRect,
+    WriterCommentRect, WriterOutlinePane, WriterOutlineEntry
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
@@ -50,8 +50,22 @@ export component WriterApp inherits Window {
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
+    /// The More menu (kind 8). Other toolbar menus use `toolbar-menu`.
     in-out property <bool> toolbar-overflow-open: false;
+    /// 0 none, 1 View, 2 Zoom, 3 Insert, 4 Text, 5 Style, 6 List, 7 Export.
+    in-out property <int> toolbar-menu: 0;
+    property <length> toolbar-menu-x: 0px;
+    property <int> toolbar-menu-kind: root.toolbar-overflow-open ? 8 : root.toolbar-menu;
     in-out property <bool> show-inspector: false;
+    /// 0 = Format, 1 = Document.
+    in-out property <int> inspector-tab: 0;
+    in-out property <bool> comment-focus-pending: false;
+    in-out property <bool> show-navigator: false;
+    in property <[WriterOutlineEntry]> outline-entries: [];
+    callback toolbar-command(string);
+    callback jump-outline(int);
+    callback view-state-changed;
+    changed show-navigator => { root.view-state-changed(); }
     in property <bool> inspector-available: true;
     in-out property <bool> compact-inspector-layout: false;
     // The compact toolbar still exposes Format. Keep the panel available at
@@ -68,6 +82,26 @@ export component WriterApp inherits Window {
         if (!ResponsivePolicy.priority-2-overflow(root.width)) {
             root.close-toolbar-overflow();
         }
+    }
+
+    /// Toolbar Format/Document: show that inspector tab, or close the
+    /// inspector when its tab is already showing. Opening and closing go
+    /// through `toggle-inspector`, so the command registry and menu see it.
+    public function show-inspector-tab(tab: int) {
+        if (root.inspector-visible && root.inspector-tab == tab) {
+            root.toggle-inspector();
+        } else {
+            root.inspector-tab = tab;
+            if (!root.inspector-visible) { root.toggle-inspector(); }
+        }
+    }
+
+    /// Insert > Comment: open the Document tab and put the caret in the
+    /// new-comment field.
+    public function open-comment-composer() {
+        root.inspector-tab = 1;
+        root.comment-focus-pending = true;
+        if (!root.inspector-visible) { root.toggle-inspector(); }
     }
 
     in property <string> doc-title: "Untitled Document";
@@ -129,6 +163,7 @@ export component WriterApp inherits Window {
     callback save-as-doc;
     callback export-pdf;
     callback export-docx;
+    callback export-markdown;
     callback undo;
     callback redo;
     callback document-edited(string, int, int);
@@ -203,27 +238,12 @@ export component WriterApp inherits Window {
         return root.wide-toolbar ? full-label : "";
     }
 
+    /// Close whichever toolbar menu is open and return focus to the page.
     public function close-toolbar-overflow() {
-        if (root.toolbar-overflow-open) {
+        if (root.toolbar-overflow-open || root.toolbar-menu != 0) {
             root.toolbar-overflow-open = false;
+            root.toolbar-menu = 0;
             root.focus-page();
-        }
-    }
-
-    changed overflow-toolbar => {
-        if (!root.overflow-toolbar) {
-            root.close-toolbar-overflow();
-        }
-    }
-
-    overflow-menu-focus := FocusScope {
-        enabled: root.toolbar-overflow-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close-toolbar-overflow();
-                return accept;
-            }
-            return reject;
         }
     }
 
@@ -279,7 +299,7 @@ export component WriterApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open) { return reject; }
             if (event.text == Key.F3) {
                 if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
                 return accept;
@@ -352,39 +372,21 @@ export component WriterApp inherits Window {
             }
 
             action-toolbar := WriterActionToolbar {
-                rtl: root.rtl;
-                wide: root.wide-toolbar;
-                overflow: root.overflow-toolbar;
-                inspector-available: root.inspector-available;
                 inspector-visible: root.inspector-visible;
-                labeled-export: root.labeled-export;
-                page-zoom: root.page-zoom;
-                can-undo: root.can-undo;
-                can-redo: root.can-redo;
-                is-bold: root.is-bold;
-                is-italic: root.is-italic;
-                is-underline: root.is-underline;
-                is-strikethrough: root.is-strikethrough;
-                text-alignment: root.text-alignment;
-                toggle-inspector => { root.toggle-inspector(); }
-                export-pdf => { root.export-pdf(); }
-                page-zoom-changed(val) => { root.page-zoom = val; }
-                overflow-requested => {
-                    if (root.toolbar-overflow-open) {
-                        root.close-toolbar-overflow();
+                inspector-tab: root.inspector-tab;
+                menu-kind: root.toolbar-menu-kind;
+                toggle-menu(kind, x) => {
+                    root.toolbar-menu-x = x;
+                    if (kind == 8) {
+                        root.toolbar-menu = 0;
+                        root.toolbar-overflow-open = !root.toolbar-overflow-open;
                     } else {
-                        root.toolbar-overflow-open = true;
-                        overflow-menu-focus.focus();
+                        root.toolbar-overflow-open = false;
+                        root.toolbar-menu = root.toolbar-menu == kind ? 0 : kind;
                     }
+                    if (root.toolbar-menu-kind != 0) { toolbar-menu-popup.focus-menu(); } else { root.focus-page(); }
                 }
-                undo => { root.undo(); }
-                redo => { root.redo(); }
-                toggle-bold => { root.toggle-bold(); }
-                insert-table => { root.insert-table(); }
-                toggle-italic => { root.toggle-italic(); }
-                toggle-underline => { root.toggle-underline(); }
-                toggle-strikethrough => { root.toggle-strikethrough(); }
-                select-alignment(val) => { root.select-alignment(val); }
+                show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
             }
 
             HorizontalLayout {
@@ -393,6 +395,12 @@ export component WriterApp inherits Window {
                 // The page stack is taller than the window; it scrolls, so it
                 // must not raise the row's minimum and push the status bar off.
                 min-height: 0px;
+
+                if root.show-navigator && !root.rtl : WriterOutlinePane {
+                    entries: root.outline-entries;
+                    jump(idx) => { root.jump-outline(idx); }
+                    close-requested => { root.show-navigator = false; root.focus-page(); }
+                }
 
                 if !root.rtl : WriterPageCanvas {
                     doc-title: root.doc-title;
@@ -446,6 +454,8 @@ export component WriterApp inherits Window {
                     vertical-stretch: 1;
                     visible: root.docked-inspector-visible;
                     active: root.docked-inspector-visible;
+                    inspector-tab <=> root.inspector-tab;
+                    comment-focus-pending <=> root.comment-focus-pending;
                     close-requested => { root.toggle-inspector(); }
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
@@ -531,6 +541,12 @@ export component WriterApp inherits Window {
                         return reject;
                     }
                 }
+
+                if root.show-navigator && root.rtl : WriterOutlinePane {
+                    entries: root.outline-entries;
+                    jump(idx) => { root.jump-outline(idx); }
+                    close-requested => { root.show-navigator = false; root.focus-page(); }
+                }
             }
 
             WriterStatusBar {
@@ -540,34 +556,12 @@ export component WriterApp inherits Window {
         }
     }
 
-    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
-        width: root.width;
-        height: root.height;
-        background: transparent;
-
-        TouchArea { clicked => { root.close-toolbar-overflow(); } }
-
-        VerticalLayout {
-            padding-top: Theme.tokens.metrics.toolbar-height + Theme.tokens.space.sm;
-            padding-right: Theme.tokens.space.lg;
-            padding-left: Theme.tokens.space.lg;
-            cross-axis-alignment: end;
-            WriterToolbarOverflow {
-                inspector-available: root.inspector-available;
-                inspector-visible: root.inspector-visible;
-                toggle-inspector => { root.toggle-inspector(); }
-                export-pdf => { root.export-pdf(); }
-                close-requested => { root.close-toolbar-overflow(); }
-            }
-        }
-    }
-
     Rectangle {
         visible: root.compact-inspector-visible;
         x: 0px;
-        y: Theme.tokens.metrics.toolbar-height;
+        y: action-toolbar.bottom-y;
         width: root.width;
-        height: root.height - Theme.tokens.metrics.toolbar-height;
+        height: root.height - action-toolbar.bottom-y;
         background: transparent;
 
         Rectangle {
@@ -583,6 +577,8 @@ export component WriterApp inherits Window {
             width: min(360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)), parent.width);
             height: parent.height;
             active: root.compact-inspector-visible;
+            inspector-tab <=> root.inspector-tab;
+            comment-focus-pending <=> root.comment-focus-pending;
             close-requested => { root.toggle-inspector(); }
             is-bold <=> root.is-bold;
             is-italic <=> root.is-italic;
@@ -625,6 +621,30 @@ export component WriterApp inherits Window {
             select-list-style(idx) => { root.select-list-style(idx); }
         }
 
+    }
+
+    toolbar-menu-popup := WriterToolbarMenu {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        kind: root.toolbar-menu-kind;
+        menu-x: root.toolbar-menu-x;
+        menu-y: action-toolbar.bottom-y;
+        inspector-visible: root.inspector-visible;
+        navigator-visible: root.show-navigator;
+        page-zoom: root.page-zoom;
+        can-undo: root.can-undo;
+        can-redo: root.can-redo;
+        is-bold: root.is-bold;
+        is-italic: root.is-italic;
+        is-underline: root.is-underline;
+        is-strikethrough: root.is-strikethrough;
+        text-alignment: root.text-alignment;
+        heading-level: root.heading-level;
+        list-style-index: root.list-style-index;
+        close-requested => { root.close-toolbar-overflow(); }
+        command(id) => { root.close-toolbar-overflow(); root.toolbar-command(id); }
     }
 
     if root.template-chooser-open : TemplateChooserModal {

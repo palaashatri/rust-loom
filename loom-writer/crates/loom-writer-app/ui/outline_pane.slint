@@ -1,0 +1,105 @@
+import { LoomIconButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// One heading in the document outline. `level` is 1 for the largest heading;
+/// `current` marks the heading the caret is under.
+export struct WriterOutlineEntry {
+    title: string,
+    level: int,
+    current: bool,
+}
+
+/// A narrow navigator listing the document's headings; activating a row moves
+/// the caret to that heading and scrolls it into view.
+export component WriterOutlinePane inherits Rectangle {
+    in property <[WriterOutlineEntry]> entries: [];
+    callback jump(int);
+    callback close-requested;
+
+    width: 220px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
+    background: Theme.palette().panel;
+
+    Rectangle {
+        x: Theme.rtl ? 0px : parent.width - 1px;
+        width: 1px;
+        background: Theme.palette().border;
+    }
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+
+        HorizontalLayout {
+            height: Theme.tokens.metrics.control-height;
+            padding-left: Theme.tokens.space.md;
+            padding-right: Theme.tokens.space.md;
+            cross-axis-alignment: center;
+            Text {
+                text: "Outline";
+                font-size: Theme.type.body;
+                font-weight: 600;
+                color: Theme.palette().ink;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            LoomIconButton {
+                icon: "close";
+                label: "Close outline";
+                tooltip: "Close outline";
+                clicked => { root.close-requested(); }
+            }
+        }
+
+        if root.entries.length == 0 : HorizontalLayout {
+            padding-left: Theme.tokens.space.md;
+            padding-right: Theme.tokens.space.md;
+            Text {
+                text: "No headings yet. Give a paragraph a Title or Heading style and it appears here.";
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+                horizontal-alignment: Theme.rtl ? right : left;
+            }
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: max(self.height, rows.preferred-height);
+
+            rows := VerticalLayout {
+                spacing: 2px;
+                padding-left: Theme.tokens.space.sm;
+                padding-right: Theme.tokens.space.sm;
+                alignment: start;
+
+                for entry[idx] in root.entries : Rectangle {
+                    height: Theme.tokens.metrics.control-height;
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    background: touch.has-hover ? Theme.palette().surface-raised
+                        : entry.current ? Theme.palette().selection-soft
+                        : transparent;
+                    accessible-role: button;
+                    accessible-label: entry.title;
+                    accessible-description: "Heading level " + entry.level + ". Go to this heading.";
+                    accessible-action-default => { root.jump(idx); }
+
+                    HorizontalLayout {
+                        padding-left: Theme.tokens.space.sm + (min(entry.level, 4) - 1) * 12px;
+                        padding-right: Theme.tokens.space.sm;
+                        cross-axis-alignment: center;
+                        Text {
+                            text: entry.title;
+                            font-size: Theme.type.caption;
+                            font-weight: entry.level == 1 || entry.current ? 600 : 400;
+                            color: entry.current ? Theme.palette().accent : Theme.palette().ink;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    touch := TouchArea { clicked => { root.jump(idx); } }
+                }
+            }
+        }
+    }
+}

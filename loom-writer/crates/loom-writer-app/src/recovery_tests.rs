@@ -293,6 +293,8 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 template: None,
                 template_chooser: false,
                 inspector: false,
+                document_tab: false,
+                navigator: false,
                 comment: None,
                 table: false,
                 sample: false,

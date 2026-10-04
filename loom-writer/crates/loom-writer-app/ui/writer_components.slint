@@ -3,7 +3,9 @@ import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import { FindBar } from "find_bar.slint";
 
-export { WriterToolbarBody, WriterActionToolbar } from "toolbar.slint";
+export { WriterActionToolbar } from "toolbar.slint";
+export { WriterToolbarMenu } from "toolbar_menu.slint";
+export { WriterOutlinePane, WriterOutlineEntry } from "outline_pane.slint";
 export { WriterInspector } from "inspector.slint";
 
 /// A rendered paragraph projected from the Writer document model.
@@ -386,44 +388,5 @@ export component WriterStatusBar inherits LoomStatusBar {
     }
     LoomStatusText {
         text: root.trailing-text;
-    }
-}
-
-/// Modal overflow surface for compact toolbars.
-export component WriterToolbarOverflow inherits Rectangle {
-    in property <bool> inspector-available: true;
-    in property <bool> inspector-visible: false;
-    callback toggle-inspector;
-    callback export-pdf;
-    callback close-requested;
-
-    border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: 1px;
-    border-color: Theme.palette().border;
-    background: Theme.palette().surface;
-    drop-shadow-blur: 16px;
-    drop-shadow-offset-y: 4px;
-    drop-shadow-color: Theme.palette().shadow;
-    min-width: 220px;
-    max-width: 280px;
-    preferred-width: 256px;
-
-    VerticalLayout {
-        spacing: Theme.tokens.space.xs;
-        padding: Theme.tokens.space.sm;
-        LoomButton {
-            icon: "format";
-            label: "Format";
-            variant: root.inspector-visible ? "primary" : "ghost";
-            selected: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { root.toggle-inspector(); root.close-requested(); }
-        }
-        LoomButton {
-            icon: "export";
-            label: "Export PDF";
-            variant: "ghost";
-            clicked => { root.export-pdf(); root.close-requested(); }
-        }
     }
 }
