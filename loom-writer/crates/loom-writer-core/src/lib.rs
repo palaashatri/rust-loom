@@ -374,7 +374,13 @@ impl WriterDocument {
         next_text.push_str(&text[end..]);
 
         if next_text != text {
-            self.replace_paragraphs(&next_text);
+            let edit = comments::TextEdit {
+                old_start: start,
+                old_end: end,
+                new_start: start,
+                new_end: start + replacement.len(),
+            };
+            self.replace_paragraphs_with_edit(&next_text, edit);
             let inserted_end = start + replacement.len();
             apply_global_character_style(self, start, inserted_end, inherited);
         }
@@ -382,25 +388,6 @@ impl WriterDocument {
         let caret = TextSelection::caret(start + replacement.len());
         self.set_selection(caret.clone());
         Ok(caret)
-    }
-
-    /// Replace the editor's canonical text after a native text-buffer edit.
-    /// The single changed range is inferred from old/new text so inserted
-    /// content inherits the style at its old caret without requiring a second
-    /// view-specific formatting path.
-    pub fn replace_editor_text(&mut self, new_text: &str) -> Result<bool, WriterError> {
-        let new_text = normalize_editor_text(new_text);
-        let old_text = self.editor_text();
-        if old_text == new_text {
-            self.set_selection(self.selection.clone());
-            return Ok(false);
-        }
-        let (old_start, _old_end, new_start, new_end) = changed_text_ranges(&old_text, &new_text);
-        let inherited = character_style_at_global(self, old_start, self.selection.affinity);
-        self.replace_paragraphs(&new_text);
-        apply_global_character_style(self, new_start, new_end, inherited);
-        self.set_selection(self.selection.clone());
-        Ok(true)
     }
 
     /// Replace the document's blocks from editable plain text paragraphs.

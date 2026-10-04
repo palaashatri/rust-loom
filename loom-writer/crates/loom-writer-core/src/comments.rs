@@ -7,9 +7,71 @@
 //! visible as an explicitly orphaned review item.
 
 use crate::{
-    changed_text_ranges, pkg_json, CommentThread, ContentParser, JsonValue, RichBlock,
-    WriterDocument,
+    apply_global_character_style, changed_text_ranges, character_style_at_global,
+    normalize_editor_text, pkg_json, CommentThread, ContentParser, JsonValue, RichBlock,
+    WriterDocument, WriterError,
 };
+
+/// One contiguous edit in editor-text byte offsets: the old range
+/// `old_start..old_end` was replaced by the new range `new_start..new_end`.
+/// Knowing the real edit lets comment anchors rebase correctly where a
+/// before/after diff alone is ambiguous (for example typing a copy of a word
+/// next to the word itself).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextEdit {
+    pub old_start: usize,
+    pub old_end: usize,
+    pub new_start: usize,
+    pub new_end: usize,
+}
+
+impl TextEdit {
+    /// Infer the edit from old and new text with no further knowledge.
+    fn diff(old_text: &str, new_text: &str) -> Self {
+        let (old_start, old_end, new_start, new_end) = changed_text_ranges(old_text, new_text);
+        Self {
+            old_start,
+            old_end,
+            new_start,
+            new_end,
+        }
+    }
+
+    /// Place a pure insertion or pure deletion using the caret the editor
+    /// reports after the edit. Returns `None` when the caret does not explain
+    /// the change, so the caller falls back to [`Self::diff`].
+    fn from_caret(old_text: &str, new_text: &str, caret: usize) -> Option<Self> {
+        if caret > new_text.len() || !new_text.is_char_boundary(caret) {
+            return None;
+        }
+        if new_text.len() > old_text.len() {
+            let inserted = new_text.len() - old_text.len();
+            let start = caret.checked_sub(inserted)?;
+            let explained = old_text.is_char_boundary(start)
+                && new_text.get(..start)? == old_text.get(..start)?
+                && new_text.get(caret..)? == old_text.get(start..)?;
+            explained.then_some(Self {
+                old_start: start,
+                old_end: start,
+                new_start: start,
+                new_end: caret,
+            })
+        } else if new_text.len() < old_text.len() {
+            let end = caret + (old_text.len() - new_text.len());
+            let explained = old_text.is_char_boundary(end)
+                && new_text.get(..caret)? == old_text.get(..caret)?
+                && new_text.get(caret..)? == old_text.get(end..)?;
+            explained.then_some(Self {
+                old_start: caret,
+                old_end: end,
+                new_start: caret,
+                new_end: caret,
+            })
+        } else {
+            None
+        }
+    }
+}
 
 /// The display name used for comments created locally (Loom is local-first
 /// and has no accounts).
@@ -102,8 +164,23 @@ impl WriterDocument {
         if old_text == new_text {
             return;
         }
-        let (old_change_start, old_change_end, new_change_start, new_change_end) =
-            changed_text_ranges(&old_text, &new_text);
+        let edit = TextEdit::diff(&old_text, &new_text);
+        Self::rebase_comment_anchors_through(comments, old_blocks, new_blocks, edit);
+    }
+
+    /// Rebase comment ranges through an explicit edit.
+    pub(crate) fn rebase_comment_anchors_through(
+        comments: &mut [CommentThread],
+        old_blocks: &[RichBlock],
+        new_blocks: &[RichBlock],
+        edit: TextEdit,
+    ) {
+        let TextEdit {
+            old_start: old_change_start,
+            old_end: old_change_end,
+            new_start: new_change_start,
+            new_end: new_change_end,
+        } = edit;
 
         for comment in comments {
             if comment.orphaned {
@@ -167,6 +244,49 @@ impl WriterDocument {
                 comment.orphaned = true;
             }
         }
+    }
+
+    /// `replace_paragraphs` for a caller that knows the exact edit: comment
+    /// anchors rebase through `edit` instead of through an inferred diff.
+    pub(crate) fn replace_paragraphs_with_edit(&mut self, plain_text: &str, edit: TextEdit) {
+        let before = self.comments.clone();
+        let old_blocks = self.blocks.clone();
+        self.replace_paragraphs(plain_text);
+        if before.is_empty() {
+            return;
+        }
+        self.comments = before;
+        Self::rebase_comment_anchors_through(&mut self.comments, &old_blocks, &self.blocks, edit);
+    }
+
+    /// Replace the editor's canonical text after a native text-buffer edit.
+    /// The single changed range is inferred from old/new text, using the
+    /// caret reported by the editor to place pure insertions and deletions
+    /// exactly. Inserted content inherits the style at its old caret.
+    pub fn replace_editor_text_at(
+        &mut self,
+        new_text: &str,
+        caret: Option<usize>,
+    ) -> Result<bool, WriterError> {
+        let new_text = normalize_editor_text(new_text);
+        let old_text = self.editor_text();
+        if old_text == new_text {
+            self.set_selection(self.selection.clone());
+            return Ok(false);
+        }
+        let edit = caret
+            .and_then(|caret| TextEdit::from_caret(&old_text, &new_text, caret))
+            .unwrap_or_else(|| TextEdit::diff(&old_text, &new_text));
+        let inherited = character_style_at_global(self, edit.old_start, self.selection.affinity);
+        self.replace_paragraphs_with_edit(&new_text, edit);
+        apply_global_character_style(self, edit.new_start, edit.new_end, inherited);
+        self.set_selection(self.selection.clone());
+        Ok(true)
+    }
+
+    /// Replace the editor's canonical text with only the old/new diff to go on.
+    pub fn replace_editor_text(&mut self, new_text: &str) -> Result<bool, WriterError> {
+        self.replace_editor_text_at(new_text, None)
     }
 
     /// Comment threads whose text anchor still exists in the document.
@@ -480,6 +600,101 @@ mod tests {
         let reopened = crate::load_document(&bytes).expect("reopen document");
         assert!(reopened.comments[0].orphaned);
         assert!(reopened.live_comment_threads().is_empty());
+    }
+
+    fn anchored_text(document: &WriterDocument) -> String {
+        let comment = &document.comments[0];
+        let block = document.get(comment.block_id).expect("comment block");
+        block.text.as_str()[comment.start..comment.end].to_string()
+    }
+
+    fn one_block(text: &str, start: usize, end: usize) -> WriterDocument {
+        let mut document = WriterDocument::new("doc", "Doc");
+        document.blocks.push(RichBlock::new(7, "paragraph", text));
+        document.add_comment_thread(7, start, end, "c").unwrap();
+        document
+    }
+
+    #[test]
+    fn inserting_a_repeat_of_the_commented_word_before_it_moves_the_anchor() {
+        let mut document = one_block("Hello world", 6, 11);
+        document.set_selection(TextSelection::caret(6));
+        document.replace_selection_text("world ").unwrap();
+        let comment = &document.comments[0];
+        assert_eq!((comment.start, comment.end), (12, 17));
+    }
+
+    #[test]
+    fn deleting_a_repeat_before_the_commented_word_keeps_the_anchor_on_its_word() {
+        let mut document = one_block("Hello world world", 12, 17);
+        document.set_selection(TextSelection::range(6, 12));
+        document.replace_selection_text("").unwrap();
+        let comment = &document.comments[0];
+        assert!(!comment.orphaned);
+        assert_eq!((comment.start, comment.end), (6, 11));
+        assert_eq!(anchored_text(&document), "world");
+    }
+
+    #[test]
+    fn native_editor_insertion_uses_the_caret_to_place_the_change() {
+        let mut document = one_block("Hello world", 6, 11);
+        document
+            .replace_editor_text_at("Hello world world", Some(12))
+            .unwrap();
+        let comment = &document.comments[0];
+        assert_eq!((comment.start, comment.end), (12, 17));
+    }
+
+    #[test]
+    fn native_editor_deletion_uses_the_caret_to_place_the_change() {
+        let mut document = one_block("Hello world world", 12, 17);
+        document
+            .replace_editor_text_at("Hello world", Some(6))
+            .unwrap();
+        let comment = &document.comments[0];
+        assert!(!comment.orphaned);
+        assert_eq!((comment.start, comment.end), (6, 11));
+    }
+
+    #[test]
+    fn insertion_at_the_end_does_not_extend_and_inside_does() {
+        let mut document = one_block("Hello world", 6, 11);
+        document.set_selection(TextSelection::caret(11));
+        document.replace_selection_text("!").unwrap();
+        assert_eq!(anchored_text(&document), "world");
+        document.set_selection(TextSelection::caret(8));
+        document.replace_selection_text("XY").unwrap();
+        assert_eq!(anchored_text(&document), "woXYrld");
+    }
+
+    #[test]
+    fn typing_before_emoji_and_combining_marks_keeps_valid_boundaries() {
+        let mut document = one_block("e\u{301}x 🌍 y", 5, 9);
+        assert_eq!(anchored_text(&document), "🌍");
+        document.set_selection(TextSelection::caret(0));
+        document.replace_selection_text("🎉").unwrap();
+        assert_eq!(anchored_text(&document), "🌍");
+    }
+
+    #[test]
+    fn splitting_inside_the_comment_keeps_its_start_block_part() {
+        let mut document = one_block("Hello world", 6, 11);
+        document.set_selection(TextSelection::caret(8));
+        document.replace_selection_text("\n").unwrap();
+        assert!(!document.comments[0].orphaned);
+        assert_eq!(anchored_text(&document), "wo");
+    }
+
+    #[test]
+    fn deleting_the_whole_commented_text_orphans_but_keeps_the_thread_manageable() {
+        let mut document = one_block("Hello world!", 6, 11);
+        document.set_selection(TextSelection::range(5, 11));
+        document.replace_selection_text("").unwrap();
+        assert!(document.comments[0].orphaned);
+        assert_eq!(document.comments.len(), 1);
+        let id = document.comments[0].id.clone();
+        assert!(document.set_comment_thread_resolved(&id, true));
+        assert!(document.remove_comment_thread(&id));
     }
 
     #[test]

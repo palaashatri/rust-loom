@@ -2855,7 +2855,9 @@ fn wire_writer_shared_callbacks(
                     return;
                 }
                 let mut next = state.current.borrow().clone();
-                let text_changed = match next.replace_editor_text(text.as_str()) {
+                let text_changed = match next
+                    .replace_editor_text_at(text.as_str(), usize::try_from(focus).ok())
+                {
                     Ok(changed) => changed,
                     Err(error) => {
                         app.set_status_left(SharedString::from(format!("Edit failed: {error}")));

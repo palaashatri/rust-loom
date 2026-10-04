@@ -293,7 +293,7 @@ export component WriterInspector inherits LoomPanel {
             for entry in root.comment-entries : Rectangle {
                 accessible-role: AccessibleRole.text;
                 accessible-label: entry.orphaned
-                    ? "Comment by " + entry.author + ", text anchor was deleted: " + entry.body
+                    ? "Comment by " + entry.author + ", the commented text was removed: " + entry.body
                     : entry.resolved
                         ? "Comment by " + entry.author + ", resolved: " + entry.body
                         : "Comment by " + entry.author + ": " + entry.body;
@@ -310,7 +310,7 @@ export component WriterInspector inherits LoomPanel {
 
                     Text {
                         text: entry.orphaned
-                            ? entry.author + " · text anchor lost"
+                            ? entry.author + " · text removed"
                             : entry.resolved
                                 ? entry.author + " · resolved"
                                 : entry.author;
@@ -329,7 +329,7 @@ export component WriterInspector inherits LoomPanel {
                         alignment: start;
 
                         LoomButton {
-                            label: entry.orphaned ? "Anchor deleted" : "Show on page";
+                            label: entry.orphaned ? "Text removed" : "Show on page";
                             variant: "secondary";
                             enabled: !entry.orphaned;
                             clicked => { root.navigate-comment(entry.id); }

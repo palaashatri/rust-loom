@@ -875,3 +875,87 @@ fn the_quick_start_sample_is_only_reachable_on_request() {
     assert!(app.get_doc_content().as_str().contains("Welcome"));
     assert!(state.save_path.borrow().is_none());
 }
+
+fn comment_rect_spans(document: &WriterDocument) -> Vec<(f32, f32, f32)> {
+    let (_, _, rects) = writer_render_projection(document, PageViewport::default());
+    rects.iter().map(|r| (r.x, r.y, r.width)).collect()
+}
+
+fn commented_reference(text: &str, start: usize, end: usize) -> WriterDocument {
+    let mut document = text_document(text);
+    let block_id = document.blocks[0].id;
+    document
+        .add_comment_thread(block_id, start, end, "reference")
+        .expect("reference comment");
+    document
+}
+
+#[test]
+fn typing_through_the_input_callback_keeps_the_page_highlight_on_the_same_words() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(commented_reference("Hello world", 6, 11), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    let before = comment_rect_spans(&state.current.borrow());
+    assert_eq!(before.len(), 1);
+
+    // Type "New " before the commented range, as the native editor reports it.
+    app.invoke_document_edited("New Hello world".into(), 4, 4);
+    {
+        let document = state.current.borrow();
+        let comment = &document.comments[0];
+        assert_eq!((comment.start, comment.end), (10, 15));
+        let reference = commented_reference("New Hello world", 10, 15);
+        assert_eq!(
+            comment_rect_spans(&document),
+            comment_rect_spans(&reference),
+            "the highlight covers 'world', not shifted letters"
+        );
+    }
+
+    // Typing a copy of the word right before it moves the anchor, too.
+    app.invoke_document_edited("New Hello world world".into(), 16, 16);
+    {
+        let document = state.current.borrow();
+        let comment = &document.comments[0];
+        assert_eq!((comment.start, comment.end), (16, 21));
+        assert_eq!(
+            comment_rect_spans(&document),
+            comment_rect_spans(&commented_reference("New Hello world world", 16, 21))
+        );
+    }
+
+    // Backspacing the copy away restores the earlier anchor.
+    app.invoke_document_edited("New Hello world".into(), 10, 10);
+    let document = state.current.borrow();
+    assert_eq!(
+        (document.comments[0].start, document.comments[0].end),
+        (10, 15)
+    );
+}
+
+#[test]
+fn deleting_the_commented_text_orphans_the_thread_and_undo_redo_restore_it() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(commented_reference("Hello world", 6, 11), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    app.invoke_document_edited("Hello ".into(), 6, 6);
+    {
+        let document = state.current.borrow();
+        assert!(document.comments[0].orphaned);
+        assert!(comment_rect_spans(&document).is_empty());
+    }
+    let entries = app.get_comment_entries();
+    assert!(entries.iter().next().expect("orphan stays listed").orphaned);
+
+    app.invoke_undo();
+    {
+        let document = state.current.borrow();
+        let comment = &document.comments[0];
+        assert!(!comment.orphaned);
+        assert_eq!((comment.start, comment.end), (6, 11));
+        assert_eq!(comment_rect_spans(&document).len(), 1);
+    }
+    app.invoke_redo();
+    assert!(state.current.borrow().comments[0].orphaned);
+}
