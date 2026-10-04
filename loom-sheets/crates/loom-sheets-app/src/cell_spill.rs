@@ -30,7 +30,7 @@ fn is_number(text: &str) -> bool {
         .chars()
         .filter(|c| !matches!(c, '$' | ',' | '%' | '(' | ')' | ' ' | '\u{20ac}' | '\u{a3}'))
         .collect();
-    !plain.is_empty() && plain.parse::<f64>().is_ok()
+    !plain.is_empty() && (plain.parse::<f64>().is_ok() || plain.chars().all(|c| c == '#'))
 }
 
 fn text_width(text: &str, size: f32, bold: bool) -> f32 {

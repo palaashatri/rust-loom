@@ -30,6 +30,7 @@ pub mod objects;
 pub mod persistence;
 pub mod refs;
 pub mod style;
+mod style_fit;
 pub mod workbook;
 pub mod xlsx;
 pub use interop::{

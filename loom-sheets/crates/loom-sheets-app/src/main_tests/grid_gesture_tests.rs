@@ -175,3 +175,37 @@ fn a_drag_that_stays_inside_the_grid_does_not_scroll() {
     assert_eq!(app.get_grid_scroll_x(), 0.0);
     pointer.invoke_drag_ended();
 }
+
+#[test]
+fn a_number_too_wide_for_its_column_is_never_shown_cut_off() {
+    let wide = "12345678901234567890";
+    let mut sheet = Sheet::new("wide");
+    sheet.set_str("A1", wide);
+    let values = evaluate(&sheet);
+    let cell = |sheet: &Sheet| {
+        let viewport = SheetViewport::from_scroll(
+            0.0,
+            0.0,
+            1_024.0,
+            720.0,
+            24.0,
+            80.0,
+            SheetDimensions::new(4, 4),
+        );
+        project_sheet_grid_with_values(sheet, &values, viewport).cells[0].clone()
+    };
+    let narrow = cell(&sheet);
+    assert!(narrow.contains("E+19"), "{narrow}");
+    assert_ne!(narrow, "12345678");
+
+    // The full precision stays in the cell and is what autofit sizes to.
+    assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some(wide));
+    let width = grid_gestures::fit_width(&sheet, &values, 0);
+    assert!(width > loom_sheets_core::DEFAULT_COL_WIDTH);
+    sheet.set_col_width(0, width);
+    let full = cell(&sheet);
+    assert!(
+        !full.contains('E') && full.starts_with("12345678901234567"),
+        "{full}"
+    );
+}

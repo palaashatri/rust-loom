@@ -21,9 +21,9 @@ use crate::{
 
 /// Average advance of a character in the grid's face, as a fraction of its
 /// font size. An estimate: the grid does not measure text.
-const GLYPH_EM: f32 = 0.58;
+const GLYPH_EM: f32 = 0.6;
 /// Bold text runs a little wider.
-const BOLD_FACTOR: f32 = 1.08;
+const BOLD_FACTOR: f32 = 1.1;
 /// Room left around the widest value (cell padding on both sides).
 const FIT_PADDING: f32 = 16.0;
 /// Pixels a scroll tick moves when the pointer is just outside, and per pixel

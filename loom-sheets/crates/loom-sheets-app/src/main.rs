@@ -225,7 +225,11 @@ fn project_sheet_grid_with_values(
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
             };
-            let display_val = style.format_value(&raw_val);
+            let display_val = style.format_value_fit(
+                &raw_val,
+                sheet.col_width(col),
+                formatting::effective_font_size(style) as f32,
+            );
             cells.push(display_val);
             cell_alignments.push(align_code);
             cell_bolds.push(style.bold);
