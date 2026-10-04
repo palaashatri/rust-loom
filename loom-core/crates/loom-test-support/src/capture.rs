@@ -106,12 +106,24 @@ pub fn snapshot_component(
     scale_factor: f32,
 ) -> Result<RgbaImage, CaptureError> {
     let (w, h) = (width.max(1.0), height.max(1.0));
-    // The minimal capture window renders at scale factor 1.0; the requested
-    // scale is applied to the physical resolution instead. This keeps
-    // rendering deterministic across platforms.
+    // A real scale factor, as on a high-DPI display: the logical size stays
+    // `width` x `height`, the layout is identical, and only the pixel density
+    // changes. `LOOM_CAPTURE_SCALE` overrides a 1.0 request for QA captures.
+    let scale_factor = if (scale_factor - 1.0).abs() < f32::EPSILON {
+        std::env::var("LOOM_CAPTURE_SCALE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| (1.0..=4.0).contains(v))
+            .unwrap_or(1.0)
+    } else {
+        scale_factor
+    };
+    handle
+        .window()
+        .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor });
     handle.window().set_size(slint::PhysicalSize::new(
-        (w * scale_factor) as u32,
-        (h * scale_factor) as u32,
+        (w * scale_factor).round() as u32,
+        (h * scale_factor).round() as u32,
     ));
     handle.show().map_err(CaptureError::Platform)?;
     render_now()
@@ -150,6 +162,39 @@ fn render_now() -> Result<RgbaImage, CaptureError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scale_factor_changes_pixel_density_not_layout() {
+        slint::slint! {
+            export component Dpi inherits Window {
+                preferred-width: 200px;
+                preferred-height: 100px;
+                background: white;
+                Rectangle { x: 0px; y: 0px; width: 50px; height: 25px; background: black; }
+            }
+        }
+        set_platform();
+        let ui = Dpi::new().unwrap();
+        let one = snapshot_component(&ui, 200.0, 100.0, 1.0).unwrap();
+        let two = snapshot_component(&ui, 200.0, 100.0, 2.0).unwrap();
+        assert_eq!(one.dimensions(), (200, 100));
+        assert_eq!(two.dimensions(), (400, 200));
+        // The 50x25 logical rectangle covers 100x50 physical pixels at 2x, so
+        // the same share of the window, not the same number of pixels.
+        let dark = |img: &RgbaImage| img.pixels().filter(|p| p.0[0] < 128).count() as f32;
+        let share_one = dark(&one) / (200.0 * 100.0);
+        let share_two = dark(&two) / (400.0 * 200.0);
+        assert!(
+            (share_one - share_two).abs() < 0.002,
+            "{share_one} vs {share_two}"
+        );
+        assert_eq!(two.get_pixel(99, 49).0[0], 0, "inside the scaled rectangle");
+        assert_eq!(
+            two.get_pixel(101, 51).0[0],
+            255,
+            "outside the scaled rectangle"
+        );
+    }
 
     #[test]
     fn snapshot_is_deterministic() {
