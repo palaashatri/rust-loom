@@ -106,6 +106,7 @@ fn error_literal(error: CalcError) -> &'static str {
         CalcError::Ref => "#REF!",
         CalcError::Spill => "#SPILL!",
         CalcError::Num => "#NUM!",
+        CalcError::Calc => "#CALC!",
     }
 }
 

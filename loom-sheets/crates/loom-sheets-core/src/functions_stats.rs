@@ -24,6 +24,8 @@ pub(crate) fn eval_stats_function(name: &str, args: &[Expr], lookup: Lookup) -> 
         "SUMIFS" => ifs(args, lookup, IfsKind::Sum),
         "COUNTIFS" => ifs(args, lookup, IfsKind::Count),
         "AVERAGEIFS" => ifs(args, lookup, IfsKind::Average),
+        "MINIFS" => ifs(args, lookup, IfsKind::Min),
+        "MAXIFS" => ifs(args, lookup, IfsKind::Max),
         _ => return None,
     };
     Some(match result {
@@ -122,9 +124,11 @@ enum IfsKind {
     Sum,
     Count,
     Average,
+    Min,
+    Max,
 }
 
-/// SUMIFS / COUNTIFS / AVERAGEIFS: criteria ranges must share one size, and
+/// SUMIFS / COUNTIFS / AVERAGEIFS / MINIFS / MAXIFS: criteria ranges must share one size, and
 /// a cell counts when every criterion matches.
 fn ifs(args: &[Expr], lookup: Lookup, kind: IfsKind) -> Calc {
     let (target, pairs) = match kind {
@@ -159,6 +163,7 @@ fn ifs(args: &[Expr], lookup: Lookup, kind: IfsKind) -> Calc {
         return Ok(mask.iter().filter(|hit| **hit).count() as f64);
     };
     let (mut total, mut count) = (0.0, 0usize);
+    let mut extreme: Option<f64> = None;
     for (hit, cell) in mask.iter().zip(&target_cells) {
         if !hit {
             continue;
@@ -167,6 +172,11 @@ fn ifs(args: &[Expr], lookup: Lookup, kind: IfsKind) -> Calc {
             Value::Number(n) => {
                 total += n;
                 count += 1;
+                extreme = Some(match (kind, extreme) {
+                    (IfsKind::Min, Some(current)) => current.min(n),
+                    (IfsKind::Max, Some(current)) => current.max(n),
+                    _ => n,
+                });
             }
             Value::Error(error) => return Err(error),
             _ => {}
@@ -175,6 +185,7 @@ fn ifs(args: &[Expr], lookup: Lookup, kind: IfsKind) -> Calc {
     match kind {
         IfsKind::Average if count == 0 => Err(CalcError::DivZero),
         IfsKind::Average => Ok(total / count as f64),
+        IfsKind::Min | IfsKind::Max => Ok(extreme.unwrap_or(0.0)),
         _ => Ok(total),
     }
 }

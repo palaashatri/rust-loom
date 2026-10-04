@@ -259,7 +259,7 @@ fn value_of(args: &[Expr], lookup: Lookup) -> Result<f64, CalcError> {
     }
 }
 
-fn parse_numeric_text(text: &str) -> Result<f64, CalcError> {
+pub(crate) fn parse_numeric_text(text: &str) -> Result<f64, CalcError> {
     let trimmed = text.trim();
     let (negative, body) = match trimmed.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
         Some(inner) => (true, inner),
@@ -269,8 +269,31 @@ fn parse_numeric_text(text: &str) -> Result<f64, CalcError> {
         Some(rest) => (true, rest),
         None => (false, body),
     };
-    let unsigned = body.trim_start_matches(['$', '-', '+']);
-    let sign_negative = body.starts_with('-') || negative;
+    // One sign and one `$`, in either order: `-5`, `$5`, `-$5`, `$-5`.
+    let mut sign_negative = negative;
+    let mut unsigned = body;
+    let mut signed = false;
+    for step in 0..3 {
+        let rest = if !signed && unsigned.starts_with('-') {
+            sign_negative = true;
+            signed = true;
+            &unsigned[1..]
+        } else if !signed && unsigned.starts_with('+') {
+            signed = true;
+            &unsigned[1..]
+        } else if step < 2
+            && unsigned.starts_with('$')
+            && !body[..body.len() - unsigned.len()].contains('$')
+        {
+            &unsigned[1..]
+        } else {
+            break;
+        };
+        unsigned = rest;
+    }
+    if unsigned.starts_with(['-', '+', '$']) {
+        return Err(CalcError::Value);
+    }
     let digits: String = unsigned.replace(',', "");
     let grouped_ok = !unsigned.contains(',') || valid_grouping(unsigned);
     if grouped_ok && !digits.is_empty() {
@@ -286,10 +309,19 @@ fn parse_numeric_text(text: &str) -> Result<f64, CalcError> {
         }
     }
     if trimmed.is_empty() {
-        return Ok(0.0);
+        return Err(CalcError::Value);
     }
     match (parse_date_text(trimmed), parse_time_text(trimmed)) {
-        (Some(date), _) => Ok(date),
+        (Some(date), _) => {
+            // A time of day after the date adds its fraction of a day.
+            let time = trimmed.split_once('T').map(|(_, time)| time).or_else(|| {
+                trimmed
+                    .split_once(' ')
+                    .map(|(_, time)| time)
+                    .filter(|t| t.contains(':'))
+            });
+            Ok(date + time.and_then(parse_time_text).unwrap_or(0.0))
+        }
         (None, Some(time)) => Ok(time),
         _ => Err(CalcError::Value),
     }
@@ -300,7 +332,7 @@ fn valid_grouping(text: &str) -> bool {
     let integer = text.split('.').next().unwrap_or("");
     let mut groups = integer.split(',');
     let first = groups.next().unwrap_or("");
-    (1..=3).contains(&first.len()) && groups.all(|g| g.len() == 3)
+    !first.is_empty() && groups.all(|g| g.len() == 3)
 }
 
 /// TEXT(value, format_text).

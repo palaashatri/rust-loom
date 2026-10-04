@@ -198,14 +198,12 @@ fn a_number_too_wide_for_its_column_is_never_shown_cut_off() {
     assert!(narrow.contains("E+19"), "{narrow}");
     assert_ne!(narrow, "12345678");
 
-    // The full precision stays in the cell and is what autofit sizes to.
+    // The typed digits stay in the cell and autofit sizes to the shown number.
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some(wide));
     let width = grid_gestures::fit_width(&sheet, &values, 0);
     assert!(width > loom_sheets_core::DEFAULT_COL_WIDTH);
     sheet.set_col_width(0, width);
+    // Like Excel, the shown digits are the 15 significant ones, zero padded.
     let full = cell(&sheet);
-    assert!(
-        !full.contains('E') && full.starts_with("12345678901234567"),
-        "{full}"
-    );
+    assert_eq!(full, "12345678901234600000");
 }

@@ -7,6 +7,19 @@ use crate::{CalcError, CellRef, Expr, Value};
 type Lookup<'a> = &'a dyn Fn(CellRef) -> Value;
 type Calc = Result<f64, CalcError>;
 
+/// N(value): numbers as they are, `TRUE` as 1, text as 0; errors propagate.
+fn n_function(args: &[Expr], lookup: Lookup) -> Calc {
+    if args.len() != 1 {
+        return Err(CalcError::Value);
+    }
+    match crate::eval_expr(&args[0], lookup) {
+        Value::Number(n) => Ok(n),
+        Value::Bool(b) => Ok(f64::from(u8::from(b))),
+        Value::Error(error) => Err(error),
+        _ => Ok(0.0),
+    }
+}
+
 /// Dispatch math functions from the main evaluator.
 pub(crate) fn eval_math_function(name: &str, args: &[Expr], lookup: Lookup) -> Option<Value> {
     let result = match name {
@@ -23,6 +36,7 @@ pub(crate) fn eval_math_function(name: &str, args: &[Expr], lookup: Lookup) -> O
         }),
         "MEDIAN" => aggregate(args, lookup, median),
         "COUNT" => count(args, lookup),
+        "N" => n_function(args, lookup),
         "ROUND" => round(args, lookup),
         "INT" => unary(args, lookup, |n| Ok(n.floor())),
         "SIGN" => unary(args, lookup, |n| {

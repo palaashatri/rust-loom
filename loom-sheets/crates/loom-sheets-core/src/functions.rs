@@ -3,7 +3,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{eval_expr, hlookup, index_lookup, match_lookup, vlookup, CalcError, CellRef, Value};
+use crate::{eval_expr, CalcError, CellRef, Value};
 
 /// Evaluates extended built-in functions for the formula engine.
 pub(crate) fn eval_extended_function(
@@ -33,117 +33,14 @@ pub(crate) fn eval_extended_function(
         return Some(v);
     }
     match name {
-        "VLOOKUP" => {
-            if raw_args.len() < 3 || raw_args.len() > 4 {
-                return Some(Value::Error(CalcError::Value));
-            }
-            let lookup_val = eval_expr(&raw_args[0], lookup).display();
-            let col_val = eval_expr(&raw_args[2], lookup);
-            let target_col = match col_val {
-                Value::Number(n) => {
-                    if n < 1.0 {
-                        return Some(Value::Error(CalcError::Value));
-                    }
-                    n as usize
-                }
-                _ => return Some(Value::Error(CalcError::Value)),
-            };
-            let exact_match = if raw_args.len() == 4 {
-                match eval_expr(&raw_args[3], lookup) {
-                    Value::Bool(b) => b,
-                    Value::Number(n) => n != 0.0,
-                    _ => false,
-                }
-            } else {
-                false
-            };
-
-            let table = extract_table_matrix(&raw_args[1], lookup);
-            match vlookup(&lookup_val, &table, target_col, exact_match) {
-                Ok(found) => Some(parse_value(&found)),
-                Err(_) => Some(Value::Error(CalcError::NA)),
-            }
-        }
-        "HLOOKUP" => {
-            if raw_args.len() < 3 || raw_args.len() > 4 {
-                return Some(Value::Error(CalcError::Value));
-            }
-            let lookup_val = eval_expr(&raw_args[0], lookup).display();
-            let row_val = eval_expr(&raw_args[2], lookup);
-            let target_row = match row_val {
-                Value::Number(n) => {
-                    if n < 1.0 {
-                        return Some(Value::Error(CalcError::Value));
-                    }
-                    n as usize
-                }
-                _ => return Some(Value::Error(CalcError::Value)),
-            };
-            let exact_match = if raw_args.len() == 4 {
-                match eval_expr(&raw_args[3], lookup) {
-                    Value::Bool(b) => b,
-                    Value::Number(n) => n != 0.0,
-                    _ => false,
-                }
-            } else {
-                false
-            };
-
-            let table = extract_table_matrix(&raw_args[1], lookup);
-            match hlookup(&lookup_val, &table, target_row, exact_match) {
-                Ok(found) => Some(parse_value(&found)),
-                Err(_) => Some(Value::Error(CalcError::NA)),
-            }
-        }
-        "INDEX" => {
-            if raw_args.len() < 2 || raw_args.len() > 3 {
-                return Some(Value::Error(CalcError::Value));
-            }
-            let row_idx = match eval_expr(&raw_args[1], lookup) {
-                Value::Number(n) if n >= 1.0 => n as usize,
-                _ => return Some(Value::Error(CalcError::Value)),
-            };
-            let col_idx = if raw_args.len() == 3 {
-                match eval_expr(&raw_args[2], lookup) {
-                    Value::Number(n) if n >= 1.0 => n as usize,
-                    _ => return Some(Value::Error(CalcError::Value)),
-                }
-            } else {
-                1
-            };
-
-            let table = extract_table_matrix(&raw_args[0], lookup);
-            match index_lookup(&table, row_idx, col_idx) {
-                Ok(found) => Some(parse_value(&found)),
-                Err(_) => Some(Value::Error(CalcError::Ref)),
-            }
-        }
-        "MATCH" => {
-            if raw_args.len() < 2 || raw_args.len() > 3 {
-                return Some(Value::Error(CalcError::Value));
-            }
-            let lookup_val = eval_expr(&raw_args[0], lookup).display();
-            let exact_match = if raw_args.len() == 3 {
-                match eval_expr(&raw_args[2], lookup) {
-                    Value::Number(n) => n == 0.0,
-                    Value::Bool(b) => b,
-                    _ => true,
-                }
-            } else {
-                true
-            };
-
-            let list = extract_1d_list(&raw_args[1], lookup);
-            match match_lookup(&lookup_val, &list, exact_match) {
-                Ok(pos) => Some(Value::Number(pos as f64)),
-                Err(_) => Some(Value::Error(CalcError::NA)),
-            }
-        }
         "LEFT" => {
             if raw_args.is_empty() || raw_args.len() > 2 {
                 return Some(Value::Error(CalcError::Value));
             }
-            let text = eval_expr(&raw_args[0], lookup).display();
+            let text = match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => text,
+                Err(error) => return Some(Value::Error(error)),
+            };
             let n = if raw_args.len() == 2 {
                 match eval_expr(&raw_args[1], lookup) {
                     Value::Number(x) if x >= 0.0 => x as usize,
@@ -159,7 +56,10 @@ pub(crate) fn eval_extended_function(
             if raw_args.is_empty() || raw_args.len() > 2 {
                 return Some(Value::Error(CalcError::Value));
             }
-            let text = eval_expr(&raw_args[0], lookup).display();
+            let text = match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => text,
+                Err(error) => return Some(Value::Error(error)),
+            };
             let n = if raw_args.len() == 2 {
                 match eval_expr(&raw_args[1], lookup) {
                     Value::Number(x) if x >= 0.0 => x as usize,
@@ -177,7 +77,10 @@ pub(crate) fn eval_extended_function(
             if raw_args.len() != 3 {
                 return Some(Value::Error(CalcError::Value));
             }
-            let text = eval_expr(&raw_args[0], lookup).display();
+            let text = match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => text,
+                Err(error) => return Some(Value::Error(error)),
+            };
             let start = match eval_expr(&raw_args[1], lookup) {
                 Value::Number(x) if x >= 1.0 => (x as usize) - 1,
                 _ => return Some(Value::Error(CalcError::Value)),
@@ -193,32 +96,38 @@ pub(crate) fn eval_extended_function(
             if raw_args.len() != 1 {
                 return Some(Value::Error(CalcError::Value));
             }
-            let text = eval_expr(&raw_args[0], lookup).display();
+            let text = match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => text,
+                Err(error) => return Some(Value::Error(error)),
+            };
             Some(Value::Number(text.chars().count() as f64))
         }
         "UPPER" => {
             if raw_args.len() != 1 {
                 return Some(Value::Error(CalcError::Value));
             }
-            Some(Value::Text(
-                eval_expr(&raw_args[0], lookup).display().to_uppercase(),
-            ))
+            Some(match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => Value::Text(crate::functions_util::excel_upper(&text)),
+                Err(error) => Value::Error(error),
+            })
         }
         "LOWER" => {
             if raw_args.len() != 1 {
                 return Some(Value::Error(CalcError::Value));
             }
-            Some(Value::Text(
-                eval_expr(&raw_args[0], lookup).display().to_lowercase(),
-            ))
+            Some(match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => Value::Text(text.to_lowercase()),
+                Err(error) => Value::Error(error),
+            })
         }
         "TRIM" => {
             if raw_args.len() != 1 {
                 return Some(Value::Error(CalcError::Value));
             }
-            Some(Value::Text(excel_trim(
-                &eval_expr(&raw_args[0], lookup).display(),
-            )))
+            Some(match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => Value::Text(excel_trim(&text)),
+                Err(error) => Value::Error(error),
+            })
         }
         "IFERROR" => {
             if raw_args.len() != 2 {
@@ -230,39 +139,45 @@ pub(crate) fn eval_extended_function(
                 other => Some(other),
             }
         }
-        "SUMIF" | "COUNTIF" | "AVERAGEIF" | "MINIFS" | "MAXIFS" => {
-            // SUMIF/COUNTIF/AVERAGEIF take (range, criteria[, sum_range]);
-            // MINIFS/MAXIFS take (range, criteria_range, criteria) instead.
-            let is_min_max = name == "MINIFS" || name == "MAXIFS";
-            if is_min_max && raw_args.len() != 3 {
-                return Some(Value::Error(CalcError::Value));
-            }
-            if !is_min_max && (raw_args.len() < 2 || raw_args.len() > 3) {
+        "SUMIF" | "COUNTIF" | "AVERAGEIF" => {
+            // SUMIF/COUNTIF/AVERAGEIF take (range, criteria[, sum_range]).
+            if raw_args.len() < 2 || raw_args.len() > 3 {
                 return Some(Value::Error(CalcError::Value));
             }
             let range_cells = match expand_cells(&raw_args[0]) {
                 Some(cells) if !cells.is_empty() => cells,
                 _ => return Some(Value::Error(CalcError::Value)),
             };
-            let (criteria_position, sum_position) = if is_min_max { (2, 0) } else { (1, 2) };
-            let criteria = eval_expr(&raw_args[criteria_position], lookup);
+            let criteria = eval_expr(&raw_args[1], lookup);
             if let Value::Error(e) = criteria {
                 return Some(Value::Error(e));
             }
             let criteria_text = criteria.display();
-            // For MINIFS/MAXIFS the criteria range is the second argument;
-            // otherwise the criteria apply to the first range itself.
-            let mask_cells = if is_min_max {
-                match expand_cells(&raw_args[1]) {
-                    Some(cells) if cells.len() == range_cells.len() => cells,
-                    _ => return Some(Value::Error(CalcError::Value)),
-                }
-            } else {
-                range_cells.clone()
-            };
-            let sum_cells = if !is_min_max && raw_args.len() == 3 {
-                match expand_cells(&raw_args[sum_position]) {
-                    Some(cells) if cells.len() == range_cells.len() => cells,
+            let mask_cells = range_cells.clone();
+            // The sum range starts at its own top-left cell but takes the
+            // shape of the criteria range, as Excel resizes it.
+            let sum_cells = if raw_args.len() == 3 {
+                match (&raw_args[0], expand_cells(&raw_args[2])) {
+                    (_, Some(cells)) if cells.len() == range_cells.len() => cells,
+                    (crate::Expr::Range { start, end }, Some(cells)) if !cells.is_empty() => {
+                        let top = cells
+                            .iter()
+                            .map(|c| (c.row, c.col))
+                            .min()
+                            .unwrap_or_default();
+                        let rows = start.row.max(end.row) - start.row.min(end.row);
+                        let cols = start.col.max(end.col) - start.col.min(end.col);
+                        let mut resized = Vec::new();
+                        for dr in 0..=rows {
+                            for dc in 0..=cols {
+                                resized.push(CellRef {
+                                    row: top.0 + dr,
+                                    col: top.1 + dc,
+                                });
+                            }
+                        }
+                        resized
+                    }
                     _ => return Some(Value::Error(CalcError::Value)),
                 }
             } else {
@@ -316,29 +231,7 @@ pub(crate) fn eval_extended_function(
                         Some(Value::Number(total / count as f64))
                     }
                 }
-                _ => {
-                    // MINIFS / MAXIFS: extremes over numeric matches; no
-                    // match yields 0 like mainstream spreadsheets.
-                    let mut extreme: Option<f64> = None;
-                    let take_min = name == "MINIFS";
-                    for (matched, cell) in mask.iter().zip(sum_cells.iter()) {
-                        if !matched {
-                            continue;
-                        }
-                        match lookup(*cell) {
-                            Value::Number(n) => {
-                                extreme = Some(match extreme {
-                                    Some(current) if take_min => current.min(n),
-                                    Some(current) => current.max(n),
-                                    None => n,
-                                });
-                            }
-                            Value::Error(e) => return Some(Value::Error(e)),
-                            _ => {}
-                        }
-                    }
-                    Some(Value::Number(extreme.unwrap_or(0.0)))
-                }
+                _ => Some(Value::Error(CalcError::Name)),
             }
         }
         "TEXTJOIN" => {
@@ -428,7 +321,7 @@ pub(crate) fn eval_extended_function(
             };
             match result {
                 Ok(n) => Some(Value::Number(n)),
-                Err(_) => Some(Value::Error(CalcError::DivZero)),
+                Err(_) => Some(Value::Error(CalcError::Num)),
             }
         }
         "SEQUENCE" => {
@@ -447,6 +340,9 @@ pub(crate) fn eval_extended_function(
             let cols = dims.get(1).copied().unwrap_or(1.0).floor() as i64;
             let start = dims.get(2).copied().unwrap_or(1.0);
             let step = dims.get(3).copied().unwrap_or(1.0);
+            if rows == 0 || cols == 0 {
+                return Some(Value::Error(CalcError::Calc));
+            }
             if rows < 1 || cols < 1 || rows > 10_000 || cols > 10_000 || rows * cols > 100_000 {
                 return Some(Value::Error(CalcError::Value));
             }
@@ -514,7 +410,8 @@ pub(crate) fn eval_extended_function(
             }
             matrix.sort_by(|a, b| {
                 let ordering = sort_key_order(&a[key_position], &b[key_position]);
-                if descending {
+                let blank = a[key_position] == Value::Empty || b[key_position] == Value::Empty;
+                if descending && !blank {
                     ordering.reverse()
                 } else {
                     ordering
@@ -619,7 +516,7 @@ pub(crate) fn eval_extended_function(
             }
             if kept.is_empty() {
                 return match raw_args.get(2).map(|arg| eval_expr(arg, lookup)) {
-                    None => Some(Value::Error(CalcError::Value)),
+                    None => Some(Value::Error(CalcError::Calc)),
                     Some(Value::Error(e)) => Some(Value::Error(e)),
                     Some(Value::Array(_, _, _)) => Some(Value::Error(CalcError::Value)),
                     Some(scalar) => Some(Value::Array(vec![scalar], 1, 1)),
@@ -677,7 +574,6 @@ pub(crate) fn expand_cells(expr: &crate::Expr) -> Option<Vec<CellRef>> {
 /// string: optional `>=`, `<=`, `<>`, `>`, `<`, `=` operator prefix, then a
 /// number, text, or `*`/`?` wildcard pattern (wildcards apply to `=`/`<>`).
 pub(crate) fn criteria_matches(value: &Value, criteria: &str) -> bool {
-    let criteria = criteria.trim();
     let (op, operand) = if let Some(rest) = criteria.strip_prefix(">=") {
         (">=", rest)
     } else if let Some(rest) = criteria.strip_prefix("<=") {
@@ -693,14 +589,28 @@ pub(crate) fn criteria_matches(value: &Value, criteria: &str) -> bool {
     } else {
         ("=", criteria)
     };
-    let operand = operand.trim();
     let cell_text = value.display();
+    // A blank cell never satisfies an ordering test against text.
+    if *value == Value::Empty
+        && matches!(op, ">" | "<" | ">=" | "<=")
+        && operand.parse::<f64>().is_err()
+    {
+        return false;
+    }
     let cell_num = match value {
         Value::Number(n) => Some(*n),
         _ => None,
     };
+    let ordering = matches!(op, ">" | "<" | ">=" | "<=");
+    // Ordering against a number counts numbers only, never numeric text.
+    let numeric_operand = operand.trim().parse::<f64>().ok();
+    if ordering
+        && (numeric_operand.is_some() != cell_num.is_some() || matches!(value, Value::Bool(_)))
+    {
+        return false;
+    }
     // Numeric comparison when both sides are numbers.
-    if let (Some(cell), Ok(target)) = (cell_num, operand.parse::<f64>()) {
+    if let (Some(cell), Ok(target)) = (cell_num, operand.trim().parse::<f64>()) {
         return match op {
             "=" => cell == target,
             "<>" => cell != target,
@@ -714,15 +624,15 @@ pub(crate) fn criteria_matches(value: &Value, criteria: &str) -> bool {
     // Text comparison (case-insensitive); wildcards only for equality.
     match op {
         "=" => {
-            if operand.contains('*') || operand.contains('?') {
-                wildcard_match(operand, &cell_text)
+            if operand.contains(['*', '?', '~']) {
+                matches!(value, Value::Text(_)) && wildcard_match(operand, &cell_text)
             } else {
                 cell_text.eq_ignore_ascii_case(operand)
             }
         }
         "<>" => {
-            if operand.contains('*') || operand.contains('?') {
-                !wildcard_match(operand, &cell_text)
+            if operand.contains(['*', '?', '~']) {
+                !(matches!(value, Value::Text(_)) && wildcard_match(operand, &cell_text))
             } else {
                 !cell_text.eq_ignore_ascii_case(operand)
             }
@@ -749,6 +659,10 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
         if text.is_empty() {
             return false;
         }
+        // `~` makes the next wildcard character literal.
+        if pattern[0] == '~' && pattern.len() > 1 {
+            return pattern[1] == text[0] && go(&pattern[2..], &text[1..]);
+        }
         if pattern[0] == '?' || pattern[0] == text[0] {
             go(&pattern[1..], &text[1..])
         } else {
@@ -756,81 +670,6 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
         }
     }
     go(&pattern, &text)
-}
-
-fn extract_table_matrix(expr: &crate::Expr, lookup: &dyn Fn(CellRef) -> Value) -> Vec<Vec<String>> {
-    match expr {
-        crate::Expr::Range { start, end } => {
-            let min_row = start.row.min(end.row);
-            let max_row = start.row.max(end.row);
-            let min_col = start.col.min(end.col);
-            let max_col = start.col.max(end.col);
-            let mut table = Vec::with_capacity((max_row - min_row + 1) as usize);
-            for row in min_row..=max_row {
-                let mut r = Vec::with_capacity((max_col - min_col + 1) as usize);
-                for col in min_col..=max_col {
-                    let val = lookup(CellRef { row, col });
-                    r.push(val.display());
-                }
-                table.push(r);
-            }
-            table
-        }
-        crate::Expr::Cell(cell) => vec![vec![lookup(*cell).display()]],
-        _ => match eval_expr(expr, lookup) {
-            // Nested spill results (e.g. VLOOKUP over SORT output).
-            Value::Array(flat, rows, cols) => {
-                let mut table = Vec::with_capacity(rows);
-                let mut cells = flat.into_iter();
-                for _ in 0..rows {
-                    let mut line = Vec::with_capacity(cols);
-                    for _ in 0..cols {
-                        line.push(cells.next().map(|v| v.display()).unwrap_or_default());
-                    }
-                    table.push(line);
-                }
-                table
-            }
-            _ => Vec::new(),
-        },
-    }
-}
-
-fn extract_1d_list(expr: &crate::Expr, lookup: &dyn Fn(CellRef) -> Value) -> Vec<String> {
-    match expr {
-        crate::Expr::Range { start, end } => {
-            let min_row = start.row.min(end.row);
-            let max_row = start.row.max(end.row);
-            let min_col = start.col.min(end.col);
-            let max_col = start.col.max(end.col);
-            let mut list = Vec::new();
-            for row in min_row..=max_row {
-                for col in min_col..=max_col {
-                    list.push(lookup(CellRef { row, col }).display());
-                }
-            }
-            list
-        }
-        crate::Expr::Cell(cell) => vec![lookup(*cell).display()],
-        _ => match eval_expr(expr, lookup) {
-            Value::Array(flat, _, _) => flat.into_iter().map(|v| v.display()).collect(),
-            _ => Vec::new(),
-        },
-    }
-}
-
-fn parse_value(s: &str) -> Value {
-    if s.is_empty() {
-        Value::Empty
-    } else if let Ok(n) = s.parse::<f64>() {
-        Value::Number(n)
-    } else if s.eq_ignore_ascii_case("TRUE") {
-        Value::Bool(true)
-    } else if s.eq_ignore_ascii_case("FALSE") {
-        Value::Bool(false)
-    } else {
-        Value::Text(s.to_string())
-    }
 }
 
 /// Read an argument as a value matrix for spill producers: ranges expand to

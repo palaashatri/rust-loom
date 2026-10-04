@@ -10,10 +10,7 @@ pub(crate) fn to_number(value: Value) -> Result<f64, CalcError> {
         Value::Number(n) => Ok(n),
         Value::Bool(b) => Ok(f64::from(u8::from(b))),
         Value::Empty => Ok(0.0),
-        Value::Text(text) => match text.trim().parse::<f64>() {
-            Ok(n) if n.is_finite() => Ok(n),
-            _ => Err(CalcError::Value),
-        },
+        Value::Text(text) => crate::functions_text::parse_numeric_text(&text),
         Value::Error(error) => Err(error),
         Value::Array(items, _, _) => match items.into_iter().next() {
             Some(first) => to_number(first),
@@ -179,4 +176,47 @@ pub(crate) fn grid(expr: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> (Vec<Value
             scalar => (vec![scalar], 1, 1),
         },
     }
+}
+
+/// `base ^ exponent` with Excel's edge cases: `0^0` is `#NUM!`, a zero base
+/// with a negative exponent is `#DIV/0!`, a negative base needs an integer
+/// exponent or the reciprocal of an odd integer (a real odd root), and
+/// overflow is `#NUM!`.
+pub(crate) fn excel_pow(base: f64, exponent: f64) -> Result<f64, CalcError> {
+    if base == 0.0 {
+        return match exponent.partial_cmp(&0.0) {
+            Some(std::cmp::Ordering::Equal) => Err(CalcError::Num),
+            Some(std::cmp::Ordering::Less) => Err(CalcError::DivZero),
+            _ => Ok(0.0),
+        };
+    }
+    let result = if base < 0.0 && exponent.fract() != 0.0 {
+        let root = 1.0 / exponent;
+        if (root - root.round()).abs() < 1e-9 && root.round() % 2.0 != 0.0 {
+            -(-base).powf(exponent)
+        } else {
+            return Err(CalcError::Num);
+        }
+    } else {
+        base.powf(exponent)
+    };
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(CalcError::Num)
+    }
+}
+
+/// Upper-case text one character at a time, keeping characters (like `ß`)
+/// whose upper case would need several characters, as Excel does.
+pub(crate) fn excel_upper(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect()
 }

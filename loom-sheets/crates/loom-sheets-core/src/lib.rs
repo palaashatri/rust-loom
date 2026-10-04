@@ -18,6 +18,7 @@ pub mod dates;
 pub mod functions;
 pub(crate) mod functions_date;
 pub(crate) mod functions_finance;
+pub(crate) mod functions_find;
 pub(crate) mod functions_format;
 pub(crate) mod functions_logic;
 pub(crate) mod functions_lookup;
@@ -26,6 +27,7 @@ pub(crate) mod functions_stats;
 pub(crate) mod functions_text;
 pub(crate) mod functions_util;
 pub mod interop;
+mod number_text;
 pub mod objects;
 pub mod persistence;
 pub mod refs;
@@ -304,15 +306,9 @@ impl Value {
     /// Display a value for export or console.
     pub fn display(&self) -> String {
         match self {
-            Self::Number(n) => {
-                if n.fract() == 0.0 && n.abs() < 1e15 {
-                    format!("{}", *n as i64)
-                } else {
-                    format!("{}", n)
-                }
-            }
+            Self::Number(n) => number_text::general_text(*n),
             Self::Text(s) => s.clone(),
-            Self::Bool(b) => b.to_string(),
+            Self::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
             Self::Empty => String::new(),
             Self::Error(e) => format!("#{}", e.code()),
             Self::Array(values, _, _) => values
@@ -342,6 +338,8 @@ pub enum CalcError {
     Parse,
     /// Invalid numeric argument.
     Num,
+    /// An array calculation produced an empty array.
+    Calc,
 }
 
 impl CalcError {
@@ -356,6 +354,7 @@ impl CalcError {
             Self::Spill => "SPILL!",
             Self::Parse => "PARSE!",
             Self::Num => "NUM!",
+            Self::Calc => "CALC!",
         }
     }
 }
@@ -1460,6 +1459,21 @@ enum Token {
     Ne,
     Amp,
     Percent,
+    /// An error literal such as `#N/A`.
+    Error(CalcError),
+}
+
+/// The error an Excel error literal (`#N/A`, `#REF!`, ...) names.
+fn error_literal(text: &str) -> Option<CalcError> {
+    Some(match text.to_ascii_uppercase().as_str() {
+        "#DIV/0!" => CalcError::DivZero,
+        "#N/A" => CalcError::NA,
+        "#VALUE!" => CalcError::Value,
+        "#NAME?" => CalcError::Name,
+        "#REF!" => CalcError::Ref,
+        "#NUM!" => CalcError::Num,
+        _ => return None,
+    })
 }
 
 fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
@@ -1588,6 +1602,15 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
                     i += 1;
                 }
             }
+            '#' => {
+                let end = bytes[i + 1..]
+                    .iter()
+                    .position(|b| !(b.is_ascii_alphanumeric() || matches!(b, b'/' | b'!' | b'?')))
+                    .map_or(bytes.len(), |p| i + 1 + p);
+                let literal = error_literal(&input[i..end]).ok_or(CalcError::Parse)?;
+                tokens.push(Token::Error(literal));
+                i = end;
+            }
             '"' => {
                 i += 1;
                 let mut s = String::new();
@@ -1612,7 +1635,9 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
                 }
                 tokens.push(Token::String(s));
             }
-            c if c.is_ascii_digit() => {
+            c if c.is_ascii_digit()
+                || (c == '.' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit)) =>
+            {
                 let start = i;
                 let mut saw_decimal = false;
                 while i < bytes.len() {
@@ -1626,6 +1651,7 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
                         break;
                     }
                 }
+                i = scan_exponent(bytes, i);
                 let num: f64 = input[start..i].parse().map_err(|_| CalcError::Parse)?;
                 tokens.push(Token::Number(num));
             }
@@ -1686,6 +1712,24 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
     Ok(tokens)
 }
 
+/// Extend a number token over an exponent (`E3`, `e-7`) when one follows.
+fn scan_exponent(bytes: &[u8], i: usize) -> usize {
+    if !bytes.get(i).is_some_and(|b| *b == b'E' || *b == b'e') {
+        return i;
+    }
+    let mut j = i + 1;
+    if bytes.get(j).is_some_and(|b| *b == b'+' || *b == b'-') {
+        j += 1;
+    }
+    if !bytes.get(j).is_some_and(u8::is_ascii_digit) {
+        return i;
+    }
+    while bytes.get(j).is_some_and(u8::is_ascii_digit) {
+        j += 1;
+    }
+    j
+}
+
 /// AST expression.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
@@ -1718,6 +1762,8 @@ pub(crate) enum Expr {
         end: CellRef,
     },
     Bool(bool),
+    /// An error literal typed into the formula.
+    Error(CalcError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1770,26 +1816,25 @@ impl Parser {
 
     fn parse_expr(&mut self) -> Result<Expr, CalcError> {
         // Handle comparison at top level.
-        let lhs = self.parse_concat()?;
-        if let Some(t) = self.peek() {
+        let mut lhs = self.parse_concat()?;
+        // Comparisons chain left to right: `2>1>0` is `(2>1)>0`.
+        while let Some(t) = self.peek() {
             let op = match t {
-                Token::Eq => Some(BinOp::Eq),
-                Token::Lt => Some(BinOp::Lt),
-                Token::Gt => Some(BinOp::Gt),
-                Token::Le => Some(BinOp::Le),
-                Token::Ge => Some(BinOp::Ge),
-                Token::Ne => Some(BinOp::Ne),
-                _ => None,
+                Token::Eq => BinOp::Eq,
+                Token::Lt => BinOp::Lt,
+                Token::Gt => BinOp::Gt,
+                Token::Le => BinOp::Le,
+                Token::Ge => BinOp::Ge,
+                Token::Ne => BinOp::Ne,
+                _ => break,
             };
-            if let Some(op) = op {
-                self.pos += 1;
-                let rhs = self.parse_concat()?;
-                return Ok(Expr::Binary {
-                    lhs: Box::new(lhs),
-                    op,
-                    rhs: Box::new(rhs),
-                });
-            }
+            self.pos += 1;
+            let rhs = self.parse_concat()?;
+            lhs = Expr::Binary {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            };
         }
         Ok(lhs)
     }
@@ -1897,6 +1942,7 @@ impl Parser {
         match self.next() {
             Some(Token::Number(n)) => Ok(Expr::Number(n)),
             Some(Token::String(s)) => Ok(Expr::Text(s)),
+            Some(Token::Error(error)) => Ok(Expr::Error(error)),
             Some(Token::Cell(r)) => {
                 // Check for range.
                 if let Some(Token::Colon) = self.peek() {
@@ -2029,6 +2075,7 @@ pub(crate) fn eval_expr(e: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Value {
         Expr::Number(n) => Value::Number(*n),
         Expr::Text(s) => Value::Text(s.clone()),
         Expr::Bool(b) => Value::Bool(*b),
+        Expr::Error(error) => Value::Error(*error),
         Expr::Cell(r) => lookup(*r),
         // Cross-sheet nodes need workbook context (see `workbook::evaluate_workbook`).
         // In a single-sheet context they are unresolvable references.
@@ -2037,17 +2084,106 @@ pub(crate) fn eval_expr(e: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Value {
             // Range used directly where a scalar is expected -> take top-left.
             lookup(*start)
         }
-        Expr::Unary(x) => match functions_util::to_number(eval_expr(x, lookup)) {
-            Ok(n) => Value::Number(0.0 - n),
-            Err(error) => Value::Error(error),
+        Expr::Unary(x) => match operand_value(x, lookup) {
+            Value::Array(items, rows, cols) => {
+                let negated = items.into_iter().map(negate).collect();
+                collapse_array(negated, rows, cols)
+            }
+            scalar => negate(scalar),
         },
         Expr::Binary { lhs, op, rhs } => {
-            let l = eval_expr(lhs, lookup);
-            let r = eval_expr(rhs, lookup);
-            eval_binary(&l, *op, &r)
+            let l = operand_value(lhs, lookup);
+            let r = operand_value(rhs, lookup);
+            if matches!(l, Value::Array(..)) || matches!(r, Value::Array(..)) {
+                broadcast(&l, *op, &r)
+            } else {
+                eval_binary(&l, *op, &r)
+            }
         }
         Expr::Func { name, args } => eval_function(name, args, lookup),
     }
+}
+
+/// An operand of an operator: a range becomes an array so operators apply
+/// to every cell (`A1:A3*2`); anything else evaluates normally.
+fn operand_value(expr: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Value {
+    match expr {
+        Expr::Range { start, end } => {
+            let (top, bottom) = (start.row.min(end.row), start.row.max(end.row));
+            let (left, right) = (start.col.min(end.col), start.col.max(end.col));
+            let mut items = Vec::new();
+            for row in top..=bottom {
+                for col in left..=right {
+                    items.push(lookup(CellRef { row, col }));
+                }
+            }
+            Value::Array(
+                items,
+                (bottom - top + 1) as usize,
+                (right - left + 1) as usize,
+            )
+        }
+        other => eval_expr(other, lookup),
+    }
+}
+
+fn negate(value: Value) -> Value {
+    match functions_util::to_number(value) {
+        Ok(n) => Value::Number(0.0 - n),
+        Err(error) => Value::Error(error),
+    }
+}
+
+/// A one-cell array is just its value.
+fn collapse_array(mut items: Vec<Value>, rows: usize, cols: usize) -> Value {
+    if items.len() == 1 {
+        items.remove(0)
+    } else {
+        Value::Array(items, rows, cols)
+    }
+}
+
+/// Apply an operator element by element. A one-row or one-column operand
+/// repeats along the other's size; cells past a shorter operand are `#N/A`.
+fn broadcast(left: &Value, op: BinOp, right: &Value) -> Value {
+    fn shape(v: &Value) -> (&[Value], usize, usize) {
+        match v {
+            Value::Array(items, rows, cols) => (items.as_slice(), *rows, *cols),
+            scalar => (std::slice::from_ref(scalar), 1, 1),
+        }
+    }
+    let (litems, lrows, lcols) = shape(left);
+    let (ritems, rrows, rcols) = shape(right);
+    let extent = |a: usize, b: usize| {
+        if a == b || b == 1 {
+            a
+        } else if a == 1 {
+            b
+        } else {
+            a.max(b)
+        }
+    };
+    let (rows, cols) = (extent(lrows, rrows), extent(lcols, rcols));
+    let pick = |items: &[Value], r: usize, c: usize, nrows: usize, ncols: usize| {
+        let (r, c) = (
+            if nrows == 1 { 0 } else { r },
+            if ncols == 1 { 0 } else { c },
+        );
+        if r < nrows && c < ncols {
+            items[r * ncols + c].clone()
+        } else {
+            Value::Error(CalcError::NA)
+        }
+    };
+    let mut out = Vec::with_capacity(rows * cols);
+    for r in 0..rows {
+        for c in 0..cols {
+            let l = pick(litems, r, c, lrows, lcols);
+            let rt = pick(ritems, r, c, rrows, rcols);
+            out.push(eval_binary(&l, op, &rt));
+        }
+    }
+    collapse_array(out, rows, cols)
 }
 
 /// Numeric reading of a value in arithmetic: blanks are 0, `TRUE`/`FALSE` are
@@ -2084,7 +2220,10 @@ fn compare_scalars(l: &Value, r: &Value) -> Option<std::cmp::Ordering> {
     }
     match (l, r) {
         (Value::Array(..), _) | (_, Value::Array(..)) => None,
-        (Value::Number(a), Value::Number(b)) => a.partial_cmp(b),
+        // Excel compares numbers at 15 significant digits: 0.1+0.2 = 0.3.
+        (Value::Number(a), Value::Number(b)) => {
+            functions_util::clean(*a).partial_cmp(&functions_util::clean(*b))
+        }
         (Value::Text(a), Value::Text(b)) => Some(a.to_lowercase().cmp(&b.to_lowercase())),
         (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
         (Value::Empty, Value::Empty) => Some(Ordering::Equal),
@@ -2144,18 +2283,30 @@ fn eval_binary(l: &Value, op: BinOp, r: &Value) -> Value {
         Err(_) => return Value::Error(CalcError::Value),
     };
     match op {
-        BinOp::Add => Value::Number(ln + rn),
-        BinOp::Sub => Value::Number(ln - rn),
-        BinOp::Mul => Value::Number(ln * rn),
+        BinOp::Add => finite(ln + rn),
+        BinOp::Sub => finite(ln - rn),
+        BinOp::Mul => finite(ln * rn),
         BinOp::Div => {
             if rn == 0.0 {
                 Value::Error(CalcError::DivZero)
             } else {
-                Value::Number(ln / rn)
+                finite(ln / rn)
             }
         }
-        BinOp::Pow => Value::Number(ln.powf(rn)),
+        BinOp::Pow => match functions_util::excel_pow(ln, rn) {
+            Ok(n) => Value::Number(n),
+            Err(error) => Value::Error(error),
+        },
         _ => Value::Error(CalcError::Value),
+    }
+}
+
+/// A number result; overflow to infinity is `#NUM!` as in Excel.
+fn finite(n: f64) -> Value {
+    if n.is_finite() {
+        Value::Number(n)
+    } else {
+        Value::Error(CalcError::Num)
     }
 }
 
@@ -2198,7 +2349,7 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
             }
             match num(&values[0]) {
                 Ok(n) => Value::Number(n.abs()),
-                Err(_) => Value::Error(CalcError::Value),
+                Err(error) => Value::Error(error),
             }
         }
         "CONCAT" | "CONCATENATE" => {
@@ -2207,7 +2358,7 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                 match v {
                     Value::Text(t) => s.push_str(t),
                     Value::Number(n) => s.push_str(&Value::Number(*n).display()),
-                    Value::Bool(b) => s.push_str(&b.to_string()),
+                    Value::Bool(_) => s.push_str(&v.display()),
                     Value::Empty => {}
                     // Arguments flatten above, so arrays never arrive here.
                     Value::Array(_, _, _) => return Value::Error(CalcError::Value),
@@ -2225,84 +2376,6 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
             }
             Value::Number(count)
         }
-        "IF" => {
-            // Lazy branches: only the taken branch evaluates, so an error in
-            // the untaken branch (e.g. `IF(A1=0, "n/a", 1/A1)`) does not leak.
-            if args.len() < 2 || args.len() > 3 {
-                return Value::Error(CalcError::Value);
-            }
-            let condition = match eval_expr(&args[0], lookup) {
-                Value::Bool(b) => b,
-                Value::Number(n) => n != 0.0,
-                Value::Text(s) => !s.is_empty(),
-                Value::Empty => false,
-                Value::Array(_, _, _) => return Value::Error(CalcError::Value),
-                Value::Error(e) => return Value::Error(e),
-            };
-            if condition {
-                eval_expr(&args[1], lookup)
-            } else if args.len() == 3 {
-                eval_expr(&args[2], lookup)
-            } else {
-                Value::Bool(false)
-            }
-        }
-        "AND" => {
-            if values.is_empty() {
-                return Value::Error(CalcError::Value);
-            }
-            for v in &values {
-                match v {
-                    Value::Bool(b) => {
-                        if !b {
-                            return Value::Bool(false);
-                        }
-                    }
-                    Value::Number(n) => {
-                        if *n == 0.0 {
-                            return Value::Bool(false);
-                        }
-                    }
-                    Value::Error(_) => return v.clone(),
-                    _ => return Value::Error(CalcError::Value),
-                }
-            }
-            Value::Bool(true)
-        }
-        "OR" => {
-            if values.is_empty() {
-                return Value::Error(CalcError::Value);
-            }
-            let mut any_true = false;
-            for v in &values {
-                match v {
-                    Value::Bool(b) => {
-                        if *b {
-                            any_true = true;
-                        }
-                    }
-                    Value::Number(n) => {
-                        if *n != 0.0 {
-                            any_true = true;
-                        }
-                    }
-                    Value::Error(_) => return v.clone(),
-                    _ => return Value::Error(CalcError::Value),
-                }
-            }
-            Value::Bool(any_true)
-        }
-        "NOT" => {
-            if values.len() != 1 {
-                return Value::Error(CalcError::Value);
-            }
-            match &values[0] {
-                Value::Bool(b) => Value::Bool(!b),
-                Value::Number(n) => Value::Bool(*n == 0.0),
-                Value::Error(_) => values[0].clone(),
-                _ => Value::Error(CalcError::Value),
-            }
-        }
         "SQRT" => {
             if values.len() != 1 {
                 return Value::Error(CalcError::Value);
@@ -2310,12 +2383,12 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
             match num(&values[0]) {
                 Ok(n) => {
                     if n < 0.0 {
-                        Value::Error(CalcError::Value)
+                        Value::Error(CalcError::Num)
                     } else {
                         Value::Number(n.sqrt())
                     }
                 }
-                Err(_) => Value::Error(CalcError::Value),
+                Err(error) => Value::Error(error),
             }
         }
         "POWER" => {
@@ -2323,7 +2396,10 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                 return Value::Error(CalcError::Value);
             }
             match (num(&values[0]), num(&values[1])) {
-                (Ok(base), Ok(exp)) => Value::Number(base.powf(exp)),
+                (Ok(base), Ok(exp)) => match functions_util::excel_pow(base, exp) {
+                    Ok(n) => Value::Number(n),
+                    Err(error) => Value::Error(error),
+                },
                 _ => Value::Error(CalcError::Value),
             }
         }
@@ -2336,7 +2412,13 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                     if d == 0.0 {
                         Value::Error(CalcError::DivZero)
                     } else {
-                        Value::Number(n % d)
+                        // Excel's result takes the sign of the divisor.
+                        let r = n % d;
+                        Value::Number(if r != 0.0 && (r < 0.0) != (d < 0.0) {
+                            r + d
+                        } else {
+                            r
+                        })
                     }
                 }
                 _ => Value::Error(CalcError::Value),

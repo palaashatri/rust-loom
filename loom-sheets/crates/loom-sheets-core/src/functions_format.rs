@@ -222,7 +222,10 @@ fn char_offset(chars: &[char], index: usize) -> usize {
 }
 
 fn format_section(section: &str, n: f64, negative: bool) -> Result<String, CalcError> {
-    if section.trim().eq_ignore_ascii_case("general") || section.is_empty() {
+    if section.is_empty() {
+        return Ok(String::new());
+    }
+    if section.trim().eq_ignore_ascii_case("general") {
         return Ok(crate::Value::Number(n).display());
     }
     let tokens = tokenize(section);
@@ -258,15 +261,13 @@ fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
         .iter()
         .position(|t| matches!(t, Tok::Digit(_) | Tok::Point));
     let Some(first) = first_digit else {
-        // No digit placeholder: only literals (e.g. "Total").
+        // No digit placeholder: only literals (e.g. "Total"); `@` is the number as text.
         return Ok(tokens
             .iter()
-            .filter_map(|t| {
-                if let Tok::Lit(l) = t {
-                    Some(l.as_str())
-                } else {
-                    None
-                }
+            .map(|t| match t {
+                Tok::Lit(l) => l.clone(),
+                Tok::Text => crate::Value::Number(n).display(),
+                _ => String::new(),
             })
             .collect());
     };
@@ -333,7 +334,11 @@ fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
     let fixed = format!("{rounded:.*}", frac_places.len());
     let (int_digits, frac_digits) = fixed.split_once('.').unwrap_or((fixed.as_str(), ""));
     let mut int_digits = int_digits.to_string();
-    if int_places.is_empty() && int_digits == "0" && !frac_places.is_empty() {
+    // A zero integer part shows nothing unless a `0` or `?` placeholder asks for it.
+    if int_digits == "0"
+        && (!frac_places.is_empty() || !int_places.is_empty())
+        && int_places.iter().all(|place| *place == '#')
+    {
         int_digits.clear();
     }
 
@@ -357,9 +362,6 @@ fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
             } else {
                 break;
             }
-        }
-        if frac.is_empty() && frac_places.iter().all(|p| *p != '0') {
-            out.pop();
         }
         out.extend(frac.iter().filter(|c| **c != '\0'));
     }
@@ -577,7 +579,8 @@ mod tests {
         assert_eq!(n(7.0, "000"), "007");
         assert_eq!(n(7.5, "0"), "8");
         assert_eq!(n(0.5, ".00"), ".50");
-        assert_eq!(n(3.0, "0.##"), "3");
+        // Excel keeps the point when every decimal placeholder is optional.
+        assert_eq!(n(3.0, "0.##"), "3.");
         assert_eq!(n(3.5, "0.##"), "3.5");
         assert_eq!(n(12.0, "General"), "12");
     }

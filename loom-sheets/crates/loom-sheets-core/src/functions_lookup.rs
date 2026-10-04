@@ -2,7 +2,7 @@
 
 use crate::functions::wildcard_match;
 use crate::functions_logic::values_equal;
-use crate::functions_util::to_number;
+use crate::functions_util::{grid, to_number};
 use crate::{eval_expr, CalcError, CellRef, Expr, Value};
 
 /// Dispatch lookup functions from the main evaluator.
@@ -11,6 +11,9 @@ pub(crate) fn eval_lookup_function(
     raw_args: &[Expr],
     lookup: &dyn Fn(CellRef) -> Value,
 ) -> Option<Value> {
+    if let Some(found) = crate::functions_find::eval_find_function(name, raw_args, lookup) {
+        return Some(found);
+    }
     match name {
         "XLOOKUP" => eval_xlookup(raw_args, lookup),
         "ROWS" => eval_rows(raw_args, lookup),
@@ -32,10 +35,19 @@ fn eval_xlookup(raw_args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -> Option<
     if let Value::Error(error) = lookup_value {
         return Some(Value::Error(error));
     }
-    let lookup_array = collect_array_values(&raw_args[1], lookup);
-    let return_array = collect_array_values(&raw_args[2], lookup);
+    let (lookup_array, lookup_rows, lookup_cols) = grid(&raw_args[1], lookup);
+    let (return_array, return_rows, return_cols) = grid(&raw_args[2], lookup);
 
     if lookup_array.is_empty() || return_array.is_empty() {
+        return Some(Value::Error(CalcError::Value));
+    }
+    // The lookup array is one row or one column; the return array must be
+    // as long along that direction.
+    let vertical = lookup_cols == 1;
+    if (!vertical && lookup_rows != 1)
+        || (vertical && return_rows != lookup_rows)
+        || (!vertical && return_cols != lookup_cols)
+    {
         return Some(Value::Error(CalcError::Value));
     }
 
@@ -68,11 +80,19 @@ fn eval_xlookup(raw_args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -> Option<
 
     match index {
         Some(idx) => {
-            if idx < return_array.len() {
-                Some(return_array[idx].clone())
+            // A vertical lookup returns the matching row, a horizontal one the column.
+            let picked: Vec<Value> = if vertical {
+                return_array[idx * return_cols..(idx + 1) * return_cols].to_vec()
             } else {
-                Some(Value::Error(CalcError::Value))
-            }
+                (0..return_rows)
+                    .map(|r| return_array[r * return_cols + idx].clone())
+                    .collect()
+            };
+            Some(match picked.len() {
+                1 => picked[0].clone(),
+                n if vertical => Value::Array(picked, 1, n),
+                n => Value::Array(picked, n, 1),
+            })
         }
         None => if_not_found.or(Some(Value::Error(CalcError::NA))),
     }
@@ -124,38 +144,6 @@ fn eval_columns(raw_args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -> Option<
     }
 }
 
-/// Collect values from a range or array expression into a flat vector.
-fn collect_array_values(expr: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Vec<Value> {
-    let mut values = Vec::new();
-    match expr {
-        Expr::Range { start, end } => {
-            for row in start.row.min(end.row)..=start.row.max(end.row) {
-                for col in start.col.min(end.col)..=start.col.max(end.col) {
-                    let cell = CellRef { row, col };
-                    values.push(lookup(cell));
-                }
-            }
-        }
-        _ => {
-            let val = eval_expr(expr, lookup);
-            push_flattened(val, &mut values);
-        }
-    }
-    values
-}
-
-/// Flatten array values recursively.
-fn push_flattened(value: Value, out: &mut Vec<Value>) {
-    match value {
-        Value::Array(items, _, _) => {
-            for item in items {
-                push_flattened(item, out);
-            }
-        }
-        scalar => out.push(scalar),
-    }
-}
-
 /// Find the index of a lookup value in an array according to match and search modes.
 fn find_lookup_index(
     lookup_value: &Value,
@@ -177,14 +165,14 @@ fn find_exact_match(lookup_value: &Value, array: &[Value], search_mode: i32) -> 
     if search_mode < 0 {
         // Search last to first
         for (i, val) in array.iter().enumerate().rev() {
-            if values_equal(lookup_value, val) {
+            if *val != Value::Empty && values_equal(lookup_value, val) {
                 return Some(i);
             }
         }
     } else {
         // Search first to last
         for (i, val) in array.iter().enumerate() {
-            if values_equal(lookup_value, val) {
+            if *val != Value::Empty && values_equal(lookup_value, val) {
                 return Some(i);
             }
         }

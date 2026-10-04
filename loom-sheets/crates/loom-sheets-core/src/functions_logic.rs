@@ -1,7 +1,7 @@
 //! Logic functions: IFS, SWITCH, XOR, IFNA, ISBLANK, ISNUMBER, ISTEXT,
 //! ISERROR, ISNA, ISLOGICAL, CHOOSE, NA.
 
-use crate::functions_util::{arg_number, flatten, to_bool};
+use crate::functions_util::{arg_number, flatten, grid, to_bool};
 use crate::{eval_expr, CalcError, CellRef, Expr, Value};
 
 type Lookup<'a> = &'a dyn Fn(CellRef) -> Value;
@@ -9,6 +9,15 @@ type Lookup<'a> = &'a dyn Fn(CellRef) -> Value;
 /// Dispatch logic functions from the main evaluator.
 pub(crate) fn eval_logic_function(name: &str, args: &[Expr], lookup: Lookup) -> Option<Value> {
     Some(match name {
+        "IF" => if_function(args, lookup),
+        "AND" => all_or_any(args, lookup, true),
+        "OR" => all_or_any(args, lookup, false),
+        "NOT" if args.len() == 1 => match to_bool(eval_expr(&args[0], lookup)) {
+            Ok(b) => Value::Bool(!b),
+            Err(failure) => error(failure),
+        },
+        "TRUE" if args.is_empty() => Value::Bool(true),
+        "FALSE" if args.is_empty() => Value::Bool(false),
         "IFS" => ifs(args, lookup),
         "SWITCH" => switch(args, lookup),
         "XOR" => xor(args, lookup),
@@ -27,6 +36,99 @@ pub(crate) fn eval_logic_function(name: &str, args: &[Expr], lookup: Lookup) -> 
 
 fn error(error: CalcError) -> Value {
     Value::Error(error)
+}
+
+/// IF(condition, then, [else]): only the taken branch is evaluated; a text
+/// condition must read `TRUE` or `FALSE`, anything else is `#VALUE!`.
+fn if_function(args: &[Expr], lookup: Lookup) -> Value {
+    if !(2..=3).contains(&args.len()) {
+        return error(CalcError::Value);
+    }
+    let (conditions, rows, cols) = grid(&args[0], lookup);
+    if conditions.len() > 1 {
+        return if_over_array(args, lookup, conditions, rows, cols);
+    }
+    match to_bool(conditions.into_iter().next().unwrap_or(Value::Empty)) {
+        Ok(true) => eval_expr(&args[1], lookup),
+        Ok(false) if args.len() == 3 => eval_expr(&args[2], lookup),
+        Ok(false) => Value::Bool(false),
+        Err(failure) => error(failure),
+    }
+}
+
+/// IF over an array of conditions: each element picks from the matching
+/// element of the branches (a one-cell branch repeats).
+fn if_over_array(
+    args: &[Expr],
+    lookup: Lookup,
+    conditions: Vec<Value>,
+    rows: usize,
+    cols: usize,
+) -> Value {
+    let branch = |index: usize| match args.get(index) {
+        Some(expr) => grid(expr, lookup),
+        None => (vec![Value::Bool(false)], 1, 1),
+    };
+    let (then_items, then_rows, then_cols) = branch(1);
+    let (else_items, else_rows, else_cols) = branch(2);
+    let pick = |items: &[Value], item_rows: usize, item_cols: usize, at: usize| {
+        let (r, c) = (at / cols, at % cols);
+        let (r, c) = (
+            if item_rows == 1 { 0 } else { r },
+            if item_cols == 1 { 0 } else { c },
+        );
+        if r < item_rows && c < item_cols {
+            items[r * item_cols + c].clone()
+        } else {
+            Value::Error(CalcError::NA)
+        }
+    };
+    let out = conditions
+        .into_iter()
+        .enumerate()
+        .map(|(at, condition)| match to_bool(condition) {
+            Ok(true) => pick(&then_items, then_rows, then_cols, at),
+            Ok(false) => pick(&else_items, else_rows, else_cols, at),
+            Err(failure) => error(failure),
+        })
+        .collect();
+    Value::Array(out, rows, cols)
+}
+
+/// AND (`all`) and OR over every logical value in the arguments. Text and
+/// blanks are ignored (`TRUE`/`FALSE` text counts), every argument is
+/// evaluated so an error anywhere wins, and no logical value is `#VALUE!`.
+fn all_or_any(args: &[Expr], lookup: Lookup, all: bool) -> Value {
+    if args.is_empty() {
+        return error(CalcError::Value);
+    }
+    let mut result = all;
+    let mut counted = false;
+    for arg in args {
+        for value in flatten(arg, lookup) {
+            let truth = match value {
+                Value::Bool(b) => b,
+                Value::Number(n) => n != 0.0,
+                Value::Error(failure) => return error(failure),
+                Value::Text(text) => match to_bool(Value::Text(text)) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            counted = true;
+            result = if all {
+                result && truth
+            } else {
+                result || truth
+            };
+        }
+    }
+    if counted {
+        Value::Bool(result)
+    } else {
+        error(CalcError::Value)
+    }
 }
 
 /// IFS(condition1, value1, ...): the value after the first true condition;
@@ -129,15 +231,29 @@ fn choose(args: &[Expr], lookup: Lookup) -> Value {
     if index < 1.0 || index > (args.len() - 1) as f64 {
         return error(CalcError::Value);
     }
-    eval_expr(&args[index as usize], lookup)
+    let (mut items, rows, cols) = grid(&args[index as usize], lookup);
+    if items.len() == 1 {
+        items.remove(0)
+    } else {
+        Value::Array(items, rows, cols)
+    }
 }
 
-/// IS* predicates take exactly one value and never propagate its error.
+/// IS* predicates take exactly one value and never propagate its error; over
+/// a range or array they answer for every element.
 fn is_kind(args: &[Expr], lookup: Lookup, test: impl Fn(&Value) -> bool) -> Value {
     if args.len() != 1 {
         return error(CalcError::Value);
     }
-    Value::Bool(test(&eval_expr(&args[0], lookup)))
+    let (items, rows, cols) = grid(&args[0], lookup);
+    if items.len() == 1 {
+        return Value::Bool(test(&items[0]));
+    }
+    Value::Array(
+        items.iter().map(|v| Value::Bool(test(v))).collect(),
+        rows,
+        cols,
+    )
 }
 
 /// Excel's `=` between two scalars: same type, text without regard to case.
@@ -148,7 +264,6 @@ pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(l), Value::Bool(r)) => l == r,
         (Value::Empty, Value::Empty) => true,
         (Value::Empty, Value::Number(n)) | (Value::Number(n), Value::Empty) => *n == 0.0,
-        (Value::Empty, Value::Text(t)) | (Value::Text(t), Value::Empty) => t.is_empty(),
         _ => false,
     }
 }

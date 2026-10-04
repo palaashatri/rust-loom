@@ -141,6 +141,12 @@ fn time(args: &[Expr], lookup: Lookup) -> Calc {
     let hours = arg_number(args, 0, lookup)?.trunc();
     let minutes = arg_number(args, 1, lookup)?.trunc();
     let seconds = arg_number(args, 2, lookup)?.trunc();
+    if [hours, minutes, seconds]
+        .iter()
+        .any(|part| !(-32768.0..=32767.0).contains(part))
+    {
+        return Err(CalcError::Num);
+    }
     let total = hours * 3600.0 + minutes * 60.0 + seconds;
     if total < 0.0 {
         return Err(CalcError::Num);
@@ -166,7 +172,10 @@ fn datevalue(args: &[Expr], lookup: Lookup) -> Calc {
         return Err(CalcError::Value);
     }
     match eval_expr(&args[0], lookup) {
-        Value::Text(text) => parse_date_text(&text).ok_or(CalcError::Value),
+        // Text that is only a time of day has no date part: day 0.
+        Value::Text(text) => parse_date_text(&text)
+            .or_else(|| parse_time_text(&text).map(|_| 0.0))
+            .ok_or(CalcError::Value),
         Value::Error(error) => Err(error),
         _ => Err(CalcError::Value),
     }
@@ -218,8 +227,13 @@ pub(crate) fn parse_date_text(text: &str) -> Option<f64> {
             )
         }
     } else if let Some(parts) = split3(date_part, '/') {
-        // US order, as Excel reads it in an en-US locale.
-        (number(parts.2)?, number(parts.0)?, number(parts.1)?)
+        if parts.0.len() == 4 {
+            // 2024/03/15
+            (number(parts.0)?, number(parts.1)?, number(parts.2)?)
+        } else {
+            // US order, as Excel reads it in an en-US locale.
+            (number(parts.2)?, number(parts.0)?, number(parts.1)?)
+        }
     } else {
         let words: Vec<&str> = text.split([' ', ',']).filter(|w| !w.is_empty()).collect();
         match words.as_slice() {
