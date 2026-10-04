@@ -25,12 +25,11 @@ pub(crate) fn sync(app: &crate::WriterApp, state: &crate::GuiState) {
 mod tests {
     use super::*;
     use crate::actions_tests::{test_state, text_document};
-    use std::path::PathBuf;
 
     #[test]
     fn saved_files_show_their_stem_and_unsaved_documents_their_title() {
         assert_eq!(display_title(None, "Untitled"), "Untitled");
-        let path = PathBuf::from(r"C:\x\Report.loomdoc");
+        let path = std::env::temp_dir().join("Report.loomdoc");
         assert_eq!(display_title(Some(&path), "Untitled"), "Report");
     }
 
