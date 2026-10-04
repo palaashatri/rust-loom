@@ -489,7 +489,7 @@ export component PresentApp inherits Window {
 
                     // Speaker Notes Collapsible Drawer
                     if root.show-notes-drawer && !root.is-preview-mode : Rectangle {
-                        height: 110px;
+                        height: 110px + 70px * (max(1.0, Theme.text-scale) - 1.0);
                         background: Theme.palette().chrome;
 
                         Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
@@ -501,7 +501,7 @@ export component PresentApp inherits Window {
                             HorizontalLayout {
                                 Text {
                                     text: "Speaker Notes";
-                                    font-size: Theme.tokens.typography.caption;
+                                    font-size: Theme.type.caption;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                     horizontal-stretch: 1;
@@ -512,7 +512,7 @@ export component PresentApp inherits Window {
                                     clicked => { root.show-notes-drawer = false; }
                                     Text {
                                         text: "✕";
-                                        font-size: Theme.tokens.typography.caption;
+                                        font-size: Theme.type.caption;
                                         color: Theme.palette().ink-secondary;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -577,7 +577,7 @@ export component PresentApp inherits Window {
         background: transparent;
         TouchArea { clicked => { root.close-toolbar-overflow(); } }
         VerticalLayout {
-            padding-top: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + Theme.tokens.space.sm;
+            padding-top: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra + Theme.tokens.space.sm;
             padding-left: Theme.tokens.space.lg;
             padding-right: Theme.tokens.space.lg;
             cross-axis-alignment: end;
@@ -613,7 +613,7 @@ export component PresentApp inherits Window {
         PresentToolbarMenu {
             kind: root.zoom-menu-open ? 1 : 0;
             x: max(0px, min(root.menu-x, root.width - self.width - 8px));
-            y: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height;
+            y: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
             navigator-visible: root.show-navigator;
             notes-visible: root.show-notes-drawer;
             zoom-index: root.zoom-index;
@@ -676,10 +676,10 @@ export component PresentApp inherits Window {
     if root.save-changes-open : Rectangle {
         width: root.width; height: root.height; background: #00000066;
         TouchArea { clicked => { } }
-        Rectangle { width: min(440px, root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
+        Rectangle { width: min(440px * max(1.0, Theme.text-scale), root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
             save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
-                Text { text: "Save changes?"; font-size: 22px; color: Theme.palette().ink; }
-                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; wrap: word-wrap; }
+                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); color: Theme.palette().ink; }
+                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; }
                 HorizontalLayout { alignment: end; spacing: 8px;
                     LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
                     LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }

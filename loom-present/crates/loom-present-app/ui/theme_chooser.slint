@@ -13,7 +13,7 @@ component PresentThemeCard inherits Rectangle {
     callback clicked;
 
     width: root.preview-width + 20px;
-    height: root.preview-height + 60px;
+    height: root.preview-height + 38px + 22px * max(1.0, Theme.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
     background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
@@ -41,7 +41,7 @@ component PresentThemeCard inherits Rectangle {
         }
 
         if root.selected : Rectangle {
-            height: 22px;
+            height: 22px * max(1.0, Theme.text-scale);
             border-radius: Theme.tokens.metrics.radius-small;
             background: Theme.palette().accent;
             HorizontalLayout {
@@ -51,7 +51,7 @@ component PresentThemeCard inherits Rectangle {
                 cross-axis-alignment: center;
                 Text {
                     text: root.title;
-                    font-size: Theme.tokens.typography.caption;
+                    font-size: Theme.type.caption;
                     font-weight: 700;
                     color: Theme.palette().accent-ink;
                     horizontal-alignment: center;
@@ -61,7 +61,7 @@ component PresentThemeCard inherits Rectangle {
         }
         if !root.selected : Text {
             text: root.title;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.type.caption;
             font-weight: 500;
             color: Theme.palette().ink;
             horizontal-alignment: center;
@@ -121,7 +121,7 @@ export component PresentThemeChooser inherits Rectangle {
 
                 // Sidebar
                 Rectangle {
-                    width: 220px;
+                    width: 220px + 80px * (max(1.0, Theme.text-scale) - 1.0);
                     background: Theme.palette().panel;
 
                     VerticalLayout {
@@ -136,22 +136,22 @@ export component PresentThemeChooser inherits Rectangle {
                             padding-bottom: Theme.tokens.space.sm;
                             Text {
                                 text: "THEMES";
-                                font-size: 10px;
+                                font-size: Theme.type.micro;
                                 font-weight: 700;
                                 color: Theme.palette().ink-secondary;
                             }
                         }
 
                         Rectangle {
-                            height: 32px;
+                            height: 32px * max(1.0, Theme.text-scale);
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.theme-category == 0 ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
                                 spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                Icon { size: 16px; icon: "new"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Icon { size: 16px * max(1.0, Theme.text-scale); icon: "new"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                 Text {
                                     text: "All Themes";
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     font-weight: root.theme-category == 0 ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
@@ -161,15 +161,15 @@ export component PresentThemeChooser inherits Rectangle {
                         }
 
                         Rectangle {
-                            height: 32px;
+                            height: 32px * max(1.0, Theme.text-scale);
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.theme-category == 1 ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
                                 spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                Icon { size: 16px; icon: "document"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Icon { size: 16px * max(1.0, Theme.text-scale); icon: "document"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                 Text {
                                     text: "Basic";
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     font-weight: root.theme-category == 1 ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
@@ -179,15 +179,15 @@ export component PresentThemeChooser inherits Rectangle {
                         }
 
                         Rectangle {
-                            height: 32px;
+                            height: 32px * max(1.0, Theme.text-scale);
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.theme-category == 2 ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
                                 spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                Icon { size: 16px; icon: "play"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Icon { size: 16px * max(1.0, Theme.text-scale); icon: "play"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                 Text {
                                     text: "Dynamic";
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     font-weight: root.theme-category == 2 ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
@@ -197,15 +197,15 @@ export component PresentThemeChooser inherits Rectangle {
                         }
 
                         Rectangle {
-                            height: 32px;
+                            height: 32px * max(1.0, Theme.text-scale);
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.theme-category == 3 ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
                                 spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                Icon { size: 16px; icon: "format"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Icon { size: 16px * max(1.0, Theme.text-scale); icon: "format"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                 Text {
                                     text: "Minimal";
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     font-weight: root.theme-category == 3 ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
@@ -220,7 +220,7 @@ export component PresentThemeChooser inherits Rectangle {
                             spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
                             Text {
                                 text: "English (US)";
-                                font-size: Theme.tokens.typography.caption;
+                                font-size: Theme.type.caption;
                                 color: Theme.palette().ink-secondary;
                                 vertical-alignment: center;
                             }
@@ -239,16 +239,34 @@ export component PresentThemeChooser inherits Rectangle {
                     padding-right: Theme.tokens.space.xxl;
                     spacing: Theme.tokens.space.xl;
 
-                    HorizontalLayout {
+                    if Theme.text-scale <= 1.25 : HorizontalLayout {
                         Text {
                             text: "Choose a Theme";
-                            font-size: 24px;
+                            font-size: 24px * max(1.0, Theme.text-scale);
                             font-weight: 700;
                             color: Theme.palette().ink;
                             horizontal-stretch: 1;
                             vertical-alignment: center;
                         }
 
+                        LoomSegmentedControl {
+                            items: ["Widescreen (16:9)", "Standard (4:3)"];
+                            current: root.aspect-ratio-wide ? 0 : 1;
+                            label: "Theme Aspect Ratio";
+                            selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
+                        }
+                    }
+
+                    // At large text the title and the aspect control stack instead of colliding.
+                    if Theme.text-scale > 1.25 : VerticalLayout {
+                        spacing: Theme.tokens.space.md;
+                        Text {
+                            text: "Choose a Theme";
+                            font-size: 24px * max(1.0, Theme.text-scale);
+                            font-weight: 700;
+                            color: Theme.palette().ink;
+                            overflow: elide;
+                        }
                         LoomSegmentedControl {
                             items: ["Widescreen (16:9)", "Standard (4:3)"];
                             current: root.aspect-ratio-wide ? 0 : 1;
@@ -387,7 +405,7 @@ export component PresentThemeChooser inherits Rectangle {
 
             // Footer Bar
             Rectangle {
-                height: 56px;
+                height: 56px * max(1.0, Theme.text-scale);
                 background: Theme.palette().chrome;
 
                 Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
@@ -400,7 +418,7 @@ export component PresentThemeChooser inherits Rectangle {
 
                     Text {
                         text: "Escape to cancel • Return to create";
-                        font-size: Theme.tokens.typography.caption;
+                        font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         horizontal-stretch: 1;
                         vertical-alignment: center;

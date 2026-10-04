@@ -42,7 +42,10 @@ export component FindBarOverlay inherits Rectangle {
     in property <int> focus-tick: FindBar.focus-tick;
     changed focus-tick => { query-field.focus-input(); }
 
-    width: 480px;
+    width: 480px * max(1.0, Theme.text-scale);
+    // At large text the action buttons move to their own row instead of
+    // squeezing the field.
+    property <bool> stacked: Theme.text-scale > 1.25;
     height: layout.preferred-height + 2 * Theme.tokens.space.sm;
     background: Theme.palette().surface-raised;
     border-width: 1px;
@@ -82,7 +85,7 @@ export component FindBarOverlay inherits Rectangle {
             }
             Text {
                 text: FindBar.status;
-                min-width: 84px;
+                min-width: 84px * max(1.0, Theme.text-scale);
                 font-size: Theme.type.caption;
                 color: Theme.palette().ink-secondary;
                 vertical-alignment: center;
@@ -91,6 +94,13 @@ export component FindBarOverlay inherits Rectangle {
                 accessible-label: "Find results";
                 accessible-live-region: AccessibleLiveness.polite;
             }
+            if !root.stacked : LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
+            if !root.stacked : LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
+            if !root.stacked : LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
+        }
+        if root.stacked : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: end;
             LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
             LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
             LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
@@ -114,6 +124,12 @@ export component FindBarOverlay inherits Rectangle {
                 accepted(text) => { FindBar.replace-current(); }
                 cancelled => { FindBar.close(); }
             }
+            if !root.stacked : LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
+            if !root.stacked : LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
+        }
+        if FindBar.show-replace && root.stacked : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: end;
             LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
             LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
         }

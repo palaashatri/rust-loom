@@ -55,14 +55,12 @@ export component TitleChrome inherits Rectangle {
 export component DocumentChrome inherits TitleChrome { }
 
 export component Toolbar inherits Rectangle {
-    // A bare Toolbar preserves the historical labeled-slot default for
-    // compatibility hosts. New surfaces must choose ContextToolbar or
-    // LabeledToolbar explicitly so the host contract is visible at the call
-    // site.
+    // A bare Toolbar keeps the legacy labeled-slot default; new surfaces
+    // choose ContextToolbar or LabeledToolbar explicitly.
     in property <bool> labeled-slot: true;
     private property <length> slot-min-height: ResponsivePolicy.toolbar-height(root.labeled-slot);
     private property <length> slot-max-height: root.labeled-slot
-        ? ResponsivePolicy.labeled-toolbar-max-height
+        ? ResponsivePolicy.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra
         : ResponsivePolicy.context-toolbar-height;
     min-height: root.slot-min-height;
     max-height: root.slot-max-height;
@@ -83,8 +81,8 @@ export component ToolbarGroup inherits Rectangle {
     // Keep groups aligned with the base/context host unless a labeled host
     // explicitly opts into the taller slot.
     in property <bool> labeled-slot: false;
-    min-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-min-height : ResponsivePolicy.context-toolbar-height;
-    max-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-max-height : ResponsivePolicy.context-toolbar-height;
+    min-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra : ResponsivePolicy.context-toolbar-height;
+    max-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra : ResponsivePolicy.context-toolbar-height;
     background: transparent;
     DirectionalLayout {
         spacing: 2px;
@@ -108,11 +106,9 @@ export component IconOverLabelToolbarItem inherits Rectangle {
 
     min-width: max(48px, label-text.preferred-width + 16px);
     preferred-width: max(48px, label-text.preferred-width + 16px);
-    // The host owns the slot contract. Items reserve the labeled range by
-    // default; compact hosts use the icon-only variant instead of clipping a
-    // label into the 40px context row.
-    min-height: ResponsivePolicy.labeled-toolbar-min-height;
-    max-height: ResponsivePolicy.labeled-toolbar-max-height;
+    // The host owns the slot; compact hosts use the icon-only variant.
+    min-height: ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
+    max-height: ResponsivePolicy.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
@@ -135,7 +131,7 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         }
         label-text := Text {
             text: root.label;
-            font-size: 10px;
+            font-size: 10px * max(1.0, Theme.text-scale);
             font-weight: root.checked ? 600 : 500;
             color: !root.enabled ? Theme.palette().ink-disabled
                 : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;

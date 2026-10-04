@@ -112,7 +112,7 @@ export component LoomTabStrip inherits Rectangle {
     in property <bool> enabled: true;
     callback selected(int);
 
-    height: Theme.tokens.metrics.sheet-tab-height;
+    height: Theme.tokens.metrics.sheet-tab-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
     background: Theme.palette().chrome;
     accessible-role: tab;
     accessible-label: root.label;

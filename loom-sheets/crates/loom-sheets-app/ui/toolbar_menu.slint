@@ -56,7 +56,7 @@ export component SheetToolbarMenu inherits Rectangle {
     Rectangle {
         x: max(0px, min(root.menu-x, root.width - self.width - 8px));
         y: root.menu-y;
-        width: 220px;
+        width: min(220px * max(1.0, Theme.text-scale), max(1px, root.width - 16px));
         height: items.preferred-height;
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;

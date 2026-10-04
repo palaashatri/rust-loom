@@ -44,9 +44,9 @@ export component SheetToolbarOverflow inherits Rectangle {
     TouchArea { clicked => { root.close-requested(); } }
 
     popup-panel := Rectangle {
-        x: root.rtl ? 8px : max(8px, root.content-width - 248px);
+        x: root.rtl ? 8px : max(8px, root.content-width - self.width - 8px);
         y: root.menu-y + 8px;
-        width: 240px;
+        width: min(240px * max(1.0, Theme.text-scale), max(1px, root.content-width - 16px));
         height: min(popup-layout.preferred-height, root.content-height - root.menu-y - 16px);
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;

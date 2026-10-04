@@ -46,6 +46,8 @@ mod layout_tests;
 mod open_operation_journeys;
 #[path = "main_tests/save_operations_journeys.rs"]
 mod save_operations_journeys;
+#[path = "main_tests/scale_surfaces_tests.rs"]
+mod scale_surfaces_tests;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
 #[path = "main_tests/toolbar_tests.rs"]

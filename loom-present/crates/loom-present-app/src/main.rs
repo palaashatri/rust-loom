@@ -3147,6 +3147,8 @@ mod window_chrome;
 #[cfg(test)]
 mod frame_bench_tests;
 #[cfg(test)]
+mod scale_surfaces_tests;
+#[cfg(test)]
 mod text_scale_tests;
 #[cfg(test)]
 mod toolbar_tests;

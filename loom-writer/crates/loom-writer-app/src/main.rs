@@ -4729,3 +4729,6 @@ mod text_scale_tests;
 
 #[cfg(test)]
 mod toolbar_tests;
+
+#[cfg(test)]
+mod scale_surfaces_tests;

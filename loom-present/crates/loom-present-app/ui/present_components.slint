@@ -9,7 +9,7 @@ export component PresentNotesEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <string> placeholder-text: "";
     in property <bool> enabled: true;
-    in property <length> font-size: Theme.tokens.typography.body;
+    in property <length> font-size: Theme.type.body;
     callback edited(string);
     callback key-pressed(event: KeyEvent) -> EventResult;
     callback key-released(event: KeyEvent) -> EventResult;
@@ -77,9 +77,9 @@ export component PresentToolbarOverflow inherits Rectangle {
     callback export-pptx;
     callback close-requested;
 
-    min-width: 220px;
-    max-width: 300px;
-    preferred-width: 256px;
+    min-width: 220px * max(1.0, Theme.text-scale);
+    max-width: 300px * max(1.0, Theme.text-scale);
+    preferred-width: 256px * max(1.0, Theme.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: Theme.palette().border;

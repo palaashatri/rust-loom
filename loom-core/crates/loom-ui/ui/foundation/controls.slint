@@ -179,7 +179,7 @@ export component LoomTextField inherits VerticalLayout {
         overflow: elide;
     }
     box := Rectangle {
-        height: Theme.tokens.metrics.control-height;
+        height: Theme.scaled-control-height;
         min-width: 140px;
         horizontal-stretch: 1;
         border-radius: Theme.tokens.metrics.radius-medium;
@@ -256,7 +256,7 @@ export component LoomSearchField inherits VerticalLayout {
         overflow: elide;
     }
     box := Rectangle {
-        height: Theme.tokens.metrics.control-height;
+        height: Theme.scaled-control-height;
         min-width: 180px;
         horizontal-stretch: 1;
         border-radius: Theme.tokens.metrics.radius-medium;
@@ -405,7 +405,7 @@ export component LoomSegmentedControl inherits Rectangle {
     in property <bool> enabled: true;
     callback selected(int);
 
-    height: Theme.tokens.metrics.control-height;
+    height: Theme.scaled-control-height;
     min-width: 160px;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : 1px;

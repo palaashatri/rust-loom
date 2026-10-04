@@ -498,11 +498,11 @@ fn very_long_series_value_and_unit_have_a_keyboard_reading_path() {
     let long_value = "1234567890".repeat(8);
     let long_unit = "million dollars per quarter ".repeat(7);
     let app = chart_app("bar", &["Q1".to_owned()], std::slice::from_ref(&long_value));
-    app.window().set_size(PhysicalSize::new(900, 680));
+    app.window().set_size(PhysicalSize::new(900, 724));
     app.set_chart_series_label(long_series.clone().into());
     app.set_chart_unit_label(long_unit.clone().into());
     app.set_template_text_scale(2.0);
-    let _ = snapshot_component(&app, 900.0, 680.0, 1.0)
+    let _ = snapshot_component(&app, 900.0, 724.0, 1.0)
         .expect("render the two-times chart with a long selected value");
 
     let data_list = chart_data_list(&app);
@@ -925,11 +925,11 @@ fn chart_summary_explains_nonpositive_pie_values() {
 #[test]
 fn long_series_and_unit_metadata_do_not_push_the_data_panel_out_of_the_workspace() {
     let app = chart_app("bar", &["Q1".to_owned()], &["100".to_owned()]);
-    app.window().set_size(PhysicalSize::new(900, 680));
+    app.window().set_size(PhysicalSize::new(900, 724));
     app.set_chart_series_label("Quarterly regional revenue ".repeat(8).into());
     app.set_chart_unit_label("million dollars per customer per quarter ".repeat(7).into());
     app.set_template_text_scale(2.0);
-    let _ = snapshot_component(&app, 900.0, 680.0, 1.0)
+    let _ = snapshot_component(&app, 900.0, 724.0, 1.0)
         .expect("render long chart metadata in a short scaled window");
 
     let summary = chart_data_list(&app);

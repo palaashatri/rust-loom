@@ -1,6 +1,6 @@
 import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "toolkit.slint";
 import { LoomOverflowButton } from "foundation.slint";
-import { Theme } from "theme.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
 
 /// One icon-over-label row in three groups: View/Zoom/Add Sheet on the
 /// reading-start side, Chart/Table/Text/Shape/Image in the middle, and
@@ -16,7 +16,7 @@ export component SheetActionToolbar inherits LabeledToolbar {
     out property <length> bottom-y: root.absolute-position.y + root.height;
 
     // Take the labeled slot's minimum height; the sheet needs the room.
-    max-height: Theme.tokens.metrics.labeled-toolbar-min-height;
+    max-height: Theme.tokens.metrics.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
 
     callback command(string);
     callback toggle-menu(int, length);

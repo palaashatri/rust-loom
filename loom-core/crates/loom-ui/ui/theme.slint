@@ -132,6 +132,8 @@ export global Theme {
     in-out property <float> text-scale: 1.0;
     // Width of one in-window menu label; grows with text so labels never touch.
     out property <length> menu-label-width: 64px + 40px * (max(1.0, root.text-scale) - 1.0);
+    // Standard control height grown by the extra line height scaled body text needs.
+    out property <length> scaled-control-height: tokens.metrics.control-height + (type.body - tokens.typography.body) * 1.0;
     in-out property <TypeScale> type: {
         micro: tokens.typography.micro * max(1.0, root.text-scale),
         caption: tokens.typography.caption * max(1.0, root.text-scale),
@@ -245,6 +247,8 @@ export global ResponsivePolicy {
     in-out property <length> context-toolbar-height: 40px;
     in-out property <length> labeled-toolbar-min-height: 48px;
     in-out property <length> labeled-toolbar-max-height: 52px;
+    /// Extra labeled-row height for a scaled 10 px caption (grows with Theme.text-scale).
+    out property <length> toolbar-label-extra: (max(1.0, Theme.text-scale) - 1.0) * 14px;
 
     public pure function priority-1-icon-only(width: length) -> bool {
         return width < priority-1-icon-only-below;
@@ -256,6 +260,6 @@ export global ResponsivePolicy {
         return width >= priority-2-overflow-below;
     }
     public pure function toolbar-height(labeled: bool) -> length {
-        return labeled ? labeled-toolbar-min-height : context-toolbar-height;
+        return labeled ? labeled-toolbar-min-height + toolbar-label-extra : context-toolbar-height;
     }
 }

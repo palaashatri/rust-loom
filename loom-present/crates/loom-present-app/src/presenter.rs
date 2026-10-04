@@ -142,6 +142,7 @@ pub(crate) fn sync(session: &PresentationSession) {
 fn build(app: &PresentApp) -> Result<Presenter, String> {
     let window = PresenterWindow::new().map_err(|error| error.to_string())?;
     Theme::get(&window).set_active_theme(Theme::get(app).get_active_theme());
+    Theme::get(&window).set_text_scale(Theme::get(app).get_text_scale());
     let clock = Rc::new(RefCell::new(Clock::started(Instant::now())));
 
     let show_clock = {

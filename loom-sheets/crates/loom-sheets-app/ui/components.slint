@@ -16,7 +16,7 @@ export component SheetTabs inherits Rectangle {
     callback select-sheet(int);
     callback add-sheet;
 
-    height: Theme.tokens.metrics.sheet-tab-height;
+    height: Theme.tokens.metrics.sheet-tab-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
     background: Theme.palette().chrome;
 
     HorizontalLayout {
@@ -70,8 +70,8 @@ export component FormulaNameBar inherits Rectangle {
 
     public function focus-formula-bar() { field.focus-input(); }
 
-    min-height: Theme.tokens.metrics.formula-bar-height;
-    max-height: Theme.tokens.metrics.formula-bar-height;
+    min-height: Theme.tokens.metrics.formula-bar-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
+    max-height: Theme.tokens.metrics.formula-bar-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
     background: Theme.palette().chrome;
 
     HorizontalLayout {

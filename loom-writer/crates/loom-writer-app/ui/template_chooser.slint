@@ -12,7 +12,7 @@ component WriterTemplateCard inherits Rectangle {
     callback clicked;
 
     width: 160px;
-    height: 236px;
+    height: 236px + 22px * (max(1.0, Theme.text-scale) - 1.0);
     border-radius: Theme.tokens.metrics.radius-medium;
     background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
@@ -40,7 +40,7 @@ component WriterTemplateCard inherits Rectangle {
         }
 
         Rectangle {
-            height: 22px;
+            height: 22px * max(1.0, Theme.text-scale);
             border-radius: Theme.tokens.metrics.radius-small;
             background: root.selected ? Theme.palette().accent : transparent;
             HorizontalLayout {
@@ -50,7 +50,7 @@ component WriterTemplateCard inherits Rectangle {
                 cross-axis-alignment: center;
                 Text {
                     text: root.title;
-                    font-size: Theme.tokens.typography.caption;
+                    font-size: Theme.type.caption;
                     font-weight: root.selected ? 700 : 500;
                     color: root.selected ? Theme.palette().accent-ink : Theme.palette().ink;
                     horizontal-alignment: center;
@@ -73,7 +73,7 @@ component CategoryRow inherits Rectangle {
     in property <string> icon-name;
     in property <bool> active: false;
     callback clicked;
-    height: 32px;
+    height: 32px * max(1.0, Theme.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
     background: root.active ? Theme.palette().surface-raised : transparent;
     HorizontalLayout {
@@ -84,7 +84,7 @@ component CategoryRow inherits Rectangle {
         Icon { size: 16px; icon: root.icon-name; tint: root.active ? Theme.palette().accent : Theme.palette().ink-secondary; }
         Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: root.active ? 600 : 400;
             color: Theme.palette().ink;
             vertical-alignment: center;
@@ -152,7 +152,7 @@ export component TemplateChooserModal inherits Rectangle {
 
                 // Left Category Sidebar
                 Rectangle {
-                    width: 220px;
+                    width: 220px + 80px * (max(1.0, Theme.text-scale) - 1.0);
                     background: Theme.palette().panel;
 
                     VerticalLayout {
@@ -189,7 +189,7 @@ export component TemplateChooserModal inherits Rectangle {
                             padding: Theme.tokens.space.md;
                             Text {
                                 text: "English (US)";
-                                font-size: Theme.tokens.typography.caption;
+                                font-size: Theme.type.caption;
                                 color: Theme.palette().ink-secondary;
                                 vertical-alignment: center;
                             }
@@ -220,7 +220,7 @@ export component TemplateChooserModal inherits Rectangle {
 
                         Text {
                             text: "Choose a Template";
-                            font-size: 24px;
+                            font-size: 24px * max(1.0, Theme.text-scale);
                             font-weight: 700;
                             color: Theme.palette().ink;
                         }
@@ -386,7 +386,7 @@ export component TemplateChooserModal inherits Rectangle {
 
                     Text {
                         text: "Escape to cancel • Return to create";
-                        font-size: Theme.tokens.typography.caption;
+                        font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         horizontal-stretch: 1;
                         vertical-alignment: center;

@@ -683,13 +683,13 @@ export component WriterApp inherits Window {
 
                 Text {
                     text: "Save changes?";
-                    font-size: Theme.tokens.typography.heading;
+                    font-size: Theme.type.heading;
                     font-weight: 700;
                     color: Theme.palette().ink;
                 }
                 Text {
                     text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?";
-                    font-size: Theme.tokens.typography.body;
+                    font-size: Theme.type.body;
                     color: Theme.palette().ink-secondary;
                     wrap: word-wrap;
                 }
@@ -756,8 +756,9 @@ export component WriterApp inherits Window {
     }
 
     if FindBar.open : FindBarOverlay {
+        width: min(480px * max(1.0, Theme.text-scale), root.width - 48px);
         x: root.width - self.width - 24px;
-        y: root.custom-chrome ? 96px : 64px;
+        y: (root.custom-chrome ? 96px : 64px) + ResponsivePolicy.toolbar-label-extra;
     }
 
     LoomWindowResizeEdges {

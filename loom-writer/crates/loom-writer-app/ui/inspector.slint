@@ -173,7 +173,7 @@ export component WriterInspector inherits LoomPanel {
                         Text {
                             horizontal-stretch: 1;
                             text: root.font-size-pt + " pt";
-                            font-size: Theme.tokens.typography.caption;
+                            font-size: Theme.type.caption;
                             font-weight: 600;
                             color: Theme.palette().ink;
                             horizontal-alignment: center;
@@ -262,7 +262,7 @@ export component WriterInspector inherits LoomPanel {
 
                 Text {
                     text: "Line Spacing:";
-                    font-size: Theme.tokens.typography.caption;
+                    font-size: Theme.type.caption;
                     color: Theme.palette().ink-secondary;
                 }
 
@@ -331,12 +331,12 @@ export component WriterInspector inherits LoomPanel {
                             : entry.resolved
                                 ? entry.author + " · resolved"
                                 : entry.author;
-                        font-size: Theme.tokens.typography.micro;
+                        font-size: Theme.type.micro;
                         color: Theme.palette().ink-secondary;
                     }
                     Text {
                         text: entry.body;
-                        font-size: Theme.tokens.typography.caption;
+                        font-size: Theme.type.caption;
                         color: Theme.palette().ink;
                         wrap: word-wrap;
                         overflow: elide;
@@ -407,13 +407,13 @@ export component WriterInspector inherits LoomPanel {
 
                 Text {
                     text: "Page 1 of " + root.page-count;
-                    font-size: Theme.tokens.typography.caption;
+                    font-size: Theme.type.caption;
                     font-weight: 600;
                     color: Theme.palette().ink;
                 }
                 Text {
                     text: root.status-left != "" ? root.status-left : "~" + root.reading-time-mins + " min read";
-                    font-size: Theme.tokens.typography.micro;
+                    font-size: Theme.type.micro;
                     color: Theme.palette().ink-secondary;
                     overflow: elide;
                 }

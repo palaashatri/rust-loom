@@ -744,6 +744,9 @@ export component CommandPalette inherits Rectangle {
     callback key-text(string);
     callback backspace;
     callback close-requested;
+    // Rows and the search field grow with text scale.
+    private property <length> row-h: 34px * max(1.0, Theme.text-scale);
+    private property <length> search-h: 32px * max(1.0, Theme.text-scale);
 
     /// Move keyboard focus into the palette's focus scope. The host calls
     /// this when opening the palette so the modal captures the next keypress.
@@ -770,21 +773,16 @@ export component CommandPalette inherits Rectangle {
         x: (parent.width - Math.min(560px, parent.width - 48px)) / 2;
         y: Math.max(64px, parent.height / 5);
         width: Math.min(560px, parent.width - 48px);
-        // Size the palette to its useful content while keeping a bounded
-        // viewport for large command sets. A fixed 430px body made a single
-        // result look lost in a large empty modal; the floor leaves room for
-        // the search row and one command, and the cap preserves scrolling.
+        // Fit the content, floored at one row and capped to keep scrolling.
         height: Math.min(
             430px,
-            Math.min(parent.height - 140px, Math.max(136px, 102px + root.commands.length * 34px))
+            Math.min(parent.height - 140px, Math.max(104px + root.search-h, 70px + root.search-h + root.commands.length * root.row-h))
         );
         border-radius: 12px;
         border-width: 1px;
         border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
         background: Theme.palette().surface-raised;
-        // Keep a long command list inside the modal surface. The previous
-        // layout let repeated rows expand past this fixed-height panel and
-        // paint over the workspace below it.
+        // Long lists stay inside the panel.
         clip: true;
         accessible-role: list;
         accessible-label: "Command palette";
@@ -815,7 +813,7 @@ export component CommandPalette inherits Rectangle {
             HorizontalLayout {
                 spacing: 8px;
                 Rectangle {
-                    height: 32px;
+                    height: root.search-h;
                     horizontal-stretch: 1;
                     border-radius: 7px;
                     border-width: 1px;
@@ -824,7 +822,7 @@ export component CommandPalette inherits Rectangle {
                     Text {
                         x: 12px;
                         vertical-alignment: center;
-                        font-size: Theme.tokens.typography.body;
+                        font-size: Theme.type.body;
                         color: Theme.palette().ink;
                         text: root.query == "" ? "Search commands…" : "> " + root.query;
                         width: parent.width - 24px;
@@ -832,8 +830,8 @@ export component CommandPalette inherits Rectangle {
                     }
                 }
                 Text {
-                    text: "↑↓ select  ↵ run  esc close";
-                    font-size: Theme.tokens.typography.caption;
+                    text: Theme.text-scale > 1.5 ? "esc close" : "↑↓ select  ↵ run  esc close";
+                    font-size: Theme.type.caption;
                     color: Theme.palette().ink-disabled;
                     vertical-alignment: center;
                 }
@@ -860,17 +858,17 @@ export component CommandPalette inherits Rectangle {
                     height: parent.height;
                     preferred-height: 100%;
                     viewport-width: parent.width;
-                    viewport-height: Math.max(parent.height, root.commands.length * 34px);
+                    viewport-height: Math.max(parent.height, root.commands.length * root.row-h);
                     viewport-y: -Math.min(
-                        Math.max(0px, Math.max(0, root.selected) * 34px - (parent.height - 34px)),
-                        Math.max(0px, root.commands.length * 34px - parent.height)
+                        Math.max(0px, Math.max(0, root.selected) * root.row-h - (parent.height - root.row-h)),
+                        Math.max(0px, root.commands.length * root.row-h - parent.height)
                     );
 
                     VerticalLayout {
                         width: parent.width;
-                        height: root.commands.length * 34px;
+                        height: root.commands.length * root.row-h;
                         for item[idx] in root.commands : Rectangle {
-                            height: 34px;
+                            height: root.row-h;
                             border-radius: 6px;
                             background: idx == root.selected ? Theme.palette().selection-soft
                                 : row-touch.has-hover ? Theme.palette().surface-sunken : transparent;
@@ -883,14 +881,14 @@ export component CommandPalette inherits Rectangle {
                                 Text {
                                     horizontal-stretch: 1;
                                     text: item.label;
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     color: item.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
                                     vertical-alignment: center;
                                     overflow: elide;
                                 }
                                 Text {
                                     text: item.shortcut;
-                                    font-size: Theme.tokens.typography.caption;
+                                    font-size: Theme.type.caption;
                                     color: Theme.palette().ink-secondary;
                                     vertical-alignment: center;
                                 }
@@ -915,7 +913,7 @@ export component CommandPalette inherits Rectangle {
 
                 // A slim, non-interactive rail makes the clipped list's
                 // scrollable state discoverable without stealing row clicks.
-                if root.commands.length * 34px > parent.height : Rectangle {
+                if root.commands.length * root.row-h > parent.height : Rectangle {
                     x: parent.width - 3px;
                     y: 4px;
                     width: 2px;
