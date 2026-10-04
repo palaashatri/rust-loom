@@ -1401,3 +1401,44 @@ fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
     }
     presenter::forget();
 }
+
+#[test]
+fn a_blank_deck_prompts_for_a_title_without_saving_the_prompt() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(GuiState {
+        save_path: RefCell::new(None),
+        ..test_state()
+    });
+    wire_app_callbacks(&app, &state);
+    refresh(&app, &state);
+
+    let placeholders: Vec<String> = app
+        .get_element_placeholders()
+        .iter()
+        .map(|text| text.to_string())
+        .collect();
+    assert_eq!(
+        placeholders.first().map(String::as_str),
+        Some("Click to add title")
+    );
+    assert_eq!(app.get_element_types().row_data(0), Some(0));
+
+    let session = state.session.borrow();
+    let element = &session.document.slides[0].elements[0];
+    assert!(
+        element.content.is_empty(),
+        "the prompt must not enter the deck"
+    );
+    assert!(!save_presentation_session(&session)
+        .map(|bytes| String::from_utf8_lossy(&bytes).contains("Click to add"))
+        .unwrap_or(true));
+    drop(session);
+
+    state.session.borrow_mut().document.slides[0].elements[0].content = "Quarterly plan".into();
+    refresh(&app, &state);
+    assert_eq!(
+        app.get_element_placeholders().row_data(0).unwrap().as_str(),
+        ""
+    );
+}

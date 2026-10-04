@@ -12,6 +12,7 @@
 mod caret_scroll;
 mod document_formatting;
 mod docx_export;
+mod file_title;
 mod find_bar;
 mod local_menu;
 mod multi_click;
@@ -1415,6 +1416,7 @@ fn save_current_document(
     *state.save_path.borrow_mut() = Some(path.clone());
     let checkpoint_result = recovery::checkpoint_document(&document);
     *state.last_saved.borrow_mut() = document;
+    file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));
     let status = match checkpoint_result {
         Ok(()) => format!("Saved {}", path.display()),
@@ -2336,6 +2338,7 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
         ));
     }
     drop(current);
+    file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));
     app.set_page_zoom(viewport.zoom);
     app.set_page_scroll_x(viewport.scroll_x);
@@ -2651,7 +2654,10 @@ fn request_document_replacement(
         return false;
     }
     state.pending_replacement.set(Some(operation));
-    let title = state.current.borrow().title.clone();
+    let title = file_title::display_title(
+        state.save_path.borrow().as_deref(),
+        &state.current.borrow().title,
+    );
     app.set_save_changes_document(SharedString::from(title));
     app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
     app.set_save_changes_open(true);

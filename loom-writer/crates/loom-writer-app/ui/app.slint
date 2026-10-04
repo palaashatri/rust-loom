@@ -629,7 +629,7 @@ export component WriterApp inherits Window {
 
         Rectangle {
             width: min(440px, root.width - 48px);
-            height: 220px;
+            height: min(save-changes-layout.preferred-height, root.height - 48px);
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
@@ -640,7 +640,7 @@ export component WriterApp inherits Window {
             drop-shadow-offset-y: 8px;
             drop-shadow-color: Theme.palette().shadow;
 
-            VerticalLayout {
+            save-changes-layout := VerticalLayout {
                 spacing: Theme.tokens.space.md;
                 padding: Theme.tokens.space.xl;
 
@@ -655,7 +655,6 @@ export component WriterApp inherits Window {
                     font-size: Theme.tokens.typography.body;
                     color: Theme.palette().ink-secondary;
                     wrap: word-wrap;
-                    vertical-stretch: 1;
                 }
                 HorizontalLayout {
                     spacing: Theme.tokens.space.sm;

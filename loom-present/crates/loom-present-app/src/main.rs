@@ -568,6 +568,18 @@ fn element_type_name(kind: &ElementType) -> &'static str {
     }
 }
 
+/// The faint on-canvas prompt for an empty text element; empty when none applies.
+fn placeholder_prompt(element: &SlideElement) -> &'static str {
+    if !element.content.trim().is_empty() {
+        return "";
+    }
+    match element.element_type {
+        ElementType::Title => "Click to add title",
+        ElementType::Subtitle | ElementType::BodyText => "Click to add text",
+        _ => "",
+    }
+}
+
 /// The text a slide element shows or is named by: its text, or a picture's file name.
 fn element_text(document: &PresentationDocument, element: &SlideElement) -> String {
     if element.element_type == ElementType::Picture {
@@ -601,7 +613,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     let session = state.session.borrow();
     let document = &session.document;
     presenter::sync(&session);
-    app.set_deck_title(document.title.as_str().into());
+    file_title::sync(app, state);
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
     app.set_slide_count_text(SharedString::from(format!("{} slides", document.len())));
@@ -638,6 +650,14 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             })
             .collect::<Vec<_>>();
         app.set_element_labels(synced(app.get_element_labels(), labels));
+        app.set_element_placeholders(synced(
+            app.get_element_placeholders(),
+            slide
+                .elements
+                .iter()
+                .map(|element| SharedString::from(placeholder_prompt(element)))
+                .collect::<Vec<_>>(),
+        ));
         app.set_element_contents(synced(
             app.get_element_contents(),
             slide
@@ -1037,6 +1057,7 @@ fn save_current_deck(
     *state.save_path.borrow_mut() = Some(path.clone());
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
+    file_title::sync(app, state);
     app.set_status_right(deck_status_text(state).into());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
@@ -1679,7 +1700,13 @@ fn request_deck_replacement(
         return false;
     }
     state.pending_replacement.set(Some(operation));
-    app.set_save_changes_document(state.session.borrow().document.title.as_str().into());
+    app.set_save_changes_document(
+        file_title::display_title(
+            state.save_path.borrow().as_deref(),
+            &state.session.borrow().document.title,
+        )
+        .into(),
+    );
     app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
     app.set_save_changes_open(true);
     set_status(app, "Unsaved changes — choose Save, Discard, or Cancel");
@@ -3072,6 +3099,7 @@ mod export_pptx_tests;
 #[cfg(test)]
 mod picture_tests;
 
+mod file_title;
 mod local_menu;
 mod model_sync;
 mod picture_view;

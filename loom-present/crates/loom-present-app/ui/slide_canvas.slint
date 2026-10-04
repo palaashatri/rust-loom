@@ -5,6 +5,8 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <bool> aspect-ratio-wide: true;
     in property <[string]> element-labels: [];
     in property <[string]> element-contents: [];
+    /// Faint prompt for an empty text element; never part of the deck.
+    in property <[string]> element-placeholders: [];
     in property <[float]> element-xs: [];
     in property <[float]> element-ys: [];
     in property <[float]> element-widths: [];
@@ -161,6 +163,21 @@ export component PresentSlideCanvas inherits Rectangle {
                     vertical-alignment: center;
                     wrap: word-wrap;
                     overflow: elide;
+                }
+
+                if root.editing-enabled && root.editing-idx != idx && root.element-placeholders.length > idx && root.element-placeholders[idx] != "" : Text {
+                    x: Theme.tokens.space.sm;
+                    y: Theme.tokens.space.xs;
+                    width: max(1px, parent.width - Theme.tokens.space.lg * 2);
+                    height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    text: root.element-placeholders[idx];
+                    font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display : Theme.tokens.typography.body-large) * slide.text-scale;
+                    color: Theme.palette().paper-muted;
+                    opacity: 0.6;
+                    horizontal-alignment: root.element-types[idx] == 0 ? center : left;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    accessible-role: none;
                 }
 
                 if root.element-types[idx] == 6 : Image {

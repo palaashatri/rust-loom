@@ -68,6 +68,7 @@ export component PresentApp inherits Window {
     in property <[ThumbRows]> slide-thumbs: [];
     in property <int> active-slide-index: 0;
     in property <[string]> element-labels: [];
+    in property <[string]> element-placeholders: [];
     in property <int> active-element-index: 0;
     in property <string> active-element-label: "No element selected";
     in property <string> active-element-content: "";
@@ -402,6 +403,7 @@ export component PresentApp inherits Window {
                         background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
                         aspect-ratio-wide: root.aspect-ratio-wide;
                         element-labels: root.element-labels;
+                        element-placeholders: root.element-placeholders;
                         element-contents: root.element-contents;
                         element-xs: root.element-xs;
                         element-ys: root.element-ys;
@@ -600,10 +602,10 @@ export component PresentApp inherits Window {
     if root.save-changes-open : Rectangle {
         width: root.width; height: root.height; background: #00000066;
         TouchArea { clicked => { } }
-        Rectangle { width: min(440px, root.width - 48px); height: 210px; x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
-            VerticalLayout { padding: 24px; spacing: 12px;
+        Rectangle { width: min(440px, root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
+            save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
                 Text { text: "Save changes?"; font-size: 22px; color: Theme.palette().ink; }
-                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; wrap: word-wrap; vertical-stretch: 1; }
+                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; wrap: word-wrap; }
                 HorizontalLayout { alignment: end; spacing: 8px;
                     LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
                     LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
