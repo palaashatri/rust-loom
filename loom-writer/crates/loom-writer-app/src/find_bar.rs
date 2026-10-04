@@ -15,9 +15,8 @@ use loom_writer_core::{TextSelection, WriterDocument};
 use slint::{ComponentHandle, SharedString};
 
 use crate::{
-    apply_with_history, normalize_page_scroll, normalize_page_zoom,
-    writer_project_selection_ranges, FindBar, FindRect, GuiState, HistoryKind, PageViewport,
-    WriterApp,
+    apply_with_history, normalize_page_scroll, normalize_page_zoom, projection, FindBar, FindRect,
+    GuiState, HistoryKind, PageViewport, WriterApp,
 };
 
 /// Most secondary highlights projected at once; a query matching more than
@@ -117,47 +116,67 @@ fn matches_for(app: &WriterApp, document: &WriterDocument, query: &str) -> Vec<(
     editor_matches(document, query, app.global::<FindBar>().get_match_case())
 }
 
+/// Soft highlights for every match but the current one, limited to the pages
+/// near the view, or none when the bar is closed.
+pub(crate) fn match_rects(app: &WriterApp, document: &WriterDocument) -> Vec<FindRect> {
+    let bar = app.global::<FindBar>();
+    let query = bar.get_query();
+    if !bar.get_open() || query.is_empty() {
+        return Vec::new();
+    }
+    let style = document.page.page_style();
+    let Ok(flow) = document.flow(
+        &style,
+        projection::layout_viewport(&style, PageViewport::default()),
+    ) else {
+        return Vec::new();
+    };
+    let Some(base_page) = flow.page_bounds().first().copied() else {
+        return Vec::new();
+    };
+    // The flow is at unit zoom with no scroll, so page `n` starts at
+    // `n * pitch` points; the view spans a screen each way around the scroll.
+    let zoom = normalize_page_zoom(app.get_page_zoom(), 1.0);
+    let view = app.get_page_view_height();
+    let span = if view > 1.0 {
+        view / zoom
+    } else {
+        style.height_pt * 2.0
+    };
+    let scroll = normalize_page_scroll(app.get_page_scroll_y()) / zoom;
+    let pages = flow.visible_pages(scroll - span, scroll + 2.0 * span);
+    let current = selection_range(document);
+    let mut rects = Vec::new();
+    for range in matches_for(app, document, query.as_str())
+        .into_iter()
+        .filter(|&range| range != current)
+        .take(HIGHLIGHT_LIMIT)
+    {
+        let found = flow.selection_rects(
+            document,
+            &TextSelection::range(range.0, range.1),
+            pages.clone(),
+        );
+        rects.extend(
+            projection::ui_selection_rects(&style, 1.0, base_page, &found)
+                .into_iter()
+                .map(|rect| FindRect {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                }),
+        );
+    }
+    rects
+}
+
 /// Project soft highlights for every match but the current one, or clear them
 /// when the bar is closed. Call after anything that moves text or the query.
 pub(crate) fn publish_match_rects(app: &WriterApp, document: &WriterDocument) {
-    let bar = app.global::<FindBar>();
-    let query = bar.get_query();
-    let mut rects = Vec::new();
-    if bar.get_open() && !query.is_empty() {
-        let style = document.page.page_style();
-        let viewport = PageViewport {
-            width: style.width_pt,
-            height: style.height_pt,
-            zoom: normalize_page_zoom(1.0, 1.0),
-            scroll_x: normalize_page_scroll(0.0),
-            scroll_y: normalize_page_scroll(0.0),
-        };
-        if let Ok(layout) = document.layout(&style, viewport) {
-            let current = selection_range(document);
-            for range in matches_for(app, document, query.as_str())
-                .into_iter()
-                .filter(|&range| range != current)
-                .take(HIGHLIGHT_LIMIT)
-            {
-                let found = document.selection_rectangles_for(
-                    &layout,
-                    &style,
-                    &TextSelection::range(range.0, range.1),
-                );
-                rects.extend(
-                    writer_project_selection_ranges(&style, &layout, &found)
-                        .into_iter()
-                        .map(|rect| FindRect {
-                            x: rect.x,
-                            y: rect.y,
-                            width: rect.width,
-                            height: rect.height,
-                        }),
-                );
-            }
-        }
-    }
-    bar.set_match_rects(Rc::new(slint::VecModel::from(rects)).into());
+    let rects = match_rects(app, document);
+    app.global::<FindBar>()
+        .set_match_rects(Rc::new(slint::VecModel::from(rects)).into());
 }
 
 fn refresh_rects(app: &WriterApp, state: &GuiState) {

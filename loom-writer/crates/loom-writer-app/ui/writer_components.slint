@@ -252,6 +252,10 @@ export component WriterPageCanvas inherits Rectangle {
     private property <length> native-y;
     private property <length> measured-height: page-scroll.height;
     in property <int> page-count: 1;
+    // Only the sheets near the viewport are drawn; a long document would
+    // otherwise keep one shadowed rectangle alive per page.
+    in property <int> visible-page-first: 0;
+    in property <int> visible-page-count: 1;
     in property <length> page-stack-height: 842px;
     in property <float> page-gap-pt: 24.0;
     in property <float> page-width-pt: 595.0;
@@ -313,9 +317,9 @@ export component WriterPageCanvas inherits Rectangle {
                 : self.raw-height * root.page-zoom;
             background: transparent;
 
-            for index in root.page-count : Rectangle {
+            for offset in root.visible-page-count : Rectangle {
                 x: 0px;
-                y: index * (page.raw-height * root.page-zoom + page.gap);
+                y: (root.visible-page-first + offset) * (page.raw-height * root.page-zoom + page.gap);
                 width: page.width;
                 height: page.raw-height * root.page-zoom;
                 border-radius: Theme.tokens.metrics.radius-small;

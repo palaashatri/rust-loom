@@ -249,13 +249,10 @@ impl WriterDocument {
     /// `replace_paragraphs` for a caller that knows the exact edit: comment
     /// anchors rebase through `edit` instead of through an inferred diff.
     pub(crate) fn replace_paragraphs_with_edit(&mut self, plain_text: &str, edit: TextEdit) {
-        let before = self.comments.clone();
-        let old_blocks = self.blocks.clone();
-        self.replace_paragraphs(plain_text);
-        if before.is_empty() {
+        let old_blocks = self.rebuild_blocks(plain_text);
+        if self.comments.is_empty() {
             return;
         }
-        self.comments = before;
         Self::rebase_comment_anchors_through(&mut self.comments, &old_blocks, &self.blocks, edit);
     }
 

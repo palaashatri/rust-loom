@@ -43,13 +43,27 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
     value
 }
 
+/// Floor a global editor-text offset to a character boundary and clamp it to
+/// the text, walking the blocks instead of joining them into one string.
+fn floor_in_document(document: &WriterDocument, offset: usize) -> usize {
+    let mut start = 0usize;
+    for block in &document.blocks {
+        let text = block.text.as_str();
+        let end = start + text.len();
+        if offset <= end {
+            return start + floor_char_boundary(text, offset.saturating_sub(start));
+        }
+        start = end + 1;
+    }
+    start.saturating_sub(1)
+}
+
 #[allow(dead_code)]
 fn normalized_selection(document: &WriterDocument, selection: DocumentSelection) -> (usize, usize) {
-    let text = document.editor_text();
     let (start, end) = selection.normalized_range();
     (
-        floor_char_boundary(&text, start),
-        floor_char_boundary(&text, end),
+        floor_in_document(document, start),
+        floor_in_document(document, end),
     )
 }
 
@@ -91,8 +105,7 @@ fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
     if document.blocks.is_empty() {
         return None;
     }
-    let text = document.editor_text();
-    let offset = floor_char_boundary(&text, offset);
+    let offset = floor_in_document(document, offset);
     let mut global_start = 0usize;
     for (index, block) in document.blocks.iter().enumerate() {
         let global_end = global_start + block.text.as_str().len();
@@ -918,5 +931,20 @@ mod tests {
             .runs
             .iter()
             .all(|run| run.style.weight == FontWeight::Bold));
+    }
+
+    #[test]
+    fn flooring_walks_the_blocks_like_flooring_the_joined_text() {
+        let mut document = WriterDocument::new("floor", "Floor");
+        document.replace_paragraphs("h\u{e9}llo\n\n\u{1F600} caf\u{e9}\nend");
+        let text = document.editor_text();
+        for offset in 0..=text.len() + 3 {
+            assert_eq!(
+                floor_in_document(&document, offset),
+                floor_char_boundary(&text, offset),
+                "offset {offset}"
+            );
+        }
+        assert_eq!(floor_in_document(&WriterDocument::new("e", "E"), 9), 0);
     }
 }

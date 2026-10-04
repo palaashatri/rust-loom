@@ -85,6 +85,8 @@ export component WriterApp inherits Window {
     in-out property <length> page-scroll-y: 0px;
     in-out property <length> page-view-height: 0px;
     in-out property <int> page-count: 1;
+    in property <int> visible-page-first: 0;
+    in property <int> visible-page-count: 1;
     in-out property <length> page-stack-height: 842px;
     in-out property <float> page-gap-pt: 24.0;
     in property <bool> can-undo: false;
@@ -407,6 +409,8 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     view-height <=> root.page-view-height;
                     page-count: root.page-count;
+                    visible-page-first: root.visible-page-first;
+                    visible-page-count: root.visible-page-count;
                     page-stack-height: root.page-stack-height;
                     page-gap-pt: root.page-gap-pt;
                     page-width-pt: root.page-width-pt;
@@ -499,6 +503,8 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     view-height <=> root.page-view-height;
                     page-count: root.page-count;
+                    visible-page-first: root.visible-page-first;
+                    visible-page-count: root.visible-page-count;
                     page-stack-height: root.page-stack-height;
                     page-gap-pt: root.page-gap-pt;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }

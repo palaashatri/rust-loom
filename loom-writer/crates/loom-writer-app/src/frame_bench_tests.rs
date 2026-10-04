@@ -49,7 +49,7 @@ fn paragraph(n: usize) -> String {
 
 /// A document of roughly `pages` pages: paragraphs, a heading every 25th, a
 /// bold run in every 7th and a comment on every 200th paragraph.
-fn build_document(pages: usize) -> WriterDocument {
+pub(super) fn build_document(pages: usize) -> WriterDocument {
     let paragraphs = pages * 20;
     let text = (0..paragraphs)
         .map(paragraph)
@@ -82,7 +82,7 @@ fn build_document(pages: usize) -> WriterDocument {
     doc
 }
 
-fn setup(doc: WriterDocument) -> (WriterApp, Rc<GuiState>) {
+pub(super) fn setup(doc: WriterDocument) -> (WriterApp, Rc<GuiState>) {
     let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
     let (app, state) = test_state(doc, dialogs);
     wire_writer_shared_callbacks(&app, &state, None);
@@ -264,7 +264,7 @@ fn writer_keystroke_stage_profile() {
     if std::env::var("LOOM_FRAME_BENCH").is_err() {
         return;
     }
-    for pages in [20usize, 100] {
+    for pages in [20usize, 100, 400] {
         let (app, state) = setup(build_document(pages));
         let base = state.current.borrow().clone();
         let text = base.editor_text();
@@ -321,6 +321,36 @@ fn writer_keystroke_stage_profile() {
         });
         stage("apply_state (whole)", &mut || {
             apply_state(&app, &state);
+        });
+        stage("projection::project (window)", &mut || {
+            let _ = projection::project(&base, *state.viewport.borrow(), Some(800.0));
+        });
+        stage("text_counts", &mut || {
+            let _ = base.text_counts();
+        });
+        stage("selection_announcement", &mut || {
+            let _ = selection_announcement(&base, &base.selection());
+        });
+        stage("formatting_state_for_selection", &mut || {
+            let selection = base.selection();
+            let _ = formatting_state_for_selection(
+                &base,
+                DocumentSelection::range(selection.anchor, selection.focus),
+            );
+        });
+        stage("document_bytes", &mut || {
+            let _ = document_bytes(&base);
+        });
+        stage("apply_state_with deferred", &mut || {
+            apply_state_with(&app, &state, RecoveryWrite::Deferred);
+        });
+        stage("apply_typing (whole keystroke)", &mut || {
+            let mut next = state.current.borrow().clone();
+            let at = next.selection().focus;
+            let mut text = next.editor_text();
+            text.insert(at, 'y');
+            let _ = next.replace_editor_text_at(&text, Some(at + 1));
+            apply_typing(&app, &state, next);
         });
     }
 }

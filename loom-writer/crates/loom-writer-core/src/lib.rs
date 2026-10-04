@@ -16,14 +16,18 @@ use unicode_segmentation::UnicodeSegmentation;
 mod comments;
 mod docx;
 mod export;
+mod layout;
 mod page_setup;
+mod paragraph_match;
 mod style_json;
 mod tables;
 mod text_metrics;
 
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
+pub use layout::{DocumentFlow, FlowLine};
 pub use page_setup::PageSetup;
+use paragraph_match::exact_paragraph_matches;
 use style_json::{
     alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, parse_line_break,
     runs_json, selection_json,
@@ -110,8 +114,22 @@ pub fn grapheme_count(text: &str) -> usize {
 /// Clamp a byte offset down to the preceding extended grapheme boundary.
 pub fn floor_grapheme_boundary(text: &str, offset: usize) -> usize {
     let offset = offset.min(text.len());
-    grapheme_boundaries(text)
-        .into_iter()
+    // A grapheme never spans a line feed (a control character always breaks,
+    // and only CR+LF joins), so the boundary nearest `offset` is found from
+    // its own line alone instead of segmenting the whole document.
+    let bytes = text.as_bytes();
+    let line_start = bytes[..offset]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |at| at + 1);
+    let line_end = bytes[offset..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(text.len(), |at| offset + at + 1);
+    text[line_start..line_end]
+        .grapheme_indices(true)
+        .map(|(at, _)| line_start + at)
+        .chain(std::iter::once(line_end))
         .take_while(|boundary| *boundary <= offset)
         .last()
         .unwrap_or(0)
@@ -330,8 +348,7 @@ impl WriterDocument {
     /// clamping both endpoints to the current editor text and UTF-8
     /// character boundaries.
     pub fn set_selection(&mut self, selection: TextSelection) {
-        let text = self.editor_text();
-        self.selection = normalize_text_selection(&text, selection);
+        self.selection = self.clamp_selection(selection);
     }
 
     /// Move the active caret or extend its range using grapheme-safe offsets.
@@ -398,6 +415,13 @@ impl WriterDocument {
     /// style, and runs, even when an insertion or deletion moves them. The
     /// empty string represents an empty document rather than one empty block.
     pub fn replace_paragraphs(&mut self, plain_text: &str) {
+        let old_blocks = self.rebuild_blocks(plain_text);
+        Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
+    }
+
+    /// Rebuild the blocks from plain text and return the old ones; comment
+    /// anchors are left for the caller to rebase.
+    pub(crate) fn rebuild_blocks(&mut self, plain_text: &str) -> Vec<RichBlock> {
         let normalized = normalize_editor_text(plain_text);
         let paragraphs = if normalized.is_empty() {
             Vec::new()
@@ -432,8 +456,8 @@ impl WriterDocument {
             })
             .collect();
         self.blocks = blocks;
-        self.selection = normalize_text_selection(&self.editor_text(), self.selection.clone());
-        Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
+        self.selection = self.clamp_selection(self.selection.clone());
+        old_blocks
     }
 
     /// A many-block Mutation (for undo replay). Returns a single mutation
@@ -1003,39 +1027,6 @@ pub struct DocumentStats {
     pub reading_time_minutes: f32,
 }
 
-/// Match exact paragraph text in order, retaining the stable metadata of the
-/// old block. LCS gives insertions and deletions in the middle the same
-/// behavior as edits at the beginning or end, instead of relying on position.
-fn exact_paragraph_matches(old: &[RichBlock], new: &[String]) -> Vec<Option<usize>> {
-    let mut lcs = vec![vec![0usize; new.len() + 1]; old.len() + 1];
-    for old_index in (0..old.len()).rev() {
-        for new_index in (0..new.len()).rev() {
-            lcs[old_index][new_index] = if old[old_index].text.as_str() == new[new_index] {
-                1 + lcs[old_index + 1][new_index + 1]
-            } else {
-                lcs[old_index + 1][new_index].max(lcs[old_index][new_index + 1])
-            };
-        }
-    }
-
-    let mut matches = vec![None; new.len()];
-    let (mut old_index, mut new_index) = (0, 0);
-    while old_index < old.len() && new_index < new.len() {
-        if old[old_index].text.as_str() == new[new_index]
-            && lcs[old_index][new_index] == 1 + lcs[old_index + 1][new_index + 1]
-        {
-            matches[new_index] = Some(old_index);
-            old_index += 1;
-            new_index += 1;
-        } else if lcs[old_index + 1][new_index] >= lcs[old_index][new_index + 1] {
-            old_index += 1;
-        } else {
-            new_index += 1;
-        }
-    }
-    matches
-}
-
 /// Add conservative metadata matches for changed paragraphs in an unmatched
 /// gap. Equal-sized gaps retain positional matching. For unequal gaps, a
 /// small sequence alignment pairs only sufficiently similar text, leaving
@@ -1241,6 +1232,10 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
 /// Line endings become `\n`. There are no tab stops, and the page font has no
 /// glyph for a tab (it draws as a box), so a tab becomes four spaces.
 fn normalize_editor_text(text: &str) -> String {
+    // Almost all text needs no change, so skip the three rewriting passes.
+    if !text.bytes().any(|byte| byte == b'\r' || byte == b'\t') {
+        return text.to_string();
+    }
     text.replace("\r\n", "\n")
         .replace('\r', "\n")
         .replace('\t', "    ")
@@ -1302,8 +1297,7 @@ fn character_style_at_global(
     if document.blocks.is_empty() {
         return loom_text::CharacterStyle::default();
     }
-    let text = document.editor_text();
-    let offset = floor_grapheme_boundary(&text, offset);
+    let offset = document.floor_offset(offset);
     let mut global_start = 0usize;
     for (index, block) in document.blocks.iter().enumerate() {
         let block_text = block.text.as_str();
@@ -1393,12 +1387,8 @@ fn normalized_selection_offsets(
     document: &WriterDocument,
     selection: TextSelection,
 ) -> (usize, usize) {
-    let text = document.editor_text();
     let (start, end) = selection.normalized_range();
-    (
-        floor_grapheme_boundary(&text, start),
-        floor_grapheme_boundary(&text, end),
-    )
+    (document.floor_offset(start), document.floor_offset(end))
 }
 
 /// Return `(block_index, local_start, local_end)` for text actually covered by
@@ -1436,8 +1426,7 @@ fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
     if document.blocks.is_empty() {
         return None;
     }
-    let text = document.editor_text();
-    let offset = floor_grapheme_boundary(&text, offset);
+    let offset = document.floor_offset(offset);
     let mut global_start = 0usize;
     for (index, block) in document.blocks.iter().enumerate() {
         let global_end = global_start + block.text.as_str().len();
@@ -3500,7 +3489,7 @@ impl WriterDocument {
                 block.text = Text::from_str(&after);
             }
         }
-        self.selection = normalize_text_selection(&self.editor_text(), self.selection.clone());
+        self.selection = self.clamp_selection(self.selection.clone());
         replacements
     }
 
@@ -3520,339 +3509,6 @@ impl WriterDocument {
                 })
             })
             .collect()
-    }
-
-    /// Deterministically paginates text using conservative font metrics.
-    ///
-    /// This is a reference CPU layout used for previews and tests. The future
-    /// shaping engine can replace it while preserving this page-fragment API.
-    pub fn paginate(&self, style: &PageStyle) -> Result<Vec<DocumentPage>, String> {
-        if !style.width_pt.is_finite()
-            || !style.height_pt.is_finite()
-            || !style.body_font_size_pt.is_finite()
-            || !style.line_height.is_finite()
-            || style.width_pt <= style.margin_left_pt + style.margin_right_pt
-            || style.height_pt <= style.margin_top_pt + style.margin_bottom_pt
-            || style.body_font_size_pt <= 0.0
-            || style.line_height <= 0.0
-        {
-            return Err("page style has invalid geometry".into());
-        }
-        let usable_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
-        let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
-        let mut pages = vec![DocumentPage {
-            index: 0,
-            fragments: Vec::new(),
-        }];
-        let mut height_used = 0.0_f32;
-        for (block_index, block) in self.blocks.iter().enumerate() {
-            let text = block.text.as_str();
-            // Pagination must use the same block metrics as `layout`: a
-            // heading has wider glyphs and a taller line box than body text.
-            // Keeping this calculation here (rather than applying body
-            // columns to every block) prevents long headings from producing
-            // fragments that the renderer cannot fit on the page.
-            let font_size = style.font_size_for_kind(block.kind.as_str());
-            let line_height = font_size * style.line_height;
-            let ranges = text_metrics::wrap_by_width(text, &block.runs, font_size, usable_width);
-            for (start, end) in ranges {
-                if !pages.last().is_some_and(|page| page.fragments.is_empty())
-                    && height_used + line_height > usable_height + f32::EPSILON
-                {
-                    pages.push(DocumentPage {
-                        index: pages.len(),
-                        fragments: Vec::new(),
-                    });
-                    height_used = 0.0;
-                }
-                pages
-                    .last_mut()
-                    .expect("at least one page")
-                    .fragments
-                    .push(PageFragment {
-                        block_id: block.id,
-                        start,
-                        end,
-                        text: text[start..end].to_string(),
-                    });
-                height_used += line_height;
-            }
-            // Paragraph spacing consumes one body line unless the next block
-            // starts on a fresh page. This mirrors `layout`, which adds the
-            // same gap only between fragments that share a page.
-            if block_index + 1 < self.blocks.len()
-                && height_used > 0.0
-                && height_used + style.body_font_size_pt * style.line_height
-                    <= usable_height + f32::EPSILON
-            {
-                height_used += style.body_font_size_pt * style.line_height;
-            }
-        }
-        Ok(pages)
-    }
-
-    /// Build a page-and-viewport projection from the same fragments returned
-    /// by [`Self::paginate`]. Geometry is deterministic and does not depend on
-    /// a window or renderer, which keeps selection and scroll tests faithful
-    /// to the editor's page model.
-    pub fn layout(&self, style: &PageStyle, viewport: PageViewport) -> Result<PageLayout, String> {
-        if !viewport.width.is_finite()
-            || !viewport.height.is_finite()
-            || !viewport.zoom.is_finite()
-            || !viewport.scroll_x.is_finite()
-            || !viewport.scroll_y.is_finite()
-            || viewport.width <= 0.0
-            || viewport.height <= 0.0
-            || viewport.zoom <= 0.0
-        {
-            return Err("page viewport has invalid geometry".into());
-        }
-
-        let pages = self.paginate(style)?;
-        let zoom = viewport.zoom;
-        let scroll_x = viewport.scroll_x.max(0.0);
-        let scroll_y = viewport.scroll_y.max(0.0);
-        let page_width = style.width_pt * zoom;
-        let page_height = style.height_pt * zoom;
-        let page_gap = PAGE_GAP_PT * zoom;
-        let body_line_height = style.body_font_size_pt * style.line_height * zoom;
-        let viewport_rect = PageRect {
-            x: 0.0,
-            y: 0.0,
-            width: viewport.width,
-            height: viewport.height,
-        };
-
-        let mut page_bounds = Vec::with_capacity(pages.len());
-        let mut fragments = Vec::new();
-        for page in &pages {
-            let page_x = ((viewport.width - page_width) / 2.0).max(0.0) - scroll_x;
-            let page_y = page.index as f32 * (page_height + page_gap) - scroll_y;
-            let bounds = PageRect {
-                x: page_x,
-                y: page_y,
-                width: page_width,
-                height: page_height,
-            };
-            page_bounds.push(bounds);
-
-            let content_x = page_x + style.margin_left_pt * zoom;
-            let content_y = page_y + style.margin_top_pt * zoom;
-            let mut line_y = content_y;
-            for (fragment_index, source) in page.fragments.iter().enumerate() {
-                let block = self.blocks.iter().find(|block| block.id == source.block_id);
-                let font_size = block
-                    .map(|block| style.font_size_for_kind(block.kind.as_str()))
-                    .unwrap_or(style.body_font_size_pt);
-                let line_height = font_size * style.line_height * zoom;
-                let runs = block.map_or(&[][..], |block| block.runs.as_slice());
-                let line_width = text_advance(&source.text, source.start, runs, font_size) * zoom;
-                let fragment_bounds = PageRect {
-                    x: content_x,
-                    y: line_y,
-                    width: line_width,
-                    height: line_height,
-                };
-                fragments.push(LayoutFragment {
-                    block_id: source.block_id,
-                    start: source.start,
-                    end: source.end,
-                    text: source.text.clone(),
-                    bounds: fragment_bounds,
-                });
-                line_y += line_height;
-                let next_block_id = page
-                    .fragments
-                    .get(fragment_index + 1)
-                    .map(|fragment| fragment.block_id);
-                if next_block_id.is_some() && next_block_id != Some(source.block_id) {
-                    // Match the paginator's conservative paragraph break while
-                    // allowing larger heading metrics to occupy their actual
-                    // visual line box.
-                    line_y += body_line_height;
-                }
-            }
-        }
-
-        let visible_ranges = fragments
-            .iter()
-            .filter_map(|fragment| {
-                if !fragment.bounds.intersects(viewport_rect) {
-                    return None;
-                }
-                let page_index = page_bounds
-                    .iter()
-                    .position(|page| {
-                        fragment.bounds.y >= page.y && fragment.bounds.y < page.y + page.height
-                    })
-                    .unwrap_or(0);
-                Some(VisibleRange {
-                    page_index,
-                    block_id: fragment.block_id,
-                    start: fragment.start,
-                    end: fragment.end,
-                })
-            })
-            .collect();
-
-        let selection_rects =
-            self.selection_rectangles(&fragments, &pages, style, zoom, &self.selection);
-
-        Ok(PageLayout {
-            pages,
-            page_bounds,
-            fragments,
-            visible_ranges,
-            selection_rects,
-            zoom,
-            scroll_x,
-            scroll_y,
-            viewport_width: viewport.width,
-            viewport_height: viewport.height,
-        })
-    }
-
-    /// Alias emphasizing that this projection extends the existing paginator.
-    pub fn paginate_with_viewport(
-        &self,
-        style: &PageStyle,
-        viewport: PageViewport,
-    ) -> Result<PageLayout, String> {
-        self.layout(style, viewport)
-    }
-
-    /// Project any text range onto an already-computed page layout.
-    ///
-    /// Reusing the layout keeps comment anchors aligned with the same wrapped
-    /// fragments as the editor without paginating the document once per
-    /// comment.
-    pub fn selection_rectangles_for(
-        &self,
-        layout: &PageLayout,
-        style: &PageStyle,
-        selection: &TextSelection,
-    ) -> Vec<SelectionRect> {
-        self.selection_rectangles(
-            &layout.fragments,
-            &layout.pages,
-            style,
-            layout.zoom,
-            selection,
-        )
-    }
-
-    fn selection_rectangles(
-        &self,
-        fragments: &[LayoutFragment],
-        pages: &[DocumentPage],
-        style: &PageStyle,
-        zoom: f32,
-        selection: &TextSelection,
-    ) -> Vec<SelectionRect> {
-        let text = self.editor_text();
-        let (selection_start, selection_end) = normalized_grapheme_range(&text, selection);
-        let mut block_starts = Vec::with_capacity(self.blocks.len());
-        let mut cursor = 0usize;
-        for (index, block) in self.blocks.iter().enumerate() {
-            block_starts.push(cursor);
-            cursor += block.text.as_str().len() + usize::from(index + 1 < self.blocks.len());
-        }
-
-        let mut result = Vec::new();
-        let mut fragment_index = 0usize;
-        let mut previous_fragment_end = None;
-        for page in pages {
-            for source in &page.fragments {
-                let Some(fragment) = fragments.get(fragment_index) else {
-                    continue;
-                };
-                let current_fragment_index = fragment_index;
-                fragment_index += 1;
-                let Some(block_index) = self
-                    .blocks
-                    .iter()
-                    .position(|block| block.id == source.block_id)
-                else {
-                    continue;
-                };
-                let block = &self.blocks[block_index];
-                let font_size = style.font_size_for_kind(block.kind.as_str());
-                let advance = |text: &str, start: usize| {
-                    text_advance(text, start, &block.runs, font_size) * zoom
-                };
-                let available_width =
-                    (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
-                let alignment_offset = match block.style.alignment {
-                    loom_text::Alignment::Center => {
-                        ((available_width - fragment.bounds.width) / 2.0).max(0.0)
-                    }
-                    loom_text::Alignment::Right => {
-                        (available_width - fragment.bounds.width).max(0.0)
-                    }
-                    loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
-                };
-                let fragment_x = fragment.bounds.x + alignment_offset;
-                let block_start = block_starts[block_index];
-                let fragment_global_start = block_start + source.start;
-                let fragment_global_end = block_start + source.end;
-                let overlap_start = selection_start.max(fragment_global_start);
-                let overlap_end = selection_end.min(fragment_global_end);
-                if overlap_start < overlap_end {
-                    let local_start = overlap_start - fragment_global_start;
-                    let local_end = overlap_end - fragment_global_start;
-                    let prefix = &source.text[..local_start.min(source.text.len())];
-                    let selected = &source.text
-                        [local_start.min(source.text.len())..local_end.min(source.text.len())];
-                    let x = fragment_x + advance(prefix, source.start);
-                    let width = advance(selected, source.start + local_start);
-                    result.push(SelectionRect {
-                        page_index: page.index,
-                        block_id: source.block_id,
-                        start: source.start + local_start,
-                        end: source.start + local_end,
-                        rect: PageRect {
-                            x,
-                            y: fragment.bounds.y,
-                            width,
-                            height: fragment.bounds.height,
-                        },
-                    });
-                } else if selection_start == selection_end {
-                    let local = selection_start.saturating_sub(fragment_global_start);
-                    let at_start = selection_start == fragment_global_start;
-                    let at_end = selection_start == fragment_global_end;
-                    let strictly_inside = selection_start > fragment_global_start
-                        && selection_start < fragment_global_end;
-                    let has_previous_boundary =
-                        previous_fragment_end == Some(fragment_global_start);
-                    let is_last_fragment = current_fragment_index + 1 == fragments.len();
-                    let use_fragment = strictly_inside
-                        || (at_start
-                            && (!has_previous_boundary
-                                || selection.affinity == CaretAffinity::Downstream))
-                        || (at_end
-                            && (selection.affinity == CaretAffinity::Upstream || is_last_fragment));
-                    if use_fragment {
-                        let local = local.clamp(0, source.text.len());
-                        let prefix = &source.text[..local];
-                        result.push(SelectionRect {
-                            page_index: page.index,
-                            block_id: source.block_id,
-                            start: source.start + local,
-                            end: source.start + local,
-                            rect: PageRect {
-                                x: fragment_x + advance(prefix, source.start),
-                                y: fragment.bounds.y,
-                                width: 1.0,
-                                height: fragment.bounds.height,
-                            },
-                        });
-                    }
-                }
-                previous_fragment_end = Some(fragment_global_end);
-            }
-        }
-        result
     }
 }
 

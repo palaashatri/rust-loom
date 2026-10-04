@@ -17,6 +17,7 @@ mod find_bar;
 mod local_menu;
 mod multi_click;
 mod palette_wiring;
+mod projection;
 mod recovery;
 mod window_chrome;
 
@@ -1152,12 +1153,32 @@ struct HistoryEntry {
     after: WriterDocument,
     kind: HistoryKind,
     last_edit_ms: u64,
+    /// Estimated size of each document, taken once when it enters the entry so
+    /// trimming the history never re-measures every entry.
+    before_bytes: usize,
+    after_bytes: usize,
 }
 
 impl HistoryEntry {
     fn memory_bytes(&self) -> usize {
-        self.before.to_content_json().len() + self.after.to_content_json().len()
+        self.before_bytes + self.after_bytes
     }
+}
+
+/// A cheap estimate of a document's size: its text plus a fixed cost per
+/// block, style run and comment.
+fn document_bytes(document: &WriterDocument) -> usize {
+    let blocks: usize = document
+        .blocks
+        .iter()
+        .map(|block| block.text.len_bytes() + block.kind.len() + 64 + block.runs.len() * 48)
+        .sum();
+    let comments: usize = document
+        .comments
+        .iter()
+        .map(|thread| thread.id.len() + thread.author.len() + thread.body.len() + 48)
+        .sum();
+    document.id.len() + document.title.len() + blocks + comments
 }
 
 #[derive(Debug)]
@@ -1201,6 +1222,7 @@ impl EditorHistory {
                 && last.after == before
                 && now_ms.saturating_sub(last.last_edit_ms) <= TYPING_COALESCE_WINDOW_MS
             {
+                last.after_bytes = document_bytes(&after);
                 last.after = after;
                 last.last_edit_ms = now_ms;
                 self.recalculate_and_trim();
@@ -1208,6 +1230,8 @@ impl EditorHistory {
             }
         }
         self.undo.push(HistoryEntry {
+            before_bytes: document_bytes(&before),
+            after_bytes: document_bytes(&after),
             before,
             after,
             kind,
@@ -1318,13 +1342,14 @@ enum PendingReplacement {
 }
 
 fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool {
-    let mut left = left.clone();
-    let mut right = right.clone();
     // Selection is view state persisted for convenience, but moving a caret
-    // must not turn a clean document into a dirty one.
-    left.set_selection(TextSelection::caret(0));
-    right.set_selection(TextSelection::caret(0));
-    left.to_content_json() == right.to_content_json()
+    // must not turn a clean document into a dirty one. Comparing the content
+    // fields in place avoids copying or serialising either document.
+    left.id == right.id
+        && left.title == right.title
+        && left.page == right.page
+        && left.comments == right.comments
+        && left.blocks == right.blocks
 }
 
 fn document_is_dirty(state: &GuiState) -> bool {
@@ -1453,8 +1478,7 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
 /// mutating the document or adding a history entry.
 fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
     let text = doc.editor_text();
-    let word_count = text.split_whitespace().count();
-    let char_count = text.chars().count();
+    let (word_count, char_count) = doc.text_counts();
     let block_count = doc.len();
     let selection = doc.selection();
     let formatting = formatting_state_for_selection(
@@ -1470,24 +1494,11 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     // indeterminate rather than falsely highlighting Body/Left.
     let heading_level = inspector_heading_level(doc, &selection);
     let text_alignment = inspector_alignment(doc, &selection);
-    let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
-
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
-    let (render_blocks, selection_rects, comment_rects) = writer_render_projection(doc, viewport);
-    app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
-    app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
-    app.set_comment_rects(Rc::new(VecModel::from(comment_rects)).into());
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
-    app.set_page_count(page_count);
-    app.set_page_stack_height(page_stack_height);
-    app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
-    let page_style = doc.page.page_style();
-    app.set_page_width_pt(page_style.width_pt);
-    app.set_page_height_pt(page_style.height_pt);
-    app.set_page_margin_pt(page_style.margin_top_pt);
-    find_bar::publish_match_rects(app, doc);
+    refresh_writer_render_projection(app, doc, viewport);
     app.set_page_paper_index(match doc.page.paper {
         loom_writer_core::PaperSize::A4 => 0,
         loom_writer_core::PaperSize::Letter => 1,
@@ -1544,41 +1555,59 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
 /// side-effect free with respect to document content, selection, history, and
 /// recovery state; it is used by viewport and selection callbacks.
 fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
-    let (render_blocks, selection_rects, comment_rects) = writer_render_projection(doc, viewport);
-    app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
-    app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
-    app.set_comment_rects(Rc::new(VecModel::from(comment_rects)).into());
-    let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
-    app.set_page_count(page_count);
-    app.set_page_stack_height(page_stack_height);
+    publish_render_projection(app, compute_render_projection(app, doc, viewport));
+}
+
+/// Like [`refresh_writer_render_projection`] for the controller's own document:
+/// the projection is computed under the borrow and published after it is
+/// released, because setting properties can call back into the controller.
+fn refresh_render_projection_of(app: &WriterApp, state: &GuiState) {
+    let viewport = *state.viewport.borrow();
+    let computed = compute_render_projection(app, &state.current.borrow(), viewport);
+    publish_render_projection(app, computed);
+}
+
+struct ComputedProjection {
+    projection: projection::Projection,
+    page_style: PageStyle,
+    match_rects: Vec<FindRect>,
+}
+
+fn compute_render_projection(
+    app: &WriterApp,
+    doc: &WriterDocument,
+    viewport: PageViewport,
+) -> ComputedProjection {
+    ComputedProjection {
+        projection: projection::project(doc, viewport, Some(app.get_page_view_height())),
+        page_style: doc.page.page_style(),
+        match_rects: find_bar::match_rects(app, doc),
+    }
+}
+
+fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
+    let ComputedProjection {
+        projection,
+        page_style,
+        match_rects,
+    } = computed;
+    app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
+    app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
+    app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
+    app.set_page_count(projection.page_count);
+    app.set_page_stack_height(projection.stack_height);
+    app.set_visible_page_first(projection.pages.start as i32);
+    app.set_visible_page_count(projection.pages.len().max(1) as i32);
     app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
-    let page_style = doc.page.page_style();
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
     app.set_page_margin_pt(page_style.margin_top_pt);
-    find_bar::publish_match_rects(app, doc);
+    app.global::<FindBar>()
+        .set_match_rects(Rc::new(VecModel::from(match_rects)).into());
 }
 
-/// Project the authoritative rich-text model into the display-only StyledText
-/// rows used by the paper surface.  The native TextInput remains the editing
-/// path, but it is deliberately transparent so formatting is visible in the
-/// same place while selection, IME, and keyboard behavior stay native.
-#[allow(dead_code)]
-fn writer_render_blocks(doc: &WriterDocument) -> Vec<WriterRenderBlock> {
-    writer_render_blocks_with_viewport(doc, PageViewport::default())
-}
-
-/// Project rich rows from the deterministic page layout.  The core layout
-/// reports viewport-relative rectangles (including zoom and scroll); the UI
-/// editor is nested inside the page's content box, so rows are converted back
-/// to logical content coordinates and the Slint page applies the live zoom.
-fn writer_render_blocks_with_viewport(
-    doc: &WriterDocument,
-    viewport: PageViewport,
-) -> Vec<WriterRenderBlock> {
-    writer_render_projection(doc, viewport).0
-}
-
+/// Rows, selection rectangles and comment rectangles for every page, the way
+/// the canvas would show them with an unbounded window.
 fn writer_render_projection(
     doc: &WriterDocument,
     viewport: PageViewport,
@@ -1587,231 +1616,33 @@ fn writer_render_projection(
     Vec<WriterSelectionRect>,
     Vec<WriterCommentRect>,
 ) {
-    let style = doc.page.page_style();
-    let layout_viewport = PageViewport {
-        // The layout viewport stays in page points so the projection remains
-        // independent of shell width; scrolling and zoom are still taken from
-        // controller state.
-        width: style.width_pt,
-        height: style.height_pt,
-        zoom: normalize_page_zoom(viewport.zoom, 1.0),
-        scroll_x: normalize_page_scroll(viewport.scroll_x),
-        scroll_y: normalize_page_scroll(viewport.scroll_y),
-    };
-    let layout = doc.layout(&style, layout_viewport).ok();
-    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    let fallback_line_height = style.body_font_size_pt * style.line_height;
-    let mut fallback_y = 0.0_f32;
-
-    let mut rows = Vec::with_capacity(doc.blocks.len());
-    let base_page = layout
-        .as_ref()
-        .and_then(|page_layout| page_layout.page_bounds.first().copied());
-    let mut numbered_counter = 0usize;
-    for block in &doc.blocks {
-        let font_size = style.font_size_for_kind(block.kind.as_str());
-        let fallback_height = writer_render_height_for_width(block, font_size, content_width);
-        let marker = writer_list_marker(block.kind.as_str(), &mut numbered_counter);
-        let mut projected = false;
-        if let (Some(page_layout), Some(base_page)) = (layout.as_ref(), base_page) {
-            let zoom = page_layout.zoom.max(f32::EPSILON);
-            for fragment in page_layout
-                .fragments
-                .iter()
-                .filter(|fragment| fragment.block_id == block.id)
-            {
-                projected = true;
-                let fragment_block = writer_fragment_block(block, fragment.start, fragment.end);
-                let x = ((fragment.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom)
-                    .max(0.0);
-                let y = ((fragment.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom)
-                    .max(0.0);
-                let height = (fragment.bounds.height / zoom).max(font_size * style.line_height);
-                rows.push(writer_render_row(
-                    &fragment_block,
-                    x,
-                    y,
-                    content_width,
-                    height,
-                    &marker,
-                ));
-            }
-        }
-        if !projected {
-            let height = fallback_height.max(font_size * style.line_height);
-            rows.push(writer_render_row(
-                block,
-                0.0,
-                fallback_y,
-                content_width,
-                height,
-                &marker,
-            ));
-            fallback_y += height;
-        }
-    }
-
-    let mut selection_rects = writer_selection_rects(&style, layout.as_ref());
-    let comment_rects = writer_comment_rects(doc, &style, layout.as_ref());
-    if selection_rects.is_empty() && doc.blocks.is_empty() {
-        selection_rects.push(WriterSelectionRect {
-            page_index: 0,
-            x: 0.0,
-            y: 0.0,
-            width: 1.0,
-            height: fallback_line_height,
-            caret: true,
-        });
-    }
-    (rows, selection_rects, comment_rects)
-}
-
-fn writer_projection_metrics(doc: &WriterDocument, viewport: PageViewport) -> (i32, f32) {
-    let style = doc.page.page_style();
-    let layout_viewport = PageViewport {
-        width: style.width_pt,
-        height: style.height_pt,
-        zoom: normalize_page_zoom(viewport.zoom, 1.0),
-        scroll_x: normalize_page_scroll(viewport.scroll_x),
-        scroll_y: normalize_page_scroll(viewport.scroll_y),
-    };
-    let Some(layout) = doc.layout(&style, layout_viewport).ok() else {
-        return (1, style.height_pt);
-    };
-    let zoom = layout.zoom.max(f32::EPSILON);
-    let stack_height = match (layout.page_bounds.first(), layout.page_bounds.last()) {
-        (Some(first), Some(last)) => ((last.y + last.height - first.y) / zoom).max(style.height_pt),
-        _ => style.height_pt,
-    };
+    let projected = projection::project(doc, viewport, None);
     (
-        layout.page_bounds.len().max(1).min(i32::MAX as usize) as i32,
-        stack_height,
+        projected.rows,
+        projected.selection_rects,
+        projected.comment_rects,
     )
 }
 
-fn writer_fragment_block(block: &RichBlock, start: usize, end: usize) -> RichBlock {
-    let text = block.text.as_str();
-    let start = floor_char_boundary_for_render(text, start);
-    let end = floor_char_boundary_for_render(text, end).max(start);
-    let mut fragment = RichBlock::new(block.id, block.kind.as_str(), &text[start..end]);
-    fragment.style = block.style.clone();
-    fragment.runs = block
-        .runs
-        .iter()
-        .filter_map(|run| {
-            let run_start = run.start.max(start);
-            let run_end = run.end.min(end);
-            (run_start < run_end).then(|| loom_text::StyleRun {
-                start: run_start - start,
-                end: run_end - start,
-                style: run.style.clone(),
-            })
-        })
-        .collect();
-    fragment
-}
-
-fn writer_render_row(
-    block: &RichBlock,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    marker: &str,
-) -> WriterRenderBlock {
-    let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
-    WriterRenderBlock {
-        content: slint::StyledText::from_markdown(&writer_render_markup(block))
-            .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
-        x,
-        y,
-        width,
-        height,
-        font_size: PageStyle::default().font_size_for_kind(block.kind.as_str()),
-        alignment: writer_render_alignment(block.style.alignment),
-        marker: SharedString::from(marker),
-        unsupported,
-        unsupported_label: if unsupported {
-            SharedString::from("Justify unavailable")
-        } else {
-            SharedString::default()
-        },
-    }
-}
-
-/// Display marker for a list-kind block. Numbered items are counted across
-/// consecutive `list-numbered` blocks via `numbered_counter`; any other kind
-/// resets the counter. Markers hang in the left page margin so the content
-/// column — and therefore caret and selection geometry — never shifts.
-/// Returns the block whose canonical editor-text range contains the given
+/// The block whose canonical editor-text range contains the given
 /// editor-stream byte offset.
 fn block_containing_offset(document: &WriterDocument, offset: usize) -> Option<&RichBlock> {
+    let total = document
+        .blocks
+        .iter()
+        .map(|block| block.text.len_bytes())
+        .sum::<usize>()
+        + document.blocks.len().saturating_sub(1);
     let mut cursor = 0usize;
     for block in &document.blocks {
         let len = block.text.len_bytes();
-        let sep = if cursor + len < document.editor_text().len() {
-            1
-        } else {
-            0
-        };
+        let sep = usize::from(cursor + len < total);
         if offset < cursor + len + sep || (sep == 0 && offset <= cursor + len) {
             return Some(block);
         }
         cursor += len + sep;
     }
     None
-}
-
-fn writer_list_marker(kind: &str, numbered_counter: &mut usize) -> String {
-    match kind {
-        "list-bulleted" => {
-            *numbered_counter = 0;
-            "\u{2022}".to_string()
-        }
-        "list-numbered" => {
-            *numbered_counter += 1;
-            format!("{numbered_counter}.")
-        }
-        _ => {
-            *numbered_counter = 0;
-            String::new()
-        }
-    }
-}
-
-fn writer_selection_rects(
-    style: &PageStyle,
-    layout: Option<&loom_writer_core::PageLayout>,
-) -> Vec<WriterSelectionRect> {
-    let Some(layout) = layout else {
-        return Vec::new();
-    };
-    writer_project_selection_ranges(style, layout, &layout.selection_rects)
-}
-
-fn writer_project_selection_ranges(
-    style: &PageStyle,
-    layout: &loom_writer_core::PageLayout,
-    ranges: &[loom_writer_core::SelectionRect],
-) -> Vec<WriterSelectionRect> {
-    let zoom = layout.zoom.max(f32::EPSILON);
-    let Some(base_page) = layout.page_bounds.first().copied() else {
-        return Vec::new();
-    };
-    ranges
-        .iter()
-        .filter_map(|selection| {
-            layout.page_bounds.get(selection.page_index)?;
-            Some(WriterSelectionRect {
-                page_index: selection.page_index as i32,
-                x: ((selection.rect.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
-                y: ((selection.rect.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
-                width: (selection.rect.width / zoom).max(1.0),
-                height: (selection.rect.height / zoom).max(1.0),
-                caret: selection.start == selection.end,
-            })
-        })
-        .collect()
 }
 
 fn comment_selection_range(doc: &WriterDocument, comment_id: &str) -> Option<(usize, usize)> {
@@ -1840,60 +1671,6 @@ fn comment_selection_range(doc: &WriterDocument, comment_id: &str) -> Option<(us
     Some((block_start + thread.start, block_start + thread.end))
 }
 
-fn writer_comment_rects(
-    doc: &WriterDocument,
-    style: &PageStyle,
-    layout: Option<&loom_writer_core::PageLayout>,
-) -> Vec<WriterCommentRect> {
-    let Some(layout) = layout else {
-        return Vec::new();
-    };
-    let mut block_starts = Vec::with_capacity(doc.blocks.len());
-    let mut cursor = 0usize;
-    for (index, block) in doc.blocks.iter().enumerate() {
-        block_starts.push((block.id, cursor));
-        cursor += block.text.as_str().len() + usize::from(index + 1 < doc.blocks.len());
-    }
-
-    let mut projected = Vec::new();
-    for thread in &doc.comments {
-        if thread.orphaned {
-            continue;
-        }
-        let Some(block) = doc.get(thread.block_id) else {
-            continue;
-        };
-        if thread.start >= thread.end
-            || thread.end > block.text.as_str().len()
-            || !block.text.as_str().is_char_boundary(thread.start)
-            || !block.text.as_str().is_char_boundary(thread.end)
-        {
-            continue;
-        }
-        let Some((_, block_start)) = block_starts.iter().find(|(id, _)| *id == thread.block_id)
-        else {
-            continue;
-        };
-        let range = TextSelection::range(block_start + thread.start, block_start + thread.end);
-        let rectangles = doc.selection_rectangles_for(layout, style, &range);
-        let label = SharedString::from(format!("Show comment by {} on page", thread.author));
-        let ui_rectangles = writer_project_selection_ranges(style, layout, &rectangles);
-        for (index, rect) in ui_rectangles.into_iter().enumerate() {
-            projected.push(WriterCommentRect {
-                comment_id: SharedString::from(thread.id.as_str()),
-                label: label.clone(),
-                page_index: rect.page_index,
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-                marker: index == 0,
-            });
-        }
-    }
-    projected
-}
-
 /// Convert a pointer in the editor's local (zoomed) coordinates to the
 /// canonical UTF-8 byte offset used by `WriterDocument::selection`.
 ///
@@ -1912,8 +1689,8 @@ fn writer_pointer_offset(
     }
     let style = doc.page.page_style();
     let zoom = normalize_page_zoom(viewport.zoom, 1.0);
-    let layout = doc
-        .layout(
+    let flow = doc
+        .flow(
             &style,
             PageViewport {
                 width: style.width_pt,
@@ -1924,50 +1701,43 @@ fn writer_pointer_offset(
             },
         )
         .ok()?;
-    let base_page = layout.page_bounds.first().copied()?;
+    let base_page = flow.page_bounds().first().copied()?;
     let local_x = x / zoom;
     let local_y = y / zoom;
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    let mut block_starts = Vec::with_capacity(doc.blocks.len());
-    let mut cursor = 0usize;
-    for (index, block) in doc.blocks.iter().enumerate() {
-        block_starts.push(cursor);
-        cursor += block.text.as_str().len() + usize::from(index + 1 < doc.blocks.len());
-    }
+    // Only the page under the pointer and its neighbours can hold the nearest
+    // line, so the rest of a long document is never visited.
+    let pointer_y = local_y + base_page.y + style.margin_top_pt;
+    let reach = style.height_pt + loom_writer_core::PAGE_GAP_PT;
+    let pages = flow.visible_pages(pointer_y - reach, pointer_y + reach);
 
     let mut nearest: Option<(f32, usize)> = None;
-    for fragment in &layout.fragments {
-        let block_index = doc
-            .blocks
-            .iter()
-            .position(|block| block.id == fragment.block_id)?;
-        let block = &doc.blocks[block_index];
+    for line in flow.lines_on(pages) {
+        let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
-        let fragment_y = fragment.bounds.y - base_page.y - style.margin_top_pt;
-        let fragment_height = fragment.bounds.height;
-        let distance = if local_y < fragment_y {
-            fragment_y - local_y
-        } else if local_y > fragment_y + fragment_height {
-            local_y - (fragment_y + fragment_height)
+        let line_y = line.bounds.y - base_page.y - style.margin_top_pt;
+        let line_height = line.bounds.height;
+        let distance = if local_y < line_y {
+            line_y - local_y
+        } else if local_y > line_y + line_height {
+            local_y - (line_y + line_height)
         } else {
             0.0
         };
         let alignment_offset = match block.style.alignment {
-            loom_text::Alignment::Center => {
-                ((content_width - fragment.bounds.width) / 2.0).max(0.0)
-            }
-            loom_text::Alignment::Right => (content_width - fragment.bounds.width).max(0.0),
+            loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
+            loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
             loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
         };
-        let fragment_x = fragment.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
+        let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
         let local_byte = loom_writer_core::offset_at_x(
-            &fragment.text,
-            fragment.start,
+            &block.text.as_str()[line.start..line.end],
+            line.start,
             &block.runs,
             font_size,
-            local_x - fragment_x,
+            local_x - line_x,
         );
-        let offset = block_starts[block_index] + fragment.start + local_byte;
+        let offset = line.global_start + local_byte;
         if distance <= f32::EPSILON {
             return Some(offset);
         }
@@ -2156,21 +1926,22 @@ fn selection_from_app(app: &WriterApp) -> TextSelection {
 }
 
 fn selection_announcement(doc: &WriterDocument, selection: &TextSelection) -> String {
-    let text = doc.editor_text();
-    let start = floor_grapheme_boundary(&text, selection.anchor);
-    let end = floor_grapheme_boundary(&text, selection.focus);
-    let (start, end) = (start.min(end), start.max(end));
+    let clamped = doc.clamp_selection(selection.clone());
+    let (start, end) = (
+        clamped.anchor.min(clamped.focus),
+        clamped.anchor.max(clamped.focus),
+    );
+    let before = doc.grapheme_position(start);
     if start == end {
         // Expose a user-facing character position rather than the model's
         // UTF-8 byte offset. Positions are one-based, with the insertion
         // point before the first grapheme reported as character 1.
-        let character_position = grapheme_count(&text[..start]) + 1;
-        return format!("Caret at character {character_position}");
+        return format!("Caret at character {}", before + 1);
     }
-    let selected = text
-        .get(start.min(text.len())..end.min(text.len()))
-        .unwrap_or_default();
-    format!("Selected {} characters", grapheme_count(selected))
+    format!(
+        "Selected {} characters",
+        doc.grapheme_position(end) - before
+    )
 }
 
 /// Inspector heading level with mixed-state sentinel.
@@ -2299,19 +2070,13 @@ fn reveal_caret(app: &WriterApp, state: &GuiState) {
         let current = state.current.borrow();
         let style = current.page.page_style();
         let viewport = *state.viewport.borrow();
-        let layout_viewport = PageViewport {
-            width: style.width_pt,
-            height: style.height_pt,
-            zoom: normalize_page_zoom(viewport.zoom, 1.0),
-            scroll_x: normalize_page_scroll(viewport.scroll_x),
-            scroll_y: normalize_page_scroll(viewport.scroll_y),
-        };
-        let Ok(layout) = current.layout(&style, layout_viewport) else {
+        let Ok(flow) = current.flow(&style, projection::layout_viewport(&style, viewport)) else {
             return;
         };
         let caret = TextSelection::caret(current.selection().focus);
-        let rects = current.selection_rectangles_for(&layout, &style, &caret);
-        let Some(rect) = rects.first() else { return };
+        let Some(rect) = flow.caret_rect(&current, &caret) else {
+            return;
+        };
         (
             rect.rect.y + caret_scroll::PAGE_TOP_INSET,
             rect.rect.y + rect.rect.height + caret_scroll::PAGE_TOP_INSET,
@@ -2324,12 +2089,11 @@ fn reveal_caret(app: &WriterApp, state: &GuiState) {
     }
     state.viewport.borrow_mut().scroll_y = next;
     app.set_page_scroll_y(next);
-    let current = state.current.borrow().clone();
-    refresh_writer_render_projection(app, &current, *state.viewport.borrow());
+    refresh_render_projection_of(app, state);
 }
 
 fn refresh_writer_registry(app: &WriterApp, state: &GuiState) {
-    let doc = state.current.borrow().clone();
+    let doc = state.current.borrow();
     let history = state.history.borrow();
     let mut registry = state.registry.lock().unwrap();
     sync_writer_registry_enablement(&mut registry, &doc, &history);
@@ -2339,17 +2103,36 @@ fn refresh_writer_registry(app: &WriterApp, state: &GuiState) {
 }
 
 fn apply_state(app: &WriterApp, state: &GuiState) {
+    apply_state_with(app, state, RecoveryWrite::Now);
+}
+
+/// When the recovery draft is written after a state change.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecoveryWrite {
+    /// Before returning: every action except typing.
+    Now,
+    /// Shortly after, off the keystroke path; see [`recovery::DeferredWrite`].
+    Deferred,
+}
+
+fn warn_recovery_failed(app: &WriterApp, error: &str) {
+    eprintln!("Writer recovery save failed: {error}");
+    app.set_status_left(SharedString::from(
+        "Recovery failed. Save a copy now; autosave may be out of date.",
+    ));
+}
+
+fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryWrite) {
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     state.syncing_editor.set(true);
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
     apply_document_with_viewport(app, &current, viewport);
-    if let Err(error) = recovery::record_document(&current) {
-        eprintln!("Writer recovery save failed: {error}");
-        app.set_status_left(SharedString::from(
-            "Recovery failed. Save a copy now; autosave may be out of date.",
-        ));
+    if recovery_write == RecoveryWrite::Now {
+        if let Err(error) = recovery::record_document(&current) {
+            warn_recovery_failed(app, &error);
+        }
     }
     drop(current);
     file_title::sync(app, state);
@@ -2445,16 +2228,57 @@ fn history_now_ms(state: &GuiState) -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
-fn apply_with_history(app: &WriterApp, state: &GuiState, next: WriterDocument, kind: HistoryKind) {
-    let current = state.current.borrow().clone();
-    if current == next {
-        return;
-    }
+/// Apply a keystroke or paste as a coalescing typing edit. The recovery draft is
+/// written shortly afterwards instead of inside the callback; see
+/// [`recovery::DeferredWrite`]. `next` must differ from the current document, as a
+/// changed text always does.
+fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) {
+    let previous = state.current.replace(next);
+    let after = state.current.borrow().clone();
     state
         .history
         .borrow_mut()
-        .record(current, next.clone(), kind, history_now_ms(state));
-    *state.current.borrow_mut() = next;
+        .record(previous, after, HistoryKind::Typing, history_now_ms(state));
+    if recovery::DEFERRED.with(recovery::DeferredWrite::note_edit) {
+        let (weak, state) = (app.as_weak(), state.clone());
+        RECOVERY_TIMER.with(|timer| {
+            timer.start(
+                slint::TimerMode::SingleShot,
+                recovery::WRITE_DELAY,
+                move || {
+                    if let Some(app) = weak.upgrade() {
+                        flush_deferred_recovery(&app, &state);
+                    }
+                },
+            );
+        });
+    }
+    apply_state_with(app, state, RecoveryWrite::Deferred);
+}
+
+std::thread_local! {
+    static RECOVERY_TIMER: slint::Timer = slint::Timer::default();
+}
+
+/// Write the recovery draft now if typing left it stale.
+fn flush_deferred_recovery(app: &WriterApp, state: &GuiState) {
+    if recovery::DEFERRED.with(recovery::DeferredWrite::fire) {
+        if let Err(error) = recovery::record_document(&state.current.borrow()) {
+            warn_recovery_failed(app, &error);
+        }
+    }
+}
+
+fn apply_with_history(app: &WriterApp, state: &GuiState, next: WriterDocument, kind: HistoryKind) {
+    if *state.current.borrow() == next {
+        return;
+    }
+    let previous = state.current.replace(next);
+    let after = state.current.borrow().clone();
+    state
+        .history
+        .borrow_mut()
+        .record(previous, after, kind, history_now_ms(state));
     apply_state(app, state);
 }
 
@@ -2815,22 +2639,17 @@ fn wire_writer_shared_callbacks(
                 let style = current.page.page_style();
                 let viewport = *state.viewport.borrow();
                 let zoom = normalize_page_zoom(viewport.zoom, 1.0);
-                let layout_viewport = PageViewport {
-                    width: style.width_pt,
-                    height: style.height_pt,
-                    zoom,
-                    scroll_x: normalize_page_scroll(viewport.scroll_x),
-                    scroll_y: normalize_page_scroll(viewport.scroll_y),
-                };
-                let Ok(layout) = current.layout(&style, layout_viewport) else {
+                let Ok(flow) = current.flow(&style, projection::layout_viewport(&style, viewport))
+                else {
                     return;
                 };
-                let Some(base) = layout.page_bounds.first().copied() else {
+                let Some(base) = flow.page_bounds().first().copied() else {
                     return;
                 };
                 let caret = TextSelection::caret(current.selection().focus);
-                let rects = current.selection_rectangles_for(&layout, &style, &caret);
-                let Some(rect) = rects.first() else { return };
+                let Some(rect) = flow.caret_rect(&current, &caret) else {
+                    return;
+                };
                 let step =
                     (app.get_page_view_height() - 96.0).max(48.0) * direction.signum() as f32;
                 let x = rect.rect.x - base.x - style.margin_left_pt * zoom;
@@ -2895,11 +2714,10 @@ fn wire_writer_shared_callbacks(
                     anchor.max(0) as usize,
                     focus.max(0) as usize,
                 ));
-                let current = state.current.borrow().clone();
-                if text_changed && next != current {
-                    apply_with_history(&app, &state, next, HistoryKind::Typing);
+                if text_changed {
+                    apply_typing(&app, &state, next);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
-                } else if next != current {
+                } else if state.current.borrow().selection() != next.selection() {
                     // A selection-only callback updates model/UI state but is
                     // never an undoable document edit.
                     *state.current.borrow_mut() = next;
@@ -3136,8 +2954,7 @@ fn wire_writer_shared_callbacks(
                 if (app.get_page_zoom() - next).abs() > f32::EPSILON {
                     app.set_page_zoom(next);
                 }
-                let current = state.current.borrow().clone();
-                refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
+                refresh_render_projection_of(&app, &state);
             }
         });
     }
@@ -3163,8 +2980,7 @@ fn wire_writer_shared_callbacks(
                 if (app.get_page_scroll_y() - next_y).abs() > f32::EPSILON {
                     app.set_page_scroll_y(next_y);
                 }
-                let current = state.current.borrow().clone();
-                refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
+                refresh_render_projection_of(&app, &state);
             }
         });
     }
@@ -3269,8 +3085,7 @@ fn wire_writer_shared_callbacks(
                 let changed = project_selection_event(&app, &mut current, anchor, focus);
                 drop(current);
                 if changed {
-                    let current = state.current.borrow().clone();
-                    refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
+                    refresh_render_projection_of(&app, &state);
                     refresh_writer_registry(&app, &state);
                     let registry = state.registry.lock().unwrap();
                     rebuild_palette_with_registry(
@@ -4848,6 +4663,8 @@ mod find_tests;
 mod frame_bench_tests;
 #[cfg(test)]
 mod page_stack_tests;
+#[cfg(test)]
+mod projection_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
