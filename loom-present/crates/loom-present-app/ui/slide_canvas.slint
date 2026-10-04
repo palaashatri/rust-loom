@@ -48,6 +48,9 @@ export component PresentSlideCanvas inherits Rectangle {
 
     background: Theme.palette().canvas;
 
+    /// Give the slide editor keyboard focus (arrows, Delete, shortcuts).
+    public function focus-slide() { slide-focus.focus(); }
+
     slide-focus := FocusScope {
         enabled: root.editing-enabled;
         key-pressed(event) => {

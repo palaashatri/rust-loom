@@ -3112,6 +3112,7 @@ dependencies = [
 name = "loom-writer-app"
 version = "0.1.0"
 dependencies = [
+ "i-slint-backend-testing",
  "i-slint-backend-winit",
  "loom-command",
  "loom-desktop",

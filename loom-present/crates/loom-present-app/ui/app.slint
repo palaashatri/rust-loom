@@ -112,12 +112,28 @@ export component PresentApp inherits Window {
     in-out property <bool> is-preview-mode: false;
     full-screen: root.is-preview-mode;
     changed is-preview-mode => {
-        app-focus.focus();
+        root.focus-editor();
         if !root.is-preview-mode {
             root.reveal = 1.0;
         }
     }
-    init => { app-focus.focus(); }
+    // Keyboard focus belongs to the slide editor (arrows, Delete, Ctrl+Z work
+    // without a click). During a slideshow the window-level scope drives
+    // navigation instead. Window shortcuts bubble up from the editor.
+    public function focus-editor() {
+        if (root.is-preview-mode) {
+            app-focus.focus();
+        } else {
+            app-focus.focus();
+            slide-canvas.focus-slide();
+        }
+    }
+
+    init => { root.focus-editor(); }
+
+    changed palette-open => {
+        if (!root.palette-open) { root.focus-editor(); }
+    }
 
     // Slide transition playback. Arriving at a slide whose transition is not
     // "None" restarts `reveal` at 0; the timer walks it to 1 over ~450 ms.
@@ -215,7 +231,7 @@ export component PresentApp inherits Window {
 
     function close-overflow-menu() {
         root.toolbar-overflow-open = false;
-        app-focus.focus();
+        root.focus-editor();
     }
 
     overflow-menu-focus := FocusScope {
@@ -248,7 +264,7 @@ export component PresentApp inherits Window {
         if (root.theme-chooser-open) {
             theme-chooser-focus.focus();
         } else {
-            app-focus.focus();
+            root.focus-editor();
         }
     }
 
@@ -392,7 +408,7 @@ export component PresentApp inherits Window {
                       vertical-stretch: 1;
                       horizontal-stretch: 1;
                       clip: true;
-                    PresentSlideCanvas {
+                    slide-canvas := PresentSlideCanvas {
                         x: root.is-preview-mode && root.transition-index == 2 ? (1.0 - root.reveal-eased) * parent.width : 0px;
                         y: 0px;
                         width: parent.width;
@@ -572,7 +588,7 @@ export component PresentApp inherits Window {
         selected-index: root.local-menu-popup-selected-index;
         menu-opened(index) => { root.local-menu-opened(index); }
         menu-move(direction) => { root.local-menu-move(direction); }
-        menu-closed => { app-focus.focus(); }
+        menu-closed => { root.focus-editor(); }
         menu-action(id) => { root.local-menu-action(id); }
     }
 
@@ -628,7 +644,7 @@ export component PresentApp inherits Window {
         if (root.save-changes-open) {
             save-changes-focus.focus();
         } else {
-            app-focus.focus();
+            root.focus-editor();
         }
     }
 

@@ -333,6 +333,7 @@ fn open_quick_start_sample(app: &WriterApp, state: &GuiState) {
     *state.history.borrow_mut() = EditorHistory::new();
     apply_state(app, state);
     app.set_status_left("Opened the Quick Start sample".into());
+    app.invoke_focus_page();
 }
 
 /// The Quick Start sample: reachable from the palette and `--sample` captures only.
@@ -2615,6 +2616,15 @@ fn end_session_recovery() {
     }
 }
 
+/// The page takes keyboard focus once the window exists, unless a startup
+/// overlay (template chooser, palette) owns it, so typing and shortcuts work
+/// without a prior click.
+fn focus_page_at_launch(app: &WriterApp) {
+    if !(app.get_template_chooser_open() || app.get_palette_open() || app.get_save_changes_open()) {
+        app.invoke_focus_page();
+    }
+}
+
 fn begin_new_document(app: &WriterApp) {
     // Opening the chooser is safe: it does not replace the current document.
     // Replacement happens only after the user presses Create Document.
@@ -2643,6 +2653,7 @@ fn open_document_from_picker(
             app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
         }
     }
+    app.invoke_focus_page();
 }
 
 fn request_document_replacement(
@@ -3160,6 +3171,7 @@ fn wire_writer_shared_callbacks(
                 if let Err(error) = save_current_document(&app, &state, false) {
                     app.set_status_left(SharedString::from(format!("Save failed: {error}")));
                 }
+                app.invoke_focus_page();
             }
         });
     }
@@ -3182,6 +3194,7 @@ fn wire_writer_shared_callbacks(
                 if let Err(error) = save_current_document(&app, &state, true) {
                     app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
                 }
+                app.invoke_focus_page();
             }
         });
     }
@@ -4125,6 +4138,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     app.show().map_err(|e| e.to_string())?;
+    focus_page_at_launch(&app);
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -4802,6 +4816,8 @@ fn wire_palette(app: &WriterApp) {
     }
 }
 
+#[cfg(test)]
+mod accessibility_tests;
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]

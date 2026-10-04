@@ -1498,7 +1498,16 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.set_palette_open(true);
     }
     app.show().map_err(|error| error.to_string())?;
+    focus_editor_at_launch(&app);
     slint::run_event_loop().map_err(|error| error.to_string())
+}
+
+/// The slide editor takes keyboard focus once the window exists, unless a
+/// startup overlay owns it, so arrows, Delete and Ctrl+Z work without a click.
+fn focus_editor_at_launch(app: &PresentApp) {
+    if !(app.get_theme_chooser_open() || app.get_palette_open() || app.get_save_changes_open()) {
+        app.invoke_focus_editor();
+    }
 }
 
 fn build_present_menu_bar() -> MenuBar {
@@ -3100,6 +3109,8 @@ mod export_pptx_tests;
 mod picture_tests;
 
 mod file_title;
+#[cfg(test)]
+mod focus_tests;
 mod local_menu;
 mod model_sync;
 mod picture_view;

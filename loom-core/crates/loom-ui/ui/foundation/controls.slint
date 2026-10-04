@@ -4,6 +4,9 @@ import { Icon } from "../icons.slint";
 export component LoomButton inherits Rectangle {
     in property <string> label: "Action";
     in property <string> icon: "";
+    // Spoken name when the visible label is shortened or empty (icon-only
+    // responsive state). Falls back to the label, then the icon name.
+    in property <string> accessible-name: "";
     in property <string> variant: "secondary";
     in property <bool> enabled: true;
     in property <bool> selected: false;
@@ -45,8 +48,8 @@ export component LoomButton inherits Rectangle {
         : Theme.palette().surface;
 
     accessible-role: button;
-    accessible-label: root.label;
-    accessible-description: root.label;
+    accessible-label: root.accessible-name != "" ? root.accessible-name : root.label != "" ? root.label : root.icon;
+    accessible-description: root.accessible-name != "" ? root.accessible-name : root.label;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     HorizontalLayout {
@@ -140,6 +143,8 @@ export component LoomIconButton inherits Rectangle {
 export component LoomTextField inherits VerticalLayout {
     in property <string> label: "Field";
     in property <string> title: "";
+    // Longer spoken hint; falls back to the title, then the label.
+    in property <string> description: "";
     in property <string> placeholder: "";
     in-out property <string> value: "";
     in property <bool> enabled: true;
@@ -162,9 +167,9 @@ export component LoomTextField inherits VerticalLayout {
 
     spacing: Theme.tokens.space.xs;
     horizontal-stretch: 1;
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: root.label;
-    accessible-description: root.title != "" ? root.title : root.label;
+    // The inner TextInput is the one element exposed to assistive tech, so the
+    // name is not announced twice.
+    accessible-role: AccessibleRole.none;
 
     if root.title != "" : Text {
         text: root.title;
@@ -195,6 +200,9 @@ export component LoomTextField inherits VerticalLayout {
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
             text <=> root.value;
+            accessible-role: AccessibleRole.text-input;
+            accessible-label: root.label;
+            accessible-description: root.description != "" ? root.description : root.title != "" ? root.title : root.label;
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
@@ -227,6 +235,8 @@ export component LoomTextField inherits VerticalLayout {
 export component LoomSearchField inherits VerticalLayout {
     in property <string> label: "Search";
     in property <string> title: "";
+    // Longer spoken hint; falls back to the title, then the label.
+    in property <string> description: "";
     in property <string> placeholder: "Search";
     in-out property <string> value: "";
     in property <bool> enabled: true;
@@ -234,9 +244,9 @@ export component LoomSearchField inherits VerticalLayout {
 
     spacing: Theme.tokens.space.xs;
     horizontal-stretch: 1;
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: root.label;
-    accessible-description: root.title != "" ? root.title : root.label;
+    // The inner TextInput is the one element exposed to assistive tech, so the
+    // name is not announced twice.
+    accessible-role: AccessibleRole.none;
 
     if root.title != "" : Text {
         text: root.title;
@@ -274,6 +284,9 @@ export component LoomSearchField inherits VerticalLayout {
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
             text <=> root.value;
+            accessible-role: AccessibleRole.text-input;
+            accessible-label: root.label;
+            accessible-description: root.description != "" ? root.description : root.title != "" ? root.title : root.label;
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;

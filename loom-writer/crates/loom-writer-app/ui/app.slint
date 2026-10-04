@@ -182,6 +182,15 @@ export component WriterApp inherits Window {
     changed page-scroll-x => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
     changed page-scroll-y => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
 
+    // Hand keyboard focus to the page editor (and the window-level shortcut
+    // scope above it), so typing and shortcuts work without a prior click.
+    public function focus-page() {
+        app-focus.focus();
+        FindBar.page-focus-tick += 1;
+    }
+
+    init => { root.focus-page(); }
+
     public function open-palette() {
         root.palette-open = true;
         root.palette-query = "";
@@ -195,7 +204,7 @@ export component WriterApp inherits Window {
     public function close-toolbar-overflow() {
         if (root.toolbar-overflow-open) {
             root.toolbar-overflow-open = false;
-            app-focus.focus();
+            root.focus-page();
         }
     }
 
@@ -235,7 +244,7 @@ export component WriterApp inherits Window {
         if (root.template-chooser-open) {
             template-chooser-focus.focus();
         } else {
-            app-focus.focus();
+            root.focus-page();
         }
     }
 
@@ -254,13 +263,15 @@ export component WriterApp inherits Window {
         if (root.save-changes-open) {
             save-changes-focus.focus();
         } else if (!root.template-chooser-open) {
-            app-focus.focus();
+            root.focus-page();
         }
     }
 
     changed palette-open => {
-        if (!root.palette-open) {
-            app-focus.focus();
+        if (root.palette-open) {
+            palette.grab-focus();
+        } else {
+            root.focus-page();
         }
     }
 
@@ -691,7 +702,7 @@ export component WriterApp inherits Window {
         selected-index: root.local-menu-popup-selected-index;
         menu-opened(index) => { root.local-menu-opened(index); }
         menu-move(direction) => { root.local-menu-move(direction); }
-        menu-closed => { app-focus.focus(); }
+        menu-closed => { root.focus-page(); }
         menu-action(id) => { root.local-menu-action(id); }
     }
 

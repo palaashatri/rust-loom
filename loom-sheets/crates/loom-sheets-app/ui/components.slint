@@ -82,7 +82,8 @@ export component FormulaNameBar inherits Rectangle {
 
         // Name box: shows the selection; type a cell or range and press Enter to go there.
         LoomTextField {
-            label: "Cell reference";
+            label: "Name box";
+            description: "Type a cell address such as D50 or B2:C3 and press Enter";
             placeholder: "A1";
             value <=> root.name-text;
             min-width: 84px;
@@ -102,7 +103,8 @@ export component FormulaNameBar inherits Rectangle {
         }
 
         field := LoomTextField {
-            label: "Selected cell formula or value";
+            label: "Formula bar";
+            description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
             placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
             value <=> root.formula-edit-buffer;
             horizontal-stretch: 1;

@@ -15,6 +15,8 @@ mod icon_accessibility_tests;
 mod chart_accessibility_tests;
 #[path = "main_tests/object_accessibility_tests.rs"]
 mod object_accessibility_tests;
+#[path = "main_tests/text_field_accessibility_tests.rs"]
+mod text_field_accessibility_tests;
 
 mod local_menu_tests;
 

@@ -298,7 +298,7 @@ fn f6_after_cancel_does_not_steal_a_new_direct_formula_draft() {
     press(&app, Key::Escape);
     assert!(!app.get_is_editing(), "Escape cancels the prior edit");
 
-    let field = ElementHandle::find_by_accessible_label(&app, "Selected cell formula or value")
+    let field = ElementHandle::find_by_accessible_label(&app, "Formula bar")
         .next()
         .expect("formula text field is available");
     let position = field.absolute_position();
