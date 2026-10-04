@@ -27,7 +27,7 @@ export component LocalMenuBar inherits Rectangle {
         padding-left: Theme.tokens.space.sm;
 
         for label[index] in root.labels : LoomButton {
-            width: 64px;
+            width: Theme.menu-label-width;
             height: 36px;
             label: label;
             variant: "ghost";
@@ -56,7 +56,7 @@ export component LocalMenuLabels inherits HorizontalLayout {
     alignment: start;
 
     for label[index] in root.labels : LoomButton {
-        width: 64px;
+        width: Theme.menu-label-width;
         height: 36px;
         label: label;
         variant: "ghost";
@@ -136,9 +136,9 @@ export component LocalMenuPopup inherits Rectangle {
     }
 
     Rectangle {
-        x: 8px + root.open-index * 64px;
+        x: 8px + root.open-index * Theme.menu-label-width;
         y: 0px;
-        width: 288px;
+        width: min(288px * max(1.0, Theme.text-scale), root.width - 16px);
         height: min(min(520px, root.height - 8px), popup-layout.preferred-height + 2px);
         border-radius: Theme.tokens.metrics.radius-small;
         border-width: 1px;
@@ -154,7 +154,7 @@ export component LocalMenuPopup inherits Rectangle {
 
             for item[index] in root.items : Rectangle {
                 visible: item.menu_index == root.open-index;
-                height: item.separator ? 1px : Theme.tokens.metrics.control-height;
+                height: item.separator ? 1px : max(Theme.tokens.metrics.control-height, Theme.type.body * 1.9);
 
                 if item.separator : Rectangle {
                     width: root.width;

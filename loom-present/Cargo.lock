@@ -3073,6 +3073,7 @@ version = "0.1.0"
 name = "loom-present-app"
 version = "0.1.0"
 dependencies = [
+ "i-slint-backend-testing",
  "i-slint-backend-winit",
  "image",
  "loom-desktop",

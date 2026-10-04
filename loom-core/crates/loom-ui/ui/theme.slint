@@ -130,6 +130,8 @@ export global Theme {
     // property rather than a function so a primitive can read it from a pure
     // measurement context such as `preferred-width`.
     in-out property <float> text-scale: 1.0;
+    // Width of one in-window menu label; grows with text so labels never touch.
+    out property <length> menu-label-width: 64px + 40px * (max(1.0, root.text-scale) - 1.0);
     in-out property <TypeScale> type: {
         micro: tokens.typography.micro * max(1.0, root.text-scale),
         caption: tokens.typography.caption * max(1.0, root.text-scale),

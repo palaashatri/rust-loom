@@ -110,9 +110,9 @@ export component LoomTitleBar inherits Rectangle {
     }
 
     Text {
-        x: 380px;
+        x: 380px + 5 * (Theme.menu-label-width - 64px);
         y: 0px;
-        width: max(0px, root.width - 760px);
+        width: max(0px, root.width - self.x - max(150px, 380px - 5 * (Theme.menu-label-width - 64px)));
         height: root.height;
         text: root.title;
         color: root.active ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;

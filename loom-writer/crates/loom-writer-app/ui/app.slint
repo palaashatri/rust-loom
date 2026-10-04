@@ -438,7 +438,7 @@ export component WriterApp inherits Window {
                 }
 
                 WriterInspector {
-                    width: root.docked-inspector-visible ? 320px : 0px;
+                    width: root.docked-inspector-visible ? 320px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
                     vertical-stretch: 1;
                     visible: root.docked-inspector-visible;
                     active: root.docked-inspector-visible;
@@ -572,9 +572,9 @@ export component WriterApp inherits Window {
         }
 
         compact-inspector := WriterInspector {
-            x: max(0px, parent.width - 360px);
+            x: max(0px, parent.width - 360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)));
             y: 0px;
-            width: min(360px, parent.width);
+            width: min(360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)), parent.width);
             height: parent.height;
             active: root.compact-inspector-visible;
             close-requested => { root.toggle-inspector(); }

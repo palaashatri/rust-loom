@@ -68,6 +68,7 @@ struct Args {
     size: (u32, u32),
     theme: String,
     rtl: bool,
+    text_scale: f32,
     open: Option<String>,
     template: Option<TemplateId>,
     template_chooser: bool,
@@ -95,6 +96,7 @@ where
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
         rtl: false,
+        text_scale: 1.0,
         open: None,
         template: None,
         template_chooser: false,
@@ -132,6 +134,17 @@ where
                 args.theme = t;
             }
             "--rtl" => args.rtl = true,
+            "--text-scale" => {
+                let scale: f32 = it
+                    .next()
+                    .ok_or("--text-scale needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --text-scale factor")?;
+                if !(1.0..=2.0).contains(&scale) {
+                    return Err("--text-scale must be between 1.0 and 2.0".to_string());
+                }
+                args.text_scale = scale;
+            }
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
@@ -2467,7 +2480,7 @@ struct ResponsiveToolbarState {
 
 fn layout_breakpoints(app: &WriterApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    let width = width as f32;
+    let width = width as f32 / Theme::get(app).get_text_scale().max(1.0);
     ResponsiveToolbarState {
         icon_only: width < policy.get_priority_1_icon_only_below(),
         overflow: width < policy.get_priority_2_overflow_below(),
@@ -2492,7 +2505,9 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     // mode is sent through this input property instead of binding it back to
     // root.width from inside the Window's own layout tree.
     app.set_inspector_available(true);
-    app.set_compact_inspector_layout(width < 1180);
+    app.set_compact_inspector_layout(
+        (width as f32 / Theme::get(app).get_text_scale().max(1.0)) < 1180.0,
+    );
 }
 
 #[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
@@ -2553,6 +2568,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     let mut doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
         None => args
@@ -3679,6 +3695,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
@@ -4202,6 +4219,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
@@ -4827,8 +4845,13 @@ mod docx_export_tests;
 #[cfg(test)]
 mod find_tests;
 #[cfg(test)]
+mod frame_bench_tests;
+#[cfg(test)]
 mod page_stack_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod review_tests;
+
+#[cfg(test)]
+mod text_scale_tests;

@@ -43,6 +43,7 @@ struct Args {
     size: (u32, u32),
     theme: String,
     rtl: bool,
+    text_scale: f32,
     open: Option<String>,
     theme_chooser: bool,
 }
@@ -56,6 +57,7 @@ fn parse_args() -> Result<Args, String> {
         size: DEFAULT_SIZE,
         theme: "light".into(),
         rtl: false,
+        text_scale: 1.0,
         open: None,
         theme_chooser: false,
     };
@@ -84,6 +86,17 @@ fn parse_args() -> Result<Args, String> {
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
             "--rtl" => args.rtl = true,
+            "--text-scale" => {
+                let scale: f32 = iterator
+                    .next()
+                    .ok_or("--text-scale needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --text-scale factor")?;
+                if !(1.0..=2.0).contains(&scale) {
+                    return Err("--text-scale must be between 1.0 and 2.0".to_string());
+                }
+                args.text_scale = scale;
+            }
             "--theme-chooser" => args.theme_chooser = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
@@ -840,7 +853,7 @@ struct ResponsiveToolbarState {
 
 fn responsive_toolbar_state(app: &PresentApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    let width = width as f32;
+    let width = width as f32 / Theme::get(app).get_text_scale().max(1.0);
     ResponsiveToolbarState {
         icon_only: width < policy.get_priority_1_icon_only_below(),
         overflow: width < policy.get_priority_2_overflow_below(),
@@ -894,6 +907,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     let inspector_available = configure_responsive_layout(&app, args.size);
     let initial = initial_session(args)?;
     let state = GuiState {
@@ -1123,6 +1137,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     let inspector_available = configure_responsive_layout(&app, args.size);
     let save_path = out_dir.join("present-manipulation.loomdeck");
     let export_path = out_dir.join("present-manipulation.pdf");
@@ -1442,6 +1457,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     let inspector_available = configure_responsive_layout(&app, args.size);
@@ -3117,3 +3133,8 @@ mod picture_view;
 mod presenter;
 mod presenter_thumbs;
 mod window_chrome;
+
+#[cfg(test)]
+mod frame_bench_tests;
+#[cfg(test)]
+mod text_scale_tests;

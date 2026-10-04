@@ -94,7 +94,7 @@ export component FormulaNameBar inherits Rectangle {
 
         Text {
             text: "fx";
-            width: 20px;
+            width: 20px * max(1.0, Theme.text-scale);
             font-size: Theme.type.body;
             font-weight: 700;
             color: Theme.palette().accent;

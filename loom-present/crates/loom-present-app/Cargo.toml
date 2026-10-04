@@ -24,4 +24,5 @@ slint-build = "1.7"
 
 [dev-dependencies]
 loom-package.workspace = true
+i-slint-backend-testing = "1.17.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
