@@ -1,0 +1,33 @@
+import { Theme } from "theme.slint";
+import { CellSpill } from "grid_pointer.slint";
+
+// Draws text that overflows its cell over the empty cells beside it. Cells
+// whose text is drawn here show nothing themselves.
+export component CellOverflowLayer inherits Rectangle {
+    // Window-local cell being edited, or -1.
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
+
+    for item in CellSpill.items : Rectangle {
+        visible: !(item.row == root.editing-row && item.col == root.editing-col);
+        x: item.x;
+        y: item.y;
+        width: item.width;
+        height: item.height;
+        clip: true;
+        Text {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: item.text;
+            font-size: item.size;
+            font-weight: item.bold ? 700 : 400;
+            font-italic: item.italic;
+            color: Theme.palette().paper-ink;
+            horizontal-alignment: item.align == 1 ? TextHorizontalAlignment.center
+                : (item.align == 2 ? TextHorizontalAlignment.right : TextHorizontalAlignment.left);
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}

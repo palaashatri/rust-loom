@@ -52,6 +52,7 @@ pub(super) fn apply_grid(
     geometry: &GridGeometry,
     zoom: f32,
 ) {
+    publish_spill(app, &grid, geometry, zoom);
     sync_model!(app, get_cols, set_cols, grid.cols);
     sync_model!(app, get_rows, set_rows, grid.rows);
     sync_model!(
@@ -301,4 +302,29 @@ pub(crate) fn settle_after_scroll(app: &slint::Weak<SheetsApp>, state: &std::rc:
             },
         );
     });
+}
+
+/// Publish which cells overflow into their neighbours for this window.
+fn publish_spill(app: &SheetsApp, grid: &ProjectedSheetGrid, geometry: &GridGeometry, zoom: f32) {
+    let face = cell_spill::CellFace {
+        cells: &grid.cells,
+        aligns: &grid.cell_alignments,
+        bolds: &grid.cell_bolds,
+        italics: &grid.cell_italics,
+        sizes: &grid.cell_font_sizes,
+    };
+    let spill = cell_spill::compute(
+        &face,
+        grid.cols.len(),
+        &geometry.column_widths,
+        &geometry.row_heights,
+        zoom,
+    );
+    let global = app.global::<CellSpill>();
+    if let Some(model) = refresh_model(global.get_kinds(), spill.kinds) {
+        global.set_kinds(model);
+    }
+    if let Some(model) = refresh_model(global.get_items(), spill.items) {
+        global.set_items(model);
+    }
 }

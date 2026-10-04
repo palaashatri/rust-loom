@@ -21,3 +21,25 @@ export global GridPointer {
     // The mouse button that selected cells was released.
     callback drag-ended();
 }
+
+// Text that runs past its cell into empty neighbours. Geometry is relative to
+// the projected grid; row and column are window-local.
+export struct SpillItem {
+    text: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    row: int,
+    col: int,
+    align: int,
+    size: length,
+    bold: bool,
+    italic: bool,
+}
+
+export global CellSpill {
+    in property <[SpillItem]> items;
+    // Per visible cell: 0 plain, 1 drawn by the overflow layer, 2 number (clipped).
+    in property <[int]> kinds;
+}

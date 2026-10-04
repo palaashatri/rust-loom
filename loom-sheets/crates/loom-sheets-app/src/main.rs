@@ -110,6 +110,7 @@ use palette::*;
 mod journey;
 use journey::*;
 
+mod cell_spill;
 mod scroll_projection;
 mod template_navigation;
 mod window_chrome;

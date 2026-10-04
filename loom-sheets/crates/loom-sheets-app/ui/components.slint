@@ -5,7 +5,8 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { GridPointer } from "grid_pointer.slint";
+import { GridPointer, CellSpill } from "grid_pointer.slint";
+import { CellOverflowLayer } from "cell_overflow.slint";
 import { SheetHeaders } from "sheet_headers.slint";
 
 export component SheetTabs inherits Rectangle {
@@ -410,6 +411,7 @@ export component SheetTable inherits Rectangle {
                             property <bool> is-underline: cell-idx < root.cell-underlines.length && root.cell-underlines[cell-idx];
                             property <bool> is-bordered: cell-idx < root.cell-borders.length && root.cell-borders[cell-idx];
                             property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
+                            property <int> spill-kind: cell-idx < CellSpill.kinds.length ? CellSpill.kinds[cell-idx] : 0;
                             property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
 
                             // High-contrast paper-line is black, so using it
@@ -450,7 +452,7 @@ export component SheetTable inherits Rectangle {
                                 x: 8px;
                                 width: parent.width - 16px;
                                 height: parent.height;
-                                text: root.cells[r * root.cols.length + c];
+                                text: spill-kind == 1 ? "" : root.cells[r * root.cols.length + c];
                                 font-size: font-px * 1px * root.zoom-factor;
                                 font-weight: is-bold ? 700 : 400;
                                 font-italic: is-italic;
@@ -461,7 +463,7 @@ export component SheetTable inherits Rectangle {
                                         ? TextHorizontalAlignment.right
                                         : TextHorizontalAlignment.left);
                                 vertical-alignment: center;
-                                overflow: elide;
+                                overflow: spill-kind == 2 ? TextOverflow.clip : TextOverflow.elide;
                             }
 
                             if is-underline : Rectangle {
@@ -520,6 +522,15 @@ export component SheetTable inherits Rectangle {
                             }
                         }
                     }
+                }
+
+                CellOverflowLayer {
+                    x: root.grid-col-offset;
+                    y: root.grid-row-offset;
+                    width: root.grid-visible-width;
+                    height: root.grid-visible-height;
+                    editing-row: root.editing ? root.selected-row - root.view-row-origin : -1;
+                    editing-col: root.editing ? root.selected-col - root.view-col-origin : -1;
                 }
             }
 
