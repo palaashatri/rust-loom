@@ -731,12 +731,6 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Align selected paragraphs to the right")
             .with_category("format")
             .with_order(100),
-        CommandSpec::new("writer.align.justify", "Justify")
-            .with_undo_label("Justify")
-            .with_description("Justify is unavailable in the page editor")
-            .with_category("format")
-            .with_order(110)
-            .with_enabled(false),
         CommandSpec::new("writer.align.left-all", "Align All Left")
             .with_undo_label("Align Left")
             .with_description("Align selected paragraphs to the left")
@@ -914,10 +908,6 @@ fn sync_writer_registry_enablement(
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
-    // The reference StyledText/page renderer has no justified line layout.
-    // Keep the legacy command discoverable for persisted/old palette callers,
-    // but never expose it as an enabled mutation path.
-    registry.set_enabled(&CommandId::new("writer.align.justify"), false);
     for id in [
         "file.new",
         "file.open",
@@ -2941,19 +2931,6 @@ fn wire_writer_shared_callbacks(
         let menu_service = menu_service.clone();
         app.on_select_alignment(move |align| {
             if let Some(app) = app_ref.upgrade() {
-                if align == 3 {
-                    // Keep the legacy callback value understood but inert:
-                    // this reference page renderer cannot perform justified
-                    // line layout, so silently mutating the model would be a
-                    // visible formatting placebo.
-                    app.set_status_right(
-                        "Justify alignment is unavailable in the page editor".into(),
-                    );
-                    app.set_selection_announcement(
-                        "Justify alignment is unavailable in the page editor".into(),
-                    );
-                    return;
-                }
                 let align_id = match align {
                     0 => "writer.align.left",
                     1 => "writer.align.center",
@@ -4717,6 +4694,8 @@ mod toolbar_tests;
 
 #[cfg(test)]
 mod dpi_surfaces_tests;
+#[cfg(test)]
+mod find_bar_placement_tests;
 #[cfg(test)]
 mod rtl_tests;
 #[cfg(test)]

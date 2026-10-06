@@ -186,10 +186,10 @@ export component PresentInspector inherits LoomPanel {
 
         if root.inspector-tab == 2 : VerticalLayout {
             spacing: Theme.tokens.space.md;
-            LoomSectionHeader { title: "Theme"; }
+            LoomSectionHeader { title: "New Presentation"; }
             LoomButton {
                 icon: "format";
-                label: "Choose Theme...";
+                label: "New from Template...";
                 variant: "secondary";
                 clicked => { root.open-theme-chooser(); }
             }

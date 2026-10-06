@@ -304,7 +304,8 @@ export component WriterInspector inherits LoomPanel {
                     x: Theme.rtl ? indent-pair.width + Theme.tokens.space.sm : 0px;
                     y: 0px;
                     width: parent.width - indent-pair.width - Theme.tokens.space.sm;
-                    items: ["Left", "Center", "Right", "Justify"];
+                    // Justified lines are not drawn by the page editor, so there is no Justify option.
+                    items: ["Left", "Center", "Right"];
                     current <=> root.text-alignment;
                     label: "Text Alignment";
                     selected(idx) => { root.select-alignment(idx); }

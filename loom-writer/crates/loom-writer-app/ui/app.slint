@@ -75,6 +75,9 @@ export component WriterApp inherits Window {
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     property <bool> docked-inspector-visible: root.inspector-visible && !root.compact-inspector-layout;
     property <bool> compact-inspector-visible: root.inspector-visible && root.compact-inspector-layout;
+    /// Width the open inspector takes from the window's reading-end side
+    /// (the left side in RTL); zero while it is closed.
+    property <length> inspector-width: root.compact-inspector-visible ? compact-inspector.width : docked-inspector.width;
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
@@ -693,10 +696,13 @@ export component WriterApp inherits Window {
         }
     }
 
+    // The find bar sits in the document area: just under the toolbar, at the
+    // reading-end edge of the page viewport (right in LTR, left in RTL), and
+    // never over the inspector or the outline, which own the window's sides.
     if FindBar.open : FindBarOverlay {
-        width: min(480px * max(1.0, Theme.text-scale), root.width - 48px);
-        x: root.rtl ? 24px : root.width - self.width - 24px;
-        y: (root.custom-chrome ? 96px : 64px) + ResponsivePolicy.toolbar-label-extra;
+        width: min(480px * max(1.0, Theme.text-scale), root.width - root.outline-width - root.inspector-width - 32px);
+        x: root.rtl ? root.inspector-width + 16px : root.width - root.inspector-width - self.width - 16px;
+        y: action-toolbar.bottom-y + 8px;
     }
 
     LoomWindowResizeEdges {

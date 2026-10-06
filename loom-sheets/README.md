@@ -1,202 +1,123 @@
 # Loom Sheets
 
-Loom Sheets is a local-first spreadsheet application for editing workbooks, formulas, and charts on your computer.
+Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workbooks with formulas and charts on your own computer. Nothing is uploaded and no account is needed. Native workbooks are open `.loomtable` packages; it also imports and exports CSV and XLSX.
 
-Status: **functional, `ACCEPTANCE_BLOCKED`**. The features below were exercised in real windows on Windows 11 and (earlier builds) Linux under WSLg. Not yet verified: screen-reader output and a full keyboard-only pass, recovery for very large workbooks (REC-02), broad Excel/LibreOffice interoperability beyond the tested fixtures, the full viewport/theme/text-scale matrix, and native macOS. The audit sections further down are dated evidence, not a current acceptance record; the live ledger is the current-truth section of the repository `AGENTS.md`.
+**Platforms:** Windows x86-64 and Linux x86-64. macOS is out of scope for v1 and is not claimed.
+
+**Status: `ACCEPTANCE_BLOCKED`.** The supervisor has not recorded `ACCEPTED`. This is not a production-ready claim. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
+
+Evidence tags used below:
+
+- **[tests]** covered by an automated test that passes (`cargo test --workspace`; the ledger records 440 app tests and 250 core tests on 2026-10-07; not re-run while writing this README).
+- **[live-W]** exercised by hand in a real Windows 11 window.
+- **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 
 ## What works
 
-Hand-checked on 2026-10-04 (Windows): typing with Tab/Enter (Enter after a Tab run returns to the column where the run began), formulas and the new functions, Ctrl+Arrow data-edge jumps, text overflow into empty neighbouring cells, wide numbers shrinking decimals / scientific / `####`, the three-way close prompt with Discard clearing recovery, and a restart showing no restored draft.
+### Files
+- Native `.loomtable` Open, Save, Save As; all tabs, styles, alignment, freeze panes, charts, shapes and embedded images are stored in the package. Legacy single-sheet files still open. [tests] [live-W]
+- Open also takes `.csv` and `.xlsx` (imports become unsaved; Save then asks for a native name). Command line: `loom-sheets path/to/file`. [tests]
+- CSV import and export, formulas preserved, delimiter detection on import. [tests]
+- XLSX export: sheet names, formulas, cached values, cell styles, column widths, freeze panes, arrays, one chart per sheet, shapes and embedded images. A set of exported workbooks opened in real Microsoft Excel 16 with cells, styles, widths, freeze panes, arrays, one chart and one shape matching. [tests] [live-W] A LibreOffice Calc 24.2.7.2 round trip (XLSX to ODS to XLSX to Loom) recovered four sheets, formulas, a styled cell, a chart and a shape label (Linux, 2026-09). [live-L]
+- XLSX import: sheets, formulas, cached values, cell styles, charts, shapes and images, read by a streaming reader checked against Excel-authored fixtures in `crates/loom-sheets-core/tests/fixtures/`. [tests]
+- Before an XLSX import replaces the open workbook, a warning names what Loom knows it will lose or approximate: defined names, links to other workbooks, conditional formatting, data validation, merged cells (imported as separate cells), hidden sheets/rows/columns (imported visible), multi-cell array formulas (only the first cell keeps the formula), time/fraction/non-dollar currency number formats, fonts, text colours, wrapped text, exact fills and border styles, partial-text formatting, comments and hyperlinks, Excel tables and filters, text that looks like a number or formula, formulas Loom calculates differently, the 1904 date system, PivotTables (cached cells only), unsupported or extra chart types, plots and series, additional charts on a sheet, absolute-anchored objects and missing drawing parts. Cancel leaves the workbook and recovery data untouched. This covers the file picker and the `--open` start-up path. [tests] The list is the known set, not a promise of full Excel round-tripping.
+- Templates: eleven seeded templates in five categories (Basic, Personal Finance, Personal, Business, Education) with a real Recents list; each creates the workbook it shows. [tests] [live-W]
+- Closing with unsaved changes asks Save and close / Discard / Cancel; Discard clears recovery so the next start shows no draft. [tests] [live-W]
 
-- **Grid**: a growing sheet (no last row), pinned headers, mouse range selection, Shift-click and header click selection, Ctrl+A / the corner select the used range, Ctrl+Arrow and Ctrl+Shift+Arrow, Page Up/Down, Home, Ctrl+Home/End, name box (`D50`, `B2:C3`), drag past the edge auto-scrolls, double-click a column edge to autofit, drag edges to resize (undoable).
-- **Editing**: formula bar and in-cell mirror, Enter/Tab/Shift+Tab/Escape commit and cancel, Fill down, copy/cut/paste through the real system clipboard (tab-separated; formulas keep their references shifted), undo/redo for every edit.
-- **Formulas**: over 100 Excel-compatible functions: math (`INT`, `ROUND*`, `MOD`, `LOG`, `SUMPRODUCT`, …), statistics (`LARGE`, `RANK.EQ`, `STDEV.S`, `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, …), text (`TEXT`, `SUBSTITUTE`, `FIND`, `SEARCH`, `VALUE`, …), logic (`IFS`, `SWITCH`, `XOR`, `IFNA`, `IS*`), lookup (`VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`), dates (`DATE`, `EDATE`, `EOMONTH`, `WEEKDAY`, …), finance (`PMT`, `FV`, `PV`, `NPV`, `IRR`, `NPER`, `RATE`) and dynamic arrays (`FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`). Operators `+ - * / ^ & %` and comparisons follow Excel precedence. Cross-sheet references, absolute `$` references and cycle detection work. A differential test compares 2,072 formulas (every implemented function plus edge cases) against real Microsoft Excel 16 results stored in `tests/fixtures/excel_corpus.json`; 38 documented differences are allow-listed in `tests/excel_differential.rs` (mostly locale-dependent text parsing, fraction formats, omitted arguments, and a few rarely used lookup modes).
-- **Formatting and display**: cell styles, alignment, number formats; text overflows into empty neighbours; numbers that do not fit never appear cut off.
-- **Objects**: charts tied to a cell range, anchored shapes and images, with keyboard and pointer manipulation.
-- **Files**: native `.loomtable` Open / Save / Save As, CSV import/export, XLSX import/export (opens in Microsoft Excel in the tested fixtures; known unsupported XLSX features are listed in a warning before the current workbook is replaced), templates, in-window menu on Windows/Linux and native menu on macOS, command palette (Ctrl+K), crash recovery with an explicit Discard.
-- **Responsiveness**: formula calculation, Open, Save and exports run on background workers; scrolling updates cells in place.
+### Grid, selection and editing
+- Growing sheet (up to 1,048,576 rows by 16,384 columns), pinned headers, text overflowing into empty neighbours, numbers shrunk (fewer decimals, scientific, `####`) rather than cut off. [tests] [live-W]
+- Mouse: click, drag a range, Shift-click, click a column or row header, the select-all corner, drag a header edge to resize (one undo step), double-click an edge to autofit, double-click a cell to edit, name box (`D50`, `B2:C3`), wheel scrolling, auto-scroll when dragging past the edge. [tests] [live-W]
+- Keyboard: arrows, Shift+arrows, Tab / Shift+Tab, Enter, Page Up/Down, Home, Ctrl+Home/End, Ctrl+Arrow data-edge jumps (with Shift to extend), Ctrl+A. Typing starts an edit. After a run of Tab-then-Enter the cursor returns to the column where the run began. [tests] [live-W]
+- Formula bar with an in-cell mirror; Enter commits and moves down, Tab commits and moves right, Escape cancels. Quick SUM/AVG/COUNT formulas and the status-bar SUM/AVG/COUNT for a selection. [tests] [live-W]
+- Copy, cut and paste through the real system clipboard as tab-separated text. Formulas keep their references shifted when pasted inside Sheets; text from other programs pastes as cells; one copied cell fills a selection. Fill down. [tests] [live-W]
+- Undo and redo for every edit, including formatting, sorting, row/column changes, sheet operations, objects and gestures. [tests] [live-W]
+- Sort ascending/descending, add/delete rows and columns, freeze header row, unfreeze panes. Sort stops above the first formula row and says so. [tests] [live-W]
+- Sheet tabs under the toolbar: add, switch, rename (references in formulas follow the new name), delete. [tests]
+- Zoom 50% to 300%. [tests]
+
+### Formulas
+- More than 100 Excel-compatible functions: math, statistics (including `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `RANK.EQ`, `STDEV.S`), text, logic (`IFS`, `SWITCH`, `XOR`, `IFNA`, `IS*`), lookup (`VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`), dates, finance (`PMT`, `FV`, `PV`, `NPV`, `IRR`, `NPER`, `RATE`) and dynamic arrays (`FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TRANSPOSE`). Operators `+ - * / ^ & %` and comparisons use Excel precedence; cross-sheet and absolute references and cycle detection work. [tests]
+- A differential test compares 2,072 formulas against results produced by real Microsoft Excel 16 (`tests/fixtures/excel_corpus.json`). There are zero unexplained mismatches and 38 allow-listed differences, listed in `tests/excel_differential.rs` (locale-dependent text parsing, fraction formats, omitted arguments, whole-column references such as `A:C`, the space intersection operator, a few rare lookup modes). [tests]
+
+### Formatting, charts and objects
+- Bold, italic, underline, left/centre/right alignment, font size, borders, fill colour (cycle), number formats General / Number / Currency / Percent with a decimals stepper, row height and column width. Inspector tabs: Organize (table name, row/column counts) and Format (cell). [tests]
+- Charts tied to a cell range: Line, Bar and Pie, redrawn after edits and Undo, with the range, series and unit shown. Chart data can be read point by point from the keyboard. [tests] [live-W]
+- Anchored shapes (seven fills with readable labels in all themes) and images; objects can be moved and resized with the pointer or the keyboard. Image bytes are stored inside the workbook, so a workbook still opens with its pictures after the source file is deleted. [tests]
+- Formula-backed pivot summaries (Sum, Count, Average, Min, Max) from the Table menu / palette. [tests]
+
+### Recovery and responsiveness
+- Formula calculation, Open, Save and CSV/XLSX export run on background workers; each commit shows "Calculating..." and results are applied only if they are still the newest for that tab. [tests]
+- Crash recovery: a journal of cell edits after a complete checkpoint, replayed at the next start. Checkpoints are written at 16 MiB of journal, 2,000 records or five minutes. If recovery cannot keep up, editing pauses (title and status say "recovery paused"), every mutating command is refused while Save, Save As, export and close stay available, and Retry Recovery (command palette) retries with a complete checkpoint. A second instance on the same recovery store is told so. Fault-injection tests (failed append, checkpoint, pointer replace, journal rewrite) each followed by a restart return the last acknowledged workbook. [tests]
+- Measured on an Intel i5-12400F, test profile at opt-level 3 (not `--release`, not a GPU frame): journal append p95 4.4 / 7.5 / 7.5 ms for the 1st, 10th and 100th unsaved edit in a 100-cell workbook; for one million unique cells, evaluation 214 ms, first recovery package 470 ms, one edit to the journal 2.7 ms, scroll projection p95 0.07 ms. Scroll callback p95 1.9 ms and a full software-renderer frame p95 21.7 ms at 300,000 cells (Windows). These are measurements, not an acceptance of the 60 fps or memory gates.
+
+### Keyboard and accessibility
+- Every menu, toolbar item, dialog (Save Changes, XLSX warning, template chooser, command palette) and the cell/formula/save workflow is operable from the keyboard with focus trapped in dialogs and restored on close; 13 keyboard-flow tests send real key events and read the accessibility tree. [tests]
+- Accessibility tree: every interactive control has a name; the live Windows UI Automation dump showed 0 unnamed interactive controls. This is tree verification only; spoken screen-reader output has not been verified. [tests] [live-W]
+- Native-window Alt+menu delivery was confirmed by hand in Writer only; Sheets relies on the tested key-event path.
+
+### Appearance
+- Themes: light, dark, high contrast, chosen with `--theme light|dark|high-contrast` at launch (there is no in-app switch). Text scale 1.0 to 2.0 (`--text-scale`) and a real device scale factor 1.0 to 4.0 (`--scale-factor`); tests render every reachable surface at text scale 1.0/1.5/2.0 and scale factors 1.25/1.5/2.0 and check controls stay inside the window. Right-to-left (`--rtl`) mirrors the window chrome. [tests]
+- Renders at 1024x720, 1280x800, 1440x900 and 1920x1200 in all three themes were inspected without clipping (renderer evidence, not human sign-off).
+
+## Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| Alt+F / Alt+E / Alt+V / Alt+T / Alt+H, or F10 | Open the File / Edit / View / Table / Help menu (F10 opens the first); arrows walk, Enter runs, Escape closes |
+| Ctrl+K | Command palette |
+| Ctrl+N / Ctrl+O | New / Open |
+| Ctrl+S / Ctrl+Shift+S | Save / Save As |
+| Ctrl+E | Export CSV |
+| Ctrl+Z / Ctrl+Shift+Z | Undo / Redo (there is no Ctrl+Y) |
+| Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A | Cut / Copy / Paste / Select all |
+| Ctrl+B / Ctrl+I / Ctrl+U | Bold / Italic / Underline |
+| Ctrl+= or Ctrl++ / Ctrl+- / Ctrl+0 | Zoom in / out / actual size |
+| Arrows, Shift+Arrows | Move / extend selection |
+| Ctrl+Arrow, Ctrl+Shift+Arrow | Jump to data edge / extend to it |
+| Page Up / Page Down, Home, Ctrl+Home, Ctrl+End | Move a screen, to column A, to A1, to the last used cell (Shift extends) |
+| Enter (grid) / typing | Start editing in the formula bar |
+| Enter / Tab / Shift+Tab / Escape (formula bar) | Commit and move down / right / left; cancel |
+| Delete or Backspace | Clear the selected cells |
+| F6 | Move between the grid, worksheet objects, chart data (if shown) and the toolbar |
+| Shift+F6 | Move grid, toolbar, inspector, grid |
+| Objects (after F6): Tab / Shift+Tab, M, R, arrows, Enter, Escape | Browse / move / resize / preview / commit / cancel or return |
+| Chart data: Left / Right, Home / End, Escape or F6 | Inspect points; return to the grid |
+
+Menu mnemonics are the first letter of each menu not already used; Sheets has File, Edit, View, Table and Help. F2 is not an edit key.
 
 ## Known limitations
 
-- Only the first series of a chart round-trips through XLSX; PivotTables import as their cached cells.
-- Formulas not in the Excel corpus, fraction number formats (`# ?/?`), omitted arguments (`IF(FALSE,1,)`), whole-column references (`A:C`) and the space intersection operator are not supported.
-- On Linux a file-dialog helper (`xdg-desktop-portal` or `zenity`) is required.
-- Recovery storage for million-cell workbooks is slow and not yet bounded (REC-02, open).
-- Unsigned downloadable builds for Linux, Windows and macOS are published by CI as the `nightly` release.
-
-## Screenshots
-
-![Loom Sheets main window — Linux](docs/screenshot-linux.png)
-*Linux X11 native window capture from the current build, taken after focusing the Sheets window with `wmctrl` and running `/usr/bin/gnome-screenshot -w`.*
-
-![Loom Sheets chart overlay — Linux](docs/screenshot-linux-chart.png)
-*Linux X11 native capture of the same workbook with its live formula-backed chart overlay visible.*
-
-![Loom Sheets anchored objects — Linux](docs/screenshot-linux-objects.png)
-*Linux X11 native capture of the same workbook with persisted anchored worksheet objects visible in the live grid.*
-
-![Loom Sheets main window — macOS](docs/screenshot.png)
-*macOS native window capture (`screencapture -l`) of the current build. A pixel-reproducible renderer capture of the same state is at [docs/screenshot-deterministic.png](docs/screenshot-deterministic.png) (`cargo run -p loom-sheets-app -- --screenshot docs/screenshot-deterministic.png --size 1280x800 --theme light`).*
-
-## Native Linux self-audit — 2026-09-23
-
-These screenshots come from the running desktop app via `/usr/bin/gnome-screenshot -w`. Each PNG includes the native title bar and measures 1024×741 for a requested 1024×720 window.
-
-![Opened saved workbook with its saved filename — Linux](docs/qa-native/opened-saved-workbook-linux.png)
-
-![Unsaved edit with the visible title marker — Linux](docs/qa-native/unsaved-edit-title-linux.png)
-
-![Keyboard-selected Checklist template — Linux](docs/qa-native/template-chooser-checklist-selected-linux.png)
-
-![Checklist workbook created from the selected template — Linux](docs/qa-native/template-created-checklist-linux.png)
-
-The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the native self-audit report](../AGENTS.md#source-work-sheets-acceptance-2026-09-23-report-md) and the repository's portable audit evidence archive.
-
-## Native Linux status and error feedback — 2026-09-23
-
-These live-window captures show UI-06 feedback outside the editable grid. The two 1024×752 captures come from the final UI-06 build; the save-cancel capture shows the dirty marker and visible cancellation message.
-
-![Invalid formula feedback stays visible while the cell shows its error](docs/qa-native/ui06-formula-error-live-status-linux.png)
-
-![Read-only save failure is concise and leaves the workbook marked unsaved](docs/qa-native/ui06-readonly-save-failure-live-status-linux.png)
-
-![Canceling Save As leaves the dirty marker and says Save cancelled](docs/qa-native/ui06-save-cancel-dirty-workbook-linux.png)
-
-The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../AGENTS.md#source-work-sheets-acceptance-2026-09-23-report-md) and the portable audit evidence archive.
-
-## Warning and menu layout repairs — 2026-09-25
-
-![Live Linux XLSX warning sized to its content at 2× text scale](docs/qa-native/ui28-xlsx-warning-live-linux.png)
-
-The warning dialog now grows to fit short messages, caps itself to the window, and scrolls long warning text while leaving both actions visible. Renderer checks cover a short message, 2× text, and a long message: [short](docs/qa-renderer/ui28-xlsx-warning-short-1024x720-linux.png), [short at 2×](docs/qa-renderer/ui28-xlsx-warning-short-2x-1024x720-linux.png), and [long at 2×](docs/qa-renderer/ui28-xlsx-warning-long-2x-1024x720-linux.png). The live screenshot verifies visual sizing only; dialog focus, Escape, and button effects remain under CODE-23 review.
-
-![Native Linux warning before dropping a single unsupported area chart](docs/qa-native/code27-unsupported-area-warning-live-linux.png)
-
-The 2026-09-27 live capture shows “unsupported area charts” before workbook replacement, with the current workbook still visible and both actions available. The focused-window PNG is 1018×728 on a 1366×768 X11 desktop; Sol's visual review found no clipped copy or hidden buttons in the capture. Native button/focus actions and the picker/startup Open dispatch for this specific fixture remain open under the Sheets acceptance gate.
-
-![Native Linux warning before dropping extra XLSX chart series](docs/qa-native/code29-multiseries-warning-live-linux.png)
-
-The 2026-09-27 live capture shows the “additional line chart series” warning before workbook replacement, with the current workbook visible and both actions in view. The native 1018×728 capture came from `/usr/bin/gnome-screenshot -w`. App tests verify Cancel preserves the workbook and recovery payload, and Continue imports the first series and names the dropped series in status. Native button/focus actions and multi-series picker/startup dispatch remain unverified under the Sheets acceptance gate.
-
-![Native Linux warning before dropping an absolute-anchor drawing object](docs/qa-native/code28-absolute-anchor-warning-live-linux.png)
-
-The 2026-09-27 live capture shows the “objects positioned with absolute anchors” warning before workbook replacement, with the recovered Checklist workbook visible and both actions in view. The 1018×728 focused-window PNG came from `/usr/bin/gnome-screenshot -w`. Core and app journeys verify supported anchor imports, warning behavior, and Cancel preserving the current workbook and recovery. Native button/focus interactions remain unverified under the Sheets acceptance gate.
-
-![Renderer capture of the aligned File menu popup](docs/qa-renderer/ui29-menu-popup-aligned-1024x720-linux.png)
-
-Menu rows use the shared exported `LoomMenuItem` from `loom-core/crates/loom-ui/ui/foundation.slint`. Other Loom applications should reuse it for consistent label, shortcut, check-mark, disabled, and selected layout. The popup now fits its visible rows. This menu popup image is renderer evidence; native popup interaction is still unverified under UI-01.
-
-## Non-macOS application menu — UI-01
-
-![Current 1024×720 renderer view with the in-window File, Edit, View, Table, and Help menu row](docs/qa-renderer/ui01-local-menu-current-1024-linux.png)
-
-![Native Linux import-warning dialog with the in-window menu row visible](docs/qa-native/ui23-xlsx-import-warning-live-linux.png)
-
-This 1024×720 image is a software-renderer capture. The native live window was captured on 2026-09-24 with the File/Edit/View/Table/Help row visible and the XLSX import-warning dialog open: [ui23-xlsx-import-warning-live-linux.png](docs/qa-native/ui23-xlsx-import-warning-live-linux.png). It confirms the row is visible and the warning copy/buttons render in the real Linux window. The popup was not opened and keyboard/focus actions were not tested because native-app controls are unavailable in this session. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](../AGENTS.md#source-loom-sheets-docs-qa-reports-2026-09-24-acceptance-follow-up-md) for exact results and remaining checks.
-
-## Core Capabilities
-
-- **Workbook Tabs & Navigation**: Multi-sheet workbook tabs with add/switch/rename/delete (all undoable), persisted with the active tab in versioned `.loomtable` packages.
-- **Action Toolbar & Formula Bar**: Undo/redo, Bold/Italic/Underline, alignment, row/column insert, live-linked charts (Bar/Line/Pie), formula-backed pivot summaries, anchored shape/image insertion, CSV/XLSX export, zoom (75–150%), sort, overflow menu; formula bar with cell badge, SUM/AVG/COUNT quick formulas, commit/cancel, and Fill down.
-- **Spreadsheet Canvas**: Viewport-filling sheet grid with headers, live selection/range marquee, keyboard navigation (arrows/Tab/Shift-extend), dynamic-array spill/error projection, anchored worksheet objects, real zoom scaling, and a floating live chart overlay.
-- **Inspector**: `Table` tab (name, rows/columns add/remove) and `Cell` tab (raw formula, font style, data format incl. Number, decimals stepper, alignment, row/column sizing) — every control undoable and persisted.
-- **Template Chooser**: Categorized chooser (Basic, Personal Finance, Personal, Business, Education) with eleven seeded templates, each creating its advertised sheet with live formulas.
-- **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu plus an in-window File/Edit/View/Table/Help menu on non-macOS desktops. The local menu uses the same command IDs and live enablement as the native menu. Linux DBusMenu layout data is not connected to a desktop global-menu host, so Linux keeps the in-window menu visible.
-- **Storage & Interoperability**: Versioned `.loomtable` packages (all tabs, styles, alignments, freeze panes, charts, anchored shapes/images, and package-owned embedded image assets; legacy single-sheet files still open), formula-preserving CSV import/export with dialect sniffing, and multi-sheet XLSX import/export preserving worksheet names, formulas, cached values, cell styles/alignments, one chart per sheet, shapes, and embedded images. Before replacing the current workbook, XLSX import warns about known losses in both the file picker and startup `--open` flow. The warning covers defined names, external workbook links, conditional formatting, data validation, PivotTables (cached cells only), frozen panes, custom row/column sizes, extra charts on one sheet, and missing drawing/media parts. An empty `<definedNames/>` container does not trigger a false warning. Cancel leaves the current workbook and recovery data in place; Continue imports the supported content and reports the dropped features. Native-menu and palette commands are ignored while the user decides. The warning covers known cases and does not guarantee complete Excel round-trip support. Normal Save does not overwrite the original `.xlsx`.
-
-## Native Linux owner audit — 2026-09-27
-
-Captured the running Sheets window with `/usr/bin/gnome-screenshot -w` while the desktop was unlocked. Main-window images are 1018×728 for a requested 1024×720 app window; native file-picker images are 689×407. The captures cover the blank workbook, File menu and keyboard focus, open/cancel flow, template chooser and Checklist selection/creation, dirty-close prompt/cancel, and primary-action labels after the theme-token repair.
-
-![Checklist selected in the native template chooser](docs/qa-native/owner-20260927-08-template-checklist-selected-live-linux.png)
-
-![Checklist workbook created from the native chooser](docs/qa-native/owner-20260927-09-template-created-live-linux.png)
-
-![Dirty-close prompt in the running Linux window](docs/qa-native/owner-20260927-10-close-save-changes-live-linux.png)
-
-![Light theme primary action after the contrast repair](docs/qa-native/owner-20260927-13-contrast-light-live-linux.png)
-
-![Dark theme primary action after the contrast repair](docs/qa-native/owner-20260927-14-contrast-dark-live-linux.png)
-
-![High-contrast theme at 1.5× text scale](docs/qa-native/owner-20260927-15-contrast-high-contrast-1.5-live-linux.png)
-
-The three theme captures show the normal Create action; hover, pressed, and disabled states have not been captured live. Other captures show the [blank workbook](docs/qa-native/owner-20260927-01-empty-workbook-live-linux.png), [Open picker](docs/qa-native/owner-20260927-02-open-file-picker-live-linux.png), [File menu](docs/qa-native/owner-20260927-03-file-menu-open-live-linux.png), [menu keyboard focus](docs/qa-native/owner-20260927-04-file-menu-keyboard-live-linux.png), [picker keyboard focus](docs/qa-native/owner-20260927-05-open-picker-keyboard-live-linux.png), [Open cancelled](docs/qa-native/owner-20260927-06-open-cancelled-live-linux.png), [template chooser](docs/qa-native/owner-20260927-07-template-chooser-live-linux.png), [close cancelled](docs/qa-native/owner-20260927-11-close-cancelled-live-linux.png), and the [created Checklist window](docs/qa-native/owner-20260927-12-checklist-window-live-linux.png). These images document the inspected states and open UI findings; they do not establish full Sheets acceptance or accessibility conformance.
-
-## Anchored shape label contrast — UI-34
-
-These live-window captures show all seven supported shape fills in each theme, plus the selected-object outline and resize handle in high contrast. The window was requested at 1024×720 and captured at 1018×728, including the Linux title bar, with `/usr/bin/gnome-screenshot -w`.
-
-![All seven shape fills with readable labels in the light theme](docs/qa-native/ui34-shape-label-light-live-linux.png)
-
-![All seven shape fills with readable labels in the dark theme](docs/qa-native/ui34-shape-label-dark-live-linux.png)
-
-![All seven shape fills with readable labels in the high-contrast theme](docs/qa-native/ui34-shape-label-high-contrast-live-linux.png)
-
-![Selected shape with a visible outline and resize handle in high contrast](docs/qa-native/ui34-shape-label-selection-high-contrast-live-linux.png)
-
-The shape foreground uses the theme's `paper-ink` role on colored fills and `ink` on the unfilled surface. The workbook was also launched with `--text-scale 2.0`; anchored object text keeps its document formatting, as specified by UI-38, so that capture was pixel-identical to the light-theme image and is not duplicated here. These images verify visual contrast and selection affordance only; keyboard object actions, assistive-technology behavior, and cross-platform rendering remain open under UI-37 and the Sheets acceptance gate.
-
-## Accessible icon actions — UI-35
-
-These 1018×728 Linux Mint captures came from the live Sheets window with `/usr/bin/gnome-screenshot -w`. The native X11 input helper activated Add row from the keyboard; the screenshot shows the new row and “Added row 7” feedback. Undo restored the example workbook afterward.
-
-![Live Table inspector with the chart-close icon visible](docs/qa-native/ui35-icon-accessibility-table-live-linux.png)
-
-![Live Cell inspector scrolled to decimal, row-height, and column-width actions](docs/qa-native/ui35-icon-accessibility-cell-live-linux.png)
-
-![Add row activated from the keyboard with visible focus and result](docs/qa-native/ui35-icon-accessibility-keyboard-live-linux.png)
-
-Automated UI-35 checks cover all 32 icon-button names, descriptions, roles, uniqueness, default actions, inspector scrolling, and returning from the scrolled Cell tab to Table. Native evidence verifies the displayed controls and a keyboard action. The final native AT-SPI tree, Orca announcements, and keyboard activation of every inspector stepper remain unverified; see the [UI-35 repair record](../AGENTS.md#ui-35--give-every-sheets-icon-action-a-meaningful-accessible-name).
-
-## Accessible chart data — UI-36
-
-These live Linux Mint captures were taken from the rebuilt 1018×728 Sheets window with `/usr/bin/gnome-screenshot -w`. The guarded X11 input helper entered chart review with F6, moved from Point 1 to Point 2, and returned to the grid with Escape. A separate run confirms F6 leaves a newly typed formula draft focused. Sol's post-fix visual review found the selected category, amount/unit line, and keyboard help readable at 1×.
-
-![Chart overview in the live Sheets window](docs/qa-native/ui36-chart-live-linux.png)
-
-![Point 1 selected in chart review](docs/qa-native/ui36-chart-point-1-focused-live-linux.png)
-
-![Point 2 selected after keyboard navigation](docs/qa-native/ui36-chart-point-2-focused-live-linux.png)
-
-![Escape returns focus to the worksheet grid](docs/qa-native/ui36-chart-grid-return-live-linux.png)
-
-![A new formula draft remains focused after F6](docs/qa-native/ui36-chart-formula-draft-f6-preserved-live-linux.png)
-
-The native AT-SPI tree exposes the chart type, source range, series, unit, selected category, point detail, and numeric value. With screen-reader narration disabled, keyboard navigation changed the native selected point from Rent/1200 to Food/450; the temporary AT-SPI inspection setting was restored afterward. Spoken announcements remain unverified, so UI-36 stays `NEEDS_REVIEW`. The 2× bar-proportion defect and inert resize handle are tracked separately under UI-40 and UI-41.
-
-## Keyboard anchored objects — UI-37 (open)
-
-These 1018×712 live Linux captures were taken with `/usr/bin/gnome-screenshot -w` after entering the object list with F6 and navigating with the guarded Linux X11 input helper.
-
-![Purple worksheet shape selected with keyboard focus](docs/qa-native/ui37-object-keyboard-focus-live-linux.png)
-
-![Escape returns to the grid while the active A1 cell remains offscreen](docs/qa-native/ui37-object-escape-return-offscreen-cell-live-linux.png)
-
-The dark/orange focus ring is clear and the selected shape label is readable. The second capture records an open focus-return defect: A1 remains the active address while the visible grid is scrolled to rows 12–25 and columns D–J. The green shape is clipped at the left viewport edge. These captures do not verify the invisible 20×20 resize hit target, screen-reader announcements, image traversal, or save/reopen behavior; see the [UI-37 repair record](../AGENTS.md#ui-37--make-anchored-objects-operable-without-a-pointer).
-
-## Visual QA Evidence
-
-- The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.
-- Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
-- The UI-06 captures verify visible formula errors, read-only save failure, and canceled Save As feedback; cancel and failure do not clear the unsaved marker.
-- These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root [current-truth section](../AGENTS.md#current-truth).
-- The XLSX loss-warning dialog passes rendered tests, including Tab navigation followed by Escape-to-Cancel. The native capture above shows the real dialog and menu row; its popup, focus, and button actions still need live interaction review.
-
-## Performance evidence
-
-The current 10,000-formula and million-cell measurements are recorded in [PERFORMANCE.md](../AGENTS.md#source-loom-sheets-performance-md). Formula-bar edits now submit a cell delta to a background worker; one test measured 0.086 ms for edit preparation and mailbox submission only. It did not measure the full callback or visible frame. The same one-million-cell run took 43 seconds to write recovery data. Recovery also appends full workbook packages and only compacts on explicit Save, so long unsaved sessions have no automatic storage bound. Recovery freshness, normal Save/Open, full-window scrolling, and a reviewed peak-memory limit remain open. These test timings do not prove native frame rate or complete Sheets acceptance; see the [acceptance report](../AGENTS.md#source-loom-sheets-docs-qa-reports-2026-09-24-acceptance-follow-up-md).
+- No pivot tables (only the formula-backed summaries above); PivotTables in an XLSX import arrive as cached cells.
+- XLSX export writes one chart series per chart at a fixed anchor. Import warns about, and drops or approximates, everything in the warning list above (for example merged cells, comments, fonts and text colours, extra chart series). Only one set of exported files was checked in Excel 16; import was checked on Excel-authored fixtures, not a wide corpus.
+- Formulas outside the Excel corpus, fraction formats, omitted arguments, whole-column references and the space intersection operator are not supported or differ (see the 38 allow-listed differences).
+- The UI offers charts of kind Line, Bar and Pie only. The Text menu's check marks are visual indicators only.
+- Recovery (REC-02) is closed for v1 on Windows and Linux with these disclosed limits: a real full-volume disk-full is untested (only injected write errors); New and Open keep their own unsaved-work decision rather than the pause guard; Save while recovery is paused refuses a pending formula-bar draft; recovery locking is only verified on Windows and Linux.
+- PERF-01 stays NEEDS_REVIEW: full-workbook copies for non-cell edits still run on the UI thread, export-scale performance, a reviewed app memory limit, and native million-cell scrolling in a real window are unmeasured. Test-profile timings above are not frame-rate proof.
+- Accessibility is tree-verified only; spoken screen-reader output, a fractional-scale live window and Wayland are unverified. The Windows UI Automation dump and Linux AT-SPI checks cover named controls, not reading order in speech.
+- Document content is left-to-right: `--rtl` mirrors the chrome, not column order.
+- On Linux, native file dialogs need `zenity` or an `xdg-desktop-portal`. Linux was last driven interactively on an earlier nightly (typing, File menu, overflow menu, keyboard menus, recovery restore); the newest Sheets features and exports were not re-driven there.
+- No wider interoperability matrix beyond the Excel 16 export check, the Calc round trip and the Excel-authored import fixtures.
+- Builds are unsigned (Windows SmartScreen warns on first run).
+
+## Install and run
+
+Download the portable archive from the GitHub `nightly` release (`https://github.com/palaashatri/rust-loom/releases/tag/nightly`): `loom-nightly-<commit>-windows-x86_64.zip` or `loom-nightly-<commit>-linux-x86_64.tar.gz`. It holds all Loom apps; run `loom-sheets.exe` (Windows) or `./loom-sheets` (Linux). Nothing needs installing.
+
+- Windows: unsigned, so choose "More info" then "Run anyway" on the SmartScreen warning.
+- Linux: needs a desktop session (X11 or Wayland), OpenGL and fontconfig; Open and Save dialogs need `zenity` or an xdg portal. `chmod +x loom-*` if the execute bit was lost.
 
 ## Development
 
 ```sh
-cargo test --manifest-path loom-sheets/Cargo.toml
-cargo run --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app
-# Headless QA capture:
-cargo build --manifest-path loom-sheets/Cargo.toml
-# Native Linux X11 window capture (focus the Sheets window first):
-wmctrl -l
-wmctrl -i -a <sheets-window-id>
-gnome-screenshot -w -f docs/screenshot-linux.png
-gnome-screenshot -w -f docs/screenshot-linux-chart.png
-gnome-screenshot -w -f docs/screenshot-linux-objects.png
+cd loom-sheets
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -p loom-sheets-app
+# open a file
+cargo run -p loom-sheets-app -- path/to/book.loomtable
+# headless render (light, dark, high-contrast; text and device scale; RTL)
+cargo run -p loom-sheets-app -- --screenshot out.png --size 1280x800 --theme dark
+cargo run -p loom-sheets-app -- --screenshot out.png --scale-factor 2 --rtl
 ```
+
+Windows builds need a 32 MiB main-thread stack for the Slint build script; `loom-sheets/.cargo/config.toml` sets it, so run cargo from inside `loom-sheets`. `docs/` holds dated screenshots (renderer and native-window captures) that are evidence for the specific states named in the ledger, not a current acceptance record.

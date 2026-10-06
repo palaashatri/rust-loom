@@ -537,17 +537,17 @@ fn save_changes_traps_tab_defaults_to_save_and_escape_cancels() {
 }
 
 #[test]
-fn theme_chooser_is_keyboard_complete_and_traps_tab() {
+fn template_chooser_is_keyboard_complete_and_traps_tab() {
     let s = launched();
     let page = focus_weak(&s.app);
-    // Reach it from the keyboard: Document tab, then Choose Theme.
+    // Reach it from the keyboard: Document tab, then New from Template.
     focus_toolbar_item(&s.app, "Document");
     press(&s.app, Key::Return);
-    tab_to(&s.app, "Choose Theme...");
+    tab_to(&s.app, "New from Template...");
     press(&s.app, Key::Return);
     assert!(
         s.app.get_theme_chooser_open(),
-        "Enter opens the theme chooser"
+        "Enter opens the template chooser"
     );
     assert_eq!(s.app.get_theme_selected(), 0);
 
@@ -561,17 +561,14 @@ fn theme_chooser_is_keyboard_complete_and_traps_tab() {
     press(&s.app, Key::UpArrow);
     assert_eq!(s.app.get_theme_category(), 0);
 
-    // Tab walks the aspect control, Cancel and Create, then wraps to the chooser.
+    // Tab walks Cancel and Create, then wraps to the chooser.
     let chooser = focus_weak(&s.app);
     let mut order = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..3 {
         tab(&s.app);
         order.push(focus_name(&s.app));
     }
-    assert_eq!(
-        order[..3],
-        ["Theme Aspect Ratio", "Cancel", "Create Presentation"]
-    );
+    assert_eq!(order[..2], ["Cancel", "Create Presentation"]);
     assert!(
         same_focus(&focus_weak(&s.app), &chooser),
         "Tab wrapped from Create back to the chooser"
@@ -840,7 +837,7 @@ fn compact_overflow_menu_opens_runs_a_command_and_escape_returns_to_the_editor()
     );
     assert_eq!(
         focus_name(&s.app),
-        "Choose theme",
+        "New from template",
         "focus starts on the first enabled command"
     );
     press(&s.app, Key::Escape);
@@ -857,7 +854,7 @@ fn compact_overflow_menu_opens_runs_a_command_and_escape_returns_to_the_editor()
     assert!(!s.app.get_toolbar_overflow_open());
     assert!(
         s.app.get_theme_chooser_open(),
-        "Enter on Choose theme opened the chooser"
+        "Enter on New from template opened the chooser"
     );
     press(&s.app, Key::Escape);
     assert!(!s.app.get_theme_chooser_open());

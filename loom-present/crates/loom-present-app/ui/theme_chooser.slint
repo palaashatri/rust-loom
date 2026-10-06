@@ -1,5 +1,5 @@
 import {
-    LoomButton, LoomSegmentedControl,
+    LoomButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
@@ -71,18 +71,16 @@ component PresentThemeCard inherits Rectangle {
     touch := TouchArea { clicked => { root.clicked(); } }
 }
 
-/// One theme card. Everything a theme looks like is derived from its number so
-/// the left-to-right and right-to-left grids list the same four themes.
+/// One template card. Everything a template says about itself is derived from
+/// its number so the left-to-right and right-to-left grids list the same four.
 component PresentThemeOption inherits PresentThemeCard {
     in property <int> theme: 0;
     in property <int> current: 0;
-    in property <bool> wide: true;
 
-    title: ["Basic White", "Basic Black", "Classic Editorial", "Dynamic Accent"][root.theme];
+    // What each template really creates: a deck with these slides and empty
+    // placeholders on them. None of them sets a colour, font or background.
+    title: ["Blank", "Title and Content", "Two Columns", "Image and Text"][root.theme];
     selected: root.current == root.theme;
-    preview-width: root.wide ? 180px : 144px;
-    preview-height: root.wide ? 101px : 108px;
-    preview-background: [Theme.palette().paper, Theme.palette().surface-sunken, Theme.palette().paper, Theme.palette().accent][root.theme];
 
     VerticalLayout {
         padding: 12px;
@@ -92,15 +90,17 @@ component PresentThemeOption inherits PresentThemeCard {
             text: root.title;
             font-size: Theme.tokens.typography.caption;
             font-weight: 700;
-            color: [Theme.palette().paper-ink, Theme.palette().ink, Theme.palette().paper-ink, Theme.palette().accent-ink][root.theme];
+            color: Theme.palette().paper-ink;
             horizontal-alignment: center;
+            overflow: elide;
         }
         Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
         Text {
-            text: "Presentation Title";
+            text: ["One empty slide", "A title slide, then a content slide", "Title with two empty columns", "Title with room for a picture"][root.theme];
             font-size: Theme.tokens.typography.micro;
-            color: [Theme.palette().paper-muted, Theme.palette().ink-secondary, Theme.palette().paper-muted, Theme.palette().accent-ink][root.theme];
+            color: Theme.palette().paper-muted;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }
@@ -146,8 +146,6 @@ export component PresentThemeChooser inherits Rectangle {
     in-out property <bool> open: false;
     in-out property <int> theme-selected: 0;
     in-out property <int> theme-category: 0;
-    in-out property <bool> aspect-ratio-wide: true;
-
     callback choose-theme-category(int);
     callback cancel-theme;
     callback create-theme(int);
@@ -155,15 +153,16 @@ export component PresentThemeChooser inherits Rectangle {
     function theme-visible(idx: int) -> bool {
         if (root.theme-category == 0) { return true; }
         if (root.theme-category == 1 && (idx == 0 || idx == 1)) { return true; }
-        if (root.theme-category == 2 && idx == 3) { return true; }
-        if (root.theme-category == 3 && (idx == 0 || idx == 2)) { return true; }
+        if (root.theme-category == 2 && (idx == 2 || idx == 3)) { return true; }
+        if (root.theme-category == 3 && idx == 0) { return true; }
         return false;
     }
 
-    // Keyboard: Left/Right pick a theme, Up/Down a category, Return creates,
-    // Escape cancels. Tab walks the aspect control, Cancel and Create and wraps
-    // from Create back to the chooser (and Shift+Tab the other way), so focus
-    // never leaves the dialog.
+    // "Theme" in the property and callback names below is historical: this
+    // dialog creates a deck from a template.
+    // Keyboard: Left/Right pick a template, Up/Down a category, Return creates,
+    // Escape cancels. Tab walks Cancel and Create and wraps from Create back to
+    // the chooser (and Shift+Tab the other way), so focus never leaves the dialog.
     in property <int> refocus-tick: 0;
     changed refocus-tick => { chooser-focus.focus(); }
 
@@ -248,30 +247,19 @@ export component PresentThemeChooser inherits Rectangle {
                             padding-bottom: Theme.tokens.space.sm;
                             alignment: Theme.rtl ? end : start;
                             Text {
-                                text: "THEMES";
+                                text: "TEMPLATES";
                                 font-size: Theme.type.micro;
                                 font-weight: 700;
                                 color: Theme.palette().ink-secondary;
                             }
                         }
 
-                        PresentThemeCategory { icon: "new"; label: "All Themes"; active: root.theme-category == 0; clicked => { root.pick-category(0); } }
+                        PresentThemeCategory { icon: "new"; label: "All Templates"; active: root.theme-category == 0; clicked => { root.pick-category(0); } }
                         PresentThemeCategory { icon: "document"; label: "Basic"; active: root.theme-category == 1; clicked => { root.pick-category(1); } }
-                        PresentThemeCategory { icon: "play"; label: "Dynamic"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
-                        PresentThemeCategory { icon: "format"; label: "Minimal"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
+                        PresentThemeCategory { icon: "play"; label: "Layouts"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
+                        PresentThemeCategory { icon: "format"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
-
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
-                            alignment: Theme.rtl ? end : start;
-                            Text {
-                                text: "English (US)";
-                                font-size: Theme.type.caption;
-                                color: Theme.palette().ink-secondary;
-                                vertical-alignment: center;
-                            }
-                        }
                     }
 
                     Rectangle { x: Theme.rtl ? 0px : parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
@@ -288,59 +276,13 @@ export component PresentThemeChooser inherits Rectangle {
                     padding-right: Theme.tokens.space.xxl;
                     spacing: Theme.tokens.space.xl;
 
-                    if Theme.text-scale <= 1.25 && !Theme.rtl : HorizontalLayout {
-                        Text {
-                            text: "Choose a Theme";
-                            font-size: 24px * max(1.0, Theme.text-scale);
-                            font-weight: 700;
-                            color: Theme.palette().ink;
-                            horizontal-stretch: 1;
-                            vertical-alignment: center;
-                        }
-
-                        LoomSegmentedControl {
-                            items: ["Widescreen (16:9)", "Standard (4:3)"];
-                            current: root.aspect-ratio-wide ? 0 : 1;
-                            label: "Theme Aspect Ratio";
-                            selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
-                        }
-                    }
-                    if Theme.text-scale <= 1.25 && Theme.rtl : HorizontalLayout {
-                        LoomSegmentedControl {
-                            items: ["Widescreen (16:9)", "Standard (4:3)"];
-                            current: root.aspect-ratio-wide ? 0 : 1;
-                            label: "Theme Aspect Ratio";
-                            selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
-                        }
-
-                        Text {
-                            text: "Choose a Theme";
-                            font-size: 24px * max(1.0, Theme.text-scale);
-                            font-weight: 700;
-                            color: Theme.palette().ink;
-                            horizontal-stretch: 1;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    // At large text the title and the aspect control stack instead of colliding.
-                    if Theme.text-scale > 1.25 : VerticalLayout {
-                        spacing: Theme.tokens.space.md;
-                        Text {
-                            text: "Choose a Theme";
-                            font-size: 24px * max(1.0, Theme.text-scale);
-                            font-weight: 700;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            overflow: elide;
-                        }
-                        LoomSegmentedControl {
-                            items: ["Widescreen (16:9)", "Standard (4:3)"];
-                            current: root.aspect-ratio-wide ? 0 : 1;
-                            label: "Theme Aspect Ratio";
-                            selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
-                        }
+                    Text {
+                        text: "Choose a Template";
+                        font-size: 24px * max(1.0, Theme.text-scale);
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        overflow: elide;
                     }
 
                     // Two rows of two cards. Right-to-left reads each row from the
@@ -350,26 +292,26 @@ export component PresentThemeChooser inherits Rectangle {
 
                         if !Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
-                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 0; } }
-                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 1; } }
+                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; } }
+                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; } }
                         }
                         if Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
                             alignment: end;
-                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 1; } }
-                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 0; } }
+                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; } }
+                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; } }
                         }
 
                         if !Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
-                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 2; } }
-                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 3; } }
+                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; } }
+                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; } }
                         }
                         if Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
                             alignment: end;
-                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 3; } }
-                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; wide: root.aspect-ratio-wide; clicked => { root.theme-selected = 2; } }
+                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; } }
+                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; } }
                         }
                     }
 

@@ -452,7 +452,7 @@ fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
 }
 
 #[test]
-fn justify_is_disabled_and_persisted_projection_is_indeterminate() {
+fn there_is_no_justify_control_and_persisted_justify_projection_is_indeterminate() {
     set_platform();
     let mut document = text_document("justify remains readable");
     document.blocks[0].style.alignment = loom_text::Alignment::Justify;
@@ -461,6 +461,7 @@ fn justify_is_disabled_and_persisted_projection_is_indeterminate() {
         Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
     let (app, state) = test_state(document.clone(), dialogs);
     wire_writer_shared_callbacks(&app, &state, None);
+    app.set_show_inspector(true);
     apply_state(&app, &state);
 
     assert_eq!(app.get_text_alignment(), -1);
@@ -472,23 +473,35 @@ fn justify_is_disabled_and_persisted_projection_is_indeterminate() {
         -1,
         "persisted Justify must not be projected as Left"
     );
+    // No inert option: neither a command nor an inspector segment offers Justify.
     assert!(
-        !state
+        state
             .registry
             .lock()
             .unwrap()
             .get(&CommandId::new("writer.align.justify"))
-            .expect("legacy Justify command")
-            .enabled
+            .is_none(),
+        "Justify is not a command"
+    );
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    assert!(
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Justify")
+            .next()
+            .is_none(),
+        "the inspector shows no Justify segment"
+    );
+    assert!(
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Center")
+            .next()
+            .is_some(),
+        "positive control: the other alignment segments are there"
     );
 
+    // A stray callback value changes nothing.
     let before = state.current.borrow().clone();
     app.invoke_select_alignment(3);
     assert_eq!(*state.current.borrow(), before);
-    assert_eq!(
-        app.get_status_right(),
-        "Justify alignment is unavailable in the page editor"
-    );
+    assert_eq!(app.get_status_right(), "Unsupported alignment option");
 }
 
 #[test]

@@ -204,7 +204,7 @@ fn sample_session() -> PresentationSession {
 fn empty_session() -> PresentationSession {
     let mut document = PresentationDocument::new("untitled-deck", "Untitled Presentation");
     if let Some(slide) = document.active_slide_mut() {
-        slide.title = "Untitled Slide".into();
+        slide.title = slide_layouts::UNTITLED_SLIDE.into();
         for element in &mut slide.elements {
             element.content.clear();
         }
@@ -361,6 +361,8 @@ fn cancel_drag(
 enum PendingReplacement {
     NewDeck,
     NewSampleDeck,
+    /// A new deck from the template chooser; the number is the card picked.
+    NewFromTemplate(i32),
     OpenDeck,
     /// Closing the window with unsaved changes.
     CloseWindow,
@@ -1033,6 +1035,23 @@ fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
     state.selected_element.set(0);
     refresh(app, state);
     set_status(app, "Created unsaved presentation");
+}
+
+fn replace_with_template(app: &PresentApp, state: &GuiState, choice: i32) {
+    let session = slide_layouts::template_session(empty_session(), choice);
+    *state.last_saved.borrow_mut() = session.document.clone();
+    *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
+    *state.session.borrow_mut() = session;
+    *state.save_path.borrow_mut() = None;
+    state.selected_element.set(0);
+    refresh(app, state);
+    let name = slide_layouts::TEMPLATE_NAMES
+        .get(choice.max(0) as usize)
+        .unwrap_or(&slide_layouts::TEMPLATE_NAMES[0]);
+    set_status(
+        app,
+        format!("Created unsaved presentation from the {name} template"),
+    );
 }
 
 fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
@@ -1805,6 +1824,9 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
     match state.pending_replacement.take() {
         Some(PendingReplacement::NewDeck) => replace_with_empty_deck(app, state),
         Some(PendingReplacement::NewSampleDeck) => replace_with_sample_deck(app, state),
+        Some(PendingReplacement::NewFromTemplate(choice)) => {
+            replace_with_template(app, state, choice)
+        }
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
         Some(PendingReplacement::CloseWindow) => {
             presenter::close();
@@ -1952,30 +1974,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
             if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
                 session.checkpoint();
-                let count = session.document.len() + 1;
-                session
-                    .document
-                    .add_slide(format!("New Slide {count}"), "content");
-                if let Some(slide) = session.document.active_slide_mut() {
-                    slide.add_element(text_element(
-                        &format!("title-{count}"),
-                        ElementType::Title,
-                        &slide.title,
-                        80.0,
-                        70.0,
-                        820.0,
-                        90.0,
-                    ));
-                    slide.add_element(text_element(
-                        &format!("body-{count}"),
-                        ElementType::BodyText,
-                        "Add your story here.",
-                        82.0,
-                        190.0,
-                        760.0,
-                        170.0,
-                    ));
-                }
+                slide_layouts::add_blank_slide(&mut session.document);
                 session.clear_selection();
                 state.selected_element.set(0);
                 drop(session);
@@ -2701,16 +2700,11 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_apply_template(move |index| {
             if let Some(app) = app_ref.upgrade() {
-                let layout = match index {
-                    0 => "cover",
-                    2 => "two-column",
-                    3 => "image-text",
-                    _ => "content",
-                };
+                let layout = slide_layouts::layout_for_choice(index);
                 let mut session = state.session.borrow_mut();
                 session.checkpoint();
                 if let Some(slide) = session.document.active_slide_mut() {
-                    slide.layout = layout.into();
+                    slide_layouts::apply_layout(slide, layout);
                 }
                 drop(session);
                 refresh(&app, &state);
@@ -2833,19 +2827,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_create_theme(move |idx| {
             if let Some(app) = app_ref.upgrade() {
-                let mut session = empty_session();
-                session.document.title = match idx {
-                    1 => "Black Minimal".into(),
-                    2 => "Editorial Presentation".into(),
-                    3 => "Dynamic Accent Deck".into(),
-                    _ => "Untitled Deck".into(),
-                };
-                *state.session.borrow_mut() = session;
-                *state.save_path.borrow_mut() = None;
-                state.selected_element.set(0);
-                refresh(&app, &state);
+                // The chooser closes first; unsaved work is asked about before it is replaced.
                 app.set_theme_chooser_open(false);
-                set_status(&app, "Created presentation from theme");
+                if !request_deck_replacement(&app, &state, PendingReplacement::NewFromTemplate(idx))
+                {
+                    replace_with_template(&app, &state, idx);
+                }
             }
         });
     }
@@ -2875,6 +2862,7 @@ enum PaletteAction {
     AddText,
     AddPicture,
     NewSampleDeck,
+    NewFromTemplate,
     ExportPdf,
     ExportPptx,
     TogglePreview,
@@ -2964,6 +2952,12 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::NewSampleDeck,
             id: "present.new-sample",
             label: "New from Sample Deck",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::NewFromTemplate,
+            id: "present.new-template",
+            label: "New from Template...",
             shortcut: "",
         },
         PaletteCommand {
@@ -3165,6 +3159,11 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::AddText => app.invoke_add_text(),
                         PaletteAction::AddPicture => app.invoke_add_picture(),
                         PaletteAction::NewSampleDeck => app.invoke_new_sample_deck(),
+                        PaletteAction::NewFromTemplate => {
+                            app.set_theme_selected(0);
+                            app.set_theme_category(0);
+                            app.set_theme_chooser_open(true);
+                        }
                         PaletteAction::TogglePreview => app.invoke_toggle_preview_mode(),
                         PaletteAction::OpenPresenter => app.invoke_open_presenter(),
                         PaletteAction::PrevSlide => app.invoke_prev_slide(),
@@ -3202,6 +3201,11 @@ mod presenter_thumbs;
 mod recovery_deferred;
 #[cfg(test)]
 mod scaling_tests;
+#[cfg(test)]
+mod slide_layout_tests;
+mod slide_layouts;
+#[cfg(test)]
+mod template_chooser_tests;
 mod view_state;
 mod window_chrome;
 
