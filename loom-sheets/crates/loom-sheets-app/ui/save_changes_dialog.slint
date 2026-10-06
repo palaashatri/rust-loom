@@ -12,8 +12,9 @@ export component SaveChangesDialog inherits Rectangle {
 
     visible: root.open;
 
+    // The primary button takes focus when the dialog opens, so Enter saves.
     public function focus-dialog() {
-        dialog-focus.focus();
+        save-button.grab-focus();
     }
 
     dialog-focus := FocusScope {
@@ -26,6 +27,15 @@ export component SaveChangesDialog inherits Rectangle {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.cancel();
+                return accept;
+            }
+            // Tab cycles Cancel, Discard, Save and never leaves the dialog.
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                if (event.text == Key.Backtab || event.modifiers.shift) {
+                    if (save-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { cancel-button.grab-focus(); } else { save-button.grab-focus(); }
+                } else {
+                    if (cancel-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { save-button.grab-focus(); } else { cancel-button.grab-focus(); }
+                }
                 return accept;
             }
             return reject;
@@ -84,17 +94,17 @@ export component SaveChangesDialog inherits Rectangle {
                     HorizontalLayout {
                         spacing: Theme.tokens.space.sm;
                         alignment: end;
-                        LoomButton {
+                        cancel-button := LoomButton {
                             label: "Cancel";
                             variant: "secondary";
                             clicked => { root.cancel(); }
                         }
-                        LoomButton {
+                        discard-button := LoomButton {
                             label: "Discard";
                             variant: "danger";
                             clicked => { root.discard(); }
                         }
-                        LoomButton {
+                        save-button := LoomButton {
                             label: root.close-mode ? "Save and close" : "Save";
                             variant: "primary";
                             clicked => { root.save(); }

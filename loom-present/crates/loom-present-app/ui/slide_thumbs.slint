@@ -55,11 +55,19 @@ component PresentSlideThumbnail inherits Rectangle {
     min-width: 0px;
     horizontal-stretch: 1;
     border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: root.active ? 2px : 1px;
-    border-color: root.active ? Theme.palette().accent : Theme.palette().border;
+    border-width: thumb-focus.has-focus ? 3px : root.active ? 2px : 1px;
+    border-color: thumb-focus.has-focus ? Theme.palette().focus : root.active ? Theme.palette().accent : Theme.palette().border;
     background: root.active ? Theme.palette().selection-soft : Theme.palette().surface;
     accessible-role: button;
     accessible-label: "Slide " + (root.index + 1) + ": " + root.title;
+    accessible-action-default => { root.clicked(); }
+    // Tab visits every slide; Enter or Space selects it.
+    thumb-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            return reject;
+        }
+    }
 
     HorizontalLayout {
         spacing: Theme.tokens.space.sm;

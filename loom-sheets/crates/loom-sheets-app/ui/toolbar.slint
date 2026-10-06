@@ -26,18 +26,29 @@ export component SheetActionToolbar inherits LabeledToolbar {
     /// Return keyboard focus to the Format item (after the inspector closes).
     public function focus-inspector-trigger() { format-item.focus-item(); }
     public function focus-overflow-trigger() { overflow-button.grab-focus(); }
+    /// F6 from the grid lands on the first toolbar item.
+    public function focus-first() { view-item.focus-item(); }
+    /// Return focus to the item that opened toolbar menu `kind` (numbered as
+    /// `menu-kind`), so Escape does not lose the place.
+    public function focus-menu-trigger(kind: int) {
+        if (kind == 1) { view-item.focus-item(); }
+        else if (kind == 2) { zoom-item.focus-item(); }
+        else if (kind == 3) { table-item.focus-item(); }
+        else if (kind == 4) { text-item.focus-item(); }
+        else { export-item.focus-item(); }
+    }
 
     changed inspector-visible => {
         if (!root.inspector-visible) { root.focus-inspector-trigger(); }
     }
 
-    IconOverLabelToolbarItem {
+    view-item := IconOverLabelToolbarItem {
         icon: "view";
         label: "View";
         checked: root.menu-kind == 1;
         clicked => { root.toggle-menu(1, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    zoom-item := IconOverLabelToolbarItem {
         icon: "zoom-fit";
         label: "Zoom";
         checked: root.menu-kind == 2;
@@ -56,13 +67,13 @@ export component SheetActionToolbar inherits LabeledToolbar {
         label: "Chart";
         clicked => { root.command("sheets.insert_chart"); }
     }
-    IconOverLabelToolbarItem {
+    table-item := IconOverLabelToolbarItem {
         icon: "table";
         label: "Table";
         checked: root.menu-kind == 3;
         clicked => { root.toggle-menu(3, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    text-item := IconOverLabelToolbarItem {
         icon: "text";
         label: "Text";
         checked: root.menu-kind == 4;
@@ -81,7 +92,7 @@ export component SheetActionToolbar inherits LabeledToolbar {
 
     ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
+    export-item := IconOverLabelToolbarItem {
         icon: "export";
         label: "Export";
         checked: root.menu-kind == 5;

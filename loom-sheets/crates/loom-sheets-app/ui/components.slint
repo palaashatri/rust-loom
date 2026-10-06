@@ -731,6 +731,9 @@ export component SheetGridSurface inherits Rectangle {
         }
     }
 
+    /// True while the cell grid itself holds keyboard focus.
+    out property <bool> grid-has-focus: grid-focus.has-focus;
+
     public function focus-grid() {
         grid-focus.focus();
     }

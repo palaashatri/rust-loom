@@ -41,6 +41,7 @@ export component PresentNotesEditor inherits Rectangle {
         text <=> root.text;
         enabled: root.enabled;
         single-line: false;
+        accessible-label: "Speaker notes";
         wrap: word-wrap;
         vertical-alignment: top;
         font-size: root.font-size;
@@ -88,25 +89,34 @@ export component PresentToolbarOverflow inherits Rectangle {
     drop-shadow-offset-y: 4px;
     drop-shadow-color: Theme.palette().shadow;
 
+    // Focus starts on the first enabled command and Escape closes the menu from
+    // any of them; Tab walks the commands.
+    init => { if (root.can-undo) { undo-button.grab-focus(); } else if (root.can-redo) { redo-button.grab-focus(); } else { theme-button.grab-focus(); } }
+    FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            return reject;
+        }
+
     VerticalLayout {
         spacing: Theme.tokens.space.xs;
         padding: Theme.tokens.space.sm;
 
-        LoomButton {
+        undo-button := LoomButton {
             icon: "undo";
             label: "Undo";
             variant: "ghost";
             enabled: root.can-undo;
             clicked => { root.undo(); root.close-requested(); }
         }
-        LoomButton {
+        redo-button := LoomButton {
             icon: "redo";
             label: "Redo";
             variant: "ghost";
             enabled: root.can-redo;
             clicked => { root.redo(); root.close-requested(); }
         }
-        LoomButton {
+        theme-button := LoomButton {
             icon: "format";
             label: "Choose theme";
             variant: "ghost";
@@ -124,5 +134,6 @@ export component PresentToolbarOverflow inherits Rectangle {
             variant: "ghost";
             clicked => { root.export-pptx(); root.close-requested(); }
         }
+    }
     }
 }

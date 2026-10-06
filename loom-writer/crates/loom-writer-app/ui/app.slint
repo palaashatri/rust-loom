@@ -2,10 +2,11 @@ import { TemplateChooserModal } from "template_chooser.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     LoomButton, LoomTitleBar, LoomWindowResizeEdges,
-    LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+    LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { FindBar, FindBarOverlay } from "find_bar.slint";
+import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
@@ -14,7 +15,7 @@ import {
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
-export { LocalMenuEntry } from "foundation.slint";
+export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
@@ -228,6 +229,29 @@ export component WriterApp inherits Window {
 
     init => { root.focus-page(); }
 
+    /// F6 / Shift+F6 from the page: Tab inside the page types a tab, so this is
+    /// how the keyboard leaves it. F6 goes to the inspector (or the toolbar when
+    /// it is closed); Shift+F6 goes to the toolbar. F6 anywhere else returns to
+    /// the page.
+    /// Alt+letter or F10 opens the in-window menu named by that key. The page
+    /// text box would otherwise type the letter, so it asks first too.
+    function open-menu-for-key(event: KeyEvent) -> bool {
+        let target = LocalMenu.target(event);
+        if (!root.local-menu-visible || !root.custom-chrome || target < 0) { return false; }
+        root.local-menu-open-index = target;
+        return true;
+    }
+
+    public function leave-page(backwards: bool) {
+        if (backwards || !root.inspector-visible) {
+            action-toolbar.focus-first();
+        } else if (root.compact-inspector-layout) {
+            compact-inspector.focus-first-control();
+        } else {
+            docked-inspector.focus-first-control();
+        }
+    }
+
     public function open-palette() {
         root.palette-open = true;
         root.palette-query = "";
@@ -236,6 +260,17 @@ export component WriterApp inherits Window {
 
     function compact-label(full-label: string) -> string {
         return root.wide-toolbar ? full-label : "";
+    }
+
+    /// Escape (or a click outside) closes the open toolbar menu and puts focus
+    /// back on the toolbar item that opened it.
+    public function dismiss-toolbar-menu() {
+        let kind = root.toolbar-menu-kind;
+        if (kind != 0) {
+            root.toolbar-overflow-open = false;
+            root.toolbar-menu = 0;
+            action-toolbar.focus-menu-trigger(kind);
+        }
     }
 
     /// Close whichever toolbar menu is open and return focus to the page.
@@ -247,45 +282,17 @@ export component WriterApp inherits Window {
         }
     }
 
-    template-chooser-focus := FocusScope {
-        enabled: root.template-chooser-open && !root.save-changes-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.cancel-template();
-                return accept;
-            }
-            if (event.text == Key.Return) {
-                root.create-template(root.template-selected);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
+    // The chooser owns its own keyboard focus (see `TemplateChooserModal`);
+    // closing it returns focus to the page. `template-refocus-tick` hands focus
+    // back when a dialog stacked on top of it closes.
+    property <int> template-refocus-tick: 0;
     changed template-chooser-open => {
-        if (root.template-chooser-open) {
-            template-chooser-focus.focus();
-        } else {
-            root.focus-page();
-        }
-    }
-
-    save-changes-focus := FocusScope {
-        enabled: root.save-changes-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.save-changes-cancel();
-                return accept;
-            }
-            return reject;
-        }
+        if (!root.template-chooser-open) { root.focus-page(); }
     }
 
     changed save-changes-open => {
-        if (root.save-changes-open) {
-            save-changes-focus.focus();
-        } else if (!root.template-chooser-open) {
-            root.focus-page();
+        if (!root.save-changes-open) {
+            if (root.template-chooser-open) { root.template-refocus-tick += 1; } else { root.focus-page(); }
         }
     }
 
@@ -298,12 +305,22 @@ export component WriterApp inherits Window {
     }
 
     app-focus := FocusScope {
+        // A window-wide shortcut scope, not a control: Tab skips it.
+        focus-on-tab-navigation: false;
+        // Alt+letter and F10 open the menu bar even from a text field (the page, the
+        // find field, the comment box), which would otherwise type the letter.
+        capture-key-pressed(event) => {
+            if (root.open-menu-for-key(event)) { return accept; }
+            return reject;
+        }
         key-pressed(event) => {
             if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open) { return reject; }
+            if (event.text == Key.F6) { root.focus-page(); return accept; }
             if (event.text == Key.F3) {
                 if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
                 return accept;
             }
+            if (root.open-menu-for-key(event)) { return accept; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -439,6 +456,8 @@ export component WriterApp inherits Window {
                             if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                             return accept;
                         }
+                        if (root.open-menu-for-key(event)) { return accept; }
+                        if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
                         if (event.text == Key.Tab) {
                             if (!event.modifiers.shift) { root.insert-tab(); }
                             return accept;
@@ -449,7 +468,7 @@ export component WriterApp inherits Window {
                     }
                 }
 
-                WriterInspector {
+                docked-inspector := WriterInspector {
                     width: root.docked-inspector-visible ? 320px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
                     vertical-stretch: 1;
                     visible: root.docked-inspector-visible;
@@ -532,6 +551,8 @@ export component WriterApp inherits Window {
                             if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                             return accept;
                         }
+                        if (root.open-menu-for-key(event)) { return accept; }
+                        if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
                         if (event.text == Key.Tab) {
                             if (!event.modifiers.shift) { root.insert-tab(); }
                             return accept;
@@ -643,77 +664,28 @@ export component WriterApp inherits Window {
         text-alignment: root.text-alignment;
         heading-level: root.heading-level;
         list-style-index: root.list-style-index;
-        close-requested => { root.close-toolbar-overflow(); }
+        close-requested => { root.dismiss-toolbar-menu(); }
         command(id) => { root.close-toolbar-overflow(); root.toolbar-command(id); }
     }
 
     if root.template-chooser-open : TemplateChooserModal {
         width: root.width;
         height: root.height;
+        refocus-tick: root.template-refocus-tick;
         template-selected <=> root.template-selected;
         template-category <=> root.template-category;
         cancel-template => { root.cancel-template(); }
         create-template(idx) => { root.create-template(idx); }
     }
 
-    if root.save-changes-open : Rectangle {
+    if root.save-changes-open : WriterSaveChangesDialog {
         width: root.width;
         height: root.height;
-        background: #00000066;
-
-        // This full-window hit target keeps clicks from reaching the editor.
-        TouchArea { clicked => { save-changes-focus.focus(); } }
-
-        Rectangle {
-            width: min(440px, root.width - 48px);
-            height: min(save-changes-layout.preferred-height, root.height - 48px);
-            x: (root.width - self.width) / 2;
-            y: (root.height - self.height) / 2;
-            border-radius: Theme.tokens.metrics.radius-large;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            drop-shadow-blur: 24px;
-            drop-shadow-offset-y: 8px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            save-changes-layout := VerticalLayout {
-                spacing: Theme.tokens.space.md;
-                padding: Theme.tokens.space.xl;
-
-                Text {
-                    text: "Save changes?";
-                    font-size: Theme.type.heading;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                }
-                Text {
-                    text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?";
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink-secondary;
-                    wrap: word-wrap;
-                }
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    alignment: end;
-                    LoomButton {
-                        label: "Cancel";
-                        variant: "secondary";
-                        clicked => { root.save-changes-cancel(); }
-                    }
-                    LoomButton {
-                        label: "Discard";
-                        variant: "danger";
-                        clicked => { root.save-changes-discard(); }
-                    }
-                    LoomButton {
-                        label: "Save";
-                        variant: "primary";
-                        clicked => { root.save-changes-save(); }
-                    }
-                }
-            }
-        }
+        document: root.save-changes-document;
+        closing: root.save-changes-closing;
+        save => { root.save-changes-save(); }
+        discard => { root.save-changes-discard(); }
+        cancel => { root.save-changes-cancel(); }
     }
 
     LocalMenuPopup {

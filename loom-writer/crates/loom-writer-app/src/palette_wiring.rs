@@ -22,6 +22,36 @@ pub(super) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
             }
         });
     }
+    // Typing and Backspace go through the same shared registry as the rebuilt
+    // query, so commands whose enablement depends on the document (Bold, Italic,
+    // headings) are found while typing, not only in the empty-query list.
+    {
+        let state_for_palette = state.clone();
+        let app_ref = app.as_weak();
+        app.on_palette_key_text(move |text| {
+            if let Some(app) = app_ref.upgrade() {
+                let query = format!("{}{}", app.get_palette_query(), text);
+                app.set_palette_query(query.as_str().into());
+                let registry = state_for_palette.registry.lock().unwrap();
+                rebuild_palette_with_registry(&app, &registry, &query);
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let state_for_palette = state.clone();
+        let app_ref = app.as_weak();
+        app.on_palette_backspace(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.pop();
+                app.set_palette_query(query.as_str().into());
+                let registry = state_for_palette.registry.lock().unwrap();
+                rebuild_palette_with_registry(&app, &registry, &query);
+                app.set_palette_selected(0);
+            }
+        });
+    }
     {
         let state_for_palette = state.clone();
         let app_ref = app.as_weak();

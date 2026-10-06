@@ -43,10 +43,11 @@ use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
     InvocationSource,
 };
+#[cfg(test)]
+use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
 use loom_desktop::{
-    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
-    FileDialogService, FileFilter, Menu, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs,
-    NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    CommandAction, CommandStateProjection, DesktopError, FileDialogService, FileFilter,
+    MenuBarService, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -3617,43 +3618,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
     wire_close_guard(&app, &state);
 
-    let mut menu_bar = build_standard_menu_bar(
-        "Loom Writer",
-        vec![
-            MenuItem::action_with_shortcut(
-                "file.export_pdf",
-                "Export to PDF...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.export_docx", "Export to Word..."),
-            MenuItem::action("file.export_md", "Export to Markdown..."),
-        ],
-        vec![],
-        vec![
-            MenuItem::check("view.inspector", "Format Inspector", false),
-            MenuItem::check("view.navigator", "Outline Navigator", false),
-        ],
-        vec![Menu::new(
-            "Format",
-            vec![
-                MenuItem::action_with_shortcut("format.bold", "Bold", MenuShortcut::primary("B")),
-                MenuItem::action_with_shortcut(
-                    "format.italic",
-                    "Italic",
-                    MenuShortcut::primary("I"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "format.underline",
-                    "Underline",
-                    MenuShortcut::primary("U"),
-                ),
-            ],
-        )],
-    );
-    // Only commands with a registered Writer/controller sink are enabled.
-    // Application/window/help entries remain disabled until a real native
-    // host bridge is installed for them.
-    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
+    let menu_bar = local_menu::writer_menu_bar();
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
@@ -4732,3 +4697,6 @@ mod toolbar_tests;
 
 #[cfg(test)]
 mod scale_surfaces_tests;
+
+#[cfg(test)]
+mod keyboard_flow_tests;

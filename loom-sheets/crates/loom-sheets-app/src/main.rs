@@ -15,10 +15,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(test)]
+use loom_desktop::{build_standard_menu_bar, Menu, MenuItem};
 use loom_desktop::{
-    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
-    FileDialogService, FileFilter, Menu, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs,
-    NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    CommandAction, CommandStateProjection, DesktopError, FileDialogService, FileFilter,
+    MenuBarService, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_sheets_core::persistence::WorkbookFile;
 #[cfg(test)]
@@ -2371,6 +2372,18 @@ fn startup_workbook(recovered: Option<WorkbookFile>, example: bool) -> (Workbook
     }
 }
 
+/// Shift+arrow extends the selected range.
+fn wire_selection_extension(app: &SheetsApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_extend_selection(move |row_delta, col_delta| {
+        if let Some(app) = app_ref.upgrade() {
+            extend_selection(&app, &state.current.borrow(), row_delta, col_delta);
+            project_current(&app, &state);
+        }
+    });
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -2632,16 +2645,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     tab_run::register_navigation(&app, &state);
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_extend_selection(move |row_delta, col_delta| {
-            if let Some(app) = app_ref.upgrade() {
-                extend_selection(&app, &state.current.borrow(), row_delta, col_delta);
-                project_current(&app, &state);
-            }
-        });
-    }
+    wire_selection_extension(&app, &state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2754,42 +2758,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // Template-chooser callbacks live in `register_sheet_actions` (actions.rs)
     // alongside every other sheet callback; see `create_template_workbook`.
 
-    let mut menu_bar = build_standard_menu_bar(
-        "Loom Sheets",
-        vec![
-            MenuItem::action("file.new_template", "New from Template..."),
-            MenuItem::action_with_shortcut(
-                "file.export_csv",
-                "Export to CSV...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
-        ],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
-        vec![Menu::new(
-            "Table",
-            vec![
-                MenuItem::action("table.add_row", "Add Row"),
-                MenuItem::action("table.delete_row", "Delete Row"),
-                MenuItem::action("table.add_col", "Add Column"),
-                MenuItem::action("table.delete_col", "Delete Column"),
-                MenuItem::action("table.sort_asc", "Sort Ascending"),
-                MenuItem::action("table.sort_desc", "Sort Descending"),
-                MenuItem::action("table.freeze_header", "Freeze Header Row"),
-                MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
-                MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
-                MenuItem::action("sheets.insert_shape", "Insert Shape"),
-                MenuItem::action("sheets.insert_image", "Insert Image"),
-                MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
-            ],
-        )],
-    );
-    // Only commands with a registered Sheets/controller sink are enabled.
-    // Application/window entries remain disabled until a real native host
-    // bridge is installed for them; Help > Keyboard Shortcuts opens the
-    // existing command palette.
-    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
+    let menu_bar = local_menu::sheets_menu_bar();
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;

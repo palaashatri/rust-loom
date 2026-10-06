@@ -127,6 +127,45 @@ export component TemplateChooserModal inherits Rectangle {
     y: 0px;
     background: Theme.palette().scrim;
 
+    // The chooser is keyboard-complete: Left/Right pick a template, Up/Down a
+    // category, Return creates, Escape cancels, and Tab cycles the chooser, its
+    // Cancel button and its Create button without leaving the dialog.
+    in property <int> refocus-tick: 0;
+    changed refocus-tick => { chooser-focus.focus(); }
+
+    // The nearest visible template in the direction of `delta`, or the current one.
+    function pick-template(delta: int) -> int {
+        let s = root.template-selected;
+        if (s + delta >= 0 && s + delta <= 5 && root.template-visible(s + delta)) { return s + delta; }
+        if (s + 2 * delta >= 0 && s + 2 * delta <= 5 && root.template-visible(s + 2 * delta)) { return s + 2 * delta; }
+        if (s + 3 * delta >= 0 && s + 3 * delta <= 5 && root.template-visible(s + 3 * delta)) { return s + 3 * delta; }
+        if (s + 4 * delta >= 0 && s + 4 * delta <= 5 && root.template-visible(s + 4 * delta)) { return s + 4 * delta; }
+        if (s + 5 * delta >= 0 && s + 5 * delta <= 5 && root.template-visible(s + 5 * delta)) { return s + 5 * delta; }
+        return s;
+    }
+
+    chooser-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        init => { chooser-focus.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.cancel-template(); return accept; }
+            if (event.text == Key.Return) { root.create-template(root.template-selected); return accept; }
+            if (event.text == Key.LeftArrow) { root.template-selected = root.pick-template(-1); return accept; }
+            if (event.text == Key.RightArrow) { root.template-selected = root.pick-template(1); return accept; }
+            if (event.text == Key.UpArrow) { root.choose-template-category(max(0, root.template-category - 1)); return accept; }
+            if (event.text == Key.DownArrow) { root.choose-template-category(min(5, root.template-category + 1)); return accept; }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                if (event.text == Key.Backtab || event.modifiers.shift) {
+                    if (create-button.has-focus) { cancel-button.grab-focus(); } else if (cancel-button.has-focus) { chooser-focus.focus(); } else { create-button.grab-focus(); }
+                } else {
+                    if (cancel-button.has-focus) { create-button.grab-focus(); } else if (create-button.has-focus) { chooser-focus.focus(); } else { cancel-button.grab-focus(); }
+                }
+                return accept;
+            }
+            return reject;
+        }
+
     Rectangle {
         width: min(1160px, max(1px, root.width - 48px));
         x: (root.width - self.width) / 2;
@@ -392,13 +431,13 @@ export component TemplateChooserModal inherits Rectangle {
                         vertical-alignment: center;
                     }
 
-                    LoomButton {
+                    cancel-button := LoomButton {
                         label: "Cancel";
                         variant: "secondary";
                         clicked => { root.cancel-template(); }
                     }
 
-                    LoomButton {
+                    create-button := LoomButton {
                         label: "Create Document";
                         variant: "primary";
                         clicked => { root.create-template(root.template-selected); }
@@ -406,5 +445,6 @@ export component TemplateChooserModal inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

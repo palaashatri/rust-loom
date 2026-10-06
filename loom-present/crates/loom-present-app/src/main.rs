@@ -2568,10 +2568,21 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let down_arrow: SharedString = slint::platform::Key::DownArrow.into();
         let delete_key: SharedString = slint::platform::Key::Delete.into();
         let backspace_key: SharedString = slint::platform::Key::Backspace.into();
+        let page_up_key: SharedString = slint::platform::Key::PageUp.into();
+        let page_down_key: SharedString = slint::platform::Key::PageDown.into();
         app.on_canvas_key_pressed(move |key, _shift, modified| {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_is_preview_mode() || modified {
                     return EventResult::Reject;
+                }
+                // Page Up and Page Down move between slides without the pointer.
+                if key == page_down_key {
+                    app.invoke_next_slide();
+                    return EventResult::Accept;
+                }
+                if key == page_up_key {
+                    app.invoke_prev_slide();
+                    return EventResult::Accept;
                 }
                 let (dx, dy) = if key == left_arrow {
                     (-10.0, 0.0)
@@ -3136,6 +3147,8 @@ mod picture_tests;
 mod file_title;
 #[cfg(test)]
 mod focus_tests;
+#[cfg(test)]
+mod keyboard_flow_tests;
 mod local_menu;
 mod model_sync;
 mod picture_view;

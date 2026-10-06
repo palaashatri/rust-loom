@@ -8,12 +8,12 @@ import { PresentActionToolbar, PresentToolbarMenu } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
 import { PresentThemeChooser } from "theme_chooser.slint";
 import {
-    LoomButton, LoomTitleBar, LoomWindowResizeEdges,
-    LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+    LoomButton, LoomIconButton, LoomTitleBar, LoomWindowResizeEdges,
+    LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
-export { LocalMenuEntry } from "foundation.slint";
+export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { PresenterWindow, ThumbRows } from "presenter.slint";
 
 export component PresentApp inherits Window {
@@ -64,6 +64,15 @@ export component PresentApp inherits Window {
             root.inspector-tab = tab;
             root.show-inspector = true;
         }
+    }
+    property <int> focus-view-tick: 0;
+    property <int> focus-zoom-tick: 0;
+    /// Escape in the View or Zoom menu: close it and focus the item that opened it.
+    function dismiss-view-menus() {
+        let was-zoom = root.zoom-menu-open;
+        root.view-menu-open = false;
+        root.zoom-menu-open = false;
+        if (was-zoom) { root.focus-zoom-tick += 1; } else { root.focus-view-tick += 1; }
     }
     function close-view-menus() {
         root.view-menu-open = false;
@@ -222,6 +231,13 @@ export component PresentApp inherits Window {
     callback toggle-inspector;
     callback toggle-preview-mode;
     callback open-presenter;
+    /// Alt+letter or F10 opens the in-window menu named by that key.
+    function open-menu-for-key(event: KeyEvent) -> bool {
+        let target = LocalMenu.target(event);
+        if (!root.local-menu-visible || !root.custom-chrome || root.is-preview-mode || target < 0) { return false; }
+        root.local-menu-open-index = target;
+        return true;
+    }
     public function close-toolbar-overflow() {
         root.toolbar-overflow-open = false;
     }
@@ -261,41 +277,23 @@ export component PresentApp inherits Window {
         root.focus-editor();
     }
 
-    overflow-menu-focus := FocusScope {
-        enabled: root.toolbar-overflow-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close-overflow-menu();
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    theme-chooser-focus := FocusScope {
-        enabled: root.theme-chooser-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.cancel-theme();
-                return accept;
-            }
-            if (event.text == Key.Return) {
-                root.create-theme(root.theme-selected);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
+    // The theme chooser owns its keyboard focus (see `PresentThemeChooser`);
+    // closing it returns focus to the slide editor. `theme-refocus-tick` hands
+    // focus back when a dialog stacked on top of it closes.
+    property <int> theme-refocus-tick: 0;
     changed theme-chooser-open => {
-        if (root.theme-chooser-open) {
-            theme-chooser-focus.focus();
-        } else {
-            root.focus-editor();
-        }
+        if (!root.theme-chooser-open) { root.focus-editor(); }
     }
 
     app-focus := FocusScope {
+        // A window-wide shortcut scope, not a control: Tab skips it.
+        focus-on-tab-navigation: false;
+        // Alt+letter and F10 open the menu bar even from a text field (notes, the
+        // element text), which would otherwise type the letter.
+        capture-key-pressed(event) => {
+            if (root.open-menu-for-key(event)) { return accept; }
+            return reject;
+        }
         key-pressed(event) => {
             if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open || root.view-menu-open || root.zoom-menu-open) { return reject; }
             if (root.is-preview-mode) {
@@ -312,7 +310,8 @@ export component PresentApp inherits Window {
                     return accept;
                 }
                 if (event.text == "n" || event.text == "N") {
-                    root.new-deck();
+                    // Ctrl+Shift+N is the New Slide shortcut shown in the Slide menu.
+                    if (event.modifiers.shift) { root.add-slide(); } else { root.new-deck(); }
                     return accept;
                 }
                 if (event.text == "o" || event.text == "O") {
@@ -358,6 +357,8 @@ export component PresentApp inherits Window {
             }
 
             if !root.is-preview-mode : action-toolbar := PresentActionToolbar {
+                focus-view-tick: root.focus-view-tick;
+                focus-zoom-tick: root.focus-zoom-tick;
                 overflow: root.overflow-toolbar;
                 inspector-visible: root.show-inspector;
                 inspector-tab: root.inspector-tab;
@@ -368,13 +369,13 @@ export component PresentApp inherits Window {
                     root.zoom-menu-open = false;
                     root.menu-x = self.view-x;
                     root.view-menu-open = !root.view-menu-open;
-                    if (root.view-menu-open) { view-menu-focus.focus(); } else { root.focus-editor(); }
+                    if (!root.view-menu-open) { root.focus-editor(); }
                 }
                 toggle-zoom-menu => {
                     root.view-menu-open = false;
                     root.menu-x = self.zoom-x;
                     root.zoom-menu-open = !root.zoom-menu-open;
-                    if (root.zoom-menu-open) { view-menu-focus.focus(); } else { root.focus-editor(); }
+                    if (!root.zoom-menu-open) { root.focus-editor(); }
                 }
                 add-slide => { root.add-slide(); }
                 add-text => { root.add-text(); }
@@ -387,7 +388,6 @@ export component PresentApp inherits Window {
                         root.close-toolbar-overflow();
                     } else {
                         root.toolbar-overflow-open = true;
-                        overflow-menu-focus.focus();
                     }
                 }
             }
@@ -506,17 +506,11 @@ export component PresentApp inherits Window {
                                     color: Theme.palette().ink;
                                     horizontal-stretch: 1;
                                 }
-                                TouchArea {
-                                    width: 24px;
-                                    height: 24px;
-                                    clicked => { root.show-notes-drawer = false; }
-                                    Text {
-                                        text: "✕";
-                                        font-size: Theme.type.caption;
-                                        color: Theme.palette().ink-secondary;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
+                                LoomIconButton {
+                                    icon: "close";
+                                    label: "Close speaker notes";
+                                    tooltip: "Close speaker notes";
+                                    clicked => { root.show-notes-drawer = false; root.focus-editor(); }
                                 }
                             }
 
@@ -589,22 +583,12 @@ export component PresentApp inherits Window {
                 open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
                 export-pdf => { root.export-pdf(); }
                 export-pptx => { root.export-pptx(); }
-                close-requested => { root.close-toolbar-overflow(); }
+                close-requested => { root.close-overflow-menu(); }
             }
         }
     }
 
     // View and Zoom menus under their toolbar items.
-    view-menu-focus := FocusScope {
-        enabled: root.view-menu-open || root.zoom-menu-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close-view-menus();
-                return accept;
-            }
-            return reject;
-        }
-    }
     if (root.view-menu-open || root.zoom-menu-open) && !root.is-preview-mode : Rectangle {
         width: root.width;
         height: root.height;
@@ -621,10 +605,12 @@ export component PresentApp inherits Window {
             toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
             choose-zoom(idx) => { root.zoom-index = idx; }
             close-requested => { root.close-view-menus(); }
+            dismissed => { root.dismiss-view-menus(); }
         }
     }
 
     if root.theme-chooser-open : PresentThemeChooser {
+        refocus-tick: root.theme-refocus-tick;
         open <=> root.theme-chooser-open;
         theme-selected <=> root.theme-selected;
         theme-category <=> root.theme-category;
@@ -673,36 +659,44 @@ export component PresentApp inherits Window {
         }
     }
 
-    if root.save-changes-open : Rectangle {
-        width: root.width; height: root.height; background: #00000066;
-        TouchArea { clicked => { } }
+    // Save Changes is a modal: its FocusScope parents the three buttons so keys
+    // bubble to it, Tab cycles Cancel, Discard, Save without leaving, Escape
+    // cancels, and the primary button is focused when it opens.
+    if root.save-changes-open : save-changes-focus := FocusScope {
+        width: root.width;
+        height: root.height;
+        init => { save-button.grab-focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                if (event.text == Key.Backtab || event.modifiers.shift) {
+                    if (save-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { cancel-button.grab-focus(); } else { save-button.grab-focus(); }
+                } else {
+                    if (cancel-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { save-button.grab-focus(); } else { cancel-button.grab-focus(); }
+                }
+                return accept;
+            }
+            return reject;
+        }
+      Rectangle {
+        width: parent.width; height: parent.height; background: #00000066;
+        TouchArea { clicked => { save-changes-focus.focus(); } }
         Rectangle { width: min(440px * max(1.0, Theme.text-scale), root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
             save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
                 Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); color: Theme.palette().ink; }
                 Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; }
                 HorizontalLayout { alignment: end; spacing: 8px;
-                    LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
-                    LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
-                    LoomButton { label: "Save"; variant: "primary"; clicked => { root.save-changes-save(); } }
+                    cancel-button := LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
+                    discard-button := LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
+                    save-button := LoomButton { label: "Save"; variant: "primary"; clicked => { root.save-changes-save(); } }
                 }
             }
         }
-    }
-    save-changes-focus := FocusScope {
-        enabled: root.save-changes-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.save-changes-cancel();
-                return accept;
-            }
-            return reject;
-        }
+      }
     }
     changed save-changes-open => {
-        if (root.save-changes-open) {
-            save-changes-focus.focus();
-        } else {
-            root.focus-editor();
+        if (!root.save-changes-open) {
+            if (root.theme-chooser-open) { root.theme-refocus-tick += 1; } else { root.focus-editor(); }
         }
     }
 

@@ -21,7 +21,7 @@ pub use menu::{
     CommandState, CommandStateProjection, Menu, MenuActionSink, MenuBar, MenuBarService, MenuItem,
     MenuShortcut, NativeMenuBar, ScriptedMenuBar,
 };
-pub use ui_bindings::{project_local_menu, LocalMenuLine};
+pub use ui_bindings::{menu_key_index, project_local_menu, LocalMenuLine};
 
 /// A display name and extension list presented by a native file dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]

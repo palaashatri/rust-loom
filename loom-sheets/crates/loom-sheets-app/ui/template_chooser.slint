@@ -118,29 +118,6 @@ export component TemplateChooserModal inherits Rectangle {
         }
     }
 
-    chooser-focus := FocusScope {
-        enabled: root.keyboard-active;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.cancel-template();
-                return accept;
-            }
-            if (event.text == Key.Return) {
-                root.create-template(root.template-selected);
-                return accept;
-            }
-            if (event.text == Key.LeftArrow) {
-                root.navigate-template-selection(-1);
-                return accept;
-            }
-            if (event.text == Key.RightArrow) {
-                root.navigate-template-selection(1);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
     function choose-template-category(category-index: int) {
         root.template-category = category-index;
         root.template-scroll-position = 0;
@@ -162,6 +139,38 @@ export component TemplateChooserModal inherits Rectangle {
     x: 0px;
     y: 0px;
     background: Theme.palette().scrim;
+
+    // The chooser is keyboard-complete: Left/Right pick a template, Up/Down a
+    // category, Return creates, Escape cancels, and Tab walks Cancel and Create
+    // then wraps back to the chooser (Shift+Tab the other way), so focus never
+    // leaves the dialog. The scope parents the buttons, so their keys bubble to it.
+    chooser-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.keyboard-active;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-template();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-template(root.template-selected);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.navigate-template-selection(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.navigate-template-selection(1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) { root.choose-template-category(max(0, root.template-category - 1)); return accept; }
+            if (event.text == Key.DownArrow) { root.choose-template-category(min(6, root.template-category + 1)); return accept; }
+            if (event.text == Key.Tab && !event.modifiers.shift && create-button.has-focus) { chooser-focus.focus(); return accept; }
+            if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { create-button.grab-focus(); return accept; }
+            return reject;
+        }
 
     // Numbers modal container
     Rectangle {
@@ -606,7 +615,7 @@ export component TemplateChooserModal inherits Rectangle {
                         clicked => { root.cancel-template(); }
                     }
 
-                    LoomButton {
+                    create-button := LoomButton {
                         label: "Create";
                         variant: "primary";
                         clicked => { root.create-template(root.template-selected); }
@@ -614,5 +623,6 @@ export component TemplateChooserModal inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

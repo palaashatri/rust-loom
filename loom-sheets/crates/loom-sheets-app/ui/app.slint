@@ -5,7 +5,7 @@ import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
     LoomToolbar, LoomStatusBar, LoomStatusText, LoomTitleBar, LoomWindowResizeEdges,
-    LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+    LocalMenuBar, LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
 import { SheetToolbarOverflow } from "toolbar_overflow.slint";
@@ -19,7 +19,7 @@ import {
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
-export { LocalMenuEntry } from "foundation.slint";
+export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { GridPointer, CellSpill } from "grid_pointer.slint";
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
@@ -315,9 +315,30 @@ export component SheetsApp inherits Window {
             action-toolbar.focus-overflow-trigger();
         }
     }
+    // Tab moves the cell cursor, so F6 reaches what it cannot: grid, objects, chart
+    // (else the toolbar), back. Shift+F6: grid, toolbar, inspector (`region`).
+
+    property <int> region: 0;
+    function cycle-region(panels: bool) {
+        let from = root.object-state != 0 || grid-surface.grid-has-focus ? 0 : root.region;
+        if (panels) {
+            if (from == 3 && root.inspector-visible) { root.region = 4; inspector-panel.focus-inspector(); }
+            else if (from == 0) { root.region = 3; root.object-state = 0; action-toolbar.focus-first(); }
+            else { root.region = 0; grid-surface.focus-grid(); }
+        } else if (root.object-state != 0 || !grid-surface.grid-has-focus) { root.object-state = 0; root.region = 0; grid-surface.focus-grid(); }
+        else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
+        else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }
+        else { root.region = 3; action-toolbar.focus-first(); }
+    }
     public function close-toolbar-menu() {
         root.toolbar-menu = 0;
-        app-focus.focus();
+        grid-surface.focus-grid();
+    }
+    /// Escape: back to the item that opened the menu.
+    public function dismiss-toolbar-menu() {
+        let kind = root.toolbar-menu;
+        root.toolbar-menu = 0;
+        if (kind != 0) { action-toolbar.focus-menu-trigger(kind); } else { grid-surface.focus-grid(); }
     }
     /// Toolbar Format/Organize: show that inspector tab, or close the
     /// inspector when its tab is already showing.
@@ -336,26 +357,31 @@ export component SheetsApp inherits Window {
             root.toolbar-overflow-open = false;
             save-changes-dialog.focus-dialog();
         } else if (!root.template-chooser-open && !root.palette-open) {
-            app-focus.focus();
+            grid-surface.focus-grid();
+        }
+    }
+    // The palette hands focus back to the grid unless a command moved it.
+    changed palette-open => {
+        if (!root.palette-open && !root.template-chooser-open && !root.save-changes-open
+            && !root.xlsx-import-warning-open && root.object-state == 0) {
+            grid-surface.focus-grid();
         }
     }
     app-focus := FocusScope {
+        // A shortcut scope, not a control: Tab skips it.
+        focus-on-tab-navigation: false;
+        // Alt+letter and F10 open a menu before a text field can type them.
+        capture-key-pressed(event) => {
+            let target = LocalMenu.target(event);
+            if (root.local-menu-visible && target >= 0) { root.local-menu-open-index = target; return accept; }
+            return reject;
+        }
         key-pressed(event) => {
             if (root.close-draining && !root.save-changes-open) { return accept; }
             if (root.xlsx-import-warning-open) { return reject; }
-            if (root.local-menu-visible && event.modifiers.alt) {
-                if (event.text == "f" || event.text == "F") { root.local-menu-open-index = 0; return accept; }
-                if (event.text == "e" || event.text == "E") { root.local-menu-open-index = 1; return accept; }
-                if (event.text == "v" || event.text == "V") { root.local-menu-open-index = 2; return accept; }
-                if (event.text == "t" || event.text == "T") { root.local-menu-open-index = 3; return accept; }
-                if (event.text == "h" || event.text == "H") { root.local-menu-open-index = 4; return accept; }
-            }
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
-                // F6: leave objects, else enter objects, else chart data.
-                if (root.object-state != 0) { root.object-state = 0; grid-surface.focus-grid(); }
-                else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
-                else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }
+                root.cycle-region(event.modifiers.shift);
                 return accept;
             }
             if (event.modifiers.control || event.modifiers.meta) {
@@ -422,7 +448,7 @@ export component SheetsApp inherits Window {
                 toggle-menu(kind, x) => {
                     root.toolbar-menu-x = x;
                     root.toolbar-menu = root.toolbar-menu == kind ? 0 : kind;
-                    if (root.toolbar-menu != 0) { toolbar-menu-popup.focus-menu(); } else { app-focus.focus(); }
+                    if (root.toolbar-menu != 0) { toolbar-menu-popup.focus-menu(); } else { grid-surface.focus-grid(); }
                 }
                 show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
                 overflow-requested => {
@@ -700,7 +726,7 @@ export component SheetsApp inherits Window {
         cell-italic: root.cell-italic;
         cell-underline: root.cell-underline;
         cell-alignment: root.cell-alignment;
-        close-requested => { root.close-toolbar-menu(); }
+        close-requested => { root.dismiss-toolbar-menu(); }
         command(id) => { root.close-toolbar-menu(); root.toolbar-command(id); }
     }
     if root.template-chooser-open : TemplateChooserModal {
@@ -745,7 +771,7 @@ export component SheetsApp inherits Window {
         focus-template-chooser => {
             root.template-chooser-focus-request = !root.template-chooser-focus-request;
         }
-        focus-app => { app-focus.focus(); }
+        focus-app => { grid-surface.focus-grid(); }
         focus-grid => { grid-surface.focus-grid(); }
         import-cancel => { root.xlsx-import-cancel(); }
         import-continue => { root.xlsx-import-continue(); }

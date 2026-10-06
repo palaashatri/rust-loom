@@ -89,6 +89,28 @@ export component PresentThemeChooser inherits Rectangle {
         return false;
     }
 
+    // Keyboard: Left/Right pick a theme, Up/Down a category, Return creates,
+    // Escape cancels. Tab walks the aspect control, Cancel and Create and wraps
+    // from Create back to the chooser (and Shift+Tab the other way), so focus
+    // never leaves the dialog.
+    in property <int> refocus-tick: 0;
+    changed refocus-tick => { chooser-focus.focus(); }
+
+    function pick-category(cat: int) {
+        root.theme-category = cat;
+        if (!root.theme-visible(root.theme-selected)) {
+            root.theme-selected = root.theme-visible(0) ? 0 : root.theme-visible(1) ? 1 : root.theme-visible(2) ? 2 : 3;
+        }
+        root.choose-theme-category(cat);
+    }
+
+    function step-theme(delta: int) {
+        let s = root.theme-selected;
+        if (s + delta >= 0 && s + delta <= 3 && root.theme-visible(s + delta)) { root.theme-selected = s + delta; }
+        else if (s + 2 * delta >= 0 && s + 2 * delta <= 3 && root.theme-visible(s + 2 * delta)) { root.theme-selected = s + 2 * delta; }
+        else if (s + 3 * delta >= 0 && s + 3 * delta <= 3 && root.theme-visible(s + 3 * delta)) { root.theme-selected = s + 3 * delta; }
+    }
+
     width: 100%;
     height: 100%;
     background: Theme.palette().scrim;
@@ -96,6 +118,22 @@ export component PresentThemeChooser inherits Rectangle {
     modal-touch := TouchArea {
         clicked => { }
     }
+
+    chooser-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        init => { chooser-focus.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.cancel-theme(); return accept; }
+            if (event.text == Key.Return) { root.create-theme(root.theme-selected); return accept; }
+            if (event.text == Key.LeftArrow) { root.step-theme(-1); return accept; }
+            if (event.text == Key.RightArrow) { root.step-theme(1); return accept; }
+            if (event.text == Key.UpArrow) { root.pick-category(max(0, root.theme-category - 1)); return accept; }
+            if (event.text == Key.DownArrow) { root.pick-category(min(3, root.theme-category + 1)); return accept; }
+            if (event.text == Key.Tab && !event.modifiers.shift && create-button.has-focus) { chooser-focus.focus(); return accept; }
+            if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { create-button.grab-focus(); return accept; }
+            return reject;
+        }
 
     Rectangle {
         width: min(1160px, max(1px, parent.width - 48px));
@@ -157,7 +195,7 @@ export component PresentThemeChooser inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            TouchArea { clicked => { root.choose-theme-category(0); } }
+                            TouchArea { clicked => { root.pick-category(0); } }
                         }
 
                         Rectangle {
@@ -175,7 +213,7 @@ export component PresentThemeChooser inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            TouchArea { clicked => { root.choose-theme-category(1); } }
+                            TouchArea { clicked => { root.pick-category(1); } }
                         }
 
                         Rectangle {
@@ -193,7 +231,7 @@ export component PresentThemeChooser inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            TouchArea { clicked => { root.choose-theme-category(2); } }
+                            TouchArea { clicked => { root.pick-category(2); } }
                         }
 
                         Rectangle {
@@ -211,7 +249,7 @@ export component PresentThemeChooser inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            TouchArea { clicked => { root.choose-theme-category(3); } }
+                            TouchArea { clicked => { root.pick-category(3); } }
                         }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
@@ -430,7 +468,7 @@ export component PresentThemeChooser inherits Rectangle {
                         clicked => { root.cancel-theme(); }
                     }
 
-                    LoomButton {
+                    create-button := LoomButton {
                         label: "Create Presentation";
                         variant: "primary";
                         clicked => { root.create-theme(root.theme-selected); }
@@ -438,5 +476,6 @@ export component PresentThemeChooser inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

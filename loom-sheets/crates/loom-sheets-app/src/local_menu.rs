@@ -40,6 +40,45 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
 
 loom_desktop::local_menu_bindings!(SheetsApp, SUPPORTED_COMMANDS, set_status_left);
 
+/// Sheets' menu bar with only the commands Sheets handles enabled. Help >
+/// Keyboard Shortcuts opens the command palette.
+pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
+    use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
+    let mut menu_bar = build_standard_menu_bar(
+        "Loom Sheets",
+        vec![
+            MenuItem::action("file.new_template", "New from Template..."),
+            MenuItem::action_with_shortcut(
+                "file.export_csv",
+                "Export to CSV...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
+        ],
+        vec![],
+        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        vec![Menu::new(
+            "Table",
+            vec![
+                MenuItem::action("table.add_row", "Add Row"),
+                MenuItem::action("table.delete_row", "Delete Row"),
+                MenuItem::action("table.add_col", "Add Column"),
+                MenuItem::action("table.delete_col", "Delete Column"),
+                MenuItem::action("table.sort_asc", "Sort Ascending"),
+                MenuItem::action("table.sort_desc", "Sort Descending"),
+                MenuItem::action("table.freeze_header", "Freeze Header Row"),
+                MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
+                MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
+                MenuItem::action("sheets.insert_shape", "Insert Shape"),
+                MenuItem::action("sheets.insert_image", "Insert Image"),
+                MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
+            ],
+        )],
+    );
+    menu_bar.disable_items_except(SUPPORTED_COMMANDS);
+    menu_bar
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};

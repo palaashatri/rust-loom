@@ -17,14 +17,16 @@ export component XlsxImportWarningDialog inherits Rectangle {
 
     visible: root.open;
 
+    // Cancel is the safe default: Enter on a freshly opened warning keeps the
+    // current workbook.
     public function focus-dialog() {
-        warning-focus.focus();
+        cancel-button.grab-focus();
     }
 
     changed open => {
         if (root.open) {
             root.clear-sibling-overlays();
-            warning-focus.focus();
+            cancel-button.grab-focus();
         } else if (root.save-changes-open) {
             root.focus-save-changes();
         } else if (root.template-chooser-open) {
@@ -37,14 +39,14 @@ export component XlsxImportWarningDialog inherits Rectangle {
     changed template-chooser-open => {
         if (root.template-chooser-open) {
             if (root.open) {
-                warning-focus.focus();
+                cancel-button.grab-focus();
             } else {
                 root.focus-template-chooser();
             }
         } else if (root.save-changes-open) {
             root.focus-save-changes();
         } else if (root.open) {
-            warning-focus.focus();
+            cancel-button.grab-focus();
         } else {
             root.focus-grid();
         }
@@ -60,6 +62,11 @@ export component XlsxImportWarningDialog inherits Rectangle {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.import-cancel();
+                return accept;
+            }
+            // Tab cycles the two buttons and never leaves the dialog.
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                if (cancel-button.has-focus) { continue-button.grab-focus(); } else { cancel-button.grab-focus(); }
                 return accept;
             }
             return reject;
@@ -122,12 +129,12 @@ export component XlsxImportWarningDialog inherits Rectangle {
                     action-row := HorizontalLayout {
                         spacing: Theme.tokens.space.sm;
                         alignment: end;
-                        LoomButton {
+                        cancel-button := LoomButton {
                             label: "Cancel import";
                             variant: "secondary";
                             clicked => { root.import-cancel(); }
                         }
-                        LoomButton {
+                        continue-button := LoomButton {
                             label: "Import with feature loss";
                             variant: "danger";
                             clicked => { root.import-continue(); }

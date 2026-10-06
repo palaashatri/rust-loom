@@ -127,6 +127,37 @@ pub fn project_local_menu(
     Ok((labels, entries))
 }
 
+/// Which in-window menu a key opens: Alt plus a letter, or `"F10"` for the
+/// first menu. Each menu takes the first letter of its label that an earlier
+/// menu has not already claimed (File and Format become F and O), so every
+/// menu has a distinct key. Returns -1 when the key opens nothing.
+pub fn menu_key_index<S: AsRef<str>>(labels: &[S], key: &str) -> i32 {
+    if key == "F10" {
+        return if labels.is_empty() { -1 } else { 0 };
+    }
+    let mut wanted = key.chars();
+    let (Some(letter), None) = (wanted.next(), wanted.next()) else {
+        return -1;
+    };
+    let letter = letter.to_ascii_lowercase();
+    let mut claimed: Vec<char> = Vec::new();
+    for (index, label) in labels.iter().enumerate() {
+        let mnemonic = label
+            .as_ref()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .find(|c| !claimed.contains(c));
+        if let Some(mnemonic) = mnemonic {
+            if mnemonic == letter {
+                return index as i32;
+            }
+            claimed.push(mnemonic);
+        }
+    }
+    -1
+}
+
 /// Expand the in-window menu bindings for one application window.
 ///
 /// Invoke inside a module of the application crate:
@@ -172,6 +203,17 @@ macro_rules! local_menu_bindings {
         /// Keep the highlighted row valid as menus open and arrow keys move it.
         pub(crate) fn wire_keyboard(app: &$app) {
             use ::slint::{ComponentHandle as _, Model as _};
+            let app_ref = app.as_weak();
+            app.global::<crate::LocalMenu>().on_key_index(move |key| {
+                app_ref.upgrade().map_or(-1, |app| {
+                    let labels: ::std::vec::Vec<::std::string::String> = app
+                        .get_local_menu_labels()
+                        .iter()
+                        .map(|label| label.to_string())
+                        .collect();
+                    $crate::menu_key_index(&labels, key.as_str())
+                })
+            });
             let app_ref = app.as_weak();
             app.on_local_menu_opened(move |menu_index| {
                 if let Some(app) = app_ref.upgrade() {
@@ -342,6 +384,19 @@ macro_rules! window_chrome_bindings {
 mod tests {
     use super::*;
     use crate::build_standard_menu_bar;
+
+    #[test]
+    fn menu_keys_are_distinct_mnemonics_and_f10_opens_the_first_menu() {
+        let labels = ["File", "Edit", "View", "Format"];
+        assert_eq!(menu_key_index(&labels, "f"), 0);
+        assert_eq!(menu_key_index(&labels, "E"), 1);
+        assert_eq!(menu_key_index(&labels, "v"), 2);
+        assert_eq!(menu_key_index(&labels, "o"), 3, "Format yields F to File");
+        assert_eq!(menu_key_index(&labels, "x"), -1);
+        assert_eq!(menu_key_index(&labels, "ab"), -1);
+        assert_eq!(menu_key_index(&labels, "F10"), 0);
+        assert_eq!(menu_key_index::<&str>(&[], "F10"), -1);
+    }
 
     #[test]
     fn projection_shows_only_menus_with_working_commands() {

@@ -113,15 +113,20 @@ export component PresentInspector inherits LoomPanel {
                     border-color: Theme.palette().border;
                     background: Theme.palette().surface-raised;
                     clip: true;
+                    // Sized to the field, not to its text: a long title must scroll inside
+                    // the field rather than push the caret off the panel.
                     HorizontalLayout {
                         padding-left: Theme.tokens.space.sm;
                         padding-right: Theme.tokens.space.sm;
                         TextInput {
+                            min-width: 0px;
+                            horizontal-stretch: 1;
                             text: root.active-element-content;
                             font-size: Theme.type.body;
                             color: Theme.palette().ink;
                             vertical-alignment: center;
                             single-line: true;
+                            accessible-label: "Selected element text";
                             edited => { root.update-element-content(self.text); }
                         }
                     }

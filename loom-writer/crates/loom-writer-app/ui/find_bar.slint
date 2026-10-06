@@ -1,4 +1,4 @@
-import { LoomButton, LoomTextField, LoomToggle } from "foundation.slint";
+import { LoomButton, LoomTextField, LoomToggle, LocalMenu } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 /// One page-space rectangle of a find match that is not the current match
@@ -35,6 +35,8 @@ export global FindBar {
     callback close;
     callback replace-current;
     callback replace-all;
+    /// Alt+letter or F10 pressed in the bar: open this in-window menu.
+    callback menu-requested(int);
 }
 
 /// The find bar: a field with Previous and Next, and an optional replace row.
@@ -59,6 +61,14 @@ export component FindBarOverlay inherits Rectangle {
     init => { query-field.focus-input(); }
 
     FocusScope {
+        // Shift+Enter steps back. The text field takes Enter for itself, so this
+        // looks at the key before the field does.
+        capture-key-pressed(event) => {
+            let target = LocalMenu.target(event);
+            if (target >= 0) { FindBar.menu-requested(target); return accept; }
+            if (event.text == Key.Return && event.modifiers.shift) { FindBar.find-previous(); return accept; }
+            return reject;
+        }
         // Escape closes the bar wherever focus is inside it.
         key-pressed(event) => {
             if (event.text == Key.Escape) { FindBar.close(); return accept; }

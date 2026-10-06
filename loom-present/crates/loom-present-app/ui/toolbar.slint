@@ -26,6 +26,13 @@ export component PresentActionToolbar inherits LabeledToolbar {
     callback show-inspector-tab(int);
     callback overflow-requested;
 
+    /// Raised when Escape closes the View or Zoom menu, so focus goes back to
+    /// the item that opened it.
+    in property <int> focus-view-tick: 0;
+    in property <int> focus-zoom-tick: 0;
+    changed focus-view-tick => { view-item.focus-item(); }
+    changed focus-zoom-tick => { zoom-item.focus-item(); }
+
     view-item := IconOverLabelToolbarItem {
         icon: "view";
         label: "View";
@@ -104,7 +111,32 @@ export component PresentToolbarMenu inherits Rectangle {
     callback toggle-navigator;
     callback toggle-notes;
     callback choose-zoom(int);
+    /// A row ran; the menu closes and focus goes back to the slide.
     callback close-requested;
+    /// Escape: close and return focus to the toolbar item that opened it.
+    callback dismissed;
+
+    // Keyboard: Down/Up move the highlighted row, Return or Space runs it.
+    in-out property <int> selected: 0;
+    property <int> row-count: root.kind == 0 ? 2 : 3;
+    function run(row: int) {
+        if (root.kind == 0) {
+            if (row == 0) { root.toggle-navigator(); } else { root.toggle-notes(); }
+        } else {
+            root.choose-zoom(row);
+        }
+        root.close-requested();
+    }
+    init => { menu-focus.focus(); }
+    menu-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.dismissed(); return accept; }
+            if (event.text == Key.DownArrow) { root.selected = Math.mod(root.selected + 1, root.row-count); return accept; }
+            if (event.text == Key.UpArrow) { root.selected = Math.mod(root.selected + root.row-count - 1, root.row-count); return accept; }
+            if (event.text == Key.Return || event.text == " ") { root.run(root.selected); return accept; }
+            return reject;
+        }
+    }
 
     width: 200px + 120px * (max(1.0, Theme.text-scale) - 1.0);
     height: menu-items.preferred-height + 2 * Theme.tokens.space.sm;
@@ -122,26 +154,31 @@ export component PresentToolbarMenu inherits Rectangle {
         if root.kind == 0 : LoomMenuItem {
             label: "Navigator";
             checked: root.navigator-visible;
+            selected: root.selected == 0;
             activated => { root.toggle-navigator(); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
             label: "Speaker Notes";
             checked: root.notes-visible;
+            selected: root.selected == 1;
             activated => { root.toggle-notes(); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {
             label: "Fit";
             checked: root.zoom-index == 0;
+            selected: root.selected == 0;
             activated => { root.choose-zoom(0); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {
             label: "75%";
             checked: root.zoom-index == 1;
+            selected: root.selected == 1;
             activated => { root.choose-zoom(1); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {
             label: "50%";
             checked: root.zoom-index == 2;
+            selected: root.selected == 2;
             activated => { root.choose-zoom(2); root.close-requested(); }
         }
     }

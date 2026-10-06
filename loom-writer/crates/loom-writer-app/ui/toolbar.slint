@@ -25,17 +25,33 @@ export component WriterActionToolbar inherits LabeledToolbar {
         if (root.inspector-tab == 1) { document-item.focus-item(); } else { format-item.focus-item(); }
     }
 
+    /// F6 from the page lands on the first toolbar item.
+    public function focus-first() { view-item.focus-item(); }
+
+    /// Return focus to the item that opened toolbar menu `kind` (the numbering
+    /// of `menu-kind`), so closing a menu with Escape does not lose the place.
+    public function focus-menu-trigger(kind: int) {
+        if (kind == 1) { view-item.focus-item(); }
+        else if (kind == 2) { zoom-item.focus-item(); }
+        else if (kind == 3) { insert-item.focus-item(); }
+        else if (kind == 4) { text-item.focus-item(); }
+        else if (kind == 5) { style-item.focus-item(); }
+        else if (kind == 6) { list-item.focus-item(); }
+        else if (kind == 7) { export-item.focus-item(); }
+        else { more-button.grab-focus(); }
+    }
+
     changed inspector-visible => {
         if (!root.inspector-visible) { root.focus-inspector-trigger(); }
     }
 
-    IconOverLabelToolbarItem {
+    view-item := IconOverLabelToolbarItem {
         icon: "view";
         label: "View";
         checked: root.menu-kind == 1;
         clicked => { root.toggle-menu(1, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    zoom-item := IconOverLabelToolbarItem {
         icon: "zoom-fit";
         label: "Zoom";
         checked: root.menu-kind == 2;
@@ -44,25 +60,25 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
     ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
+    insert-item := IconOverLabelToolbarItem {
         icon: "plus";
         label: "Insert";
         checked: root.menu-kind == 3;
         clicked => { root.toggle-menu(3, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    text-item := IconOverLabelToolbarItem {
         icon: "bold";
         label: "Text";
         checked: root.menu-kind == 4;
         clicked => { root.toggle-menu(4, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    style-item := IconOverLabelToolbarItem {
         icon: "text";
         label: "Style";
         checked: root.menu-kind == 5;
         clicked => { root.toggle-menu(5, self.absolute-position.x); }
     }
-    IconOverLabelToolbarItem {
+    list-item := IconOverLabelToolbarItem {
         icon: "list";
         label: "List";
         checked: root.menu-kind == 6;
@@ -71,7 +87,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
     ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
+    export-item := IconOverLabelToolbarItem {
         icon: "export";
         label: "Export";
         checked: root.menu-kind == 7;

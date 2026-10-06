@@ -105,6 +105,8 @@ export component SheetInspector inherits LoomPanel {
 
     panel-focus := FocusScope {
         enabled: root.active;
+        accessible-role: groupbox;
+        accessible-label: "Inspector, " + root.selection-range + " selection";
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.close-requested();

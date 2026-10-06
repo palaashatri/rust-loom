@@ -15,6 +15,19 @@ export struct LocalMenuEntry {
     separator: bool,
 }
 
+/// Keyboard access to the menu bar. The host answers which menu a key opens:
+/// an Alt+letter mnemonic, or "F10" for the first menu. -1 means no menu.
+export global LocalMenu {
+    callback key-index(string) -> int;
+    /// The menu this key opens: Alt+letter, or F10 for the first; -1 for none.
+    public function target(event: KeyEvent) -> int {
+        if ((event.modifiers.alt && !event.modifiers.control) || event.text == Key.F10) {
+            return LocalMenu.key-index(event.text == Key.F10 ? "F10" : event.text);
+        }
+        return -1;
+    }
+}
+
 export component LocalMenuBar inherits Rectangle {
     in property <[string]> labels: [];
     in-out property <int> open-index: -1;
@@ -97,13 +110,12 @@ export component LocalMenuPopup inherits Rectangle {
                 root.open-index = -1;
                 return accept;
             }
-            if (event.modifiers.alt) {
-                if (event.text == "f" || event.text == "F") { root.open-index = 0; return accept; }
-                if (event.text == "e" || event.text == "E") { root.open-index = 1; return accept; }
-                if (event.text == "v" || event.text == "V") { root.open-index = 2; return accept; }
-                if (event.text == "t" || event.text == "T") { root.open-index = 3; return accept; }
-                if (event.text == "h" || event.text == "H") { root.open-index = 4; return accept; }
+            if (event.text == Key.F10) {
+                root.open-index = -1;
+                return accept;
             }
+            let target = LocalMenu.target(event);
+            if (target >= 0) { root.open-index = target; return accept; }
             if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
                 root.menu-move(event.text == Key.DownArrow ? 1 : -1);
                 return accept;

@@ -24,3 +24,45 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
 ];
 
 loom_desktop::local_menu_bindings!(WriterApp, SUPPORTED_COMMANDS, set_status_right);
+
+/// Writer's menu bar with only the commands Writer actually handles enabled.
+pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
+    use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
+    let mut menu_bar = build_standard_menu_bar(
+        "Loom Writer",
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_pdf",
+                "Export to PDF...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_docx", "Export to Word..."),
+            MenuItem::action("file.export_md", "Export to Markdown..."),
+        ],
+        vec![],
+        vec![
+            MenuItem::check("view.inspector", "Format Inspector", false),
+            MenuItem::check("view.navigator", "Outline Navigator", false),
+        ],
+        vec![Menu::new(
+            "Format",
+            vec![
+                MenuItem::action_with_shortcut("format.bold", "Bold", MenuShortcut::primary("B")),
+                MenuItem::action_with_shortcut(
+                    "format.italic",
+                    "Italic",
+                    MenuShortcut::primary("I"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "format.underline",
+                    "Underline",
+                    MenuShortcut::primary("U"),
+                ),
+            ],
+        )],
+    );
+    // Application/window/help entries stay disabled until a real host bridge
+    // handles them.
+    menu_bar.disable_items_except(SUPPORTED_COMMANDS);
+    menu_bar
+}

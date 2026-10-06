@@ -120,6 +120,14 @@ fn matches_for(app: &WriterApp, document: &WriterDocument, query: &str) -> Vec<(
 /// near the view, or none when the bar is closed.
 pub(crate) fn match_rects(app: &WriterApp, document: &WriterDocument) -> Vec<FindRect> {
     let bar = app.global::<FindBar>();
+    {
+        let app_ref = app.as_weak();
+        bar.on_menu_requested(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_local_menu_open_index(index);
+            }
+        });
+    }
     let query = bar.get_query();
     if !bar.get_open() || query.is_empty() {
         return Vec::new();

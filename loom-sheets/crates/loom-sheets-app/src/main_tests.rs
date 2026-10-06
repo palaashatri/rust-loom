@@ -8,6 +8,9 @@ mod template_chooser_tests;
 
 mod inspector_tests;
 
+#[path = "main_tests/keyboard_flow_tests.rs"]
+mod keyboard_flow_tests;
+
 #[path = "main_tests/icon_accessibility_tests.rs"]
 mod icon_accessibility_tests;
 

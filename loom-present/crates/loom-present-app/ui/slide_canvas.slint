@@ -56,6 +56,22 @@ export component PresentSlideCanvas inherits Rectangle {
     slide-focus := FocusScope {
         enabled: root.editing-enabled;
         key-pressed(event) => {
+            // Tab and Shift+Tab walk the objects on the slide (the first Tab selects
+            // the first object); past the last or first one they leave the canvas, so
+            // the slide never traps the keyboard. Enter or F2 edits the selected
+            // object's text where it stands; Escape stops editing.
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                let back = event.text == Key.Backtab || event.modifiers.shift;
+                let next = root.selection-count == 0 ? (back ? root.element-xs.length - 1 : 0) : root.active-element-index + (back ? -1 : 1);
+                if (next >= 0 && next < root.element-xs.length) { root.select-element(next); return accept; }
+                return reject;
+            }
+            if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta
+                && root.selection-count == 1 && root.active-element-index < root.element-types.length
+                && root.element-types[root.active-element-index] != 6) {
+                root.editing-idx = root.active-element-index;
+                return accept;
+            }
             return root.canvas-key-pressed(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta);
         }
 
@@ -148,7 +164,7 @@ export component PresentSlideCanvas inherits Rectangle {
                 transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;
                 accessible-role: button;
                 accessible-enabled: root.editing-enabled;
-                accessible-label: root.element-selected.length > idx && root.element-selected[idx] ? "Selected " + root.element-labels[idx] : root.element-labels[idx];
+                accessible-label: root.element-labels[idx];
                 accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); slide-focus.focus(); }
 
                 Text {
