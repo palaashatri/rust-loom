@@ -666,6 +666,12 @@ pub(crate) fn register_object_actions(
         let menu_service = menu_service.clone();
         app.on_object_keyboard_action(move |index, action, delta_col, delta_row| {
             if let Some(app) = app_ref.upgrade() {
+                // -1 and -2 commit a move or resize; the other actions only select or preview.
+                if matches!(action, -1 | -2)
+                    && crate::mutation_guard::refused_ending_gesture(&app, &state)
+                {
+                    return;
+                }
                 handle_keyboard_action(
                     &app,
                     &state,
@@ -683,6 +689,9 @@ pub(crate) fn register_object_actions(
         let app_ref = app.as_weak();
         app.on_object_move_started(move |index| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 begin_gesture(&app, &state, index, ObjectGestureMode::Move);
             }
         });
@@ -709,6 +718,9 @@ pub(crate) fn register_object_actions(
         let menu_service = menu_service.clone();
         app.on_object_move_ended(move |index| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused_ending_gesture(&app, &state) {
+                    return;
+                }
                 finish_gesture(
                     &app,
                     &state,
@@ -742,6 +754,9 @@ pub(crate) fn register_object_actions(
         let app_ref = app.as_weak();
         app.on_object_resize_started(move |index| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 begin_gesture(&app, &state, index, ObjectGestureMode::Resize);
             }
         });
@@ -768,6 +783,9 @@ pub(crate) fn register_object_actions(
         let menu_service = menu_service.clone();
         app.on_object_resize_ended(move |index| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused_ending_gesture(&app, &state) {
+                    return;
+                }
                 finish_gesture(
                     &app,
                     &state,

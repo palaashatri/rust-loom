@@ -214,6 +214,9 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
         let menu_service = menu_service.clone();
         app.on_cut_selection(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let count = copy_to_clipboards(&state, sel);
                 let changed = clear_selection(
@@ -240,6 +243,9 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
         let menu_service = menu_service.clone();
         app.on_paste_selection(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let Some((cells, origin)) = clipboard_cells(&state) else {
                     app.set_status_left("Nothing to paste".into());

@@ -265,6 +265,9 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
         let (state, app_ref, menu) = (state.clone(), app.as_weak(), menu_service.clone());
         pointer.on_header_autofit(move |is_row, index| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 autofit(&app, &state, &menu, is_row, index);
             }
         });

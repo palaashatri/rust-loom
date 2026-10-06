@@ -47,6 +47,8 @@ mod grid_pointer_tests;
 mod grid_tab_enter_tests;
 #[path = "main_tests/layout_tests.rs"]
 mod layout_tests;
+#[path = "main_tests/mutation_guard_tests.rs"]
+mod mutation_guard_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
 #[path = "main_tests/recovery_pause_ui_tests.rs"]

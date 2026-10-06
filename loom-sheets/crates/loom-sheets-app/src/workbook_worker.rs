@@ -175,6 +175,7 @@ struct Shared {
     result_available: Condvar,
 }
 
+#[derive(Clone)]
 enum RecoveryLocation {
     Application(String),
     #[cfg(test)]
@@ -215,29 +216,13 @@ impl WorkbookWorker {
         let worker_thread = thread::Builder::new()
             .name("loom-sheets-workbook".into())
             .spawn(move || {
-                let (mut recovery, startup) = match location {
-                    RecoveryLocation::Application(application_id) => {
-                        open_recovery(CellEditRecovery::open(&application_id))
-                    }
-                    #[cfg(test)]
-                    RecoveryLocation::Directory(directory) => {
-                        open_recovery(CellEditRecovery::open_at(directory))
-                    }
-                    #[cfg(test)]
-                    RecoveryLocation::DirectoryWithCadence(directory, limits) => {
-                        let (mut recovery, startup) =
-                            open_recovery(CellEditRecovery::open_at(directory));
-                        if let Some(recovery) = recovery.as_mut() {
-                            recovery.set_cadence_limits_for_test(limits);
-                        }
-                        (recovery, startup)
-                    }
-                };
+                let (mut recovery, startup) = open_recovery(open_location(&location));
                 let startup_error = startup.recovery_error.clone();
                 if startup_tx.send(startup).is_ok() {
                     run_worker(
                         worker_shared,
                         &mut recovery,
+                        &location,
                         &schema,
                         startup_error,
                         save_completions,
@@ -630,10 +615,49 @@ enum WorkerAction {
     Stop,
 }
 
-fn sync_recovery_pause(shared: &Shared, recovery: &Option<CellEditRecovery>) {
-    let failure = recovery
-        .as_ref()
-        .and_then(|recovery| recovery.failure().map(str::to_owned));
+/// Open the recovery store at its location, with the test cadence if one was
+/// asked for. Used at start-up and again by Retry Recovery.
+fn open_location(
+    location: &RecoveryLocation,
+) -> Result<(CellEditRecovery, Option<Vec<u8>>), String> {
+    match location {
+        RecoveryLocation::Application(application_id) => CellEditRecovery::open(application_id),
+        #[cfg(test)]
+        RecoveryLocation::Directory(directory) => CellEditRecovery::open_at(directory),
+        #[cfg(test)]
+        RecoveryLocation::DirectoryWithCadence(directory, limits) => {
+            CellEditRecovery::open_at(directory).map(|(mut recovery, restored)| {
+                recovery.set_cadence_limits_for_test(*limits);
+                (recovery, restored)
+            })
+        }
+    }
+}
+
+/// Retry for a store that never opened. A draft left by an earlier session is
+/// not this window's work, and publishing this workbook over it would destroy
+/// it, so a store that still holds one stays closed.
+fn reopen_recovery(location: &RecoveryLocation) -> Result<CellEditRecovery, String> {
+    let (recovery, restored) = open_location(location)?;
+    if restored.is_some() {
+        return Err(crate::recovery_pause::EARLIER_DRAFT_WAITING.to_string());
+    }
+    Ok(recovery)
+}
+
+fn sync_recovery_pause(
+    shared: &Shared,
+    recovery: &Option<CellEditRecovery>,
+    startup_error: &Option<String>,
+) {
+    // A store that never opened has no writer to latch a failure, so its open
+    // error is the pause: nothing can be journaled until it opens.
+    let failure = match recovery {
+        Some(recovery) => recovery.failure().map(str::to_owned),
+        None => startup_error
+            .as_deref()
+            .map(crate::recovery_pause::describe_open_failure),
+    };
     if let Ok(mut pause) = shared.recovery_pause.lock() {
         *pause = failure;
     }
@@ -688,8 +712,9 @@ fn next_completion_sequence(sequence: &mut u64) -> u64 {
 fn run_worker(
     shared: Arc<Shared>,
     recovery: &mut Option<CellEditRecovery>,
+    location: &RecoveryLocation,
     _schema: &str,
-    startup_error: Option<String>,
+    mut startup_error: Option<String>,
     save_completions: mpsc::Sender<crate::save_operations::SaveCompletion>,
     export_completions: mpsc::Sender<crate::export_operations::ExportCompletion>,
 ) {
@@ -724,7 +749,7 @@ fn run_worker(
                         }
                     }
                 }
-                sync_recovery_pause(&shared, recovery);
+                sync_recovery_pause(&shared, recovery, &startup_error);
             }
             WorkerAction::Initialize(initialization) => {
                 if initialization.revision <= last_revision {
@@ -785,7 +810,7 @@ fn run_worker(
                     }
                 }
 
-                sync_recovery_pause(&shared, recovery);
+                sync_recovery_pause(&shared, recovery, &startup_error);
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -868,6 +893,17 @@ fn run_worker(
                     is_replacement && input_error.is_none(),
                 );
                 active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
+                // A full replacement is how Retry Recovery reaches the worker:
+                // try to open a store that never opened before checkpointing.
+                if is_replacement && recovery.is_none() && startup_error.is_some() {
+                    match reopen_recovery(location) {
+                        Ok(reopened) => {
+                            *recovery = Some(reopened);
+                            startup_error = None;
+                        }
+                        Err(error) => startup_error = Some(error),
+                    }
+                }
                 let mut recovery_error = startup_error.clone();
                 #[cfg(test)]
                 let mut recovery_package_duration = Duration::ZERO;
@@ -914,7 +950,7 @@ fn run_worker(
                         }
                     }
                 }
-                sync_recovery_pause(&shared, recovery);
+                sync_recovery_pause(&shared, recovery, &startup_error);
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -1012,7 +1048,7 @@ fn run_worker(
                     }
                     Err(error) => (Err(error), None, None),
                 };
-                sync_recovery_pause(&shared, recovery);
+                sync_recovery_pause(&shared, recovery, &startup_error);
 
                 let _ = save_completions.send(crate::save_operations::SaveCompletion {
                     completion_sequence: next_completion_sequence(&mut completion_sequence),
@@ -1063,7 +1099,7 @@ fn run_worker(
                     // The store is gone on purpose; nothing may recreate it.
                     *recovery = None;
                 }
-                sync_recovery_pause(&shared, recovery);
+                sync_recovery_pause(&shared, recovery, &startup_error);
                 let _ = reply.send(result);
             }
             WorkerAction::Stop => return,

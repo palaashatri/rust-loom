@@ -114,6 +114,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_create_template(move |idx| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 create_template_workbook(&app, &state, &menu_service, idx);
             }
         });
@@ -184,6 +187,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_add_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 crate::object_actions::cancel_active_gesture(&app, &state);
                 sync_current_to_tabs(&state);
                 let mut after_sheets = state.sheets.borrow().clone();
@@ -211,6 +217,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_add_row(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let dims = state.current.borrow().dimensions();
                 let next_row = dims.rows;
                 let cell = CellRef {
@@ -240,6 +249,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_organize(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let sorted = sort_table(
                     &mut state.current.borrow_mut(),
@@ -316,6 +328,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if toggle_selection_bold(
                     &mut state.current.borrow_mut(),
@@ -338,6 +353,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if toggle_selection_italic(
                     &mut state.current.borrow_mut(),
@@ -360,6 +378,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_toggle_underline(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if toggle_selection_underline(
                     &mut state.current.borrow_mut(),
@@ -382,6 +403,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_adjust_decimals(move |delta| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if set_selection_decimal_places(
                     &mut state.current.borrow_mut(),
@@ -410,6 +434,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_toggle_borders(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if toggle_selection_borders(
                     &mut state.current.borrow_mut(),
@@ -432,6 +459,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_cycle_fill(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if cycle_selection_fill(
                     &mut state.current.borrow_mut(),
@@ -454,6 +484,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_adjust_font(move |delta| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 if adjust_selection_font_size(
                     &mut state.current.borrow_mut(),
@@ -479,6 +512,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_set_fill(move |swatch_idx| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let fill = match swatch_idx {
                     0 => FillColor::Red,
                     1 => FillColor::Orange,
@@ -529,6 +565,9 @@ pub(crate) fn register_sheet_actions(
                     app.set_status_left(
                         "Select two columns including headers and data, then Insert Chart.".into(),
                     );
+                    return;
+                }
+                if crate::mutation_guard::refused(&app, &state) {
                     return;
                 }
                 let planned = plan_chart_in_range(
@@ -591,6 +630,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_insert_shape(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let before = state.current.borrow().clone();
                 let mut after = before.clone();
                 let anchor = selection_from_app(&app).focus;
@@ -617,6 +659,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_insert_image(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let request = match image_open_request(&state) {
                     Ok(request) => request,
                     Err(error) => {
@@ -679,6 +724,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_cycle_chart_kind(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let before = state.current.borrow().clone();
                 let Some(current) = before.chart.clone() else {
                     app.set_status_left("Insert a chart first".into());
@@ -721,6 +769,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_pivot_summary(move |agg_idx| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 crate::object_actions::cancel_active_gesture(&app, &state);
                 let aggregation = match agg_idx {
                     1 => PivotAggregation::Count,
@@ -765,6 +816,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_rename_sheet(move |new_name| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 crate::object_actions::cancel_active_gesture(&app, &state);
                 let trimmed = new_name.trim().to_string();
                 sync_current_to_tabs(&state);
@@ -813,6 +867,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_add_table_col(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let dims = state.current.borrow().dimensions();
                 let next_col = dims.cols;
                 let cell = CellRef {
@@ -843,6 +900,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_set_cell_format(move |fmt_idx| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let fmt = match fmt_idx {
                     1 => NumberFormat::Currency,
                     2 => NumberFormat::Percentage,
@@ -874,6 +934,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_clear_selected_cells(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let changed = clear_selection(
                     &mut state.current.borrow_mut(),
@@ -896,6 +959,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_set_cell_alignment(move |align_idx| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let align = match align_idx {
                     1 => CellAlignment::Center,
                     2 => CellAlignment::Right,
@@ -955,6 +1021,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_delete_row(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let cell_str = app.get_selected_cell();
                 if let Some(cell) = CellRef::parse(cell_str.as_str()) {
                     let before = state.current.borrow().clone();
@@ -996,6 +1065,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_delete_col(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let cell_str = app.get_selected_cell();
                 if let Some(cell) = CellRef::parse(cell_str.as_str()) {
                     let before = state.current.borrow().clone();
@@ -1037,6 +1109,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_delete_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 delete_active_sheet(&app, &state, &menu_service);
             }
         });
@@ -1048,6 +1123,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_sort_ascending(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let sorted = sort_table(
                     &mut state.current.borrow_mut(),
@@ -1072,6 +1150,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_sort_descending(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let sel = selection_from_app(&app);
                 let sorted = sort_table(
                     &mut state.current.borrow_mut(),
@@ -1096,6 +1177,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_freeze_panes(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let before = state.current.borrow().clone();
                 let mut after = before.clone();
                 after.freeze_panes(1, 0);
@@ -1121,6 +1205,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_unfreeze_panes(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let before = state.current.borrow().clone();
                 let mut after = before.clone();
                 after.unfreeze_panes();
@@ -1146,6 +1233,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_adjust_row_height(move |delta| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let cell_str = app.get_selected_cell();
                 if let Some(cell) = CellRef::parse(cell_str.as_str()) {
                     let cur_h = state.current.borrow().row_height(cell.row);
@@ -1180,6 +1270,9 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_adjust_col_width(move |delta| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 let cell_str = app.get_selected_cell();
                 if let Some(cell) = CellRef::parse(cell_str.as_str()) {
                     let cur_w = state.current.borrow().col_width(cell.col);

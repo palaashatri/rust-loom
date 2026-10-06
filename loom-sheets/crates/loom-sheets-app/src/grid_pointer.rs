@@ -184,6 +184,15 @@ fn header_pressed(app: &SheetsApp, state: &GuiState, is_row: bool, index: i32, s
     )));
 }
 
+/// A resize that was refused part-way (recovery paused mid-drag) must not
+/// leave its live preview in the workbook.
+fn cancel_resize_preview(app: &SheetsApp, state: &GuiState) {
+    if let Some(resize) = GESTURE.with(|gesture| gesture.borrow_mut().resize.take()) {
+        *state.current.borrow_mut() = resize.before;
+        project_current_without_reveal(app, state);
+    }
+}
+
 fn header_resized(
     app: &SheetsApp,
     state: &GuiState,
@@ -333,6 +342,10 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
         let (state, app_ref, menu_service) = (state.clone(), app.as_weak(), menu_service.clone());
         pointer.on_header_resized(move |is_row, index, travel, finished| {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    cancel_resize_preview(&app, &state);
+                    return;
+                }
                 header_resized(
                     &app,
                     &state,

@@ -174,7 +174,11 @@ impl CellEditRecovery {
             .open(versioned_directory.join(WRITER_LOCK_FILE))
             .map_err(|error| format!("open Sheets recovery writer lock: {error}"))?;
         FileExt::try_lock_exclusive(&writer_lock).map_err(|error| {
-            if error.kind() == io::ErrorKind::WouldBlock {
+            // Windows reports a held byte-range lock as a lock violation, not
+            // `WouldBlock`, so compare with the platform's own contention error.
+            if error.kind() == io::ErrorKind::WouldBlock
+                || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+            {
                 "Sheets recovery already has an active writer".to_string()
             } else {
                 format!("lock Sheets recovery writer: {error}")

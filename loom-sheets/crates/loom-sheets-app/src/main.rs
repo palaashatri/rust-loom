@@ -94,6 +94,7 @@ mod evaluation_cache;
 mod export_operations;
 mod file_operation_completions;
 mod legacy_migration;
+mod mutation_guard;
 mod open_operations;
 mod recovery_pause;
 mod recovery_policy;
@@ -2314,6 +2315,9 @@ pub(crate) fn register_history_actions(
         let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.undo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
@@ -2340,6 +2344,9 @@ pub(crate) fn register_history_actions(
         let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
                 object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.redo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
@@ -2548,40 +2555,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let state = state.clone();
         let app_ref = app.as_weak();
         let menu_service = menu_service.clone();
-        app.on_quick_formula(move |func| {
-            if let Some(app) = app_ref.upgrade() {
-                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let range_str = app.get_selection_range();
-                    let formula_text = if range_str.contains(':') {
-                        format!("={func}({range_str})")
-                    } else {
-                        let col = cell
-                            .to_a1()
-                            .trim_end_matches(|c: char| c.is_ascii_digit())
-                            .to_string();
-                        format!("={func}({col}1:{col}5)")
-                    };
-                    let committed = {
-                        let mut current = state.current.borrow_mut();
-                        let mut undo = state.undo_stack.borrow_mut();
-                        let mut redo = state.redo_stack.borrow_mut();
-                        commit_formula_edit(&mut current, &mut undo, &mut redo, cell, &formula_text)
-                    };
-                    if committed {
-                        apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
-                        app.set_formula_feedback(SharedString::from(format!(
-                            "Inserted {func} formula"
-                        )));
-                    }
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 if !request_replacement_after_dialog(&app, &state, PendingReplacement::OpenWorkbook)
@@ -2657,40 +2630,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     tab_run::register_navigation(&app, &state);
     wire_selection_extension(&app, &state);
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_fill_selection(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let changed = {
-                    let selection = selection_from_app(&app);
-                    let mut current = state.current.borrow_mut();
-                    let mut undo = state.undo_stack.borrow_mut();
-                    let mut redo = state.redo_stack.borrow_mut();
-                    fill_selection_down(&mut current, &mut undo, &mut redo, selection)
-                };
-                if changed {
-                    let source = selection_from_app(&app).range();
-                    if let Some(target) = fill_target_range(source) {
-                        let expanded = CellRange::new(source.start, target.end);
-                        update_selection_range(
-                            &app,
-                            &state.current.borrow(),
-                            &evaluate(&state.current.borrow()),
-                            GridSelection::new(source.start, expanded.end),
-                        );
-                    }
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    app.set_formula_feedback(SharedString::from(format!(
-                        "Filled {} down",
-                        app.get_selection_range()
-                    )));
-                }
-            }
-        });
-    }
+    cell_actions::register_quick_edit_actions(&app, &state, &menu_service);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2808,6 +2748,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         )));
     }
     state.recompute_dirty_from_saved();
+    recovery_pause::sync(&app, &state);
     sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
     let _worker_completion_timer = start_workbook_worker_timer(&app, &state, &menu_service);

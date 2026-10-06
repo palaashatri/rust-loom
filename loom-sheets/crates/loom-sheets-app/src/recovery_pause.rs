@@ -27,6 +27,20 @@ pub(crate) fn paused_reason(state: &GuiState) -> Option<String> {
         .and_then(crate::workbook_worker::WorkbookWorker::recovery_pause)
 }
 
+/// Why Retry Recovery leaves a store closed when it holds a draft from an
+/// earlier session: this window's workbook must not be written over it.
+pub(crate) const EARLIER_DRAFT_WAITING: &str = "an earlier unsaved draft is waiting in recovery storage. Restart Loom to restore it, or use Save As to keep this work";
+
+/// Plain wording for a recovery store that could not be opened.
+pub(crate) fn describe_open_failure(error: &str) -> String {
+    if error.contains("already has an active writer") {
+        "another Loom window is holding this workbook's recovery storage. Close that window first"
+            .to_string()
+    } else {
+        error.to_string()
+    }
+}
+
 fn rejection_message(reason: &str) -> String {
     format!(
         "Edit not applied: Loom cannot keep your changes safe right now ({reason}). \
@@ -84,8 +98,16 @@ pub(crate) fn sync(app: &SheetsApp, state: &GuiState) {
         app.set_recovery_paused(paused.is_some());
         crate::sync_window_title(app, state);
         if let (Some(reason), None) = (&paused, state.recovery_retry_revision.get()) {
+            // An edit that was already on screen when recovery failed is kept,
+            // never rolled back, but recovery has not confirmed it.
+            let kept = if state.is_dirty() {
+                " Your latest changes are still on screen, but recovery has not confirmed \
+                 them; Retry Recovery, Save, or Save As keeps them."
+            } else {
+                ""
+            };
             app.set_status_left(SharedString::from(format!(
-                "Recovery paused: {reason}. New edits are blocked until recovery works \
+                "Recovery paused: {reason}.{kept} New edits are blocked until recovery works \
                  again. Choose Retry Recovery in the command palette, or Save As."
             )));
         }
