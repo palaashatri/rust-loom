@@ -1,5 +1,6 @@
 use loom_production::define_snapshot_recovery;
 use loom_writer_core::WriterDocument;
+use slint::ComponentHandle;
 
 define_snapshot_recovery!(
     application_id: "org.loom.writer",
@@ -27,6 +28,40 @@ pub(super) fn record_document(document: &WriterDocument) -> Result<(), String> {
     let payload = loom_writer_core::save_document(document)
         .map_err(|error| format!("could not prepare recovery data: {error}"))?;
     record_snapshot_recovery("writer state", payload)
+}
+
+/// Write the draft from the timer without blocking the window: the document is
+/// copied now, serialized on a worker thread, and recorded on the UI thread
+/// (where the store lives) unless a synchronous write or a clear happened
+/// meanwhile. Failures are reported through `app` when the result arrives.
+pub(super) fn record_document_deferred(
+    app: &crate::WriterApp,
+    document: &WriterDocument,
+) -> Result<(), String> {
+    #[cfg(test)]
+    WRITES.with(|writes| writes.set(writes.get() + 1));
+    let epoch = DEFERRED.with(DeferredWrite::epoch);
+    let copy = document.clone();
+    let weak = app.as_weak();
+    std::thread::Builder::new()
+        .name("writer-recovery".into())
+        .spawn(move || {
+            let payload = loom_writer_core::save_document(&copy)
+                .map_err(|error| format!("could not prepare recovery data: {error}"));
+            // Without a running event loop there is nowhere to record it.
+            let _ = slint::invoke_from_event_loop(move || {
+                if DEFERRED.with(DeferredWrite::epoch) != epoch {
+                    return;
+                }
+                let result =
+                    payload.and_then(|payload| record_snapshot_recovery("writer state", payload));
+                if let (Err(error), Some(app)) = (result, weak.upgrade()) {
+                    crate::warn_recovery_failed(&app, &error);
+                }
+            });
+        })
+        .map(|_| ())
+        .map_err(|error| format!("could not start the recovery writer: {error}"))
 }
 
 /// Checkpoint the recovery store after the document has been saved to disk.
@@ -60,6 +95,9 @@ pub(super) const WRITE_DELAY: std::time::Duration = std::time::Duration::from_mi
 pub(super) struct DeferredWrite {
     stale: std::cell::Cell<bool>,
     armed: std::cell::Cell<bool>,
+    /// Bumped by every synchronous write or clear, so a draft still being
+    /// serialized when one happens is dropped instead of landing after it.
+    epoch: std::cell::Cell<u64>,
 }
 
 impl DeferredWrite {
@@ -79,6 +117,11 @@ impl DeferredWrite {
     /// A synchronous write already recorded the current document.
     pub(super) fn settled(&self) {
         self.stale.set(false);
+        self.epoch.set(self.epoch.get() + 1);
+    }
+
+    pub(super) fn epoch(&self) -> u64 {
+        self.epoch.get()
     }
 
     #[cfg(test)]

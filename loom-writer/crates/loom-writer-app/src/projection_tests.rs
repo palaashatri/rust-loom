@@ -256,3 +256,15 @@ fn typing_defers_the_recovery_write_and_every_other_action_writes_at_once() {
     assert_eq!(writes(), baseline + 2, "formatting writes at once");
     assert!(!recovery::DEFERRED.with(recovery::DeferredWrite::is_stale));
 }
+
+#[test]
+fn a_synchronous_write_invalidates_a_draft_still_being_serialized() {
+    let pending = recovery::DeferredWrite::default();
+    let in_flight = pending.epoch();
+    pending.settled();
+    assert_ne!(
+        pending.epoch(),
+        in_flight,
+        "the worker's result is dropped when it arrives"
+    );
+}

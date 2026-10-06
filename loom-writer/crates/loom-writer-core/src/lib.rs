@@ -19,6 +19,7 @@ mod export;
 mod layout;
 mod page_setup;
 mod paragraph_match;
+mod search;
 mod style_json;
 mod tables;
 mod text_metrics;
@@ -3416,6 +3417,17 @@ impl WriterDocument {
                             start,
                             end: start + value.len(),
                         }),
+                );
+            } else if needle.is_ascii() && block.text.as_str().is_ascii() {
+                // The common case: plain ASCII text and query, matched byte by byte.
+                matches.extend(
+                    search::ascii_case_insensitive(block.text.as_str(), needle.as_bytes()).map(
+                        |(start, end)| SearchMatch {
+                            block_id: block.id,
+                            start,
+                            end,
+                        },
+                    ),
                 );
             } else {
                 // Unicode lowercase can change byte length, so search by character

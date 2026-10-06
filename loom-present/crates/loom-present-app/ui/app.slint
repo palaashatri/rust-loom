@@ -102,6 +102,9 @@ export component PresentApp inherits Window {
     in property <string> slide-count-text: "1 slide";
     in property <[string]> slide-titles: [];
     in property <[ThumbRows]> slide-thumbs: [];
+    /// First slide and slide count the strip draws; set by the controller.
+    in-out property <int> strip-first: 0;
+    in-out property <int> strip-count: 24;
     in property <int> active-slide-index: 0;
     in property <[string]> element-labels: [];
     in property <[string]> element-placeholders: [];
@@ -211,6 +214,11 @@ export component PresentApp inherits Window {
     callback redo;
     callback add-slide;
     callback delete-slide;
+    /// The slide strip tells the controller which slides it currently draws, so
+    /// only those thumbnails are kept up to date.
+    callback strip-window-changed(int, int);
+    /// A deferred recovery draft is due; the controller writes it.
+    callback recovery-flush();
     callback duplicate-slide;
     callback prev-slide;
     callback next-slide;
@@ -427,6 +435,7 @@ export component PresentApp inherits Window {
                     select-slide(idx) => { root.select-slide(idx); }
                     add-slide => { root.add-slide(); }
                     delete-slide => { root.delete-slide(); }
+                    window-changed(first, count) => { root.strip-window-changed(first, count); }
                 }
 
                 // Center Canvas & Notes
@@ -546,6 +555,7 @@ export component PresentApp inherits Window {
                     select-slide(idx) => { root.select-slide(idx); }
                     add-slide => { root.add-slide(); }
                     delete-slide => { root.delete-slide(); }
+                    window-changed(first, count) => { root.strip-window-changed(first, count); }
                 }
 
                 if !root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {

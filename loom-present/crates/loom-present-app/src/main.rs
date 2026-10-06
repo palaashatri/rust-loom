@@ -22,7 +22,7 @@ use loom_present_core::{
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
 use slint::{
-    private_unstable_api::re_exports::EventResult, ComponentHandle, Model, ModelRc, PhysicalSize,
+    private_unstable_api::re_exports::EventResult, ComponentHandle, Model, PhysicalSize,
     SharedString, VecModel,
 };
 
@@ -643,13 +643,14 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
     app.set_slide_count_text(SharedString::from(format!("{} slides", document.len())));
-    app.set_slide_titles(ModelRc::new(VecModel::from(
+    app.set_slide_titles(synced(
+        app.get_slide_titles(),
         document
             .slides
             .iter()
             .map(|slide| SharedString::from(slide.title.as_str()))
             .collect::<Vec<_>>(),
-    )));
+    ));
     app.set_active_slide_index(document.active_index as i32);
     if let Some(slide) = document.active_slide() {
         app.set_slide_title(slide.title.as_str().into());
@@ -836,9 +837,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     app.set_marquee_height(drag.marquee_height);
     app.set_marquee_visible(drag.mode == Some(HandleKind::Marquee));
     if recover {
-        if let Ok(bytes) = save_presentation_session(&session) {
-            let _ = record_snapshot_recovery("presentation state", bytes);
-        }
+        recovery_deferred::note_edit(app);
     }
     if let Some(menu_service) = &state.menu_service {
         sync_menu_state(menu_service, app, state);
@@ -1091,6 +1090,7 @@ fn save_current_deck(
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
     file_title::sync(app, state);
     app.set_status_right(deck_status_text(state).into());
+    recovery_deferred::invalidate();
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(
@@ -1791,6 +1791,7 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
 /// The window is really closing: drop the recovery data so a discarded or saved
 /// deck is not offered again. A crash never reaches here, so it stays recoverable.
 fn end_session_recovery() {
+    recovery_deferred::invalidate();
     let cleared = PRESENT_RECOVERY.with(|slot| match slot.borrow_mut().take() {
         Some(recovery) => recovery.clear().map_err(|error| error.to_string()),
         None => Ok(()),
@@ -1816,6 +1817,27 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     view_state::wire(app, state);
+    {
+        let state = state.clone();
+        app.on_recovery_flush(move || {
+            if let Ok(session) = state.session.try_borrow() {
+                recovery_deferred::flush(&session);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_strip_window_changed(move |first, count| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_strip_first(first);
+                app.set_strip_count(count);
+                if let Ok(session) = state.session.try_borrow() {
+                    picture_view::sync_thumbnails(&app, &session.document);
+                }
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3177,6 +3199,9 @@ mod model_sync;
 mod picture_view;
 mod presenter;
 mod presenter_thumbs;
+mod recovery_deferred;
+#[cfg(test)]
+mod scaling_tests;
 mod view_state;
 mod window_chrome;
 

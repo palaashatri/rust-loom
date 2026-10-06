@@ -8,7 +8,6 @@
 //! ignores case unless "Match case" is on. Replacing is a document edit, so it is undoable and recovered like
 //! any other.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use loom_writer_core::{TextSelection, WriterDocument};
@@ -32,20 +31,23 @@ pub(crate) fn editor_matches(
     query: &str,
     case_sensitive: bool,
 ) -> Vec<(usize, usize)> {
-    let mut starts = HashMap::new();
-    let mut offset = 0;
-    for block in &document.blocks {
-        starts.insert(block.id, offset);
-        offset += block.text.as_str().len() + 1;
-    }
-    document
+    // Hits come back in block order, so one walk over the blocks places them all.
+    let mut hits = document
         .find_all(query, case_sensitive)
         .into_iter()
-        .filter_map(|hit| {
-            let base = starts.get(&hit.block_id)?;
-            Some((base + hit.start, base + hit.end))
-        })
-        .collect()
+        .peekable();
+    let mut placed = Vec::with_capacity(hits.len());
+    let mut base = 0;
+    for block in &document.blocks {
+        while let Some(hit) = hits.next_if(|hit| hit.block_id == block.id) {
+            placed.push((base + hit.start, base + hit.end));
+        }
+        if hits.peek().is_none() {
+            break;
+        }
+        base += block.text.as_str().len() + 1;
+    }
+    placed
 }
 
 /// The match to move to from a selection spanning `low..high`: the first one
@@ -120,16 +122,23 @@ fn matches_for(app: &WriterApp, document: &WriterDocument, query: &str) -> Vec<(
 /// near the view, or none when the bar is closed.
 pub(crate) fn match_rects(app: &WriterApp, document: &WriterDocument) -> Vec<FindRect> {
     let bar = app.global::<FindBar>();
-    {
-        let app_ref = app.as_weak();
-        bar.on_menu_requested(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_local_menu_open_index(index);
-            }
-        });
-    }
     let query = bar.get_query();
     if !bar.get_open() || query.is_empty() {
+        return Vec::new();
+    }
+    let matches = matches_for(app, document, query.as_str());
+    rects_for_matches(app, document, &matches)
+}
+
+/// The highlight rectangles for `matches`, which must be the current matches
+/// of the open bar's query in `document`. Only matches on the pages near the
+/// view are turned into rectangles, so the cost follows the screen.
+fn rects_for_matches(
+    app: &WriterApp,
+    document: &WriterDocument,
+    matches: &[(usize, usize)],
+) -> Vec<FindRect> {
+    if matches.is_empty() {
         return Vec::new();
     }
     let style = document.page.page_style();
@@ -153,11 +162,17 @@ pub(crate) fn match_rects(app: &WriterApp, document: &WriterDocument) -> Vec<Fin
     };
     let scroll = normalize_page_scroll(app.get_page_scroll_y()) / zoom;
     let pages = flow.visible_pages(scroll - span, scroll + 2.0 * span);
+    let Some((window_start, window_end)) = flow.editor_span(pages.clone()) else {
+        return Vec::new();
+    };
     let current = selection_range(document);
+    // Matches are sorted, so the ones in the window form one run.
+    let first = matches.partition_point(|&(_, end)| end < window_start);
+    let last = matches.partition_point(|&(start, _)| start <= window_end);
     let mut rects = Vec::new();
-    for range in matches_for(app, document, query.as_str())
-        .into_iter()
-        .filter(|&range| range != current)
+    for &range in matches[first..last.max(first)]
+        .iter()
+        .filter(|&&range| range != current)
         .take(HIGHLIGHT_LIMIT)
     {
         let found = flow.selection_rects(
@@ -207,26 +222,40 @@ fn select(app: &WriterApp, (start, end): (usize, usize)) {
 }
 
 fn publish_status(app: &WriterApp, state: &GuiState) {
+    let query = app.global::<FindBar>().get_query();
+    let matches = matches_for(app, &state.current.borrow(), query.as_str());
+    publish_results(app, state, &matches);
+}
+
+/// Status text and soft highlights for `matches`, the current matches of the
+/// bar's query, from one search of the document.
+fn publish_results(app: &WriterApp, state: &GuiState, matches: &[(usize, usize)]) {
     let bar = app.global::<FindBar>();
     let query = bar.get_query();
     let document = state.current.borrow();
-    let matches = matches_for(app, &document, query.as_str());
-    let status = status_text(&matches, query.as_str(), selection_range(&document));
+    let status = status_text(matches, query.as_str(), selection_range(&document));
     bar.set_status(SharedString::from(status));
+    let rects = if bar.get_open() && !query.is_empty() {
+        rects_for_matches(app, &document, matches)
+    } else {
+        Vec::new()
+    };
+    bar.set_match_rects(Rc::new(slint::VecModel::from(rects)).into());
 }
 
 fn step(app: &WriterApp, state: &GuiState, forward: bool) {
     let query = app.global::<FindBar>().get_query();
-    let target = {
+    let (matches, target) = {
         let document = state.current.borrow();
         let matches = matches_for(app, &document, query.as_str());
-        step_target(&matches, selection_range(&document), forward).map(|index| matches[index])
+        let target =
+            step_target(&matches, selection_range(&document), forward).map(|index| matches[index]);
+        (matches, target)
     };
     if let Some(range) = target {
         select(app, range);
     }
-    publish_status(app, state);
-    refresh_rects(app, state);
+    publish_results(app, state, &matches);
 }
 
 fn open(app: &WriterApp, state: &GuiState, replace: bool) {
@@ -259,16 +288,16 @@ fn open(app: &WriterApp, state: &GuiState, replace: bool) {
 }
 
 fn query_changed(app: &WriterApp, state: &GuiState, text: &str) {
-    let target = {
+    let (matches, target) = {
         let document = state.current.borrow();
         let matches = matches_for(app, &document, text);
-        first_from(&matches, selection_range(&document).0).map(|index| matches[index])
+        let target = first_from(&matches, selection_range(&document).0).map(|index| matches[index]);
+        (matches, target)
     };
     if let Some(range) = target {
         select(app, range);
     }
-    publish_status(app, state);
-    refresh_rects(app, state);
+    publish_results(app, state, &matches);
 }
 
 fn replace_current(app: &WriterApp, state: &GuiState) {
@@ -315,6 +344,14 @@ fn replace_all(app: &WriterApp, state: &GuiState) {
 
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     let bar = app.global::<FindBar>();
+    {
+        let app_ref = app.as_weak();
+        bar.on_menu_requested(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_local_menu_open_index(index);
+            }
+        });
+    }
     {
         let (state, app_ref) = (state.clone(), app.as_weak());
         bar.on_open_requested(move |replace| {

@@ -56,7 +56,7 @@ fn png(seed: u8) -> Vec<u8> {
 }
 
 /// `slides` slides of 20 elements: 15 text boxes and 5 pictures.
-fn build_session(slides: usize) -> PresentationSession {
+pub(super) fn build_session(slides: usize) -> PresentationSession {
     let mut document = PresentationDocument::new("bench-deck", "Bench deck");
     let assets: Vec<_> = (0..5u8)
         .map(|seed| {
@@ -123,7 +123,7 @@ fn state_for(session: PresentationSession) -> Rc<GuiState> {
     })
 }
 
-fn setup(session: PresentationSession) -> (PresentApp, Rc<GuiState>) {
+pub(super) fn setup(session: PresentationSession) -> (PresentApp, Rc<GuiState>) {
     set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     let state = state_for(session);
@@ -288,5 +288,54 @@ fn present_frame_bench_100_slides() {
 fn present_frame_bench_300_slides() {
     if let Ok(mode) = std::env::var("LOOM_FRAME_BENCH") {
         bench_size(300, &mode);
+    }
+}
+
+/// Times the pieces of one refresh (what every slide switch and edit runs) so a
+/// failed budget can be pinned to a stage. Printed with `LOOM_FRAME_BENCH=1`;
+/// asserts nothing.
+#[test]
+fn present_refresh_stage_profile() {
+    if std::env::var("LOOM_FRAME_BENCH").is_err() {
+        return;
+    }
+    for slides in [20usize, 100, 300] {
+        let (app, state) = setup(build_session(slides));
+        let stage = |name: &str, f: &mut dyn FnMut()| {
+            let t = Instant::now();
+            for _ in 0..10 {
+                f();
+            }
+            eprintln!("STAGE slides={slides} {name}: {:.2} ms", ms(t) / 10.0);
+        };
+        stage("refresh (whole, with recovery)", &mut || {
+            refresh(&app, &state);
+        });
+        stage("refresh_without_recovery", &mut || {
+            refresh_without_recovery(&app, &state);
+        });
+        stage("save_presentation_session", &mut || {
+            let _ = save_presentation_session(&state.session.borrow());
+        });
+        stage("record_snapshot_recovery", &mut || {
+            let bytes = save_presentation_session(&state.session.borrow()).expect("save");
+            let _ = record_snapshot_recovery("presentation state", bytes);
+        });
+        stage("deck_is_dirty", &mut || {
+            let _ = deck_is_dirty(&state);
+        });
+        stage("validate", &mut || {
+            let _ = state.session.borrow().validate();
+        });
+        stage("picture_view::sync", &mut || {
+            picture_view::sync(&app, &state.session.borrow().document);
+        });
+        stage("document clone", &mut || {
+            let _ = state.session.borrow().document.clone();
+        });
+        stage("select_slide callback", &mut || {
+            let n = (state.session.borrow().document.active_index + 1) % slides;
+            app.invoke_select_slide(n as i32);
+        });
     }
 }

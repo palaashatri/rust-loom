@@ -150,3 +150,36 @@ fn match_case_switches_between_case_sensitive_and_insensitive_matching() {
     bar.invoke_query_changed(bar.get_query());
     assert_eq!(highlight_count(&app), 2);
 }
+
+/// Highlights are built for the pages near the view, not for every match in
+/// the document: the work must not grow with the length of the document.
+#[test]
+fn highlights_are_built_only_for_matches_near_the_view() {
+    let counts: Vec<(usize, usize)> = [20usize, 100]
+        .into_iter()
+        .map(|pages| {
+            let (app, state) =
+                crate::frame_bench_tests::setup(crate::frame_bench_tests::build_document(pages));
+            app.set_page_view_height(800.0);
+            let bar = app.global::<FindBar>();
+            bar.invoke_open_requested(false);
+            query(&app, "dolor");
+            let total = find_bar::editor_matches(&state.current.borrow(), "dolor", false).len();
+            (total, highlight_count(&app))
+        })
+        .collect();
+    let (small_total, small_rects) = counts[0];
+    let (big_total, big_rects) = counts[1];
+    assert!(
+        big_total > small_total * 4,
+        "the long document has far more matches"
+    );
+    assert!(
+        big_rects < big_total / 4,
+        "{big_rects} of {big_total} highlighted"
+    );
+    assert!(
+        big_rects <= small_rects.max(1) * 3,
+        "a 5x longer document does not 5x the highlight work: {small_rects} vs {big_rects}"
+    );
+}

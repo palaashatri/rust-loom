@@ -123,6 +123,8 @@ fn fingerprint(document: &PresentationDocument, slide: &Slide) -> String {
 /// The canvas rows of one slide as a thumbnail or presenter view draws them.
 /// Selection is never shown on a thumbnail.
 pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -> ThumbRows {
+    #[cfg(test)]
+    ROWS_BUILT.with(|built| built.set(built.get() + 1));
     let elements = slide.map(|slide| slide.elements.as_slice()).unwrap_or(&[]);
     let floats = |values: Vec<f32>| ModelRc::new(VecModel::from(values));
     let text = |element: &SlideElement| {
@@ -157,19 +159,32 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
     }
 }
 
-/// Brings the slide strip's thumbnails and the canvas pictures in line with the
-/// document. A thumbnail is rewritten only when its slide changed.
+/// Brings the canvas pictures and the slide strip's thumbnails in line with the
+/// document.
 pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
     set_draw_density(app.window().scale_factor());
     app.set_element_images(synced(
         app.get_element_images(),
         images_for(document, document.active_slide()),
     ));
+    sync_thumbnails(app, document);
+}
+
+/// Thumbnails of the slides the strip is drawing (it reports them through
+/// `strip-first` and `strip-count`); every other row stays an empty
+/// placeholder until the strip scrolls to it. A thumbnail is rewritten only
+/// when its slide changed, so an edit costs the window, not the deck.
+pub(crate) fn sync_thumbnails(app: &PresentApp, document: &PresentationDocument) {
+    let first = usize::try_from(app.get_strip_first()).unwrap_or(0);
+    let count = usize::try_from(app.get_strip_count()).unwrap_or(0);
+    let window =
+        first.min(document.slides.len())..first.saturating_add(count).min(document.slides.len());
     let current = app.get_slide_thumbs();
     let model = current.as_any().downcast_ref::<VecModel<ThumbRows>>();
     match model {
         Some(model) if model.row_count() == document.slides.len() => {
-            for (index, slide) in document.slides.iter().enumerate() {
+            for index in window {
+                let slide = &document.slides[index];
                 let key = fingerprint(document, slide);
                 let stale = model
                     .row_data(index)
@@ -184,11 +199,24 @@ pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
                 document
                     .slides
                     .iter()
-                    .map(|slide| rows_for(document, Some(slide)))
+                    .enumerate()
+                    .map(|(index, slide)| {
+                        if window.contains(&index) {
+                            rows_for(document, Some(slide))
+                        } else {
+                            ThumbRows::default()
+                        }
+                    })
                     .collect::<Vec<_>>(),
             )));
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Thumbnail row sets built on this thread, for tests of how much work an edit does.
+    pub(crate) static ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Reads and checks a PNG or JPEG file. Nothing in the deck changes on failure.

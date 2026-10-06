@@ -51,7 +51,10 @@ component PresentSlideThumbnail inherits Rectangle {
     in property <bool> active: false;
     callback clicked;
 
-    height: mini.height + Theme.tokens.space.sm * 2;
+    // The strip fixes every row to one height (see `PresentSlideStrip`) so it
+    // can place rows without measuring them.
+    in property <length> row-height;
+    height: root.row-height;
     min-width: 0px;
     horizontal-stretch: 1;
     border-radius: Theme.tokens.metrics.radius-medium;
@@ -75,7 +78,7 @@ component PresentSlideThumbnail inherits Rectangle {
         // The slide number sits at the reading-start edge: left in LTR, right in RTL.
         if !Theme.rtl : Text {
             text: (root.index + 1) + "";
-            min-width: 12px;
+            width: 24px;
             font-size: Theme.tokens.typography.micro;
             font-weight: 700;
             color: Theme.palette().ink-secondary;
@@ -96,7 +99,7 @@ component PresentSlideThumbnail inherits Rectangle {
         }
         if Theme.rtl : Text {
             text: (root.index + 1) + "";
-            min-width: 12px;
+            width: 24px;
             font-size: Theme.tokens.typography.micro;
             font-weight: 700;
             color: Theme.palette().ink-secondary;
@@ -106,6 +109,10 @@ component PresentSlideThumbnail inherits Rectangle {
     }
     TouchArea { clicked => { root.clicked(); } }
 }
+/// The slide strip. Only the rows near the visible part of the strip exist as
+/// elements, so a long deck costs what fits on screen, not what the deck holds.
+/// `window-changed` reports which slides those are; the controller fills the
+/// thumbnails of exactly those slides.
 export component PresentSlideStrip inherits Rectangle {
     in property <[string]> titles: [];
     in property <[ThumbRows]> thumbs: [];
@@ -113,11 +120,34 @@ export component PresentSlideStrip inherits Rectangle {
     callback select-slide(int);
     callback add-slide;
     callback delete-slide;
+    /// First slide index and number of slides currently instantiated.
+    callback window-changed(int, int);
+
+    // Every row has one height, so row `n` sits at `n * pitch` without measuring.
+    property <length> row-height: (strip-flick.width - 24px - 3 * Theme.tokens.space.sm) * 0.5625 + 2 * Theme.tokens.space.sm;
+    property <length> pitch: max(root.row-height + Theme.tokens.space.sm, 1px);
+    // Two rows of margin above and four below the visible ones.
+    property <int> first-row: max(0, floor(-strip-flick.viewport-y / root.pitch) - 2);
+    property <int> row-count: min(root.titles.length, ceil(strip-flick.height / root.pitch) + 6);
 
     width: 220px;
     background: Theme.palette().panel;
     border-width: 1px;
     border-color: Theme.palette().border;
+
+    changed first-row => { root.window-changed(root.first-row, root.row-count); }
+    changed row-count => { root.window-changed(root.first-row, root.row-count); }
+    changed active-index => { root.reveal(root.active-index); }
+    init => { root.window-changed(root.first-row, root.row-count); }
+
+    /// Scroll the strip so slide `i` is fully visible.
+    function reveal(i: int) {
+        if (i * root.pitch < -strip-flick.viewport-y) {
+            strip-flick.viewport-y = -(i * root.pitch);
+        } else if ((i + 1) * root.pitch > -strip-flick.viewport-y + strip-flick.height) {
+            strip-flick.viewport-y = strip-flick.height - (i + 1) * root.pitch;
+        }
+    }
 
     VerticalLayout {
         spacing: Theme.tokens.space.sm;
@@ -125,17 +155,28 @@ export component PresentSlideStrip inherits Rectangle {
         padding-bottom: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.sm;
         padding-right: Theme.tokens.space.sm;
-        alignment: start;
+        alignment: stretch;
 
-        for title[idx] in root.titles : PresentSlideThumbnail {
-            index: idx;
-            title: title;
-            rows: root.thumbs[idx];
-            active: idx == root.active-index;
-            clicked => { root.select-slide(idx); }
+        strip-flick := Flickable {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: root.titles.length * root.pitch;
+
+            for k in root.row-count : PresentSlideThumbnail {
+                property <int> slide: root.first-row + k;
+                visible: self.slide < root.titles.length;
+                x: 0px;
+                y: self.slide * root.pitch;
+                width: strip-flick.width;
+                row-height: root.row-height;
+                index: self.slide;
+                title: root.titles[self.slide];
+                rows: root.thumbs[self.slide];
+                active: self.slide == root.active-index;
+                clicked => { root.select-slide(self.slide); }
+            }
         }
 
-        Rectangle { vertical-stretch: 1; background: transparent; }
 
         if !Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.xs;

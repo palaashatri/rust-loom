@@ -683,6 +683,23 @@ impl DocumentFlow {
         &self.page_bounds
     }
 
+    /// The span of the editor text stream covered by the lines of `pages`, or
+    /// `None` when those pages hold no lines.
+    pub fn editor_span(&self, pages: Range<usize>) -> Option<(usize, usize)> {
+        let end = pages.end.min(self.page_lines.len());
+        let start = pages.start.min(end);
+        if start >= end {
+            return None;
+        }
+        let first = self.page_lines.get(start)?.start;
+        let last = self.page_lines.get(end - 1)?.end;
+        let (first, last) = (
+            self.lines.get(first)?,
+            self.lines.get(last.checked_sub(1)?)?,
+        );
+        Some((first.global_start, last.global_end()))
+    }
+
     /// Effective page scale.
     pub fn zoom(&self) -> f32 {
         self.zoom

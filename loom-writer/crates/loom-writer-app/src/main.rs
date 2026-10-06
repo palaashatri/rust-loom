@@ -2305,7 +2305,7 @@ std::thread_local! {
 /// Write the recovery draft now if typing left it stale.
 fn flush_deferred_recovery(app: &WriterApp, state: &GuiState) {
     if recovery::DEFERRED.with(recovery::DeferredWrite::fire) {
-        if let Err(error) = recovery::record_document(&state.current.borrow()) {
+        if let Err(error) = recovery::record_document_deferred(app, &state.current.borrow()) {
             warn_recovery_failed(app, &error);
         }
     }
