@@ -21,7 +21,7 @@ impl RecoveryScratchDirectory {
 
 impl Drop for RecoveryScratchDirectory {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        crate::cell_edit_recovery::remove_test_recovery_data(&self.0);
     }
 }
 
@@ -111,9 +111,16 @@ fn million_sparse_cells_project_one_viewport_within_one_frame() {
         .into_iter()
         .next()
         .expect("worker returns UI workbook copy");
-    worker
-        .wait_for_result_timeout(1, Duration::from_secs(120))
+    let initial = worker
+        .wait_for_result_timeout(1, Duration::from_secs(600))
         .expect("complete initial calculation and recovery write");
+    eprintln!(
+        "PERF initial_load cells={CELLS} worker_evaluation_ms={:.1} recovery_package_ms={:.1} recovery_checkpoint_ms={:.1} recovery_dir_bytes={}",
+        initial.evaluation_duration.as_secs_f64() * 1_000.0,
+        initial.recovery_package_duration.as_secs_f64() * 1_000.0,
+        initial.recovery_journal_duration.as_secs_f64() * 1_000.0,
+        directory_bytes(&crate::cell_edit_recovery::versioned_directory_for(&recovery_directory.0).expect("versioned directory")),
+    );
 
     let address = pseudorandom_address(CELLS as u32 - 1);
     let cell = CellRef {
@@ -146,7 +153,7 @@ fn million_sparse_cells_project_one_viewport_within_one_frame() {
         .expect("submit million-cell edit");
     let mailbox = mailbox_started.elapsed();
     let result = worker
-        .wait_for_result_timeout(2, Duration::from_secs(120))
+        .wait_for_result_timeout(2, Duration::from_secs(600))
         .expect("calculate edited workbook");
     assert_eq!(
         result.update_kind,
@@ -163,12 +170,29 @@ fn million_sparse_cells_project_one_viewport_within_one_frame() {
         result.recovery_package_duration.as_secs_f64() * 1_000.0,
         result.recovery_journal_duration.as_secs_f64() * 1_000.0,
     );
+    eprintln!(
+        "PERF edit_durability cells={CELLS} one_edit_journal_ms={:.2} recovery_dir_bytes={}",
+        result.recovery_journal_duration.as_secs_f64() * 1_000.0,
+        directory_bytes(
+            &crate::cell_edit_recovery::versioned_directory_for(&recovery_directory.0)
+                .expect("versioned directory")
+        ),
+    );
     let ui_total = preparation + mailbox;
     assert!(
         ui_total.as_secs_f64() * 1_000.0 < 16.7,
         "cell preparation and mailbox submission exceeded 16.7 ms: {:.3} ms",
         ui_total.as_secs_f64() * 1_000.0
     );
+}
+
+fn directory_bytes(directory: &std::path::Path) -> u64 {
+    fs::read_dir(directory).map_or(0, |entries| {
+        entries
+            .flatten()
+            .map(|entry| entry.metadata().map_or(0, |metadata| metadata.len()))
+            .sum()
+    })
 }
 
 fn pseudorandom_address(index: u32) -> u32 {

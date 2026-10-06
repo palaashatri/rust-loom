@@ -36,6 +36,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "file.open" | "sheets.open" => app.invoke_open_sheet(),
         "file.save" | "sheets.save" => app.invoke_save_sheet(),
         "file.save_as" | "sheets.save-as" => app.invoke_save_as_sheet(),
+        "sheets.retry-recovery" => app.invoke_retry_recovery(),
         "file.export_csv" | "sheets.export-csv" => app.invoke_export_csv(),
         "file.export_xlsx" | "sheets.export-xlsx" => app.invoke_export_xlsx(),
         "edit.undo" | "sheets.undo" => app.invoke_undo(),

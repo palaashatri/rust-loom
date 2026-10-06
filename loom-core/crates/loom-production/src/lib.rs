@@ -11,6 +11,10 @@
 #[cfg(test)]
 mod checkpoint_generation_tests;
 mod checkpoint_generations;
+#[cfg(feature = "fault-injection")]
+pub mod fault_injection;
+#[cfg(all(test, feature = "fault-injection"))]
+mod fault_injection_tests;
 mod recovery_checkpoint;
 #[cfg(test)]
 mod recovery_checkpoint_tests;
@@ -440,6 +444,8 @@ impl RecoveryJournal {
         if read.skipped_tail && limits.is_some() {
             repair_journal(&self.directory, &read.records)?;
         }
+        #[cfg(feature = "fault-injection")]
+        fault_injection::check(&path, fault_injection::FaultStep::JournalAppend)?;
         let existed = path.exists();
         if existed {
             let mut file = OpenOptions::new().append(true).open(path)?;
@@ -635,6 +641,10 @@ fn atomic_write_with(
         .parent()
         .ok_or_else(|| ProductionError::InvalidData("path has no parent".into()))?;
     fs::create_dir_all(parent)?;
+    #[cfg(feature = "fault-injection")]
+    if let Some(step) = fault_injection::classify(path) {
+        fault_injection::check(path, step)?;
+    }
     atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
         .write(write)
         .map_err(io::Error::from)?;

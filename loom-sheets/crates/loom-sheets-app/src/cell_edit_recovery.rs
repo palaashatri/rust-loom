@@ -14,7 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const VERSIONED_DIRECTORY_SUFFIX: &str = ".sheets-recovery-v1";
 const VERSIONED_SCHEMA_PREFIX: &str = "loom.sheets.recovery/1";
@@ -142,6 +142,7 @@ pub(crate) struct CellEditRecovery {
     identity: Option<RecoveryIdentity>,
     last_sequence: u64,
     failed: Option<String>,
+    cadence: super::recovery_policy::CheckpointCadence,
     #[cfg(test)]
     migration_limits_override: Option<(u64, u64, u64)>,
     #[cfg(test)]
@@ -338,6 +339,17 @@ impl CellEditRecovery {
         let journal =
             RecoveryJournal::open_from_inspection(&versioned_lock, cursor, &operations)
                 .map_err(|error| format!("finalize validated Sheets recovery journal: {error}"))?;
+        let mut cadence = super::recovery_policy::CheckpointCadence::default();
+        if let Some(metadata) = checkpoint_metadata.as_ref() {
+            // Records replayed at startup still await a covering checkpoint.
+            let now = Instant::now();
+            for record in operations
+                .iter()
+                .filter(|record| record.sequence > metadata.last_sequence)
+            {
+                cadence.record_durable_batch(encoded_record_bytes(record), now);
+            }
+        }
         if let Some(mut receipt) = pending_receipt_cleanup {
             if !super::legacy_migration::is_verified(&receipt) {
                 super::legacy_migration::mark_verified(&mut receipt);
@@ -359,6 +371,7 @@ impl CellEditRecovery {
                 identity,
                 last_sequence,
                 failed: None,
+                cadence,
                 #[cfg(test)]
                 migration_limits_override: None,
                 #[cfg(test)]
@@ -462,7 +475,16 @@ impl CellEditRecovery {
         ) {
             Ok(record) if record.sequence == expected_sequence => {
                 self.last_sequence = record.sequence;
-                Ok(())
+                let now = Instant::now();
+                self.cadence
+                    .record_durable_batch(encoded_record_bytes(&record), now);
+                if self.cadence.is_due_at(now) {
+                    // The edit is already durable. A complete checkpoint now
+                    // bounds the journal, and compacts only covered records.
+                    self.checkpoint_current_model(checkpoint_package)
+                } else {
+                    Ok(())
+                }
             }
             Ok(record) => self.fail(format!(
                 "Sheets recovery wrote unexpected sequence {}; expected {expected_sequence}",
@@ -590,6 +612,7 @@ impl CellEditRecovery {
             };
             self.identity = Some(identity);
             self.last_sequence = outcome.last_sequence;
+            self.cadence.reset_after_checkpoint();
             if let Some(error) = outcome.compaction_error {
                 return self.fail(error);
             }
@@ -604,6 +627,7 @@ impl CellEditRecovery {
         // even if its separately ordered compaction reports an error.
         self.identity = Some(identity);
         self.last_sequence = durable_sequence;
+        self.cadence.reset_after_checkpoint();
         if let Err(error) = self.journal.compact(durable_sequence) {
             return self.fail(error.to_string());
         }
@@ -678,6 +702,34 @@ impl CellEditRecovery {
         self.failed = Some(error);
     }
 
+    /// The latched recovery failure. While set, no further edit is journaled;
+    /// only a successful complete checkpoint clears it.
+    pub(crate) fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
+
+    /// Whether the approved 16 MiB, 2,000-record, or five-minute checkpoint
+    /// trigger has been reached for edits not yet covered by a checkpoint.
+    pub(crate) fn checkpoint_due_at(&self, now: Instant) -> bool {
+        self.failed.is_none() && self.identity.is_some() && self.cadence.is_due_at(now)
+    }
+
+    /// When the age trigger fires for the oldest uncovered edit, if any.
+    pub(crate) fn checkpoint_deadline(&self) -> Option<Instant> {
+        if self.failed.is_some() || self.identity.is_none() {
+            return None;
+        }
+        self.cadence.next_deadline()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_cadence_limits_for_test(
+        &mut self,
+        limits: super::recovery_policy::CadenceLimits,
+    ) {
+        self.cadence.set_limits(limits);
+    }
+
     /// Delete every recovery file in both stores after the user intentionally
     /// closed the workbook (saved it, or chose Discard). The lock files stay so
     /// another process cannot create a competing lock during deletion. This
@@ -694,6 +746,7 @@ impl CellEditRecovery {
         self.identity = None;
         self.last_sequence = 0;
         self.pending_legacy_migration = None;
+        self.cadence.reset_after_checkpoint();
         Ok(())
     }
 
@@ -737,6 +790,11 @@ impl CellEditRecovery {
         self.failed = Some(error.clone());
         Err(error)
     }
+}
+
+fn encoded_record_bytes(record: &JournalRecord) -> u64 {
+    // One JSON line plus its newline, as the journal stores it.
+    serde_json::to_vec(record).map_or(record.payload.len() as u64, |bytes| bytes.len() as u64 + 1)
 }
 
 fn is_journal_limit_refusal(error: &ProductionError) -> bool {

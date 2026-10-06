@@ -218,10 +218,17 @@ pub(super) fn handle_completion(
             let status_succeeded = matches!(&checkpoint_result, Some(Ok(())));
             let save_status = match checkpoint_result {
                 Some(Ok(())) => format!("Saved {}", path.display()),
-                Some(Err(error)) => format!(
-                    "Saved {}, but recovery checkpoint failed: {error}",
-                    path.display()
-                ),
+                Some(Err(error)) => {
+                    let blocked = if crate::recovery_pause::paused_reason(state).is_some() {
+                        ". New edits stay blocked until recovery works; choose Retry Recovery or Save As again"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "Saved {}, but recovery checkpoint failed: {error}{blocked}",
+                        path.display()
+                    )
+                }
                 None => format!(
                     "Saved {}, but recovery checkpoint was not completed",
                     path.display()

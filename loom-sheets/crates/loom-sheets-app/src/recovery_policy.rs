@@ -4,7 +4,6 @@ use loom_production::RecoveryInspectionLimits;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Component, Path};
-#[cfg(test)]
 use std::time::{Duration, Instant};
 use std::{fs, io};
 
@@ -17,11 +16,8 @@ pub(super) const MAX_TEMPORARY_RECOVERY_BYTES: u64 = 1024 * MIB;
 pub(super) const MAX_JOURNAL_BYTES: u64 = 64 * MIB;
 pub(super) const MAX_JOURNAL_RECORDS: u64 = 10_000;
 pub(super) const MAX_JOURNAL_RECORD_BYTES: u64 = MIB;
-#[cfg(test)]
 pub(super) const CHECKPOINT_AFTER_BYTES: u64 = 16 * MIB;
-#[cfg(test)]
 pub(super) const CHECKPOINT_AFTER_RECORDS: u64 = 2_000;
-#[cfg(test)]
 pub(super) const CHECKPOINT_AFTER_AGE: Duration = Duration::from_secs(5 * 60);
 #[cfg(test)]
 pub(super) const RETAINED_CHECKPOINT_GENERATIONS: usize = 2;
@@ -322,16 +318,51 @@ pub(super) fn preflight_checkpoint(
     })
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The approved triggers for taking a complete checkpoint, whichever comes
+/// first. Tests lower them to exercise each trigger quickly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CadenceLimits {
+    pub(super) bytes: u64,
+    pub(super) records: u64,
+    pub(super) age: Duration,
+}
+
+pub(super) const APPROVED_CADENCE_LIMITS: CadenceLimits = CadenceLimits {
+    bytes: CHECKPOINT_AFTER_BYTES,
+    records: CHECKPOINT_AFTER_RECORDS,
+    age: CHECKPOINT_AFTER_AGE,
+};
+
+/// Journal volume and age since the last complete checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CheckpointCadence {
+    limits: CadenceLimits,
     encoded_batch_bytes: u64,
     records: u64,
     oldest_uncheckpointed_at: Option<Instant>,
 }
 
-#[cfg(test)]
+impl Default for CheckpointCadence {
+    fn default() -> Self {
+        Self::with_limits(APPROVED_CADENCE_LIMITS)
+    }
+}
+
 impl CheckpointCadence {
+    pub(super) fn with_limits(limits: CadenceLimits) -> Self {
+        Self {
+            limits,
+            encoded_batch_bytes: 0,
+            records: 0,
+            oldest_uncheckpointed_at: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_limits(&mut self, limits: CadenceLimits) {
+        self.limits = limits;
+    }
+
     pub(super) fn record_durable_batch(&mut self, encoded_bytes: u64, durable_at: Instant) {
         if self.records == 0 {
             self.oldest_uncheckpointed_at = Some(durable_at);
@@ -341,20 +372,20 @@ impl CheckpointCadence {
     }
 
     pub(super) fn is_due_at(self, now: Instant) -> bool {
-        self.encoded_batch_bytes >= CHECKPOINT_AFTER_BYTES
-            || self.records >= CHECKPOINT_AFTER_RECORDS
+        self.encoded_batch_bytes >= self.limits.bytes
+            || self.records >= self.limits.records
             || self
                 .oldest_uncheckpointed_at
-                .is_some_and(|oldest| now.saturating_duration_since(oldest) >= CHECKPOINT_AFTER_AGE)
+                .is_some_and(|oldest| now.saturating_duration_since(oldest) >= self.limits.age)
     }
 
     pub(super) fn next_deadline(self) -> Option<Instant> {
         self.oldest_uncheckpointed_at
-            .and_then(|oldest| oldest.checked_add(CHECKPOINT_AFTER_AGE))
+            .and_then(|oldest| oldest.checked_add(self.limits.age))
     }
 
     pub(super) fn reset_after_checkpoint(&mut self) {
-        *self = Self::default();
+        *self = Self::with_limits(self.limits);
     }
 }
 

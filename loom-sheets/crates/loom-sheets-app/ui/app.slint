@@ -25,8 +25,7 @@ export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
     default-font-family: "Inter";
-    // Windows and Linux draw their own frame so the menu and the title share
-    // one row. macOS keeps the native frame and global menu bar.
+    // Windows/Linux draw their own frame (menu and title share a row); macOS keeps its native one.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -179,12 +178,14 @@ export component SheetsApp inherits Window {
         ? "Save changes to \"" + root.save-changes-document + "\" before closing?"
         : "Save changes to \"" + root.save-changes-document + "\" before replacing it?";
     in-out property <bool> close-draining: false;
+    in property <bool> recovery-paused;
     in-out property <bool> xlsx-import-warning-open: false;
     in-out property <string> xlsx-import-warning-message: "";
     callback new-sheet;
     callback open-sheet;
     callback save-sheet;
     callback save-as-sheet;
+    callback retry-recovery;
     callback export-csv;
     callback export-xlsx;
     callback undo;

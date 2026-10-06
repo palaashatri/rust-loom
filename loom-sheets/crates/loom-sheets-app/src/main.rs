@@ -95,6 +95,7 @@ mod export_operations;
 mod file_operation_completions;
 mod legacy_migration;
 mod open_operations;
+mod recovery_pause;
 mod recovery_policy;
 mod save_operations;
 mod worker_failure;
@@ -1761,6 +1762,8 @@ pub(crate) struct GuiState {
     pub(crate) worker_saved_baseline_generation: Cell<Option<u64>>,
     pub(crate) worker_saved_baseline_revision: Cell<Option<u64>>,
     pub(crate) pending_cell_commit: Cell<Option<(u64, CellRef)>>,
+    /// Revision of a Retry Recovery checkpoint whose outcome is still unreported.
+    pub(crate) recovery_retry_revision: Cell<Option<u64>>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
     /// Workbook state from the last completed save/open/new operation.
     /// Comparing document content, rather than undo depth, means undoing back
@@ -1818,6 +1821,7 @@ impl GuiState {
             worker_saved_baseline_generation: Cell::new(None),
             worker_saved_baseline_revision: Cell::new(None),
             pending_cell_commit: Cell::new(None),
+            recovery_retry_revision: Cell::new(None),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
@@ -2064,11 +2068,14 @@ pub(crate) fn workbook_window_title(
 }
 
 pub(crate) fn sync_window_title(app: &SheetsApp, state: &GuiState) {
-    let title = workbook_window_title(
+    let mut title = workbook_window_title(
         state.save_path.borrow().as_deref(),
         state.current.borrow().name.as_str(),
         state.is_dirty(),
     );
+    if recovery_pause::paused_reason(state).is_some() {
+        title.push_str(recovery_pause::TITLE_SUFFIX);
+    }
     app.set_window_title(SharedString::from(title));
 }
 
@@ -2129,10 +2136,13 @@ pub(crate) fn apply_workbook_worker_result(
     app.set_formula_edit_buffer(formula_draft);
     drop(sheet);
 
-    if let Some(error) = result.recovery_error {
-        app.set_status_right(SharedString::from(format!(
+    match result.recovery_error {
+        // A latched failure is reported (and cleared) by recovery_pause::sync.
+        Some(_) if recovery_pause::paused_reason(state).is_some() => {}
+        Some(error) => app.set_status_right(SharedString::from(format!(
             "Recovery checkpoint unavailable: {error}"
-        )));
+        ))),
+        None => {}
     }
     if let Some(error) = result.input_error.as_ref() {
         app.set_status_right(SharedString::from(format!(
@@ -2513,6 +2523,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     register_cell_edit_action(&app, &state, &menu_service);
+    recovery_pause::wire(&app, &state);
     {
         let app_ref = app.as_weak();
         let state = state.clone();

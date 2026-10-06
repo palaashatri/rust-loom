@@ -15,6 +15,7 @@ pub enum PaletteAction {
     OpenSheet,
     SaveSheet,
     SaveAsSheet,
+    RetryRecovery,
     ExportCsv,
     ExportXlsx,
     Cut,
@@ -70,6 +71,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::OpenSheet => dispatch_command(app, "sheets.open"),
         PaletteAction::SaveSheet => dispatch_command(app, "sheets.save"),
         PaletteAction::SaveAsSheet => dispatch_command(app, "sheets.save-as"),
+        PaletteAction::RetryRecovery => dispatch_command(app, "sheets.retry-recovery"),
         PaletteAction::ExportCsv => dispatch_command(app, "sheets.export-csv"),
         PaletteAction::ExportXlsx => dispatch_command(app, "sheets.export-xlsx"),
         PaletteAction::Cut => dispatch_command(app, "sheets.cut"),
@@ -127,6 +129,7 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "sheets.open" => Some(PaletteAction::OpenSheet),
         "sheets.save" => Some(PaletteAction::SaveSheet),
         "sheets.save-as" => Some(PaletteAction::SaveAsSheet),
+        "sheets.retry-recovery" => Some(PaletteAction::RetryRecovery),
         "sheets.export-csv" => Some(PaletteAction::ExportCsv),
         "sheets.export-xlsx" => Some(PaletteAction::ExportXlsx),
         "sheets.cut" => Some(PaletteAction::Cut),
@@ -214,6 +217,12 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "sheets.save-as",
             "Save Workbook As",
             "Ctrl+Shift+S",
+        ),
+        (
+            PaletteAction::RetryRecovery,
+            "sheets.retry-recovery",
+            "Retry Recovery",
+            "",
         ),
         (
             PaletteAction::ExportCsv,
@@ -447,6 +456,7 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
         PaletteAction::Undo => app.get_can_undo(),
         PaletteAction::Redo => app.get_can_redo(),
         PaletteAction::WorksheetObjects => app.get_object_views().row_count() > 0,
+        PaletteAction::RetryRecovery => app.get_recovery_paused(),
         _ => true,
     })
     .collect()

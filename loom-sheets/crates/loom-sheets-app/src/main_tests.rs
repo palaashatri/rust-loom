@@ -49,6 +49,8 @@ mod grid_tab_enter_tests;
 mod layout_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
+#[path = "main_tests/recovery_pause_ui_tests.rs"]
+mod recovery_pause_ui_tests;
 #[path = "main_tests/rtl_tests.rs"]
 mod rtl_tests;
 #[path = "main_tests/save_operations_journeys.rs"]

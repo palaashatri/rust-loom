@@ -122,6 +122,7 @@ pub(crate) fn process_worker_tick(
     }
     process_tick(app, state, &completions, worker_failures.as_deref());
     preserve_worker_input_failure_status(app, state, &completions);
+    crate::recovery_pause::sync(app, state);
 }
 
 pub(crate) fn blocks_admission(state: &GuiState) -> bool {

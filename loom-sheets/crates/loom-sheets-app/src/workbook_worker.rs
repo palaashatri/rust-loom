@@ -5,7 +5,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 #[cfg(test)]
 use std::time::Duration;
-#[cfg(test)]
 use std::time::Instant;
 
 use loom_sheets_core::workbook::evaluate_workbook;
@@ -169,6 +168,10 @@ struct Shared {
     work_available: Condvar,
     latest_result: Mutex<Option<WorkbookResult>>,
     pending_input_failure: Mutex<Option<WorkerInputError>>,
+    /// The latched recovery failure, mirrored from the recovery writer. While
+    /// it is set the UI stops admitting edits; a successful complete
+    /// checkpoint (Retry, Save, or Save As) clears it.
+    recovery_pause: Mutex<Option<String>>,
     result_available: Condvar,
 }
 
@@ -176,6 +179,8 @@ enum RecoveryLocation {
     Application(String),
     #[cfg(test)]
     Directory(PathBuf),
+    #[cfg(test)]
+    DirectoryWithCadence(PathBuf, crate::recovery_policy::CadenceLimits),
 }
 
 pub(crate) struct WorkbookWorker {
@@ -217,6 +222,15 @@ impl WorkbookWorker {
                     #[cfg(test)]
                     RecoveryLocation::Directory(directory) => {
                         open_recovery(CellEditRecovery::open_at(directory))
+                    }
+                    #[cfg(test)]
+                    RecoveryLocation::DirectoryWithCadence(directory, limits) => {
+                        let (mut recovery, startup) =
+                            open_recovery(CellEditRecovery::open_at(directory));
+                        if let Some(recovery) = recovery.as_mut() {
+                            recovery.set_cadence_limits_for_test(limits);
+                        }
+                        (recovery, startup)
                     }
                 };
                 let startup_error = startup.recovery_error.clone();
@@ -356,6 +370,14 @@ impl WorkbookWorker {
 
     pub(crate) fn pending_input_failure(&self) -> Result<Option<WorkerInputError>, String> {
         read_pending_input_failure(&self.shared)
+    }
+
+    /// The reason durable recovery can no longer keep up, if it cannot.
+    pub(crate) fn recovery_pause(&self) -> Option<String> {
+        self.shared.recovery_pause.lock().map_or_else(
+            |_| Some("recovery state is unavailable".into()),
+            |p| p.clone(),
+        )
     }
 
     /// Queue a Save barrier after all updates currently accepted by the worker.
@@ -504,6 +526,22 @@ impl WorkbookWorker {
     }
 
     #[cfg(test)]
+    pub(super) fn start_at_with_cadence(
+        directory: PathBuf,
+        schema: impl Into<String>,
+        limits: crate::recovery_policy::CadenceLimits,
+    ) -> Result<(Self, WorkerStartup), String> {
+        let (save_completions, _save) = mpsc::channel();
+        let (export_completions, _export) = mpsc::channel();
+        Self::spawn(
+            RecoveryLocation::DirectoryWithCadence(directory, limits),
+            schema.into(),
+            save_completions,
+            export_completions,
+        )
+    }
+
+    #[cfg(test)]
     pub(super) fn start_at(
         directory: PathBuf,
         schema: impl Into<String>,
@@ -587,10 +625,21 @@ enum WorkerAction {
         entered: mpsc::Sender<()>,
         release: mpsc::Receiver<()>,
     },
+    /// The five-minute checkpoint trigger fired while the worker was idle.
+    CadenceTick,
     Stop,
 }
 
-fn next_action(shared: &Shared) -> WorkerAction {
+fn sync_recovery_pause(shared: &Shared, recovery: &Option<CellEditRecovery>) {
+    let failure = recovery
+        .as_ref()
+        .and_then(|recovery| recovery.failure().map(str::to_owned));
+    if let Ok(mut pause) = shared.recovery_pause.lock() {
+        *pause = failure;
+    }
+}
+
+fn next_action(shared: &Shared, deadline: Option<Instant>) -> WorkerAction {
     let mut mailbox = shared.mailbox.lock().expect("workbook worker mailbox");
     loop {
         if let Some(msg) = mailbox.queue.pop_front() {
@@ -609,10 +658,23 @@ fn next_action(shared: &Shared) -> WorkerAction {
         if mailbox.stopping {
             return WorkerAction::Stop;
         }
-        mailbox = shared
-            .work_available
-            .wait(mailbox)
-            .expect("workbook worker mailbox");
+        mailbox = match deadline {
+            None => shared
+                .work_available
+                .wait(mailbox)
+                .expect("workbook worker mailbox"),
+            Some(deadline) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return WorkerAction::CadenceTick;
+                }
+                shared
+                    .work_available
+                    .wait_timeout(mailbox, deadline - now)
+                    .expect("workbook worker mailbox")
+                    .0
+            }
+        };
     }
 }
 
@@ -636,8 +698,34 @@ fn run_worker(
     let mut last_revision = 0;
     let mut baseline: Option<(Vec<Sheet>, usize)> = None;
     let mut completion_sequence = 0;
+    // True once the worker's model is the workbook that recovery protects. A
+    // temporary import awaiting confirmation (or a worker that has not been
+    // initialized yet) must never be written over the recovery checkpoint.
+    let mut mirror_is_recoverable = false;
     loop {
-        match next_action(&shared) {
+        let cadence_deadline = if mirror_is_recoverable {
+            recovery
+                .as_ref()
+                .and_then(CellEditRecovery::checkpoint_deadline)
+        } else {
+            None
+        };
+        match next_action(&shared, cadence_deadline) {
+            WorkerAction::CadenceTick => {
+                if let Some(recovery) = recovery.as_mut() {
+                    if recovery.checkpoint_due_at(Instant::now()) {
+                        match workbook_package_bytes(&sheets, active_sheet) {
+                            Ok(package) => {
+                                // A failure latches inside the recovery writer
+                                // and pauses edit admission below.
+                                let _ = recovery.checkpoint_package(package, false);
+                            }
+                            Err(error) => recovery.mark_failed(error),
+                        }
+                    }
+                }
+                sync_recovery_pause(&shared, recovery);
+            }
             WorkerAction::Initialize(initialization) => {
                 if initialization.revision <= last_revision {
                     continue;
@@ -648,6 +736,7 @@ fn run_worker(
                 if sheets.is_empty() {
                     sheets.push(Sheet::new("Untitled"));
                 }
+                mirror_is_recoverable = record_recovery;
                 active_sheet = initialization
                     .active_sheet
                     .min(sheets.len().saturating_sub(1));
@@ -696,6 +785,7 @@ fn run_worker(
                     }
                 }
 
+                sync_recovery_pause(&shared, recovery);
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -795,11 +885,10 @@ fn run_worker(
                         #[cfg(test)]
                         let journal_started = Instant::now();
                         match package {
-                            Ok(payload) => {
-                                if let Err(error) = recovery.checkpoint_package(payload, true) {
-                                    recovery_error = Some(error);
-                                }
-                            }
+                            Ok(payload) => match recovery.checkpoint_package(payload, true) {
+                                Ok(()) => mirror_is_recoverable = true,
+                                Err(error) => recovery_error = Some(error),
+                            },
                             Err(error) => {
                                 recovery.mark_failed(error.clone());
                                 recovery_error = Some(error);
@@ -825,6 +914,7 @@ fn run_worker(
                         }
                     }
                 }
+                sync_recovery_pause(&shared, recovery);
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -922,6 +1012,7 @@ fn run_worker(
                     }
                     Err(error) => (Err(error), None, None),
                 };
+                sync_recovery_pause(&shared, recovery);
 
                 let _ = save_completions.send(crate::save_operations::SaveCompletion {
                     completion_sequence: next_completion_sequence(&mut completion_sequence),
@@ -972,6 +1063,7 @@ fn run_worker(
                     // The store is gone on purpose; nothing may recreate it.
                     *recovery = None;
                 }
+                sync_recovery_pause(&shared, recovery);
                 let _ = reply.send(result);
             }
             WorkerAction::Stop => return,
@@ -1078,3 +1170,11 @@ fn publish_result(shared: &Shared, result: WorkbookResult) {
 #[cfg(test)]
 #[path = "workbook_worker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "recovery_pause_tests.rs"]
+mod pause_tests;
+
+#[cfg(test)]
+#[path = "recovery_bench_tests.rs"]
+mod bench_tests;

@@ -15,3 +15,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+# Test-only write-fault injection used by application recovery tests.
+fault-injection = []

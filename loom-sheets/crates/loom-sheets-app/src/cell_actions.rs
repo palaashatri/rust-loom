@@ -26,6 +26,9 @@ pub(crate) fn register_cell_edit_action(
             if crate::close_operations::reject_admission(&app, &state) {
                 return;
             }
+            if crate::recovery_pause::reject_edit(&app, &state) {
+                return;
+            }
             crate::object_actions::cancel_active_gesture(&app, &state);
             if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
                 state.tab_run.note_commit(cell);
