@@ -108,16 +108,8 @@ pub fn snapshot_component(
     let (w, h) = (width.max(1.0), height.max(1.0));
     // A real scale factor, as on a high-DPI display: the logical size stays
     // `width` x `height`, the layout is identical, and only the pixel density
-    // changes. `LOOM_CAPTURE_SCALE` overrides a 1.0 request for QA captures.
-    let scale_factor = if (scale_factor - 1.0).abs() < f32::EPSILON {
-        std::env::var("LOOM_CAPTURE_SCALE")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| (1.0..=4.0).contains(v))
-            .unwrap_or(1.0)
-    } else {
-        scale_factor
-    };
+    // changes. Callers pass the factor explicitly (apps expose `--scale-factor`).
+    let scale_factor = scale_factor.clamp(0.5, 8.0);
     handle
         .window()
         .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor });

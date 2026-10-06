@@ -37,9 +37,9 @@ impl Stop {
     }
 }
 
-struct Session {
-    app: PresentApp,
-    state: Rc<GuiState>,
+pub(super) struct Session {
+    pub(super) app: PresentApp,
+    pub(super) state: Rc<GuiState>,
     actions: Rc<RefCell<Vec<String>>>,
 }
 
@@ -90,7 +90,7 @@ fn launched_with(dialogs: Rc<dyn FileDialogService>) -> Session {
     }
 }
 
-fn launched() -> Session {
+pub(super) fn launched() -> Session {
     launched_with(Rc::new(loom_desktop::ScriptedFileDialogs::default()))
 }
 

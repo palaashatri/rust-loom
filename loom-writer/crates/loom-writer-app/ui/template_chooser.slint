@@ -76,7 +76,7 @@ component CategoryRow inherits Rectangle {
     height: 32px * max(1.0, Theme.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
     background: root.active ? Theme.palette().surface-raised : transparent;
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
@@ -90,7 +90,128 @@ component CategoryRow inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        alignment: end;
+        cross-axis-alignment: center;
+        Text {
+            text: root.label;
+            font-size: Theme.type.body;
+            font-weight: root.active ? 600 : 400;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+        }
+        Icon { size: 16px; icon: root.icon-name; tint: root.active ? Theme.palette().accent : Theme.palette().ink-secondary; }
+    }
     TouchArea { clicked => { root.clicked(); } }
+}
+
+/// One template card, whose miniature document is chosen by its number. The
+/// same six cards appear in either reading order.
+component WriterTemplateOption inherits WriterTemplateCard {
+    in property <int> index: 0;
+    in property <int> current: 0;
+
+    title: ["Blank", "Blank Black", "Executive Report", "Business Letter", "Curriculum Vitae", "Newsletter"][root.index];
+    selected: root.current == root.index;
+    preview-background: root.index == 1 ? #18181b : Theme.palette().paper;
+
+    if root.index == 0 : VerticalLayout {
+        spacing: 8px;
+        padding: 16px;
+        Text {
+            text: "Aa";
+            font-size: Theme.tokens.typography.display-large;
+            font-weight: 700;
+            color: Theme.palette().paper-ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            vertical-stretch: 1;
+        }
+        Rectangle { height: 1px; background: Theme.palette().paper-line; }
+    }
+    if root.index == 1 : VerticalLayout {
+        spacing: 8px;
+        padding: 16px;
+        Text {
+            text: "Aa";
+            font-size: Theme.tokens.typography.display-large;
+            font-weight: 700;
+            color: #f4f4f5;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            vertical-stretch: 1;
+        }
+        Rectangle { height: 1px; background: #3f3f46; }
+    }
+    if root.index == 2 : VerticalLayout {
+        spacing: 6px;
+        padding: 14px;
+        Text { text: "REPORT TITLE"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().paper-ink; }
+        Rectangle { height: 2px; background: Theme.palette().accent; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
+        Rectangle { height: 6px; background: transparent; }
+        Text { text: "Executive Summary"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+    if root.index == 3 : VerticalLayout {
+        spacing: 6px;
+        padding: 14px;
+        Text { text: "Your Name"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().paper-ink; }
+        Text { text: "October 24, 2026"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; }
+        Rectangle { height: 1px; background: Theme.palette().paper-line; }
+        Text { text: "Dear Recipient,"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-ink; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+    if root.index == 4 : VerticalLayout {
+        spacing: 5px;
+        padding: 12px;
+        Text { text: "YOUR NAME"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().paper-ink; }
+        Rectangle { height: 2px; background: Theme.palette().content-cool; }
+        Text { text: "EXPERIENCE"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
+        Text { text: "EDUCATION"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+    if root.index == 5 : VerticalLayout {
+        spacing: 4px;
+        padding: 12px;
+        Rectangle {
+            height: 20px;
+            background: Theme.palette().content-accent-soft;
+            border-radius: 2px;
+            Text { text: "NEWSLETTER"; font-size: 8px; font-weight: 700; color: Theme.palette().accent; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 3px;
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+            Rectangle { width: 1px; background: Theme.palette().paper-line; }
+            VerticalLayout {
+                spacing: 3px;
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+        }
+    }
 }
 
 export component TemplateChooserModal inherits Rectangle {
@@ -151,8 +272,8 @@ export component TemplateChooserModal inherits Rectangle {
         key-pressed(event) => {
             if (event.text == Key.Escape) { root.cancel-template(); return accept; }
             if (event.text == Key.Return) { root.create-template(root.template-selected); return accept; }
-            if (event.text == Key.LeftArrow) { root.template-selected = root.pick-template(-1); return accept; }
-            if (event.text == Key.RightArrow) { root.template-selected = root.pick-template(1); return accept; }
+            if (event.text == Key.LeftArrow) { root.template-selected = root.pick-template(Theme.rtl ? 1 : -1); return accept; }
+            if (event.text == Key.RightArrow) { root.template-selected = root.pick-template(Theme.rtl ? -1 : 1); return accept; }
             if (event.text == Key.UpArrow) { root.choose-template-category(max(0, root.template-category - 1)); return accept; }
             if (event.text == Key.DownArrow) { root.choose-template-category(min(5, root.template-category + 1)); return accept; }
             if (event.text == Key.Tab || event.text == Key.Backtab) {
@@ -184,14 +305,15 @@ export component TemplateChooserModal inherits Rectangle {
             spacing: 0px;
             padding: 0px;
 
-            // Main body: Sidebar + Content Grid
-            HorizontalLayout {
-                spacing: 0px;
+            // Main body: the category list at the reading-start side (left in LTR,
+            // right in RTL) and the template grid filling the rest.
+            Rectangle {
                 vertical-stretch: 1;
 
-                // Left Category Sidebar
-                Rectangle {
+                sidebar := Rectangle {
+                    x: Theme.rtl ? parent.width - self.width : 0px;
                     width: 220px + 80px * (max(1.0, Theme.text-scale) - 1.0);
+                    height: parent.height;
                     background: Theme.palette().panel;
 
                     VerticalLayout {
@@ -202,8 +324,10 @@ export component TemplateChooserModal inherits Rectangle {
                         padding-right: Theme.tokens.space.lg;
 
                         HorizontalLayout {
-                            padding-left: Theme.tokens.space.md;
+                            padding-left: Theme.rtl ? 0px : Theme.tokens.space.md;
+                            padding-right: Theme.rtl ? Theme.tokens.space.md : 0px;
                             padding-bottom: Theme.tokens.space.sm;
+                            alignment: Theme.rtl ? end : start;
                             Text {
                                 text: "TEMPLATES";
                                 font-size: 10px;
@@ -226,6 +350,7 @@ export component TemplateChooserModal inherits Rectangle {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.sm;
                             padding: Theme.tokens.space.md;
+                            alignment: Theme.rtl ? end : start;
                             Text {
                                 text: "English (US)";
                                 font-size: Theme.type.caption;
@@ -237,7 +362,7 @@ export component TemplateChooserModal inherits Rectangle {
                     }
 
                     Rectangle {
-                        x: parent.width - 1px;
+                        x: Theme.rtl ? 0px : parent.width - 1px;
                         y: 0px;
                         width: 1px;
                         height: parent.height;
@@ -245,9 +370,12 @@ export component TemplateChooserModal inherits Rectangle {
                     }
                 }
 
-                // Right Content Area
+                // Content area
                 Flickable {
-                    horizontal-stretch: 1;
+                    x: Theme.rtl ? 0px : sidebar.width;
+                    y: 0px;
+                    width: parent.width - sidebar.width;
+                    height: parent.height;
                     viewport-height: 640px;
 
                     VerticalLayout {
@@ -262,186 +390,86 @@ export component TemplateChooserModal inherits Rectangle {
                             font-size: 24px * max(1.0, Theme.text-scale);
                             font-weight: 700;
                             color: Theme.palette().ink;
+                            horizontal-alignment: Theme.rtl ? right : left;
                         }
 
-                        // Row 1: Basic & Presentation
-                        HorizontalLayout {
+                        // Row 1: Basic & Reports. Right-to-left reads each row from the right.
+                        if !Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
                             alignment: center;
-
-                            if root.template-visible(0) : WriterTemplateCard {
-                                title: "Blank";
-                                selected: root.template-selected == 0;
-                                clicked => { root.template-selected = 0; }
-                                VerticalLayout {
-                                    spacing: 8px;
-                                    padding: 16px;
-                                    Text {
-                                        text: "Aa";
-                                        font-size: Theme.tokens.typography.display-large;
-                                        font-weight: 700;
-                                        color: Theme.palette().paper-ink;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                        vertical-stretch: 1;
-                                    }
-                                    Rectangle { height: 1px; background: Theme.palette().paper-line; }
-                                }
-                            }
-
-                            if root.template-visible(1) : WriterTemplateCard {
-                                title: "Blank Black";
-                                selected: root.template-selected == 1;
-                                preview-background: #18181b;
-                                clicked => { root.template-selected = 1; }
-                                VerticalLayout {
-                                    spacing: 8px;
-                                    padding: 16px;
-                                    Text {
-                                        text: "Aa";
-                                        font-size: Theme.tokens.typography.display-large;
-                                        font-weight: 700;
-                                        color: #f4f4f5;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                        vertical-stretch: 1;
-                                    }
-                                    Rectangle { height: 1px; background: #3f3f46; }
-                                }
-                            }
-
-                            if root.template-visible(2) : WriterTemplateCard {
-                                title: "Executive Report";
-                                selected: root.template-selected == 2;
-                                clicked => { root.template-selected = 2; }
-                                VerticalLayout {
-                                    spacing: 6px;
-                                    padding: 14px;
-                                    Text { text: "REPORT TITLE"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().paper-ink; }
-                                    Rectangle { height: 2px; background: Theme.palette().accent; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 6px; background: transparent; }
-                                    Text { text: "Executive Summary"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                }
-                            }
+                            if root.template-visible(0) : WriterTemplateOption { index: 0; current: root.template-selected; clicked => { root.template-selected = 0; } }
+                            if root.template-visible(1) : WriterTemplateOption { index: 1; current: root.template-selected; clicked => { root.template-selected = 1; } }
+                            if root.template-visible(2) : WriterTemplateOption { index: 2; current: root.template-selected; clicked => { root.template-selected = 2; } }
+                        }
+                        if Theme.rtl : HorizontalLayout {
+                            spacing: Theme.tokens.space.xl;
+                            alignment: center;
+                            if root.template-visible(2) : WriterTemplateOption { index: 2; current: root.template-selected; clicked => { root.template-selected = 2; } }
+                            if root.template-visible(1) : WriterTemplateOption { index: 1; current: root.template-selected; clicked => { root.template-selected = 1; } }
+                            if root.template-visible(0) : WriterTemplateOption { index: 0; current: root.template-selected; clicked => { root.template-selected = 0; } }
                         }
 
                         // Row 2: Letters, CV & Newsletters
-                        HorizontalLayout {
+                        if !Theme.rtl : HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
                             alignment: center;
-
-                            if root.template-visible(3) : WriterTemplateCard {
-                                title: "Business Letter";
-                                selected: root.template-selected == 3;
-                                clicked => { root.template-selected = 3; }
-                                VerticalLayout {
-                                    spacing: 6px;
-                                    padding: 14px;
-                                    Text { text: "Your Name"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().paper-ink; }
-                                    Text { text: "October 24, 2026"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; }
-                                    Rectangle { height: 1px; background: Theme.palette().paper-line; }
-                                    Text { text: "Dear Recipient,"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-ink; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                }
-                            }
-
-                            if root.template-visible(4) : WriterTemplateCard {
-                                title: "Curriculum Vitae";
-                                selected: root.template-selected == 4;
-                                clicked => { root.template-selected = 4; }
-                                VerticalLayout {
-                                    spacing: 5px;
-                                    padding: 12px;
-                                    Text { text: "YOUR NAME"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().paper-ink; }
-                                    Rectangle { height: 2px; background: Theme.palette().content-cool; }
-                                    Text { text: "EXPERIENCE"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
-                                    Text { text: "EDUCATION"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-                                    Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                }
-                            }
-
-                            if root.template-visible(5) : WriterTemplateCard {
-                                title: "Newsletter";
-                                selected: root.template-selected == 5;
-                                clicked => { root.template-selected = 5; }
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    padding: 12px;
-                                    Rectangle {
-                                        height: 20px;
-                                        background: Theme.palette().content-accent-soft;
-                                        border-radius: 2px;
-                                        Text { text: "NEWSLETTER"; font-size: 8px; font-weight: 700; color: Theme.palette().accent; horizontal-alignment: center; vertical-alignment: center; }
-                                    }
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        vertical-stretch: 1;
-                                        VerticalLayout {
-                                            spacing: 3px;
-                                            Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                            Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                            Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                            Rectangle { vertical-stretch: 1; background: transparent; }
-                                        }
-                                        Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                        VerticalLayout {
-                                            spacing: 3px;
-                                            Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                            Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                                            Rectangle { vertical-stretch: 1; background: transparent; }
-                                        }
-                                    }
-                                }
-                            }
+                            if root.template-visible(3) : WriterTemplateOption { index: 3; current: root.template-selected; clicked => { root.template-selected = 3; } }
+                            if root.template-visible(4) : WriterTemplateOption { index: 4; current: root.template-selected; clicked => { root.template-selected = 4; } }
+                            if root.template-visible(5) : WriterTemplateOption { index: 5; current: root.template-selected; clicked => { root.template-selected = 5; } }
+                        }
+                        if Theme.rtl : HorizontalLayout {
+                            spacing: Theme.tokens.space.xl;
+                            alignment: center;
+                            if root.template-visible(5) : WriterTemplateOption { index: 5; current: root.template-selected; clicked => { root.template-selected = 5; } }
+                            if root.template-visible(4) : WriterTemplateOption { index: 4; current: root.template-selected; clicked => { root.template-selected = 4; } }
+                            if root.template-visible(3) : WriterTemplateOption { index: 3; current: root.template-selected; clicked => { root.template-selected = 3; } }
                         }
                     }
                 }
             }
 
-            // Bottom Action Bar
+            // Bottom Action Bar. The primary button sits at the reading end: right
+            // in LTR, left in RTL; the hint fills the rest.
             Rectangle {
                 height: 56px;
                 background: Theme.palette().chrome;
 
                 Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
 
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.lg;
-                    padding-left: Theme.tokens.space.xl;
-                    padding-right: Theme.tokens.space.xl;
-                    cross-axis-alignment: center;
+                cancel-button := LoomButton {
+                    label: "Cancel";
+                    variant: "secondary";
+                    width: self.preferred-width;
+                    height: Theme.tokens.metrics.control-height;
+                    x: Theme.rtl
+                        ? create-button.x + create-button.width + Theme.tokens.space.lg
+                        : create-button.x - Theme.tokens.space.lg - self.width;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.cancel-template(); }
+                }
 
-                    Text {
-                        text: "Escape to cancel • Return to create";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
+                create-button := LoomButton {
+                    label: "Create Document";
+                    variant: "primary";
+                    width: self.preferred-width;
+                    height: Theme.tokens.metrics.control-height;
+                    x: Theme.rtl ? Theme.tokens.space.xl : parent.width - Theme.tokens.space.xl - self.width;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.create-template(root.template-selected); }
+                }
 
-                    cancel-button := LoomButton {
-                        label: "Cancel";
-                        variant: "secondary";
-                        clicked => { root.cancel-template(); }
-                    }
-
-                    create-button := LoomButton {
-                        label: "Create Document";
-                        variant: "primary";
-                        clicked => { root.create-template(root.template-selected); }
-                    }
+                Text {
+                    text: "Escape to cancel • Return to create";
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().ink-secondary;
+                    x: Theme.rtl ? cancel-button.x + cancel-button.width + Theme.tokens.space.lg : Theme.tokens.space.xl;
+                    width: Theme.rtl
+                        ? max(0px, parent.width - Theme.tokens.space.xl - self.x)
+                        : max(0px, cancel-button.x - Theme.tokens.space.lg - Theme.tokens.space.xl);
+                    height: parent.height;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
             }
         }

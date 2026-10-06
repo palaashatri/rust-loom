@@ -56,6 +56,7 @@ export component WriterApp inherits Window {
     /// 0 none, 1 View, 2 Zoom, 3 Insert, 4 Text, 5 Style, 6 List, 7 Export.
     in-out property <int> toolbar-menu: 0;
     property <length> toolbar-menu-x: 0px;
+    property <length> outline-width: root.show-navigator ? 220px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
     property <int> toolbar-menu-kind: root.toolbar-overflow-open ? 8 : root.toolbar-menu;
     in-out property <bool> show-inspector: false;
     /// 0 = Format, 1 = Document.
@@ -226,8 +227,6 @@ export component WriterApp inherits Window {
         app-focus.focus();
         FindBar.page-focus-tick += 1;
     }
-
-    init => { root.focus-page(); }
 
     /// F6 / Shift+F6 from the page: Tab inside the page types a tab, so this is
     /// how the keyboard leaves it. F6 goes to the inspector (or the toolbar when
@@ -406,71 +405,90 @@ export component WriterApp inherits Window {
                 show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
             }
 
-            HorizontalLayout {
-                spacing: 0px;
+            // Outline, page and inspector. Left-to-right puts the outline at the left and
+            // the inspector at the right; right-to-left mirrors them. They are placed by
+            // position so one page canvas serves both directions.
+            Rectangle {
                 vertical-stretch: 1;
                 // The page stack is taller than the window; it scrolls, so it
                 // must not raise the row's minimum and push the status bar off.
                 min-height: 0px;
 
-                if root.show-navigator && !root.rtl : WriterOutlinePane {
+                if root.show-navigator : WriterOutlinePane {
+                    x: root.rtl ? parent.width - self.width : 0px;
+                    y: 0px;
+                    height: parent.height;
                     entries: root.outline-entries;
                     jump(idx) => { root.jump-outline(idx); }
                     close-requested => { root.show-navigator = false; root.focus-page(); }
                 }
 
-                if !root.rtl : WriterPageCanvas {
-                    doc-title: root.doc-title;
-                    doc-content <=> root.doc-content;
-                    render-blocks <=> root.render-blocks;
-                    selection-rects <=> root.selection-rects;
-                    comment-rects: root.comment-rects;
-                    activate-comment(id) => { root.navigate-comment(id); }
-                    selection-anchor <=> root.selection-anchor;
-                    selection-focus <=> root.selection-focus;
-                    selection-announcement: root.selection-announcement;
-                    page-zoom <=> root.page-zoom;
-                    page-scroll-x <=> root.page-scroll-x;
-                    page-scroll-y <=> root.page-scroll-y;
-                    view-height <=> root.page-view-height;
-                    page-count: root.page-count;
-                    visible-page-first: root.visible-page-first;
-                    visible-page-count: root.visible-page-count;
-                    page-stack-height: root.page-stack-height;
-                    page-gap-pt: root.page-gap-pt;
-                    page-width-pt: root.page-width-pt;
-                    page-height-pt: root.page-height-pt;
-                    page-margin-pt: root.page-margin-pt;
-                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
-                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
-                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
-                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
-                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
-                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
-                    pointer-released(x, y) => { root.pointer-released(x, y); }
-                    pointer-cancelled => { root.pointer-cancelled(); }
-                    key-pressed(event) => {
-                        // The text box has an undo of its own that knows nothing of formatting,
-                        // replace or table edits; the document history is the only one.
-                        if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
-                            if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                            return accept;
+                // The page fills what the outline and the inspector leave; the layout
+                // gives it its size, and two spacers hold the side panels' room.
+                HorizontalLayout {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 0px;
+                    Rectangle { width: root.rtl ? docked-inspector.width : root.outline-width; }
+                    page-canvas := WriterPageCanvas {
+                        horizontal-stretch: 1;
+                        doc-title: root.doc-title;
+                        doc-content <=> root.doc-content;
+                        render-blocks <=> root.render-blocks;
+                        selection-rects <=> root.selection-rects;
+                        comment-rects: root.comment-rects;
+                        activate-comment(id) => { root.navigate-comment(id); }
+                        selection-anchor <=> root.selection-anchor;
+                        selection-focus <=> root.selection-focus;
+                        selection-announcement: root.selection-announcement;
+                        page-zoom <=> root.page-zoom;
+                        page-scroll-x <=> root.page-scroll-x;
+                        page-scroll-y <=> root.page-scroll-y;
+                        view-height <=> root.page-view-height;
+                        page-count: root.page-count;
+                        visible-page-first: root.visible-page-first;
+                        visible-page-count: root.visible-page-count;
+                        page-stack-height: root.page-stack-height;
+                        page-gap-pt: root.page-gap-pt;
+                        page-width-pt: root.page-width-pt;
+                        page-height-pt: root.page-height-pt;
+                        page-margin-pt: root.page-margin-pt;
+                        page-zoom-changed(value) => { root.page-zoom-changed(value); }
+                        page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
+                        document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                        selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                        pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                        pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                        pointer-released(x, y) => { root.pointer-released(x, y); }
+                        pointer-cancelled => { root.pointer-cancelled(); }
+                        key-pressed(event) => {
+                            // The text box has an undo of its own that knows nothing of formatting,
+                            // replace or table edits; the document history is the only one.
+                            if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
+                                if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                                return accept;
+                            }
+                            if (root.open-menu-for-key(event)) { return accept; }
+                            if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
+                            if (event.text == Key.Tab) {
+                                if (!event.modifiers.shift) { root.insert-tab(); }
+                                return accept;
+                            }
+                            if (event.text == Key.PageDown) { root.page-move(1, event.modifiers.shift); return accept; }
+                            if (event.text == Key.PageUp) { root.page-move(-1, event.modifiers.shift); return accept; }
+                            return reject;
                         }
-                        if (root.open-menu-for-key(event)) { return accept; }
-                        if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
-                        if (event.text == Key.Tab) {
-                            if (!event.modifiers.shift) { root.insert-tab(); }
-                            return accept;
-                        }
-                        if (event.text == Key.PageDown) { root.page-move(1, event.modifiers.shift); return accept; }
-                        if (event.text == Key.PageUp) { root.page-move(-1, event.modifiers.shift); return accept; }
-                        return reject;
                     }
+                    Rectangle { width: root.rtl ? root.outline-width : docked-inspector.width; }
                 }
 
                 docked-inspector := WriterInspector {
+                    x: root.rtl ? 0px : parent.width - self.width;
+                    y: 0px;
                     width: root.docked-inspector-visible ? 320px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
-                    vertical-stretch: 1;
+                    height: parent.height;
                     visible: root.docked-inspector-visible;
                     active: root.docked-inspector-visible;
                     inspector-tab <=> root.inspector-tab;
@@ -516,58 +534,6 @@ export component WriterApp inherits Window {
                     select-margins(idx) => { root.select-margins(idx); }
                     select-list-style(idx) => { root.select-list-style(idx); }
                 }
-
-                if root.rtl : WriterPageCanvas {
-                    doc-title: root.doc-title;
-                    doc-content <=> root.doc-content;
-                    render-blocks <=> root.render-blocks;
-                    selection-rects <=> root.selection-rects;
-                    comment-rects: root.comment-rects;
-                    activate-comment(id) => { root.navigate-comment(id); }
-                    selection-anchor <=> root.selection-anchor;
-                    selection-focus <=> root.selection-focus;
-                    selection-announcement: root.selection-announcement;
-                    page-zoom <=> root.page-zoom;
-                    page-scroll-x <=> root.page-scroll-x;
-                    page-scroll-y <=> root.page-scroll-y;
-                    view-height <=> root.page-view-height;
-                    page-count: root.page-count;
-                    visible-page-first: root.visible-page-first;
-                    visible-page-count: root.visible-page-count;
-                    page-stack-height: root.page-stack-height;
-                    page-gap-pt: root.page-gap-pt;
-                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
-                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
-                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
-                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
-                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
-                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
-                    pointer-released(x, y) => { root.pointer-released(x, y); }
-                    pointer-cancelled => { root.pointer-cancelled(); }
-                    key-pressed(event) => {
-                        // The text box has an undo of its own that knows nothing of formatting,
-                        // replace or table edits; the document history is the only one.
-                        if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
-                            if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                            return accept;
-                        }
-                        if (root.open-menu-for-key(event)) { return accept; }
-                        if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
-                        if (event.text == Key.Tab) {
-                            if (!event.modifiers.shift) { root.insert-tab(); }
-                            return accept;
-                        }
-                        if (event.text == Key.PageDown) { root.page-move(1, event.modifiers.shift); return accept; }
-                        if (event.text == Key.PageUp) { root.page-move(-1, event.modifiers.shift); return accept; }
-                        return reject;
-                    }
-                }
-
-                if root.show-navigator && root.rtl : WriterOutlinePane {
-                    entries: root.outline-entries;
-                    jump(idx) => { root.jump-outline(idx); }
-                    close-requested => { root.show-navigator = false; root.focus-page(); }
-                }
             }
 
             WriterStatusBar {
@@ -593,7 +559,7 @@ export component WriterApp inherits Window {
         }
 
         compact-inspector := WriterInspector {
-            x: max(0px, parent.width - 360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)));
+            x: root.rtl ? 0px : max(0px, parent.width - 360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)));
             y: 0px;
             width: min(360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)), parent.width);
             height: parent.height;
@@ -729,7 +695,7 @@ export component WriterApp inherits Window {
 
     if FindBar.open : FindBarOverlay {
         width: min(480px * max(1.0, Theme.text-scale), root.width - 48px);
-        x: root.width - self.width - 24px;
+        x: root.rtl ? 24px : root.width - self.width - 24px;
         y: (root.custom-chrome ? 96px : 64px) + ResponsivePolicy.toolbar-label-extra;
     }
 

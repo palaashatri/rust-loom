@@ -37,16 +37,20 @@ export component LocalMenuBar inherits Rectangle {
 
     HorizontalLayout {
         spacing: 0px;
-        padding-left: Theme.tokens.space.sm;
+        padding-left: Theme.rtl ? 0px : Theme.tokens.space.sm;
+        padding-right: Theme.rtl ? Theme.tokens.space.sm : 0px;
+        alignment: Theme.rtl ? end : start;
 
-        for label[index] in root.labels : LoomButton {
+        // Right-to-left reads File first at the right edge.
+        for slot in root.labels.length : LoomButton {
+            property <int> index: Theme.rtl ? root.labels.length - 1 - slot : slot;
             width: Theme.menu-label-width;
             height: 36px;
-            label: label;
+            label: root.labels[self.index];
             variant: "ghost";
-            selected: root.open-index == index;
+            selected: root.open-index == self.index;
             clicked => {
-                root.open-index = root.open-index == index ? -1 : index;
+                root.open-index = root.open-index == self.index ? -1 : self.index;
             }
         }
     }
@@ -66,16 +70,17 @@ export component LocalMenuLabels inherits HorizontalLayout {
     in-out property <int> open-index: -1;
 
     spacing: 0px;
-    alignment: start;
+    alignment: Theme.rtl ? end : start;
 
-    for label[index] in root.labels : LoomButton {
+    for slot in root.labels.length : LoomButton {
+        property <int> index: Theme.rtl ? root.labels.length - 1 - slot : slot;
         width: Theme.menu-label-width;
         height: 36px;
-        label: label;
+        label: root.labels[self.index];
         variant: "ghost";
-        selected: root.open-index == index;
+        selected: root.open-index == self.index;
         clicked => {
-            root.open-index = root.open-index == index ? -1 : index;
+            root.open-index = root.open-index == self.index ? -1 : self.index;
         }
     }
 }
@@ -123,8 +128,9 @@ export component LocalMenuPopup inherits Rectangle {
             if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
                 let count = root.labels.length;
                 if (count > 0) {
-                    root.open-index = Math.mod(root.open-index
-                        + (event.text == Key.RightArrow ? 1 : count - 1), count);
+                    // Arrows follow what is on screen, so they mirror in RTL.
+                    let forward = (event.text == Key.RightArrow) != Theme.rtl;
+                    root.open-index = Math.mod(root.open-index + (forward ? 1 : count - 1), count);
                 }
                 return accept;
             }
@@ -148,7 +154,10 @@ export component LocalMenuPopup inherits Rectangle {
     }
 
     Rectangle {
-        x: 8px + root.open-index * Theme.menu-label-width;
+        // Opens under its label, at the reading edge: left in LTR, right in RTL.
+        x: Theme.rtl
+            ? root.width - 8px - root.open-index * Theme.menu-label-width - self.width
+            : 8px + root.open-index * Theme.menu-label-width;
         y: 0px;
         width: min(288px * max(1.0, Theme.text-scale), root.width - 16px);
         height: min(min(520px, root.height - 8px), popup-layout.preferred-height + 2px);

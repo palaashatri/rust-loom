@@ -44,6 +44,7 @@ struct Args {
     theme: String,
     rtl: bool,
     text_scale: f32,
+    scale_factor: f32,
     open: Option<String>,
     theme_chooser: bool,
 }
@@ -58,6 +59,7 @@ fn parse_args() -> Result<Args, String> {
         theme: "light".into(),
         rtl: false,
         text_scale: 1.0,
+        scale_factor: 1.0,
         open: None,
         theme_chooser: false,
     };
@@ -96,6 +98,17 @@ fn parse_args() -> Result<Args, String> {
                     return Err("--text-scale must be between 1.0 and 2.0".to_string());
                 }
                 args.text_scale = scale;
+            }
+            "--scale-factor" => {
+                let factor: f32 = iterator
+                    .next()
+                    .ok_or("--scale-factor needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --scale-factor factor")?;
+                if !(1.0..=4.0).contains(&factor) {
+                    return Err("--scale-factor must be between 1.0 and 4.0".to_string());
+                }
+                args.scale_factor = factor;
             }
             "--theme-chooser" => args.theme_chooser = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
@@ -935,8 +948,13 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     if args.theme_chooser {
         app.set_theme_chooser_open(true);
     }
-    let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
-        .map_err(|error| error.to_string())?;
+    let image = snapshot_component(
+        &app,
+        args.size.0 as f32,
+        args.size.1 as f32,
+        args.scale_factor,
+    )
+    .map_err(|error| error.to_string())?;
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
 }
 
@@ -1092,8 +1110,13 @@ fn capture_present_journey_step(
     out_dir: &Path,
     name: &str,
 ) -> Result<String, String> {
-    let image = snapshot_component(app, args.size.0 as f32, args.size.1 as f32, 1.0)
-        .map_err(|error| format!("capture {name}: {error}"))?;
+    let image = snapshot_component(
+        app,
+        args.size.0 as f32,
+        args.size.1 as f32,
+        args.scale_factor,
+    )
+    .map_err(|error| format!("capture {name}: {error}"))?;
     let file_name = format!("present-manipulation-{name}.png");
     let path = out_dir.join(&file_name);
     loom_test_support::png::save_png(&path, &image)
@@ -3158,7 +3181,11 @@ mod view_state;
 mod window_chrome;
 
 #[cfg(test)]
+mod dpi_surfaces_tests;
+#[cfg(test)]
 mod frame_bench_tests;
+#[cfg(test)]
+mod rtl_tests;
 #[cfg(test)]
 mod scale_surfaces_tests;
 #[cfg(test)]

@@ -3,47 +3,7 @@ import {
     LoomPanel, LoomSectionHeader, LoomToggle, LoomButton, LoomIconButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
-
-component SheetPropertyRow inherits HorizontalLayout {
-    in property <string> label: "";
-    spacing: Theme.tokens.space.sm;
-    cross-axis-alignment: center;
-    // Control labels never truncate: desktop-ui.toml [truncation]
-    // allow-control-label = false. The band starts at the contract minimum
-    // (property-label-width-min) and stays below the width the row's own
-    // controls need, so a long localized label wraps instead of eliding.
-    Text {
-        text: root.label;
-        min-width: 84px;
-        max-width: 100px;
-        font-size: Theme.type.caption;
-        color: Theme.palette().ink-secondary;
-        wrap: word-wrap;
-        vertical-alignment: center;
-        accessible-role: text;
-        accessible-label: root.label;
-    }
-    @children
-}
-
-// Fill color swatch: pointer shortcut for direct color choice. Every fill
-// state stays keyboard-reachable through the palette's Fill cycle command.
-component FillSwatch inherits Rectangle {
-    in property <color> swatch-color: transparent;
-    in property <bool> selected: false;
-    in property <string> swatch-label: "";
-    in property <int> swatch-index: -1;
-    callback pick(int);
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    background: root.swatch-color;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
-    accessible-role: button;
-    accessible-label: root.swatch-label;
-    TouchArea { clicked => { root.pick(root.swatch-index); } }
-}
+import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetChoiceRow } from "inspector_rows.slint";
 
 export component SheetInspector inherits LoomPanel {
     in property <string> selection-range: "A1";
@@ -119,7 +79,7 @@ export component SheetInspector inherits LoomPanel {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.md;
 
-        HorizontalLayout {
+        if !Theme.rtl : HorizontalLayout {
             cross-axis-alignment: center;
             Text {
                 text: "Format and table properties";
@@ -134,6 +94,24 @@ export component SheetInspector inherits LoomPanel {
                 label: "Close";
                 variant: "ghost";
                 clicked => { root.close-requested(); }
+            }
+        }
+        if Theme.rtl : HorizontalLayout {
+            cross-axis-alignment: center;
+            LoomButton {
+                label: "Close";
+                variant: "ghost";
+                clicked => { root.close-requested(); }
+            }
+            Text {
+                text: "Format and table properties";
+                font-size: Theme.type.caption;
+                font-weight: 600;
+                color: Theme.palette().ink-secondary;
+                horizontal-stretch: 1;
+                min-width: 0px;
+                horizontal-alignment: right;
+                wrap: word-wrap;
             }
         }
 
@@ -164,51 +142,47 @@ export component SheetInspector inherits LoomPanel {
                 if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     LoomSectionHeader { title: "Table"; }
-                    SheetPropertyRow {
+                    SheetFieldRow {
                         label: "Name";
-                        LoomTextField {
-                            label: "Table name";
-                            value: root.sheet-name;
-                            edited(name) => { root.rename-sheet(name); }
-                        }
+                        field-label: "Table name";
+                        value: root.sheet-name;
+                        editable: true;
+                        edited(name) => { root.rename-sheet(name); }
                     }
-                    SheetPropertyRow {
+                    SheetStepperRow {
                         label: "Rows";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "plus"; label: "Add worksheet row"; tooltip: "Add a row after the last used worksheet row."; clicked => { root.add-table-row(); } }
-                            LoomIconButton { icon: "minus"; label: "Delete selected row"; tooltip: "Remove the row containing the selected cell and shift later rows up."; clicked => { root.delete-table-row(); } }
-                        }
+                        field-label: "Worksheet rows";
+                        value: root.table-rows-label;
+                        plus-first: true;
+                        increase-label: "Add worksheet row";
+                        increase-tip: "Add a row after the last used worksheet row.";
+                        decrease-label: "Delete selected row";
+                        decrease-tip: "Remove the row containing the selected cell and shift later rows up.";
+                        increase => { root.add-table-row(); }
+                        decrease => { root.delete-table-row(); }
                     }
-                    SheetPropertyRow {
+                    SheetStepperRow {
                         label: "Columns";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "plus"; label: "Add worksheet column"; tooltip: "Add a column after the last used worksheet column."; clicked => { root.add-table-col(); } }
-                            LoomIconButton { icon: "minus"; label: "Delete selected column"; tooltip: "Remove the column containing the selected cell and shift later columns left."; clicked => { root.delete-table-col(); } }
-                        }
+                        field-label: "Worksheet columns";
+                        value: root.table-cols-label;
+                        plus-first: true;
+                        increase-label: "Add worksheet column";
+                        increase-tip: "Add a column after the last used worksheet column.";
+                        decrease-label: "Delete selected column";
+                        decrease-tip: "Remove the column containing the selected cell and shift later columns left.";
+                        increase => { root.add-table-col(); }
+                        decrease => { root.delete-table-col(); }
                     }
                 }
 
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     LoomSectionHeader { title: "Cell"; }
-                    SheetPropertyRow {
-                        label: "Selection";
-                        LoomTextField { label: "Selected range"; value: root.selection-range; enabled: false; }
-                    }
-                    SheetPropertyRow {
-                        label: "Value";
-                        LoomTextField { label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; enabled: false; }
-                    }
-                    SheetPropertyRow {
-                        label: "Formula";
-                        LoomTextField { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
-                    }
+                    SheetFieldRow { label: "Selection"; field-label: "Selected range"; value: root.selection-range; }
+                    SheetFieldRow { label: "Value"; field-label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; }
+                    SheetFieldRow { label: "Formula"; field-label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; }
                     LoomSectionHeader { title: "Font Style"; }
-                    HorizontalLayout {
+                    if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         LoomIconButton {
                             icon: "bold";
@@ -232,104 +206,89 @@ export component SheetInspector inherits LoomPanel {
                             clicked => { root.toggle-underline(); }
                         }
                     }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: end;
+                        LoomIconButton {
+                            icon: "underline";
+                            label: "Toggle underline formatting (Cell inspector)";
+                            tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
+                            selected: root.cell-underline;
+                            clicked => { root.toggle-underline(); }
+                        }
+                        LoomIconButton {
+                            icon: "italic";
+                            label: "Toggle italic formatting (Cell inspector)";
+                            tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
+                            selected: root.cell-italic;
+                            clicked => { root.toggle-italic(); }
+                        }
+                        LoomIconButton {
+                            icon: "bold";
+                            label: "Toggle bold formatting (Cell inspector)";
+                            tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
+                            selected: root.cell-bold;
+                            clicked => { root.toggle-bold(); }
+                        }
+                    }
                     LoomSectionHeader { title: "Borders & Fill"; }
                     HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
+                        alignment: Theme.rtl ? end : start;
                         LoomButton {
                             label: "Border";
                             variant: root.cell-border ? "primary" : "ghost";
                             clicked => { root.toggle-borders(); }
                         }
                     }
-                    HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        FillSwatch { swatch-color: #FECACA; selected: root.cell-fill == 0; swatch-label: "Fill red"; swatch-index: 0; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #FED7AA; selected: root.cell-fill == 1; swatch-label: "Fill orange"; swatch-index: 1; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #FEF08A; selected: root.cell-fill == 2; swatch-label: "Fill yellow"; swatch-index: 2; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #BBF7D0; selected: root.cell-fill == 3; swatch-label: "Fill green"; swatch-index: 3; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #BFDBFE; selected: root.cell-fill == 4; swatch-label: "Fill blue"; swatch-index: 4; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #DDD6FE; selected: root.cell-fill == 5; swatch-label: "Fill purple"; swatch-index: 5; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: #E5E7EB; selected: root.cell-fill == 6; swatch-label: "Fill gray"; swatch-index: 6; pick(idx) => { root.set-fill(idx); } }
-                        FillSwatch { swatch-color: transparent; selected: root.cell-fill == -1; swatch-label: "No fill"; swatch-index: -1; pick(idx) => { root.set-fill(idx); } }
-                    }
-                    SheetPropertyRow {
+                    SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
+                    SheetStepperRow {
                         label: "Font size";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Font size in points"; value: root.cell-font-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; label: "Decrease selected cell font size"; tooltip: "Reduce the font size of selected cells by one step."; clicked => { root.adjust-font(-1); } }
-                            LoomIconButton { icon: "plus"; label: "Increase selected cell font size"; tooltip: "Increase the font size of selected cells by one step."; clicked => { root.adjust-font(1); } }
-                        }
+                        field-label: "Font size in points";
+                        value: root.cell-font-label;
+                        decrease-label: "Decrease selected cell font size";
+                        decrease-tip: "Reduce the font size of selected cells by one step.";
+                        increase-label: "Increase selected cell font size";
+                        increase-tip: "Increase the font size of selected cells by one step.";
+                        decrease => { root.adjust-font(-1); }
+                        increase => { root.adjust-font(1); }
                     }
                     LoomSectionHeader { title: "Data Format"; }
-                    HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        LoomButton {
-                            label: "123";
-                            variant: root.cell-format == 0 ? "primary" : "ghost";
-                            clicked => { root.set-cell-format(0); }
-                        }
-                        LoomButton {
-                            label: "$";
-                            variant: root.cell-format == 1 ? "primary" : "ghost";
-                            clicked => { root.set-cell-format(1); }
-                        }
-                        LoomButton {
-                            label: "%";
-                            variant: root.cell-format == 2 ? "primary" : "ghost";
-                            clicked => { root.set-cell-format(2); }
-                        }
-                        LoomButton {
-                            label: "1.23";
-                            variant: root.cell-format == 3 ? "primary" : "ghost";
-                            clicked => { root.set-cell-format(3); }
-                        }
-                    }
-                    SheetPropertyRow {
+                    SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
+                    SheetStepperRow {
                         label: "Decimals";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Decimals count"; value: root.cell-decimals-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; label: "Decrease displayed decimal places"; tooltip: "Show one fewer decimal place in the selected cells."; clicked => { root.adjust-decimals(-1); } }
-                            LoomIconButton { icon: "plus"; label: "Increase displayed decimal places"; tooltip: "Show one more decimal place in the selected cells."; clicked => { root.adjust-decimals(1); } }
-                        }
+                        field-label: "Decimals count";
+                        value: root.cell-decimals-label;
+                        decrease-label: "Decrease displayed decimal places";
+                        decrease-tip: "Show one fewer decimal place in the selected cells.";
+                        increase-label: "Increase displayed decimal places";
+                        increase-tip: "Show one more decimal place in the selected cells.";
+                        decrease => { root.adjust-decimals(-1); }
+                        increase => { root.adjust-decimals(1); }
                     }
                     LoomSectionHeader { title: "Alignment"; }
-                    HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        LoomButton {
-                            label: "Left";
-                            variant: root.cell-alignment == 0 ? "primary" : "ghost";
-                            clicked => { root.set-cell-alignment(0); }
-                        }
-                        LoomButton {
-                            label: "Center";
-                            variant: root.cell-alignment == 1 ? "primary" : "ghost";
-                            clicked => { root.set-cell-alignment(1); }
-                        }
-                        LoomButton {
-                            label: "Right";
-                            variant: root.cell-alignment == 2 ? "primary" : "ghost";
-                            clicked => { root.set-cell-alignment(2); }
-                        }
-                    }
-                    SheetPropertyRow {
+                    SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
+                    SheetStepperRow {
                         label: "Row height";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; label: "Decrease selected row height"; tooltip: "Reduce the selected row height by 4 px, down to 16 px."; clicked => { root.adjust-row-height(-4); } }
-                            LoomIconButton { icon: "plus"; label: "Increase selected row height"; tooltip: "Increase the selected row height by 4 px, up to 160 px."; clicked => { root.adjust-row-height(4); } }
-                        }
+                        field-label: "Selected row height";
+                        value: root.selected-row-height;
+                        decrease-label: "Decrease selected row height";
+                        decrease-tip: "Reduce the selected row height by 4 px, down to 16 px.";
+                        increase-label: "Increase selected row height";
+                        increase-tip: "Increase the selected row height by 4 px, up to 160 px.";
+                        decrease => { root.adjust-row-height(-4); }
+                        increase => { root.adjust-row-height(4); }
                     }
-                    SheetPropertyRow {
+                    SheetStepperRow {
                         label: "Column width";
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xs;
-                            LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; label: "Decrease selected column width"; tooltip: "Reduce the selected column width by 10 px, down to 32 px."; clicked => { root.adjust-col-width(-10); } }
-                            LoomIconButton { icon: "plus"; label: "Increase selected column width"; tooltip: "Increase the selected column width by 10 px, up to 400 px."; clicked => { root.adjust-col-width(10); } }
-                        }
+                        field-label: "Selected column width";
+                        value: root.selected-col-width;
+                        decrease-label: "Decrease selected column width";
+                        decrease-tip: "Reduce the selected column width by 10 px, down to 32 px.";
+                        increase-label: "Increase selected column width";
+                        increase-tip: "Increase the selected column width by 10 px, up to 400 px.";
+                        decrease => { root.adjust-col-width(-10); }
+                        increase => { root.adjust-col-width(10); }
                     }
                 }
 

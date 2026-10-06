@@ -36,9 +36,9 @@ impl Stop {
     }
 }
 
-struct Session {
-    app: SheetsApp,
-    state: Rc<GuiState>,
+pub(super) struct Session {
+    pub(super) app: SheetsApp,
+    pub(super) state: Rc<GuiState>,
     actions: Rc<RefCell<Vec<String>>>,
 }
 
@@ -46,7 +46,7 @@ struct Session {
 /// native file pickers: custom chrome with the in-window menu, the real menu
 /// bar, palette, toolbar, cell editing, tab-run navigation, objects, grid
 /// pointer, history and sheet actions; inspector open; grid focused.
-fn launched(cells: &[(&str, &str)]) -> Session {
+pub(super) fn launched(cells: &[(&str, &str)]) -> Session {
     let (app, state) = super::grid_pointer_tests::projected(cells);
     window_chrome::install(&app);
     app.set_local_menu_visible(true);

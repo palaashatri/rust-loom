@@ -1,5 +1,5 @@
-import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "components.slint";
-import { LoomOverflowButton, LoomMenuItem } from "foundation.slint";
+import { LabeledToolbar, ToolbarSpacer } from "components.slint";
+import { LoomMenuItem, LoomToolbarItem, LoomOverflowTrigger } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 /// One icon-over-label row in three groups: View/Zoom/Add Slide on the
@@ -12,12 +12,10 @@ export component PresentActionToolbar inherits LabeledToolbar {
     in property <bool> view-menu-open: false;
     in property <bool> zoom-menu-open: false;
     in property <bool> is-preview-mode: false;
-    /// Window x of the View and Zoom items, so their menus open beneath them.
-    out property <length> view-x: view-item.absolute-position.x;
-    out property <length> zoom-x: zoom-item.absolute-position.x;
-
-    callback toggle-view-menu;
-    callback toggle-zoom-menu;
+    /// The View and Zoom menus open beneath their items: each item reports the
+    /// window x of its reading-start edge (left in LTR, right in RTL).
+    callback toggle-view-menu(length);
+    callback toggle-zoom-menu(length);
     callback add-slide;
     callback add-text;
     callback add-shape;
@@ -27,77 +25,157 @@ export component PresentActionToolbar inherits LabeledToolbar {
     callback overflow-requested;
 
     /// Raised when Escape closes the View or Zoom menu, so focus goes back to
-    /// the item that opened it.
+    /// the item that opened it. Each tick is a counter; the item takes focus
+    /// when it changes.
     in property <int> focus-view-tick: 0;
     in property <int> focus-zoom-tick: 0;
-    changed focus-view-tick => { view-item.focus-item(); }
-    changed focus-zoom-tick => { zoom-item.focus-item(); }
 
-    view-item := IconOverLabelToolbarItem {
-        icon: "view";
-        label: "View";
-        checked: root.view-menu-open;
-        clicked => { root.toggle-view-menu(); }
-    }
-    zoom-item := IconOverLabelToolbarItem {
-        icon: "zoom-fit";
-        label: "Zoom";
-        checked: root.zoom-menu-open;
-        clicked => { root.toggle-zoom-menu(); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "slide";
-        label: "Add Slide";
-        clicked => { root.add-slide(); }
-    }
+    // Left-to-right order. Right-to-left is the exact mirror image: the groups
+    // and the items inside each group are reversed, and the overflow button
+    // moves to the left end. Both orders share the same commands.
+    if !Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        LoomToolbarItem {
+            icon: "view";
+            label: "View";
+            checked: root.view-menu-open;
+            focus-request: root.focus-view-tick;
+            clicked => { root.toggle-view-menu(self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "zoom-fit";
+            label: "Zoom";
+            checked: root.zoom-menu-open;
+            focus-request: root.focus-zoom-tick;
+            clicked => { root.toggle-zoom-menu(self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "slide";
+            label: "Add Slide";
+            clicked => { root.add-slide(); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
-        icon: "image";
-        label: "Insert";
-        clicked => { root.add-picture(); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "text";
-        label: "Text";
-        clicked => { root.add-text(); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "shape";
-        label: "Shape";
-        clicked => { root.add-shape(); }
-    }
+        LoomToolbarItem {
+            icon: "image";
+            label: "Insert";
+            clicked => { root.add-picture(); }
+        }
+        LoomToolbarItem {
+            icon: "text";
+            label: "Text";
+            clicked => { root.add-text(); }
+        }
+        LoomToolbarItem {
+            icon: "shape";
+            label: "Shape";
+            clicked => { root.add-shape(); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
-        icon: "play";
-        label: "Play";
-        checked: root.is-preview-mode;
-        clicked => { root.toggle-preview(); }
+        LoomToolbarItem {
+            icon: "play";
+            label: "Play";
+            checked: root.is-preview-mode;
+            clicked => { root.toggle-preview(); }
+        }
+        LoomToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomToolbarItem {
+            icon: "sparkle";
+            label: "Animate";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomToolbarItem {
+            icon: "document";
+            label: "Document";
+            checked: root.inspector-visible && root.inspector-tab == 2;
+            clicked => { root.show-inspector-tab(2); }
+        }
+        if root.overflow : LoomOverflowTrigger {
+            tooltip: "More presentation commands";
+            clicked => { root.overflow-requested(); }
+        }
     }
-    IconOverLabelToolbarItem {
-        icon: "format";
-        label: "Format";
-        checked: root.inspector-visible && root.inspector-tab == 0;
-        clicked => { root.show-inspector-tab(0); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "sparkle";
-        label: "Animate";
-        checked: root.inspector-visible && root.inspector-tab == 1;
-        clicked => { root.show-inspector-tab(1); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "document";
-        label: "Document";
-        checked: root.inspector-visible && root.inspector-tab == 2;
-        clicked => { root.show-inspector-tab(2); }
-    }
-    if root.overflow : LoomOverflowButton {
-        tooltip: "More presentation commands";
-        clicked => { root.overflow-requested(); }
+    if Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        if root.overflow : LoomOverflowTrigger {
+            tooltip: "More presentation commands";
+            clicked => { root.overflow-requested(); }
+        }
+        LoomToolbarItem {
+            icon: "document";
+            label: "Document";
+            checked: root.inspector-visible && root.inspector-tab == 2;
+            clicked => { root.show-inspector-tab(2); }
+        }
+        LoomToolbarItem {
+            icon: "sparkle";
+            label: "Animate";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomToolbarItem {
+            icon: "play";
+            label: "Play";
+            checked: root.is-preview-mode;
+            clicked => { root.toggle-preview(); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "shape";
+            label: "Shape";
+            clicked => { root.add-shape(); }
+        }
+        LoomToolbarItem {
+            icon: "text";
+            label: "Text";
+            clicked => { root.add-text(); }
+        }
+        LoomToolbarItem {
+            icon: "image";
+            label: "Insert";
+            clicked => { root.add-picture(); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "slide";
+            label: "Add Slide";
+            clicked => { root.add-slide(); }
+        }
+        LoomToolbarItem {
+            icon: "zoom-fit";
+            label: "Zoom";
+            checked: root.zoom-menu-open;
+            focus-request: root.focus-zoom-tick;
+            clicked => { root.toggle-zoom-menu(self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "view";
+            label: "View";
+            checked: root.view-menu-open;
+            focus-request: root.focus-view-tick;
+            clicked => { root.toggle-view-menu(self.absolute-position.x + self.width); }
+        }
     }
 }
 

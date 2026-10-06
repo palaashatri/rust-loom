@@ -4,7 +4,7 @@
 use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 
-type Rect = (String, f32, f32, f32, f32);
+pub(super) type Rect = (String, f32, f32, f32, f32);
 
 const ROLES: [AccessibleRole; 7] = [
     AccessibleRole::Button,
@@ -16,7 +16,7 @@ const ROLES: [AccessibleRole; 7] = [
     AccessibleRole::ListItem,
 ];
 
-fn rects(app: &WriterApp) -> Vec<Rect> {
+pub(super) fn rects(app: &WriterApp) -> Vec<Rect> {
     let roots: Vec<_> = [
         "Rectangle",
         "WriterApp",
@@ -94,7 +94,7 @@ fn assert_clean(items: &[Rect], background: &[Rect], width: f32, height: f32, wh
     }
 }
 
-fn editor(width: f32, height: f32, scale: f32) -> WriterApp {
+pub(super) fn editor(width: f32, height: f32, scale: f32) -> WriterApp {
     set_platform();
     let app = WriterApp::new().expect("create app");
     app.window()
@@ -105,7 +105,7 @@ fn editor(width: f32, height: f32, scale: f32) -> WriterApp {
     app
 }
 
-fn open_surface(app: &WriterApp, surface: &str) {
+pub(super) fn open_surface(app: &WriterApp, surface: &str) {
     match surface {
         "save-changes" => {
             app.set_save_changes_document("Quarterly report".into());

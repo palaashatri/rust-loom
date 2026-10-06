@@ -158,28 +158,36 @@ fn scroll_cell_inspector_to_bottom(app: &SheetsApp) {
 #[test]
 fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_accessibility_tree() {
     let app = accessibility_test_app();
-    let source_instances = [
-        include_str!("../../ui/components.slint"),
-        include_str!("../../ui/toolbar.slint"),
-        include_str!("../../ui/chart.slint"),
-        include_str!("../../ui/inspector.slint"),
-    ]
-    .iter()
-    .map(|source| {
-        source
-            .match_indices("LoomIconButton")
-            .filter(|(index, token)| {
-                let end = index + token.len();
-                source[end..].trim_start().starts_with('{')
-            })
-            .count()
-    })
-    .sum::<usize>();
-    let semantic_action_count = SHARED_ACTIONS.len() + TABLE_ACTIONS.len() + CELL_ACTIONS.len();
+    // Icon buttons are declared in a few reusable components (steppers and
+    // bars are shared between the Table and Cell tabs and mirrored for
+    // right-to-left), so a per-file instance count no longer equals the number of
+    // actions. The guard instead pins which files may declare an icon button; the
+    // live-tree checks below prove every action appears once with its own name.
+    let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+    let mut declaring_files: Vec<String> = std::fs::read_dir(&ui_dir)
+        .expect("read the Sheets ui directory")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "slint"))
+        .filter(|entry| {
+            let source = std::fs::read_to_string(entry.path()).expect("read a Slint source");
+            source
+                .match_indices("LoomIconButton")
+                .any(|(index, token)| source[index + token.len()..].trim_start().starts_with('{'))
+        })
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    declaring_files.sort();
     assert_eq!(
-        source_instances, semantic_action_count,
-        "update this accessibility contract when adding or removing a Sheets icon action"
+        declaring_files,
+        [
+            "chart.slint",
+            "inspector.slint",
+            "inspector_rows.slint",
+            "sheet_bars.slint"
+        ],
+        "a new file declares an icon button: add its actions to this accessibility contract"
     );
+    let semantic_action_count = SHARED_ACTIONS.len() + TABLE_ACTIONS.len() + CELL_ACTIONS.len();
 
     let mut seen_labels = HashSet::new();
     app.set_inspector_tab(0);

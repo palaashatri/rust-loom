@@ -9,37 +9,69 @@ use std::path::Path;
 
 use loom_desktop::{FileFilter, OpenFileRequest};
 use loom_present_core::{ElementType, ImageAsset, PresentationDocument, Slide, SlideElement};
-use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{
+    ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel,
+};
 
 use crate::model_sync::synced;
 use crate::{element_type_index, GuiState, PresentApp, ThumbRows};
 
-/// Longest side, in pixels, a picture is decoded to for drawing.
+/// Longest side, in pixels, a picture is decoded to for drawing at 1x. A display
+/// with a scale factor of N draws it at N times this size, so a 2x display never
+/// shows a 1x bitmap stretched and blurred.
 const DRAW_SIDE: u32 = 1280;
-/// Decoded images kept between refreshes; the cache is dropped when it grows past this.
-const CACHE_LIMIT: usize = 48;
+/// Hard ceiling on the decoded side, whatever the display density.
+const MAX_DRAW_SIDE: u32 = 4096;
+/// Decoded pixels kept between refreshes; the cache is dropped past this budget
+/// (48 pictures of the 1x draw size).
+const CACHE_PIXEL_BUDGET: u64 = 48 * (DRAW_SIDE as u64) * (DRAW_SIDE as u64);
 
-thread_local! {
-    static DECODED: RefCell<HashMap<String, Image>> = RefCell::new(HashMap::new());
+#[derive(Default)]
+struct DrawCache {
+    images: HashMap<String, Image>,
+    pixels: u64,
 }
 
-/// The picture ready to draw. Decoding happens once per asset, not once per refresh.
+thread_local! {
+    static DECODED: RefCell<DrawCache> = RefCell::new(DrawCache::default());
+    /// Whole device pixels per logical pixel of the window being drawn.
+    static DRAW_DENSITY: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
+}
+
+/// Tell the picture cache how dense the display is. Called from `sync` with the
+/// window's scale factor so pictures are decoded for the pixels they will cover.
+fn set_draw_density(scale_factor: f32) {
+    DRAW_DENSITY.with(|d| d.set(scale_factor.ceil().clamp(1.0, 4.0) as u32));
+}
+
+fn draw_side() -> u32 {
+    (DRAW_SIDE * DRAW_DENSITY.with(|d| d.get())).min(MAX_DRAW_SIDE)
+}
+
+/// The picture ready to draw. Decoding happens once per asset and density, not
+/// once per refresh.
 pub(crate) fn image_for(asset: &ImageAsset) -> Image {
+    let side = draw_side();
+    let key = format!("{}@{side}", asset.id);
     DECODED.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(image) = cache.get(&asset.id) {
+        if let Some(image) = cache.images.get(&key) {
             return image.clone();
         }
-        let image = match asset.preview_rgba(DRAW_SIDE) {
+        let image = match asset.preview_rgba(side) {
             Ok((width, height, rgba)) => Image::from_rgba8(
                 SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, width, height),
             ),
             Err(_) => Image::default(),
         };
-        if cache.len() >= CACHE_LIMIT {
-            cache.clear();
+        let size = image.size();
+        let pixels = u64::from(size.width) * u64::from(size.height);
+        if cache.pixels + pixels > CACHE_PIXEL_BUDGET {
+            cache.images.clear();
+            cache.pixels = 0;
         }
-        cache.insert(asset.id.clone(), image.clone());
+        cache.pixels += pixels;
+        cache.images.insert(key, image.clone());
         image
     })
 }
@@ -128,6 +160,7 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
 /// Brings the slide strip's thumbnails and the canvas pictures in line with the
 /// document. A thumbnail is rewritten only when its slide changed.
 pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
+    set_draw_density(app.window().scale_factor());
     app.set_element_images(synced(
         app.get_element_images(),
         images_for(document, document.active_slide()),

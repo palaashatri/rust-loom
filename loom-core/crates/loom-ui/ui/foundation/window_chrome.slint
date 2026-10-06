@@ -109,10 +109,15 @@ export component LoomTitleBar inherits Rectangle {
         }
     }
 
+    // Left-to-right: menu at the left, caption buttons at the right.
+    // Right-to-left mirrors the whole row, as mirrored Windows does: menu at
+    // the right, caption buttons at the left in reverse order.
     Text {
-        x: 380px + 5 * (Theme.menu-label-width - 64px);
+        x: Theme.rtl ? max(150px, 380px - 5 * (Theme.menu-label-width - 64px)) : 380px + 5 * (Theme.menu-label-width - 64px);
         y: 0px;
-        width: max(0px, root.width - self.x - max(150px, 380px - 5 * (Theme.menu-label-width - 64px)));
+        width: Theme.rtl
+            ? max(0px, root.width - self.x - (380px + 5 * (Theme.menu-label-width - 64px)))
+            : max(0px, root.width - self.x - max(150px, 380px - 5 * (Theme.menu-label-width - 64px)));
         height: root.height;
         text: root.title;
         color: root.active ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
@@ -126,13 +131,14 @@ export component LoomTitleBar inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: Theme.tokens.space.md;
+        padding-left: Theme.rtl ? 0px : Theme.tokens.space.md;
+        padding-right: Theme.rtl ? Theme.tokens.space.md : 0px;
         spacing: 0px;
-        alignment: start;
+        alignment: Theme.rtl ? end : start;
         @children
     }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         x: root.width - self.preferred-width;
         width: self.preferred-width;
         height: root.height;
@@ -155,6 +161,31 @@ export component LoomTitleBar inherits Rectangle {
             label: "Close window";
             height: root.height;
             clicked => { root.close(); }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        x: 0px;
+        width: self.preferred-width;
+        height: root.height;
+        alignment: start;
+
+        LoomCaptionButton {
+            kind: "close";
+            label: "Close window";
+            height: root.height;
+            clicked => { root.close(); }
+        }
+        LoomCaptionButton {
+            kind: root.maximized ? "restore" : "maximize";
+            label: root.maximized ? "Restore window" : "Maximize window";
+            height: root.height;
+            clicked => { root.toggle-maximize(); }
+        }
+        LoomCaptionButton {
+            kind: "minimize";
+            label: "Minimize window";
+            height: root.height;
+            clicked => { root.minimize(); }
         }
     }
 

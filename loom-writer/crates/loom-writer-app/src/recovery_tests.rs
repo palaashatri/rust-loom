@@ -289,6 +289,7 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 theme: "light".into(),
                 rtl: false,
                 text_scale: 1.0,
+                scale_factor: 1.0,
                 open: Some(open_path.to_string_lossy().into_owned()),
                 template: None,
                 template_chooser: false,

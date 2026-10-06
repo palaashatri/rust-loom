@@ -1,5 +1,5 @@
-import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "toolkit.slint";
-import { LoomOverflowButton } from "foundation.slint";
+import { LabeledToolbar, ToolbarSpacer } from "toolkit.slint";
+import { LoomToolbarItem, LoomOverflowTrigger } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 /// One icon-over-label row in three groups: View/Zoom on the reading-start
@@ -16,97 +16,150 @@ export component WriterActionToolbar inherits LabeledToolbar {
     /// Window y just below the toolbar, where menus open.
     out property <length> bottom-y: root.absolute-position.y + root.height;
 
+    /// A menu item reports the window x of its reading-start edge (left edge in
+    /// LTR, right edge in RTL) so the menu opens beneath it.
     callback toggle-menu(int, length);
     callback show-inspector-tab(int);
+
+    // Keyboard focus is requested by number: 1..8 are the menu kinds above,
+    // 11 is the Format tab and 12 the Document tab. The item with that number
+    // takes focus when `focus-seq` changes; the toolbar draws its items in
+    // either reading order, so the root cannot name them directly.
+    property <int> focus-code: 0;
+    property <int> focus-seq: 0;
+    function ask-focus(code: int) {
+        root.focus-code = code;
+        root.focus-seq += 1;
+    }
+    pure function request(code: int) -> int { return root.focus-code == code ? root.focus-seq : 0; }
 
     /// Return keyboard focus to the inspector tab that was showing (after the
     /// inspector closes).
     public function focus-inspector-trigger() {
-        if (root.inspector-tab == 1) { document-item.focus-item(); } else { format-item.focus-item(); }
+        root.ask-focus(root.inspector-tab == 1 ? 12 : 11);
     }
 
     /// F6 from the page lands on the first toolbar item.
-    public function focus-first() { view-item.focus-item(); }
+    public function focus-first() { root.ask-focus(1); }
 
     /// Return focus to the item that opened toolbar menu `kind` (the numbering
     /// of `menu-kind`), so closing a menu with Escape does not lose the place.
-    public function focus-menu-trigger(kind: int) {
-        if (kind == 1) { view-item.focus-item(); }
-        else if (kind == 2) { zoom-item.focus-item(); }
-        else if (kind == 3) { insert-item.focus-item(); }
-        else if (kind == 4) { text-item.focus-item(); }
-        else if (kind == 5) { style-item.focus-item(); }
-        else if (kind == 6) { list-item.focus-item(); }
-        else if (kind == 7) { export-item.focus-item(); }
-        else { more-button.grab-focus(); }
-    }
+    public function focus-menu-trigger(kind: int) { root.ask-focus(kind); }
 
     changed inspector-visible => {
         if (!root.inspector-visible) { root.focus-inspector-trigger(); }
     }
 
-    view-item := IconOverLabelToolbarItem {
-        icon: "view";
-        label: "View";
-        checked: root.menu-kind == 1;
-        clicked => { root.toggle-menu(1, self.absolute-position.x); }
-    }
-    zoom-item := IconOverLabelToolbarItem {
-        icon: "zoom-fit";
-        label: "Zoom";
-        checked: root.menu-kind == 2;
-        clicked => { root.toggle-menu(2, self.absolute-position.x); }
-    }
+    // Left-to-right order. Right-to-left is the exact mirror image: the groups
+    // and the items inside each group are reversed.
+    if !Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        LoomToolbarItem {
+            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            clicked => { root.toggle-menu(1, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            clicked => { root.toggle-menu(2, self.absolute-position.x); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    insert-item := IconOverLabelToolbarItem {
-        icon: "plus";
-        label: "Insert";
-        checked: root.menu-kind == 3;
-        clicked => { root.toggle-menu(3, self.absolute-position.x); }
-    }
-    text-item := IconOverLabelToolbarItem {
-        icon: "bold";
-        label: "Text";
-        checked: root.menu-kind == 4;
-        clicked => { root.toggle-menu(4, self.absolute-position.x); }
-    }
-    style-item := IconOverLabelToolbarItem {
-        icon: "text";
-        label: "Style";
-        checked: root.menu-kind == 5;
-        clicked => { root.toggle-menu(5, self.absolute-position.x); }
-    }
-    list-item := IconOverLabelToolbarItem {
-        icon: "list";
-        label: "List";
-        checked: root.menu-kind == 6;
-        clicked => { root.toggle-menu(6, self.absolute-position.x); }
-    }
+        LoomToolbarItem {
+            icon: "plus"; label: "Insert"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            clicked => { root.toggle-menu(3, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            clicked => { root.toggle-menu(4, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "text"; label: "Style"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            clicked => { root.toggle-menu(5, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "list"; label: "List"; checked: root.menu-kind == 6; focus-request: root.request(6);
+            clicked => { root.toggle-menu(6, self.absolute-position.x); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    export-item := IconOverLabelToolbarItem {
-        icon: "export";
-        label: "Export";
-        checked: root.menu-kind == 7;
-        clicked => { root.toggle-menu(7, self.absolute-position.x); }
+        LoomToolbarItem {
+            icon: "export"; label: "Export"; checked: root.menu-kind == 7; focus-request: root.request(7);
+            clicked => { root.toggle-menu(7, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "format"; label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            focus-request: root.request(11);
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomToolbarItem {
+            icon: "document"; label: "Document";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            focus-request: root.request(12);
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomOverflowTrigger {
+            tooltip: "More actions: undo, redo, new, open, save and find";
+            focus-request: root.request(8);
+            clicked => { root.toggle-menu(8, self.absolute-position.x); }
+        }
     }
-    format-item := IconOverLabelToolbarItem {
-        icon: "format";
-        label: "Format";
-        checked: root.inspector-visible && root.inspector-tab == 0;
-        clicked => { root.show-inspector-tab(0); }
-    }
-    document-item := IconOverLabelToolbarItem {
-        icon: "document";
-        label: "Document";
-        checked: root.inspector-visible && root.inspector-tab == 1;
-        clicked => { root.show-inspector-tab(1); }
-    }
-    more-button := LoomOverflowButton {
-        tooltip: "More actions: undo, redo, new, open, save and find";
-        clicked => { root.toggle-menu(8, more-button.absolute-position.x); }
+    if Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        LoomOverflowTrigger {
+            tooltip: "More actions: undo, redo, new, open, save and find";
+            focus-request: root.request(8);
+            clicked => { root.toggle-menu(8, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "document"; label: "Document";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            focus-request: root.request(12);
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomToolbarItem {
+            icon: "format"; label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            focus-request: root.request(11);
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomToolbarItem {
+            icon: "export"; label: "Export"; checked: root.menu-kind == 7; focus-request: root.request(7);
+            clicked => { root.toggle-menu(7, self.absolute-position.x + self.width); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "list"; label: "List"; checked: root.menu-kind == 6; focus-request: root.request(6);
+            clicked => { root.toggle-menu(6, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "text"; label: "Style"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            clicked => { root.toggle-menu(5, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            clicked => { root.toggle-menu(4, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "plus"; label: "Insert"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            clicked => { root.toggle-menu(3, self.absolute-position.x + self.width); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            clicked => { root.toggle-menu(2, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            clicked => { root.toggle-menu(1, self.absolute-position.x + self.width); }
+        }
     }
 }

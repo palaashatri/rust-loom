@@ -382,11 +382,20 @@ export component WriterPageCanvas inherits Rectangle {
 export component WriterStatusBar inherits LoomStatusBar {
     in property <string> leading-text: "";
     in property <string> trailing-text: "";
-    LoomStatusText {
+    // Right-to-left puts the leading status at the right edge.
+    if !Theme.rtl : LoomStatusText {
         text: root.leading-text;
         horizontal-stretch: 1;
     }
-    LoomStatusText {
+    if !Theme.rtl : LoomStatusText {
         text: root.trailing-text;
+    }
+    if Theme.rtl : LoomStatusText {
+        text: root.trailing-text;
+    }
+    if Theme.rtl : LoomStatusText {
+        text: root.leading-text;
+        horizontal-stretch: 1;
+        horizontal-alignment: right;
     }
 }

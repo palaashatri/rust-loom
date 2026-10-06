@@ -157,6 +157,13 @@ export component LoomTextField inherits VerticalLayout {
     // Left off, Tab keeps moving focus between controls.
     in property <bool> capture-tab: false;
     callback tabbed(bool);
+    // Raised by a host that cannot name the field (it may sit in either of two
+    // reading orders): the field takes focus whenever this changes to a positive
+    // number.
+    in property <int> focus-request: 0;
+    changed focus-request => {
+        if (root.focus-request > 0) { root.focus-input(); }
+    }
     // Focus the field with the caret after its text. When a host seeds the
     // value and then focuses the field (typing into a spreadsheet cell does
     // this), the caret would otherwise sit at the start and every following
@@ -197,9 +204,10 @@ export component LoomTextField inherits VerticalLayout {
             clicked => { input.focus(); }
         }
         input := TextInput {
-            x: Theme.tokens.space.md;
+            x: Theme.rtl ? Theme.tokens.space.xl - Theme.tokens.space.md : Theme.tokens.space.md;
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
+            horizontal-alignment: Theme.rtl ? right : left;
             text <=> root.value;
             accessible-role: AccessibleRole.text-input;
             accessible-label: root.label;
@@ -221,12 +229,13 @@ export component LoomTextField inherits VerticalLayout {
             }
         }
         if input.text == "" : Text {
-            x: Theme.tokens.space.md;
+            x: Theme.rtl ? Theme.tokens.space.xl - Theme.tokens.space.md : Theme.tokens.space.md;
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
             text: root.placeholder;
             font-size: Theme.type.body;
             color: Theme.palette().ink-disabled;
+            horizontal-alignment: Theme.rtl ? right : left;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -284,6 +293,7 @@ export component LoomSearchField inherits VerticalLayout {
             x: Theme.rtl ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
+            horizontal-alignment: Theme.rtl ? right : left;
             text <=> root.value;
             accessible-role: AccessibleRole.text-input;
             accessible-label: root.label;
@@ -299,6 +309,7 @@ export component LoomSearchField inherits VerticalLayout {
             x: Theme.rtl ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
+            horizontal-alignment: Theme.rtl ? right : left;
             text: root.placeholder;
             font-size: Theme.type.body;
             color: Theme.palette().ink-disabled;

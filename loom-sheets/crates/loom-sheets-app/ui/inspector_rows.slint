@@ -1,0 +1,173 @@
+// Rows of the Sheets inspector. Each row lists its parts from the reading-start
+// edge, so right-to-left is the exact mirror image of left-to-right: label,
+// then field, then the buttons; or buttons, field, label.
+import { LoomTextField, LoomButton, LoomIconButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+component SheetRowLabel inherits Text {
+    min-width: 84px;
+    max-width: 100px;
+    font-size: Theme.type.caption;
+    color: Theme.palette().ink-secondary;
+    wrap: word-wrap;
+    vertical-alignment: center;
+    horizontal-alignment: Theme.rtl ? right : left;
+    accessible-role: text;
+}
+
+/// A label with one field (read-only unless `editable`).
+export component SheetFieldRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> field-label: "";
+    in property <string> value: "";
+    in property <bool> editable: false;
+    callback edited(string);
+
+    min-height: Theme.scaled-control-height;
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+        LoomTextField {
+            label: root.field-label;
+            value: root.value;
+            enabled: root.editable;
+            edited(text) => { root.edited(text); }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        LoomTextField {
+            label: root.field-label;
+            value: root.value;
+            enabled: root.editable;
+            edited(text) => { root.edited(text); }
+        }
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+    }
+}
+
+/// The two step buttons, in reading order: decrease then increase (or the
+/// other way round with `plus-first`); the order mirrors in right-to-left.
+component SheetStepButtons inherits HorizontalLayout {
+    in property <bool> plus-first: false;
+    in property <string> decrease-label: "";
+    in property <string> decrease-tip: "";
+    in property <string> increase-label: "";
+    in property <string> increase-tip: "";
+    callback decrease;
+    callback increase;
+
+    spacing: Theme.tokens.space.xs;
+    for slot in 2 : LoomIconButton {
+        property <int> pos: Theme.rtl ? 1 - slot : slot;
+        property <bool> plus: (self.pos == 0) == root.plus-first;
+        icon: self.plus ? "plus" : "minus";
+        label: self.plus ? root.increase-label : root.decrease-label;
+        tooltip: self.plus ? root.increase-tip : root.decrease-tip;
+        clicked => { if (self.plus) { root.increase(); } else { root.decrease(); } }
+    }
+}
+
+/// A label, a read-only value and two step buttons (decrease, increase).
+export component SheetStepperRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> field-label: "";
+    in property <string> value: "";
+    in property <bool> plus-first: false;
+    in property <string> decrease-label: "";
+    in property <string> decrease-tip: "";
+    in property <string> increase-label: "";
+    in property <string> increase-tip: "";
+    callback decrease;
+    callback increase;
+
+    min-height: Theme.scaled-control-height;
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            LoomTextField { label: root.field-label; value: root.value; enabled: false; horizontal-stretch: 1; }
+            SheetStepButtons {
+                plus-first: root.plus-first;
+                decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
+                increase-label: root.increase-label; increase-tip: root.increase-tip;
+                decrease => { root.decrease(); }
+                increase => { root.increase(); }
+            }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            SheetStepButtons {
+                plus-first: root.plus-first;
+                decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
+                increase-label: root.increase-label; increase-tip: root.increase-tip;
+                decrease => { root.decrease(); }
+                increase => { root.increase(); }
+            }
+            LoomTextField { label: root.field-label; value: root.value; enabled: false; horizontal-stretch: 1; }
+        }
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+    }
+}
+
+/// Fill color swatch: pointer shortcut for direct color choice. Every fill
+/// state stays keyboard-reachable through the palette's Fill cycle command.
+component FillSwatch inherits Rectangle {
+    in property <color> swatch-color: transparent;
+    in property <bool> selected: false;
+    in property <string> swatch-label: "";
+    in property <int> swatch-index: -1;
+    callback pick(int);
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: root.swatch-color;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+    accessible-role: button;
+    accessible-label: root.swatch-label;
+    TouchArea { clicked => { root.pick(root.swatch-index); } }
+}
+
+/// The eight fill choices, red first; right-to-left starts from the right edge.
+export component SheetFillRow inherits HorizontalLayout {
+    in property <int> cell-fill: -1;
+    callback set-fill(int);
+
+    spacing: Theme.tokens.space.xs;
+    alignment: Theme.rtl ? end : start;
+    for slot in 8 : FillSwatch {
+        property <int> k: Theme.rtl ? 7 - slot : slot;
+        property <int> fill: k == 7 ? -1 : k;
+        swatch-color: [#FECACA, #FED7AA, #FEF08A, #BBF7D0, #BFDBFE, #DDD6FE, #E5E7EB, transparent][self.k];
+        selected: root.cell-fill == self.fill;
+        swatch-label: ["Fill red", "Fill orange", "Fill yellow", "Fill green", "Fill blue", "Fill purple", "Fill gray", "No fill"][self.k];
+        swatch-index: self.fill;
+        pick(idx) => { root.set-fill(idx); }
+    }
+}
+
+/// A group of choice buttons, the current one filled; first choice at the
+/// reading-start edge.
+export component SheetChoiceRow inherits HorizontalLayout {
+    in property <[string]> choices: [];
+    in property <int> current: 0;
+    callback chosen(int);
+
+    spacing: Theme.tokens.space.xs;
+    alignment: Theme.rtl ? end : start;
+    for slot in root.choices.length : LoomButton {
+        property <int> k: Theme.rtl ? root.choices.length - 1 - slot : slot;
+        label: root.choices[self.k];
+        variant: root.current == self.k ? "primary" : "ghost";
+        clicked => { root.chosen(self.k); }
+    }
+}

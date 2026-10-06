@@ -1,64 +1,7 @@
 import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import {
-    BlankPreview, ChecklistPreview, TableChartPreview, PivotPreview,
-    ChartingPreview, BudgetPreview, MonthlyBudgetPreview, MonthlyGoalPreview,
-    PortfolioPreview, NetWorthPreview, InvoicePreview,
-} from "template_previews.slint";
-
-component SheetsTemplateCard inherits Rectangle {
-    in property <string> title: "";
-    in property <bool> selected: false;
-    in property <length> preview-width: 144px;
-    in property <length> preview-height: 96px;
-    in property <color> preview-background: #ffffff;
-    in property <float> text-scale: 1.0;
-    callback clicked;
-
-    width: 156px;
-    height: max(160px, root.preview-height + 14px + 44px * root.text-scale);
-    accessible-role: button;
-    accessible-label: root.title;
-    accessible-action-default => { root.clicked(); }
-
-    VerticalLayout {
-        spacing: 6px;
-        alignment: start;
-        cross-axis-alignment: center;
-
-        // Preview frame
-        Rectangle {
-            width: root.preview-width;
-            height: root.preview-height;
-            border-radius: Theme.tokens.metrics.radius-small;
-            background: root.preview-background;
-            border-width: root.selected ? 2.5px : 1px;
-            border-color: root.selected ? Theme.palette().success : Theme.palette().border;
-            clip: true;
-            drop-shadow-blur: root.selected ? 6px : 3px;
-            drop-shadow-offset-y: 1.5px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            @children
-        }
-
-        Text {
-            text: root.title;
-            font-size: Theme.tokens.typography.caption * root.text-scale;
-            font-weight: root.selected ? 600 : 500;
-            color: Theme.palette().ink;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-            width: root.width - 8px;
-            min-height: 44px * root.text-scale;
-        }
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
+import { SheetsTemplateOption } from "template_cards.slint";
 
 export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
@@ -158,11 +101,11 @@ export component TemplateChooserModal inherits Rectangle {
                 return accept;
             }
             if (event.text == Key.LeftArrow) {
-                root.navigate-template-selection(-1);
+                root.navigate-template-selection(Theme.rtl ? 1 : -1);
                 return accept;
             }
             if (event.text == Key.RightArrow) {
-                root.navigate-template-selection(1);
+                root.navigate-template-selection(Theme.rtl ? -1 : 1);
                 return accept;
             }
             if (event.text == Key.UpArrow) { root.choose-template-category(max(0, root.template-category - 1)); return accept; }
@@ -191,13 +134,15 @@ export component TemplateChooserModal inherits Rectangle {
             spacing: 0px;
             padding: 0px;
 
-            HorizontalLayout {
-                spacing: 0px;
+            // The category list sits at the reading-start side: left in LTR, right
+            // in RTL; the template grid fills the rest.
+            Rectangle {
                 vertical-stretch: 1;
 
-                // Left Category Sidebar
-                Rectangle {
+                sidebar := Rectangle {
+                    x: Theme.rtl ? parent.width - self.width : 0px;
                     width: 200px;
+                    height: parent.height;
                     background: Theme.palette().panel;
 
                     VerticalLayout {
@@ -219,7 +164,7 @@ export component TemplateChooserModal inherits Rectangle {
                             height: 30px * root.text-scale;
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.template-category == i ? Theme.palette().surface-raised : transparent;
-                            HorizontalLayout {
+                            if !Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.md;
                                 padding-left: Theme.tokens.space.md;
                                 padding-right: Theme.tokens.space.md;
@@ -239,6 +184,27 @@ export component TemplateChooserModal inherits Rectangle {
                                     wrap: word-wrap;
                                 }
                             }
+                            if Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.md;
+                                padding-left: Theme.tokens.space.md;
+                                padding-right: Theme.tokens.space.md;
+                                cross-axis-alignment: center;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: cat.name;
+                                    font-size: Theme.tokens.typography.caption * root.text-scale;
+                                    font-weight: root.template-category == i ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                }
+                                Icon {
+                                    size: 15px;
+                                    icon: cat.icon;
+                                    tint: Theme.palette().success;
+                                }
+                            }
                             TouchArea { clicked => { root.choose-template-category(i); } }
                         }
 
@@ -246,8 +212,10 @@ export component TemplateChooserModal inherits Rectangle {
 
                         HorizontalLayout {
                             spacing: Theme.tokens.space.sm;
-                            padding-left: Theme.tokens.space.md;
+                            padding-left: Theme.rtl ? 0px : Theme.tokens.space.md;
+                            padding-right: Theme.rtl ? Theme.tokens.space.md : 0px;
                             padding-bottom: Theme.tokens.space.sm;
+                            alignment: Theme.rtl ? end : start;
                             cross-axis-alignment: center;
                             Text {
                                 text: "English (US)";
@@ -264,7 +232,7 @@ export component TemplateChooserModal inherits Rectangle {
                     }
 
                     Rectangle {
-                        x: parent.width - 1px;
+                        x: Theme.rtl ? 0px : parent.width - 1px;
                         y: 0px;
                         width: 1px;
                         height: parent.height;
@@ -272,13 +240,15 @@ export component TemplateChooserModal inherits Rectangle {
                     }
                 }
 
-                // Right Content Area
+                // Content area
                 VerticalLayout {
-                    horizontal-stretch: 1;
+                    x: Theme.rtl ? 0px : sidebar.width;
+                    width: parent.width - sidebar.width;
+                    height: parent.height;
                     padding-top: Theme.tokens.space.xl;
                     padding-bottom: Theme.tokens.space.md;
-                    padding-left: Theme.tokens.space.xxl;
-                    padding-right: Theme.tokens.space.xl;
+                    padding-left: Theme.rtl ? Theme.tokens.space.xl : Theme.tokens.space.xxl;
+                    padding-right: Theme.rtl ? Theme.tokens.space.xxl : Theme.tokens.space.xl;
                     spacing: Theme.tokens.space.lg;
 
                     Text {
@@ -286,6 +256,7 @@ export component TemplateChooserModal inherits Rectangle {
                         font-size: Theme.tokens.typography.display * root.text-scale;
                         font-weight: 700;
                         color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
                     }
 
                     scroll-viewport := Rectangle {
@@ -318,6 +289,7 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
                                 if root.template-recents.length == 0 : Text {
                                     text: "No recent templates. Choose a template below or select a category.";
@@ -325,27 +297,17 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.body * root.text-scale;
                                     color: Theme.palette().ink-secondary;
                                 }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
-                                    for recent in root.template-recents : SheetsTemplateCard {
-                                        title: root.template-title(recent);
-                                        selected: root.template-selected == recent;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = recent; }
-                                        if recent == 0 : BlankPreview {}
-                                        if recent == 1 : MonthlyBudgetPreview {}
-                                        if recent == 2 : InvoicePreview {}
-                                        if recent == 3 : ChecklistPreview {}
-                                        if recent == 4 : TableChartPreview {}
-                                        if recent == 5 : PivotPreview {}
-                                        if recent == 6 : ChartingPreview {}
-                                        if recent == 7 : BudgetPreview {}
-                                        if recent == 8 : MonthlyGoalPreview {}
-                                        if recent == 9 : PortfolioPreview {}
-                                        if recent == 10 : NetWorthPreview {}
-                                    }
+                                    for recent in root.template-recents : SheetsTemplateOption { index: recent; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = recent; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    for slot in root.template-recents.length : SheetsTemplateOption { index: root.template-recents[root.template-recents.length - 1 - slot]; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = root.template-recents[root.template-recents.length - 1 - slot]; } }
                                 }
                             }
 
@@ -359,50 +321,37 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Blank";
-                                        selected: root.template-selected == 0;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 0; }
-                                        BlankPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Checklist";
-                                        selected: root.template-selected == 3;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 3; }
-                                        ChecklistPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Table and Chart";
-                                        selected: root.template-selected == 4;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 4; }
-                                        TableChartPreview {}
-                                    }
-                                }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
-                                    SheetsTemplateCard {
-                                        title: "Expense Summary";
-                                        selected: root.template-selected == 5;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 5; }
-                                        PivotPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Sales Chart";
-                                        selected: root.template-selected == 6;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 6; }
-                                        ChartingPreview {}
-                                    }
+                                    SheetsTemplateOption { index: 0; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 0; } }
+                                    SheetsTemplateOption { index: 3; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 3; } }
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                    SheetsTemplateOption { index: 3; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 3; } }
+                                    SheetsTemplateOption { index: 0; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 0; } }
+                                }
+                                if !Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
+                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
+                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
+                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
                                 }
                             }
 
@@ -416,50 +365,37 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Budget";
-                                        selected: root.template-selected == 7;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 7; }
-                                        BudgetPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Monthly Budget";
-                                        selected: root.template-selected == 1;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 1; }
-                                        MonthlyBudgetPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Monthly Goal";
-                                        selected: root.template-selected == 8;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 8; }
-                                        MonthlyGoalPreview {}
-                                    }
-                                }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
-                                    SheetsTemplateCard {
-                                        title: "Portfolio";
-                                        selected: root.template-selected == 9;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 9; }
-                                        PortfolioPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Net Worth";
-                                        selected: root.template-selected == 10;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 10; }
-                                        NetWorthPreview {}
-                                    }
+                                    SheetsTemplateOption { index: 7; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 7; } }
+                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
+                                    SheetsTemplateOption { index: 7; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 7; } }
+                                }
+                                if !Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
+                                    SheetsTemplateOption { index: 9; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 9; } }
+                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
+                                    SheetsTemplateOption { index: 9; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 9; } }
                                 }
                             }
 
@@ -473,31 +409,23 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Monthly Budget";
-                                        selected: root.template-selected == 1;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 1; }
-                                        MonthlyBudgetPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Monthly Goal";
-                                        selected: root.template-selected == 8;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 8; }
-                                        MonthlyGoalPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Net Worth";
-                                        selected: root.template-selected == 10;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 10; }
-                                        NetWorthPreview {}
-                                    }
+                                    alignment: start;
+                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
                                 }
                             }
 
@@ -511,31 +439,23 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Invoice & Expenses";
-                                        selected: root.template-selected == 2;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 2; }
-                                        InvoicePreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Table and Chart";
-                                        selected: root.template-selected == 4;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 4; }
-                                        TableChartPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Expense Summary";
-                                        selected: root.template-selected == 5;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 5; }
-                                        PivotPreview {}
-                                    }
+                                    alignment: start;
+                                    SheetsTemplateOption { index: 2; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 2; } }
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                    SheetsTemplateOption { index: 2; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 2; } }
                                 }
                             }
 
@@ -549,31 +469,23 @@ export component TemplateChooserModal inherits Rectangle {
                                     font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
+                                    horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                HorizontalLayout {
+                                if !Theme.rtl : HorizontalLayout {
                                     vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Sales Chart";
-                                        selected: root.template-selected == 6;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 6; }
-                                        ChartingPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Monthly Goal";
-                                        selected: root.template-selected == 8;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 8; }
-                                        MonthlyGoalPreview {}
-                                    }
-                                    SheetsTemplateCard {
-                                        title: "Table and Chart";
-                                        selected: root.template-selected == 4;
-                                        text-scale: root.text-scale;
-                                        clicked => { root.template-selected = 4; }
-                                        TableChartPreview {}
-                                    }
+                                    alignment: start;
+                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                }
+                                if Theme.rtl : HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: end;
+                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
+                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
+                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
                                 }
                             }
                             }
@@ -582,7 +494,8 @@ export component TemplateChooserModal inherits Rectangle {
                 }
             }
 
-            // Bottom Footer Action Bar
+            // Bottom Footer Action Bar. The primary button sits at the reading end:
+            // right in LTR, left in RTL; the hint fills the rest.
             Rectangle {
                 height: 52px;
                 background: Theme.palette().chrome;
@@ -595,31 +508,40 @@ export component TemplateChooserModal inherits Rectangle {
                     background: Theme.palette().border;
                 }
 
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.lg;
-                    padding-left: Theme.tokens.space.xl;
-                    padding-right: Theme.tokens.space.xl;
-                    cross-axis-alignment: center;
+                cancel-button := LoomButton {
+                    label: "Cancel";
+                    variant: "secondary";
+                    width: self.preferred-width;
+                    height: Theme.tokens.metrics.control-height;
+                    x: Theme.rtl
+                        ? create-button.x + create-button.width + Theme.tokens.space.lg
+                        : create-button.x - Theme.tokens.space.lg - self.width;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.cancel-template(); }
+                }
 
-                    Text {
-                        text: "Escape to cancel • Return to create";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
+                create-button := LoomButton {
+                    label: "Create";
+                    variant: "primary";
+                    width: self.preferred-width;
+                    height: Theme.tokens.metrics.control-height;
+                    x: Theme.rtl ? Theme.tokens.space.xl : parent.width - Theme.tokens.space.xl - self.width;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.create-template(root.template-selected); }
+                }
 
-                    LoomButton {
-                        label: "Cancel";
-                        variant: "secondary";
-                        clicked => { root.cancel-template(); }
-                    }
-
-                    create-button := LoomButton {
-                        label: "Create";
-                        variant: "primary";
-                        clicked => { root.create-template(root.template-selected); }
-                    }
+                Text {
+                    text: "Escape to cancel • Return to create";
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().ink-secondary;
+                    x: Theme.rtl ? cancel-button.x + cancel-button.width + Theme.tokens.space.lg : Theme.tokens.space.xl;
+                    width: Theme.rtl
+                        ? max(0px, parent.width - Theme.tokens.space.xl - self.x)
+                        : max(0px, cancel-button.x - Theme.tokens.space.lg - Theme.tokens.space.xl);
+                    height: parent.height;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
             }
         }

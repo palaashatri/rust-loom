@@ -15,6 +15,8 @@ pub(super) struct Args {
     pub(super) open: Option<String>,
     pub(super) template_chooser: bool,
     pub(super) text_scale: f32,
+    /// Real device scale factor (pixel density), independent of `text_scale`.
+    pub(super) scale_factor: f32,
     pub(super) zoom: Option<f32>,
 }
 
@@ -42,6 +44,7 @@ where
         open: None,
         template_chooser: false,
         text_scale: 1.0,
+        scale_factor: 1.0,
         zoom: None,
     };
     let mut it = raw_args.into_iter().map(Into::into);
@@ -84,6 +87,17 @@ where
                     return Err("--text-scale must be between 1.0 and 2.0".to_string());
                 }
                 args.text_scale = scale;
+            }
+            "--scale-factor" => {
+                let factor: f32 = it
+                    .next()
+                    .ok_or("--scale-factor needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --scale-factor factor")?;
+                if !(1.0..=4.0).contains(&factor) {
+                    return Err("--scale-factor must be between 1.0 and 4.0".to_string());
+                }
+                args.scale_factor = factor;
             }
             "--zoom" => {
                 let zoom: f32 = it

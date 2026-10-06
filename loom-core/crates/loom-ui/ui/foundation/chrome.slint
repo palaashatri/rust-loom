@@ -59,19 +59,30 @@ export component LoomSectionHeader inherits Rectangle {
 
     HorizontalLayout {
         spacing: Theme.tokens.space.md;
-        padding-left: Theme.tokens.space.xl;
-        padding-right: Theme.tokens.space.lg;
+        padding-left: Theme.rtl ? Theme.tokens.space.lg : Theme.tokens.space.xl;
+        padding-right: Theme.rtl ? Theme.tokens.space.xl : Theme.tokens.space.lg;
         cross-axis-alignment: center;
+        // Right-to-left puts the detail at the left end and the title at the right.
+        if Theme.rtl && root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.type.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 180px;
+            overflow: elide;
+        }
         Text {
             text: root.title;
             font-size: Theme.type.title;
             font-weight: 700;
             color: Theme.palette().ink;
             vertical-alignment: center;
+            horizontal-alignment: Theme.rtl ? right : left;
             horizontal-stretch: 1;
             overflow: elide;
         }
-        if root.detail != "" : Text {
+        if !Theme.rtl && root.detail != "" : Text {
             text: root.detail;
             font-size: Theme.type.caption;
             font-weight: 500;
@@ -121,6 +132,8 @@ export component LoomTabStrip inherits Rectangle {
         spacing: 0px;
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
+        // Tabs start at the reading-start edge: left in LTR, right in RTL.
+        alignment: Theme.rtl ? end : start;
         cross-axis-alignment: stretch;
         for item[idx] in root.items : Rectangle {
             property <int> rel: Theme.rtl ? root.items.length - 1 - idx : idx;

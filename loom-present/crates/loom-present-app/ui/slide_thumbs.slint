@@ -72,7 +72,8 @@ component PresentSlideThumbnail inherits Rectangle {
     HorizontalLayout {
         spacing: Theme.tokens.space.sm;
         padding: Theme.tokens.space.sm;
-        Text {
+        // The slide number sits at the reading-start edge: left in LTR, right in RTL.
+        if !Theme.rtl : Text {
             text: (root.index + 1) + "";
             min-width: 12px;
             font-size: Theme.tokens.typography.micro;
@@ -92,6 +93,15 @@ component PresentSlideThumbnail inherits Rectangle {
                 rows: root.rows;
                 description: root.title;
             }
+        }
+        if Theme.rtl : Text {
+            text: (root.index + 1) + "";
+            min-width: 12px;
+            font-size: Theme.tokens.typography.micro;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+            horizontal-alignment: right;
+            vertical-alignment: top;
         }
     }
     TouchArea { clicked => { root.clicked(); } }
@@ -127,7 +137,7 @@ export component PresentSlideStrip inherits Rectangle {
 
         Rectangle { vertical-stretch: 1; background: transparent; }
 
-        HorizontalLayout {
+        if !Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.xs;
             alignment: start;
             LoomIconButton {
@@ -141,6 +151,23 @@ export component PresentSlideStrip inherits Rectangle {
                 label: "Delete Slide";
                 tooltip: "Delete selected slide";
                 clicked => { root.delete-slide(); }
+            }
+        }
+        // Right-to-left: the same two buttons, starting from the right edge.
+        if Theme.rtl : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: end;
+            LoomIconButton {
+                icon: "trash-2";
+                label: "Delete Slide";
+                tooltip: "Delete selected slide";
+                clicked => { root.delete-slide(); }
+            }
+            LoomIconButton {
+                icon: "plus";
+                label: "Add Slide";
+                tooltip: "Add a new slide";
+                clicked => { root.add-slide(); }
             }
         }
     }

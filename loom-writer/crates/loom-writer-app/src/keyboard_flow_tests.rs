@@ -37,9 +37,9 @@ impl Stop {
     }
 }
 
-struct Session {
-    app: WriterApp,
-    state: Rc<GuiState>,
+pub(super) struct Session {
+    pub(super) app: WriterApp,
+    pub(super) state: Rc<GuiState>,
     actions: Rc<RefCell<Vec<String>>>,
 }
 
@@ -80,7 +80,7 @@ fn launched_with(document: WriterDocument, dialogs: Rc<dyn FileDialogService>) -
     }
 }
 
-fn launched(text: &str) -> Session {
+pub(super) fn launched(text: &str) -> Session {
     launched_with(text_document(text), scripted(vec![]))
 }
 

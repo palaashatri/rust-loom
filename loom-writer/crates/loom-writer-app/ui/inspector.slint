@@ -93,18 +93,21 @@ export component WriterInspector inherits LoomPanel {
             height: parent.height;
             spacing: Theme.tokens.space.md;
 
-            HorizontalLayout {
-                padding-left: Theme.tokens.space.md;
-                padding-right: Theme.tokens.space.md;
-                spacing: Theme.tokens.space.sm;
-                cross-axis-alignment: center;
+            // The tabs fill the row and the close button sits at the reading end:
+            // right in LTR, left in RTL.
+            Rectangle {
+                height: Theme.scaled-control-height;
                 tab-control := LoomSegmentedControl {
-                    horizontal-stretch: 1;
+                    x: (Theme.rtl ? close-button.width + Theme.tokens.space.sm : 0px) + Theme.tokens.space.md;
+                    y: 0px;
+                    width: parent.width - close-button.width - Theme.tokens.space.sm - 2 * Theme.tokens.space.md;
                     items: ["Format", "Document"];
                     current <=> root.inspector-tab;
                     label: "Inspector tab";
                 }
-                LoomIconButton {
+                close-button := LoomIconButton {
+                    x: Theme.rtl ? Theme.tokens.space.md : parent.width - self.width - Theme.tokens.space.md;
+                    y: (parent.height - self.height) / 2;
                     icon: "close";
                     label: "Close inspector";
                     tooltip: "Close inspector";
@@ -136,12 +139,13 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Font & Size"; }
 
-            HorizontalLayout {
-                spacing: Theme.tokens.space.sm;
-                cross-axis-alignment: center;
-
+            // The font family fills the row; the size stepper sits at the reading end.
+            Rectangle {
+                height: max(32px, Theme.scaled-control-height);
                 LoomSegmentedControl {
-                    horizontal-stretch: 1;
+                    x: Theme.rtl ? font-stepper.width + Theme.tokens.space.sm : 0px;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - font-stepper.width - Theme.tokens.space.sm;
                     items: ["Sans", "Serif", "Mono"];
                     current <=> root.font-family-index;
                     label: "Font Family";
@@ -149,7 +153,9 @@ export component WriterInspector inherits LoomPanel {
                 }
 
                 // Font size stepper
-                Rectangle {
+                font-stepper := Rectangle {
+                    x: Theme.rtl ? 0px : parent.width - self.width;
+                    y: (parent.height - self.height) / 2;
                     width: 104px;
                     height: 32px;
                     border-radius: Theme.tokens.metrics.radius-medium;
@@ -157,7 +163,7 @@ export component WriterInspector inherits LoomPanel {
                     border-color: Theme.palette().border;
                     background: Theme.palette().surface-raised;
 
-                    HorizontalLayout {
+                    if !Theme.rtl : HorizontalLayout {
                         spacing: 2px;
                         padding-left: 4px;
                         padding-right: 4px;
@@ -187,11 +193,42 @@ export component WriterInspector inherits LoomPanel {
                             clicked => { root.increase-font-size(); }
                         }
                     }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: 2px;
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        cross-axis-alignment: center;
+
+                        LoomIconButton {
+                            icon: "plus";
+                            label: "Larger";
+                            tooltip: "Increase font size";
+                            clicked => { root.increase-font-size(); }
+                        }
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.font-size-pt + " pt";
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        LoomIconButton {
+                            icon: "minus";
+                            label: "Smaller";
+                            tooltip: "Decrease font size";
+                            clicked => { root.decrease-font-size(); }
+                        }
+                    }
                 }
             }
 
-            // Character styles row
-            HorizontalLayout {
+            // Character styles row, from the reading-start edge: Bold sits at the
+            // left in LTR and at the right in RTL.
+            if !Theme.rtl : HorizontalLayout {
                 spacing: Theme.tokens.space.xs;
                 alignment: start;
 
@@ -224,50 +261,109 @@ export component WriterInspector inherits LoomPanel {
                     clicked => { root.toggle-strikethrough(); }
                 }
             }
+            if Theme.rtl : HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                alignment: end;
+
+                LoomIconButton {
+                    icon: "strikethrough";
+                    label: "Strikethrough";
+                    tooltip: "Strikethrough";
+                    selected: root.is-strikethrough;
+                    clicked => { root.toggle-strikethrough(); }
+                }
+                LoomIconButton {
+                    icon: "underline";
+                    label: "Underline";
+                    tooltip: "Underline (Cmd+U)";
+                    selected: root.is-underline;
+                    clicked => { root.toggle-underline(); }
+                }
+                LoomIconButton {
+                    icon: "italic";
+                    label: "Italic";
+                    tooltip: "Italic (Cmd+I)";
+                    selected: root.is-italic;
+                    clicked => { root.toggle-italic(); }
+                }
+                LoomIconButton {
+                    icon: "bold";
+                    label: "Bold";
+                    tooltip: "Bold (Cmd+B)";
+                    selected: root.is-bold;
+                    clicked => { root.toggle-bold(); }
+                }
+            }
 
             LoomSectionHeader { title: "Alignment & Spacing"; }
 
-            HorizontalLayout {
-                spacing: Theme.tokens.space.sm;
-
+            // Alignment fills the row; the two indent buttons sit at the reading end.
+            Rectangle {
+                height: Theme.scaled-control-height;
                 LoomSegmentedControl {
-                    horizontal-stretch: 1;
+                    x: Theme.rtl ? indent-pair.width + Theme.tokens.space.sm : 0px;
+                    y: 0px;
+                    width: parent.width - indent-pair.width - Theme.tokens.space.sm;
                     items: ["Left", "Center", "Right", "Justify"];
                     current <=> root.text-alignment;
                     label: "Text Alignment";
                     selected(idx) => { root.select-alignment(idx); }
                 }
 
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.xs;
+                indent-pair := Rectangle {
+                    x: Theme.rtl ? 0px : parent.width - self.width;
+                    y: (parent.height - self.height) / 2;
+                    width: 2 * Theme.tokens.metrics.control-height + Theme.tokens.space.xs;
+                    height: Theme.tokens.metrics.control-height;
 
-                    LoomIconButton {
-                        icon: "outdent";
-                        label: "Outdent";
-                        tooltip: "Decrease Indent";
-                        clicked => { root.outdent-text(); }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomIconButton {
+                            icon: "outdent";
+                            label: "Outdent";
+                            tooltip: "Decrease Indent";
+                            clicked => { root.outdent-text(); }
+                        }
+                        LoomIconButton {
+                            icon: "indent";
+                            label: "Indent";
+                            tooltip: "Increase Indent";
+                            clicked => { root.indent-text(); }
+                        }
                     }
-                    LoomIconButton {
-                        icon: "indent";
-                        label: "Indent";
-                        tooltip: "Increase Indent";
-                        clicked => { root.indent-text(); }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomIconButton {
+                            icon: "indent";
+                            label: "Indent";
+                            tooltip: "Increase Indent";
+                            clicked => { root.indent-text(); }
+                        }
+                        LoomIconButton {
+                            icon: "outdent";
+                            label: "Outdent";
+                            tooltip: "Decrease Indent";
+                            clicked => { root.outdent-text(); }
+                        }
                     }
                 }
             }
 
-            HorizontalLayout {
-                spacing: Theme.tokens.space.sm;
-                cross-axis-alignment: center;
-
-                Text {
+            // The caption sits at the reading-start edge, the choices fill the rest.
+            Rectangle {
+                height: Theme.scaled-control-height;
+                spacing-caption := Text {
+                    x: Theme.rtl ? parent.width - self.width : 0px;
+                    y: (parent.height - self.height) / 2;
                     text: "Line Spacing:";
                     font-size: Theme.type.caption;
                     color: Theme.palette().ink-secondary;
                 }
 
                 LoomSegmentedControl {
-                    horizontal-stretch: 1;
+                    x: Theme.rtl ? 0px : spacing-caption.width + Theme.tokens.space.sm;
+                    y: 0px;
+                    width: parent.width - spacing-caption.width - Theme.tokens.space.sm;
                     items: ["1.0", "1.15", "1.5", "2.0"];
                     current <=> root.line-spacing-index;
                     label: "Line Spacing";
@@ -333,15 +429,17 @@ export component WriterInspector inherits LoomPanel {
                                 : entry.author;
                         font-size: Theme.type.micro;
                         color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
                     }
                     Text {
                         text: entry.body;
                         font-size: Theme.type.caption;
                         color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
                         wrap: word-wrap;
                         overflow: elide;
                     }
-                    HorizontalLayout {
+                    if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         alignment: start;
 
@@ -360,6 +458,27 @@ export component WriterInspector inherits LoomPanel {
                             label: "Delete";
                             variant: "ghost";
                             clicked => { root.delete-comment(entry.id); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: end;
+
+                        LoomButton {
+                            label: "Delete";
+                            variant: "ghost";
+                            clicked => { root.delete-comment(entry.id); }
+                        }
+                        LoomButton {
+                            label: entry.resolved ? "Reopen" : "Resolve";
+                            variant: "ghost";
+                            clicked => { root.set-comment-resolved(entry.id, !entry.resolved); }
+                        }
+                        LoomButton {
+                            label: entry.orphaned ? "Text removed" : "Show on page";
+                            variant: "secondary";
+                            enabled: !entry.orphaned;
+                            clicked => { root.navigate-comment(entry.id); }
                         }
                     }
                 }
@@ -410,11 +529,13 @@ export component WriterInspector inherits LoomPanel {
                     font-size: Theme.type.caption;
                     font-weight: 600;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                 }
                 Text {
                     text: root.status-left != "" ? root.status-left : "~" + root.reading-time-mins + " min read";
                     font-size: Theme.type.micro;
                     color: Theme.palette().ink-secondary;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     overflow: elide;
                 }
             }

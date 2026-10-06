@@ -28,7 +28,7 @@ export component WriterOutlinePane inherits Rectangle {
     VerticalLayout {
         spacing: Theme.tokens.space.sm;
 
-        HorizontalLayout {
+        if !Theme.rtl : HorizontalLayout {
             height: Theme.tokens.metrics.control-height;
             padding-left: Theme.tokens.space.md;
             padding-right: Theme.tokens.space.md;
@@ -46,6 +46,27 @@ export component WriterOutlinePane inherits Rectangle {
                 label: "Close outline";
                 tooltip: "Close outline";
                 clicked => { root.close-requested(); }
+            }
+        }
+        if Theme.rtl : HorizontalLayout {
+            height: Theme.tokens.metrics.control-height;
+            padding-left: Theme.tokens.space.md;
+            padding-right: Theme.tokens.space.md;
+            cross-axis-alignment: center;
+            LoomIconButton {
+                icon: "close";
+                label: "Close outline";
+                tooltip: "Close outline";
+                clicked => { root.close-requested(); }
+            }
+            Text {
+                text: "Outline";
+                font-size: Theme.type.body;
+                font-weight: 600;
+                color: Theme.palette().ink;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                vertical-alignment: center;
             }
         }
 

@@ -13,6 +13,7 @@ component InspectorPropertyRow inherits Rectangle {
             font-size: Theme.type.caption;
             font-weight: 500;
             color: Theme.palette().ink-secondary;
+            horizontal-alignment: Theme.rtl ? right : left;
             wrap: word-wrap;
             horizontal-stretch: 1;
         }
@@ -93,12 +94,14 @@ export component PresentInspector inherits LoomPanel {
                         font-size: Theme.type.body;
                         font-weight: 600;
                         color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
                         overflow: elide;
                     }
                     Text {
                         text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
                         font-size: Theme.type.micro;
                         color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
                         overflow: elide;
                     }
                 }
@@ -125,6 +128,7 @@ export component PresentInspector inherits LoomPanel {
                             font-size: Theme.type.body;
                             color: Theme.palette().ink;
                             vertical-alignment: center;
+                            horizontal-alignment: Theme.rtl ? right : left;
                             single-line: true;
                             accessible-label: "Selected element text";
                             edited => { root.update-element-content(self.text); }
@@ -140,6 +144,7 @@ export component PresentInspector inherits LoomPanel {
                     text: root.element-x-text + " × " + root.element-y-text;
                     font-size: Theme.type.body;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -150,6 +155,7 @@ export component PresentInspector inherits LoomPanel {
                     text: root.element-width-text + " × " + root.element-height-text;
                     font-size: Theme.type.body;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -160,6 +166,7 @@ export component PresentInspector inherits LoomPanel {
                     text: root.element-rotation-text;
                     font-size: Theme.type.body;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -193,6 +200,7 @@ export component PresentInspector inherits LoomPanel {
                     text: root.aspect-ratio-wide ? "16:9 Wide" : "4:3 Standard";
                     font-size: Theme.type.body;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     vertical-alignment: center;
                 }
             }
@@ -203,6 +211,7 @@ export component PresentInspector inherits LoomPanel {
                     text: root.slide-count-text;
                     font-size: Theme.type.body;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     vertical-alignment: center;
                 }
             }

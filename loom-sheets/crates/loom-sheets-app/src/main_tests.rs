@@ -33,6 +33,8 @@ mod clipboard_tests;
 mod close_operation_journeys;
 #[path = "main_tests/command_dispatch_tests.rs"]
 mod command_dispatch_tests;
+#[path = "main_tests/dpi_surfaces_tests.rs"]
+mod dpi_surfaces_tests;
 #[path = "main_tests/export_operation_journeys.rs"]
 mod export_operation_journeys;
 #[path = "main_tests/grid_gesture_tests.rs"]
@@ -47,6 +49,8 @@ mod grid_tab_enter_tests;
 mod layout_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
+#[path = "main_tests/rtl_tests.rs"]
+mod rtl_tests;
 #[path = "main_tests/save_operations_journeys.rs"]
 mod save_operations_journeys;
 #[path = "main_tests/scale_surfaces_tests.rs"]

@@ -55,7 +55,8 @@ pub(super) fn render_headless(args: &Args, out: &str) -> Result<(), String> {
             sync_chart_to_app(&app, &sheet);
         }
     }
-    let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
+    let img = snapshot_component(&app, w as f32, h as f32, args.scale_factor)
+        .map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
     Ok(())
 }

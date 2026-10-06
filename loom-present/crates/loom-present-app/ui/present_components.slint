@@ -22,7 +22,7 @@ export component PresentNotesEditor inherits Rectangle {
     forward-focus: notes-input;
 
     if root.text == "" : Text {
-        x: Theme.tokens.space.lg;
+        x: Theme.rtl ? Theme.tokens.space.xl - Theme.tokens.space.lg : Theme.tokens.space.lg;
         y: Theme.tokens.space.sm;
         width: max(1px, root.width - Theme.tokens.space.xl);
         height: max(1px, root.height - Theme.tokens.space.lg);
@@ -30,11 +30,12 @@ export component PresentNotesEditor inherits Rectangle {
         font-size: root.font-size;
         color: Theme.palette().ink-disabled;
         vertical-alignment: top;
+        horizontal-alignment: Theme.rtl ? right : left;
         wrap: word-wrap;
     }
 
     notes-input := TextInput {
-        x: Theme.tokens.space.lg;
+        x: Theme.rtl ? Theme.tokens.space.xl - Theme.tokens.space.lg : Theme.tokens.space.lg;
         y: Theme.tokens.space.sm;
         width: max(1px, root.width - Theme.tokens.space.xl);
         height: max(1px, root.height - Theme.tokens.space.lg);
@@ -44,6 +45,7 @@ export component PresentNotesEditor inherits Rectangle {
         accessible-label: "Speaker notes";
         wrap: word-wrap;
         vertical-alignment: top;
+        horizontal-alignment: Theme.rtl ? right : left;
         font-size: root.font-size;
         color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
         selection-background-color: Theme.palette().selection;
@@ -58,12 +60,19 @@ export component PresentStatusBar inherits LoomStatusBar {
     in property <string> leading-text: "";
     in property <string> trailing-text: "";
 
-    LoomStatusText {
+    // Right-to-left puts the leading status at the right edge.
+    if !Theme.rtl : LoomStatusText {
         text: root.leading-text;
     }
-    Rectangle { horizontal-stretch: 1; }
-    LoomStatusText {
+    if Theme.rtl : LoomStatusText {
         text: root.trailing-text;
+    }
+    Rectangle { horizontal-stretch: 1; }
+    if !Theme.rtl : LoomStatusText {
+        text: root.trailing-text;
+    }
+    if Theme.rtl : LoomStatusText {
+        text: root.leading-text;
     }
 }
 

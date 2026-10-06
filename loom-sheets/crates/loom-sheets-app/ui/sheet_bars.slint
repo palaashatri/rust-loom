@@ -1,0 +1,254 @@
+import { LoomButton, LoomIconButton, LoomTextField, LoomToolbarSpacer, LoomTabStrip } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { GridPointer } from "grid_pointer.slint";
+
+export component SheetTabs inherits Rectangle {
+    in property <[string]> sheets: ["Sheet 1"];
+    in property <int> active-sheet: 0;
+    in property <bool> can-add-sheet: true;
+    callback select-sheet(int);
+    callback add-sheet;
+
+    height: Theme.tokens.metrics.sheet-tab-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
+    background: Theme.palette().chrome;
+
+    // The add button comes first at the reading start, then the tabs.
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        LoomIconButton {
+            icon: "plus";
+            label: "Add sheet";
+            tooltip: "Add a worksheet to this workbook.";
+            enabled: root.can-add-sheet;
+            clicked => { root.add-sheet(); }
+        }
+
+        LoomTabStrip {
+            items: root.sheets;
+            current: root.active-sheet;
+            selected(idx) => { root.select-sheet(idx); }
+        }
+
+        LoomToolbarSpacer { }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        LoomToolbarSpacer { }
+
+        LoomTabStrip {
+            items: root.sheets;
+            current: root.active-sheet;
+            selected(idx) => { root.select-sheet(idx); }
+        }
+
+        LoomIconButton {
+            icon: "plus";
+            label: "Add sheet";
+            tooltip: "Add a worksheet to this workbook.";
+            enabled: root.can-add-sheet;
+            clicked => { root.add-sheet(); }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+export component FormulaNameBar inherits Rectangle {
+    in property <string> selection-range: "A1";
+    in property <string> selection-formula: "";
+    in property <int> selection-count: 1;
+    in property <bool> show-quick-formulas: false;
+    in-out property <string> formula-edit-buffer: "";
+    in property <bool> is-editing: false;
+    in-out property <string> name-text: "A1";
+    changed selection-range => { root.name-text = root.selection-range; }
+    callback commit(string);
+    callback commit-advance(string, int, int);
+    callback cancel;
+    callback quick-formula(string);
+    callback fill-selection;
+
+    // The formula field lives in either reading order, so it takes focus by
+    // request counter instead of by name.
+    property <int> focus-seq: 0;
+    public function focus-formula-bar() { root.focus-seq += 1; }
+
+    min-height: Theme.tokens.metrics.formula-bar-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
+    max-height: Theme.tokens.metrics.formula-bar-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
+    background: Theme.palette().chrome;
+
+    // Reading order: name box, fx, the formula field, quick formulas, then the
+    // commit, cancel and fill buttons. Right-to-left is the exact mirror image.
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        // Name box: shows the selection; type a cell or range and press Enter to go there.
+        LoomTextField {
+            label: "Name box";
+            description: "Type a cell address such as D50 or B2:C3 and press Enter";
+            placeholder: "A1";
+            value <=> root.name-text;
+            min-width: 84px;
+            max-width: 84px;
+            accepted(text) => { GridPointer.goto-cell(text); }
+            cancelled => { root.name-text = root.selection-range; }
+        }
+
+        Text {
+            text: "fx";
+            width: 20px * max(1.0, Theme.text-scale);
+            font-size: Theme.type.body;
+            font-weight: 700;
+            color: Theme.palette().accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        LoomTextField {
+            label: "Formula bar";
+            description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
+            placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
+            value <=> root.formula-edit-buffer;
+            horizontal-stretch: 1;
+            capture-tab: true;
+            focus-request: root.focus-seq;
+            // Enter commits and moves down; Tab and Shift+Tab commit and move
+            // sideways, as in every spreadsheet. The check button commits in place.
+            accepted(text) => { root.commit-advance(text, 1, 0); }
+            tabbed(back) => { root.commit-advance(root.formula-edit-buffer, 0, back ? -1 : 1); }
+            cancelled => {
+                root.formula-edit-buffer = root.selection-formula;
+                root.cancel();
+            }
+        }
+
+        if root.show-quick-formulas : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            LoomButton { label: "SUM"; variant: "ghost"; clicked => { root.quick-formula("SUM"); } }
+            LoomButton { label: "AVG"; variant: "ghost"; clicked => { root.quick-formula("AVERAGE"); } }
+            LoomButton { label: "COUNT"; variant: "ghost"; clicked => { root.quick-formula("COUNT"); } }
+        }
+
+        LoomIconButton {
+            icon: "check";
+            label: "Commit formula";
+            tooltip: "Apply the formula bar entry to the selected cell.";
+            clicked => { root.commit(root.formula-edit-buffer); }
+        }
+        LoomIconButton {
+            icon: "close";
+            label: "Cancel formula edit";
+            tooltip: "Discard formula bar changes and keep the current cell value.";
+            clicked => {
+                root.formula-edit-buffer = root.selection-formula;
+                root.cancel();
+            }
+        }
+        LoomButton {
+            label: "Fill down";
+            variant: "ghost";
+            enabled: root.selection-count > 1;
+            clicked => { root.fill-selection(); }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        LoomButton {
+            label: "Fill down";
+            variant: "ghost";
+            enabled: root.selection-count > 1;
+            clicked => { root.fill-selection(); }
+        }
+        LoomIconButton {
+            icon: "close";
+            label: "Cancel formula edit";
+            tooltip: "Discard formula bar changes and keep the current cell value.";
+            clicked => {
+                root.formula-edit-buffer = root.selection-formula;
+                root.cancel();
+            }
+        }
+        LoomIconButton {
+            icon: "check";
+            label: "Commit formula";
+            tooltip: "Apply the formula bar entry to the selected cell.";
+            clicked => { root.commit(root.formula-edit-buffer); }
+        }
+
+        if root.show-quick-formulas : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            LoomButton { label: "COUNT"; variant: "ghost"; clicked => { root.quick-formula("COUNT"); } }
+            LoomButton { label: "AVG"; variant: "ghost"; clicked => { root.quick-formula("AVERAGE"); } }
+            LoomButton { label: "SUM"; variant: "ghost"; clicked => { root.quick-formula("SUM"); } }
+        }
+
+        LoomTextField {
+            label: "Formula bar";
+            description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
+            placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
+            value <=> root.formula-edit-buffer;
+            horizontal-stretch: 1;
+            capture-tab: true;
+            focus-request: root.focus-seq;
+            // Enter commits and moves down; Tab and Shift+Tab commit and move
+            // sideways, as in every spreadsheet. The check button commits in place.
+            accepted(text) => { root.commit-advance(text, 1, 0); }
+            tabbed(back) => { root.commit-advance(root.formula-edit-buffer, 0, back ? -1 : 1); }
+            cancelled => {
+                root.formula-edit-buffer = root.selection-formula;
+                root.cancel();
+            }
+        }
+
+        Text {
+            text: "fx";
+            width: 20px * max(1.0, Theme.text-scale);
+            font-size: Theme.type.body;
+            font-weight: 700;
+            color: Theme.palette().accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        // Name box: shows the selection; type a cell or range and press Enter to go there.
+        LoomTextField {
+            label: "Name box";
+            description: "Type a cell address such as D50 or B2:C3 and press Enter";
+            placeholder: "A1";
+            value <=> root.name-text;
+            min-width: 84px;
+            max-width: 84px;
+            accepted(text) => { GridPointer.goto-cell(text); }
+            cancelled => { root.name-text = root.selection-range; }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+

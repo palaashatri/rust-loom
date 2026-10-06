@@ -5,9 +5,9 @@ use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use loom_test_support::capture::{set_platform, snapshot_component};
 
-type Rect = (String, f32, f32, f32, f32);
+pub(super) type Rect = (String, f32, f32, f32, f32);
 
-const ROLES: [AccessibleRole; 7] = [
+pub(super) const ROLES: [AccessibleRole; 7] = [
     AccessibleRole::Button,
     AccessibleRole::Checkbox,
     AccessibleRole::Combobox,
@@ -17,7 +17,10 @@ const ROLES: [AccessibleRole; 7] = [
     AccessibleRole::ListItem,
 ];
 
-fn rects<C: slint::ComponentHandle>(component: &C, roles: &[AccessibleRole]) -> Vec<Rect> {
+pub(super) fn rects<C: slint::ComponentHandle>(
+    component: &C,
+    roles: &[AccessibleRole],
+) -> Vec<Rect> {
     let roots: Vec<_> = [
         "Rectangle",
         "PresentApp",
@@ -86,7 +89,7 @@ fn assert_clean(items: &[Rect], background: &[Rect], width: f32, height: f32, wh
     }
 }
 
-fn open_surface(app: &PresentApp, surface: &str) {
+pub(super) fn open_surface(app: &PresentApp, surface: &str) {
     match surface {
         "save-changes" => {
             app.set_save_changes_document("Quarterly review".into());
@@ -208,7 +211,7 @@ fn presenter_window_inherits_text_scale_and_fits_its_minimum_size() {
 
 /// Controls of the plain editor at the same size and scale, i.e. what a modal
 /// surface covers.
-fn rects_without_surface(width: f32, height: f32, scale: f32) -> Vec<Rect> {
+pub(super) fn rects_without_surface(width: f32, height: f32, scale: f32) -> Vec<Rect> {
     set_platform();
     let app = PresentApp::new().expect("create app");
     app.window()

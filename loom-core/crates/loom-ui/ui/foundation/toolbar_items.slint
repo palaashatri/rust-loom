@@ -1,0 +1,25 @@
+// Toolbar items that can be focused by a request counter.
+//
+// A toolbar draws its items in one order for left-to-right and the mirror
+// order for right-to-left, so the items live inside `if` branches and the
+// toolbar root cannot name them. Instead the root bumps a counter and the item
+// that matches takes keyboard focus.
+import { IconOverLabelToolbarItem } from "../toolkit.slint";
+import { LoomOverflowButton } from "chrome.slint";
+
+/// An icon-over-label toolbar item that takes keyboard focus when
+/// `focus-request` changes to a positive number.
+export component LoomToolbarItem inherits IconOverLabelToolbarItem {
+    in property <int> focus-request: 0;
+    changed focus-request => {
+        if (root.focus-request > 0) { root.focus-item(); }
+    }
+}
+
+/// The overflow ("...") button with the same focus request.
+export component LoomOverflowTrigger inherits LoomOverflowButton {
+    in property <int> focus-request: 0;
+    changed focus-request => {
+        if (root.focus-request > 0) { root.grab-focus(); }
+    }
+}

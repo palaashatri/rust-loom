@@ -106,6 +106,7 @@ export component XlsxImportWarningDialog inherits Rectangle {
                         font-size: Theme.type.heading;
                         font-weight: 700;
                         color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
                         wrap: word-wrap;
                     }
 
@@ -113,7 +114,7 @@ export component XlsxImportWarningDialog inherits Rectangle {
                         width: parent.width;
                         height: min(warning-copy.preferred-height,
                             max(72px, root.height - dialog-title.preferred-height
-                                - action-row.preferred-height - 82px));
+                                - Theme.tokens.metrics.control-height - 82px));
                         viewport-width: parent.width;
                         viewport-height: max(warning-scroll.height, warning-copy.preferred-height);
 
@@ -122,22 +123,30 @@ export component XlsxImportWarningDialog inherits Rectangle {
                             text: root.warning-message;
                             font-size: Theme.type.body;
                             color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
                             wrap: word-wrap;
                         }
                     }
 
-                    action-row := HorizontalLayout {
-                        spacing: Theme.tokens.space.sm;
-                        alignment: end;
-                        cancel-button := LoomButton {
-                            label: "Cancel import";
-                            variant: "secondary";
-                            clicked => { root.import-cancel(); }
-                        }
+                    // The destructive choice sits at the reading end: right in LTR,
+                    // left in RTL; the safe default is beside it.
+                    action-row := Rectangle {
+                        height: Theme.tokens.metrics.control-height;
                         continue-button := LoomButton {
                             label: "Import with feature loss";
                             variant: "danger";
+                            width: self.preferred-width;
+                            height: Theme.tokens.metrics.control-height;
+                            x: Theme.rtl ? 0px : max(0px, parent.width - self.width);
                             clicked => { root.import-continue(); }
+                        }
+                        cancel-button := LoomButton {
+                            label: "Cancel import";
+                            variant: "secondary";
+                            width: self.preferred-width;
+                            height: Theme.tokens.metrics.control-height;
+                            x: Theme.rtl ? continue-button.width + Theme.tokens.space.sm : max(0px, continue-button.x - Theme.tokens.space.sm - self.width);
+                            clicked => { root.import-cancel(); }
                         }
                     }
                 }

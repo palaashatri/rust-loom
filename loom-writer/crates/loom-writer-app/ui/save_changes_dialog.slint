@@ -56,30 +56,41 @@ export component WriterSaveChangesDialog inherits FocusScope {
                     font-size: Theme.type.heading;
                     font-weight: 700;
                     color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
                 }
                 Text {
                     text: "Save changes to \"" + root.document + "\" before " + (root.closing ? "closing" : "replacing it") + "?";
                     font-size: Theme.type.body;
                     color: Theme.palette().ink-secondary;
+                    horizontal-alignment: Theme.rtl ? right : left;
                     wrap: word-wrap;
                 }
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    alignment: end;
-                    cancel-button := LoomButton {
-                        label: "Cancel";
-                        variant: "secondary";
-                        clicked => { root.cancel(); }
+                // The primary button sits at the reading end: right in LTR, left in RTL.
+                Rectangle {
+                    height: Theme.tokens.metrics.control-height;
+                    save-button := LoomButton {
+                        label: "Save";
+                        variant: "primary";
+                        width: self.preferred-width;
+                        height: Theme.tokens.metrics.control-height;
+                        x: Theme.rtl ? 0px : parent.width - self.width;
+                        clicked => { root.save(); }
                     }
                     discard-button := LoomButton {
                         label: "Discard";
                         variant: "danger";
+                        width: self.preferred-width;
+                        height: Theme.tokens.metrics.control-height;
+                        x: Theme.rtl ? save-button.width + Theme.tokens.space.sm : save-button.x - Theme.tokens.space.sm - self.width;
                         clicked => { root.discard(); }
                     }
-                    save-button := LoomButton {
-                        label: "Save";
-                        variant: "primary";
-                        clicked => { root.save(); }
+                    cancel-button := LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        width: self.preferred-width;
+                        height: Theme.tokens.metrics.control-height;
+                        x: Theme.rtl ? discard-button.x + discard-button.width + Theme.tokens.space.sm : discard-button.x - Theme.tokens.space.sm - self.width;
+                        clicked => { root.cancel(); }
                     }
                 }
             }

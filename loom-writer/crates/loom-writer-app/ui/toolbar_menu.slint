@@ -100,7 +100,11 @@ export component WriterToolbarMenu inherits Rectangle {
         }
     }
     Rectangle {
-        x: max(0px, min(root.menu-x, root.width - self.width - 8px));
+        // Opens at the item's reading-start edge: its left edge in LTR; in RTL
+        // the menu's right edge lines up with the item's right edge.
+        x: Theme.rtl
+            ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
+            : max(0px, min(root.menu-x, root.width - self.width - 8px));
         y: root.menu-y;
         width: 240px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
         height: items.preferred-height;

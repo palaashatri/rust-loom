@@ -1,5 +1,5 @@
-import { LabeledToolbar, IconOverLabelToolbarItem, ToolbarSpacer } from "toolkit.slint";
-import { LoomOverflowButton } from "foundation.slint";
+import { LabeledToolbar, ToolbarSpacer } from "toolkit.slint";
+import { LoomToolbarItem, LoomOverflowTrigger } from "foundation.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 
 /// One icon-over-label row in three groups: View/Zoom/Add Sheet on the
@@ -19,98 +19,159 @@ export component SheetActionToolbar inherits LabeledToolbar {
     max-height: Theme.tokens.metrics.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
 
     callback command(string);
+    /// A menu item reports the window x of its reading-start edge (left edge in
+    /// LTR, right edge in RTL) so the menu opens beneath it.
     callback toggle-menu(int, length);
     callback show-inspector-tab(int);
     callback overflow-requested;
 
+    // Keyboard focus is requested by number: 1..5 are the menu kinds above,
+    // 9 the overflow button and 11 the Format tab. The item with that number
+    // takes focus when `focus-seq` changes; the toolbar draws its items in
+    // either reading order, so the root cannot name them directly.
+    property <int> focus-code: 0;
+    property <int> focus-seq: 0;
+    function ask-focus(code: int) {
+        root.focus-code = code;
+        root.focus-seq += 1;
+    }
+    pure function request(code: int) -> int { return root.focus-code == code ? root.focus-seq : 0; }
+
     /// Return keyboard focus to the Format item (after the inspector closes).
-    public function focus-inspector-trigger() { format-item.focus-item(); }
-    public function focus-overflow-trigger() { overflow-button.grab-focus(); }
+    public function focus-inspector-trigger() { root.ask-focus(11); }
+    public function focus-overflow-trigger() { root.ask-focus(9); }
     /// F6 from the grid lands on the first toolbar item.
-    public function focus-first() { view-item.focus-item(); }
+    public function focus-first() { root.ask-focus(1); }
     /// Return focus to the item that opened toolbar menu `kind` (numbered as
     /// `menu-kind`), so Escape does not lose the place.
-    public function focus-menu-trigger(kind: int) {
-        if (kind == 1) { view-item.focus-item(); }
-        else if (kind == 2) { zoom-item.focus-item(); }
-        else if (kind == 3) { table-item.focus-item(); }
-        else if (kind == 4) { text-item.focus-item(); }
-        else { export-item.focus-item(); }
-    }
+    public function focus-menu-trigger(kind: int) { root.ask-focus(kind); }
 
     changed inspector-visible => {
         if (!root.inspector-visible) { root.focus-inspector-trigger(); }
     }
 
-    view-item := IconOverLabelToolbarItem {
-        icon: "view";
-        label: "View";
-        checked: root.menu-kind == 1;
-        clicked => { root.toggle-menu(1, self.absolute-position.x); }
-    }
-    zoom-item := IconOverLabelToolbarItem {
-        icon: "zoom-fit";
-        label: "Zoom";
-        checked: root.menu-kind == 2;
-        clicked => { root.toggle-menu(2, self.absolute-position.x); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "plus";
-        label: "Add Sheet";
-        clicked => { root.command("sheets.add_sheet"); }
-    }
+    // Left-to-right order. Right-to-left is the exact mirror image: the groups
+    // and the items inside each group are reversed.
+    if !Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        LoomToolbarItem {
+            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            clicked => { root.toggle-menu(1, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            clicked => { root.toggle-menu(2, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "plus"; label: "Add Sheet";
+            clicked => { root.command("sheets.add_sheet"); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    IconOverLabelToolbarItem {
-        icon: "chart";
-        label: "Chart";
-        clicked => { root.command("sheets.insert_chart"); }
-    }
-    table-item := IconOverLabelToolbarItem {
-        icon: "table";
-        label: "Table";
-        checked: root.menu-kind == 3;
-        clicked => { root.toggle-menu(3, self.absolute-position.x); }
-    }
-    text-item := IconOverLabelToolbarItem {
-        icon: "text";
-        label: "Text";
-        checked: root.menu-kind == 4;
-        clicked => { root.toggle-menu(4, self.absolute-position.x); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "shape";
-        label: "Shape";
-        clicked => { root.command("sheets.insert_shape"); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "image";
-        label: "Image";
-        clicked => { root.command("sheets.insert_image"); }
-    }
+        LoomToolbarItem {
+            icon: "chart"; label: "Chart";
+            clicked => { root.command("sheets.insert_chart"); }
+        }
+        LoomToolbarItem {
+            icon: "table"; label: "Table"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            clicked => { root.toggle-menu(3, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "text"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            clicked => { root.toggle-menu(4, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "shape"; label: "Shape";
+            clicked => { root.command("sheets.insert_shape"); }
+        }
+        LoomToolbarItem {
+            icon: "image"; label: "Image";
+            clicked => { root.command("sheets.insert_image"); }
+        }
 
-    ToolbarSpacer { }
+        ToolbarSpacer { }
 
-    export-item := IconOverLabelToolbarItem {
-        icon: "export";
-        label: "Export";
-        checked: root.menu-kind == 5;
-        clicked => { root.toggle-menu(5, self.absolute-position.x); }
+        LoomToolbarItem {
+            icon: "export"; label: "Export"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            clicked => { root.toggle-menu(5, self.absolute-position.x); }
+        }
+        LoomToolbarItem {
+            icon: "format"; label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            focus-request: root.request(11);
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomToolbarItem {
+            icon: "organize"; label: "Organize";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomOverflowTrigger {
+            focus-request: root.request(9);
+            clicked => { root.overflow-requested(); }
+        }
     }
-    format-item := IconOverLabelToolbarItem {
-        icon: "format";
-        label: "Format";
-        checked: root.inspector-visible && root.inspector-tab == 1;
-        clicked => { root.show-inspector-tab(1); }
-    }
-    IconOverLabelToolbarItem {
-        icon: "organize";
-        label: "Organize";
-        checked: root.inspector-visible && root.inspector-tab == 0;
-        clicked => { root.show-inspector-tab(0); }
-    }
-    overflow-button := LoomOverflowButton {
-        clicked => { root.overflow-requested(); }
+    if Theme.rtl : HorizontalLayout {
+        horizontal-stretch: 1;
+        spacing: 4px;
+        LoomOverflowTrigger {
+            focus-request: root.request(9);
+            clicked => { root.overflow-requested(); }
+        }
+        LoomToolbarItem {
+            icon: "organize"; label: "Organize";
+            checked: root.inspector-visible && root.inspector-tab == 0;
+            clicked => { root.show-inspector-tab(0); }
+        }
+        LoomToolbarItem {
+            icon: "format"; label: "Format";
+            checked: root.inspector-visible && root.inspector-tab == 1;
+            focus-request: root.request(11);
+            clicked => { root.show-inspector-tab(1); }
+        }
+        LoomToolbarItem {
+            icon: "export"; label: "Export"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            clicked => { root.toggle-menu(5, self.absolute-position.x + self.width); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "image"; label: "Image";
+            clicked => { root.command("sheets.insert_image"); }
+        }
+        LoomToolbarItem {
+            icon: "shape"; label: "Shape";
+            clicked => { root.command("sheets.insert_shape"); }
+        }
+        LoomToolbarItem {
+            icon: "text"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            clicked => { root.toggle-menu(4, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "table"; label: "Table"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            clicked => { root.toggle-menu(3, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "chart"; label: "Chart";
+            clicked => { root.command("sheets.insert_chart"); }
+        }
+
+        ToolbarSpacer { }
+
+        LoomToolbarItem {
+            icon: "plus"; label: "Add Sheet";
+            clicked => { root.command("sheets.add_sheet"); }
+        }
+        LoomToolbarItem {
+            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            clicked => { root.toggle-menu(2, self.absolute-position.x + self.width); }
+        }
+        LoomToolbarItem {
+            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            clicked => { root.toggle-menu(1, self.absolute-position.x + self.width); }
+        }
     }
 }

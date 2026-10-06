@@ -365,15 +365,15 @@ export component PresentApp inherits Window {
                 view-menu-open: root.view-menu-open;
                 zoom-menu-open: root.zoom-menu-open;
                 is-preview-mode: root.is-preview-mode;
-                toggle-view-menu => {
+                toggle-view-menu(anchor) => {
                     root.zoom-menu-open = false;
-                    root.menu-x = self.view-x;
+                    root.menu-x = anchor;
                     root.view-menu-open = !root.view-menu-open;
                     if (!root.view-menu-open) { root.focus-editor(); }
                 }
-                toggle-zoom-menu => {
+                toggle-zoom-menu(anchor) => {
                     root.view-menu-open = false;
-                    root.menu-x = self.zoom-x;
+                    root.menu-x = anchor;
                     root.zoom-menu-open = !root.zoom-menu-open;
                     if (!root.zoom-menu-open) { root.focus-editor(); }
                 }
@@ -498,7 +498,7 @@ export component PresentApp inherits Window {
                             padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-right: 16px;
                             spacing: 4px;
 
-                            HorizontalLayout {
+                            if !root.rtl : HorizontalLayout {
                                 Text {
                                     text: "Speaker Notes";
                                     font-size: Theme.type.caption;
@@ -511,6 +511,22 @@ export component PresentApp inherits Window {
                                     label: "Close speaker notes";
                                     tooltip: "Close speaker notes";
                                     clicked => { root.show-notes-drawer = false; root.focus-editor(); }
+                                }
+                            }
+                            if root.rtl : HorizontalLayout {
+                                LoomIconButton {
+                                    icon: "close";
+                                    label: "Close speaker notes";
+                                    tooltip: "Close speaker notes";
+                                    clicked => { root.show-notes-drawer = false; root.focus-editor(); }
+                                }
+                                Text {
+                                    text: "Speaker Notes";
+                                    font-size: Theme.type.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                    horizontal-stretch: 1;
+                                    horizontal-alignment: right;
                                 }
                             }
 
@@ -574,7 +590,7 @@ export component PresentApp inherits Window {
             padding-top: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra + Theme.tokens.space.sm;
             padding-left: Theme.tokens.space.lg;
             padding-right: Theme.tokens.space.lg;
-            cross-axis-alignment: end;
+            cross-axis-alignment: root.rtl ? start : end;
             PresentToolbarOverflow {
                 can-undo: root.can-undo;
                 can-redo: root.can-redo;
@@ -596,7 +612,11 @@ export component PresentApp inherits Window {
         TouchArea { clicked => { root.close-view-menus(); } }
         PresentToolbarMenu {
             kind: root.zoom-menu-open ? 1 : 0;
-            x: max(0px, min(root.menu-x, root.width - self.width - 8px));
+            // Opens at the item's reading-start edge: its left edge in LTR, and
+            // in RTL the menu's right edge lines up with the item's right edge.
+            x: root.rtl
+                ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
+                : max(0px, min(root.menu-x, root.width - self.width - 8px));
             y: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
             navigator-visible: root.show-navigator;
             notes-visible: root.show-notes-drawer;
@@ -683,12 +703,13 @@ export component PresentApp inherits Window {
         TouchArea { clicked => { save-changes-focus.focus(); } }
         Rectangle { width: min(440px * max(1.0, Theme.text-scale), root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
             save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
-                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); color: Theme.palette().ink; }
-                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; }
-                HorizontalLayout { alignment: end; spacing: 8px;
-                    cancel-button := LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
-                    discard-button := LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
-                    save-button := LoomButton { label: "Save"; variant: "primary"; clicked => { root.save-changes-save(); } }
+                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); color: Theme.palette().ink; horizontal-alignment: root.rtl ? right : left; }
+                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; horizontal-alignment: root.rtl ? right : left; }
+                // The primary button sits at the reading end: right in LTR, left in RTL.
+                Rectangle { height: Theme.tokens.metrics.control-height;
+                    save-button := LoomButton { label: "Save"; variant: "primary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? 0px : parent.width - self.width; clicked => { root.save-changes-save(); } }
+                    discard-button := LoomButton { label: "Discard"; variant: "danger"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? save-button.width + 8px : save-button.x - 8px - self.width; clicked => { root.save-changes-discard(); } }
+                    cancel-button := LoomButton { label: "Cancel"; variant: "secondary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? discard-button.x + discard-button.width + 8px : discard-button.x - 8px - self.width; clicked => { root.save-changes-cancel(); } }
                 }
             }
         }
