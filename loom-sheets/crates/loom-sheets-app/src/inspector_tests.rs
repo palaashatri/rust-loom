@@ -145,9 +145,22 @@ fn inspector_property_labels_are_readable_at_the_docked_width() {
         "the value field must stay usable beside the label, got {}",
         field.size().width
     );
+    let label_pos = label.absolute_position();
+    let field_pos = field.absolute_position();
+    let beside = control.absolute_position().x >= label_pos.x + label_width - 1.0;
+    let below = field_pos.y >= label_pos.y + label.size().height - 1.0;
     assert!(
-        control.absolute_position().x >= label.absolute_position().x + label_width - 1.0,
-        "the control column must start after the full label band"
+        beside || below,
+        "controls must follow the full label band, beside it or on a new line"
+    );
+    let panel = ElementHandle::find_by_element_id(&app, "SheetsApp::inspector-panel")
+        .next()
+        .expect("inspector panel");
+    let right = panel.absolute_position().x + panel.size().width - 16.0;
+    assert!(
+        control.absolute_position().x + control.size().width <= right + 0.5
+            && field_pos.x + field.size().width <= right + 0.5,
+        "the label must not push the field or stepper outside panel padding"
     );
 }
 

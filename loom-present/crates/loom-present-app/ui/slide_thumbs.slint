@@ -169,7 +169,7 @@ export component PresentSlideStrip inherits Rectangle {
     property <int> drop-gap: root.dragging ? max(0, min(root.titles.length, round((root.pointer-y - strip-flick.viewport-y) / root.pitch))) : -1;
     property <int> drop-target: root.drop-gap > root.drag-from ? root.drop-gap - 1 : root.drop-gap;
 
-    width: 220px;
+    width: max(220px, 4 * Theme.tokens.metrics.control-height * max(1.0, Theme.text-scale) + 3 * Theme.tokens.space.xs + 2 * Theme.tokens.space.sm);
     background: Theme.palette().panel;
     border-width: 1px;
     border-color: Theme.palette().border;
@@ -340,18 +340,21 @@ export component PresentSlideStrip inherits Rectangle {
             spacing: Theme.tokens.space.xs;
             alignment: start;
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "plus";
                 label: "Add Slide";
                 tooltip: "Add a new slide";
                 clicked => { root.add-slide(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "trash-2";
                 label: "Delete Slide";
                 tooltip: "Delete selected slide";
                 clicked => { root.delete-slide(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "chevron-up";
                 label: "Move Slide Up";
                 tooltip: "Move the selected slide earlier (Ctrl+Alt+Up)";
@@ -359,6 +362,7 @@ export component PresentSlideStrip inherits Rectangle {
                 clicked => { root.move-slide-up(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "chevron-down";
                 label: "Move Slide Down";
                 tooltip: "Move the selected slide later (Ctrl+Alt+Down)";
@@ -371,6 +375,7 @@ export component PresentSlideStrip inherits Rectangle {
             spacing: Theme.tokens.space.xs;
             alignment: end;
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "chevron-down";
                 label: "Move Slide Down";
                 tooltip: "Move the selected slide later (Ctrl+Alt+Down)";
@@ -378,6 +383,7 @@ export component PresentSlideStrip inherits Rectangle {
                 clicked => { root.move-slide-down(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "chevron-up";
                 label: "Move Slide Up";
                 tooltip: "Move the selected slide earlier (Ctrl+Alt+Up)";
@@ -385,12 +391,14 @@ export component PresentSlideStrip inherits Rectangle {
                 clicked => { root.move-slide-up(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "trash-2";
                 label: "Delete Slide";
                 tooltip: "Delete selected slide";
                 clicked => { root.delete-slide(); }
             }
             LoomIconButton {
+                text-scale: Theme.text-scale;
                 icon: "plus";
                 label: "Add Slide";
                 tooltip: "Add a new slide";

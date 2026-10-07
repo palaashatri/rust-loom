@@ -166,6 +166,7 @@ export component LocalMenuPopup inherits Rectangle {
         border-width: 1px;
         border-color: Theme.palette().border;
         background: Theme.palette().surface;
+        clip: true;
         drop-shadow-blur: 12px;
         drop-shadow-offset-y: 3px;
         drop-shadow-color: Theme.palette().shadow;
@@ -179,7 +180,7 @@ export component LocalMenuPopup inherits Rectangle {
                 height: item.separator ? 1px : max(Theme.tokens.metrics.control-height, Theme.type.body * 1.9);
 
                 if item.separator : Rectangle {
-                    width: root.width;
+                    width: parent.width;
                     height: 1px;
                     background: Theme.palette().border;
                 }

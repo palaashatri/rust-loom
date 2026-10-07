@@ -8,6 +8,9 @@ mod template_chooser_tests;
 
 mod inspector_tests;
 
+#[path = "main_tests/hostile_visual_tests.rs"]
+mod hostile_visual_tests;
+
 #[path = "main_tests/keyboard_flow_tests.rs"]
 mod keyboard_flow_tests;
 

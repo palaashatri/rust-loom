@@ -256,8 +256,8 @@ export component PresentThemeChooser inherits Rectangle {
 
                         PresentThemeCategory { icon: "new"; label: "All Templates"; active: root.theme-category == 0; clicked => { root.pick-category(0); } }
                         PresentThemeCategory { icon: "document"; label: "Basic"; active: root.theme-category == 1; clicked => { root.pick-category(1); } }
-                        PresentThemeCategory { icon: "play"; label: "Layouts"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
-                        PresentThemeCategory { icon: "format"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
+                        PresentThemeCategory { icon: "slide"; label: "Layouts"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
+                        PresentThemeCategory { icon: "stop"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
                     }

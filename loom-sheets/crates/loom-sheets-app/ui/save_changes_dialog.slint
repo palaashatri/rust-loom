@@ -52,14 +52,15 @@ export component SaveChangesDialog inherits Rectangle {
 
             TouchArea { clicked => { dialog-focus.focus(); } }
 
-            // The panel follows its content and is capped to the window, so a
-            // large text scale or a long document name reflows instead of
-            // clipping. Only the prompt scrolls; the actions never do.
+            // Measure wrapped text at the available content width; none of the
+            // text rows stretches to absorb spare height.
             panel := Rectangle {
                 x: (root.width - min(520px, root.width - 32px)) / 2;
                 y: (root.height - self.height) / 2;
                 width: min(520px, root.width - 32px);
-                height: min(dialog-content.preferred-height,
+                height: min(title-text.preferred-height + prompt-text.preferred-height
+                    + Theme.tokens.metrics.control-height + 2 * Theme.tokens.space.md
+                    + 2 * Theme.tokens.space.xl,
                     max(120px, root.height - 32px));
                 border-radius: Theme.tokens.metrics.radius-large;
                 border-width: 1px;
@@ -73,7 +74,9 @@ export component SaveChangesDialog inherits Rectangle {
                     spacing: Theme.tokens.space.md;
                     padding: Theme.tokens.space.xl;
 
-                    Text {
+                    title-text := Text {
+                        height: self.preferred-height;
+                        vertical-stretch: 0;
                         text: "Save changes?";
                         font-size: Theme.type.heading;
                         font-weight: 700;
@@ -86,8 +89,9 @@ export component SaveChangesDialog inherits Rectangle {
                     prompt-text := Text {
                         text: root.prompt;
                         accessible-label: root.prompt;
-                        width: max(0px, parent.width);
+                        width: max(0px, panel.width - 2 * Theme.tokens.space.xl);
                         height: self.preferred-height;
+                        vertical-stretch: 0;
                         font-size: Theme.type.body;
                         color: Theme.palette().ink-secondary;
                         horizontal-alignment: Theme.rtl ? right : left;

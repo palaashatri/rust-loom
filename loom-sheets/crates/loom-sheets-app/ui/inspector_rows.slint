@@ -23,6 +23,8 @@ export component SheetFieldRow inherits Rectangle {
     in property <bool> editable: false;
     callback edited(string);
 
+    min-width: 0px;
+    vertical-stretch: 0;
     min-height: Theme.scaled-control-height;
     if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.sm;
@@ -83,15 +85,38 @@ export component SheetStepperRow inherits Rectangle {
     callback decrease;
     callback increase;
 
-    min-height: Theme.scaled-control-height;
-    if !Theme.rtl : HorizontalLayout {
+    // Stack when the label, the field's 140 px minimum and both full-size
+    // buttons cannot share a line. Scaling also gives the label its own line.
+    private property <bool> stacked: root.width < 100px + Theme.tokens.space.sm
+        + 140px + 2 * Theme.tokens.metrics.control-height + 2 * Theme.tokens.space.xs
+        || Theme.text-scale > 1;
+    min-width: 0px;
+    height: row-layout.preferred-height;
+    vertical-stretch: 0;
+    row-layout := GridLayout {
+        width: root.width;
         spacing: Theme.tokens.space.sm;
-        cross-axis-alignment: center;
-        SheetRowLabel { text: root.label; accessible-label: root.label; }
+        SheetRowLabel {
+            row: 0;
+            col: !root.stacked && Theme.rtl ? 1 : 0;
+            text: root.label;
+            accessible-label: root.label;
+            horizontal-stretch: root.stacked ? 1 : 0;
+            max-width: root.stacked ? root.width : 100px;
+        }
         HorizontalLayout {
+            row: root.stacked ? 1 : 0;
+            col: root.stacked || Theme.rtl ? 0 : 1;
             spacing: Theme.tokens.space.xs;
+            if Theme.rtl : SheetStepButtons {
+                plus-first: root.plus-first;
+                decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
+                increase-label: root.increase-label; increase-tip: root.increase-tip;
+                decrease => { root.decrease(); }
+                increase => { root.increase(); }
+            }
             LoomTextField { label: root.field-label; value: root.value; enabled: false; horizontal-stretch: 1; }
-            SheetStepButtons {
+            if !Theme.rtl : SheetStepButtons {
                 plus-first: root.plus-first;
                 decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
                 increase-label: root.increase-label; increase-tip: root.increase-tip;
@@ -99,22 +124,6 @@ export component SheetStepperRow inherits Rectangle {
                 increase => { root.increase(); }
             }
         }
-    }
-    if Theme.rtl : HorizontalLayout {
-        spacing: Theme.tokens.space.sm;
-        cross-axis-alignment: center;
-        HorizontalLayout {
-            spacing: Theme.tokens.space.xs;
-            SheetStepButtons {
-                plus-first: root.plus-first;
-                decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
-                increase-label: root.increase-label; increase-tip: root.increase-tip;
-                decrease => { root.decrease(); }
-                increase => { root.increase(); }
-            }
-            LoomTextField { label: root.field-label; value: root.value; enabled: false; horizontal-stretch: 1; }
-        }
-        SheetRowLabel { text: root.label; accessible-label: root.label; }
     }
 }
 

@@ -48,7 +48,8 @@ export component PresentInspector inherits LoomPanel {
     callback set-transition(int);
     callback open-theme-chooser;
 
-    title: "Format";
+    accessible-role: groupbox;
+    accessible-label: "Slide inspector";
     width: 280px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
 
     VerticalLayout {

@@ -80,6 +80,18 @@ export component LoomButton inherits Rectangle {
         }
     }
 
+    // An outer ring remains distinguishable from the primary button's fill.
+    if focus.has-focus : Rectangle {
+        x: -4px;
+        y: -4px;
+        width: root.width + 8px;
+        height: root.height + 8px;
+        border-radius: root.border-radius + 4px;
+        border-width: 2px;
+        border-color: Theme.palette().focus;
+        background: transparent;
+    }
+
     focus := FocusScope {
         enabled: root.enabled;
         key-pressed(event) => {
@@ -100,11 +112,12 @@ export component LoomIconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> selected: false;
     in property <bool> destructive: false;
+    in property <float> text-scale: 1.0;
     callback clicked;
     public function grab-focus() { focus.focus(); }
 
-    width: Theme.tokens.metrics.control-height;
-    height: Theme.tokens.metrics.control-height;
+    width: Theme.tokens.metrics.control-height * max(1.0, root.text-scale);
+    height: Theme.tokens.metrics.control-height * max(1.0, root.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.selected ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().border : transparent;
@@ -120,9 +133,9 @@ export component LoomIconButton inherits Rectangle {
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     Icon {
-        x: (root.width - Theme.tokens.metrics.icon-size) / 2;
-        y: (root.height - Theme.tokens.metrics.icon-size) / 2;
-        size: Theme.tokens.metrics.icon-size;
+        x: (root.width - self.size) / 2;
+        y: (root.height - self.size) / 2;
+        size: Theme.tokens.metrics.icon-size * max(1.0, root.text-scale);
         icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled
             : root.destructive ? Theme.palette().danger

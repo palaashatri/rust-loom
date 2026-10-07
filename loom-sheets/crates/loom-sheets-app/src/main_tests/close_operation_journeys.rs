@@ -1171,3 +1171,31 @@ fn closing_a_clean_workbook_also_clears_recovery() {
     pump_worker_until(&app, &state, || !app.window().is_visible());
     assert_eq!(recovery_files(&dir), Vec::<String>::new());
 }
+
+/// Exercise UI-30 through CloseRequested, including the untouched workbook's
+/// default identity rather than only a template or the name helper.
+#[test]
+fn hostile_dirty_close_untitled_prompt_agrees_with_window_title() {
+    let (app, state) = close_test_app([]);
+    state.current.borrow_mut().name = "Sheet1".into();
+    let recovery = ScratchDirectory::new();
+    attach_worker(&app, &state, &recovery.0, true);
+    wire_close_actions(&app, &state);
+    state.mark_content_dirty();
+    sync_window_title(&app, &state);
+    app.window().show().expect("show untitled workbook");
+    assert_eq!(app.get_window_title().as_str(), "Untitled *");
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    pump_worker_until(&app, &state, || {
+        state.close_state.get() == close_operations::CloseState::DirtyDecision
+    });
+    assert_eq!(app.get_save_changes_document().as_str(), "Untitled");
+    assert_eq!(
+        app.get_save_changes_prompt().as_str(),
+        "Save changes to \"Untitled\" before closing?"
+    );
+    app.invoke_save_changes_cancel();
+    assert!(state.is_dirty());
+    assert!(app.window().is_visible());
+}
