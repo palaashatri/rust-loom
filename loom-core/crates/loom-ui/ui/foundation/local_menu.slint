@@ -12,6 +12,7 @@ export struct LocalMenuEntry {
     shortcut: string,
     enabled: bool,
     checked: bool,
+    checkable: bool,
     separator: bool,
 }
 
@@ -189,6 +190,7 @@ export component LocalMenuPopup inherits Rectangle {
                     label: item.label;
                     shortcut: item.shortcut;
                     checked: item.checked;
+                    checkable: item.checkable;
                     selected: root.selected-index == index;
                     enabled: item.enabled;
                     activated => {

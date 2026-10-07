@@ -11,6 +11,8 @@ pub(super) struct Args {
     pub(super) journey: Option<String>,
     pub(super) size: (u32, u32),
     pub(super) theme: String,
+    /// True when `--theme` was given: it overrides the saved appearance.
+    pub(super) theme_explicit: bool,
     pub(super) rtl: bool,
     pub(super) open: Option<String>,
     pub(super) template_chooser: bool,
@@ -40,6 +42,7 @@ where
         journey: None,
         size: super::DEFAULT_SIZE,
         theme: "light".to_string(),
+        theme_explicit: false,
         rtl: false,
         open: None,
         template_chooser: false,
@@ -70,10 +73,11 @@ where
             }
             "--theme" => {
                 let theme = it.next().ok_or("--theme needs a name")?;
-                if !matches!(theme.as_str(), "light" | "dark" | "high-contrast") {
+                if loom_desktop::Appearance::from_id(&theme).is_none() {
                     return Err(format!("unknown theme: {theme}"));
                 }
                 args.theme = theme;
+                args.theme_explicit = true;
             }
             "--rtl" => args.rtl = true,
             "--template-chooser" => args.template_chooser = true,

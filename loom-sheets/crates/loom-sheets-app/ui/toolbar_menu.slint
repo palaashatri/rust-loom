@@ -20,17 +20,17 @@ export component SheetToolbarMenu inherits Rectangle {
     public function focus-menu() { menu-focus.focus(); }
 
     property <int> selected: 0;
-    property <[string]> labels: root.kind == 1 ? ["Format Inspector", "Command Palette"]
+    property <[string]> labels: root.kind == 1 ? ["Format Inspector", "Command Palette", "Appearance: System", "Appearance: Light", "Appearance: Dark", "Appearance: High Contrast"]
         : root.kind == 2 ? ["Zoom In", "Zoom Out", "Actual Size"]
         : root.kind == 3 ? ["Add Row", "Add Column", "Sort"]
         : root.kind == 4 ? ["Bold", "Italic", "Underline", "Align Left", "Align Center", "Align Right"]
         : root.kind == 5 ? ["Export CSV", "Export Excel"] : [];
-    property <[string]> ids: root.kind == 1 ? ["view.inspector", "app.palette"]
+    property <[string]> ids: root.kind == 1 ? ["view.inspector", "app.palette", "view.appearance.system", "view.appearance.light", "view.appearance.dark", "view.appearance.high_contrast"]
         : root.kind == 2 ? ["view.zoom_in", "view.zoom_out", "view.zoom_actual"]
         : root.kind == 3 ? ["table.add_row", "table.add_col", "sheets.organize"]
         : root.kind == 4 ? ["format.bold", "format.italic", "format.underline", "format.align_left", "format.align_center", "format.align_right"]
         : root.kind == 5 ? ["file.export_csv", "file.export_xlsx"] : [];
-    property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false]
+    property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false, Theme.appearance == "system", Theme.appearance == "light", Theme.appearance == "dark", Theme.appearance == "high-contrast"]
         : root.kind == 4 ? [root.cell-bold, root.cell-italic, root.cell-underline,
             root.cell-alignment == 0, root.cell-alignment == 1, root.cell-alignment == 2] : [];
 
@@ -60,7 +60,7 @@ export component SheetToolbarMenu inherits Rectangle {
             ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
             : max(0px, min(root.menu-x, root.width - self.width - 8px));
         y: root.menu-y;
-        width: min(220px * max(1.0, Theme.text-scale), max(1px, root.width - 16px));
+        width: min(244px * max(1.0, Theme.text-scale), max(1px, root.width - 16px));
         height: items.preferred-height;
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;
@@ -76,6 +76,7 @@ export component SheetToolbarMenu inherits Rectangle {
             for label[idx] in root.labels : LoomMenuItem {
                 label: label;
                 checked: idx < root.checks.length && root.checks[idx];
+                checkable: idx < root.checks.length && root.checks[idx];
                 selected: idx == root.selected;
                 activated => { root.command(root.ids[idx]); }
             }

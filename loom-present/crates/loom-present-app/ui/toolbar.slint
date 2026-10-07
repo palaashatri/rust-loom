@@ -189,6 +189,8 @@ export component PresentToolbarMenu inherits Rectangle {
     callback toggle-navigator;
     callback toggle-notes;
     callback choose-zoom(int);
+    /// An appearance row ran; carries its command id (`view.appearance.*`).
+    callback choose-appearance(string);
     /// A row ran; the menu closes and focus goes back to the slide.
     callback close-requested;
     /// Escape: close and return focus to the toolbar item that opened it.
@@ -196,10 +198,16 @@ export component PresentToolbarMenu inherits Rectangle {
 
     // Keyboard: Down/Up move the highlighted row, Return or Space runs it.
     in-out property <int> selected: 0;
-    property <int> row-count: root.kind == 0 ? 2 : 3;
+    property <int> row-count: root.kind == 0 ? 6 : 3;
+    property <[string]> appearance-ids: [
+        "view.appearance.system", "view.appearance.light",
+        "view.appearance.dark", "view.appearance.high_contrast",
+    ];
     function run(row: int) {
         if (root.kind == 0) {
-            if (row == 0) { root.toggle-navigator(); } else { root.toggle-notes(); }
+            if (row == 0) { root.toggle-navigator(); }
+            else if (row == 1) { root.toggle-notes(); }
+            else { root.choose-appearance(root.appearance-ids[row - 2]); }
         } else {
             root.choose-zoom(row);
         }
@@ -216,7 +224,7 @@ export component PresentToolbarMenu inherits Rectangle {
         }
     }
 
-    width: 200px + 120px * (max(1.0, Theme.text-scale) - 1.0);
+    width: 244px + 120px * (max(1.0, Theme.text-scale) - 1.0);
     height: menu-items.preferred-height + 2 * Theme.tokens.space.sm;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
@@ -240,6 +248,34 @@ export component PresentToolbarMenu inherits Rectangle {
             checked: root.notes-visible;
             selected: root.selected == 1;
             activated => { root.toggle-notes(); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: System";
+            checked: Theme.appearance == "system";
+            checkable: true;
+            selected: root.selected == 2;
+            activated => { root.choose-appearance("view.appearance.system"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Light";
+            checked: Theme.appearance == "light";
+            checkable: true;
+            selected: root.selected == 3;
+            activated => { root.choose-appearance("view.appearance.light"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Dark";
+            checked: Theme.appearance == "dark";
+            checkable: true;
+            selected: root.selected == 4;
+            activated => { root.choose-appearance("view.appearance.dark"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: High Contrast";
+            checked: Theme.appearance == "high-contrast";
+            checkable: true;
+            selected: root.selected == 5;
+            activated => { root.choose-appearance("view.appearance.high_contrast"); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {
             label: "Fit";

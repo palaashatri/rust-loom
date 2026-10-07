@@ -19,11 +19,17 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "slide.insert_image",
     "slide.duplicate",
     "slide.delete",
+    "slide.move_up",
+    "slide.move_down",
     "slide.prev",
     "slide.next",
     "view.inspector",
     "view.navigator",
     "view.notes",
+    "view.appearance.system",
+    "view.appearance.light",
+    "view.appearance.dark",
+    "view.appearance.high_contrast",
     "app.palette",
 ];
 

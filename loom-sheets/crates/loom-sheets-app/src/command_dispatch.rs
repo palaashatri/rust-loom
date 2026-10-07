@@ -50,6 +50,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "view.zoom_in" => app.invoke_zoom_in(),
         "view.zoom_out" => app.invoke_zoom_out(),
         "view.zoom_actual" => app.invoke_zoom_actual(),
+        id if crate::appearance::dispatch(app, id) => {}
         "table.add_row" => app.invoke_add_row(),
         "table.delete_row" => app.invoke_delete_row(),
         "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),

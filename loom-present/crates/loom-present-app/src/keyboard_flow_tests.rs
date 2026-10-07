@@ -40,10 +40,10 @@ impl Stop {
 pub(super) struct Session {
     pub(super) app: PresentApp,
     pub(super) state: Rc<GuiState>,
-    actions: Rc<RefCell<Vec<String>>>,
+    pub(super) actions: Rc<RefCell<Vec<String>>>,
 }
 
-fn launched_with(dialogs: Rc<dyn FileDialogService>) -> Session {
+pub(super) fn launched_with(dialogs: Rc<dyn FileDialogService>) -> Session {
     set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     window_chrome::install(&app);
@@ -94,32 +94,32 @@ pub(super) fn launched() -> Session {
     launched_with(Rc::new(loom_desktop::ScriptedFileDialogs::default()))
 }
 
-fn render(app: &PresentApp) {
+pub(super) fn render(app: &PresentApp) {
     let _ = snapshot_component(app, WIDTH, HEIGHT, 1.0).expect("render");
 }
 
-fn key_down(app: &PresentApp, text: impl Into<SharedString>) {
+pub(super) fn key_down(app: &PresentApp, text: impl Into<SharedString>) {
     app.window()
         .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
 }
 
-fn key_up(app: &PresentApp, text: impl Into<SharedString>) {
+pub(super) fn key_up(app: &PresentApp, text: impl Into<SharedString>) {
     app.window()
         .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
 }
 
-fn tap(app: &PresentApp, text: impl Into<SharedString>) {
+pub(super) fn tap(app: &PresentApp, text: impl Into<SharedString>) {
     let text = text.into();
     key_down(app, text.clone());
     key_up(app, text);
     render(app);
 }
 
-fn press(app: &PresentApp, key: Key) {
+pub(super) fn press(app: &PresentApp, key: Key) {
     tap(app, SharedString::from(key));
 }
 
-fn chord(app: &PresentApp, modifiers: &[Key], text: &str) {
+pub(super) fn chord(app: &PresentApp, modifiers: &[Key], text: &str) {
     for m in modifiers {
         key_down(app, SharedString::from(*m));
     }
@@ -155,14 +155,14 @@ fn shift_tab(app: &PresentApp) {
     shift_key(app, Key::Tab);
 }
 
-fn focus_weak(app: &PresentApp) -> ItemWeak {
+pub(super) fn focus_weak(app: &PresentApp) -> ItemWeak {
     WindowInner::from_pub(app.window())
         .focus_item
         .borrow()
         .clone()
 }
 
-fn same_focus(a: &ItemWeak, b: &ItemWeak) -> bool {
+pub(super) fn same_focus(a: &ItemWeak, b: &ItemWeak) -> bool {
     match (a.upgrade(), b.upgrade()) {
         (Some(a), Some(b)) => a == b,
         (None, None) => true,
@@ -225,7 +225,7 @@ fn stop(app: &PresentApp) -> Option<Stop> {
     })
 }
 
-fn focus_name(app: &PresentApp) -> String {
+pub(super) fn focus_name(app: &PresentApp) -> String {
     stop(app).map(|s| s.name).unwrap_or_default()
 }
 
@@ -259,7 +259,7 @@ fn active_slide(s: &Session) -> usize {
     s.state.session.borrow().document.active_index
 }
 
-fn tab_to(app: &PresentApp, name: &str) {
+pub(super) fn tab_to(app: &PresentApp, name: &str) {
     for _ in 0..40 {
         if focus_name(app) == name {
             return;
@@ -657,7 +657,7 @@ fn add_slide_edit_text_navigate_save_and_present_without_a_pointer() {
     // Slide strip: Tab reaches each slide and Enter selects it.
     s.app.invoke_focus_editor();
     shift_key(&s.app, Key::Tab);
-    tab_to(&s.app, "Slide 1: Create without compromise");
+    tab_to(&s.app, "Slide 1 of 4, Create without compromise");
     press(&s.app, Key::Return);
     assert_eq!(active_slide(&s), 0, "Enter on a slide thumbnail selects it");
 
@@ -818,7 +818,11 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
             ]
         );
         let strip = names(Region::Strip);
-        assert_eq!(strip.len(), 5, "three slides, Add and Delete: {strip:?}");
+        assert_eq!(
+            strip.len(),
+            6,
+            "three slides, Add, Delete and Move Slide Down (Move Slide Up is disabled on the first slide): {strip:?}"
+        );
         assert!(strip[0].starts_with("Slide 1"));
     }
 }

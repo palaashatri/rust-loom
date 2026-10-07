@@ -57,6 +57,7 @@ fn local_application_menu_supports_keyboard_navigation_and_activation() {
                 shortcut: "Ctrl+N".into(),
                 enabled: true,
                 checked: false,
+                checkable: false,
                 separator: false,
             },
             LocalMenuEntry {
@@ -66,6 +67,7 @@ fn local_application_menu_supports_keyboard_navigation_and_activation() {
                 shortcut: "Ctrl+S".into(),
                 enabled: false,
                 checked: false,
+                checkable: false,
                 separator: false,
             },
             LocalMenuEntry {
@@ -75,6 +77,7 @@ fn local_application_menu_supports_keyboard_navigation_and_activation() {
                 shortcut: "Ctrl+Shift+S".into(),
                 enabled: true,
                 checked: false,
+                checkable: false,
                 separator: false,
             },
             LocalMenuEntry {
@@ -84,6 +87,7 @@ fn local_application_menu_supports_keyboard_navigation_and_activation() {
                 shortcut: "Ctrl+Z".into(),
                 enabled: true,
                 checked: false,
+                checkable: false,
                 separator: false,
             },
         ])));

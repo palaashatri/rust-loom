@@ -12,6 +12,10 @@ import "fonts/Inter-Medium.ttf";
 import "fonts/Inter-SemiBold.ttf";
 import "fonts/Inter-Bold.ttf";
 
+// Only the platform's light/dark preference is read from the widget library;
+// no widget is instantiated.
+import { Palette as SystemPalette } from "std-widgets.slint";
+
 struct Palette {
     canvas: color, canvas-alt: color, surface: color, surface-raised: color,
     surface-sunken: color, chrome: color, panel: color, overlay: color,
@@ -117,6 +121,15 @@ export global Theme {
     // the selected theme instead of only the palette function changing.
     in-out property <ThemeTokens> tokens: light-tokens;
     in-out property <string> active-theme: "light";
+    // The user's choice: "system", "light", "dark" or "high-contrast". Hosts
+    // set it together with `active-theme`; while it is "system", a change of
+    // the operating system's preference re-resolves `active-theme` on its own.
+    in-out property <string> appearance: "light";
+    // What the operating system prefers: "dark", or "light" when the platform
+    // reports nothing. Writable so a test can simulate a system change.
+    in-out property <string> system-scheme: SystemPalette.color-scheme == ColorScheme.dark ? "dark" : "light";
+    out property <string> resolved-theme: appearance == "system" ? system-scheme : appearance;
+    changed resolved-theme => { active-theme = resolved-theme; }
     // Direction is orthogonal to colour theme. Hosts set it from the
     // platform/document locale; primitives consume it without introducing
     // app-local palette or spacing overrides.

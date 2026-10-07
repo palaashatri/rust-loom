@@ -287,6 +287,7 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 journey: None,
                 size: DEFAULT_SIZE,
                 theme: "light".into(),
+                theme_explicit: false,
                 rtl: false,
                 text_scale: 1.0,
                 scale_factor: 1.0,

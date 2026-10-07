@@ -34,6 +34,10 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "view.inspector", label: "Format Inspector", shortcut: "", checked: root.inspector-visible, enabled: true },
             { id: "view.navigator", label: "Outline Navigator", shortcut: "", checked: root.navigator-visible, enabled: true },
             { id: "app.palette", label: "Command Palette", shortcut: "Ctrl+K", checked: false, enabled: true },
+            { id: "view.appearance.system", label: "Appearance: System", shortcut: "", checked: Theme.appearance == "system", enabled: true },
+            { id: "view.appearance.light", label: "Appearance: Light", shortcut: "", checked: Theme.appearance == "light", enabled: true },
+            { id: "view.appearance.dark", label: "Appearance: Dark", shortcut: "", checked: Theme.appearance == "dark", enabled: true },
+            { id: "view.appearance.high_contrast", label: "Appearance: High Contrast", shortcut: "", checked: Theme.appearance == "high-contrast", enabled: true },
         ]
         : root.kind == 2 ? [
             { id: "view.zoom_in", label: "Zoom In", shortcut: "", checked: false, enabled: root.page-zoom < 1.99 },
@@ -123,6 +127,7 @@ export component WriterToolbarMenu inherits Rectangle {
                 label: row.label;
                 shortcut: row.shortcut;
                 checked: row.checked;
+                checkable: row.checked;
                 enabled: row.enabled;
                 selected: idx == root.selected;
                 activated => { root.command(row.id); }

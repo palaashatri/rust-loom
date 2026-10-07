@@ -385,6 +385,7 @@ export component WriterStatusBar inherits LoomStatusBar {
     // Right-to-left puts the leading status at the right edge.
     if !Theme.rtl : LoomStatusText {
         text: root.leading-text;
+        live: true;
         horizontal-stretch: 1;
     }
     if !Theme.rtl : LoomStatusText {
@@ -395,6 +396,7 @@ export component WriterStatusBar inherits LoomStatusBar {
     }
     if Theme.rtl : LoomStatusText {
         text: root.leading-text;
+        live: true;
         horizontal-stretch: 1;
         horizontal-alignment: right;
     }

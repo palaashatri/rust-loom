@@ -287,6 +287,70 @@ mod visual_tests {
     }
 
     #[test]
+    fn system_appearance_follows_the_platform_and_explicit_choices_do_not() {
+        loom_test_support::capture::set_platform();
+        let window = SmokeWindow::new().expect("create Loom UI reference window");
+        let theme = Theme::get(&window);
+        let canvas_hex = |theme: &Theme| theme.get_tokens().palette.canvas;
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            theme.get_system_scheme(),
+            "light",
+            "a platform that reports no preference is light"
+        );
+
+        // The default binding reads the platform palette, not a stored value.
+        use super::smoke_window::WidgetPalette;
+        let platform = WidgetPalette::get(&window);
+        platform.set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Dark);
+        theme.set_appearance("system".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            theme.get_system_scheme(),
+            "dark",
+            "the OS preference reaches Theme"
+        );
+        assert_eq!(theme.get_active_theme(), "dark");
+        platform.set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            theme.get_active_theme(),
+            "light",
+            "and so does a change back"
+        );
+        theme.set_appearance("system".into());
+        theme.set_system_scheme("dark".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_resolved_theme(), "dark");
+        assert_eq!(theme.get_active_theme(), "dark", "System follows a dark OS");
+        assert_eq!(
+            canvas_hex(&theme),
+            slint::Color::from_argb_encoded(0xff1c1c1e)
+        );
+
+        theme.set_system_scheme("light".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_active_theme(), "light", "and follows it back");
+        assert_eq!(
+            canvas_hex(&theme),
+            slint::Color::from_argb_encoded(0xfff5f5f7)
+        );
+
+        theme.set_appearance("high-contrast".into());
+        slint::platform::update_timers_and_animations();
+        theme.set_system_scheme("dark".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            theme.get_active_theme(),
+            "high-contrast",
+            "an explicit choice ignores the OS"
+        );
+        theme.set_appearance("light".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_active_theme(), "light");
+    }
+
+    #[test]
     fn active_theme_switches_the_complete_token_bundle() {
         loom_test_support::capture::set_platform();
         let window = SmokeWindow::new().expect("create Loom UI reference window");

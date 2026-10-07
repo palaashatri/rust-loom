@@ -56,7 +56,8 @@ Evidence tags used below:
 - Native-window Alt+menu delivery was confirmed by hand in Writer only; Sheets relies on the tested key-event path.
 
 ### Appearance
-- Themes: light, dark, high contrast, chosen with `--theme light|dark|high-contrast` at launch (there is no in-app switch). Text scale 1.0 to 2.0 (`--text-scale`) and a real device scale factor 1.0 to 4.0 (`--scale-factor`); tests render every reachable surface at text scale 1.0/1.5/2.0 and scale factors 1.25/1.5/2.0 and check controls stay inside the window. Right-to-left (`--rtl`) mirrors the window chrome. [tests]
+- Appearance: View > Appearance: System, Light, Dark and High Contrast (also in the toolbar View menu and the command palette) switches the whole window live, including dialogs and popups, and is remembered per user in `settings.toml` under the platform config directory (`LOOM_CONFIG_DIR` overrides it). System follows the operating system's light/dark preference and falls back to light. `--theme system|light|dark|high-contrast` overrides the saved choice for that run without changing it. Document artwork (page, cells, slides) is not recoloured. [tests]
+- Text scale 1.0 to 2.0 (`--text-scale`) and a real device scale factor 1.0 to 4.0 (`--scale-factor`); tests render every reachable surface at text scale 1.0/1.5/2.0 and scale factors 1.25/1.5/2.0 and check controls stay inside the window. Right-to-left (`--rtl`) mirrors the window chrome. [tests]
 - Renders at 1024x720, 1280x800, 1440x900 and 1920x1200 in all three themes were inspected without clipping (renderer evidence, not human sign-off).
 
 ## Keyboard shortcuts

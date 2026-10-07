@@ -308,6 +308,10 @@ export component LoomStatusBar inherits Rectangle {
 
 export component LoomStatusText inherits Text {
     in property <bool> strong: false;
+    // True for a line that reports what just happened, so assistive
+    // technology announces it when it changes.
+    in property <bool> live: false;
+    accessible-live-region: root.live ? AccessibleLiveness.polite : AccessibleLiveness.off;
     font-size: Theme.type.caption;
     font-weight: root.strong ? 600 : 500;
     color: root.strong ? Theme.palette().ink : Theme.palette().ink-secondary;

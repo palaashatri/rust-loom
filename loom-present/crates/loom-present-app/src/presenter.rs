@@ -139,9 +139,27 @@ pub(crate) fn sync(session: &PresentationSession) {
     });
 }
 
+/// Gives the presenter window the same appearance as the main window. Its own
+/// `Theme` follows the operating system while `System` is chosen.
+fn copy_theme(app: &PresentApp, window: &PresenterWindow) {
+    let source = Theme::get(app);
+    let theme = Theme::get(window);
+    theme.set_appearance(source.get_appearance());
+    theme.set_active_theme(source.get_active_theme());
+}
+
+/// Re-applies the main window's appearance to an open presenter window.
+pub(crate) fn mirror_theme(app: &PresentApp) {
+    PRESENTER.with(|cell| {
+        if let Some(presenter) = cell.borrow().as_ref() {
+            copy_theme(app, &presenter.window);
+        }
+    });
+}
+
 fn build(app: &PresentApp) -> Result<Presenter, String> {
     let window = PresenterWindow::new().map_err(|error| error.to_string())?;
-    Theme::get(&window).set_active_theme(Theme::get(app).get_active_theme());
+    copy_theme(app, &window);
     Theme::get(&window).set_text_scale(Theme::get(app).get_text_scale());
     let clock = Rc::new(RefCell::new(Clock::started(Instant::now())));
 

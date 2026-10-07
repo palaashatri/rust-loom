@@ -233,6 +233,8 @@ export component LoomMenuItem inherits Rectangle {
     in property <string> label: "Menu item";
     in property <string> shortcut: "";
     in property <bool> checked: false;
+    // A check or radio row has an on/off state to announce even while off.
+    in property <bool> checkable: false;
     in property <bool> selected: false;
     in property <bool> enabled: true;
     callback activated;
@@ -246,6 +248,8 @@ export component LoomMenuItem inherits Rectangle {
     accessible-role: list-item;
     accessible-label: root.label;
     accessible-description: root.shortcut;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checked;
     accessible-action-default => {
         if (root.enabled) { root.activated(); }
     }

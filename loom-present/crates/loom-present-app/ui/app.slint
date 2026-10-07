@@ -106,6 +106,12 @@ export component PresentApp inherits Window {
     in-out property <int> strip-first: 0;
     in-out property <int> strip-count: 24;
     in property <int> active-slide-index: 0;
+    /// Whether the selected slide has a neighbour to swap with (menu, palette
+    /// and strip buttons share these).
+    in property <bool> can-move-slide-up: false;
+    in property <bool> can-move-slide-down: false;
+    /// Spoken after a slide moves ("Moved slide 2 to position 4").
+    in-out property <string> slide-announcement: "";
     in property <[string]> element-labels: [];
     in property <[string]> element-placeholders: [];
     in property <int> active-element-index: 0;
@@ -220,6 +226,10 @@ export component PresentApp inherits Window {
     /// A deferred recovery draft is due; the controller writes it.
     callback recovery-flush();
     callback duplicate-slide;
+    callback move-slide-up;
+    callback move-slide-down;
+    /// Slide `from` was dragged (or keyboard-moved) to position `to`.
+    callback reorder-slide(int, int);
     callback prev-slide;
     callback next-slide;
     callback select-slide(int);
@@ -312,6 +322,11 @@ export component PresentApp inherits Window {
                 return accept;
             }
             if (event.text == Key.F5) { root.toggle-preview-mode(); return accept; }
+            // Ctrl+Alt+Up and Ctrl+Alt+Down move the selected slide (Alt alone is the menu key).
+            if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.alt) {
+                if (event.text == Key.UpArrow) { root.move-slide-up(); return accept; }
+                if (event.text == Key.DownArrow) { root.move-slide-down(); return accept; }
+            }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -432,9 +447,16 @@ export component PresentApp inherits Window {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
+                    can-move-up: root.can-move-slide-up;
+                    can-move-down: root.can-move-slide-down;
+                    announcement <=> root.slide-announcement;
                     select-slide(idx) => { root.select-slide(idx); }
                     add-slide => { root.add-slide(); }
                     delete-slide => { root.delete-slide(); }
+                    move-slide-up => { root.move-slide-up(); }
+                    move-slide-down => { root.move-slide-down(); }
+                    reorder-slide(from, to) => { root.reorder-slide(from, to); }
+                    drag-finished => { root.focus-editor(); }
                     window-changed(first, count) => { root.strip-window-changed(first, count); }
                 }
 
@@ -552,9 +574,16 @@ export component PresentApp inherits Window {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
+                    can-move-up: root.can-move-slide-up;
+                    can-move-down: root.can-move-slide-down;
+                    announcement <=> root.slide-announcement;
                     select-slide(idx) => { root.select-slide(idx); }
                     add-slide => { root.add-slide(); }
                     delete-slide => { root.delete-slide(); }
+                    move-slide-up => { root.move-slide-up(); }
+                    move-slide-down => { root.move-slide-down(); }
+                    reorder-slide(from, to) => { root.reorder-slide(from, to); }
+                    drag-finished => { root.focus-editor(); }
                     window-changed(first, count) => { root.strip-window-changed(first, count); }
                 }
 
@@ -634,6 +663,7 @@ export component PresentApp inherits Window {
             toggle-navigator => { root.show-navigator = !root.show-navigator; }
             toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
             choose-zoom(idx) => { root.zoom-index = idx; }
+            choose-appearance(id) => { root.local-menu-action(id); }
             close-requested => { root.close-view-menus(); }
             dismissed => { root.dismiss-view-menus(); }
         }

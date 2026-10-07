@@ -49,7 +49,17 @@ component PresentSlideThumbnail inherits Rectangle {
     in property <ThumbRows> rows;
     in property <int> index: 0;
     in property <bool> active: false;
+    /// Slides in the deck, for the accessible name ("Slide 2 of 5").
+    in property <int> count: 1;
+    /// True while this slide is being dragged to a new position.
+    in property <bool> dragged: false;
+    /// The strip asks the thumbnail of this slide to take keyboard focus (after
+    /// a keyboard move, so the slide keeps focus as it changes position).
+    in property <int> want-focus: -1;
     callback clicked;
+    /// Ctrl+Up (-1) or Ctrl+Down (1) on the focused thumbnail.
+    callback move-requested(int);
+    changed want-focus => { if (root.want-focus == root.index) { thumb-focus.focus(); } }
 
     // The strip fixes every row to one height (see `PresentSlideStrip`) so it
     // can place rows without measuring them.
@@ -62,12 +72,16 @@ component PresentSlideThumbnail inherits Rectangle {
     border-color: thumb-focus.has-focus ? Theme.palette().focus : root.active ? Theme.palette().accent : Theme.palette().border;
     background: root.active ? Theme.palette().selection-soft : Theme.palette().surface;
     accessible-role: button;
-    accessible-label: "Slide " + (root.index + 1) + ": " + root.title;
+    opacity: root.dragged ? 0.45 : 1.0;
+    accessible-label: "Slide " + (root.index + 1) + " of " + root.count + ", " + root.title;
     accessible-action-default => { root.clicked(); }
-    // Tab visits every slide; Enter or Space selects it.
+    // Tab visits every slide; Enter or Space selects it; Ctrl+Up and Ctrl+Down
+    // move the slide one place.
     thumb-focus := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.UpArrow) { root.move-requested(-1); return accept; }
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == Key.DownArrow) { root.move-requested(1); return accept; }
             return reject;
         }
     }
@@ -107,7 +121,6 @@ component PresentSlideThumbnail inherits Rectangle {
             vertical-alignment: top;
         }
     }
-    TouchArea { clicked => { root.clicked(); } }
 }
 /// The slide strip. Only the rows near the visible part of the strip exist as
 /// elements, so a long deck costs what fits on screen, not what the deck holds.
@@ -117,9 +130,19 @@ export component PresentSlideStrip inherits Rectangle {
     in property <[string]> titles: [];
     in property <[ThumbRows]> thumbs: [];
     in property <int> active-index: 0;
+    in property <bool> can-move-up: false;
+    in property <bool> can-move-down: false;
+    /// Spoken (as a live region) after a slide moves, and when a drag is cancelled.
+    in-out property <string> announcement: "";
     callback select-slide(int);
     callback add-slide;
     callback delete-slide;
+    callback move-slide-up;
+    callback move-slide-down;
+    /// Move slide `from` so it ends up at position `to` (both slide indices).
+    callback reorder-slide(int, int);
+    /// A drag that took keyboard focus ended; the editor should have it back.
+    callback drag-finished;
     /// First slide index and number of slides currently instantiated.
     callback window-changed(int, int);
 
@@ -128,12 +151,32 @@ export component PresentSlideStrip inherits Rectangle {
     property <length> pitch: max(root.row-height + Theme.tokens.space.sm, 1px);
     // Two rows of margin above and four below the visible ones.
     property <int> first-row: max(0, floor(-strip-flick.viewport-y / root.pitch) - 2);
-    property <int> row-count: min(root.titles.length, ceil(strip-flick.height / root.pitch) + 6);
+    property <int> row-count: min(min(root.titles.length, ceil(strip-flick.height / root.pitch) + 6), 32);
+
+    // Dragging a thumbnail. `drag-from` is the slide under the pointer since
+    // the press (-1 when none); `dragging` turns on once the pointer has moved
+    // 4 px, so a smaller movement is an ordinary click. `pointer-y` is the
+    // height of the pointer inside the visible strip, so it stays right while
+    // the strip scrolls under a stationary pointer.
+    property <int> drag-from: -1;
+    property <bool> dragging: false;
+    property <length> press-y: 0px;
+    property <length> pointer-y: 0px;
+    property <int> focus-target: -1;
+    // The gap the slide would be dropped into: 0 is before the first slide, the
+    // slide count is after the last. `drop-target` is the slide's index once
+    // moved; equal to `drag-from` means the drop changes nothing.
+    property <int> drop-gap: root.dragging ? max(0, min(root.titles.length, round((root.pointer-y - strip-flick.viewport-y) / root.pitch))) : -1;
+    property <int> drop-target: root.drop-gap > root.drag-from ? root.drop-gap - 1 : root.drop-gap;
 
     width: 220px;
     background: Theme.palette().panel;
     border-width: 1px;
     border-color: Theme.palette().border;
+    accessible-role: list;
+    accessible-label: "Slides";
+    accessible-description: root.announcement;
+    accessible-live-region: AccessibleLiveness.polite;
 
     changed first-row => { root.window-changed(root.first-row, root.row-count); }
     changed row-count => { root.window-changed(root.first-row, root.row-count); }
@@ -149,6 +192,44 @@ export component PresentSlideStrip inherits Rectangle {
         }
     }
 
+    function end-drag() {
+        root.drag-from = -1;
+        root.dragging = false;
+    }
+
+    function cancel-drag() {
+        let had-focus = root.dragging;
+        if (had-focus) { root.announcement = "Move cancelled"; }
+        root.end-drag();
+        if (had-focus) { root.drag-finished(); }
+    }
+
+    // While a thumbnail is dragged the strip owns the keyboard: Escape cancels
+    // and nothing else reaches the deck. Tab never stops here.
+    drag-keys := FocusScope {
+        width: 0px;
+        height: 0px;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (!root.dragging) { return reject; }
+            if (event.text == Key.Escape) { root.cancel-drag(); }
+            return accept;
+        }
+    }
+
+    // Edge scrolling: while a drag is held near the top or bottom edge the
+    // strip scrolls, faster the closer the pointer gets to (or past) the edge.
+    Timer {
+        interval: 16ms;
+        running: root.dragging;
+        triggered => {
+            let edge = 36px;
+            let from-bottom = strip-flick.height - root.pointer-y;
+            let step = root.pointer-y < edge ? (edge - max(root.pointer-y, -edge)) * 0.3 : from-bottom < edge ? -(edge - max(from-bottom, -edge)) * 0.3 : 0px;
+            strip-flick.viewport-y = min(0px, max(strip-flick.height - strip-flick.viewport-height, strip-flick.viewport-y + step));
+        }
+    }
+
     VerticalLayout {
         spacing: Theme.tokens.space.sm;
         padding-top: Theme.tokens.space.md;
@@ -157,26 +238,103 @@ export component PresentSlideStrip inherits Rectangle {
         padding-right: Theme.tokens.space.sm;
         alignment: stretch;
 
+        // Not draggable: a press-and-drag moves the slide under the pointer
+        // (see `drag-area`); the wheel and keyboard still scroll the strip.
         strip-flick := Flickable {
             vertical-stretch: 1;
+            interactive: false;
             viewport-width: self.width;
             viewport-height: root.titles.length * root.pitch;
 
-            for k in root.row-count : PresentSlideThumbnail {
+            // A fixed pool of rows, shown or hidden as the window moves. A row count
+            // that followed `row-count` made Slint rebuild every row (and drop
+            // keyboard focus from the focused thumbnail) on each refresh.
+            for k in 32 : PresentSlideThumbnail {
                 property <int> slide: root.first-row + k;
-                visible: self.slide < root.titles.length;
+                visible: k < root.row-count && self.slide < root.titles.length;
                 x: 0px;
                 y: self.slide * root.pitch;
                 width: strip-flick.width;
                 row-height: root.row-height;
                 index: self.slide;
+                count: root.titles.length;
                 title: root.titles[self.slide];
                 rows: root.thumbs[self.slide];
                 active: self.slide == root.active-index;
+                dragged: root.dragging && self.slide == root.drag-from;
+                want-focus: root.focus-target;
                 clicked => { root.select-slide(self.slide); }
+                move-requested(delta) => {
+                    let to = self.slide + delta;
+                    if (to >= 0 && to < root.titles.length) {
+                        root.reorder-slide(self.slide, to);
+                        root.focus-target = to;
+                    }
+                }
+            }
+
+            // Where the dragged slide will land. Drawn only; it is never a
+            // focus stop and has no accessible role.
+            if root.dragging && root.drop-target != root.drag-from : drop-indicator := Rectangle {
+                x: 0px;
+                y: max(0px, root.drop-gap * root.pitch - Theme.tokens.space.sm / 2 - 1.5px);
+                width: strip-flick.width;
+                height: 3px;
+                border-radius: 1.5px;
+                background: Theme.palette().accent;
+                // The round end sits at the reading-start edge: left in LTR, right in RTL.
+                drop-dot := Rectangle {
+                    x: Theme.rtl ? parent.width - 8px : 0px;
+                    y: -2.5px;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: Theme.palette().accent;
+                }
+            }
+
+            // One pointer surface over all rows, in viewport coordinates, so a
+            // drag survives the rows being reused as the strip scrolls.
+            drag-area := TouchArea {
+                x: 0px;
+                y: 0px;
+                width: strip-flick.width;
+                height: max(strip-flick.viewport-height, strip-flick.height);
+                mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.default;
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        let row = floor(self.mouse-y / root.pitch);
+                        root.drag-from = row < root.titles.length ? row : -1;
+                        root.dragging = false;
+                        root.press-y = self.mouse-y;
+                        root.pointer-y = self.mouse-y + strip-flick.viewport-y;
+                    } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                        let from = root.drag-from;
+                        let to = root.drop-target;
+                        let was-dragging = root.dragging;
+                        root.end-drag();
+                        if (was-dragging) {
+                            if (from >= 0 && from < root.titles.length && to != from) { root.reorder-slide(from, to); }
+                            root.drag-finished();
+                        } else if (from >= 0 && from < root.titles.length) {
+                            root.select-slide(from);
+                        }
+                    } else if (event.kind == PointerEventKind.cancel) {
+                        root.cancel-drag();
+                        root.end-drag();
+                    }
+                }
+                moved => {
+                    if (root.drag-from >= 0) {
+                        root.pointer-y = self.mouse-y + strip-flick.viewport-y;
+                        if (!root.dragging && abs(self.mouse-y - root.press-y) >= 4px) {
+                            root.dragging = true;
+                            drag-keys.focus();
+                        }
+                    }
+                }
             }
         }
-
 
         if !Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.xs;
@@ -193,11 +351,39 @@ export component PresentSlideStrip inherits Rectangle {
                 tooltip: "Delete selected slide";
                 clicked => { root.delete-slide(); }
             }
+            LoomIconButton {
+                icon: "chevron-up";
+                label: "Move Slide Up";
+                tooltip: "Move the selected slide earlier (Ctrl+Alt+Up)";
+                enabled: root.can-move-up;
+                clicked => { root.move-slide-up(); }
+            }
+            LoomIconButton {
+                icon: "chevron-down";
+                label: "Move Slide Down";
+                tooltip: "Move the selected slide later (Ctrl+Alt+Down)";
+                enabled: root.can-move-down;
+                clicked => { root.move-slide-down(); }
+            }
         }
-        // Right-to-left: the same two buttons, starting from the right edge.
+        // Right-to-left: the same four buttons, starting from the right edge.
         if Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.xs;
             alignment: end;
+            LoomIconButton {
+                icon: "chevron-down";
+                label: "Move Slide Down";
+                tooltip: "Move the selected slide later (Ctrl+Alt+Down)";
+                enabled: root.can-move-down;
+                clicked => { root.move-slide-down(); }
+            }
+            LoomIconButton {
+                icon: "chevron-up";
+                label: "Move Slide Up";
+                tooltip: "Move the selected slide earlier (Ctrl+Alt+Up)";
+                enabled: root.can-move-up;
+                clicked => { root.move-slide-up(); }
+            }
             LoomIconButton {
                 icon: "trash-2";
                 label: "Delete Slide";
@@ -213,4 +399,3 @@ export component PresentSlideStrip inherits Rectangle {
         }
     }
 }
-

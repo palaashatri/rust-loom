@@ -18,6 +18,10 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "app.palette",
     "view.inspector",
     "view.navigator",
+    "view.appearance.system",
+    "view.appearance.light",
+    "view.appearance.dark",
+    "view.appearance.high_contrast",
     "format.bold",
     "format.italic",
     "format.underline",
@@ -40,10 +44,14 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
             MenuItem::action("file.export_md", "Export to Markdown..."),
         ],
         vec![],
-        vec![
-            MenuItem::check("view.inspector", "Format Inspector", false),
-            MenuItem::check("view.navigator", "Outline Navigator", false),
-        ],
+        [
+            vec![
+                MenuItem::check("view.inspector", "Format Inspector", false),
+                MenuItem::check("view.navigator", "Outline Navigator", false),
+            ],
+            loom_desktop::appearance::menu_items(),
+        ]
+        .concat(),
         vec![Menu::new(
             "Format",
             vec![

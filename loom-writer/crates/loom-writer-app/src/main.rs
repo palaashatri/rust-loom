@@ -9,6 +9,7 @@
     windows_subsystem = "windows"
 )]
 
+mod appearance;
 mod caret_scroll;
 mod document_formatting;
 mod docx_export;
@@ -73,6 +74,8 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    /// True when `--theme` was given: it overrides the saved appearance.
+    theme_explicit: bool,
     rtl: bool,
     text_scale: f32,
     /// Real device scale factor (pixel density), independent of `text_scale`.
@@ -107,6 +110,7 @@ where
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
+        theme_explicit: false,
         rtl: false,
         text_scale: 1.0,
         scale_factor: 1.0,
@@ -143,10 +147,11 @@ where
             }
             "--theme" => {
                 let t = it.next().ok_or("--theme needs a name")?;
-                if !matches!(t.as_str(), "light" | "dark" | "high-contrast") {
+                if loom_desktop::Appearance::from_id(&t).is_none() {
                     return Err(format!("unknown theme: {t}"));
                 }
                 args.theme = t;
+                args.theme_explicit = true;
             }
             "--rtl" => args.rtl = true,
             "--text-scale" => {
@@ -448,6 +453,7 @@ enum PaletteAction {
     SetHeading(i32),
     SetAlignment(i32),
     InsertTable,
+    SetAppearance(loom_desktop::Appearance),
 }
 
 /// Dispatch one canonical command identifier through the callbacks shared by
@@ -471,6 +477,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
+        id if appearance::dispatch(app, id) => {}
         "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
         "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
         "format.underline" | "writer.style.underline-all" => app.invoke_toggle_underline(),
@@ -517,6 +524,7 @@ fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
             true
         }
         PaletteAction::InsertTable => dispatch_command(app, "writer.table.insert"),
+        PaletteAction::SetAppearance(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
         // Needs the document state; handled where the palette is wired.
         PaletteAction::NewFromSample => false,
@@ -544,7 +552,7 @@ fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
 /// Every entry carries an undo label, description, category, order and default
 /// shortcut so palette grouping, search ranking and shortcut display stay aligned.
 fn writer_command_catalog() -> Vec<CommandSpec> {
-    vec![
+    let mut catalog = vec![
         // File — order 10..50
         CommandSpec::new("file.new", "New Document")
             .with_undo_label("New Document")
@@ -819,7 +827,9 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_order(21)
             .with_shortcut("Ctrl+Shift+Z")
             .with_enabled(false),
-    ]
+    ];
+    catalog.extend(appearance::command_specs());
+    catalog
 }
 
 /// Build an authoritative `CommandRegistry` pre-populated with the Writer catalog
@@ -1087,6 +1097,16 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         },
     ]
     .into_iter()
+    .chain(
+        loom_desktop::Appearance::ALL
+            .into_iter()
+            .map(|choice| PaletteCommand {
+                action: PaletteAction::SetAppearance(choice),
+                id: choice.command_id(),
+                label: choice.label(),
+                shortcut: "",
+            }),
+    )
     .filter(|c| match c.action {
         PaletteAction::Undo => app.get_can_undo(),
         PaletteAction::Redo => app.get_can_redo(),
@@ -2219,6 +2239,7 @@ fn menu_projection(
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
     view_state::project(&mut projection, app);
+    loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
 
     Ok(projection)
 }
@@ -2314,13 +2335,13 @@ fn apply_with_history(app: &WriterApp, state: &GuiState, next: WriterDocument, k
     apply_state(app, state);
 }
 
+/// Switches the window to a named appearance (`--theme`, tests). The page is
+/// paper-colored in every theme and nothing in the window reads Slint's native
+/// widget palette (`the_window_does_not_depend_on_the_native_widget_palette`
+/// proves it), so the palette is left to follow the operating system and
+/// `Appearance::System` can follow it too.
 fn apply_theme(app: &WriterApp, theme: &str) {
-    Theme::get(app).set_active_theme(SharedString::from(theme));
-    // The editor itself is intentionally rendered on a paper-colored surface.
-    // Keep its native palette light so text remains ink-dark in all surrounding
-    // application themes; chrome and controls continue to use `Theme`.
-    WidgetPalette::get(app)
-        .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
+    appearance::apply_id(app, theme);
 }
 
 fn configure_direction(app: &WriterApp, rtl: bool) {
@@ -3551,7 +3572,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
-    apply_theme(&app, &args.theme);
+    // The saved appearance, unless `--theme` was given.
+    appearance::start(
+        &app,
+        appearance::APPLICATION_ID,
+        args.theme_explicit.then_some(args.theme.as_str()),
+    );
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -3616,6 +3642,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
     local_menu::wire_action(&app, menu_service.clone());
     let _ = local_menu::sync(&app, &menu_service);
+    // A choice from any surface refreshes the menu check marks.
+    appearance::on_change(|app| app.invoke_view_state_changed());
     let app_ref = app.as_weak();
     let registry_for_menu = state.registry.clone();
     menu_service
@@ -4669,6 +4697,8 @@ fn wire_palette(app: &WriterApp) {
 mod accessibility_tests;
 #[cfg(test)]
 mod actions_tests;
+#[cfg(test)]
+mod appearance_tests;
 #[cfg(test)]
 mod audit_tests;
 #[cfg(test)]

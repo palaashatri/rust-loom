@@ -40,6 +40,7 @@ pub(super) struct Session {
     pub(super) app: SheetsApp,
     pub(super) state: Rc<GuiState>,
     actions: Rc<RefCell<Vec<String>>>,
+    pub(super) menu: Arc<NativeMenuBar>,
 }
 
 /// The window as `run_gui` wires it, minus the background worker and the
@@ -102,6 +103,7 @@ pub(super) fn launched(cells: &[(&str, &str)]) -> Session {
         app,
         state,
         actions,
+        menu,
     }
 }
 

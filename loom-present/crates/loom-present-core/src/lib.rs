@@ -9,6 +9,7 @@ mod pictures;
 mod pptx_export;
 mod pptx_titles;
 mod session_history;
+mod slide_order;
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use pptx_export::export_pptx;
 pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_pptx};

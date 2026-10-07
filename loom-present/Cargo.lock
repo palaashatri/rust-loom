@@ -3075,6 +3075,7 @@ version = "0.1.0"
 dependencies = [
  "i-slint-backend-testing",
  "i-slint-backend-winit",
+ "i-slint-core",
  "image",
  "loom-desktop",
  "loom-package",

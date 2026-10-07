@@ -75,6 +75,7 @@ use object_layout::editor_dimensions_with_width;
 
 mod chart_actions;
 
+mod appearance;
 mod local_menu;
 
 mod cli;
@@ -1061,6 +1062,7 @@ fn menu_projection(
     inspector.enabled = app.get_inspector_available();
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
+    loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
 
     Ok(projection)
 }
@@ -1669,7 +1671,7 @@ fn inspector_context_matches(index: i32, query: &str) -> bool {
 }
 
 pub(crate) fn apply_theme(app: &SheetsApp, theme: &str) {
-    Theme::get(app).set_active_theme(SharedString::from(theme));
+    appearance::apply_id(app, theme);
 }
 
 pub(crate) fn configure_direction(app: &SheetsApp, rtl: bool) {
@@ -2415,7 +2417,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
-    apply_theme(&app, &args.theme);
+    // The saved appearance, unless `--theme` was given.
+    appearance::start(
+        &app,
+        appearance::APPLICATION_ID,
+        args.theme_explicit.then_some(args.theme.as_str()),
+    );
     app.set_template_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -2721,6 +2728,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     local_menu::wire_action(&app, menu_service.clone());
+    {
+        // A choice from any surface refreshes the menu check marks.
+        let menu_service = menu_service.clone();
+        let state = state.clone();
+        appearance::on_change(move |app| sync_menu_state(&menu_service, app, &state));
+    }
 
     register_sheet_actions(&app, &state, &menu_service);
     object_actions::register_object_actions(&app, &state, &menu_service);

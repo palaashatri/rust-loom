@@ -42,6 +42,8 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    /// True when `--theme` was given: it overrides the saved appearance.
+    theme_explicit: bool,
     rtl: bool,
     text_scale: f32,
     scale_factor: f32,
@@ -57,6 +59,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".into(),
+        theme_explicit: false,
         rtl: false,
         text_scale: 1.0,
         scale_factor: 1.0,
@@ -86,7 +89,10 @@ fn parse_args() -> Result<Args, String> {
                     height.parse().map_err(|_| "bad height")?,
                 );
             }
-            "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--theme" => {
+                args.theme = iterator.next().ok_or("--theme needs a name")?;
+                args.theme_explicit = true;
+            }
             "--rtl" => args.rtl = true,
             "--text-scale" => {
                 let scale: f32 = iterator
@@ -644,6 +650,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     file_title::sync(app, state);
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
+    slide_order::sync(app, &session);
     app.set_slide_count_text(SharedString::from(format!("{} slides", document.len())));
     app.set_slide_titles(synced(
         app.get_slide_titles(),
@@ -847,7 +854,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
 }
 
 fn apply_theme(app: &PresentApp, theme: &str) {
-    Theme::get(app).set_active_theme(SharedString::from(theme));
+    appearance::apply_id(app, theme);
 }
 
 fn configure_direction(app: &PresentApp, rtl: bool) {
@@ -1498,7 +1505,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
-    apply_theme(&app, &args.theme);
+    // The saved appearance, unless `--theme` was given.
+    appearance::start(
+        &app,
+        appearance::APPLICATION_ID,
+        args.theme_explicit.then_some(args.theme.as_str()),
+    );
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -1535,6 +1547,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
     local_menu::wire_action(&app, menu_service.clone());
+    // A choice from any surface refreshes the menu check marks and the
+    // presenter window.
+    appearance::on_change(|app| {
+        app.invoke_view_state_changed();
+        presenter::mirror_theme(app);
+    });
     let _ = local_menu::sync(&app, &menu_service);
 
     let app_ref = app.as_weak();
@@ -1585,7 +1603,10 @@ fn build_present_menu_bar() -> MenuBar {
             MenuItem::check("view.navigator", "Navigator", true),
             MenuItem::check("view.notes", "Speaker Notes", false),
             MenuItem::check("view.inspector", "Format Inspector", false),
-        ],
+        ]
+        .into_iter()
+        .chain(loom_desktop::appearance::menu_items())
+        .collect(),
         vec![Menu::new(
             "Slide",
             vec![
@@ -1597,6 +1618,17 @@ fn build_present_menu_bar() -> MenuBar {
                 MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
+                MenuItem::Separator,
+                MenuItem::action_with_shortcut(
+                    slide_order::MOVE_UP,
+                    "Move Slide Up",
+                    MenuShortcut::primary_alt("Up"),
+                ),
+                MenuItem::action_with_shortcut(
+                    slide_order::MOVE_DOWN,
+                    "Move Slide Down",
+                    MenuShortcut::primary_alt("Down"),
+                ),
                 MenuItem::Separator,
                 MenuItem::action("slide.prev", "Previous Slide"),
                 MenuItem::action("slide.next", "Next Slide"),
@@ -1644,6 +1676,8 @@ fn menu_projection(
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
     view_state::project(&mut projection, app);
+    loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
+    slide_order::project(&mut projection, &session);
 
     let mut slide_delete = projection.get("slide.delete").cloned().ok_or_else(|| {
         DesktopError::InvalidRequest("Present menu is missing slide.delete".into())
@@ -1676,7 +1710,7 @@ fn sync_menu_state_result(
     rebuild_palette(app, app.get_palette_query().as_str());
     let projection = menu_projection(menu_service, app, state)?;
     menu_service.sync_command_states(&projection)?;
-    local_menu::sync(app, menu_service)
+    menu_models::sync(app, menu_service)
 }
 
 fn sync_menu_state(menu_service: &NativeMenuBar, app: &PresentApp, state: &GuiState) {
@@ -1704,6 +1738,8 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "slide.next" => app.invoke_next_slide(),
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
+        id if appearance::dispatch(app, id) => {}
+        id if slide_order::dispatch(app, id) => {}
         "app.palette" => app.invoke_open_palette(),
         _ => return false,
     }
@@ -1711,28 +1747,29 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
 }
 
 fn is_present_menu_command(id: &str) -> bool {
-    matches!(
-        id,
-        "file.new"
-            | "file.new_sample"
-            | "slide.insert_image"
-            | "file.open"
-            | "file.save"
-            | "file.save_as"
-            | "file.export_pdf"
-            | "file.export_pptx"
-            | "edit.undo"
-            | "edit.redo"
-            | "slide.new"
-            | "slide.duplicate"
-            | "slide.delete"
-            | "slide.prev"
-            | "slide.next"
-            | "view.inspector"
-            | "view.navigator"
-            | "view.notes"
-            | "app.palette"
-    )
+    slide_order::is_command(id)
+        || matches!(
+            id,
+            "file.new"
+                | "file.new_sample"
+                | "slide.insert_image"
+                | "file.open"
+                | "file.save"
+                | "file.save_as"
+                | "file.export_pdf"
+                | "file.export_pptx"
+                | "edit.undo"
+                | "edit.redo"
+                | "slide.new"
+                | "slide.duplicate"
+                | "slide.delete"
+                | "slide.prev"
+                | "slide.next"
+                | "view.inspector"
+                | "view.navigator"
+                | "view.notes"
+                | "app.palette"
+        )
 }
 
 fn schedule_menu_action(
@@ -1839,6 +1876,7 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     view_state::wire(app, state);
+    slide_order::wire(app, state);
     {
         let state = state.clone();
         app.on_recovery_flush(move || {
@@ -2857,6 +2895,8 @@ enum PaletteAction {
     AddSlide,
     DuplicateSlide,
     DeleteSlide,
+    MoveSlideUp,
+    MoveSlideDown,
     Undo,
     Redo,
     AddText,
@@ -2870,6 +2910,7 @@ enum PaletteAction {
     PrevSlide,
     NextSlide,
     ApplyTemplate(i32),
+    SetAppearance(loom_desktop::Appearance),
     SetTransition(i32),
 }
 
@@ -2923,6 +2964,18 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.delete-slide",
             label: "Delete Slide",
             shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::MoveSlideUp,
+            id: "present.move-slide-up",
+            label: "Move Slide Up",
+            shortcut: "Ctrl+Alt+Up",
+        },
+        PaletteCommand {
+            action: PaletteAction::MoveSlideDown,
+            id: "present.move-slide-down",
+            label: "Move Slide Down",
+            shortcut: "Ctrl+Alt+Down",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -3040,9 +3093,21 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
         },
     ]
     .into_iter()
+    .chain(
+        loom_desktop::Appearance::ALL
+            .into_iter()
+            .map(|choice| PaletteCommand {
+                action: PaletteAction::SetAppearance(choice),
+                id: choice.command_id(),
+                label: choice.label(),
+                shortcut: "",
+            }),
+    )
     .filter(|c| match c.action {
         PaletteAction::Undo => app.get_can_undo(),
         PaletteAction::Redo => app.get_can_redo(),
+        PaletteAction::MoveSlideUp => app.get_can_move_slide_up(),
+        PaletteAction::MoveSlideDown => app.get_can_move_slide_down(),
         _ => true,
     })
     .collect()
@@ -3154,6 +3219,8 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::AddSlide => app.invoke_add_slide(),
                         PaletteAction::DuplicateSlide => app.invoke_duplicate_slide(),
                         PaletteAction::DeleteSlide => app.invoke_delete_slide(),
+                        PaletteAction::MoveSlideUp => app.invoke_move_slide_up(),
+                        PaletteAction::MoveSlideDown => app.invoke_move_slide_down(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddText => app.invoke_add_text(),
@@ -3172,6 +3239,7 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::ExportPptx => app.invoke_export_pptx(),
                         PaletteAction::ApplyTemplate(index) => app.invoke_apply_template(index),
                         PaletteAction::SetTransition(index) => app.invoke_set_transition(index),
+                        PaletteAction::SetAppearance(choice) => appearance::choose(&app, choice),
                     }
                 }
             }
@@ -3188,12 +3256,16 @@ mod export_pptx_tests;
 #[cfg(test)]
 mod picture_tests;
 
+mod appearance;
+#[cfg(test)]
+mod appearance_tests;
 mod file_title;
 #[cfg(test)]
 mod focus_tests;
 #[cfg(test)]
 mod keyboard_flow_tests;
 mod local_menu;
+mod menu_models;
 mod model_sync;
 mod picture_view;
 mod presenter;
@@ -3204,6 +3276,9 @@ mod scaling_tests;
 #[cfg(test)]
 mod slide_layout_tests;
 mod slide_layouts;
+mod slide_order;
+#[cfg(test)]
+mod slide_order_tests;
 #[cfg(test)]
 mod template_chooser_tests;
 mod view_state;

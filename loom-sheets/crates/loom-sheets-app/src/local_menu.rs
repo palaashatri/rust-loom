@@ -24,6 +24,10 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "view.zoom_in",
     "view.zoom_out",
     "view.zoom_actual",
+    "view.appearance.system",
+    "view.appearance.light",
+    "view.appearance.dark",
+    "view.appearance.high_contrast",
     "table.add_row",
     "table.delete_row",
     "table.add_col",
@@ -56,7 +60,11 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
             MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
         ],
         vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        [
+            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+            loom_desktop::appearance::menu_items(),
+        ]
+        .concat(),
         vec![Menu::new(
             "Table",
             vec![

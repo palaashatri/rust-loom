@@ -25,6 +25,9 @@ pub struct LocalMenuLine {
     pub enabled: bool,
     /// Whether a check or radio row is on.
     pub checked: bool,
+    /// Whether the row is a check or radio row, so it has an on/off state
+    /// even while it is off.
+    pub checkable: bool,
     /// Whether this row is a separator rule.
     pub separator: bool,
 }
@@ -67,14 +70,14 @@ pub fn project_local_menu(
                     label,
                     shortcut,
                     enabled,
-                } => Some((id, label, shortcut, *enabled, false)),
+                } => Some((id, label, shortcut, *enabled, false, false)),
                 MenuItem::Check {
                     id,
                     label,
                     shortcut,
                     enabled,
                     checked,
-                } => Some((id, label, shortcut, *enabled, *checked)),
+                } => Some((id, label, shortcut, *enabled, *checked, true)),
                 MenuItem::Radio {
                     id,
                     label,
@@ -82,7 +85,7 @@ pub fn project_local_menu(
                     enabled,
                     selected,
                     ..
-                } => Some((id, label, shortcut, *enabled, *selected)),
+                } => Some((id, label, shortcut, *enabled, *selected, true)),
                 MenuItem::Separator => {
                     separator_pending = !menu_entries.is_empty();
                     None
@@ -94,7 +97,7 @@ pub fn project_local_menu(
                     )));
                 }
             };
-            if let Some((id, label, shortcut, enabled, checked)) = entry {
+            if let Some((id, label, shortcut, enabled, checked, checkable)) = entry {
                 if separator_pending {
                     menu_entries.push(LocalMenuLine {
                         menu_index: menu_index as i32,
@@ -103,6 +106,7 @@ pub fn project_local_menu(
                         shortcut: String::new(),
                         enabled: false,
                         checked: false,
+                        checkable: false,
                         separator: true,
                     });
                     separator_pending = false;
@@ -117,6 +121,7 @@ pub fn project_local_menu(
                         .unwrap_or_default(),
                     enabled,
                     checked,
+                    checkable,
                     separator: false,
                 });
             }
@@ -167,6 +172,8 @@ pub fn menu_key_index<S: AsRef<str>>(labels: &[S], key: &str) -> i32 {
 /// `LocalMenuEntry` at the crate root. Generates `sync`, `wire_keyboard`, and
 /// `wire_action`.
 #[macro_export]
+// The macro deliberately names the invoking crate's generated `LocalMenuEntry`.
+#[allow(clippy::crate_in_macro_def)]
 macro_rules! local_menu_bindings {
     ($app:ty, $supported:expr, $status_setter:ident) => {
         /// Rebuild the in-window menu rows from the installed menu bar.
@@ -192,6 +199,7 @@ macro_rules! local_menu_bindings {
                     shortcut: line.shortcut.into(),
                     enabled: line.enabled,
                     checked: line.checked,
+                    checkable: line.checkable,
                     separator: line.separator,
                 })
                 .collect();
@@ -421,6 +429,41 @@ mod tests {
         assert!(!entries.iter().any(|entry| {
             entry.command_id == "help.documentation" || entry.command_id == "window.minimize"
         }));
+    }
+
+    #[test]
+    fn check_and_radio_rows_are_checkable_even_while_off() {
+        let menu = build_standard_menu_bar(
+            "Loom",
+            vec![],
+            vec![],
+            crate::appearance::menu_items(),
+            vec![],
+        );
+        let supported: Vec<&str> = crate::Appearance::ALL
+            .iter()
+            .map(|choice| choice.command_id())
+            .chain(["file.open"])
+            .collect();
+        let (_, entries) = project_local_menu(&menu, &supported).expect("project menus");
+        let open = entries
+            .iter()
+            .find(|e| e.command_id == "file.open")
+            .expect("open");
+        assert!(!open.checkable && !open.checked);
+        let dark = entries
+            .iter()
+            .find(|e| e.command_id == "view.appearance.dark")
+            .expect("dark row");
+        assert!(
+            dark.checkable && !dark.checked,
+            "an unchecked radio row is still checkable"
+        );
+        let system = entries
+            .iter()
+            .find(|e| e.command_id == "view.appearance.system")
+            .expect("system row");
+        assert!(system.checkable && system.checked);
     }
 
     #[test]

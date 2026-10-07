@@ -128,7 +128,7 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     app.set_can_redo(true);
     wire_palette(&app);
     rebuild_palette(&app, "");
-    assert_eq!(app.get_palette_commands().row_count(), 49);
+    assert_eq!(app.get_palette_commands().row_count(), 53);
     let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(
         app.get_palette_commands()

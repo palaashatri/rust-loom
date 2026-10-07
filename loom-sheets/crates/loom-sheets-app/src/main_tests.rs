@@ -25,6 +25,8 @@ mod local_menu_tests;
 
 #[path = "main_tests/app_startup_tests.rs"]
 mod app_startup_tests;
+#[path = "main_tests/appearance_tests.rs"]
+mod appearance_tests;
 #[path = "main_tests/cell_spill_tests.rs"]
 mod cell_spill_tests;
 #[path = "main_tests/clipboard_tests.rs"]

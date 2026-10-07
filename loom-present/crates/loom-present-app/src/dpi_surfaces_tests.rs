@@ -89,6 +89,7 @@ fn scale_factor_is_independent_of_text_scale() {
             journey: None,
             size: DEFAULT_SIZE,
             theme: "light".into(),
+            theme_explicit: false,
             rtl: false,
             text_scale: 1.0,
             scale_factor: 1.0,

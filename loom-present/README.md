@@ -22,6 +22,7 @@ Evidence tags used below:
 - Command line: `loom-present path/to/deck.loomdeck`. [tests]
 
 ### Slides and objects
+- Reorder slides: Slide > Move Slide Up/Down, Ctrl+Alt+Up/Down, the strip's up/down buttons, drag a thumbnail (a drop line shows the target, Escape cancels, the strip auto-scrolls at its edges) or Ctrl+Up/Down on a focused thumbnail; each move is one undo step, is announced, and save, export, recovery and undo keep the new order. [tests]
 - Add slide (toolbar, Slide menu, Ctrl+Shift+N, palette), duplicate and delete. The left strip shows real scaled thumbnails (text, shapes, pictures) that update as you edit; one thumbnail is rewritten per edit. [tests] [live-W] [live-L]
 - Slide layouts in the Format inspector: Title, Content, 2 Col, Image. Each supplies empty placeholders, never filler text. [tests]
 - Insert Text, Shape (a rectangle) and Image from the toolbar. Insert Image is also in the Slide menu and the palette and uses a native picker for PNG and JPEG; the picture is centred and at most 60 % of the slide. Image bytes are stored inside the `.loomdeck` (deduplicated), so the deck reopens with its pictures after the source file is deleted. Missing, corrupt or cancelled files change nothing and say why. [tests] [live-W]
@@ -49,7 +50,8 @@ Evidence tags used below:
 - Accessibility tree: every interactive element has a name; the live Windows UI Automation dump showed 0 unnamed interactive controls. This is tree verification only; spoken screen-reader output has not been verified.
 
 ### Appearance and performance
-- Light is the default theme; dark and high contrast are chosen with `--theme light|dark|high-contrast` at launch (no in-app switch for the application chrome). Text scale 1.0 to 2.0 (`--text-scale`), real device scale factor 1.0 to 4.0 (`--scale-factor`) and mirrored right-to-left chrome (`--rtl`, with the slide strip on the other side); tests render every reachable surface, including the presenter window, at text scale 1.0/1.5/2.0 and scale factors 1.25/1.5/2.0 and check controls stay inside the window. [tests] Renders at 1024x720, 1280x800, 1440x900 and 1920x1200 in all three themes were inspected without clipping (renderer evidence, not human sign-off). A `--scale-factor 2` render (2560x1600) was viewed on Windows and Linux. [live-W] [live-L]
+- Appearance: View > Appearance: System, Light, Dark and High Contrast (also in the toolbar View menu and the command palette) switches the whole window live, including dialogs and popups, and is remembered per user in `settings.toml` under the platform config directory (`LOOM_CONFIG_DIR` overrides it). System follows the operating system's light/dark preference and falls back to light. `--theme system|light|dark|high-contrast` overrides the saved choice for that run without changing it. Document artwork (page, cells, slides) is not recoloured. [tests] The presenter window follows the chosen appearance.
+- Text scale 1.0 to 2.0 (`--text-scale`), real device scale factor 1.0 to 4.0 (`--scale-factor`) and mirrored right-to-left chrome (`--rtl`, with the slide strip on the other side); tests render every reachable surface, including the presenter window, at text scale 1.0/1.5/2.0 and scale factors 1.25/1.5/2.0 and check controls stay inside the window. [tests] Renders at 1024x720, 1280x800, 1440x900 and 1920x1200 in all three themes were inspected without clipping (renderer evidence, not human sign-off). A `--scale-factor 2` render (2560x1600) was viewed on Windows and Linux. [live-W] [live-L]
 - Compact windows hide the inspector and move low-priority commands into an overflow menu. [tests]
 - Measured on an Intel i5-12400F, test profile at opt-level 3 with the software renderer (not `--release`, not a GPU frame), 2026-10-07, 20 elements per slide, p50: slide switch 0.05 / 0.14 / 0.34 ms and an edit 0.10 / 0.80 / 0.98 ms at 20 / 100 / 300 slides; the editor render at 300 slides took 6.0 ms. Earlier runs put drag, open, save, PDF and PPTX export and transition frames within budget at 20, 100 and 300 slides.
 
@@ -61,6 +63,7 @@ Evidence tags used below:
 | Ctrl+K | Command palette |
 | Ctrl+N | New deck |
 | Ctrl+Shift+N | New slide |
+| Ctrl+Alt+Up / Ctrl+Alt+Down | Move slide up / down |
 | Ctrl+O | Open |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+E | Export PDF |
@@ -79,11 +82,11 @@ Present has no F6 region key; Tab and the toolbar order cover the toolbar, inspe
 
 ## Known limitations
 
-- No slide reordering in the interface (the document model can move a slide, but no command or drag exposes it). Duplicate and delete exist.
+- On keyboard layouts where AltGr counts as Ctrl+Alt, Ctrl+Alt+Up/Down may not fire; use the Slide menu, the strip buttons or Ctrl+Up/Down on a focused thumbnail. Repeating the same slide move twice in a row may not be re-announced by a screen reader.
 - No tables, charts, audio or video, master slides or slide-number fields. Rich text runs are not supported: one style per text box. Shape inserts a rectangle only.
 - Typed numeric entry for position, size and rotation is not available (UI-18); geometry is shown read-only.
 - Present Zoom offers Fit, 75% and 50% only, no zoom in. The Document tab shows the aspect ratio read-only (16:9 Wide); there is no 4:3 option.
-- "New from Template..." creates a new deck from a named layout set (Blank, Title and Content, Two Columns, Image and Text) after the usual Save / Discard / Cancel prompt. Templates are layouts only: there is no stored or applied visual deck theme (colours, background) and no in-app light/dark/high-contrast switch (`--theme` at launch only). [tests]
+- "New from Template..." creates a new deck from a named layout set (Blank, Title and Content, Two Columns, Image and Text) after the usual Save / Discard / Cancel prompt. Templates are layouts only: there is no stored or applied visual deck theme (colours, background) and no stored per-deck appearance. [tests]
 - Transitions: only None, Dissolve, Push and Morph; Morph plays as Dissolve. The tween is not a cross-fade (the previous slide is not drawn during the transition, so Dissolve is a fade through black) and runs on timer ticks, so smoothness on real hardware is unmeasured.
 - PPTX export carries slide text, shapes, pictures, notes and transitions but not click actions or per-element styling; only a one-picture deck is known to open cleanly in PowerPoint. There is no PPTX import; Open reads `.loomdeck` only.
 - No second-display placement, presenter-view memory of its position, slide-progress or pacing targets. The presenter view's next-slide area is a thumbnail only.

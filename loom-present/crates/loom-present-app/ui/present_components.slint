@@ -63,6 +63,7 @@ export component PresentStatusBar inherits LoomStatusBar {
     // Right-to-left puts the leading status at the right edge.
     if !Theme.rtl : LoomStatusText {
         text: root.leading-text;
+        live: true;
     }
     if Theme.rtl : LoomStatusText {
         text: root.trailing-text;
@@ -73,6 +74,7 @@ export component PresentStatusBar inherits LoomStatusBar {
     }
     if Theme.rtl : LoomStatusText {
         text: root.leading-text;
+        live: true;
     }
 }
 

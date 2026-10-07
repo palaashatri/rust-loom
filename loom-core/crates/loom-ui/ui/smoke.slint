@@ -13,6 +13,9 @@ import {
 import { EmptyState, StatusPill, CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
+// Lets a test play the platform: the widget palette is where Slint publishes the
+// operating system's light or dark preference.
+export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component SmokeWindow inherits Window {
     title: "Loom UI Reference";

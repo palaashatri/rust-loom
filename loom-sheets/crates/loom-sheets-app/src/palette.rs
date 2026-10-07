@@ -61,6 +61,7 @@ pub enum PaletteAction {
     PivotMax,
     Undo,
     Redo,
+    Appearance(loom_desktop::Appearance),
 }
 
 /// Route a palette action through the canonical command dispatcher.
@@ -115,6 +116,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::PivotAverage => dispatch_command(app, "table.pivot_average"),
         PaletteAction::PivotMin => dispatch_command(app, "table.pivot_min"),
         PaletteAction::PivotMax => dispatch_command(app, "table.pivot_max"),
+        PaletteAction::Appearance(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::Undo if app.get_can_undo() => dispatch_command(app, "sheets.undo"),
         PaletteAction::Redo if app.get_can_redo() => dispatch_command(app, "sheets.redo"),
         PaletteAction::Undo | PaletteAction::Redo => false,
@@ -175,7 +177,7 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "table.pivot_max" => Some(PaletteAction::PivotMax),
         "sheets.undo" => Some(PaletteAction::Undo),
         "sheets.redo" => Some(PaletteAction::Redo),
-        _ => None,
+        other => loom_desktop::Appearance::from_command_id(other).map(PaletteAction::Appearance),
     }
 }
 
@@ -442,10 +444,20 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "Pivot Summary: Max",
             "",
         ),
-        (PaletteAction::Undo, "sheets.undo", "Undo", "Ctrl+Z"),
-        (PaletteAction::Redo, "sheets.redo", "Redo", "Ctrl+Shift+Z"),
     ]
     .into_iter()
+    .chain(loom_desktop::Appearance::ALL.into_iter().map(|choice| {
+        (
+            PaletteAction::Appearance(choice),
+            choice.command_id(),
+            choice.label(),
+            "",
+        )
+    }))
+    .chain([
+        (PaletteAction::Undo, "sheets.undo", "Undo", "Ctrl+Z"),
+        (PaletteAction::Redo, "sheets.redo", "Redo", "Ctrl+Shift+Z"),
+    ])
     .map(|(action, id, label, shortcut)| PaletteCommand {
         action,
         id,
