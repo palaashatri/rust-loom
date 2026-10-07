@@ -163,8 +163,19 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     },
                     _ => body.clone(),
                 };
+                // Center and right alignment place the line inside the text column.
+                let column =
+                    (page_style.width_pt - page_style.margin_left_pt - page_style.margin_right_pt)
+                        .max(0.0);
+                let line_width = loom_pdf::text_width_pt(&format!("{marker}{line}"), &style);
+                let shift = match block.style.alignment {
+                    loom_text::Alignment::Center => (column - line_width) / 2.0,
+                    loom_text::Alignment::Right => column - line_width,
+                    _ => 0.0,
+                }
+                .max(0.0);
                 let start = StyledLine {
-                    x: page_style.margin_left_pt,
+                    x: page_style.margin_left_pt + shift,
                     y,
                     marker: &marker,
                     text: line,
@@ -352,5 +363,57 @@ mod tests {
         assert!(pdf.contains("Line number 000"), "first line");
         assert!(pdf.contains("Line number 050"), "middle line");
         assert!(pdf.contains("Line number 074"), "last line");
+    }
+
+    /// Text x position of the line drawn as `(text) Tj`.
+    fn line_x(pdf: &[u8], text: &str) -> f32 {
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let at = content
+            .find(&format!(" Td ({text}) Tj"))
+            .unwrap_or_else(|| panic!("{text:?} is drawn"));
+        let before: Vec<&str> = content[..at].split_whitespace().collect();
+        before[before.len() - 2].parse().expect("x coordinate")
+    }
+
+    #[test]
+    fn export_pdf_honors_center_and_right_alignment() {
+        use loom_text::Alignment;
+
+        let mut document = WriterDocument::new("align", "Align");
+        for (text, alignment) in [
+            ("left line", Alignment::Left),
+            ("centered line", Alignment::Center),
+            ("right line", Alignment::Right),
+        ] {
+            let mut block = RichBlock::new(document.next_id(), "paragraph", text);
+            block.style.alignment = alignment;
+            document.push(block);
+        }
+        let style = document.page.page_style();
+        let pdf = export_pdf(&document);
+
+        let column = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let body = loom_pdf::TextStyle {
+            size_pt: style.body_font_size_pt,
+            ..Default::default()
+        };
+        let width = |text: &str| loom_pdf::text_width_pt(text, &body);
+        let left = line_x(&pdf, "left line");
+        let center = line_x(&pdf, "centered line");
+        let right = line_x(&pdf, "right line");
+        assert!(
+            (left - style.margin_left_pt).abs() < 0.01,
+            "left stays at the margin"
+        );
+        let want_center = style.margin_left_pt + (column - width("centered line")) / 2.0;
+        assert!(
+            (center - want_center).abs() < 3.0 && center > left + 50.0,
+            "centered line starts at {center}, expected about {want_center}"
+        );
+        let want_right = style.margin_left_pt + column - width("right line");
+        assert!(
+            (right - want_right).abs() < 3.0,
+            "right line starts at {right}, expected about {want_right}"
+        );
     }
 }

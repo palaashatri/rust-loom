@@ -1,0 +1,298 @@
+LOOM — LINUX HANDOFF (2026-10-07)
+=================================
+
+Read this first. Then read AGENTS.md (constitution + live ledger, the only
+authoritative Markdown). This file is a plain-text operating guide for the
+Linux machine; it is not a second ledger. When it disagrees with AGENTS.md,
+AGENTS.md wins. Update AGENTS.md (current-truth section) for any product
+truth you verify; do not create other .md files (governance forbids it).
+
+1. WHAT THIS IS
+---------------
+Loom is a local-first Rust + Slint creative suite. v1 scope (owner decision
+2026-10-06): Loom Sheets, Loom Writer and Loom Present, on Windows and Linux
+only. macOS is OUT of v1. Photo, Motion, Video, Studio and Encode stay locked
+(refactor-only extraction allowed). Target: all three apps "fully production
+ready" by the end of the week of 2026-10-06. The owner delegated every gate
+decision to the supervising agent (gate standards are in the AGENTS.md
+paragraph "Owner decision 2026-10-06: v1 scope and gate authority").
+
+Repo: https://github.com/palaashatri/rust-loom , branch main only.
+Commit and push after EVERY verified milestone (owner instruction).
+Co-author trailer used so far: "Co-Authored-By: Claude Sonnet 5.5
+<noreply@anthropic.com>". Use your own model's trailer.
+
+Apps (each is its own cargo workspace; ALWAYS run cargo from inside the app
+folder so .cargo/config.toml applies):
+  loom-sheets/   loom-writer/   loom-present/   shared: loom-core/
+  Shared UI crate: loom-core/crates/loom-ui (Slint). Shared desktop glue:
+  loom-core/crates/loom-desktop. Capture helper: loom-core/crates/loom-test-support.
+
+2. ROLES FOR THE LINUX SETUP
+----------------------------
+Orchestrator  = Claude Code, Sonnet 5.5 (low effort). Owns the plan, task
+                cards, git, the ledger, CI watching and every commit/push.
+                Never writes large code itself; delegates.
+Hostile review = Claude Code, Opus 5.5 (high effort). Read-only by default.
+                Reviews each coder deliverable BEFORE the orchestrator commits;
+                drives the real app windows on Linux; tries to break claims.
+                Decides gate PASS/FAIL on evidence. Writes findings, not code
+                (it may write tiny repro tests).
+Coder         = GPT 6.1 "Sol" through the ChatGPT Codex app. Implements one
+                bounded task card at a time. Codex reads AGENTS.md
+                automatically; AGENTS.md is large (~140 KB), so give Codex the
+                TASK CARD (section 9) and tell it which AGENTS.md paragraphs to
+                read, not "read everything". Codex does NOT commit.
+
+Loop per milestone:
+  1. Orchestrator writes a task card (template in section 9).
+  2. Coder implements in the working tree, runs the gates, reports.
+  3. Reviewer verifies independently (re-runs the gates, reads the diff,
+     drives the app, mutation-checks new tests: a test that cannot fail is
+     not evidence) and answers PASS or a numbered defect list.
+  4. Orchestrator commits + pushes only after PASS, updates the ledger in the
+     same commit, then watches CI (section 6).
+Only ONE coder works on a given app at a time (shared files like main.rs and
+app.slint collide). Different apps may run in parallel. Disk and build-lock
+contention are real (section 8).
+
+Rules every worker must follow (copied from AGENTS.md "Owner override
+2026-10-02", still in force):
+  - Work only in the files the card names plus new modules needed to stay
+    under size limits. NEVER raise a byte ceiling
+    (loom-bootstrap/contracts/code-quality.toml); extract a module instead.
+  - Never edit AGENTS.md or READMEs (the orchestrator does). List needed
+    README text changes in the report.
+  - No git checkout/stash/reset/clean, no cargo clean.
+  - Debug builds only for tests (CARGO_INCREMENTAL=0). Use
+    CARGO_PROFILE_TEST_OPT_LEVEL=3 for timing benches. A DEBUG build is
+    10-30x slower and meaningless for performance claims.
+  - Regression test first (see it FAIL), implement, see it pass. Test
+    behaviour, not source strings. No placebo controls, no success messages
+    without the real effect, no weakened or deleted tests.
+  - Finish with: cargo fmt --all; cargo clippy --workspace --all-targets
+    -- -D warnings; cargo test --workspace (in each app touched); then from
+    the repo root the four audits (section 4). Warnings are failures.
+
+3. LINUX ENVIRONMENT SETUP
+--------------------------
+  - Rust stable (rustup). Build dependencies are listed in
+    .github/workflows/ci.yml (the Linux jobs install them: fontconfig,
+    xkbcommon, X11/Wayland libs, etc.). Copy that apt list.
+  - python3 (audits use python3 on Linux), zenity (file dialogs fall back to
+    zenity when no xdg portal), xdotool + an X11 session for driving windows
+    (Wayland blocks synthetic input; use X11/Xwayland or XTEST, NOT
+    `xdotool --window` events, which apps did not receive reliably),
+    at-spi2 + Orca for accessibility checks, LibreOffice
+    (libreoffice-core/calc/writer/impress) for interop checks.
+  - GPU window: the winit backend uses Slint femtovg (OpenGL). Headless
+    screenshots use the software renderer: `loom-<app> --screenshot out.png
+    --size 1280x800 --theme light|dark|high-contrast [--text-scale 1.0-2.0]
+    [--scale-factor 1.0-4.0] [--rtl] [--sample (Writer)]`.
+  - The Windows-only 32 MiB stack link flag lives in each app's
+    .cargo/config.toml; irrelevant on Linux but do not delete it.
+  - Isolated state for QA runs: set HOME, XDG_DATA_HOME, XDG_CONFIG_HOME,
+    XDG_STATE_HOME to a temp dir, and LOOM_CONFIG_DIR for settings. Without
+    that, a recovered draft from a previous run contaminates the next run.
+  - CI helper: `gh` may exist on Linux; on the Windows box it did not, so the
+    GitHub REST API was used (api.github.com/repos/palaashatri/rust-loom/
+    actions/runs). Nightly builds publish to the `nightly` release.
+
+4. THE GATES (commands)
+-----------------------
+Per app (from inside loom-sheets / loom-writer / loom-present):
+  cargo fmt --all -- --check
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace            # Sheets app suite takes ~14 min
+From the repo root:
+  python3 loom-bootstrap/scripts/audit-code-structure.py
+  python3 loom-bootstrap/scripts/audit-ui-foundation.py
+  python3 loom-bootstrap/scripts/audit-governance.py
+  python3 loom-bootstrap/scripts/audit-assets.py
+  python3 -m unittest discover -s loom-bootstrap/scripts -p test_audit_governance.py
+    (CI runs the unit tests; on Windows set PYTHONUTF8=1.)
+Last verified baselines (Windows, 2026-10-07): Sheets app 451 + core 250;
+Writer app 213 + core 138; Present app 147 + core 62; loom-desktop 32;
+loom-ui 10. Linux CI for these commits is the source of truth for Linux.
+
+GOVERNANCE TRAP (cost us a red CI): the live application status table in
+AGENTS.md is parsed strictly. The Work status column must be exactly one of
+IN_PROGRESS / LOCKED. During the Sheets phase Writer and Present must read
+LOCKED there (the owner overrides that waive the serial lock are cited in the
+evidence column). Do not write "IN_PROGRESS (v1)". Changing workflow phase is a
+separate reviewed change (workflow.toml + the gate block + audit tests).
+
+5. CURRENT STATE OF EACH GATE (honest; all three apps are ACCEPTANCE_BLOCKED)
+-----------------------------------------------------------------------------
+Gate                         Sheets          Writer          Present
+1 foundation adoption        PASS            PASS            PASS
+2 visual (viewports/themes)  PARTIAL         PARTIAL         PARTIAL
+3 core workflow via GUI      PASS (Win)      PASS (Win,Lnx)  PASS (Win)
+4 direct manipulation        PASS            PASS            PASS
+5 undo/redo + persistence    PASS            PASS            PASS
+6 native open/save/export    PASS (Win)      PASS            PASS
+7 truthful errors/recovery   PASS (REC-02    PASS            PASS
+                             closed for v1)
+8 keyboard-only              PASS (tested    PASS            PASS
+                             flows, Windows)
+9 a11y semantics/focus       PARTIAL         PARTIAL         PARTIAL
+10 performance               PARTIAL         PASS*           PASS
+11 interoperability          PARTIAL         PARTIAL         PARTIAL
+12 test evidence             PASS            PASS            PASS
+13 no sev-1/2 defects        see section 7   see section 7   see section 7
+14 ACCEPTED record           not recorded    not recorded    not recorded
+(*) Writer render budget is a test-harness limit, see section 7.
+No app may be marked ACCEPTED until every row passes with recorded evidence.
+When it is, the README feature list must come first, then an ACCEPTED record
+in AGENTS.md listing every gate with its evidence and disclosed limitations.
+
+6. WHAT IS DONE (do not redo) AND WHERE THE EVIDENCE IS
+-------------------------------------------------------
+Everything below has a dated paragraph in AGENTS.md current-truth.
+  - Design language: iWork-style icon-over-label toolbar in three groups,
+    right inspector open by default, View menus, sheet tabs under toolbar.
+  - Text scaling (1.0-2.0) for chrome/dialogs; REAL high-DPI scale factor and
+    RTL mirroring of chrome with per-app tests (dpi_surfaces_tests,
+    rtl_tests, scale_surfaces_tests).
+    NOTE: an earlier ledger said "2.0x" for text scale; that was not high DPI
+    and has been corrected (see "Correction" paragraph).
+  - Keyboard-only flows + focus order (keyboard_flow_tests per app).
+  - REC-02 (Sheets recovery): edit pause, Retry, cadence, fault injection,
+    mutation guard over all 45 mutating callbacks. Durability p95 ~5-8 ms.
+  - Performance: Writer keystroke p95 4.4 ms @100 pages, find 8 ms @400;
+    Present slide switch 0.34 ms @300 slides; recovery drafts off-thread.
+  - Present: slide reordering (commands, drag, keyboard), blank new slides,
+    "New from Template", slideshow, presenter view, transitions.
+  - All three apps: in-app Appearance (System/Light/Dark/High Contrast),
+    persisted in settings.toml.
+  - READMEs rewritten with tagged feature lists ([tests] [live-W] [live-L]).
+  - Hostile live reviews of the Windows nightly (2ca7166) and a Linux
+    nightly (b7dd8ce) were done; defects found were fixed.
+  - Two real export fixes (uncommitted when this file was written, then
+    committed with it): Writer PDF honours centre/right alignment; Present
+    PDF draws multi-line text on separate baselines.
+
+7. OPEN WORK, PRIORITISED (this is the list to drive)
+-----------------------------------------------------
+A. CI must be green on Linux and Windows. Check the latest runs first. The
+   macOS-Intel "Sheets scroll budget" job has been red; macOS is out of v1.
+   Remove or make non-required macOS jobs once confirmed unrelated.
+B. Gate 11 interoperability (largest missing evidence):
+   - Fixtures exist as #[ignore] tests: loom-sheets-core/tests/
+     interop_fixtures.rs, loom-writer-core/tests/interop_fixtures.rs,
+     loom-present-core/tests/interop_fixtures.rs. Run with
+     `cargo test -p <core-crate> --test interop_fixtures -- --ignored`
+     with LOOM_INTEROP_OUT=<dir>.
+   - Checker scripts: tests/interop/ in each app folder. check_excel.ps1,
+     check_word.ps1 drive real Office through COM and are WINDOWS-ONLY (the
+     owner still has the Windows machine; Office 16 is installed there).
+     check_libreoffice.sh (Sheets, Writer) runs on Linux; Present needs one.
+     Do the LibreOffice side on Linux; hand the COM side back to the owner's
+     Windows box or mark it "not re-run".
+   - The deliverable is loom-bootstrap/audit-evidence-interop-2026-10-07.txt
+     (plain text; not yet written) with per-check PASS/FAIL and a mismatch
+     list with severities. A README format claim without an independent
+     reader's confirmation must be softened in the README.
+C. Gate 9: Linux AT-SPI tree audit of all three apps (names, roles, focus
+   order, live regions) and an Orca pass if possible. Tree evidence is
+   labelled "tree-verified, not speech-verified"; spoken output was never
+   verified anywhere. Known: the shared LoomIconButton does not expose an
+   accessible "enabled" state (a disabled Move Slide button reads as
+   available) - fix in loom-ui; toolbar-menu rows do not announce an off
+   state.
+D. Gate 2: hostile visual review of REAL Linux windows (not just renders) at
+   1024x720, 1280x800, 1440x900, 1920x1200; light/dark/high-contrast;
+   scale factor 1.0/1.5/2.0; text scale 1.0/1.5/2.0; one RTL pass. The
+   owner's own human sign-off is optional now (delegated), but the hostile
+   reviewer must record what was seen. Mutation-check the dpi/rtl tests (not
+   done: they might pass on a broken layout).
+E. Gate 10 / PERF-01 (Sheets): non-cell full-workbook copies on the UI
+   thread, export scale, app memory budget (never set), million-cell scroll
+   in a REAL window. Measure on release builds. Writer render budget needs a
+   live GPU window check at a 100+ page document (software renderer panics
+   past 32,767 px of content; that is a harness limit only if a live GPU
+   window stays responsive - UNVERIFIED).
+F. Known product gaps to decide: ship, fix or disclose in READMEs:
+   Sheets: Save with a pending formula-bar draft while recovery is paused
+     refuses the draft; new_sheet/open_sheet have their own unsaved-work
+     decision outside the mutation guard; XLSX charts export one series;
+     no pivot tables; real full-volume disk-full untested.
+   Writer: no Justify (control removed), no RTL text shaping or bidi caret,
+     no spell check, no visual table editor, no inline images, two document
+     clones per keystroke, TextInput holds the whole text, comment anchors
+     fall back to a text diff on paste-over-selection.
+   Present: Morph plays as Dissolve, no tables/charts/audio/video,
+     Ctrl+Alt+Up/Down may not fire where AltGr = Ctrl+Alt, no stored visual
+     theme, thumbnail/strip focus checked only in tests.
+   Shared: LoomButton keeps its 28 px height at 2.0x text scale (cramped),
+     toolbar caption sizes, Sheets cell fill swatches are hard-coded hex.
+G. Design-system governance cards GOV-02/03/04 (prose vs contracts,
+   geometry manifest generator missing, evidence not bound to source hashes)
+   are OPEN; they do not block v1 but weaken "visual acceptance" claims.
+H. CODE-14/15/18, UI-10/15/18-22/24 are open cards in locked apps or minor
+   items; ignore unless trivial.
+
+8. PITFALLS LEARNED (save yourself the pain)
+--------------------------------------------
+  - DISK: the three app target/ folders reach 12-15 GB each. Build one app at
+    a time and delete another app's target/ when space is low. The Windows
+    drive hit 3 GB free twice. Never run three full workspace builds at once.
+  - A DEBUG Writer build takes ~10 s per keystroke on a 300-paragraph paste;
+    do not judge speed or hang from debug builds.
+  - Headless windows report width 0 until laid out: absolute x positions that
+    depend on parent.width went negative and pushed dialog buttons off-screen
+    (fixed with max(0px, ...)). Watch for this class of bug in new dialogs.
+  - cargo test does NOT rebuild target/debug/loom-<app> (the app binary);
+    run cargo build -p loom-<app>-app before using --screenshot.
+  - In the qa driver, `--screenshot` captures of full-screen windows return
+    the monitor size; do not resize them non-uniformly.
+  - Slint Windows glyph/stack: a full-screen slideshow capture is the whole
+    monitor.
+  - Git emits LF->CRLF warnings on the Windows checkout; harmless. On Linux
+    keep LF. The code-structure audit measures LF-normalised bytes.
+  - Sonnet-class subagents occasionally hit usage limits mid-edit; always
+    re-read git status/diff before resuming a worker, and resume with an
+    explicit "you were cut off, here is what is in the tree" message.
+  - Do not trust a worker's "tests pass" for large suites: re-run the gate
+    yourself or wait for CI, and mutation-check new tests.
+  - AGENTS.md size: keep it under ~150 KB; subagents inherit it. Move full
+    card text to docs/archive/AGENTS-ARCHIVE.md (authorized).
+
+9. TASK CARD TEMPLATE (give this to the coder)
+----------------------------------------------
+  TITLE:
+  APP(S) AND FILES YOU MAY TOUCH:
+  READ FIRST (AGENTS.md paragraphs by heading, not the whole file):
+  GOAL (what the user does, what is wrong now, what must happen):
+  ACCEPTANCE CHECKS (each must have a test you saw fail first):
+  CONSTRAINTS: no byte-ceiling increase, no AGENTS.md/README edits, no
+    git history changes, debug builds only, disk budget, do not commit.
+  DONE WHEN: fmt, clippy -D warnings, cargo test --workspace in the app,
+    the four audits, plus the app run live and a screenshot described.
+  REPORT: exact commands, pass counts, changed files, README text changes
+    needed, anything not done, anything that needs a screen reader.
+
+REVIEWER CHECKLIST (Opus): re-run the gates; read the diff for weakened
+tests, new allow()s, raised ceilings, dead code; mutation-check each new
+test by breaking the code under test; drive the real app (keyboard only,
+then mouse); check RTL and 2.0x scale; look for placebo controls and success
+messages without effect; confirm README claims match behaviour; then answer
+PASS or a numbered defect list with severity (1 data loss/crash/corrupt
+export, 2 broken primary workflow, 3 polish).
+
+10. ORCHESTRATOR FIRST MOVES ON LINUX
+-------------------------------------
+  1. git pull; read AGENTS.md "Owner decision 2026-10-06", the last ~10 dated
+     current-truth paragraphs, and the three READMEs.
+  2. Check CI (section 3) for the latest main commit; fix red first.
+  3. Install the Linux deps, build ONE app, run its gates to confirm the
+     environment (start with Present: smallest).
+  4. Task cards in this order: (B) interop on Linux, (C) AT-SPI audit,
+     (D) hostile Linux window review, (E) PERF-01 live measurements,
+     (F) the gap list, then the ACCEPTED records.
+  5. Keep the ledger honest: label tree-verified vs speech-verified,
+     Windows-verified vs Linux-verified, tests vs live.
+
+Owner preferences: autonomous work, commit and push each coherent milestone,
+no macOS, Windows and Linux only, be a hostile reviewer, never claim
+"production ready" without every gate passing, and keep disk usage low.

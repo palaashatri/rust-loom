@@ -589,7 +589,15 @@ impl WriterDocument {
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         let mut numbered_index = 0usize;
+        // List items and table rows end without a blank line; the next block must
+        // be separated or Markdown readers fold it into the list item or table.
+        let mut open_block = false;
         for b in &self.blocks {
+            let is_list = matches!(b.kind.as_str(), "list-bulleted" | "list-numbered");
+            if open_block && !is_list {
+                out.push('\n');
+            }
+            open_block = is_list || b.kind == "table";
             match b.kind.as_str() {
                 "heading1" => out.push_str(&format!("# {}\n\n", b.text.as_str())),
                 "heading2" => out.push_str(&format!("## {}\n\n", b.text.as_str())),
@@ -4417,6 +4425,33 @@ mod tests {
         let md = d.to_markdown();
         assert!(md.starts_with("# My Report"));
         assert!(md.contains("This is an original Loom document."));
+    }
+
+    #[test]
+    fn markdown_separates_lists_and_tables_from_the_next_block() {
+        let mut doc = WriterDocument::new("md", "Md");
+        for (kind, text) in [
+            ("list-numbered", "Third step"),
+            (TABLE_BLOCK_KIND, "| A | B |\n| --- | --- |\n| 1 | 2 |"),
+            ("paragraph", "After the table"),
+            ("list-bulleted", "Last item"),
+            ("paragraph", "After the list"),
+        ] {
+            doc.push(RichBlock::new(doc.next_id(), kind, text));
+        }
+        let md = doc.to_markdown();
+        assert!(
+            md.contains("1. Third step\n\n| A | B |"),
+            "blank line between list and table: {md:?}"
+        );
+        assert!(
+            md.contains("| 1 | 2 |\n\nAfter the table"),
+            "blank line between table and paragraph: {md:?}"
+        );
+        assert!(
+            md.contains("- Last item\n\nAfter the list"),
+            "blank line between list and paragraph: {md:?}"
+        );
     }
 
     #[test]

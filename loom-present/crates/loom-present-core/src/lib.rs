@@ -1412,14 +1412,21 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
                     }
                 }
                 ElementType::Subtitle | ElementType::BodyText => {
-                    pdf.draw_text_with_transform(
-                        page,
-                        8.0,
-                        style_body.size_pt + 4.0,
-                        &elem.content,
-                        &style_body,
-                        transform,
-                    );
+                    // A line feed is not a line break inside one PDF string, so each
+                    // line is drawn on its own baseline.
+                    for (index, line) in elem.content.split('\n').enumerate() {
+                        if line.is_empty() {
+                            continue;
+                        }
+                        pdf.draw_text_with_transform(
+                            page,
+                            8.0,
+                            style_body.size_pt + 4.0 + index as f32 * style_body.size_pt * 1.3,
+                            line.trim_end_matches('\r'),
+                            &style_body,
+                            transform,
+                        );
+                    }
                 }
             }
         }

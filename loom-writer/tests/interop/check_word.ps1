@@ -80,7 +80,8 @@ try {
     Check 'docx opens in Word read-only without repair' ($doc.Name -eq 'writer.docx') "name '$($doc.Name)'"
 
     # ---- Word can export the docx to PDF (layout and fonts resolve)
-    $tempPdf = Join-Path ([IO.Path]::GetTempPath()) ('loom-interop-word-' + [Guid]::NewGuid().ToString('N') + '.pdf')
+    # A plain [string]: a PSObject-wrapped path (what Join-Path returns) makes ExportAsFixedFormat hang.
+    $tempPdf = [string]([IO.Path]::GetTempPath() + 'loom-interop-word-' + [Guid]::NewGuid().ToString('N') + '.pdf')
     Info "exporting the docx to PDF through Word"
     $doc.ExportAsFixedFormat($tempPdf, 17)   # wdExportFormatPDF
     Info "export done"
