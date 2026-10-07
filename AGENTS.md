@@ -461,8 +461,8 @@ Quality and permission to work are different. The owner override permits the act
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
 | 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS | Linux menu geometry/keyboard and macOS menu keyboard/focus; warning-dialog and close interactions; Open worker shutdown and live timing; slow and unbounded recovery storage; non-cell full-workbook copies and export-scale performance; full visual/accessibility coverage; broader interoperability; native million-cell scroll; reviewed app memory budget |
-| 2 | Writer | ACCEPTANCE_BLOCKED | IN_PROGRESS (v1) | CODE-17 fixed; v1 gate evidence in progress (see 2026-10-06 owner decision) |
-| 3 | Present | ACCEPTANCE_BLOCKED | IN_PROGRESS (v1) | CODE-16/19 fixed; v1 gate evidence in progress (see 2026-10-06 owner decision) |
+| 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | In v1 scope; the serial lock is waived by the 2026-09-30 and 2026-10-02 owner overrides and the 2026-10-06 owner decision. CODE-17 fixed; v1 gate evidence in progress |
+| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | In v1 scope; the serial lock is waived by the 2026-09-30 and 2026-10-02 owner overrides and the 2026-10-06 owner decision. CODE-16/19 fixed; v1 gate evidence in progress |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
 | 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-17 still-frame parity verified; UI-14/18 and full video-render acceptance remain |
 | 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-25 repaired in code; UI-19/20 and real-media checks remain |
