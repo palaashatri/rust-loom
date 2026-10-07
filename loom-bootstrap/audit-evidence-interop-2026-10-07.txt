@@ -1,0 +1,59 @@
+LOOM INTEROP EVIDENCE - Linux/LibreOffice 24.2.7.2 - 2026-10-07
+Fixtures: cargo test --test interop_fixtures -- --ignored; checkers: <app>/tests/interop/check_libreoffice.sh
+== sheets
+INFO  LibreOffice 24.2.7.2 420(Build:2)
+PASS  xlsx converts to PDF
+PASS  xlsx converts to CSV
+PASS  header row Item,Qty,Price,Total
+PASS  accented text Café Zoë survives
+PASS  typographic text survives
+PASS  formula D2=B2*C2 calculates 3.75
+PASS  IF formula gives small
+PASS  text formula gives APPLES-5
+PASS  cross-sheet formula gives 4.5
+PASS  SUM total 67.25 (D7)
+PASS  currency format shows $1.25
+PASS  date format shows 2024-03-15
+PASS  percent format shows 25.6%
+PASS  xlsx converts to ODS
+PASS  ODS has sheets Q1 Sales|Rates
+PASS  ODS carries the chart object
+PASS  Loom CSV is valid UTF-8
+SUMMARY libreoffice sheets: 17 passed, 0 failed
+== writer
+INFO  LibreOffice 24.2.7.2 420(Build:2)
+PASS  docx converts to text
+PASS  heading text
+PASS  paragraph text
+PASS  bulleted items
+PASS  numbered items
+PASS  table cells Tea and Coffee
+PASS  accented and typographic text
+PASS  closing line
+PASS  docx converts to PDF
+PASS  ODT keeps Heading 1 style
+PASS  ODT keeps a table
+PASS  ODT keeps a list
+PASS  ODT keeps the comment (annotation)
+PASS  ODT keeps bold text
+PASS  Loom PDF text: heading and list
+PASS  Loom PDF text: accents
+PASS  Loom Markdown is valid UTF-8
+SUMMARY libreoffice writer: 17 passed, 0 failed
+== present
+INFO  LibreOffice 24.2.7.2 420(Build:2)
+PASS  pptx converts to ODP
+PASS  ODP has 4 slides
+PASS  slide text: title, results, labels
+PASS  slide text: Results
+PASS  slide text: Box label and 42%
+PASS  subtitle accents and typographic text
+PASS  speaker notes survive
+PASS  picture is a draw:image
+PASS  pptx converts to PDF
+PASS  Impress PDF shows 4 pages
+PASS  Loom PDF text: slide titles
+PASS  Loom PDF text: body lines on separate lines
+SUMMARY libreoffice present: 12 passed, 0 failed
+NOT RE-RUN: Microsoft Excel/Word/PowerPoint COM checks (Windows-only; owner machine). Limits: LibreOffice only; Excel/Office compatibility unverified on Linux.
+Mismatch list: none (one checker-pattern bug fixed: Sheets header row quoted CSV).

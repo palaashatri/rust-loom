@@ -33,7 +33,7 @@ csv="$(ls out/sheets*.csv 2>/dev/null | head -1)"
 check "xlsx converts to CSV" "$([ -n "$csv" ]; echo $?)" "no CSV written"
 if [ -n "$csv" ]; then
   has() { grep -qF -- "$1" "$csv"; echo $?; }
-  check "header row Item,Qty,Price,Total" "$(has 'Item,Qty,Price,Total')" "$(head -1 "$csv")"
+  check "header row Item,Qty,Price,Total" "$(has '"Item","Qty","Price","Total"')" "$(head -1 "$csv")"
   check "accented text Café Zoë survives" "$(has 'Café Zoë')" ""
   check "typographic text survives" "$(has 'Düsseldorf – “quoted”')" ""
   check "formula D2=B2*C2 calculates 3.75" "$(has '3.75')" ""
