@@ -2,9 +2,11 @@
 //! runs them through the same callbacks as the menu bar, the palette and the
 //! inspector, and decides how the window starts (inspector open on Format).
 
+use std::cell::RefCell;
+
 use slint::{ComponentHandle, Global};
 
-use crate::{dispatch_command, FindBar, Theme, WriterApp};
+use crate::{dispatch_command, FindBar, ResponsivePolicy, Theme, WriterApp};
 
 /// One zoom step, as a fraction of actual size.
 const ZOOM_STEP: f32 = 0.25;
@@ -51,10 +53,78 @@ pub(crate) fn wire(app: &WriterApp) {
 /// A fresh window shows the inspector on the Format tab. A window too narrow
 /// to dock it keeps it closed, as the drawer would cover the page.
 pub(crate) fn start_with_inspector_open(app: &WriterApp, width: u32) {
+    clear_auto_opened_inspector(app);
     app.set_inspector_tab(0);
     let docked =
         width as f32 / Theme::get(app).get_text_scale().max(1.0) >= DOCKED_INSPECTOR_MIN_WIDTH;
     if docked {
         app.set_show_inspector(true);
+        AUTO_OPENED_INSPECTORS.with(|windows| windows.borrow_mut().push(app.as_weak()));
+    }
+}
+
+std::thread_local! {
+    // Weak handles keep startup state per window without retaining closed windows.
+    static AUTO_OPENED_INSPECTORS: RefCell<Vec<slint::Weak<WriterApp>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Consumes startup ownership on compact resize or an explicit user toggle.
+pub(crate) fn clear_auto_opened_inspector(app: &WriterApp) -> bool {
+    AUTO_OPENED_INSPECTORS.with(|windows| {
+        let mut cleared = false;
+        windows.borrow_mut().retain(|weak| {
+            let Some(window) = weak.upgrade() else {
+                return false;
+            };
+            if std::ptr::eq(window.window(), app.window()) {
+                cleared = true;
+                false
+            } else {
+                true
+            }
+        });
+        cleared
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResponsiveToolbarState {
+    pub(crate) icon_only: bool,
+    pub(crate) overflow: bool,
+    pub(crate) labeled: bool,
+}
+
+pub(crate) fn layout_breakpoints(app: &WriterApp, width: u32) -> ResponsiveToolbarState {
+    let policy = ResponsivePolicy::get(app);
+    let width = width as f32 / Theme::get(app).get_text_scale().max(1.0);
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+pub(crate) fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
+    let state = layout_breakpoints(app, width);
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_labeled_toolbar(state.labeled);
+    app.set_wide_toolbar(state.labeled);
+    app.set_labeled_export(state.labeled);
+    if !state.overflow && app.get_toolbar_overflow_open() {
+        app.invoke_close_toolbar_overflow();
+    }
+    app.set_overflow_toolbar(state.overflow);
+    if !state.overflow {
+        app.set_toolbar_overflow_open(false);
+    }
+    // Keep the same Format action available at every width. The shell layout
+    // mode is sent through this input property instead of binding it back to
+    // root.width from inside the Window's own layout tree.
+    app.set_inspector_available(true);
+    let compact =
+        width as f32 / Theme::get(app).get_text_scale().max(1.0) < DOCKED_INSPECTOR_MIN_WIDTH;
+    app.set_compact_inspector_layout(compact);
+    if compact && clear_auto_opened_inspector(app) {
+        app.set_show_inspector(false);
     }
 }

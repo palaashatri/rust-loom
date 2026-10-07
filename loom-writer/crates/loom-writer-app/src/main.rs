@@ -33,6 +33,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use toolbar_commands::apply_layout_breakpoints;
+#[cfg(test)]
+use toolbar_commands::{layout_breakpoints, ResponsiveToolbarState};
+
 use document_formatting::{
     formatting_state_for_selection, indent_selection, selection_text_spans,
     set_selection_alignment, set_selection_bold, set_selection_font_family,
@@ -2348,45 +2352,6 @@ fn configure_direction(app: &WriterApp, rtl: bool) {
     app.set_rtl(rtl);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ResponsiveToolbarState {
-    icon_only: bool,
-    overflow: bool,
-    labeled: bool,
-}
-
-fn layout_breakpoints(app: &WriterApp, width: u32) -> ResponsiveToolbarState {
-    let policy = ResponsivePolicy::get(app);
-    let width = width as f32 / Theme::get(app).get_text_scale().max(1.0);
-    ResponsiveToolbarState {
-        icon_only: width < policy.get_priority_1_icon_only_below(),
-        overflow: width < policy.get_priority_2_overflow_below(),
-        labeled: width >= policy.get_priority_2_overflow_below(),
-    }
-}
-
-fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
-    let state = layout_breakpoints(app, width);
-    app.set_icon_only_toolbar(state.icon_only);
-    app.set_labeled_toolbar(state.labeled);
-    app.set_wide_toolbar(state.labeled);
-    app.set_labeled_export(state.labeled);
-    if !state.overflow && app.get_toolbar_overflow_open() {
-        app.invoke_close_toolbar_overflow();
-    }
-    app.set_overflow_toolbar(state.overflow);
-    if !state.overflow {
-        app.set_toolbar_overflow_open(false);
-    }
-    // Keep the same Format action available at every width. The shell layout
-    // mode is sent through this input property instead of binding it back to
-    // root.width from inside the Window's own layout tree.
-    app.set_inspector_available(true);
-    app.set_compact_inspector_layout(
-        (width as f32 / Theme::get(app).get_text_scale().max(1.0)) < 1180.0,
-    );
-}
-
 #[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
 fn wire_responsive_layout(app: &WriterApp) {
     let app_ref = app.as_weak();
@@ -3535,6 +3500,7 @@ fn wire_writer_inspector_toggle(
                 return;
             }
             if app.get_inspector_available() {
+                toolbar_commands::clear_auto_opened_inspector(&app);
                 let visible = app.get_show_inspector();
                 app.set_show_inspector(!visible);
                 if let Some(menu_service) = menu_service.as_ref() {
@@ -4733,3 +4699,6 @@ mod scale_surfaces_tests;
 
 #[cfg(test)]
 mod keyboard_flow_tests;
+
+#[cfg(test)]
+mod inspector_startup_tests;
