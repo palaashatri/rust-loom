@@ -466,7 +466,7 @@ export component LoomSegmentedControl inherits Rectangle {
                 width: 1px;
                 height: 12px;
                 background: Theme.palette().border;
-                visible: rel != root.current && prev-rel != root.current;
+                visible: rel != root.current && prev-rel != root.current && Theme.active-theme != "high-contrast";
             }
             item-label := Text {
                 text: root.items[rel];

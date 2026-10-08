@@ -78,10 +78,10 @@ export component PresentSlideCanvas inherits Rectangle {
         slide := Rectangle {
             property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
             property <length> margin: root.fit-screen ? 0px : Theme.tokens.space.xxl;
-            property <float> text-scale: root.fit-screen || root.zoom < 1.0 ? self.width / 840px : 1.0;
+            property <float> text-scale: root.fit-screen || root.zoom < 1.0 ? self.width / 840px : max(1.0, self.width / 840px);
             x: max(self.margin, (parent.width - self.width) / 2);
             y: max(self.margin, (parent.height - self.height) / 2);
-            width: min(root.fit-screen ? 100000px : 840px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * root.zoom;
+            width: min(root.fit-screen ? 100000px : 2520px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * root.zoom;
             height: min(parent.height - self.margin * 2, self.width * self.slide-ratio);
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
@@ -167,22 +167,38 @@ export component PresentSlideCanvas inherits Rectangle {
                 accessible-label: root.element-labels[idx];
                 accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); slide-focus.focus(); }
 
+                // A miniature (fit-screen) line under 4 px cannot be read; it is drawn as a bar.
+                property <length> text-px: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
+                    : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
+                property <bool> too-small: root.fit-screen && text-px < 4px;
+
+                Rectangle {
+                    visible: too-small && root.element-types[idx] != 6;
+                    x: parent.width * 0.06;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width * 0.88;
+                    height: max(1px, text-px * 0.45);
+                    border-radius: self.height / 2;
+                    background: Theme.palette().paper-muted;
+                    opacity: 0.45;
+                }
+
                 Text {
-                    visible: root.editing-idx != idx && root.element-types[idx] != 6;
+                    visible: root.editing-idx != idx && root.element-types[idx] != 6 && !too-small;
                     x: Theme.tokens.space.sm;
-                    y: Theme.tokens.space.xs;
+                    y: root.fit-screen ? 0px : Theme.tokens.space.xs;
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2);
-                    height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    height: root.fit-screen ? parent.height : max(1px, parent.height - Theme.tokens.space.sm * 2);
                     text: root.element-contents[idx];
-                    font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
-                        : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
+                    // A miniature title is never set below 10 px, so its word spaces survive.
+                    font-size: root.fit-screen && root.element-types[idx] == 0 ? max(text-px, 10px) : text-px;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
                         : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
                         : Theme.palette().paper-ink;
                     horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
                     vertical-alignment: center;
-                    wrap: word-wrap;
+                    wrap: root.fit-screen ? no-wrap : word-wrap;
                     overflow: elide;
                 }
 

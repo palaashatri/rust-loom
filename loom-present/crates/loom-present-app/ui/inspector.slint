@@ -77,6 +77,7 @@ export component PresentInspector inherits LoomPanel {
             if root.selection-count == 0 : Text {
                 text: "Select an object to edit its position and style.";
                 wrap: word-wrap;
+                horizontal-alignment: Theme.rtl ? right : left;
                 font-size: Theme.type.body;
                 color: Theme.palette().ink-secondary;
             }
