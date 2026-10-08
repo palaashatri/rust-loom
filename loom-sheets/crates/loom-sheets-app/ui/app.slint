@@ -2,7 +2,6 @@ import { TemplateChooserModal } from "template_chooser.slint";
 import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
 import { SaveChangesDialog } from "save_changes_dialog.slint";
 import { CloseDrainShield } from "close_drain_shield.slint";
-import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
     LoomToolbar, LoomStatusBar, LoomStatusText, LoomTitleBar, LoomWindowResizeEdges,
     LocalMenuBar, LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
@@ -14,7 +13,7 @@ import { SheetObjectLayer, SheetObjectView } from "objects.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
-    SheetScrollbars, SheetTable, SheetTabs
+    SheetScrollbars, SheetTable, SheetTabs, SheetStatusRow
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
@@ -676,16 +675,11 @@ export component SheetsApp inherits Window {
                 }
             }
 
-            LoomStatusBar {
-                SheetsOperationStatusText { message: root.status-left; }
-                LoomStatusText {
-                    text: root.status-summary;
-                    horizontal-alignment: right;
-                }
-                LoomStatusText {
-                    text: root.status-right;
-                    horizontal-alignment: right;
-                }
+            SheetStatusRow {
+                rtl: root.rtl;
+                operation: root.status-left;
+                summary: root.status-summary;
+                state: root.status-right;
             }
         }
     }

@@ -228,3 +228,102 @@ fn table_inspector_controls_stay_inside_the_panel_padding() {
         );
     }
 }
+
+/// Rows of the Cell inspector are one stack: each field row's top edge follows
+/// the previous row at the same pitch, with no band of stray space between
+/// them, and every control can be reached by scrolling the inspector.
+#[test]
+fn cell_inspector_rows_are_evenly_spaced_and_reachable_at_every_size() {
+    set_platform();
+    for (width, height) in [(1280.0f32, 800.0f32), (1440.0, 900.0), (1920.0, 1200.0)] {
+        for scale in [1.0f32, 1.5] {
+            let app = SheetsApp::new().expect("create SheetsApp");
+            app.window()
+                .set_size(PhysicalSize::new(width as u32, height as u32));
+            app.set_template_text_scale(scale);
+            app.set_show_inspector(true);
+            app.set_inspector_tab(1);
+            let _ = snapshot_component(&app, width, height, 1.0).expect("render Cell inspector");
+
+            let top = |label: &str| {
+                let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label).collect();
+                assert_eq!(found.len(), 1, "one field named {label}");
+                let el = found.into_iter().next().expect("field count checked");
+                (el.absolute_position().y, el.size().height)
+            };
+            let (y1, h1) = top("Selected range");
+            let (y2, _) = top("Displayed value");
+            let (y3, _) = top("Raw formula");
+            let gap_a = y2 - y1;
+            let gap_b = y3 - y2;
+            assert!(
+                (gap_a - gap_b).abs() <= 2.0,
+                "{width}x{height} x{scale}: row pitches differ ({gap_a} vs {gap_b})"
+            );
+            assert!(
+                gap_a - h1 <= 16.0 * scale,
+                "{width}x{height} x{scale}: stray space of {} px between rows",
+                gap_a - h1
+            );
+
+            // The last control must be reachable: after the user scrolls the
+            // inspector to its end, the Column width field lies inside the panel.
+            // Controls below the fold are not in the tree until the inspector
+            // scrolls, so scroll from a visible control the way a user would.
+            let anchor: Vec<_> = ElementHandle::find_by_accessible_label(
+                &app,
+                "Toggle bold formatting (Cell inspector)",
+            )
+            .collect();
+            assert_eq!(anchor.len(), 1, "one bold toggle in the Cell inspector");
+            anchor
+                .into_iter()
+                .next()
+                .expect("bold toggle")
+                .scroll(0.0, -1_000.0);
+            let _ = snapshot_component(&app, width, height, 1.0).expect("render scrolled");
+            let field: Vec<_> =
+                ElementHandle::find_by_accessible_label(&app, "Selected column width").collect();
+            let field = field.into_iter().next().expect("column-width field");
+            let panel = ElementHandle::find_by_element_id(&app, "SheetsApp::inspector-panel")
+                .next()
+                .expect("inspector panel");
+            let panel_bottom = panel.absolute_position().y + panel.size().height;
+            let field_bottom = field.absolute_position().y + field.size().height;
+            assert!(
+                field_bottom <= panel_bottom + 0.5,
+                "{width}x{height} x{scale}: Column width field ends at {field_bottom}, panel at {panel_bottom}"
+            );
+        }
+    }
+}
+
+/// Each control sits under the heading of its own group: Font size under Font
+/// Style, the fill swatches under Borders & Fill and before Data Format.
+#[test]
+fn cell_inspector_controls_sit_under_their_own_headings() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1920, 1200));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let _ = snapshot_component(&app, 1920.0, 1200.0, 1.0).expect("render Cell inspector");
+    let y_of = |label: &str| -> f32 {
+        let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label).collect();
+        assert_eq!(found.len(), 1, "one element named {label}");
+        found[0].absolute_position().y
+    };
+    let font_style = y_of("Font Style");
+    let font_size = y_of("Font size in points");
+    let borders = y_of("Borders & Fill");
+    let fill = y_of("Fill red");
+    let data_format = y_of("Data Format");
+    assert!(
+        font_style < font_size && font_size < borders,
+        "Font size must sit under Font Style and above Borders & Fill ({font_style}, {font_size}, {borders})"
+    );
+    assert!(
+        borders < fill && fill < data_format,
+        "fill swatches must sit under Borders & Fill ({borders}, {fill}, {data_format})"
+    );
+}

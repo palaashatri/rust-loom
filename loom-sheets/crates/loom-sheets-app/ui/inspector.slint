@@ -131,7 +131,9 @@ export component SheetInspector inherits LoomPanel {
             horizontal-stretch: 1;
             vertical-stretch: 1;
             viewport-width: parent.width;
-            viewport-height: max(parent.height, cell-property-layout.preferred-height);
+            // The content keeps its own height. A taller viewport would make the
+            // layout absorb the spare height as gaps between rows.
+            viewport-height: cell-property-layout.preferred-height;
 
             cell-property-layout := VerticalLayout {
                 x: 0px;
@@ -231,17 +233,6 @@ export component SheetInspector inherits LoomPanel {
                             clicked => { root.toggle-bold(); }
                         }
                     }
-                    LoomSectionHeader { title: "Borders & Fill"; }
-                    HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        alignment: Theme.rtl ? end : start;
-                        LoomButton {
-                            label: "Border";
-                            variant: root.cell-border ? "primary" : "ghost";
-                            clicked => { root.toggle-borders(); }
-                        }
-                    }
-                    SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
                     SheetStepperRow {
                         label: "Font size";
                         field-label: "Font size in points";
@@ -253,6 +244,25 @@ export component SheetInspector inherits LoomPanel {
                         decrease => { root.adjust-font(-1); }
                         increase => { root.adjust-font(1); }
                     }
+                    LoomSectionHeader { title: "Borders & Fill"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: Theme.rtl ? end : start;
+                        LoomButton {
+                            label: "Border";
+                            variant: root.cell-border ? "primary" : "ghost";
+                            clicked => { root.toggle-borders(); }
+                        }
+                    }
+                    Text {
+                        text: "Fill";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        accessible-role: text;
+                        accessible-label: "Fill";
+                    }
+                    SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
                     LoomSectionHeader { title: "Data Format"; }
                     SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
                     SheetStepperRow {

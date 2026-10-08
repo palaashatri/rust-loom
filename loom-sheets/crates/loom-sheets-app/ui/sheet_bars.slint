@@ -1,5 +1,7 @@
 import { LoomButton, LoomIconButton, LoomTextField, LoomToolbarSpacer, LoomTabStrip } from "foundation.slint";
+import { LoomStatusBar, LoomStatusText } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { SheetsOperationStatusText } from "operation_status_text.slint";
 import { GridPointer } from "grid_pointer.slint";
 
 export component SheetTabs inherits Rectangle {
@@ -28,6 +30,9 @@ export component SheetTabs inherits Rectangle {
         }
 
         LoomTabStrip {
+            // Hug the tabs: the strip's own spacer would otherwise stretch it
+            // across the toolbar and draw its bottom rule across the window.
+            horizontal-stretch: 0;
             items: root.sheets;
             current: root.active-sheet;
             selected(idx) => { root.select-sheet(idx); }
@@ -44,6 +49,9 @@ export component SheetTabs inherits Rectangle {
         LoomToolbarSpacer { }
 
         LoomTabStrip {
+            // Hug the tabs: the strip's own spacer would otherwise stretch it
+            // across the toolbar and draw its bottom rule across the window.
+            horizontal-stretch: 0;
             items: root.sheets;
             current: root.active-sheet;
             selected(idx) => { root.select-sheet(idx); }
@@ -58,13 +66,6 @@ export component SheetTabs inherits Rectangle {
         }
     }
 
-    Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: 1px;
-        background: Theme.palette().border;
-    }
 }
 
 export component FormulaNameBar inherits Rectangle {
@@ -252,3 +253,20 @@ export component FormulaNameBar inherits Rectangle {
     }
 }
 
+
+/// The status row is a plain row, so right-to-left reverses its order: the
+/// connection state at the reading end (left), the counts beside it, and the
+/// stretching operation text last at the right.
+export component SheetStatusRow inherits LoomStatusBar {
+    in property <bool> rtl: false;
+    in property <string> operation: "";
+    in property <string> summary: "";
+    in property <string> state: "";
+
+    if !root.rtl : SheetsOperationStatusText { message: root.operation; }
+    if !root.rtl : LoomStatusText { text: root.summary; horizontal-alignment: right; }
+    if !root.rtl : LoomStatusText { text: root.state; horizontal-alignment: right; }
+    if root.rtl : LoomStatusText { text: root.state; horizontal-alignment: left; }
+    if root.rtl : LoomStatusText { text: root.summary; horizontal-alignment: left; }
+    if root.rtl : SheetsOperationStatusText { message: root.operation; horizontal-alignment: right; }
+}
