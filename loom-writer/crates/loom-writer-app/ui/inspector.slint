@@ -67,11 +67,8 @@ export component WriterInspector inherits LoomPanel {
         tab-control.grab-focus();
     }
 
-    changed active => {
-        if (root.active && !root.comment-focus-pending) {
-            tab-control.grab-focus();
-        }
-    }
+    // Showing the inspector does not take focus: only the user's own keyboard
+    // route (F6 from the page, or a toolbar tab) puts it on the tabs.
 
     width: 320px;
 
@@ -98,15 +95,15 @@ export component WriterInspector inherits LoomPanel {
             Rectangle {
                 height: Theme.scaled-control-height;
                 tab-control := LoomSegmentedControl {
-                    x: (Theme.rtl ? close-button.width + Theme.tokens.space.sm : 0px) + Theme.tokens.space.md;
+                    x: (Theme.rtl ? close-button.width + Theme.tokens.space.sm : 0px) + Theme.tokens.space.xl;
                     y: 0px;
-                    width: parent.width - close-button.width - Theme.tokens.space.sm - 2 * Theme.tokens.space.md;
+                    width: parent.width - close-button.width - Theme.tokens.space.sm - 2 * Theme.tokens.space.xl;
                     items: ["Format", "Document"];
                     current <=> root.inspector-tab;
                     label: "Inspector tab";
                 }
                 close-button := LoomIconButton {
-                    x: Theme.rtl ? Theme.tokens.space.md : parent.width - self.width - Theme.tokens.space.md;
+                    x: Theme.rtl ? Theme.tokens.space.xl : parent.width - self.width - Theme.tokens.space.xl;
                     y: (parent.height - self.height) / 2;
                     icon: "close";
                     label: "Close inspector";
@@ -122,7 +119,8 @@ export component WriterInspector inherits LoomPanel {
 
         content := VerticalLayout {
             spacing: Theme.tokens.space.md;
-            padding: Theme.tokens.space.md;
+            padding-top: Theme.tokens.space.md;
+            padding-bottom: Theme.tokens.space.md;
             alignment: start;
 
             if root.inspector-tab == 0 : VerticalLayout {
@@ -130,16 +128,23 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Paragraph Style"; }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             heading-control := LoomSegmentedControl {
                 items: ["Body", "H1", "H2", "H3"];
                 current <=> root.heading-level;
                 label: "Heading Style";
                 selected(idx) => { root.select-heading(idx); }
             }
+            }
 
             LoomSectionHeader { title: "Font & Size"; }
 
             // The font family fills the row; the size stepper sits at the reading end.
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             Rectangle {
                 height: max(32px, Theme.scaled-control-height);
                 LoomSegmentedControl {
@@ -225,6 +230,7 @@ export component WriterInspector inherits LoomPanel {
                     }
                 }
             }
+            }
 
             // Character styles row, from the reading-start edge: Bold sits at the
             // left in LTR and at the right in RTL.
@@ -298,6 +304,9 @@ export component WriterInspector inherits LoomPanel {
             LoomSectionHeader { title: "Alignment & Spacing"; }
 
             // Alignment fills the row; the two indent buttons sit at the reading end.
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             Rectangle {
                 height: Theme.scaled-control-height;
                 LoomSegmentedControl {
@@ -349,36 +358,46 @@ export component WriterInspector inherits LoomPanel {
                     }
                 }
             }
+            }
 
             // The caption sits at the reading-start edge, the choices fill the rest.
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+            // Line spacing: the label sits above the strip, and the strip ends where the
+            // alignment strip above ends, so the two rows share their far edge.
+            Text {
+                text: "Line Spacing";
+                font-size: Theme.type.body;
+                color: Theme.palette().ink;
+                horizontal-alignment: Theme.rtl ? right : left;
+            }
+
             Rectangle {
                 height: Theme.scaled-control-height;
-                spacing-caption := Text {
-                    x: Theme.rtl ? parent.width - self.width : 0px;
-                    y: (parent.height - self.height) / 2;
-                    text: "Line Spacing:";
-                    font-size: Theme.type.caption;
-                    color: Theme.palette().ink-secondary;
-                }
-
                 LoomSegmentedControl {
-                    x: Theme.rtl ? 0px : spacing-caption.width + Theme.tokens.space.sm;
+                    x: Theme.rtl ? indent-pair.width + Theme.tokens.space.sm : 0px;
                     y: 0px;
-                    width: parent.width - spacing-caption.width - Theme.tokens.space.sm;
+                    width: parent.width - indent-pair.width - Theme.tokens.space.sm;
                     items: ["1.0", "1.15", "1.5", "2.0"];
                     current <=> root.line-spacing-index;
                     label: "Line Spacing";
                     selected(idx) => { root.select-line-spacing(idx); }
                 }
             }
+            }
 
             LoomSectionHeader { title: "Lists"; }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             LoomSegmentedControl {
                 items: ["None", "Bulleted", "Numbered"];
                 current <=> root.list-style-index;
                 label: "List Style";
                 selected(idx) => { root.select-list-style(idx); }
+            }
             }
             }
 
@@ -390,18 +409,26 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Comments"; }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             comment-field := LoomTextField {
                 label: "New comment";
                 placeholder: "Comment on the selection…";
                 value <=> root.comment-draft;
                 accepted(body) => { root.add-comment(body); }
             }
+            }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             LoomButton {
                 label: "Add Comment";
                 variant: "secondary";
                 enabled: root.comment-draft != "";
                 clicked => { root.add-comment(root.comment-draft); }
+            }
             }
 
             for entry in root.comment-entries : Rectangle {
@@ -487,20 +514,31 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Page Setup"; }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             LoomSegmentedControl {
                 items: ["A4", "US Letter"];
                 current <=> root.page-paper-index;
                 label: "Paper Size";
                 selected(idx) => { root.select-paper-size(idx); }
             }
+            }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             LoomSegmentedControl {
                 items: ["Portrait", "Landscape"];
                 current <=> root.page-orientation-index;
                 label: "Orientation";
                 selected(idx) => { root.select-orientation(idx); }
             }
+            }
 
+            VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
             LoomSegmentedControl {
                 items: ["Normal", "Narrow", "Wide"];
                 current <=> root.page-margins-index;
@@ -508,36 +546,42 @@ export component WriterInspector inherits LoomPanel {
                 selected(idx) => { root.select-margins(idx); }
             }
             }
+            }
         }
         }
 
         // Persistent bottom document status card (pinned below the scroll area)
-        Rectangle {
-            height: 52px;
-            border-radius: Theme.tokens.metrics.radius-medium;
-            background: Theme.palette().surface-sunken;
-            border-width: 1px;
-            border-color: Theme.palette().border;
+        HorizontalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+            padding-bottom: Theme.tokens.space.xl;
+            Rectangle {
+                height: 52px;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: Theme.palette().surface-sunken;
+                border-width: 1px;
+                border-color: Theme.palette().border;
 
-            VerticalLayout {
-                padding-left: Theme.tokens.space.md;
-                padding-right: Theme.tokens.space.md;
-                spacing: 2px;
-                alignment: center;
+                VerticalLayout {
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    spacing: 2px;
+                    alignment: center;
 
-                Text {
-                    text: "Page 1 of " + root.page-count;
-                    font-size: Theme.type.caption;
-                    font-weight: 600;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                }
-                Text {
-                    text: "~" + root.reading-time-mins + " min read";
-                    font-size: Theme.type.micro;
-                    color: Theme.palette().ink-secondary;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    overflow: elide;
+                    Text {
+                        text: "Page 1 of " + root.page-count;
+                        font-size: Theme.type.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                    }
+                    Text {
+                        text: "~" + root.reading-time-mins + " min read";
+                        font-size: Theme.type.micro;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        overflow: elide;
+                    }
                 }
             }
         }

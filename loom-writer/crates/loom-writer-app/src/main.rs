@@ -1599,14 +1599,30 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
         })
         .collect();
     app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
-    app.set_status_left(SharedString::from(format!(
-        "{} words · {} chars · {} {}",
+    app.set_status_left(SharedString::from(status_left_text(
         word_count,
         char_count,
         block_count,
-        if block_count == 1 { "block" } else { "blocks" }
     )));
-    app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
+    app.set_status_right(SharedString::from(announcement));
+}
+
+/// The left status text: the document's counts, with paragraphs named as
+/// writers name them (the model's block is an implementation term).
+fn status_left_text(word_count: usize, char_count: usize, paragraph_count: usize) -> String {
+    format!(
+        "{} {} · {} {} · {} {}",
+        word_count,
+        if word_count == 1 { "word" } else { "words" },
+        char_count,
+        if char_count == 1 { "char" } else { "chars" },
+        paragraph_count,
+        if paragraph_count == 1 {
+            "paragraph"
+        } else {
+            "paragraphs"
+        }
+    )
 }
 
 /// Recompute only the page display projection.  This is intentionally
@@ -2105,7 +2121,7 @@ fn project_selection_event(
     app.set_text_alignment(inspector_alignment(document, &selection));
     let announcement = selection_announcement(document, &selection);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
-    app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
+    app.set_status_right(SharedString::from(announcement));
     refresh_writer_render_projection(
         app,
         document,
@@ -4705,3 +4721,5 @@ mod keyboard_flow_tests;
 
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod writer_chrome_tests;
