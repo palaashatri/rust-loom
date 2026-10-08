@@ -533,7 +533,7 @@ export component WriterInspector inherits LoomPanel {
                     horizontal-alignment: Theme.rtl ? right : left;
                 }
                 Text {
-                    text: root.status-left != "" ? root.status-left : "~" + root.reading-time-mins + " min read";
+                    text: "~" + root.reading-time-mins + " min read";
                     font-size: Theme.type.micro;
                     color: Theme.palette().ink-secondary;
                     horizontal-alignment: Theme.rtl ? right : left;

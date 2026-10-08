@@ -1600,8 +1600,11 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
         .collect();
     app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
     app.set_status_left(SharedString::from(format!(
-        "{} words · {} chars · {} blocks",
-        word_count, char_count, block_count
+        "{} words · {} chars · {} {}",
+        word_count,
+        char_count,
+        block_count,
+        if block_count == 1 { "block" } else { "blocks" }
     )));
     app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
 }
