@@ -97,6 +97,7 @@ export component PresentApp inherits Window {
     }
 
     in property <string> deck-title: "Untitled Deck";
+    in property <bool> deck-dirty: false;
     in property <string> slide-title: "Slide Title";
     in property <string> slide-body: "";
     in property <string> slide-count-text: "1 slide";
@@ -366,7 +367,7 @@ export component PresentApp inherits Window {
             padding: 0px;
 
             if root.custom-chrome && !root.is-preview-mode : LoomTitleBar {
-                title: root.deck-title;
+                title: root.deck-title + (root.deck-dirty ? " \u{2022}" : "");
                 maximized: root.maximized;
                 drag-requested => { root.window-drag(); }
                 // `maximized` and `minimized` are Slint's own window properties.

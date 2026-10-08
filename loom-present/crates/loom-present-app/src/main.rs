@@ -825,6 +825,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     };
     app.set_status_left(SharedString::from(status));
     app.set_status_right(deck_status_text(state).into());
+    app.set_deck_dirty(deck_is_dirty(state));
     picture_view::sync(app, document);
     let drag = state.drag_state.borrow();
     app.set_snap_guides_x(synced(
@@ -1119,6 +1120,7 @@ fn save_current_deck(
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
     file_title::sync(app, state);
     app.set_status_right(deck_status_text(state).into());
+    app.set_deck_dirty(deck_is_dirty(state));
     recovery_deferred::invalidate();
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),

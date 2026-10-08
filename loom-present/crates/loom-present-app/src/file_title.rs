@@ -25,12 +25,9 @@ mod tests {
     use super::*;
     use crate::*;
 
-    #[test]
-    fn saving_renames_the_window_and_close_prompt_without_touching_the_deck() {
+    /// Builds a wired app whose next Save dialog returns `save_to`.
+    fn wired_app(save_to: PathBuf) -> (PresentApp, Rc<GuiState>) {
         set_platform();
-        let dir = std::env::temp_dir().join(format!("loom-deck-title-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("qa_deck.loomdeck");
         let app = PresentApp::new().expect("create PresentApp");
         let state = Rc::new(GuiState {
             session: RefCell::new(empty_session()),
@@ -40,16 +37,48 @@ mod tests {
             selected_element: Cell::new(0),
             inspector_available: Cell::new(true),
             save_path: RefCell::new(None),
-            dialogs: Rc::new(loom_desktop::ScriptedFileDialogs::new(
-                [],
-                [Some(path.clone())],
-            )),
+            dialogs: Rc::new(loom_desktop::ScriptedFileDialogs::new([], [Some(save_to)])),
             deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
             menu_service: None,
             drag_state: RefCell::new(DragState::default()),
         });
         wire_app_callbacks(&app, &state);
+        (app, state)
+    }
+
+    #[test]
+    fn title_bar_dirty_marker_follows_unsaved_edits() {
+        let dir = std::env::temp_dir().join(format!("loom-deck-dirty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dirty_deck.loomdeck");
+        let (app, state) = wired_app(path);
+        refresh(&app, &state);
+        assert!(
+            !app.get_deck_dirty(),
+            "a fresh session must not be marked dirty"
+        );
+
+        app.invoke_add_slide();
+        assert!(
+            app.get_deck_dirty(),
+            "an edit must set the title bar dirty marker"
+        );
+
+        app.invoke_save_deck();
+        assert!(
+            !app.get_deck_dirty(),
+            "saving must clear the title bar dirty marker"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saving_renames_the_window_and_close_prompt_without_touching_the_deck() {
+        let dir = std::env::temp_dir().join(format!("loom-deck-title-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("qa_deck.loomdeck");
+        let (app, state) = wired_app(path);
         refresh(&app, &state);
         assert_eq!(app.get_deck_title().as_str(), "Untitled Presentation");
         app.invoke_save_deck();
