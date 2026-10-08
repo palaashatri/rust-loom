@@ -70,6 +70,7 @@ export component WriterApp inherits Window {
     changed show-navigator => { root.view-state-changed(); }
     in property <bool> inspector-available: true;
     in-out property <bool> compact-inspector-layout: false;
+    in-out property <bool> inspector-quiet-open: false;
     // The compact toolbar still exposes Format. Keep the panel available at
     // every width so the button always does something when activated.
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
@@ -496,6 +497,7 @@ export component WriterApp inherits Window {
                     active: root.docked-inspector-visible;
                     inspector-tab <=> root.inspector-tab;
                     comment-focus-pending <=> root.comment-focus-pending;
+                    quiet-open <=> root.inspector-quiet-open;
                     close-requested => { root.toggle-inspector(); }
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
@@ -569,6 +571,7 @@ export component WriterApp inherits Window {
             active: root.compact-inspector-visible;
             inspector-tab <=> root.inspector-tab;
             comment-focus-pending <=> root.comment-focus-pending;
+            quiet-open <=> root.inspector-quiet-open;
             close-requested => { root.toggle-inspector(); }
             is-bold <=> root.is-bold;
             is-italic <=> root.is-italic;

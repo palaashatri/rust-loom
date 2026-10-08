@@ -59,6 +59,9 @@ pub(crate) fn start_with_inspector_open(app: &WriterApp, width: u32) {
         width as f32 / Theme::get(app).get_text_scale().max(1.0) >= DOCKED_INSPECTOR_MIN_WIDTH;
     if docked {
         app.set_show_inspector(true);
+        // The inspector's focus grab is for user-opened panels; at launch the page keeps focus.
+        app.set_inspector_quiet_open(true);
+        app.invoke_focus_page();
         AUTO_OPENED_INSPECTORS.with(|windows| windows.borrow_mut().push(app.as_weak()));
     }
 }

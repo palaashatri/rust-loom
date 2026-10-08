@@ -34,6 +34,8 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     /// Set to put the keyboard caret in the new-comment field.
     in-out property <bool> comment-focus-pending: false;
+    /// Set once at launch so the first automatic open does not take focus.
+    in-out property <bool> quiet-open: false;
     in-out property <string> comment-draft: "";
     in property <string> status-left: "";
     in property <int> word-count: 83;
@@ -67,8 +69,14 @@ export component WriterInspector inherits LoomPanel {
         tab-control.grab-focus();
     }
 
-    // Showing the inspector does not take focus: only the user's own keyboard
-    // route (F6 from the page, or a toolbar tab) puts it on the tabs.
+    // Opening the inspector moves focus into it (a user action). Startup returns
+    // focus to the page afterwards, so no ring is drawn at launch.
+    changed active => {
+        if (root.active && !root.comment-focus-pending && !root.quiet-open) {
+            tab-control.grab-focus();
+        }
+        if (root.active) { root.quiet-open = false; }
+    }
 
     width: 320px;
 
