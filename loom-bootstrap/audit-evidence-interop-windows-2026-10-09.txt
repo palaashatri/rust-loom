@@ -1,0 +1,86 @@
+LOOM GATE 11 INTEROPERABILITY EVIDENCE - Windows, real Microsoft Office
+Date: 2026-10-09
+Commit tested: 0bc6705df666ebbcf11273f892128dc32e83b1c2 (origin/main, cloned fresh in WSL Ubuntu)
+Office: Excel 16.0 build 20430, Word 16.0 build 16.0.20430, PowerPoint 16.0 build 20430
+Method: fixtures generated in WSL with
+  CARGO_INCREMENTAL=0 LOOM_INTEROP_OUT=<dir> cargo test -p <core> --test interop_fixtures -- --ignored --nocapture
+(loom-sheets-core, loom-writer-core, loom-present-core; each 1 passed), copied to Windows, then checked with
+loom-sheets/tests/interop/check_excel.ps1, loom-writer/tests/interop/check_word.ps1,
+loom-present/tests/interop/check_powerpoint.ps1. Office ran hidden (Visible=false / no window, DisplayAlerts off),
+documents read-only. No stray EXCEL/WINWORD/POWERPNT processes remained afterwards.
+
+SUMMARY
+  Sheets  (Excel)      47 passed, 1 failed
+  Writer  (Word)       43 passed, 0 failed
+  Present (PowerPoint) 35 passed, 0 failed
+
+SHEETS - check_excel.ps1
+  PASS  xlsx opens in Excel without repair
+  PASS  sheet names are "Q1 Sales", "Rates"
+  PASS  xlsx carries the cached values Loom calculated (formula cells)
+  PASS  Excel recalculated values equal Loom's values (49 cells)
+  PASS  formula D2, D5, B7, D7, H2, H3, H4, H5, H6, H7, H8 (11 checks, each equals the expected formula text)
+  PASS  text cells are values, not formulas (A2, A5)
+  PASS  accented/typographic text survives (A4, A5)
+  PASS  Rates sheet data (A2=North, B4=0.25)
+  PASS  C2 currency format $#,##0.00 / C2 displays $1.25
+  PASS  E2 date format yyyy-mm-dd / E2 displays 2024-03-15
+  PASS  F2 percent format 0.0% / F2 displays 25.6%
+  PASS  D7 number format #,##0.00
+  PASS  header cells A1:F1 are bold; A2 is not bold; header fill is gray E5E7EB
+  PASS  D7 fill is yellow FEF08A, bold, single underline; F2 is italic
+  PASS  header cell B1 has all four borders; D2 has no border; A7 is right aligned
+  PASS  column A ~150 px; column D ~90 px; column B default width; row 1 height ~30 px
+  PASS  freeze panes: 1 row and 1 column
+  PASS  one chart on Q1 Sales; clustered column (51); title "Totals by item"
+  PASS  chart series reads Q1 Sales D2:D5 with A2:A5 categories; plots 3.75, 8, 31.5, 24
+  PASS  shape "Interop shape" is present
+  FAIL  CSV opened plainly in Excel keeps accents  -- Excel shows 'CafAc ZoA®' (file has BOM: False); Excel assumes the ANSI code page without a UTF-8 BOM
+  PASS  CSV imported as UTF-8 keeps accents and typographic text
+  PASS  CSV holds calculated values (D2=3.75, H3=0.8, D7=67.25)
+  PASS  CSV has no formulas (values only)
+
+WRITER - check_word.ps1 (all 43 PASS)
+  Markdown (6): headings, lists, table rows, UTF-8 text, bold/italic markup, blank line before table.
+  docx (30): opens read-only without repair; Word exports it to a non-empty PDF (1 page); body paragraphs in order;
+  accents/typography; Heading 1/2 styles and outline levels; heading larger and bold; named body font (Arial 12 / 24);
+  bold/italic/underline runs and plain run; bulleted list; numbered 1. 2. 3.; one 3x2 table with text, bold header row
+  and borders; centered and left alignment; Letter landscape; margins 72/72/54/54; one comment (author Ada Lovelace,
+  text, anchored on "bold"); Title property "Interop Report".
+  writer.pdf (7): one Letter-landscape page; Helvetica faces with WinAnsi; text; accents; bold/oblique fonts per run;
+  centered paragraph; table drawn as grid.
+  Note: writer.pdf is checked by decoding its uncompressed content stream, not by a PDF reader (script comment: Word's
+  PDF reflow hangs an unattended Word).
+
+PRESENT - check_powerpoint.ps1 (all 35 PASS)
+  present.pdf (10, decoded directly): 4 pages 842x595; titles/labels/42%/Logo/Thank you; subtitle with en dash, accent,
+  curly quotes; one embedded picture; two-line body split.
+  pptx (25): opens read-only without repair; 4 slides; 16:9 960x540; text on all slides; title placeholder; rectangle
+  rotated 15 deg with geometry 576/134.4/288x115.2; oval; one picture (2:1, centred, only slide 3); notes on slides 1-2,
+  none on 3-4; EntryEffect per slide 3849, 3853, 0, 3849 (fade, push, none, fade); PowerPoint exports the pptx to a
+  non-empty PDF.
+
+MISMATCH LIST
+  1. [severity 3, fixture/test defect, not an app defect] check_excel "CSV opened plainly in Excel keeps accents" FAIL.
+     Cause: the fixture (loom-sheets-core/tests/interop_fixtures.rs, line ~195) writes sheets-N.csv from
+     to_csv_with_values(...).as_bytes() with no BOM, so Excel reads it as the ANSI code page. The app does not export
+     that way: loom-sheets-app/src/workbook_io.rs csv_file_bytes() prepends the UTF-8 BOM (EF BB BF) to every CSV export
+     (comment there: Excel reads CSV as the system code page without it). Verified directly: the same fixture CSV with a
+     BOM prepended, opened plainly in hidden Excel, returned A4 = "Cafe-acute Zo-diaeresis" correctly (checked by code
+     page bytes 0x82/0x89 in OEM output).
+     So the real export is NOT affected; the check tests the wrong bytes.
+  2. [severity 3, coverage gap] The CSV checks also differ from the app in content: the app exports with
+     to_csv_with_formulas (formulas preserved), the fixture uses to_csv_with_values, so "CSV holds calculated values /
+     has no formulas" validates a variant the app does not write. The BOM-bearing real export path is untested by Excel.
+  3. [not a mismatch, caveat] Windows only. Linux LibreOffice checks were run separately (2026-10-07). Word/PowerPoint
+     opened the fixtures; PDFs from Loom were not opened by a PDF viewer here.
+
+RECOMMENDATION (fixture change, do not weaken the check)
+  Make the fixture write the same bytes as the app: either move the BOM prefix into a shared loom-sheets-core helper that
+  both csv_file_bytes() and interop_fixtures.rs call, or at minimum have the fixture prepend [0xEF,0xBB,0xBF] to
+  sheets-1.csv. Preferably also write a second fixture from to_csv_with_formulas through that helper and assert the
+  formulas survive. After the change the plain-open check should PASS while "CSV imported as UTF-8" (OpenText, 65001)
+  stays unchanged. Tests to add: a core-level test that the shared export helper starts with EF BB BF.
+
+Gate 11 verdict from this run: all Word and PowerPoint checks and 47/48 Excel checks pass at 0bc6705; the single FAIL is
+a fixture defect (severity 3), not a product defect, and is verified as such. No severity 1 or 2 mismatch found.
