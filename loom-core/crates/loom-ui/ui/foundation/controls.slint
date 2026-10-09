@@ -379,8 +379,11 @@ export component LoomToggle inherits Rectangle {
             border-color: focus.has-focus ? Theme.palette().focus
                 : root.checked ? Theme.palette().accent
                 : Theme.palette().border-strong;
+            // High contrast's off track is the black surface: the white knob would
+            // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
                 : root.checked ? Theme.palette().accent
+                : Theme.active-theme == "high-contrast" ? Theme.palette().surface
                 : Theme.palette().border;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;

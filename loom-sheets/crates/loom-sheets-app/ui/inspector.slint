@@ -1,9 +1,10 @@
 import {
     LoomTextField, LoomSearchField, LoomTabStrip,
-    LoomPanel, LoomSectionHeader, LoomToggle, LoomButton, LoomIconButton,
+    LoomPanel, LoomToggle, LoomButton, LoomIconButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
-import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetChoiceRow } from "inspector_rows.slint";
+import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
+import { SheetScrollBar } from "sheet_scrollbar.slint";
 
 export component SheetInspector inherits LoomPanel {
     in property <string> selection-range: "A1";
@@ -49,10 +50,11 @@ export component SheetInspector inherits LoomPanel {
     callback adjust-font(int);
     callback adjust-decimals(int);
     callback close-requested;
+    // How far the body scrolls: zero when every control fits.
+    property <length> scroll-range: max(0px, inspector-scroll.viewport-height - inspector-scroll.height);
 
     public function focus-inspector() { panel-focus.focus(); }
 
-    title: root.selection-range + " selection";
     width: 320px;
 
     changed active => {
@@ -82,16 +84,16 @@ export component SheetInspector inherits LoomPanel {
         if !Theme.rtl : HorizontalLayout {
             cross-axis-alignment: center;
             Text {
-                text: "Format and table properties";
-                font-size: Theme.type.caption;
-                font-weight: 600;
-                color: Theme.palette().ink-secondary;
+                text: root.selection-range + " selection";
+                font-size: Theme.type.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
                 horizontal-stretch: 1;
                 min-width: 0px;
                 wrap: no-wrap;
                 overflow: elide;
                 accessible-role: text;
-                accessible-label: "Format and table properties";
+                accessible-label: root.selection-range + " selection";
             }
             LoomButton {
                 label: "Close";
@@ -107,17 +109,17 @@ export component SheetInspector inherits LoomPanel {
                 clicked => { root.close-requested(); }
             }
             Text {
-                text: "Format and table properties";
-                font-size: Theme.type.caption;
-                font-weight: 600;
-                color: Theme.palette().ink-secondary;
+                text: root.selection-range + " selection";
+                font-size: Theme.type.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
                 horizontal-stretch: 1;
                 min-width: 0px;
                 horizontal-alignment: right;
                 wrap: no-wrap;
                 overflow: elide;
                 accessible-role: text;
-                accessible-label: "Format and table properties";
+                accessible-label: root.selection-range + " selection";
             }
         }
 
@@ -149,7 +151,7 @@ export component SheetInspector inherits LoomPanel {
 
                 if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
                     spacing: Theme.tokens.space.md;
-                    LoomSectionHeader { title: "Table"; }
+                    SheetHeading { title: "Table"; }
                     SheetFieldRow {
                         label: "Name";
                         field-label: "Table name";
@@ -185,11 +187,11 @@ export component SheetInspector inherits LoomPanel {
 
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;
-                    LoomSectionHeader { title: "Cell"; }
+                    SheetHeading { title: "Cell"; }
                     SheetFieldRow { label: "Selection"; field-label: "Selected range"; value: root.selection-range; }
                     SheetFieldRow { label: "Value"; field-label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; }
-                    SheetFieldRow { label: "Formula"; field-label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; }
-                    LoomSectionHeader { title: "Font Style"; }
+                    SheetFieldRow { label: "Formula"; field-label: "Raw formula"; value: root.selection-formula == "" ? "No formula" : root.selection-formula; placeholder: root.selection-formula == ""; }
+                    SheetHeading { title: "Font Style"; }
                     if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         LoomIconButton {
@@ -256,7 +258,7 @@ export component SheetInspector inherits LoomPanel {
                         decrease => { root.adjust-font(-1); }
                         increase => { root.adjust-font(1); }
                     }
-                    LoomSectionHeader { title: "Borders & Fill"; }
+                    SheetHeading { title: "Borders & Fill"; }
                     HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         alignment: Theme.rtl ? end : start;
@@ -279,7 +281,7 @@ export component SheetInspector inherits LoomPanel {
                         accessible-label: "Fill";
                     }
                     SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
-                    LoomSectionHeader { title: "Data Format"; }
+                    SheetHeading { title: "Data Format"; }
                     SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; choice-names: ["Number", "Currency", "Percent", "Decimal places"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
                     SheetStepperRow {
                         label: "Decimals";
@@ -292,7 +294,7 @@ export component SheetInspector inherits LoomPanel {
                         decrease => { root.adjust-decimals(-1); }
                         increase => { root.adjust-decimals(1); }
                     }
-                    LoomSectionHeader { title: "Alignment"; }
+                    SheetHeading { title: "Alignment"; }
                     SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
                     SheetStepperRow {
                         label: "Row height";
@@ -333,5 +335,19 @@ export component SheetInspector inherits LoomPanel {
             }
         }
     }
+    }
+    // Drawn over the body's right padding (the left one in right-to-left), so the
+    // track never covers a control. It is not a Tab stop: focus already scrolls.
+    if root.scroll-range > 0px : SheetScrollBar {
+        label: "Inspector scroll";
+        focusable: false;
+        x: Theme.rtl ? (Theme.tokens.space.xl - Theme.tokens.space.md) / 2
+            : root.width - Theme.tokens.space.xl + (Theme.tokens.space.xl - Theme.tokens.space.md) / 2;
+        y: inspector-scroll.absolute-position.y - root.absolute-position.y;
+        width: Theme.tokens.space.md;
+        height: inspector-scroll.height;
+        maximum: root.scroll-range;
+        page-size: inspector-scroll.height;
+        value <=> inspector-scroll.viewport-y;
     }
 }

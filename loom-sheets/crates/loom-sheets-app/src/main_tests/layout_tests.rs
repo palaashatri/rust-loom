@@ -541,7 +541,8 @@ fn assert_control_inside_component(
         .filter(|control| {
             let position = control.absolute_position();
             let size = control.size();
-            control.accessible_role() != Some(AccessibleRole::Text)
+            (control.accessible_role() != Some(AccessibleRole::Text)
+                || control.accessible_value().is_some())
                 && position.x >= parent_position.x - 1.0
                 && position.y >= parent_position.y - 1.0
                 && position.x + size.width <= parent_position.x + parent_size.width + 1.0

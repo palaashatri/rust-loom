@@ -84,7 +84,7 @@ fn inspector_icon_buttons_grow_with_text_scale_and_the_title_stays_on_one_line()
         app.set_template_text_scale(scale);
         let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
         let bold = first_named(&app, "Toggle bold formatting (Cell inspector)");
-        let title = first_named(&app, "Format and table properties");
+        let title = first_named(&app, "A1 selection");
         (bold.size().height, title.size().height)
     };
     let (bold_1, title_1) = measure(1.0);

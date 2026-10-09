@@ -7,8 +7,11 @@ fn control(app: &SheetsApp, label: &str) -> ElementHandle {
     // while keeping the prompt's text node available for the ink measurement.
     let role = if label == app.get_save_changes_prompt().as_str() {
         AccessibleRole::Text
-    } else if ["Table name", "Worksheet rows", "Worksheet columns"].contains(&label) {
+    } else if ["Table name"].contains(&label) {
         AccessibleRole::TextInput
+    } else if ["Worksheet rows", "Worksheet columns"].contains(&label) {
+        // Read-only values in the Table tab expose their value as text.
+        AccessibleRole::Text
     } else {
         AccessibleRole::Button
     };

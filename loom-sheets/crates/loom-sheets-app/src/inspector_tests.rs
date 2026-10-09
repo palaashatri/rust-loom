@@ -415,3 +415,278 @@ fn cell_inspector_controls_sit_under_their_own_headings() {
         "fill swatches must sit under Borders & Fill ({borders}, {fill}, {data_format})"
     );
 }
+
+/// The Cell tab overflows a 720 px window, so a visible scroll track must say
+/// that more follows. A Table tab that fits shows none.
+#[test]
+fn the_inspector_shows_a_scroll_track_only_when_its_content_overflows() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1024, 720));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let _ = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render the Cell inspector");
+    let tracks: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Inspector scroll")
+        .filter(|e| e.accessible_role() == Some(AccessibleRole::Slider))
+        .collect();
+    assert_eq!(
+        tracks.len(),
+        1,
+        "one inspector scroll track while the Cell tab overflows"
+    );
+    let panel = ElementHandle::find_by_element_id(&app, "SheetsApp::inspector-panel")
+        .next()
+        .expect("inspector panel");
+    let right = panel.absolute_position().x + panel.size().width;
+    let track = &tracks[0];
+    let x = track.absolute_position().x;
+    assert!(
+        x >= right - 16.0 && x + track.size().width <= right + 0.5,
+        "the track sits in the panel's 16 px padding, not over a control: x={x}, panel right={right}"
+    );
+    assert!(
+        track.size().height >= 100.0,
+        "the track spans the visible body, height {}",
+        track.size().height
+    );
+
+    app.window().set_size(PhysicalSize::new(1920, 1200));
+    app.set_inspector_tab(0);
+    let _ = snapshot_component(&app, 1920.0, 1200.0, 1.0).expect("render the Table inspector");
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Inspector scroll").count(),
+        0,
+        "no scroll track when the Table tab fits"
+    );
+}
+
+/// The inspector stacked two headings: the panel's "A1 selection" and a second
+/// "Format and table properties" row above the search field. One row now names
+/// the selection and carries Close.
+#[test]
+fn the_inspector_has_one_heading_row_naming_the_selection() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(0);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Table inspector");
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Format and table properties").count(),
+        0,
+        "the duplicate heading must be gone"
+    );
+    let titles: Vec<_> = ElementHandle::find_by_accessible_label(&app, "A1 selection").collect();
+    assert_eq!(titles.len(), 1, "exactly one heading names the selection");
+    // Only the button counts: its caption is also exposed as a text node. Other
+    // panels have their own Close controls, so only the inspector's are counted.
+    let panel = ElementHandle::find_by_element_id(&app, "SheetsApp::inspector-panel")
+        .next()
+        .expect("inspector panel");
+    let origin = panel.absolute_position();
+    let inside = |e: &ElementHandle| {
+        let p = e.absolute_position();
+        p.x >= origin.x
+            && p.x < origin.x + panel.size().width
+            && p.y >= origin.y
+            && p.y < origin.y + panel.size().height
+    };
+    let close: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Close")
+        .filter(|e| e.accessible_role() == Some(AccessibleRole::Button) && inside(e))
+        .collect();
+    assert_eq!(close.len(), 1, "one Close control in the inspector");
+    let (title_y, close_y) = (
+        titles[0].absolute_position().y,
+        close[0].absolute_position().y,
+    );
+    assert!(
+        (title_y - close_y).abs() < 16.0,
+        "the title and Close share one row: title y={title_y}, Close y={close_y}"
+    );
+}
+
+/// A section heading's text starts where the controls under it start. The shared
+/// header pads its text by 16 px, so each heading must be shifted back to the
+/// column edge that its rows use.
+#[test]
+fn section_headings_start_where_the_controls_below_them_start() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+    // `role` narrows the match when a caption is also exposed as another node.
+    let x_of = |label: &str, role: Option<AccessibleRole>| -> f32 {
+        let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label)
+            .filter(|e| role.is_none() || e.accessible_role() == role)
+            .collect();
+        assert_eq!(found.len(), 1, "one element named {label}");
+        found[0].absolute_position().x
+    };
+    let column = x_of("Font size", None);
+    assert!(
+        (x_of("Font Style", None) - column).abs() < 1.0,
+        "Font Style must start at the x of the Font size row ({column})"
+    );
+    let switch = x_of("Border", Some(AccessibleRole::Switch));
+    assert!(
+        (x_of("Borders & Fill", None) - switch).abs() < 1.0,
+        "Borders & Fill must start at the x of the Border switch ({switch})"
+    );
+    let choice = x_of("Number", Some(AccessibleRole::Button));
+    assert!(
+        (x_of("Data Format", None) - choice).abs() < 1.0,
+        "Data Format must start at the x of its choices ({choice})"
+    );
+}
+
+/// A read-only value is a sunken well with no input outline, so it does not look
+/// like a field that takes typing. An editable field keeps its outline.
+#[test]
+fn read_only_values_drop_the_input_outline_and_editable_fields_keep_it() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    apply_theme(&app, "light");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(0);
+    let table = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Table tab");
+    let name: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Table name")
+        .filter(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
+        .collect();
+    assert_eq!(name.len(), 1, "one editable Table name field");
+    let input = name[0].absolute_position();
+    let mid = (input.y + name[0].size().height / 2.0) as u32;
+    // The shared field insets its text by space.md (8 px) inside its outline box.
+    let outline_x = (input.x - 8.0) as u32;
+    assert_ne!(
+        table.get_pixel(outline_x, mid).0,
+        table.get_pixel(outline_x + 4, mid).0,
+        "an editable field keeps its outline"
+    );
+
+    app.set_inspector_tab(1);
+    let cell = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell tab");
+    let value: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Selected range").collect();
+    assert_eq!(value.len(), 1, "one Selected range value");
+    let well = value[0].absolute_position();
+    let mid = (well.y + value[0].size().height / 2.0) as u32;
+    let edge = well.x as u32;
+    assert_eq!(
+        cell.get_pixel(edge, mid).0,
+        cell.get_pixel(edge + 4, mid).0,
+        "a read-only value has no input outline"
+    );
+}
+
+/// The Formula row shows a cell's raw formula. A cell holding a plain value has
+/// no formula, so the row says so instead of repeating the value.
+#[test]
+fn the_formula_row_shows_a_formula_and_says_no_formula_for_a_value() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let mut sheet = Sheet::new("formula");
+    sheet.set_str("A1", "Item");
+    sheet.set_str("B1", "=A1");
+    let values = evaluate(&sheet);
+    let formula_shown_for = |cell: &str| -> String {
+        let at = CellRef::parse(cell).unwrap();
+        update_selection_range(&app, &sheet, &values, GridSelection::new(at, at));
+        let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+        let rows: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Raw formula").collect();
+        assert_eq!(rows.len(), 1, "one Raw formula field");
+        rows[0]
+            .accessible_value()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    };
+    assert_eq!(formula_shown_for("A1"), "No formula");
+    assert_eq!(formula_shown_for("B1"), "=A1");
+}
+
+fn inspector_luminance(c: [u8; 4]) -> f64 {
+    let channel = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+}
+
+fn inspector_contrast(a: [u8; 4], b: [u8; 4]) -> f64 {
+    let (la, lb) = (inspector_luminance(a), inspector_luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+fn rgba_of(c: slint::Color) -> [u8; 4] {
+    [c.red(), c.green(), c.blue(), c.alpha()]
+}
+
+/// The Border switch needs a visible knob and track in every theme. In high
+/// contrast the off-state track was white, the same as the white knob, so the
+/// knob disappeared. Light and dark keep the shared tokens.
+#[test]
+fn the_border_switch_keeps_a_visible_knob_and_track_in_each_theme() {
+    set_platform();
+    for theme in ["light", "dark", "high-contrast"] {
+        for checked in [false, true] {
+            let app = SheetsApp::new().expect("create SheetsApp");
+            apply_theme(&app, theme);
+            app.window().set_size(PhysicalSize::new(1280, 800));
+            app.set_show_inspector(true);
+            app.set_inspector_tab(1);
+            app.set_cell_border(checked);
+            let picture =
+                snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+            let switch: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Border")
+                .filter(|e| e.accessible_role() == Some(AccessibleRole::Switch))
+                .collect();
+            assert_eq!(switch.len(), 1, "one Border switch");
+            let origin = switch[0].absolute_position();
+            // The 34x20 track is centred in the 28 px row, at the reading-start edge.
+            let (x0, top) = (origin.x.round() as u32, (origin.y + 4.0).round() as u32);
+            let mid = top + 10;
+            let (track, knob) = if checked {
+                (
+                    picture.get_pixel(x0 + 6, mid).0,
+                    picture.get_pixel(x0 + 24, mid).0,
+                )
+            } else {
+                (
+                    picture.get_pixel(x0 + 26, mid).0,
+                    picture.get_pixel(x0 + 10, mid).0,
+                )
+            };
+            let edge = picture.get_pixel(x0 + 17, top).0;
+            let panel = picture.get_pixel(x0 - 6, mid).0;
+            let palette = Theme::get(&app).invoke_palette();
+            let state = format!("{theme}, checked={checked}");
+            if theme == "high-contrast" {
+                assert!(
+                    inspector_contrast(knob, track) >= 3.0,
+                    "{state}: knob {knob:?} must stand out from its track {track:?}"
+                );
+                assert!(
+                    inspector_contrast(edge, panel) >= 3.0,
+                    "{state}: the switch outline {edge:?} must stand out from the panel {panel:?}"
+                );
+            } else {
+                let (want_track, want_knob, want_edge) = if checked {
+                    (palette.accent, palette.accent_ink, palette.accent)
+                } else {
+                    (palette.border, palette.paper, palette.border_strong)
+                };
+                assert_eq!(track, rgba_of(want_track), "{state}: track keeps its token");
+                assert_eq!(knob, rgba_of(want_knob), "{state}: knob keeps its token");
+                assert_eq!(edge, rgba_of(want_edge), "{state}: outline keeps its token");
+            }
+        }
+    }
+}

@@ -1163,6 +1163,11 @@ pub(crate) fn update_selection_range(
         .raw(selected)
         .map(SharedString::from)
         .unwrap_or_default();
+    app.set_inspector_formula(if formula.starts_with('=') {
+        formula.clone()
+    } else {
+        SharedString::new()
+    });
     app.set_selection_formula(formula);
     app.invoke_reset_formula_edit_buffer();
     app.set_selected_cell(selected.to_a1().into());

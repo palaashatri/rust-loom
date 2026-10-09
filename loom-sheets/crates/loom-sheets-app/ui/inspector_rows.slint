@@ -1,7 +1,7 @@
 // Rows of the Sheets inspector. Each row lists its parts from the reading-start
 // edge, so right-to-left is the exact mirror image of left-to-right: label,
 // then field, then the buttons; or buttons, field, label.
-import { LoomTextField, LoomButton, LoomIconButton } from "foundation.slint";
+import { LoomTextField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 component SheetRowLabel inherits Text {
@@ -15,12 +15,57 @@ component SheetRowLabel inherits Text {
     accessible-role: text;
 }
 
-/// A label with one field (read-only unless `editable`).
+/// A section heading. The shared header pads its text by space.xl, so the heading
+/// moves back by that much: its text starts at the column edge of the rows below.
+export component SheetHeading inherits Rectangle {
+    in property <string> title: "";
+    height: Theme.tokens.metrics.panel-header-height;
+
+    LoomSectionHeader {
+        x: Theme.rtl ? Theme.tokens.space.xl : -Theme.tokens.space.xl;
+        width: Theme.rtl ? parent.width : parent.width + Theme.tokens.space.xl;
+        height: parent.height;
+        title: root.title;
+    }
+}
+
+/// A read-only value: a sunken well with no input outline, so it does not look
+/// like a field that takes typing. Editable fields keep the shared outline.
+component SheetValueBox inherits Rectangle {
+    in property <string> field-label: "";
+    in property <string> value: "";
+    in property <bool> placeholder: false;
+
+    min-width: 140px;
+    horizontal-stretch: 1;
+    height: Theme.scaled-control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: Theme.palette().surface-sunken;
+    accessible-role: text;
+    accessible-label: root.field-label;
+    accessible-value: root.value;
+
+    Text {
+        x: Theme.tokens.space.md;
+        width: parent.width - Theme.tokens.space.xl;
+        height: parent.height;
+        text: root.value;
+        font-size: Theme.type.body;
+        color: root.placeholder ? Theme.palette().ink-disabled : Theme.palette().ink-secondary;
+        horizontal-alignment: Theme.rtl ? right : left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+/// A label with one field: an editable field gets the shared input; a read-only
+/// value gets the subdued well.
 export component SheetFieldRow inherits Rectangle {
     in property <string> label: "";
     in property <string> field-label: "";
     in property <string> value: "";
     in property <bool> editable: false;
+    in property <bool> placeholder: false;
     callback edited(string);
 
     min-width: 0px;
@@ -30,21 +75,29 @@ export component SheetFieldRow inherits Rectangle {
         spacing: Theme.tokens.space.sm;
         cross-axis-alignment: center;
         SheetRowLabel { text: root.label; accessible-label: root.label; }
-        LoomTextField {
+        if root.editable : LoomTextField {
             label: root.field-label;
             value: root.value;
-            enabled: root.editable;
             edited(text) => { root.edited(text); }
+        }
+        if !root.editable : SheetValueBox {
+            field-label: root.field-label;
+            value: root.value;
+            placeholder: root.placeholder;
         }
     }
     if Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.sm;
         cross-axis-alignment: center;
-        LoomTextField {
+        if root.editable : LoomTextField {
             label: root.field-label;
             value: root.value;
-            enabled: root.editable;
             edited(text) => { root.edited(text); }
+        }
+        if !root.editable : SheetValueBox {
+            field-label: root.field-label;
+            value: root.value;
+            placeholder: root.placeholder;
         }
         SheetRowLabel { text: root.label; accessible-label: root.label; }
     }
@@ -116,7 +169,7 @@ export component SheetStepperRow inherits Rectangle {
                 decrease => { root.decrease(); }
                 increase => { root.increase(); }
             }
-            LoomTextField { label: root.field-label; value: root.value; enabled: false; horizontal-stretch: 1; }
+            SheetValueBox { field-label: root.field-label; value: root.value; }
             if !Theme.rtl : SheetStepButtons {
                 plus-first: root.plus-first;
                 decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;
