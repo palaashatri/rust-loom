@@ -669,6 +669,8 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     ));
     app.set_active_slide_index(document.active_index as i32);
     if let Some(slide) = document.active_slide() {
+        // The layout control names the slide's own layout, not a default.
+        app.set_active_template_index(slide_layouts::choice_for_layout(&slide.layout));
         app.set_slide_title(slide.title.as_str().into());
         app.set_slide_body(active_body(&session).into());
         app.set_slide_notes(slide.speaker_notes.as_str().into());
@@ -1159,21 +1161,10 @@ fn capture_present_journey_step(
     Ok(file_name)
 }
 
+/// Whether two saved documents are identical, including the slide they open on:
+/// used to check that a saved file reopens as the same deck.
 fn presentation_documents_match(left: &PresentationDocument, right: &PresentationDocument) -> bool {
-    left.id == right.id
-        && left.title == right.title
-        && left.author == right.author
-        && left.theme == right.theme
-        && left.active_index == right.active_index
-        && left.slides.len() == right.slides.len()
-        && left.slides.iter().zip(&right.slides).all(|(left, right)| {
-            left.id == right.id
-                && left.title == right.title
-                && left.layout == right.layout
-                && left.elements == right.elements
-                && left.speaker_notes == right.speaker_notes
-                && left.bg_color == right.bg_color
-        })
+    left.active_index == right.active_index && deck_guard::content_matches(left, right)
 }
 
 /// Record the controller-backed direct manipulation journey with per-step
@@ -1719,34 +1710,6 @@ fn schedule_menu_action(
         })
 }
 
-fn deck_is_dirty(state: &GuiState) -> bool {
-    let session = state.session.borrow();
-    !presentation_documents_match(&session.document, &state.last_saved.borrow())
-        || session.transitions != *state.last_saved_transitions.borrow()
-}
-
-fn request_deck_replacement(
-    app: &PresentApp,
-    state: &GuiState,
-    operation: PendingReplacement,
-) -> bool {
-    if !deck_is_dirty(state) {
-        return false;
-    }
-    state.pending_replacement.set(Some(operation));
-    app.set_save_changes_document(
-        file_title::display_title(
-            state.save_path.borrow().as_deref(),
-            &state.session.borrow().document.title,
-        )
-        .into(),
-    );
-    app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
-    app.set_save_changes_open(true);
-    set_status(app, "Unsaved changes — choose Save, Discard, or Cancel");
-    true
-}
-
 /// Closing with unsaved work asks first, through the same Save / Discard /
 /// Cancel dialog New and Open use. The custom title bar's close button raises
 /// this same request.
@@ -1799,6 +1762,7 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     view_state::wire(app, state);
     slide_order::wire(app, state);
+    deck_guard::wire(app, state);
     {
         let state = state.clone();
         app.on_recovery_flush(move || {
@@ -3181,6 +3145,8 @@ mod picture_tests;
 mod appearance;
 #[cfg(test)]
 mod appearance_tests;
+mod deck_guard;
+use deck_guard::{deck_is_dirty, request_deck_replacement};
 mod element_names;
 mod file_menu;
 mod file_title;
@@ -3223,6 +3189,8 @@ mod toolbar_tests;
 
 #[cfg(test)]
 mod accessibility_tests;
+#[cfg(test)]
+mod deck_guard_tests;
 #[cfg(test)]
 mod miniature_tests;
 #[cfg(test)]

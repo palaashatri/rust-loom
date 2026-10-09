@@ -53,6 +53,17 @@ export component PresentSlideCanvas inherits Rectangle {
     /// Give the slide editor keyboard focus (arrows, Delete, shortcuts).
     public function focus-slide() { slide-focus.focus(); }
 
+    /// Edit the selected object's text where it stands. False when the selection is
+    /// not one editable text object (none, several, or a picture).
+    public function start-editing() -> bool {
+        if (root.editing-enabled && root.selection-count == 1 && root.active-element-index < root.element-types.length
+            && root.element-types[root.active-element-index] != 6) {
+            root.editing-idx = root.active-element-index;
+            return true;
+        }
+        return false;
+    }
+
     slide-focus := FocusScope {
         enabled: root.editing-enabled;
         // The slide is not a Tab stop of its own. Tab moves through the objects, each a
@@ -60,10 +71,7 @@ export component PresentSlideCanvas inherits Rectangle {
         focus-on-tab-navigation: false;
         key-pressed(event) => {
             // Enter or F2 edits the selected object's text where it stands; Escape stops editing.
-            if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta
-                && root.selection-count == 1 && root.active-element-index < root.element-types.length
-                && root.element-types[root.active-element-index] != 6) {
-                root.editing-idx = root.active-element-index;
+            if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta && root.start-editing()) {
                 return accept;
             }
             return root.canvas-key-pressed(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta);
@@ -184,12 +192,19 @@ export component PresentSlideCanvas inherits Rectangle {
                     : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
                 property <bool> too-small: root.fit-screen && text-px < 4px;
 
-                Rectangle {
-                    // Text too small to read is drawn as a bar, but an empty object draws nothing.
-                    visible: too-small && root.element-types[idx] != 6 && root.element-contents[idx] != "";
+                // Text too small to read is drawn as bars, one for each line its text takes at this
+                // size (about half an em a character), so a long body shows several bars and a title
+                // one. An empty object or a picture draws nothing.
+                property <length> bar-pitch: text-px * 1.25;
+                property <float> bar-chars: (self.width * 0.88) / (max(text-px, 1px) * 0.5);
+                property <float> bar-count: (root.element-contents[idx] == "" || root.element-types[idx] == 6) ? 0.0
+                    : min(5.0, max(1.0, ceil(root.element-contents[idx].character-count / self.bar-chars)));
+                property <float> bar-last: max(0.35, min(1.0, root.element-contents[idx].character-count / self.bar-chars - (self.bar-count - 1.0)));
+                for slot in [0.0, 1.0, 2.0, 3.0, 4.0] : Rectangle {
+                    visible: too-small && slot < parent.bar-count;
                     x: parent.width * 0.06;
-                    y: (parent.height - self.height) / 2;
-                    width: parent.width * 0.88;
+                    y: (parent.height - parent.bar-count * parent.bar-pitch) / 2 + slot * parent.bar-pitch;
+                    width: parent.width * 0.88 * (slot + 1.0 < parent.bar-count ? 1.0 : parent.bar-last);
                     height: max(1px, text-px * 0.45);
                     border-radius: self.height / 2;
                     background: Theme.palette().paper-muted;
@@ -197,6 +212,8 @@ export component PresentSlideCanvas inherits Rectangle {
                 }
 
                 Text {
+                    // The object's button above carries its name; its text is not a second label.
+                    accessible-role: none;
                     visible: root.editing-idx != idx && root.element-types[idx] != 6 && !too-small;
                     x: Theme.tokens.space.sm * slide.text-scale;
                     y: Theme.tokens.space.xs * slide.text-scale;

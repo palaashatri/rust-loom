@@ -211,6 +211,8 @@ export component PresentApp inherits Window {
     in-out property <bool> aspect-ratio-wide: true;
 
     callback new-deck;
+    /// A key the window did not use. Rust explains a typed letter instead of dropping it.
+    callback window-key-unhandled(string);
     callback open-deck;
     callback save-deck;
     callback save-as-deck;
@@ -361,6 +363,13 @@ export component PresentApp inherits Window {
                     return accept;
                 }
             }
+            // Enter and F2 edit the selected object when the keyboard is on the window;
+            // the object itself takes them when it has focus.
+            if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta && slide-canvas.selection-count == 1) {
+                root.focus-editor();
+                if (slide-canvas.start-editing()) { return accept; }
+            }
+            root.window-key-unhandled(event.text);
             return reject;
         }
 
@@ -745,7 +754,7 @@ export component PresentApp inherits Window {
         TouchArea { clicked => { save-changes-focus.focus(); } }
         Rectangle { width: min(440px * max(1.0, Theme.text-scale), root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
             save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
-                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); color: Theme.palette().ink; horizontal-alignment: root.rtl ? right : left; }
+                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); font-weight: 700; color: Theme.palette().ink; horizontal-alignment: root.rtl ? right : left; }
                 Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; horizontal-alignment: root.rtl ? right : left; }
                 // The primary button sits at the reading end: right in LTR, left in RTL.
                 Rectangle { height: Theme.tokens.metrics.control-height;

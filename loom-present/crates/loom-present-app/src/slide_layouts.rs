@@ -57,6 +57,17 @@ pub(crate) fn layout_for_choice(index: i32) -> &'static str {
     }
 }
 
+/// The chooser entry that names `layout`: the inverse of `layout_for_choice`.
+/// A layout the chooser does not offer is shown as Content, the default.
+pub(crate) fn choice_for_layout(layout: &str) -> i32 {
+    match layout {
+        "cover" => 0,
+        "two-column" => 2,
+        "image-text" => 3,
+        _ => 1,
+    }
+}
+
 /// The placeholders a layout offers, in reading order. The Image layout keeps
 /// the left half free: a picture is a real asset the user inserts, so it has no
 /// empty placeholder of its own.

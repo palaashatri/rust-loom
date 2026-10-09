@@ -158,6 +158,74 @@ fn ink_height(image: &RgbaImage, (x0, y0, x1, y1): Area) -> u32 {
     }
 }
 
+/// Bands of anything drawn in `area` (text or a light bar), as (top, bottom)
+/// fractions of its height.
+fn drawn_bands(image: &RgbaImage, (x0, y0, x1, y1): Area) -> Vec<(f32, f32)> {
+    let height = (y1 - y0) as f32;
+    let mut bands = Vec::new();
+    let mut top = None;
+    for y in y0..=y1 {
+        let drawn = y < y1 && (x0..x1).any(|x| image.get_pixel(x, y).0[0] < 235);
+        match (drawn, top) {
+            (true, None) => top = Some(y),
+            (false, Some(start)) => {
+                bands.push(((start - y0) as f32 / height, (y - y0) as f32 / height));
+                top = None;
+            }
+            _ => {}
+        }
+    }
+    bands
+}
+
+const LONG_BODY: &str = "Revenue grew in every region this quarter, and the new hires in the \
+    support and sales teams are on track to meet the plan for the next two years. The next \
+    review covers pricing, the partner programme, and the budget for the hiring that remains.";
+
+#[test]
+fn a_thumbnail_body_draws_one_bar_per_line_its_text_would_take() {
+    let s = launched();
+    // The Content layout gives the first slide its body placeholder.
+    s.app.invoke_apply_template(1);
+    let body = s.state.session.borrow().document.slides[0]
+        .elements
+        .iter()
+        .position(|element| element.element_type == loom_present_core::ElementType::BodyText)
+        .expect("the Content layout has a body placeholder");
+    let count = s.state.session.borrow().document.slides.len();
+
+    let bands_for = |text: &str| -> usize {
+        {
+            let mut session = s.state.session.borrow_mut();
+            session.document.slides[0].elements[body].content = text.into();
+        }
+        refresh(&s.app, &s.state);
+        let image = snapshot_component(&s.app, 1280.0, 800.0, SCALE).expect("render");
+        let mini = thumbnail(&s.app, 0, count)
+            .query_descendants()
+            .match_type_name("MiniSlide")
+            .find_first()
+            .expect("the first thumbnail's slide");
+        let place = {
+            let session = s.state.session.borrow();
+            let element = &session.document.slides[0].elements[body];
+            (element.x, element.y, element.width, element.height)
+        };
+        drawn_bands(
+            &image,
+            object_area(slide_box(&image, device_area(&mini)), place),
+        )
+        .len()
+    };
+    let short = bands_for("Thanks");
+    let long = bands_for(LONG_BODY);
+    assert!(short >= 1, "a short body is still drawn");
+    assert!(
+        long >= short + 2,
+        "a body that takes several lines draws several bars: {short} for one line, {long} for the long text"
+    );
+}
+
 #[test]
 fn the_title_wraps_onto_the_same_lines_in_the_editor_at_any_size_and_in_the_slideshow() {
     let s = launched();

@@ -53,7 +53,9 @@ pub(super) fn launched_with(dialogs: Rc<dyn FileDialogService>) -> Session {
     let menu = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
         last_saved: RefCell::new(session.document.clone()),
-        last_saved_transitions: RefCell::default(),
+        // The saved baseline starts as the opened deck, as at launch: its transitions
+        // are part of the deck, so an untouched sample is not treated as edited.
+        last_saved_transitions: RefCell::new(session.transitions.clone()),
         session: RefCell::new(session),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),

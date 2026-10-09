@@ -2,9 +2,10 @@
 //! (thumbnails included) has a name, and the element text field exists only
 //! while an element is selected.
 
-use super::keyboard_flow_tests::{launched, render, Session};
+use super::keyboard_flow_tests::{focus_name, launched, press, render, Session};
 use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle, ElementRoot};
+use slint::platform::Key;
 use slint::Model;
 
 fn index_of(s: &Session, id: &str) -> usize {
@@ -83,5 +84,64 @@ fn the_element_text_field_exists_only_while_an_element_is_selected() {
             .next()
             .is_none(),
         "with nothing selected there is no text field to reach"
+    );
+}
+
+#[test]
+fn the_selected_text_field_exposes_the_element_text() {
+    let s = launched();
+    s.app.set_show_inspector(true);
+    render(&s.app);
+    let title = index_of(&s, "cover-title");
+    let text = s.state.session.borrow().document.slides[0].elements[title]
+        .content
+        .clone();
+    let field = ElementHandle::find_by_accessible_label(&s.app, "Selected element text")
+        .next()
+        .expect("the text field exists while the title is selected");
+    assert_eq!(
+        field.accessible_value().map(|value| value.to_string()),
+        Some(text),
+        "a screen reader can read the field's text"
+    );
+}
+
+#[test]
+fn no_text_or_button_in_the_window_is_left_unnamed() {
+    let s = launched();
+    // An empty title and a fresh thumbnail strip are the cases that leave labels unnamed.
+    s.app.invoke_update_element_content("".into());
+    render(&s.app);
+    let unnamed = s
+        .app
+        .root_element()
+        .query_descendants()
+        .match_predicate(|_| true)
+        .find_all()
+        .into_iter()
+        .filter(|e| {
+            matches!(
+                e.accessible_role(),
+                Some(AccessibleRole::Text | AccessibleRole::Button)
+            )
+        })
+        .filter(|e| e.accessible_label().is_none_or(|label| label.is_empty()))
+        .map(|e| format!("{:?} at {:?}", e.accessible_role(), e.absolute_position()))
+        .collect::<Vec<_>>();
+    assert!(unnamed.is_empty(), "unnamed text or buttons: {unnamed:?}");
+}
+
+#[test]
+fn tabbing_to_an_object_makes_it_the_focused_selected_element() {
+    let s = launched();
+    s.state.session.borrow_mut().selected_elements.clear();
+    refresh(&s.app, &s.state);
+    render(&s.app);
+    press(&s.app, Key::Tab);
+    render(&s.app);
+    let name = focus_name(&s.app);
+    assert!(
+        name.starts_with("Selected "),
+        "the object Tab reaches is selected and named as focused, got {name:?}"
     );
 }
