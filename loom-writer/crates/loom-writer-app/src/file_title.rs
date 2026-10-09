@@ -18,7 +18,18 @@ pub(crate) fn sync(app: &crate::WriterApp, state: &crate::GuiState) {
         state.save_path.borrow().as_deref(),
         &state.current.borrow().title,
     );
+    app.set_window_title(window_title(&title, crate::document_is_dirty(state)).into());
     app.set_doc_title(title.into());
+}
+
+/// The window title: the document's name, starred while it has unsaved
+/// changes, then the application name.
+pub(crate) fn window_title(name: &str, dirty: bool) -> String {
+    if dirty {
+        format!("{name} * - Loom Writer")
+    } else {
+        format!("{name} - Loom Writer")
+    }
 }
 
 #[cfg(test)]
@@ -31,6 +42,26 @@ mod tests {
         assert_eq!(display_title(None, "Untitled"), "Untitled");
         let path = std::env::temp_dir().join("Report.loomdoc");
         assert_eq!(display_title(Some(&path), "Untitled"), "Report");
+    }
+
+    #[test]
+    fn the_window_title_names_the_document_and_marks_unsaved_work() {
+        let dir = std::env::temp_dir().join(format!("loom-window-title-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Report.loomdoc");
+        let dialogs: std::rc::Rc<dyn loom_desktop::FileDialogService> = std::rc::Rc::new(
+            loom_desktop::ScriptedFileDialogs::new([], [Some(path.clone())]),
+        );
+        let (app, state) = test_state(text_document("hello"), dialogs);
+        crate::wire_writer_shared_callbacks(&app, &state, None);
+        crate::apply_state(&app, &state);
+        assert_eq!(app.get_window_title().as_str(), "Test - Loom Writer");
+        state.current.borrow_mut().replace_paragraphs("changed");
+        crate::apply_state(&app, &state);
+        assert_eq!(app.get_window_title().as_str(), "Test * - Loom Writer");
+        app.invoke_save_doc();
+        assert_eq!(app.get_window_title().as_str(), "Report - Loom Writer");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

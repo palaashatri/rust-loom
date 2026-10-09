@@ -171,7 +171,8 @@ export component SheetChart inherits Rectangle {
 
     VerticalLayout {
         padding: Theme.tokens.space.md;
-        spacing: Theme.tokens.space.sm;
+        // Large text needs the room more than the gaps.
+        spacing: root.text-scale > 1.0 ? Theme.tokens.space.xs : Theme.tokens.space.sm;
 
         // Chart Header
         HorizontalLayout {
@@ -479,7 +480,10 @@ export component SheetChart inherits Rectangle {
         }
 
         data-list := Rectangle {
-            height: min(140px * max(1.0, root.text-scale), root.height * 0.45);
+            // Shrinks toward a floor that still fits the point heading and three help lines.
+            min-height: 16px + (10px + 1.25 * (Theme.tokens.typography.body-large + 3 * Theme.tokens.typography.caption)) * max(1.0, root.text-scale);
+            preferred-height: min(140px * max(1.0, root.text-scale), root.height * 0.45);
+            vertical-stretch: 0;
             background: Theme.palette().surface-sunken;
             border-width: 1px;
             border-color: Theme.palette().border-strong;

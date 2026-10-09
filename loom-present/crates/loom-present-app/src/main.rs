@@ -224,8 +224,12 @@ fn empty_session() -> PresentationSession {
 fn load_session(path: &Path) -> Result<PresentationSession, String> {
     let bytes = std::fs::read(path)
         .map_err(|error| format!("failed to read presentation '{}': {error}", path.display()))?;
-    load_presentation_session(&bytes)
-        .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))
+    let mut session = load_presentation_session(&bytes)
+        .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))?;
+    // A deck opens on its first slide, whichever slide was showing when it was saved,
+    // so the editor and the slideshow both start at the beginning.
+    session.document.active_index = 0;
+    Ok(session)
 }
 
 fn initial_session(args: &Args) -> Result<PresentationSession, String> {
@@ -673,19 +677,11 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             .iter()
             .map(|element| {
                 let selected = session.selected_elements.iter().any(|id| id == &element.id);
-                SharedString::from(if selected {
-                    format!(
-                        "Selected {} · {}",
-                        element_type_name(&element.element_type),
-                        element_text(document, element)
-                    )
-                } else {
-                    format!(
-                        "{} · {}",
-                        element_type_name(&element.element_type),
-                        element_text(document, element)
-                    )
-                })
+                SharedString::from(element_names::label(
+                    element_type_name(&element.element_type),
+                    &element_text(document, element),
+                    selected,
+                ))
             })
             .collect::<Vec<_>>();
         app.set_element_labels(synced(app.get_element_labels(), labels));
@@ -1640,6 +1636,7 @@ fn build_present_menu_bar() -> MenuBar {
             ],
         )],
     );
+    file_menu::group(&mut menu_bar);
     menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
     menu_bar
 }
@@ -3184,6 +3181,8 @@ mod picture_tests;
 mod appearance;
 #[cfg(test)]
 mod appearance_tests;
+mod element_names;
+mod file_menu;
 mod file_title;
 #[cfg(test)]
 mod focus_tests;
@@ -3222,5 +3221,9 @@ mod text_scale_tests;
 #[cfg(test)]
 mod toolbar_tests;
 
+#[cfg(test)]
+mod accessibility_tests;
+#[cfg(test)]
+mod miniature_tests;
 #[cfg(test)]
 mod visual_defect_tests;

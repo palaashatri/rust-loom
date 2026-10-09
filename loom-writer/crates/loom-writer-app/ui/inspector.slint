@@ -41,7 +41,7 @@ export component WriterInspector inherits LoomPanel {
     in property <int> word-count: 83;
     in property <int> char-count: 507;
     in property <int> page-count: 1;
-    in property <int> reading-time-mins: 1;
+    in property <int> reading-time-mins: 0;
 
     callback toggle-bold;
     callback toggle-italic;
@@ -245,6 +245,8 @@ export component WriterInspector inherits LoomPanel {
             if !Theme.rtl : HorizontalLayout {
                 spacing: Theme.tokens.space.xs;
                 alignment: start;
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
 
                 LoomIconButton {
                     icon: "bold";
@@ -278,6 +280,8 @@ export component WriterInspector inherits LoomPanel {
             if Theme.rtl : HorizontalLayout {
                 spacing: Theme.tokens.space.xs;
                 alignment: end;
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
 
                 LoomIconButton {
                     icon: "strikethrough";
@@ -584,7 +588,7 @@ export component WriterInspector inherits LoomPanel {
                         horizontal-alignment: Theme.rtl ? right : left;
                     }
                     Text {
-                        text: "~" + root.reading-time-mins + " min read";
+                        text: root.reading-time-mins > 0 ? ("~" + root.reading-time-mins + " min read") : "";
                         font-size: Theme.type.micro;
                         color: Theme.palette().ink-secondary;
                         horizontal-alignment: Theme.rtl ? right : left;

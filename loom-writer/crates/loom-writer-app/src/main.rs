@@ -21,6 +21,7 @@ mod multi_click;
 mod outline;
 mod palette_wiring;
 mod projection;
+mod reading_time;
 mod recovery;
 mod toolbar_commands;
 mod view_state;
@@ -1582,8 +1583,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_text_alignment(text_alignment);
     app.set_word_count(word_count.min(i32::MAX as usize) as i32);
     app.set_char_count(char_count.min(i32::MAX as usize) as i32);
-    // ~200 wpm average reading speed
-    app.set_reading_time_mins(word_count.div_ceil(200).max(1).min(i32::MAX as usize) as i32);
+    app.set_reading_time_mins(reading_time::minutes_for_words(word_count));
     let comment_entries: Vec<WriterCommentEntry> = doc
         .comments
         .iter()

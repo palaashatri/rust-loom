@@ -57,7 +57,6 @@ component WriterDocumentEditor inherits Rectangle {
     in property <length> font-size: Theme.tokens.typography.body;
     in property <int> selection-anchor: 0;
     in property <int> selection-focus: 0;
-    in property <string> selection-announcement: "No text selected";
     callback edited(string, int, int);
     callback selection-changed(int, int);
     callback pointer-pressed(length, length, bool);
@@ -72,7 +71,7 @@ component WriterDocumentEditor inherits Rectangle {
     min-height: 0px;
     background: transparent;
     accessible-role: AccessibleRole.text-input;
-    accessible-label: "Document body, " + root.selection-announcement;
+    accessible-label: "Document body";
     accessible-enabled: root.enabled;
     accessible-value <=> root.text;
     accessible-placeholder-text: root.placeholder;
@@ -242,7 +241,6 @@ export component WriterPageCanvas inherits Rectangle {
     in property <[WriterCommentRect]> comment-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
-    in property <string> selection-announcement: "No text selected";
     in-out property <float> page-zoom: 1.0;
     in-out property <length> page-scroll-x: 0px;
     in-out property <length> page-scroll-y: 0px;
@@ -348,7 +346,6 @@ export component WriterPageCanvas inherits Rectangle {
                     comment-rects: root.comment-rects;
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
-                    selection-announcement <=> root.selection-announcement;
                     page-zoom: root.page-zoom;
                     font-size: 11px * root.page-zoom;
                     edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }

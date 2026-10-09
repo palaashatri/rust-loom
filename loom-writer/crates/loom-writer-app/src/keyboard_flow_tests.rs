@@ -371,6 +371,66 @@ fn ctrl_k_palette_runs_a_command_and_escape_closes_it_returning_focus() {
     assert!(same_focus(&focus_weak(&s.app), &page));
 }
 
+/// Types `text` as a keyboard does: a capital or a shifted symbol is pressed
+/// with Shift held, so the palette receives the letter together with the
+/// modifier state.
+fn type_as_keyboard(app: &WriterApp, text: &str) {
+    for c in text.chars() {
+        if c.is_uppercase() || "!?@#$%^&*()_+{}|:\"<>~".contains(c) {
+            chord(app, &[Key::Shift], &c.to_string());
+        } else {
+            tap(app, c.to_string());
+        }
+    }
+}
+
+#[test]
+fn palette_query_keeps_capital_letters_and_shifted_symbols() {
+    let s = launched("Hello world");
+    ctrl(&s.app, "k");
+    assert!(s.app.get_palette_open(), "Ctrl+K opens the palette");
+    type_as_keyboard(&s.app, "Export PDF");
+    assert_eq!(s.app.get_palette_query(), "Export PDF");
+    assert!(
+        s.app.get_palette_commands().row_count() > 0,
+        "the capitalised query finds its command"
+    );
+    type_as_keyboard(&s.app, "!");
+    assert_eq!(s.app.get_palette_query(), "Export PDF!");
+}
+
+#[test]
+fn palette_says_so_when_no_command_matches() {
+    let s = launched("Hello world");
+    ctrl(&s.app, "k");
+    type_as_keyboard(&s.app, "Zqxv?");
+    assert_eq!(s.app.get_palette_query(), "Zqxv?");
+    assert_eq!(s.app.get_palette_commands().row_count(), 0);
+    let line = ElementHandle::find_by_accessible_label(&s.app, "No matching commands")
+        .find(|element| element.size().height > 0.0)
+        .expect("an empty result shows a 'No matching commands' line");
+    assert!(line.computed_opacity() > 0.0, "the line is visible");
+}
+
+#[test]
+fn palette_ignores_arrow_and_tab_keys_in_its_query() {
+    let s = launched("Hello world");
+    ctrl(&s.app, "k");
+    type_as_keyboard(&s.app, "Bold");
+    press(&s.app, Key::LeftArrow);
+    press(&s.app, Key::RightArrow);
+    press(&s.app, Key::Tab);
+    assert_eq!(
+        s.app.get_palette_query(),
+        "Bold",
+        "navigation keys are not query text"
+    );
+    assert!(
+        s.app.get_palette_open(),
+        "navigation keys do not close the palette"
+    );
+}
+
 fn open_toolbar_menu(s: &Session, name: &str) {
     s.app.invoke_focus_page();
     shift_key(&s.app, Key::F6);

@@ -23,6 +23,8 @@ struct Stop {
     w: f32,
     h: f32,
     visible: bool,
+    /// The focused item is the named control itself: same rectangle, not a surface around it.
+    matched: bool,
 }
 
 impl Stop {
@@ -206,14 +208,20 @@ fn stop(app: &PresentApp) -> Option<Stop> {
             best = Some((score, element));
         }
     }
-    let (name, role) = best
+    let (name, role, matched) = best
         .map(|(_, e)| {
+            let (p, s) = (e.absolute_position(), e.size());
+            let matched = (p.x - origin.x).abs() < 1.0
+                && (p.y - origin.y).abs() < 1.0
+                && (s.width - geometry.size.width).abs() < 1.0
+                && (s.height - geometry.size.height).abs() < 1.0;
             (
                 e.accessible_label().unwrap().to_string(),
                 e.accessible_role(),
+                matched,
             )
         })
-        .unwrap_or_default();
+        .unwrap_or((String::new(), None, false));
     Some(Stop {
         name,
         role,
@@ -222,6 +230,7 @@ fn stop(app: &PresentApp) -> Option<Stop> {
         w: geometry.size.width,
         h: geometry.size.height,
         visible: item.is_visible(),
+        matched,
     })
 }
 
@@ -495,7 +504,11 @@ fn save_changes_traps_tab_defaults_to_save_and_escape_cancels() {
         s.app.get_save_changes_open(),
         "closing a dirty deck asks first"
     );
-    assert_eq!(focus_name(&s.app), "Save", "the primary button has focus");
+    assert_eq!(
+        focus_name(&s.app),
+        "Save and close",
+        "the primary button has focus"
+    );
 
     let mut order = Vec::new();
     for _ in 0..6 {
@@ -504,7 +517,14 @@ fn save_changes_traps_tab_defaults_to_save_and_escape_cancels() {
     }
     assert_eq!(
         order,
-        ["Cancel", "Discard", "Save", "Cancel", "Discard", "Save"]
+        [
+            "Cancel",
+            "Discard",
+            "Save and close",
+            "Cancel",
+            "Discard",
+            "Save and close"
+        ]
     );
     shift_tab(&s.app);
     assert_eq!(focus_name(&s.app), "Discard");
@@ -533,6 +553,78 @@ fn save_changes_traps_tab_defaults_to_save_and_escape_cancels() {
         s.state.session.borrow().document.slides[0].elements.len(),
         1,
         "nothing was discarded"
+    );
+}
+
+#[test]
+fn the_primary_button_names_what_it_does_when_replacing_and_when_closing() {
+    let s = launched();
+    press(&s.app, Key::Delete);
+    s.app.invoke_new_deck();
+    render(&s.app);
+    assert!(s.app.get_save_changes_open(), "a new deck asks first");
+    assert_eq!(
+        focus_name(&s.app),
+        "Save",
+        "replacing the deck keeps the plain Save button"
+    );
+    press(&s.app, Key::Escape);
+
+    request_close(&s.app);
+    assert_eq!(
+        focus_name(&s.app),
+        "Save and close",
+        "closing the window names the button for what it does"
+    );
+}
+
+/// Presses and releases the pointer over object `index`, holding Shift when asked.
+fn click_object(app: &PresentApp, index: usize, shift: bool) {
+    let label = app
+        .get_element_labels()
+        .row_data(index)
+        .expect("the object has a name")
+        .to_string();
+    let object = ElementHandle::find_by_accessible_label(app, &label)
+        .next()
+        .expect("the object is on screen");
+    let (p, s) = (object.absolute_position(), object.size());
+    let position = slint::LogicalPosition::new(p.x + s.width / 2.0, p.y + s.height / 2.0);
+    if shift {
+        key_down(app, SharedString::from(Key::Shift));
+    }
+    let button = slint::platform::PointerEventButton::Left;
+    app.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    app.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    if shift {
+        key_up(app, SharedString::from(Key::Shift));
+    }
+    render(app);
+}
+
+#[test]
+fn a_click_selects_one_object_and_shift_click_adds_another() {
+    let s = launched();
+    click_object(&s.app, 1, false);
+    assert_eq!(
+        s.app.get_selection_count(),
+        1,
+        "a click selects the object it lands on"
+    );
+    assert_eq!(s.app.get_active_element_index(), 1);
+    assert_eq!(
+        bare(&focus_name(&s.app)),
+        bare(&s.app.get_element_labels().row_data(1).unwrap()),
+        "the clicked object takes keyboard focus"
+    );
+
+    click_object(&s.app, 0, true);
+    assert_eq!(
+        s.app.get_selection_count(),
+        2,
+        "shift-click adds the object to the selection rather than replacing it"
     );
 }
 
@@ -679,25 +771,40 @@ fn add_slide_edit_text_navigate_save_and_present_without_a_pointer() {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Region {
-    Notes,
-    Inspector,
+enum Part {
     Menu,
     Toolbar,
     Strip,
+    Objects,
+    Notes,
+    Inspector,
 }
 
-fn region(stop: &Stop) -> Region {
-    if stop.y < 36.0 {
-        Region::Menu
+/// A name without the "Selected " prefix the canvas adds to the selected object.
+fn bare(name: &str) -> &str {
+    name.strip_prefix("Selected ").unwrap_or(name)
+}
+
+/// Whether a focused item's name is one of the slide's objects.
+fn is_object(app: &PresentApp, name: &str) -> bool {
+    app.get_element_labels()
+        .iter()
+        .any(|label| bare(label.as_str()) == bare(name))
+}
+
+fn part_of(app: &PresentApp, stop: &Stop) -> Part {
+    if is_object(app, &stop.name) {
+        Part::Objects
+    } else if stop.y < 36.0 {
+        Part::Menu
     } else if stop.y < 90.0 {
-        Region::Toolbar
+        Part::Toolbar
     } else if stop.x >= 1000.0 {
-        Region::Inspector
+        Part::Inspector
     } else if stop.x < 220.0 {
-        Region::Strip
+        Part::Strip
     } else {
-        Region::Notes
+        Part::Notes
     }
 }
 
@@ -713,46 +820,74 @@ fn reads_in_order(stops: &[&Stop]) -> bool {
 }
 
 #[test]
+fn tab_reaches_each_slide_object_in_order_then_leaves_the_slide() {
+    let s = launched();
+    let editor = focus_weak(&s.app);
+    let names: Vec<String> = s
+        .app
+        .get_element_labels()
+        .iter()
+        .map(|label| bare(label.as_str()).to_string())
+        .collect();
+    assert!(names.len() >= 2, "the cover slide has several objects");
+    for (index, name) in names.iter().enumerate() {
+        tab(&s.app);
+        assert!(
+            !same_focus(&focus_weak(&s.app), &editor),
+            "Tab {index} moved focus onto the object, not the slide surface"
+        );
+        assert_eq!(
+            bare(&focus_name(&s.app)),
+            name.as_str(),
+            "Tab {index} focuses object {index}"
+        );
+    }
+    tab(&s.app);
+    assert!(
+        !is_object(&s.app, &focus_name(&s.app)),
+        "after the last object, Tab leaves the slide: {:?}",
+        focus_name(&s.app)
+    );
+}
+
+#[test]
 fn tab_order_is_logical_named_visible_and_free_of_traps() {
     for (notes, inspector_tab) in [(false, 0), (true, 1), (false, 2)] {
         let s = launched();
         s.app.set_show_notes_drawer(notes);
         s.app.set_inspector_tab(inspector_tab);
         render(&s.app);
-        let editor = focus_weak(&s.app);
 
-        // Tab walks the slide's objects first, then leaves the editor.
-        let mut presses = 0;
+        // One full cycle of Tab: from its first stop back to that stop.
+        tab(&s.app);
+        let first = focus_weak(&s.app);
+        let mut steps = vec![(first.clone(), stop(&s.app).expect("the first stop"))];
         loop {
             tab(&s.app);
-            presses += 1;
-            assert!(presses <= 6, "Tab never left the slide editor");
-            if !same_focus(&focus_weak(&s.app), &editor) {
+            let here = focus_weak(&s.app);
+            if same_focus(&here, &first) {
                 break;
             }
-        }
-        let mut stops = vec![(focus_weak(&s.app), stop(&s.app).unwrap())];
-        loop {
-            tab(&s.app);
-            if same_focus(&focus_weak(&s.app), &editor) {
-                break;
-            }
-            assert!(stops.len() < 80, "Tab did not come back to the editor");
-            stops.push((focus_weak(&s.app), stop(&s.app).unwrap()));
+            assert!(steps.len() < 80, "Tab never came back to its first stop");
+            steps.push((here, stop(&s.app).expect("a focused item")));
         }
 
-        for (i, (item, stop)) in stops.iter().enumerate() {
+        for (i, (item, st)) in steps.iter().enumerate() {
             assert!(
-                !stop.name.is_empty(),
-                "stop {i} has no accessible name: {stop:?}"
+                !st.name.is_empty(),
+                "stop {i} has no accessible name: {st:?}"
             );
-            assert!(stop.role.is_some(), "stop {i} has no role: {stop:?}");
+            assert!(st.role.is_some(), "stop {i} has no role: {st:?}");
             assert!(
-                stop.on_screen(),
-                "stop {i} {} is not on screen: {stop:?}",
-                stop.name
+                st.on_screen(),
+                "stop {i} {} is not on screen: {st:?}",
+                st.name
             );
-            for (j, (other, _)) in stops.iter().enumerate().skip(i + 1) {
+            assert!(
+                st.matched,
+                "stop {i} is a surface, not the control it is named for: {st:?}"
+            );
+            for (j, (other, _)) in steps.iter().enumerate().skip(i + 1) {
                 assert!(
                     !same_focus(item, other),
                     "stops {i} and {j} are the same control"
@@ -760,49 +895,45 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
             }
         }
 
-        // Regions come in one block each, in a fixed order: notes, inspector,
-        // menu bar, toolbar, slide strip, and each reads left to right, top down.
-        let mut blocks: Vec<(Region, Vec<&Stop>)> = Vec::new();
-        for (_, stop) in &stops {
-            let r = region(stop);
+        // The cycle starts at the menu bar, the first thing a keyboard user meets:
+        // menus, toolbar, slide list, the slide's objects, notes, then the inspector.
+        let parts: Vec<Part> = steps.iter().map(|(_, st)| part_of(&s.app, st)).collect();
+        let start = parts
+            .iter()
+            .position(|part| *part == Part::Menu)
+            .expect("the menu bar is in the cycle");
+        let mut blocks: Vec<(Part, Vec<&Stop>)> = Vec::new();
+        for offset in 0..steps.len() {
+            let index = (start + offset) % steps.len();
+            let (part, st) = (parts[index], &steps[index].1);
             match blocks.last_mut() {
-                Some((last, group)) if *last == r => group.push(stop),
-                _ => blocks.push((r, vec![stop])),
+                Some((last, group)) if *last == part => group.push(st),
+                _ => blocks.push((part, vec![st])),
             }
         }
-        let order: Vec<Region> = blocks.iter().map(|(r, _)| *r).collect();
-        let expected: Vec<Region> = if notes {
-            vec![
-                Region::Notes,
-                Region::Inspector,
-                Region::Menu,
-                Region::Toolbar,
-                Region::Strip,
-            ]
-        } else {
-            vec![
-                Region::Inspector,
-                Region::Menu,
-                Region::Toolbar,
-                Region::Strip,
-            ]
-        };
+        let order: Vec<Part> = blocks.iter().map(|(part, _)| *part).collect();
+        let mut expected = vec![Part::Menu, Part::Toolbar, Part::Strip, Part::Objects];
+        if notes {
+            expected.push(Part::Notes);
+        }
+        expected.push(Part::Inspector);
         assert_eq!(order, expected, "regions in tab order: {blocks:#?}");
-        for (r, group) in &blocks {
-            if *r != Region::Strip {
-                assert!(reads_in_order(group), "{r:?} order: {group:#?}");
+        for (part, group) in &blocks {
+            if *part != Part::Strip {
+                assert!(reads_in_order(group), "{part:?} order: {group:#?}");
             }
         }
-        let names = |r: Region| -> Vec<String> {
+
+        let names = |part: Part| -> Vec<String> {
             blocks
                 .iter()
-                .find(|(x, _)| *x == r)
-                .map(|(_, g)| g.iter().map(|s| s.name.clone()).collect())
+                .find(|(p, _)| *p == part)
+                .map(|(_, group)| group.iter().map(|st| st.name.clone()).collect())
                 .unwrap_or_default()
         };
-        assert_eq!(names(Region::Menu), ["File", "Edit", "View", "Slide"]);
+        assert_eq!(names(Part::Menu), ["File", "Edit", "View", "Slide"]);
         assert_eq!(
-            names(Region::Toolbar),
+            names(Part::Toolbar),
             [
                 "View",
                 "Zoom",
@@ -817,13 +948,18 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
                 "More actions"
             ]
         );
-        let strip = names(Region::Strip);
+        let strip = names(Part::Strip);
         assert_eq!(
             strip.len(),
             6,
             "three slides, Add, Delete and Move Slide Down (Move Slide Up is disabled on the first slide): {strip:?}"
         );
         assert!(strip[0].starts_with("Slide 1"));
+        assert_eq!(
+            names(Part::Objects).len(),
+            s.state.session.borrow().document.slides[0].elements.len(),
+            "every object of the slide is a stop"
+        );
     }
 }
 

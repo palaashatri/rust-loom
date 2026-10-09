@@ -178,7 +178,11 @@ fn test_deep_audit_export_pipelines_pdf_and_markdown() {
     let md = doc.to_markdown();
     assert!(md.contains("# Executive Summary"));
     assert!(md.contains("## Core Architecture"));
-    assert!(md.contains("Loom Writer is a professional"));
+    // The bold and italic runs are written as Markdown emphasis.
+    assert!(
+        md.contains("**Loom Writer** is a *professional* creative word processor."),
+        "{md:?}"
+    );
 
     // PDF export
     let pdf_bytes = loom_writer_core::export_pdf(&doc);

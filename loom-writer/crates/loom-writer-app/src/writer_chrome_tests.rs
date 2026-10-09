@@ -2,7 +2,7 @@
 use super::actions_tests::text_document;
 use super::scale_surfaces_tests::editor;
 use super::*;
-use i_slint_backend_testing::ElementRoot;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle, ElementRoot};
 use loom_test_support::capture::snapshot_component;
 
 const PLACEHOLDER: &str = "Type your text here...";
@@ -23,6 +23,60 @@ fn status_bar_counts_paragraphs_and_drops_the_offline_prefix() {
     );
     assert!(!app.get_status_left().contains("block"));
     assert!(!app.get_status_right().contains("Offline"));
+}
+
+#[test]
+fn the_page_keeps_one_accessible_name_while_the_caret_moves() {
+    let app = editor(1280.0, 800.0, 1.0);
+    let mut document = text_document("Hello world");
+    apply_document(&app, &document);
+    document.set_selection(TextSelection::caret(6));
+    apply_document(&app, &document);
+    // The caret position is still reported, in the status bar rather than in
+    // the page's name, which must not change with every keystroke.
+    assert_eq!(app.get_status_right(), "Caret at character 7");
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    let named_page = ElementHandle::find_by_accessible_label(&app, "Document body")
+        .any(|element| element.accessible_role() == Some(AccessibleRole::TextInput));
+    assert!(
+        named_page,
+        "the page is named 'Document body' after the caret moves"
+    );
+}
+
+fn shows_text(app: &WriterApp, text: &str) -> bool {
+    app.root_element()
+        .query_descendants()
+        .match_predicate({
+            let text = text.to_string();
+            move |element| {
+                element
+                    .accessible_label()
+                    .is_some_and(|label| label.contains(text.as_str()))
+            }
+        })
+        .find_all()
+        .into_iter()
+        .any(|element| element.size().height > 0.0)
+}
+
+#[test]
+fn an_empty_document_shows_no_reading_time() {
+    let empty = super::keyboard_flow_tests::launched("");
+    let _ = snapshot_component(&empty.app, 1280.0, 800.0, 1.0).expect("render");
+    assert_eq!(empty.app.get_reading_time_mins(), 0);
+    assert!(
+        !shows_text(&empty.app, "min read"),
+        "an empty document has no '~1 min read' caption"
+    );
+
+    let short = super::keyboard_flow_tests::launched("Hello world");
+    let _ = snapshot_component(&short.app, 1280.0, 800.0, 1.0).expect("render");
+    assert_eq!(short.app.get_reading_time_mins(), 1);
+    assert!(
+        shows_text(&short.app, "~1 min read"),
+        "short text reads as one minute"
+    );
 }
 
 fn relative_luminance(rgb: [u8; 3]) -> f64 {

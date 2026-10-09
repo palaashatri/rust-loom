@@ -4,6 +4,7 @@
 //! byte ceiling. Public names are re-exported from the crate root so the
 //! public API surface is unchanged.
 
+use crate::export_table::{self, TableLayout};
 use crate::WriterDocument;
 
 /// Exports a document to a `.docx` archive Word opens directly; see
@@ -91,6 +92,17 @@ fn draw_styled_line(
     }
 }
 
+/// How far a line of `width` moves right inside the text `column` for its
+/// alignment: centred and right-aligned lines move, the others stay at the margin.
+fn align_shift(alignment: loom_text::Alignment, column: f32, width: f32) -> f32 {
+    match alignment {
+        loom_text::Alignment::Center => (column - width) / 2.0,
+        loom_text::Alignment::Right => column - width,
+        _ => 0.0,
+    }
+    .max(0.0)
+}
+
 /// Render the document to a paginated PDF using the same deterministic page
 /// fragments as the editor preview. Output is byte-for-byte deterministic for
 /// the same document.
@@ -104,6 +116,10 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
         fill_rgb: (0.15, 0.13, 0.11),
         ..Default::default()
     };
+
+    let column =
+        (page_style.width_pt - page_style.margin_left_pt - page_style.margin_right_pt).max(0.0);
+    let mut table: Option<(u64, TableLayout)> = None;
 
     // Pagination is authoritative.  Every fragment is emitted on the page
     // selected by `WriterDocument::paginate`, so a long document can never be
@@ -149,7 +165,28 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             // precedes it.  The newline consumes the line box but must not be
             // emitted as a second PDF text line.
             let line = fragment.text.strip_suffix('\n').unwrap_or(&fragment.text);
-            if !marker.is_empty() || !line.is_empty() {
+            if block.kind.as_str() == crate::TABLE_BLOCK_KIND {
+                let cached = matches!(&table, Some((id, _)) if *id == block.id);
+                if !cached {
+                    table = Some((
+                        block.id,
+                        TableLayout::new(block.text.as_str(), &body, column),
+                    ));
+                }
+                if let Some((_, layout)) = &table {
+                    let shift = align_shift(block.style.alignment, column, layout.width);
+                    let origin = (page_style.margin_left_pt + shift, y);
+                    export_table::draw_line(
+                        &mut pdf,
+                        page,
+                        block.text.as_str(),
+                        fragment.start,
+                        layout,
+                        origin,
+                        &body,
+                    );
+                }
+            } else if !marker.is_empty() || !line.is_empty() {
                 let style = match block.kind.as_str() {
                     "heading1" => TextStyle {
                         size_pt: 15.0,
@@ -164,16 +201,8 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     _ => body.clone(),
                 };
                 // Center and right alignment place the line inside the text column.
-                let column =
-                    (page_style.width_pt - page_style.margin_left_pt - page_style.margin_right_pt)
-                        .max(0.0);
                 let line_width = loom_pdf::text_width_pt(&format!("{marker}{line}"), &style);
-                let shift = match block.style.alignment {
-                    loom_text::Alignment::Center => (column - line_width) / 2.0,
-                    loom_text::Alignment::Right => column - line_width,
-                    _ => 0.0,
-                }
-                .max(0.0);
+                let shift = align_shift(block.style.alignment, column, line_width);
                 let start = StyledLine {
                     x: page_style.margin_left_pt + shift,
                     y,
@@ -373,6 +402,56 @@ mod tests {
             .unwrap_or_else(|| panic!("{text:?} is drawn"));
         let before: Vec<&str> = content[..at].split_whitespace().collect();
         before[before.len() - 2].parse().expect("x coordinate")
+    }
+
+    /// Text position (x, y) of the line drawn as `(text) Tj`.
+    fn text_position(pdf: &[u8], text: &str) -> (f32, f32) {
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let at = content
+            .find(&format!(" Td ({text}) Tj"))
+            .unwrap_or_else(|| panic!("{text:?} is drawn"));
+        let before: Vec<&str> = content[..at].split_whitespace().collect();
+        (
+            before[before.len() - 2].parse().expect("x coordinate"),
+            before[before.len() - 1].parse().expect("y coordinate"),
+        )
+    }
+
+    #[test]
+    fn export_pdf_draws_table_cells_in_aligned_columns_without_pipes() {
+        let mut document = WriterDocument::new("table", "Table");
+        document.push(RichBlock::new(
+            document.next_id(),
+            crate::TABLE_BLOCK_KIND,
+            "| Name | Qty |\n| --- | --- |\n| Ada | 3 |\n| Grace | 12 |",
+        ));
+        let pdf = export_pdf(&document);
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        assert!(!content.contains('|'), "no pipe characters are printed");
+        assert!(!content.contains("---"), "the separator row is not printed");
+
+        let (name_x, name_y) = text_position(&pdf, "Name");
+        let (qty_x, qty_y) = text_position(&pdf, "Qty");
+        let (ada_x, ada_y) = text_position(&pdf, "Ada");
+        let (three_x, three_y) = text_position(&pdf, "3");
+        let (grace_x, grace_y) = text_position(&pdf, "Grace");
+        let (twelve_x, twelve_y) = text_position(&pdf, "12");
+        assert_eq!(name_y, qty_y, "header cells share a row");
+        assert_eq!(ada_y, three_y, "the first data row shares a row");
+        assert_eq!(grace_y, twelve_y, "the second data row shares a row");
+        assert!(name_y > ada_y && ada_y > grace_y, "rows run down the page");
+        assert!(
+            (ada_x - name_x).abs() < 0.01 && (grace_x - name_x).abs() < 0.01,
+            "the first column is aligned"
+        );
+        assert!(
+            (three_x - qty_x).abs() < 0.01 && (twelve_x - qty_x).abs() < 0.01,
+            "the second column is aligned"
+        );
+        assert!(
+            qty_x > name_x + 30.0,
+            "the second column starts after the first"
+        );
     }
 
     #[test]

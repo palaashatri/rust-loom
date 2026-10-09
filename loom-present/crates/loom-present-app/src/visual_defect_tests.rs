@@ -324,12 +324,14 @@ fn ink_gaps(image: &RgbaImage, x0: u32, x1: u32, y0: u32, y1: u32) -> Vec<u32> {
 }
 
 #[test]
-fn thumbnail_title_words_keep_their_spacing_at_1x() {
+fn thumbnail_title_words_keep_their_spacing_at_2x() {
     let session = launched();
     let app = &session.app;
     apply_theme(app, "light");
     configure_responsive_layout(app, (1920, 1200));
-    let image = snapshot_component(app, 1920.0, 1200.0, 1.0).unwrap();
+    // A thumbnail's title is about 5 logical pixels tall, so its word spaces are
+    // measured in device pixels at 2x.
+    let image = snapshot_component(app, 1920.0, 1200.0, 2.0).unwrap();
     let thumb = ElementHandle::find_by_element_type_name(app, "MiniSlide")
         .find(|e| {
             e.accessible_label()
@@ -337,18 +339,23 @@ fn thumbnail_title_words_keep_their_spacing_at_1x() {
         })
         .expect("third thumbnail");
     let (p, s) = (thumb.absolute_position(), thumb.size());
-    let (x0, x1) = (p.x as u32 + 2, (p.x + s.width) as u32 - 2);
+    let (x0, x1) = ((p.x * 2.0) as u32 + 4, ((p.x + s.width) * 2.0) as u32 - 4);
     let (y0, y1) = (
-        (p.y + s.height * 0.17) as u32,
-        (p.y + s.height * 0.30) as u32,
+        ((p.y + s.height * 0.17) * 2.0) as u32,
+        ((p.y + s.height * 0.30) * 2.0) as u32,
     );
-    // "Built around ownership" has two word spaces: the two widest gaps must be
-    // clearly wider than the letter gaps, or the words have run together.
+    // "Built around ownership" has two word spaces. Letter gaps are a pixel or two;
+    // each word space must stand clearly wider than the typical letter gap, or the
+    // words have run together.
     let mut gaps = ink_gaps(&image, x0, x1, y0, y1);
     gaps.sort_unstable();
     let widest_two = gaps.iter().rev().take(2).copied().collect::<Vec<_>>();
+    let letters = &gaps[..gaps.len().saturating_sub(2)];
+    let typical_letter = letters.get(letters.len() / 2).copied().unwrap_or(0) as f32;
     assert!(
-        widest_two.len() == 2 && widest_two[1] >= 3 && gaps.len() >= 2,
+        widest_two.len() == 2
+            && widest_two[1] >= 2
+            && widest_two[1] as f32 >= 1.5 * typical_letter.max(1.0),
         "thumbnail title lost its word spacing; gaps {gaps:?}"
     );
 }

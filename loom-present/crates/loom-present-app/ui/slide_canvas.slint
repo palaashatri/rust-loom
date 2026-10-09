@@ -55,17 +55,11 @@ export component PresentSlideCanvas inherits Rectangle {
 
     slide-focus := FocusScope {
         enabled: root.editing-enabled;
+        // The slide is not a Tab stop of its own. Tab moves through the objects, each a
+        // stop (see `element-focus`), and then leaves the slide.
+        focus-on-tab-navigation: false;
         key-pressed(event) => {
-            // Tab and Shift+Tab walk the objects on the slide (the first Tab selects
-            // the first object); past the last or first one they leave the canvas, so
-            // the slide never traps the keyboard. Enter or F2 edits the selected
-            // object's text where it stands; Escape stops editing.
-            if (event.text == Key.Tab || event.text == Key.Backtab) {
-                let back = event.text == Key.Backtab || event.modifiers.shift;
-                let next = root.selection-count == 0 ? (back ? root.element-xs.length - 1 : 0) : root.active-element-index + (back ? -1 : 1);
-                if (next >= 0 && next < root.element-xs.length) { root.select-element(next); return accept; }
-                return reject;
-            }
+            // Enter or F2 edits the selected object's text where it stands; Escape stops editing.
             if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta
                 && root.selection-count == 1 && root.active-element-index < root.element-types.length
                 && root.element-types[root.active-element-index] != 6) {
@@ -78,7 +72,9 @@ export component PresentSlideCanvas inherits Rectangle {
         slide := Rectangle {
             property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
             property <length> margin: root.fit-screen ? 0px : Theme.tokens.space.xxl;
-            property <float> text-scale: root.fit-screen || root.zoom < 1.0 ? self.width / 840px : max(1.0, self.width / 840px);
+            // One scale for the editor, the slideshow and the thumbnails: text, insets and
+            // spacing all follow the stage width, so a slide wraps the same way at any size.
+            property <float> text-scale: self.width / 840px;
             x: max(self.margin, (parent.width - self.width) / 2);
             y: max(self.margin, (parent.height - self.height) / 2);
             width: min(root.fit-screen ? 100000px : 2520px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * root.zoom;
@@ -154,18 +150,34 @@ export component PresentSlideCanvas inherits Rectangle {
                 width: self.render-width;
                 height: self.render-height;
                 border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
-                border-width: root.editing-enabled && root.element-selected.length > idx && root.element-selected[idx] ? 2px : 0px;
-                border-color: Theme.palette().accent;
+                border-width: root.editing-enabled && (element-focus.has-focus || (root.element-selected.length > idx && root.element-selected[idx])) ? 2px : 0px;
+                border-color: element-focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
                 background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
                     : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
                     : root.element-types[idx] == 5 ? Theme.palette().content-accent
                     : transparent;
                 transform-origin: { x: self.width / 2, y: self.height / 2 };
                 transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;
-                accessible-role: button;
-                accessible-enabled: root.editing-enabled;
-                accessible-label: root.element-labels[idx];
-                accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); slide-focus.focus(); }
+                // Each object is a Tab stop of its own. Focus selects it. The keys the object
+                // does not take (Enter, Delete, the arrows) bubble up to the slide.
+                element-focus := FocusScope {
+                    enabled: root.editing-enabled;
+                    // Focus selects the object unless it is already selected, so a press (which
+                    // selects first) and a multi-selection are never reset by the focus move.
+                    changed has-focus => {
+                        if (self.has-focus && !(root.element-selected.length > idx && root.element-selected[idx])) { root.select-element(idx); }
+                    }
+                }
+
+                // The object as one named button. Only the editable slide has one: a
+                // thumbnail or the slideshow is a single image, not buttons inside it.
+                if root.editing-enabled : Rectangle {
+                    width: 100%;
+                    height: 100%;
+                    accessible-role: button;
+                    accessible-label: root.element-labels[idx];
+                    accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); element-focus.focus(); }
+                }
 
                 // A miniature (fit-screen) line under 4 px cannot be read; it is drawn as a bar.
                 property <length> text-px: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
@@ -173,7 +185,8 @@ export component PresentSlideCanvas inherits Rectangle {
                 property <bool> too-small: root.fit-screen && text-px < 4px;
 
                 Rectangle {
-                    visible: too-small && root.element-types[idx] != 6;
+                    // Text too small to read is drawn as a bar, but an empty object draws nothing.
+                    visible: too-small && root.element-types[idx] != 6 && root.element-contents[idx] != "";
                     x: parent.width * 0.06;
                     y: (parent.height - self.height) / 2;
                     width: parent.width * 0.88;
@@ -185,28 +198,27 @@ export component PresentSlideCanvas inherits Rectangle {
 
                 Text {
                     visible: root.editing-idx != idx && root.element-types[idx] != 6 && !too-small;
-                    x: Theme.tokens.space.sm;
-                    y: root.fit-screen ? 0px : Theme.tokens.space.xs;
-                    width: max(1px, parent.width - Theme.tokens.space.lg * 2);
-                    height: root.fit-screen ? parent.height : max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    x: Theme.tokens.space.sm * slide.text-scale;
+                    y: Theme.tokens.space.xs * slide.text-scale;
+                    width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
+                    height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
                     text: root.element-contents[idx];
-                    // A miniature title is never set below 10 px, so its word spaces survive.
-                    font-size: root.fit-screen && root.element-types[idx] == 0 ? max(text-px, 10px) : text-px;
+                    font-size: text-px;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
                         : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
                         : Theme.palette().paper-ink;
                     horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
                     vertical-alignment: center;
-                    wrap: root.fit-screen ? no-wrap : word-wrap;
+                    wrap: word-wrap;
                     overflow: elide;
                 }
 
                 if root.editing-enabled && root.editing-idx != idx && root.element-placeholders.length > idx && root.element-placeholders[idx] != "" : Text {
-                    x: Theme.tokens.space.sm;
-                    y: Theme.tokens.space.xs;
-                    width: max(1px, parent.width - Theme.tokens.space.lg * 2);
-                    height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    x: Theme.tokens.space.sm * slide.text-scale;
+                    y: Theme.tokens.space.xs * slide.text-scale;
+                    width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
+                    height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
                     text: root.element-placeholders[idx];
                     font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display : Theme.tokens.typography.body-large) * slide.text-scale;
                     color: Theme.palette().paper-muted;
@@ -237,8 +249,11 @@ export component PresentSlideCanvas inherits Rectangle {
                     double-clicked => { if (root.editing-enabled && root.element-types[idx] != 6) { root.editing-idx = idx; } }
                     pointer-event(event) => {
                         if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                            slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y;
+                            // The press selects first (a shift-press extends the selection), then the
+                            // object takes focus, unless the press just took it out of the selection.
                             root.element-pressed(idx, event.modifiers.shift);
+                            if (root.element-selected.length > idx && root.element-selected[idx]) { element-focus.focus(); }
+                            self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y;
                         } else if (event.kind == PointerEventKind.cancel) {
                             root.element-cancelled(idx);
                         } else if (event.kind == PointerEventKind.up) {
@@ -255,10 +270,10 @@ export component PresentSlideCanvas inherits Rectangle {
                 // Double-click edits the text where it stands. The editor sits
                 // over the text with the same type, so nothing jumps.
                 if root.editing-enabled && root.editing-idx == idx : TextInput {
-                    x: Theme.tokens.space.sm;
-                    y: Theme.tokens.space.xs;
-                    width: max(1px, parent.width - Theme.tokens.space.lg * 2);
-                    height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    x: Theme.tokens.space.sm * slide.text-scale;
+                    y: Theme.tokens.space.xs * slide.text-scale;
+                    width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
+                    height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
                     text: root.element-contents[idx];
                     font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
                         : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
@@ -273,7 +288,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     changed has-focus => { if (!self.has-focus) { root.editing-idx = -1; } }
                     edited => { root.content-edited(self.text); }
                     key-pressed(event) => {
-                        if (event.text == Key.Escape) { root.editing-idx = -1; slide-focus.focus(); return accept; }
+                        if (event.text == Key.Escape) { root.editing-idx = -1; element-focus.focus(); return accept; }
                         return reject;
                     }
                 }

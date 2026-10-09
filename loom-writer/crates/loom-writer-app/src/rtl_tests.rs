@@ -77,3 +77,43 @@ fn every_surface_is_the_mirror_image_in_right_to_left() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The character-style row (Bold, Italic, Underline, Strikethrough) belongs to
+/// the inspector's content column, so it must start and end where the padded
+/// rows above it do: left edge in left-to-right, right edge in right-to-left.
+#[test]
+fn the_character_style_row_lines_up_with_the_inspector_content_edge() {
+    for rtl in [false, true] {
+        for width in [1280.0f32, 1440.0] {
+            let session = launched("");
+            let app = session.app;
+            configure_direction(&app, rtl);
+            apply_theme(&app, "light");
+            apply_layout_breakpoints(&app, width as u32);
+            open_surface(&app, "inspector");
+            let _ = snapshot_component(&app, width, 800.0, 1.0).expect("render");
+
+            // The paragraph-style control sits in a padded section above the row.
+            let reference = ElementHandle::find_by_accessible_label(&app, "Heading Style")
+                .next()
+                .expect("paragraph style control");
+            let reference_top = reference.absolute_position().y;
+            let bold = ElementHandle::find_by_accessible_label(&app, "Bold")
+                .find(|element| element.absolute_position().y > reference_top)
+                .expect("inspector Bold button");
+
+            let (reference_x, reference_w) =
+                (reference.absolute_position().x, reference.size().width);
+            let (bold_x, bold_w) = (bold.absolute_position().x, bold.size().width);
+            let (edge, expected, found) = if rtl {
+                ("right", reference_x + reference_w, bold_x + bold_w)
+            } else {
+                ("left", reference_x, bold_x)
+            };
+            assert!(
+                (found - expected).abs() < 0.5,
+                "rtl={rtl} width={width}: Bold's {edge} edge is {found}, the content {edge} edge is {expected}"
+            );
+        }
+    }
+}

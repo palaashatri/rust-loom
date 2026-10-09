@@ -20,7 +20,9 @@ export { FindBar, FindRect } from "find_bar.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
-    title: "Loom Writer";
+    // Set from the document's name and unsaved state, as Sheets does.
+    in-out property <string> window-title: "Loom Writer";
+    title: root.window-title;
     default-font-family: "Inter";
     // Windows and Linux draw their own frame so the menu and the title share
     // one row. macOS keeps the native frame and global menu bar.
@@ -147,7 +149,7 @@ export component WriterApp inherits Window {
     in-out property <int> line-spacing-index: 1;
     in property <int> word-count: 0;
     in property <int> char-count: 0;
-    in property <int> reading-time-mins: 1;
+    in property <int> reading-time-mins: 0;
 
     in property <float> page-width-pt: 595.0;
     in property <float> page-height-pt: 842.0;
@@ -446,7 +448,6 @@ export component WriterApp inherits Window {
                         activate-comment(id) => { root.navigate-comment(id); }
                         selection-anchor <=> root.selection-anchor;
                         selection-focus <=> root.selection-focus;
-                        selection-announcement: root.selection-announcement;
                         page-zoom <=> root.page-zoom;
                         page-scroll-x <=> root.page-scroll-x;
                         page-scroll-y <=> root.page-scroll-y;

@@ -354,6 +354,93 @@ fn inline_runs_carry_bold_italic_underline_and_strike() {
 }
 
 #[test]
+fn every_text_run_states_its_font_family_and_size() {
+    let mut doc = WriterDocument::new("fonts", "Fonts");
+    doc.push(RichBlock::new(
+        doc.next_id(),
+        "paragraph",
+        "Plain body text",
+    ));
+    doc.push(RichBlock::new(doc.next_id(), "heading1", "Heading text"));
+    let mut serif = RichBlock::new(doc.next_id(), "paragraph", "Serif text");
+    serif.runs = vec![run(
+        0,
+        11,
+        styled(|style| {
+            style.font_family = "Serif".into();
+            style.font_size = 18.0;
+        }),
+    )];
+    doc.push(serif);
+    let export = export_docx(&doc).unwrap();
+    let parts = parts(&export);
+    let body = parse(&parts["word/document.xml"]);
+
+    // Word substitutes its own font and size for any run that does not name
+    // them, so every run with text carries both.
+    for r in all(&body, "r") {
+        let text: String = r
+            .children()
+            .filter(|c| is_w(c, "t"))
+            .filter_map(|c| c.text())
+            .collect();
+        if text.is_empty() {
+            continue;
+        }
+        let props = child(r, "rPr").unwrap_or_else(|| panic!("run {text:?} has no run properties"));
+        assert!(
+            child(props, "rFonts")
+                .and_then(|f| w_attr(f, "ascii"))
+                .is_some(),
+            "run {text:?} names no font family"
+        );
+        assert!(
+            child(props, "sz").and_then(|s| w_attr(s, "val")).is_some(),
+            "run {text:?} names no font size"
+        );
+    }
+
+    let run_font = |text: &str| {
+        let paragraph = body_paragraph(&body, text);
+        let r = paragraph
+            .descendants()
+            .find(|n| is_w(n, "r"))
+            .expect("paragraph has a run");
+        let props = child(r, "rPr").expect("run properties");
+        let family = child(props, "rFonts").and_then(|f| w_attr(f, "ascii"));
+        let size = child(props, "sz").and_then(|s| w_attr(s, "val"));
+        (family.map(str::to_string), size.map(str::to_string))
+    };
+    let font =
+        |family: &str, half_points: &str| (Some(family.to_string()), Some(half_points.to_string()));
+    // The editor's default is 12 pt Sans; Sans is written as Arial, the
+    // metric match for the Helvetica the PDF export draws.
+    assert_eq!(run_font("Plain body text"), font("Arial", "24"));
+    // A heading keeps the 24 pt its heading style gives.
+    assert_eq!(run_font("Heading text"), font("Arial", "48"));
+    assert_eq!(run_font("Serif text"), font("Times New Roman", "36"));
+
+    // Unstyled text, the Normal style and new text typed in Word agree.
+    let styles = parse(&parts["word/styles.xml"]);
+    let defaults = child(
+        all(&styles, "rPrDefault")
+            .first()
+            .copied()
+            .expect("document defaults"),
+        "rPr",
+    )
+    .expect("default run properties");
+    assert_eq!(
+        child(defaults, "rFonts").and_then(|f| w_attr(f, "ascii")),
+        Some("Arial")
+    );
+    assert_eq!(
+        child(defaults, "sz").and_then(|s| w_attr(s, "val")),
+        Some("24")
+    );
+}
+
+#[test]
 fn alignment_lists_and_numbering_restart() {
     let export = export_docx(&rich_document()).unwrap();
     let parts = parts(&export);

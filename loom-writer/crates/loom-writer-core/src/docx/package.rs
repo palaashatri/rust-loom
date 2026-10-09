@@ -20,6 +20,9 @@ pub(super) const STYLE_TABLE: &str = "TableGrid";
 /// paragraph only carries direct spacing when it differs from these.
 pub(super) const DEFAULT_SPACE_AFTER_TWIPS: i32 = 160;
 pub(super) const DEFAULT_LINE_TWIPS: i32 = 276;
+/// The face Writer's "Sans" text is written with, and the face of text that
+/// names none. Arial is the metric match for the Helvetica the PDF export draws.
+pub(super) const SANS_FAMILY: &str = "Arial";
 
 /// `[Content_Types].xml`.
 pub(super) fn content_types(has_comments: bool) -> String {
@@ -139,12 +142,14 @@ fn half_points(points: f32) -> u32 {
 /// works), List Paragraph, Quote, Table Grid and the comment styles. Sizes
 /// follow the page style the editor lays out with.
 pub(super) fn styles(page: &PageStyle) -> String {
-    let body = half_points(page.body_font_size_pt);
+    // Unnamed text is the editor's default run: 12 pt in the Sans family.
+    let body = half_points(loom_text::CharacterStyle::default().font_size);
+    let family = SANS_FAMILY;
     let mut out = String::from(XML_DECLARATION);
     out.push_str(&format!("<w:styles xmlns:w=\"{W_NS}\">"));
     out.push_str(&format!(
         "<w:docDefaults><w:rPrDefault><w:rPr>\
-         <w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:eastAsia=\"Calibri\" w:cs=\"Calibri\"/>\
+         <w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" w:cs=\"{family}\"/>\
          <w:sz w:val=\"{body}\"/><w:szCs w:val=\"{body}\"/><w:lang w:val=\"en-US\" w:eastAsia=\"en-US\" w:bidi=\"ar-SA\"/>\
          </w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>\
          <w:spacing w:after=\"{DEFAULT_SPACE_AFTER_TWIPS}\" w:line=\"{DEFAULT_LINE_TWIPS}\" w:lineRule=\"auto\"/>\
@@ -203,6 +208,7 @@ pub(super) fn styles(page: &PageStyle) -> String {
 /// at 1, because Writer restarts numbering after any block that is not a
 /// numbered item.
 pub(super) fn numbering(numbered_lists: usize) -> String {
+    let family = SANS_FAMILY;
     let mut out = String::from(XML_DECLARATION);
     out.push_str(&format!("<w:numbering xmlns:w=\"{W_NS}\">"));
 
@@ -219,7 +225,7 @@ pub(super) fn numbering(numbered_lists: usize) -> String {
             "<w:lvl w:ilvl=\"{level}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/>\
              <w:lvlText w:val=\"{glyph}\"/><w:lvlJc w:val=\"left\"/>\
              <w:pPr><w:ind w:left=\"{}\" w:hanging=\"360\"/></w:pPr>\
-             <w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:cs=\"Calibri\" w:hint=\"default\"/></w:rPr></w:lvl>",
+             <w:rPr><w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:cs=\"{family}\" w:hint=\"default\"/></w:rPr></w:lvl>",
             720 * (level + 1)
         ));
     }

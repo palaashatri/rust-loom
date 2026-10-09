@@ -12,11 +12,22 @@ pub(crate) fn display_title(save_path: Option<&Path>, deck_title: &str) -> Strin
         .unwrap_or_else(|| deck_title.to_owned())
 }
 
+/// The OS window title: the deck's name, a `*` while there are unsaved changes,
+/// then the application name. The in-app title bar shows the same unsaved state.
+pub(crate) fn window_title(name: &str, dirty: bool) -> String {
+    if dirty {
+        format!("{name} * - Loom Present")
+    } else {
+        format!("{name} - Loom Present")
+    }
+}
+
 pub(crate) fn sync(app: &crate::PresentApp, state: &crate::GuiState) {
     let title = display_title(
         state.save_path.borrow().as_deref(),
         &state.session.borrow().document.title,
     );
+    app.set_os_window_title(window_title(&title, crate::deck_is_dirty(state)).into());
     app.set_deck_title(title.into());
 }
 
@@ -88,6 +99,35 @@ mod tests {
             "Untitled Presentation"
         );
         assert_eq!(display_title(None, "Deck"), "Deck");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_os_window_title_names_the_deck_and_marks_unsaved_work() {
+        let dir = std::env::temp_dir().join(format!("loom-deck-window-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("qa_deck.loomdeck");
+        let (app, state) = wired_app(path);
+        refresh(&app, &state);
+        assert_eq!(
+            app.get_os_window_title().as_str(),
+            "Untitled Presentation - Loom Present",
+            "a new deck is named by its title"
+        );
+
+        app.invoke_add_slide();
+        assert_eq!(
+            app.get_os_window_title().as_str(),
+            "Untitled Presentation * - Loom Present",
+            "unsaved work is marked in the window title"
+        );
+
+        app.invoke_save_deck();
+        assert_eq!(
+            app.get_os_window_title().as_str(),
+            "qa_deck - Loom Present",
+            "saving names the window after the file and clears the mark"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

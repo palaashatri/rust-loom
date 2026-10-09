@@ -16,7 +16,9 @@ use unicode_segmentation::UnicodeSegmentation;
 mod comments;
 mod docx;
 mod export;
+mod export_table;
 mod layout;
+mod markdown;
 mod page_setup;
 mod paragraph_match;
 mod search;
@@ -587,43 +589,7 @@ impl WriterDocument {
 
     /// Render to Markdown.
     pub fn to_markdown(&self) -> String {
-        let mut out = String::new();
-        let mut numbered_index = 0usize;
-        // List items and table rows end without a blank line; the next block must
-        // be separated or Markdown readers fold it into the list item or table.
-        let mut open_block = false;
-        for b in &self.blocks {
-            let is_list = matches!(b.kind.as_str(), "list-bulleted" | "list-numbered");
-            if open_block && !is_list {
-                out.push('\n');
-            }
-            open_block = is_list || b.kind == "table";
-            match b.kind.as_str() {
-                "heading1" => out.push_str(&format!("# {}\n\n", b.text.as_str())),
-                "heading2" => out.push_str(&format!("## {}\n\n", b.text.as_str())),
-                "heading3" => out.push_str(&format!("### {}\n\n", b.text.as_str())),
-                "heading4" => out.push_str(&format!("#### {}\n\n", b.text.as_str())),
-                "heading5" => out.push_str(&format!("##### {}\n\n", b.text.as_str())),
-                "heading6" => out.push_str(&format!("###### {}\n\n", b.text.as_str())),
-                "list-bulleted" => {
-                    numbered_index = 0;
-                    out.push_str(&format!("- {}\n", b.text.as_str()));
-                }
-                "table" => {
-                    numbered_index = 0;
-                    out.push_str(&format!("{}\n", b.text.as_str()));
-                }
-                "list-numbered" => {
-                    numbered_index += 1;
-                    out.push_str(&format!("{}. {}\n", numbered_index, b.text.as_str()));
-                }
-                _ => {
-                    numbered_index = 0;
-                    out.push_str(&format!("{}\n\n", b.text.as_str()));
-                }
-            }
-        }
-        out
+        markdown::document_markdown(self)
     }
 
     /// Render document content to semantic HTML markup.
@@ -4451,6 +4417,83 @@ mod tests {
         assert!(
             md.contains("- Last item\n\nAfter the list"),
             "blank line between list and paragraph: {md:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_writes_run_formatting_and_escapes_formatting_characters() {
+        use loom_text::{CharacterStyle, FontWeight, StyleRun};
+        let run = |start, end, style: CharacterStyle| StyleRun { start, end, style };
+        let mut doc = WriterDocument::new("md-runs", "Runs");
+
+        let mut styled = RichBlock::new(
+            doc.next_id(),
+            "paragraph",
+            "Bold and italic and struck and under",
+        );
+        styled.runs = vec![
+            run(
+                0,
+                4,
+                CharacterStyle {
+                    weight: FontWeight::Bold,
+                    ..Default::default()
+                },
+            ),
+            run(
+                9,
+                15,
+                CharacterStyle {
+                    italic: true,
+                    ..Default::default()
+                },
+            ),
+            run(
+                20,
+                26,
+                CharacterStyle {
+                    strikethrough: true,
+                    ..Default::default()
+                },
+            ),
+            run(
+                31,
+                36,
+                CharacterStyle {
+                    underline: true,
+                    ..Default::default()
+                },
+            ),
+        ];
+        doc.push(styled);
+        doc.push(RichBlock::new(
+            doc.next_id(),
+            "paragraph",
+            "2*3 and snake_case",
+        ));
+        let mut edge = RichBlock::new(doc.next_id(), "paragraph", "Edge space");
+        edge.runs = vec![run(
+            0,
+            5,
+            CharacterStyle {
+                weight: FontWeight::Bold,
+                ..Default::default()
+            },
+        )];
+        doc.push(edge);
+
+        let md = doc.to_markdown();
+        assert!(
+            md.contains("**Bold** and *italic* and ~~struck~~ and <u>under</u>"),
+            "run formatting is written as Markdown: {md:?}"
+        );
+        assert!(
+            md.contains("2\\*3 and snake\\_case"),
+            "formatting characters in plain text are escaped: {md:?}"
+        );
+        assert!(
+            md.contains("**Edge** space"),
+            "edge spaces stay outside the markers: {md:?}"
         );
     }
 

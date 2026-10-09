@@ -7,12 +7,13 @@ use loom_text::{Alignment, CharacterStyle, FontWeight};
 
 use super::comments::{self, Anchor, CommentPlan};
 use super::package::{
-    DEFAULT_LINE_TWIPS, DEFAULT_SPACE_AFTER_TWIPS, STYLE_LIST, STYLE_QUOTE, STYLE_TABLE,
+    DEFAULT_LINE_TWIPS, DEFAULT_SPACE_AFTER_TWIPS, SANS_FAMILY, STYLE_LIST, STYLE_QUOTE,
+    STYLE_TABLE,
 };
 use super::xml::{self, R_NS, W_NS, XML_DECLARATION};
 use crate::{
-    parse_table_markdown, PageOrientation, PaperSize, RichBlock, WriterDocument, WriterTable,
-    TABLE_BLOCK_KIND,
+    parse_table_markdown, PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument,
+    WriterTable, TABLE_BLOCK_KIND,
 };
 
 /// The body part plus what the numbering part needs to know about it.
@@ -261,26 +262,33 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
 }
 
 /// Character formatting of one run, in the order WordprocessingML lists it.
-#[derive(Default, PartialEq)]
+/// Every run states its font family and size, so Word never falls back to its
+/// own defaults for text the editor draws.
+#[derive(PartialEq)]
 struct RunProps {
     bold: bool,
     italic: bool,
     underline: bool,
     strike: bool,
     vertical: Option<&'static str>,
-    family: Option<String>,
-    half_points: Option<u32>,
+    family: String,
+    half_points: u32,
 }
 
 impl RunProps {
     /// What the editor draws (bold at weight 700 and above, italic, underline,
-    /// strikethrough) plus the formatting the inspector records explicitly:
-    /// super/subscript, a font family other than the default sans, and a
-    /// size other than the model's unset default.
-    fn of(style: Option<&CharacterStyle>, force_bold: bool) -> Self {
+    /// strikethrough), the run's font family and size, and super/subscript.
+    /// `kind_pt` is the size the block kind gives text that names none, so a
+    /// heading keeps its heading size.
+    fn of(style: Option<&CharacterStyle>, force_bold: bool, kind_pt: f32) -> Self {
         let mut props = Self {
             bold: force_bold,
-            ..Self::default()
+            italic: false,
+            underline: false,
+            strike: false,
+            vertical: None,
+            family: family_name(style.map_or("", |style| style.font_family.as_str())),
+            half_points: half_points_of(kind_pt),
         };
         let Some(style) = style else { return props };
         props.bold |= style.weight.numeric() >= FontWeight::Bold.numeric();
@@ -294,30 +302,23 @@ impl RunProps {
         } else {
             None
         };
-        props.family = match style.font_family.trim() {
-            "" | "Sans" => None,
-            "Serif" => Some("Times New Roman".to_string()),
-            "Monospace" => Some("Courier New".to_string()),
-            other => Some(other.to_string()),
-        };
+        // A size set explicitly wins; the default size keeps the block kind's.
         let size = style.font_size;
         if size.is_finite()
             && (size - CharacterStyle::default().font_size).abs() > 0.01
             && (1.0..=1638.0).contains(&size)
         {
-            props.half_points = Some((size * 2.0).round() as u32);
+            props.half_points = half_points_of(size);
         }
         props
     }
 
     fn xml(&self) -> String {
         let mut out = String::new();
-        if let Some(family) = &self.family {
-            let family = xml::attr(family);
-            out.push_str(&format!(
-                "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:cs=\"{family}\"/>"
-            ));
-        }
+        let family = xml::attr(&self.family);
+        out.push_str(&format!(
+            "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:cs=\"{family}\"/>"
+        ));
         if self.bold {
             out.push_str("<w:b/><w:bCs/>");
         }
@@ -327,22 +328,44 @@ impl RunProps {
         if self.strike {
             out.push_str("<w:strike/>");
         }
-        if let Some(size) = self.half_points {
-            out.push_str(&format!(
-                "<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/>"
-            ));
-        }
+        let size = self.half_points;
+        out.push_str(&format!(
+            "<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/>"
+        ));
         if self.underline {
             out.push_str("<w:u w:val=\"single\"/>");
         }
         if let Some(vertical) = self.vertical {
             out.push_str(&format!("<w:vertAlign w:val=\"{vertical}\"/>"));
         }
-        if out.is_empty() {
-            out
-        } else {
-            format!("<w:rPr>{out}</w:rPr>")
-        }
+        format!("<w:rPr>{out}</w:rPr>")
+    }
+}
+
+/// The Word face a Writer family is written as: "Sans" and an unnamed family
+/// are Arial, "Serif" and "Monospace" the usual Word faces, and any other name
+/// is kept as it is.
+fn family_name(name: &str) -> String {
+    match name.trim() {
+        "" | "Sans" => SANS_FAMILY.to_string(),
+        "Serif" => "Times New Roman".to_string(),
+        "Monospace" => "Courier New".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Half-points, the unit `w:sz` is written in, for a size in points.
+fn half_points_of(points: f32) -> u32 {
+    (points * 2.0).round().max(2.0) as u32
+}
+
+/// The size a block kind gives text that names none: headings take their
+/// heading size, every other block the editor's default run size.
+fn kind_size_pt(kind: &str) -> f32 {
+    if kind.starts_with("heading") {
+        PageStyle::default().font_size_for_kind(kind)
+    } else {
+        CharacterStyle::default().font_size
     }
 }
 
@@ -371,6 +394,7 @@ fn paragraph_content(block: &RichBlock, anchors: &[Anchor]) -> String {
     cuts.extend(boundaries.filter(|&at| at <= text.len() && text.is_char_boundary(at)));
     let cuts: Vec<usize> = cuts.into_iter().collect();
 
+    let size = kind_size_pt(&block.kind);
     let mut out = String::new();
     for (index, &at) in cuts.iter().enumerate() {
         comments::push_events(&mut out, anchors, at);
@@ -382,7 +406,7 @@ fn paragraph_content(block: &RichBlock, anchors: &[Anchor]) -> String {
             .iter()
             .find(|run| run.start <= at && at < run.end)
             .map(|run| &run.style);
-        push_run(&mut out, &RunProps::of(style, false), &text[at..next]);
+        push_run(&mut out, &RunProps::of(style, false, size), &text[at..next]);
     }
     out
 }
@@ -431,10 +455,7 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
                 "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr><w:p>"
             ));
             let cell = row.get(column).map_or("", String::as_str);
-            let props = RunProps {
-                bold: header,
-                ..RunProps::default()
-            };
+            let props = RunProps::of(None, header, CharacterStyle::default().font_size);
             push_run(&mut out, &props, cell);
             out.push_str("</w:p></w:tc>");
         }

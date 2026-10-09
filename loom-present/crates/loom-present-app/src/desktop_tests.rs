@@ -1442,3 +1442,73 @@ fn a_blank_deck_prompts_for_a_title_without_saving_the_prompt() {
         ""
     );
 }
+
+#[test]
+fn reopening_a_deck_selects_its_first_slide_so_the_slideshow_starts_there() {
+    let dir = std::env::temp_dir().join(format!("loom-deck-reopen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("three_slides.loomdeck");
+    let mut saved = sample_session();
+    // Saved while its last slide was the one showing.
+    saved.document.active_index = saved.document.slides.len() - 1;
+    std::fs::write(&path, save_presentation_session(&saved).unwrap()).unwrap();
+
+    let s = super::keyboard_flow_tests::launched_with(Rc::new(ScriptedFileDialogs::new(
+        [Some(path.clone())],
+        [],
+    )));
+    // The harness deck is not yet saved; make it the saved baseline so opening is not
+    // held back by the Save prompt.
+    *s.state.last_saved_transitions.borrow_mut() = s.state.session.borrow().transitions.clone();
+    assert!(
+        !s.app.get_save_changes_open(),
+        "a clean deck opens without asking"
+    );
+    s.app.invoke_open_deck();
+    assert_eq!(
+        s.state.session.borrow().document.active_index,
+        0,
+        "opening selects the first slide"
+    );
+    assert_eq!(s.app.get_active_slide_index(), 0);
+
+    super::keyboard_flow_tests::press(&s.app, slint::platform::Key::F5);
+    assert!(s.app.get_is_preview_mode(), "F5 starts the slideshow");
+    assert_eq!(
+        s.state.session.borrow().document.active_index,
+        0,
+        "the slideshow starts on the first slide"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_file_menu_keeps_new_from_sample_with_new_and_groups_the_exports_apart() {
+    let bar = build_present_menu_bar();
+    let file = bar
+        .menus
+        .iter()
+        .find(|menu| menu.title == "File")
+        .expect("File menu");
+    // "-" stands for a separator.
+    let order: Vec<&str> = file
+        .items
+        .iter()
+        .map(|item| item.id().unwrap_or("-"))
+        .collect();
+    let mut expected = vec![
+        "file.new",
+        "file.new_sample",
+        "file.open",
+        "-",
+        "file.save",
+        "file.save_as",
+        "-",
+        "file.export_pdf",
+        "file.export_pptx",
+    ];
+    if !cfg!(target_os = "macos") {
+        expected.extend(["-", "app.quit"]);
+    }
+    assert_eq!(order, expected);
+}

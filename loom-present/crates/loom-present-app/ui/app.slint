@@ -17,7 +17,9 @@ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { PresenterWindow, ThumbRows } from "presenter.slint";
 
 export component PresentApp inherits Window {
-    title: "Loom Present";
+    // The OS window title, set from the deck name and unsaved state.
+    in property <string> os-window-title: "Loom Present";
+    title: root.os-window-title;
     default-font-family: "Inter";
     // Windows and Linux draw their own frame so the menu and the title share
     // one row. macOS keeps the native frame and global menu bar.
@@ -747,7 +749,7 @@ export component PresentApp inherits Window {
                 Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; horizontal-alignment: root.rtl ? right : left; }
                 // The primary button sits at the reading end: right in LTR, left in RTL.
                 Rectangle { height: Theme.tokens.metrics.control-height;
-                    save-button := LoomButton { label: "Save"; variant: "primary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? 0px : parent.width - self.width; clicked => { root.save-changes-save(); } }
+                    save-button := LoomButton { label: root.save-changes-closing ? "Save and close" : "Save"; variant: "primary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? 0px : parent.width - self.width; clicked => { root.save-changes-save(); } }
                     discard-button := LoomButton { label: "Discard"; variant: "danger"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? save-button.width + 8px : save-button.x - 8px - self.width; clicked => { root.save-changes-discard(); } }
                     cancel-button := LoomButton { label: "Cancel"; variant: "secondary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? discard-button.x + discard-button.width + 8px : discard-button.x - 8px - self.width; clicked => { root.save-changes-cancel(); } }
                 }
