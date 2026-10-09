@@ -19,6 +19,8 @@ export component WriterInspector inherits LoomPanel {
     in-out property <bool> is-italic: false;
     in-out property <bool> is-underline: false;
     in-out property <bool> is-strikethrough: false;
+    // The platform modifier named in shortcut hints ("Ctrl" or "Cmd").
+    in property <string> shortcut-modifier: "Ctrl";
     in-out property <int> heading-level: 0;
     in-out property <int> font-family-index: 0;
     in-out property <int> font-size-pt: 11;
@@ -97,6 +99,8 @@ export component WriterInspector inherits LoomPanel {
             width: parent.width;
             height: parent.height;
             spacing: Theme.tokens.space.md;
+            // Keeps the tab strip clear of the toolbar divider above the panel.
+            padding-top: Theme.tokens.space.md;
 
             // The tabs fill the row and the close button sits at the reading end:
             // right in LTR, left in RTL.
@@ -111,6 +115,7 @@ export component WriterInspector inherits LoomPanel {
                     label: "Inspector tab";
                 }
                 close-button := LoomIconButton {
+                    text-scale: Theme.text-scale;
                     x: Theme.rtl ? Theme.tokens.space.xl : parent.width - self.width - Theme.tokens.space.xl;
                     y: (parent.height - self.height) / 2;
                     icon: "close";
@@ -151,6 +156,7 @@ export component WriterInspector inherits LoomPanel {
 
             // The font family fills the row; the size stepper sits at the reading end.
             VerticalLayout {
+                horizontal-stretch: 1;
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
             Rectangle {
@@ -169,8 +175,9 @@ export component WriterInspector inherits LoomPanel {
                 font-stepper := Rectangle {
                     x: Theme.rtl ? 0px : parent.width - self.width;
                     y: (parent.height - self.height) / 2;
-                    width: 104px;
-                    height: 32px;
+                    // Grows with text scale so its two icon buttons and the size fit.
+                    width: 104px * max(1.0, Theme.text-scale);
+                    height: Theme.scaled-control-height;
                     border-radius: Theme.tokens.metrics.radius-medium;
                     border-width: 1px;
                     border-color: Theme.palette().border;
@@ -183,6 +190,7 @@ export component WriterInspector inherits LoomPanel {
                         cross-axis-alignment: center;
 
                         LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "minus";
                             label: "Smaller";
                             tooltip: "Decrease font size";
@@ -200,6 +208,7 @@ export component WriterInspector inherits LoomPanel {
                         }
 
                         LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "plus";
                             label: "Larger";
                             tooltip: "Increase font size";
@@ -213,6 +222,7 @@ export component WriterInspector inherits LoomPanel {
                         cross-axis-alignment: center;
 
                         LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "plus";
                             label: "Larger";
                             tooltip: "Increase font size";
@@ -230,6 +240,7 @@ export component WriterInspector inherits LoomPanel {
                         }
 
                         LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "minus";
                             label: "Smaller";
                             tooltip: "Decrease font size";
@@ -249,27 +260,31 @@ export component WriterInspector inherits LoomPanel {
                 padding-right: Theme.tokens.space.xl;
 
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "bold";
                     label: "Bold";
-                    tooltip: "Bold (Cmd+B)";
+                    tooltip: "Bold (" + root.shortcut-modifier + "+B)";
                     selected: root.is-bold;
                     clicked => { root.toggle-bold(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "italic";
                     label: "Italic";
-                    tooltip: "Italic (Cmd+I)";
+                    tooltip: "Italic (" + root.shortcut-modifier + "+I)";
                     selected: root.is-italic;
                     clicked => { root.toggle-italic(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "underline";
                     label: "Underline";
-                    tooltip: "Underline (Cmd+U)";
+                    tooltip: "Underline (" + root.shortcut-modifier + "+U)";
                     selected: root.is-underline;
                     clicked => { root.toggle-underline(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "strikethrough";
                     label: "Strikethrough";
                     tooltip: "Strikethrough";
@@ -284,6 +299,7 @@ export component WriterInspector inherits LoomPanel {
                 padding-right: Theme.tokens.space.xl;
 
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "strikethrough";
                     label: "Strikethrough";
                     tooltip: "Strikethrough";
@@ -291,23 +307,26 @@ export component WriterInspector inherits LoomPanel {
                     clicked => { root.toggle-strikethrough(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "underline";
                     label: "Underline";
-                    tooltip: "Underline (Cmd+U)";
+                    tooltip: "Underline (" + root.shortcut-modifier + "+U)";
                     selected: root.is-underline;
                     clicked => { root.toggle-underline(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "italic";
                     label: "Italic";
-                    tooltip: "Italic (Cmd+I)";
+                    tooltip: "Italic (" + root.shortcut-modifier + "+I)";
                     selected: root.is-italic;
                     clicked => { root.toggle-italic(); }
                 }
                 LoomIconButton {
+                    text-scale: Theme.text-scale;
                     icon: "bold";
                     label: "Bold";
-                    tooltip: "Bold (Cmd+B)";
+                    tooltip: "Bold (" + root.shortcut-modifier + "+B)";
                     selected: root.is-bold;
                     clicked => { root.toggle-bold(); }
                 }
@@ -316,60 +335,61 @@ export component WriterInspector inherits LoomPanel {
             LoomSectionHeader { title: "Alignment & Spacing"; }
 
             // Alignment fills the row; the two indent buttons sit at the reading end.
+            // One layout holds both, so the buttons can never be placed past the row.
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
-            Rectangle {
-                height: Theme.scaled-control-height;
-                LoomSegmentedControl {
-                    x: Theme.rtl ? indent-pair.width + Theme.tokens.space.sm : 0px;
-                    y: 0px;
-                    width: parent.width - indent-pair.width - Theme.tokens.space.sm;
-                    // Justified lines are not drawn by the page editor, so there is no Justify option.
-                    items: ["Left", "Center", "Right"];
-                    current <=> root.text-alignment;
-                    label: "Text Alignment";
-                    selected(idx) => { root.select-alignment(idx); }
-                }
-
-                indent-pair := Rectangle {
-                    x: Theme.rtl ? 0px : parent.width - self.width;
-                    y: (parent.height - self.height) / 2;
-                    width: 2 * Theme.tokens.metrics.control-height + Theme.tokens.space.xs;
-                    height: Theme.tokens.metrics.control-height;
-
-                    if !Theme.rtl : HorizontalLayout {
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    height: Theme.scaled-control-height;
+                    if !Theme.rtl : LoomSegmentedControl {
+                        horizontal-stretch: 1;
+                        // Justified lines are not drawn by the page editor, so there is no Justify option.
+                        items: ["Left", "Center", "Right"];
+                        current <=> root.text-alignment;
+                        label: "Text Alignment";
+                        selected(idx) => { root.select-alignment(idx); }
+                    }
+                    indent-pair := HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
-                        LoomIconButton {
+                        if !Theme.rtl : LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "outdent";
                             label: "Outdent";
                             tooltip: "Decrease Indent";
                             clicked => { root.outdent-text(); }
                         }
-                        LoomIconButton {
+                        if !Theme.rtl : LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "indent";
                             label: "Indent";
                             tooltip: "Increase Indent";
                             clicked => { root.indent-text(); }
                         }
-                    }
-                    if Theme.rtl : HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        LoomIconButton {
+                        if Theme.rtl : LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "indent";
                             label: "Indent";
                             tooltip: "Increase Indent";
                             clicked => { root.indent-text(); }
                         }
-                        LoomIconButton {
+                        if Theme.rtl : LoomIconButton {
+                            text-scale: Theme.text-scale;
                             icon: "outdent";
                             label: "Outdent";
                             tooltip: "Decrease Indent";
                             clicked => { root.outdent-text(); }
                         }
                     }
+                    if Theme.rtl : LoomSegmentedControl {
+                        horizontal-stretch: 1;
+                        // Justified lines are not drawn by the page editor, so there is no Justify option.
+                        items: ["Left", "Center", "Right"];
+                        current <=> root.text-alignment;
+                        label: "Text Alignment";
+                        selected(idx) => { root.select-alignment(idx); }
+                    }
                 }
-            }
             }
 
             // The caption sits at the reading-start edge, the choices fill the rest.
@@ -388,9 +408,9 @@ export component WriterInspector inherits LoomPanel {
             Rectangle {
                 height: Theme.scaled-control-height;
                 LoomSegmentedControl {
-                    x: Theme.rtl ? indent-pair.width + Theme.tokens.space.sm : 0px;
+                    x: 0px;
                     y: 0px;
-                    width: parent.width - indent-pair.width - Theme.tokens.space.sm;
+                    width: parent.width;
                     items: ["1.0", "1.15", "1.5", "2.0"];
                     current <=> root.line-spacing-index;
                     label: "Line Spacing";

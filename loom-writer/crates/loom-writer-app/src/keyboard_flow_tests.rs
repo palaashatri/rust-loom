@@ -431,6 +431,47 @@ fn palette_ignores_arrow_and_tab_keys_in_its_query() {
     );
 }
 
+#[test]
+fn ctrl_a_in_the_palette_search_selects_the_query_so_typing_replaces_it() {
+    let s = launched("Hello world");
+    let page_selection = s.state.current.borrow().selection();
+    ctrl(&s.app, "k");
+    type_as_keyboard(&s.app, "Bold");
+    ctrl(&s.app, "a");
+    assert_eq!(s.app.get_palette_query(), "Bold", "Ctrl+A changes no text");
+    assert!(
+        s.app.get_palette_query_selected(),
+        "Ctrl+A selects the search text"
+    );
+    assert_eq!(
+        s.state.current.borrow().selection(),
+        page_selection,
+        "the page selection is untouched"
+    );
+    type_text(&s.app, "Export");
+    assert_eq!(
+        s.app.get_palette_query(),
+        "Export",
+        "typing replaces the selected search text"
+    );
+    assert!(!s.app.get_palette_query_selected());
+}
+
+#[test]
+fn backspace_after_ctrl_a_clears_the_palette_search() {
+    let s = launched("Hello world");
+    ctrl(&s.app, "k");
+    type_as_keyboard(&s.app, "Bold");
+    ctrl(&s.app, "a");
+    press(&s.app, Key::Backspace);
+    assert_eq!(
+        s.app.get_palette_query(),
+        "",
+        "Backspace clears the selection"
+    );
+    assert!(!s.app.get_palette_query_selected());
+}
+
 fn open_toolbar_menu(s: &Session, name: &str) {
     s.app.invoke_focus_page();
     shift_key(&s.app, Key::F6);

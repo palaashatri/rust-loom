@@ -660,7 +660,10 @@ fn native_menu_and_palette_share_writer_callback_dispatch() {
     app.on_save_doc(move || calls_ref.set(calls_ref.get() + 1));
 
     assert!(dispatch_command(&app, "file.save"));
-    assert!(dispatch_palette_action(&app, PaletteAction::SaveDoc));
+    assert!(dispatch_palette_action(
+        &app,
+        crate::palette_catalog::PaletteAction::SaveDoc
+    ));
 
     let menu = NativeMenuBar::new();
     let bar = build_standard_menu_bar("Loom Writer", vec![], vec![], vec![], vec![]);
@@ -1362,4 +1365,115 @@ fn selection_announcement_is_meaningful_and_focus_restores_after_palette() {
     d2.set_selection(TextSelection::range(0, 6));
     apply_document(&app, &d2);
     assert_eq!(app.get_selection_announcement(), "Selected 6 characters");
+}
+
+/// The page drawn for one paragraph whose whole text is bold and/or italic.
+fn rendered_sentence(bold: bool, italic: bool) -> Vec<u8> {
+    let mut document = text_document("Slanted words in the page editor");
+    if bold || italic {
+        let len = document.blocks[0].text.len_bytes();
+        let mut style = loom_text::CharacterStyle {
+            italic,
+            ..Default::default()
+        };
+        if bold {
+            style.weight = loom_text::FontWeight::Bold;
+        }
+        document.blocks[0].runs.push(loom_text::StyleRun {
+            start: 0,
+            end: len,
+            style,
+        });
+    }
+    let (app, state) = test_state(
+        document,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    apply_state(&app, &state);
+    let image = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render");
+    // LOOM_ITALIC_DUMP=<dir> writes each render as a PNG for visual review.
+    if let Ok(dir) = std::env::var("LOOM_ITALIC_DUMP") {
+        let _ = image.save(format!("{dir}/sentence-bold-{bold}-italic-{italic}.png"));
+    }
+    image.as_raw().clone()
+}
+
+#[test]
+fn an_italic_run_is_drawn_with_a_slanted_face_not_upright() {
+    let upright = rendered_sentence(false, false);
+    let slanted = rendered_sentence(false, true);
+    let differing = upright.iter().zip(&slanted).filter(|(a, b)| a != b).count();
+    assert!(
+        differing > 500,
+        "italic text must differ from upright text on the page, but {differing} bytes differ"
+    );
+}
+
+#[test]
+fn a_bold_italic_run_is_drawn_italic_as_well_as_bold() {
+    let bold = rendered_sentence(true, false);
+    let bold_italic = rendered_sentence(true, true);
+    let differing = bold
+        .iter()
+        .zip(&bold_italic)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        differing > 500,
+        "bold italic text must differ from bold text on the page, but {differing} bytes differ"
+    );
+}
+
+/// A paragraph, a 2x2 table with "North" in a cell, and a paragraph after it.
+fn document_with_a_table() -> WriterDocument {
+    let mut table = loom_writer_core::WriterTable::new("table-1", 2, 2);
+    table.set(1, 0, "North");
+    table.set(1, 1, "10");
+    let mut document = WriterDocument::new("table", "Table");
+    document
+        .blocks
+        .push(loom_writer_core::RichBlock::new(1, "paragraph", "Intro"));
+    document.blocks.push(loom_writer_core::RichBlock::new(
+        2,
+        loom_writer_core::TABLE_BLOCK_KIND,
+        &table.to_markdown(),
+    ));
+    document
+        .blocks
+        .push(loom_writer_core::RichBlock::new(3, "paragraph", "Outro"));
+    document
+}
+
+#[test]
+fn typing_into_a_table_cell_is_one_undo_step_and_undo_restores_the_table() {
+    let (app, state) = test_state(
+        document_with_a_table(),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    wire_writer_shared_callbacks(&app, &state, None);
+    apply_state(&app, &state);
+    let original = state.current.borrow().editor_text();
+    let at = original.find("North").expect("cell text") + "North".len();
+    let mut typed = original.clone();
+    for (offset, ch) in "XYZ".chars().enumerate() {
+        typed.insert(at + offset, ch);
+        let caret = (at + offset + 1) as i32;
+        app.invoke_document_edited(typed.as_str().into(), caret, caret);
+    }
+    assert_eq!(
+        state.current.borrow().blocks.len(),
+        3,
+        "typing keeps the table as one block"
+    );
+    assert_eq!(
+        state.history.borrow().undo_len(),
+        1,
+        "one typed run is one undo step"
+    );
+    app.invoke_undo();
+    assert_eq!(
+        state.current.borrow().editor_text(),
+        original,
+        "one undo removes the whole typed run and restores the table"
+    );
 }

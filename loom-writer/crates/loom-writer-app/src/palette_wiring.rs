@@ -30,7 +30,14 @@ pub(super) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_palette_key_text(move |text| {
             if let Some(app) = app_ref.upgrade() {
-                let query = format!("{}{}", app.get_palette_query(), text);
+                // After Ctrl+A the search text is selected, so typing replaces it.
+                let base = if app.get_palette_query_selected() {
+                    String::new()
+                } else {
+                    app.get_palette_query().to_string()
+                };
+                app.set_palette_query_selected(false);
+                let query = format!("{base}{text}");
                 app.set_palette_query(query.as_str().into());
                 let registry = state_for_palette.registry.lock().unwrap();
                 rebuild_palette_with_registry(&app, &registry, &query);
@@ -43,8 +50,14 @@ pub(super) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_palette_backspace(move || {
             if let Some(app) = app_ref.upgrade() {
+                // After Ctrl+A, Backspace clears the whole selected search text.
                 let mut query = app.get_palette_query().to_string();
-                query.pop();
+                if app.get_palette_query_selected() {
+                    query.clear();
+                } else {
+                    query.pop();
+                }
+                app.set_palette_query_selected(false);
                 app.set_palette_query(query.as_str().into());
                 let registry = state_for_palette.registry.lock().unwrap();
                 rebuild_palette_with_registry(&app, &registry, &query);
@@ -239,6 +252,24 @@ mod tests {
             run_palette(&app, query);
             assert!(state.registry.try_lock().is_ok(), "{query}: lock leaked");
         }
+    }
+
+    #[test]
+    fn palette_search_finds_the_markdown_export_command() {
+        use slint::Model;
+        let _guard = watchdog();
+        let (app, _state) = palette_app(text_document("unsaved work"), true);
+        app.invoke_open_palette();
+        app.invoke_palette_query_changed("Markdown".into());
+        let commands = app.get_palette_commands();
+        let labels: Vec<String> = (0..commands.row_count())
+            .filter_map(|row| commands.row_data(row))
+            .map(|item| item.label.to_string())
+            .collect();
+        assert!(
+            labels.iter().any(|label| label == "Export Markdown (.md)"),
+            "searching Markdown lists the export command, got {labels:?}"
+        );
     }
 
     #[test]

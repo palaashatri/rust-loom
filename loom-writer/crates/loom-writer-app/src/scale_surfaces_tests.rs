@@ -100,6 +100,7 @@ pub(super) fn editor(width: f32, height: f32, scale: f32) -> WriterApp {
     app.window()
         .set_size(PhysicalSize::new(width as u32, height as u32));
     apply_theme(&app, "light");
+    apply_shortcut_labels(&app);
     Theme::get(&app).set_text_scale(scale);
     apply_layout_breakpoints(&app, width as u32);
     app
@@ -253,5 +254,162 @@ fn toolbar_captions_scale_and_the_row_grows_to_hold_them() {
             "toolbar row must grow with the caption at {scale}x"
         );
         previous = item;
+    }
+}
+
+/// The element with `label` that is furthest right, as (label, x, y, w, h).
+fn rightmost(items: &[Rect], label: &str) -> Rect {
+    items
+        .iter()
+        .filter(|item| item.0 == label)
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .cloned()
+        .unwrap_or_else(|| panic!("no element labelled {label:?} in {items:?}"))
+}
+
+#[test]
+fn inspector_icon_buttons_and_font_stepper_grow_with_text_and_stay_inside_the_window() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    let mut bold_widths = Vec::new();
+    for scale in [1.0f32, 2.0] {
+        let app = editor(width, height, scale);
+        open_surface(&app, "inspector");
+        let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+        let items = rects(&app);
+        bold_widths.push(rightmost(&items, "Bold").3);
+        for label in [
+            "Bold",
+            "Italic",
+            "Underline",
+            "Strikethrough",
+            "Outdent",
+            "Indent",
+            "Smaller",
+            "Larger",
+        ] {
+            let (_, x, _, w, _) = rightmost(&items, label);
+            assert!(
+                x >= 0.0 && x + w <= width - 16.0,
+                "{label} at {scale}x ends at {} inside a {width} px window",
+                x + w
+            );
+        }
+    }
+    assert!(
+        bold_widths[1] > bold_widths[0] + 8.0,
+        "the B/I/U/S buttons grow with text scale: {bold_widths:?}"
+    );
+}
+
+#[test]
+fn inspector_tab_strip_keeps_clear_of_the_toolbar_divider() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    for scale in [1.0f32, 1.5, 2.0] {
+        let app = editor(width, height, scale);
+        open_surface(&app, "inspector");
+        let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+        let items = rects(&app);
+        // The inspector's own "Format" segment sits below the toolbar row.
+        let tabs = items
+            .iter()
+            .find(|item| item.0 == "Format" && item.2 > 40.0)
+            .cloned()
+            .unwrap_or_else(|| panic!("no inspector Format tab in {items:?}"));
+        // The toolbar is the row of items at the top of the window.
+        let toolbar_bottom = items
+            .iter()
+            .filter(|item| item.2 < 20.0)
+            .map(|item| item.2 + item.4)
+            .fold(0.0f32, f32::max);
+        assert!(
+            tabs.2 - toolbar_bottom >= 6.0,
+            "the tab strip at y {} touches the toolbar that ends at {toolbar_bottom} ({scale}x)",
+            tabs.2
+        );
+    }
+}
+
+#[test]
+fn line_spacing_control_spans_the_full_row_like_the_heading_control() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    let app = editor(width, height, 1.0);
+    open_surface(&app, "inspector");
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+    let items = rects(&app);
+    let heading = rightmost(&items, "H3");
+    let spacing = rightmost(&items, "2.0");
+    let heading_end = heading.1 + heading.3;
+    let spacing_end = spacing.1 + spacing.3;
+    assert!(
+        (spacing_end - heading_end).abs() < 1.0,
+        "line spacing ends at {spacing_end} but the heading row ends at {heading_end}"
+    );
+}
+
+/// At 1280 px with the inspector docked (text scale 1.0), every comment marker on
+/// the page lies left of the panel. Below the docking width the inspector is a
+/// compact overlay instead, which this test does not cover.
+#[test]
+fn a_comment_marker_stays_clear_of_the_docked_inspector_at_1280() {
+    let mut document = super::actions_tests::text_document(
+        "A paragraph with a remark on some of the words in it.",
+    );
+    let block_id = document.blocks[0].id;
+    document
+        .add_comment_thread(block_id, 2, 30, "Check this wording")
+        .expect("comment");
+    let (app, state) = super::actions_tests::test_state(
+        document,
+        std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    apply_layout_breakpoints(&app, 1280);
+    crate::toolbar_commands::start_with_inspector_open(&app, 1280);
+    apply_state(&app, &state);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    // The inspector's "Format" tab marks where the docked panel starts.
+    let tabs: Vec<f32> = ElementHandle::find_by_accessible_label(&app, "Format")
+        .filter(|element| element.absolute_position().y > 40.0)
+        .map(|element| element.absolute_position().x)
+        .collect();
+    assert!(!tabs.is_empty(), "the docked inspector shows its tabs");
+    let inspector_left = tabs.iter().copied().fold(f32::MAX, f32::min);
+    let markers: Vec<_> =
+        ElementHandle::find_by_accessible_label(&app, "Show comment by You on page")
+            .filter(|element| element.size().width > 0.0)
+            .collect();
+    assert!(!markers.is_empty(), "the comment has a page marker");
+    for marker in markers {
+        let (position, size) = (marker.absolute_position(), marker.size());
+        assert!(
+            position.x + size.width <= inspector_left,
+            "the comment marker spans {}..{} and the inspector starts at {inspector_left}",
+            position.x,
+            position.x + size.width
+        );
+    }
+}
+
+#[test]
+fn inspector_shortcut_hints_name_the_platform_modifier() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    let app = editor(width, height, 1.0);
+    open_surface(&app, "inspector");
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+    let modifier = if cfg!(target_os = "macos") {
+        "Cmd"
+    } else {
+        "Ctrl"
+    };
+    for (label, key) in [("Bold", "B"), ("Italic", "I"), ("Underline", "U")] {
+        let hints: Vec<String> = ElementHandle::find_by_accessible_label(&app, label)
+            .filter_map(|element| element.accessible_description())
+            .map(|hint| hint.to_string())
+            .collect();
+        let want = format!("{label} ({modifier}+{key})");
+        assert!(
+            hints.contains(&want),
+            "the {label} hint is {want:?}; the hints found are {hints:?}"
+        );
     }
 }

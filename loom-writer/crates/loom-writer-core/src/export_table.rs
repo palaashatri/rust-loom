@@ -2,12 +2,16 @@
 //! positions, without Markdown pipes or the separator row, so a table reads as
 //! a table rather than as Markdown source.
 
-use loom_pdf::{text_width_pt, PageIndex, PdfDocument, TextStyle};
+use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
 
 use crate::parse_table_markdown;
 
 /// Space kept between a cell and the next column.
 const GUTTER_PT: f32 = 12.0;
+/// Narrowest column, so an empty column of a new table is still drawn.
+const MIN_COLUMN_PT: f32 = 48.0;
+/// Colour of the cell rules.
+const RULE_RGB: (f32, f32, f32) = (0.55, 0.55, 0.55);
 /// Marks a cell that was shortened to fit its column.
 const ELLIPSIS: char = '\u{2026}';
 
@@ -18,6 +22,8 @@ pub(crate) struct TableLayout {
     widths: Vec<f32>,
     /// The table's width, from its left edge to the end of its last column.
     pub(crate) width: f32,
+    /// The body style the cells are set in.
+    body: TextStyle,
 }
 
 impl TableLayout {
@@ -26,7 +32,7 @@ impl TableLayout {
     /// to fit when drawn.
     pub(crate) fn new(markdown: &str, body: &TextStyle, max_width: f32) -> Self {
         let table = parse_table_markdown(markdown);
-        let mut natural = vec![GUTTER_PT; table.columns()];
+        let mut natural = vec![MIN_COLUMN_PT; table.columns()];
         for (index, row) in table.rows.iter().enumerate() {
             let style = cell_style(body, table.header_row && index == 0);
             for (column, cell) in row.iter().enumerate() {
@@ -51,14 +57,16 @@ impl TableLayout {
             starts,
             widths,
             width,
+            body: body.clone(),
         }
     }
 }
 
-/// Draws the table line that begins at byte `start` of the block's `text`,
-/// with the table's top-left corner at `origin`. A line that begins inside a
-/// wrapped row draws nothing (the row was drawn from its first line), and so
-/// does the separator row.
+/// Draws the table row that begins at byte `start` of the block's `text`, with
+/// the table's top-left corner at `origin` and the row box `row_height` tall.
+/// Every row gets its cell rules, so an empty table still shows its columns;
+/// the first row also gets a top rule. A line that begins inside another line
+/// draws nothing.
 pub(crate) fn draw_line(
     pdf: &mut PdfDocument,
     page: PageIndex,
@@ -66,7 +74,7 @@ pub(crate) fn draw_line(
     start: usize,
     layout: &TableLayout,
     origin: (f32, f32),
-    body: &TextStyle,
+    row_height: f32,
 ) {
     let Some(line) = line_starting_at(text, start) else {
         return;
@@ -74,11 +82,40 @@ pub(crate) fn draw_line(
     let Some(cells) = parse_table_markdown(line).rows.into_iter().next() else {
         return;
     };
-    let style = cell_style(body, layout.header_row && start == 0);
+    draw_rules(pdf, page, layout, origin, row_height, start == 0);
+    let style = cell_style(&layout.body, layout.header_row && start == 0);
     for (column, cell) in cells.iter().enumerate().take(layout.starts.len()) {
         let fitted = fit(cell, &style, layout.widths[column] - GUTTER_PT);
         let x = origin.0 + layout.starts[column];
         pdf.draw_text(page, x, origin.1, &fitted, &style);
+    }
+}
+
+/// Draws one row's box: a rule under it, a vertical rule at every column edge,
+/// and a rule above the table when `first`.
+fn draw_rules(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    layout: &TableLayout,
+    origin: (f32, f32),
+    row_height: f32,
+    first: bool,
+) {
+    let rule = PathStyle::stroked(RULE_RGB, 0.5);
+    // The text sits on its baseline, so the box runs from one em above it to
+    // the bottom of the row.
+    let size = layout.body.size_pt;
+    let top = origin.1 + size;
+    let bottom = origin.1 - (row_height - size).max(0.0);
+    let right = origin.0 + layout.width;
+    for start in &layout.starts {
+        let x = origin.0 + start;
+        pdf.draw_line(page, x, top, x, bottom, rule);
+    }
+    pdf.draw_line(page, right, top, right, bottom, rule);
+    pdf.draw_line(page, origin.0, bottom, right, bottom, rule);
+    if first {
+        pdf.draw_line(page, origin.0, top, right, top, rule);
     }
 }
 

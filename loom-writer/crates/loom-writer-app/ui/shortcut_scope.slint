@@ -1,0 +1,90 @@
+// Writer's window-level keyboard shortcuts. The scope wraps the whole window
+// content, so a key that no focused control takes reaches these handlers, and
+// Alt+letter reaches the menus from inside a text field.
+import { FindBar } from "find_bar.slint";
+
+export component WriterShortcutScope inherits FocusScope {
+    in property <bool> palette-open;
+    in property <bool> template-chooser-open;
+    in property <bool> save-changes-open;
+    in property <int> toolbar-menu-kind;
+    callback open-menu-for-key(KeyEvent) -> bool;
+    callback focus-page();
+    callback open-palette();
+    callback new-doc();
+    callback open-doc();
+    callback save-doc();
+    callback save-as-doc();
+    callback export-pdf();
+    callback toggle-bold();
+    callback toggle-italic();
+    callback toggle-underline();
+    callback undo();
+    callback redo();
+
+    // A window-wide shortcut scope, not a control: Tab skips it.
+    focus-on-tab-navigation: false;
+    // Alt+letter and F10 open the menu bar even from a text field (the page, the
+    // find field, the comment box), which would otherwise type the letter.
+    capture-key-pressed(event) => {
+        if (root.open-menu-for-key(event)) { return accept; }
+        return reject;
+    }
+    key-pressed(event) => {
+        if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open) { return reject; }
+        if (event.text == Key.F6) { root.focus-page(); return accept; }
+        if (event.text == Key.F3) {
+            if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
+            return accept;
+        }
+        if (root.open-menu-for-key(event)) { return accept; }
+        if (event.modifiers.control || event.modifiers.meta) {
+            if (event.text == Key.K || event.text == "k") {
+                root.open-palette();
+                return accept;
+            }
+            if (event.text == "n" || event.text == "N") {
+                root.new-doc();
+                return accept;
+            }
+            if (event.text == "o" || event.text == "O") {
+                root.open-doc();
+                return accept;
+            }
+            if (event.text == "s" || event.text == "S") {
+                if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                return accept;
+            }
+            if (event.text == "e" || event.text == "E") {
+                root.export-pdf();
+                return accept;
+            }
+            if (event.text == "b" || event.text == "B") {
+                root.toggle-bold();
+                return accept;
+            }
+            if (event.text == "i" || event.text == "I") {
+                root.toggle-italic();
+                return accept;
+            }
+            if (event.text == "u" || event.text == "U") {
+                root.toggle-underline();
+                return accept;
+            }
+            if (event.text == "z" || event.text == "Z") {
+                if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                return accept;
+            }
+            if (event.text == "f" || event.text == "F") {
+                FindBar.open-requested(false);
+                return accept;
+            }
+            if (event.text == "h" || event.text == "H") {
+                FindBar.open-requested(true);
+                return accept;
+            }
+        }
+        return reject;
+    }
+    @children
+}

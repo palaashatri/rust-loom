@@ -1,5 +1,5 @@
 import { TemplateChooserModal } from "template_chooser.slint";
-import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import { CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     LoomButton, LoomTitleBar, LoomWindowResizeEdges,
     LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
@@ -7,6 +7,8 @@ import {
 import { Icon } from "icons.slint";
 import { FindBar, FindBarOverlay } from "find_bar.slint";
 import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
+import { WriterPaletteHost } from "palette_host.slint";
+import { WriterShortcutScope } from "shortcut_scope.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
@@ -215,6 +217,10 @@ export component WriterApp inherits Window {
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
     in-out property <string> palette-query: "";
+    // Ctrl+A selects the search text: the next typed text replaces it.
+    in-out property <bool> palette-query-selected: false;
+    // The platform modifier that shortcut hints name: "Ctrl", or "Cmd" on macOS.
+    in-out property <string> shortcut-modifier: "Ctrl";
     in-out property <int> palette-selected: 0;
     callback palette-invoked(int);
     callback palette-query-changed(string);
@@ -260,7 +266,8 @@ export component WriterApp inherits Window {
     public function open-palette() {
         root.palette-open = true;
         root.palette-query = "";
-        palette.grab-focus();
+        root.palette-query-selected = false;
+        palette-host.grab-focus();
     }
 
     function compact-label(full-label: string) -> string {
@@ -303,78 +310,30 @@ export component WriterApp inherits Window {
 
     changed palette-open => {
         if (root.palette-open) {
-            palette.grab-focus();
+            palette-host.grab-focus();
         } else {
             root.focus-page();
         }
     }
 
-    app-focus := FocusScope {
-        // A window-wide shortcut scope, not a control: Tab skips it.
-        focus-on-tab-navigation: false;
-        // Alt+letter and F10 open the menu bar even from a text field (the page, the
-        // find field, the comment box), which would otherwise type the letter.
-        capture-key-pressed(event) => {
-            if (root.open-menu-for-key(event)) { return accept; }
-            return reject;
-        }
-        key-pressed(event) => {
-            if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open) { return reject; }
-            if (event.text == Key.F6) { root.focus-page(); return accept; }
-            if (event.text == Key.F3) {
-                if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
-                return accept;
-            }
-            if (root.open-menu-for-key(event)) { return accept; }
-            if (event.modifiers.control || event.modifiers.meta) {
-                if (event.text == Key.K || event.text == "k") {
-                    root.open-palette();
-                    return accept;
-                }
-                if (event.text == "n" || event.text == "N") {
-                    root.new-doc();
-                    return accept;
-                }
-                if (event.text == "o" || event.text == "O") {
-                    root.open-doc();
-                    return accept;
-                }
-                if (event.text == "s" || event.text == "S") {
-                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
-                    return accept;
-                }
-                if (event.text == "e" || event.text == "E") {
-                    root.export-pdf();
-                    return accept;
-                }
-                if (event.text == "b" || event.text == "B") {
-                    root.toggle-bold();
-                    return accept;
-                }
-                if (event.text == "i" || event.text == "I") {
-                    root.toggle-italic();
-                    return accept;
-                }
-                if (event.text == "u" || event.text == "U") {
-                    root.toggle-underline();
-                    return accept;
-                }
-                if (event.text == "z" || event.text == "Z") {
-                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                    return accept;
-                }
-                if (event.text == "f" || event.text == "F") {
-                    FindBar.open-requested(false);
-                    return accept;
-                }
-                if (event.text == "h" || event.text == "H") {
-                    FindBar.open-requested(true);
-                    return accept;
-                }
-            }
-            return reject;
-        }
-
+    app-focus := WriterShortcutScope {
+        palette-open: root.palette-open;
+        template-chooser-open: root.template-chooser-open;
+        save-changes-open: root.save-changes-open;
+        toolbar-menu-kind: root.toolbar-menu-kind;
+        open-menu-for-key(event) => { return root.open-menu-for-key(event); }
+        focus-page => { root.focus-page(); }
+        open-palette => { root.open-palette(); }
+        new-doc => { root.new-doc(); }
+        open-doc => { root.open-doc(); }
+        save-doc => { root.save-doc(); }
+        save-as-doc => { root.save-as-doc(); }
+        export-pdf => { root.export-pdf(); }
+        toggle-bold => { root.toggle-bold(); }
+        toggle-italic => { root.toggle-italic(); }
+        toggle-underline => { root.toggle-underline(); }
+        undo => { root.undo(); }
+        redo => { root.redo(); }
         VerticalLayout {
             spacing: 0px;
             padding: 0px;
@@ -490,6 +449,7 @@ export component WriterApp inherits Window {
                 }
 
                 docked-inspector := WriterInspector {
+                    shortcut-modifier: root.shortcut-modifier;
                     x: root.rtl ? 0px : parent.width - self.width;
                     y: 0px;
                     width: root.docked-inspector-visible ? 320px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
@@ -565,6 +525,7 @@ export component WriterApp inherits Window {
         }
 
         compact-inspector := WriterInspector {
+            shortcut-modifier: root.shortcut-modifier;
             x: root.rtl ? 0px : max(0px, parent.width - 360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)));
             y: 0px;
             width: min(360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)), parent.width);
@@ -677,20 +638,17 @@ export component WriterApp inherits Window {
         menu-action(id) => { root.local-menu-action(id); }
     }
 
-    palette := CommandPalette {
-        x: 0px;
-        y: 0px;
+    // The command palette and its Ctrl+A search scope; see palette_host.slint.
+    palette-host := WriterPaletteHost {
         width: parent.width;
         height: parent.height;
         open: root.palette-open;
         commands: root.palette-commands;
-        query: root.palette-query;
+        query <=> root.palette-query;
+        query-selected <=> root.palette-query-selected;
         selected: root.palette-selected;
         command-invoked(idx) => { root.palette-invoked(idx); }
-        query-changed(q) => {
-            root.palette-query = q;
-            root.palette-query-changed(q);
-        }
+        query-changed(q) => { root.palette-query-changed(q); }
         move-selection(delta) => { root.palette-move(delta); }
         key-text(text) => { root.palette-key-text(text); }
         backspace => { root.palette-backspace(); }

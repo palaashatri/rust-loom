@@ -1,0 +1,55 @@
+// The command palette as the Writer window hosts it. A window-sized scope sits
+// above the shared CommandPalette: Slint's capture phase only reaches ancestors
+// of the focused item, so Ctrl+A is caught here, selects the search text and is
+// not passed to the page. The palette ignores Ctrl keys. This scope takes no
+// focus on click, so clicks still reach the page beneath.
+import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+
+export component WriterPaletteHost inherits FocusScope {
+    in property <bool> open;
+    in property <[CommandPaletteItem]> commands;
+    in-out property <string> query;
+    in-out property <bool> query-selected;
+    in property <int> selected;
+    callback command-invoked(int);
+    callback query-changed(string);
+    callback move-selection(int);
+    callback key-text(string);
+    callback backspace;
+    callback close-requested;
+
+    /// Moves keyboard focus into the palette, which captures the next keypress.
+    public function grab-focus() {
+        palette.grab-focus();
+    }
+
+    focus-on-click: false;
+    focus-on-tab-navigation: false;
+    capture-key-pressed(event) => {
+        if (root.open && event.modifiers.control && (event.text == "a" || event.text == "A")) {
+            root.query-selected = true;
+            return accept;
+        }
+        return reject;
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.open;
+        commands: root.commands;
+        query: root.query;
+        selected: root.selected;
+        command-invoked(idx) => { root.command-invoked(idx); }
+        query-changed(q) => {
+            root.query = q;
+            root.query-changed(q);
+        }
+        move-selection(delta) => { root.move-selection(delta); }
+        key-text(text) => { root.key-text(text); }
+        backspace => { root.backspace(); }
+        close-requested => { root.close-requested(); }
+    }
+}

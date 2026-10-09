@@ -27,7 +27,7 @@ pub(crate) struct TextEdit {
 
 impl TextEdit {
     /// Infer the edit from old and new text with no further knowledge.
-    fn diff(old_text: &str, new_text: &str) -> Self {
+    pub(crate) fn diff(old_text: &str, new_text: &str) -> Self {
         let (old_start, old_end, new_start, new_end) = changed_text_ranges(old_text, new_text);
         Self {
             old_start,
@@ -249,7 +249,7 @@ impl WriterDocument {
     /// `replace_paragraphs` for a caller that knows the exact edit: comment
     /// anchors rebase through `edit` instead of through an inferred diff.
     pub(crate) fn replace_paragraphs_with_edit(&mut self, plain_text: &str, edit: TextEdit) {
-        let old_blocks = self.rebuild_blocks(plain_text);
+        let old_blocks = self.rebuild_blocks(plain_text, Some(edit));
         if self.comments.is_empty() {
             return;
         }
@@ -372,7 +372,7 @@ pub(crate) fn comment_thread_from_raw(raw: &str) -> Option<CommentThread> {
     })
 }
 
-fn blocks_to_text(blocks: &[RichBlock]) -> String {
+pub(crate) fn blocks_to_text(blocks: &[RichBlock]) -> String {
     blocks
         .iter()
         .map(|block| block.text.as_str())

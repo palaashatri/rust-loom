@@ -16,6 +16,7 @@ use unicode_segmentation::UnicodeSegmentation;
 mod comments;
 mod docx;
 mod export;
+mod export_flow;
 mod export_table;
 mod layout;
 mod markdown;
@@ -30,7 +31,7 @@ pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
 pub use layout::{DocumentFlow, FlowLine};
 pub use page_setup::PageSetup;
-use paragraph_match::exact_paragraph_matches;
+use paragraph_match::{exact_paragraph_matches, metadata_matches};
 use style_json::{
     alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, parse_line_break,
     runs_json, selection_json,
@@ -418,23 +419,39 @@ impl WriterDocument {
     /// style, and runs, even when an insertion or deletion moves them. The
     /// empty string represents an empty document rather than one empty block.
     pub fn replace_paragraphs(&mut self, plain_text: &str) {
-        let old_blocks = self.rebuild_blocks(plain_text);
+        let old_blocks = self.rebuild_blocks(plain_text, None);
         Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
     }
 
     /// Rebuild the blocks from plain text and return the old ones; comment
-    /// anchors are left for the caller to rebase.
-    pub(crate) fn rebuild_blocks(&mut self, plain_text: &str) -> Vec<RichBlock> {
+    /// anchors are left for the caller to rebase. A table block that `edit`
+    /// touches stays one table block (see `tables::map_tables_through_edit`).
+    pub(crate) fn rebuild_blocks(
+        &mut self,
+        plain_text: &str,
+        edit: Option<comments::TextEdit>,
+    ) -> Vec<RichBlock> {
         let normalized = normalize_editor_text(plain_text);
-        let paragraphs = if normalized.is_empty() {
-            Vec::new()
-        } else {
-            normalized.split('\n').map(str::to_owned).collect()
-        };
-
         let old_blocks = std::mem::take(&mut self.blocks);
+        let edit = match edit {
+            Some(edit)
+                if edit.new_end <= normalized.len()
+                    && normalized.is_char_boundary(edit.new_start)
+                    && normalized.is_char_boundary(edit.new_end) =>
+            {
+                edit
+            }
+            _ => comments::TextEdit::diff(&comments::blocks_to_text(&old_blocks), &normalized),
+        };
+        let (paragraphs, forced) = if normalized.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let tables = tables::map_tables_through_edit(&old_blocks, &normalized, edit);
+            tables::split_editor_text(&normalized, &tables)
+        };
         let exact_matches = exact_paragraph_matches(&old_blocks, &paragraphs);
-        let metadata_matches = metadata_matches(&old_blocks, &paragraphs, &exact_matches);
+        let mut metadata_matches = metadata_matches(&old_blocks, &paragraphs, &exact_matches);
+        tables::pin_table_matches(&old_blocks, &forced, &mut metadata_matches);
         let mut next_id = old_blocks.iter().map(|block| block.id).max().unwrap_or(0) + 1;
         let blocks = paragraphs
             .into_iter()
@@ -1000,110 +1017,6 @@ pub struct DocumentStats {
     pub sentence_count: usize,
     /// Estimated reading time in minutes (assuming 200 WPM).
     pub reading_time_minutes: f32,
-}
-
-/// Add conservative metadata matches for changed paragraphs in an unmatched
-/// gap. Equal-sized gaps retain positional matching. For unequal gaps, a
-/// small sequence alignment pairs only sufficiently similar text, leaving
-/// unrelated insertions with fresh metadata instead of borrowing a deleted
-/// block's id, kind, or style.
-fn metadata_matches(
-    old: &[RichBlock],
-    new: &[String],
-    exact_matches: &[Option<usize>],
-) -> Vec<Option<usize>> {
-    let anchors = exact_matches
-        .iter()
-        .enumerate()
-        .filter_map(|(new_index, old_index)| old_index.map(|old_index| (new_index, old_index)));
-    let mut matches = exact_matches.to_vec();
-    let mut old_start = 0;
-    let mut new_start = 0;
-
-    for (new_end, old_end) in anchors.chain(std::iter::once((new.len(), old.len()))) {
-        let old_gap_len = old_end - old_start;
-        let new_gap_len = new_end - new_start;
-        if old_gap_len == new_gap_len {
-            for offset in 0..new_gap_len {
-                if matches[new_start + offset].is_none() {
-                    matches[new_start + offset] = Some(old_start + offset);
-                }
-            }
-        } else if old_gap_len > 0 && new_gap_len > 0 {
-            for (new_offset, old_offset) in
-                align_metadata_gap(&old[old_start..old_end], &new[new_start..new_end])
-            {
-                matches[new_start + new_offset] = Some(old_start + old_offset);
-            }
-        }
-
-        if new_end < new.len() {
-            old_start = old_end + 1;
-            new_start = new_end + 1;
-        }
-    }
-
-    matches
-}
-
-fn align_metadata_gap(old: &[RichBlock], new: &[String]) -> Vec<(usize, usize)> {
-    let mut scores = vec![vec![0usize; new.len() + 1]; old.len() + 1];
-    for old_index in (0..old.len()).rev() {
-        for new_index in (0..new.len()).rev() {
-            let skip_old = scores[old_index + 1][new_index];
-            let skip_new = scores[old_index][new_index + 1];
-            let pair = paragraph_similarity(&old[old_index].text, &new[new_index])
-                .map(|score| score + scores[old_index + 1][new_index + 1])
-                .unwrap_or(0);
-            scores[old_index][new_index] = skip_old.max(skip_new).max(pair);
-        }
-    }
-
-    let mut pairs = Vec::new();
-    let (mut old_index, mut new_index) = (0, 0);
-    while old_index < old.len() && new_index < new.len() {
-        let score = paragraph_similarity(&old[old_index].text, &new[new_index]);
-        let pair = score
-            .map(|score| score + scores[old_index + 1][new_index + 1])
-            .unwrap_or(0);
-        let skip_old = scores[old_index + 1][new_index];
-        let skip_new = scores[old_index][new_index + 1];
-        if score.is_some() && pair >= skip_old.max(skip_new) {
-            pairs.push((new_index, old_index));
-            old_index += 1;
-            new_index += 1;
-        } else if skip_old >= skip_new {
-            old_index += 1;
-        } else {
-            new_index += 1;
-        }
-    }
-    pairs
-}
-
-/// Return a normalized similarity score when the unchanged prefix/suffix is
-/// substantial enough to identify an edited paragraph. The score is scaled so
-/// sequence alignment can compare multiple candidate pairs without floats.
-fn paragraph_similarity(old: &Text, new: &str) -> Option<usize> {
-    let old_chars: Vec<char> = old.as_str().chars().collect();
-    let new_chars: Vec<char> = new.chars().collect();
-    let prefix = old_chars
-        .iter()
-        .zip(&new_chars)
-        .take_while(|(old, new)| old == new)
-        .count();
-    let max_suffix = (old_chars.len() - prefix).min(new_chars.len() - prefix);
-    let suffix = (0..max_suffix)
-        .take_while(|offset| {
-            old_chars[old_chars.len() - 1 - offset] == new_chars[new_chars.len() - 1 - offset]
-        })
-        .count();
-    let shared = prefix + suffix;
-    let shorter = old_chars.len().min(new_chars.len());
-    if shared == 0 || shorter == 0 || shared * 2 < shorter {
-        return None;
-    }
-    Some(shared * 1_000 / old_chars.len().max(new_chars.len()))
 }
 
 /// Remap byte-ranged character styles across the single contiguous edit that

@@ -4,8 +4,9 @@
 //! byte ceiling. Public names are re-exported from the crate root so the
 //! public API surface is unchanged.
 
+use crate::export_flow;
 use crate::export_table::{self, TableLayout};
-use crate::WriterDocument;
+use crate::{PageStyle, WriterDocument};
 
 /// Exports a document to a `.docx` archive Word opens directly; see
 /// [`crate::export_docx`] for what is carried over. Round-trips through
@@ -103,119 +104,192 @@ fn align_shift(alignment: loom_text::Alignment, column: f32, width: f32) -> f32 
     .max(0.0)
 }
 
-/// Render the document to a paginated PDF using the same deterministic page
-/// fragments as the editor preview. Output is byte-for-byte deterministic for
-/// the same document.
+/// The text of one PDF line: a byte range of its block's text, or one row of a
+/// table block.
+enum LineContent {
+    Text {
+        start: usize,
+        end: usize,
+        marker: String,
+        style: loom_pdf::TextStyle,
+    },
+    TableRow {
+        start: usize,
+    },
+}
+
+/// One line of the PDF in document order.
+struct PdfLine {
+    block: usize,
+    content: LineContent,
+    /// Space before the line, between blocks.
+    gap: f32,
+    /// Height of the line box.
+    height: f32,
+}
+
+/// Whether `kind` is one of the heading block kinds.
+fn is_heading(kind: &str) -> bool {
+    kind.strip_prefix("heading")
+        .is_some_and(|level| matches!(level, "1" | "2" | "3" | "4" | "5" | "6"))
+}
+
+/// The style of a block's text: headings take the document model's size and
+/// are bold, as the DOCX export sets them; other blocks use the body style.
+fn block_style(kind: &str, body: &loom_pdf::TextStyle) -> loom_pdf::TextStyle {
+    if is_heading(kind) {
+        loom_pdf::TextStyle {
+            size_pt: PageStyle::default().font_size_for_kind(kind),
+            bold: true,
+            ..body.clone()
+        }
+    } else {
+        body.clone()
+    }
+}
+
+/// Lays every block out as PDF lines, wrapped with the PDF's own widths.
+fn pdf_lines(
+    doc: &WriterDocument,
+    page_style: &PageStyle,
+    body: &loom_pdf::TextStyle,
+    column: f32,
+) -> Vec<PdfLine> {
+    let mut lines = Vec::new();
+    let mut numbered_index = 0usize;
+    let block_gap = body.size_pt * page_style.line_height;
+    for (index, block) in doc.blocks.iter().enumerate() {
+        let gap = if index == 0 { 0.0 } else { block_gap };
+        let kind = block.kind.as_str();
+        let text = block.text.as_str();
+        if kind == crate::TABLE_BLOCK_KIND {
+            let mut offset = 0usize;
+            let mut first = true;
+            for row in text.split('\n') {
+                if !crate::parse_table_markdown(row).rows.is_empty() {
+                    lines.push(PdfLine {
+                        block: index,
+                        content: LineContent::TableRow { start: offset },
+                        gap: if first { gap } else { 0.0 },
+                        height: body.size_pt * page_style.line_height,
+                    });
+                    first = false;
+                }
+                offset += row.len() + 1;
+            }
+            continue;
+        }
+        let marker = match kind {
+            "list-bulleted" => {
+                numbered_index = 0;
+                "- ".to_string()
+            }
+            "list-numbered" => {
+                numbered_index += 1;
+                format!("{numbered_index}. ")
+            }
+            _ => {
+                numbered_index = 0;
+                String::new()
+            }
+        };
+        let style = block_style(kind, body);
+        let height = style.size_pt * page_style.line_height;
+        let marker_width = loom_pdf::text_width_pt(&marker, &style);
+        let ranges = export_flow::wrap(
+            text,
+            &block.runs,
+            &style,
+            (column - marker_width).max(0.0),
+            column,
+        );
+        for (line_index, (start, end)) in ranges.into_iter().enumerate() {
+            lines.push(PdfLine {
+                block: index,
+                content: LineContent::Text {
+                    start,
+                    end,
+                    marker: if line_index == 0 {
+                        marker.clone()
+                    } else {
+                        String::new()
+                    },
+                    style: style.clone(),
+                },
+                gap: if line_index == 0 { gap } else { 0.0 },
+                height,
+            });
+        }
+    }
+    lines
+}
+
+/// Render the document to a PDF. Lines are wrapped with the widths the PDF
+/// draws with, so no line or appended run passes the right margin; headings
+/// take the document model's sizes; pages break by line height within the
+/// margins. Output is byte-for-byte deterministic for the same document.
 pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     use loom_pdf::{PdfDocument, TextStyle};
     let page_style = doc.page.page_style();
     let mut pdf = PdfDocument::new();
-    let pages = doc.paginate(&page_style).unwrap_or_default();
     let body = TextStyle {
-        size_pt: page_style.body_font_size_pt,
+        size_pt: loom_text::CharacterStyle::default().font_size,
         fill_rgb: (0.15, 0.13, 0.11),
         ..Default::default()
     };
-
     let column =
         (page_style.width_pt - page_style.margin_left_pt - page_style.margin_right_pt).max(0.0);
-    let mut table: Option<(u64, TableLayout)> = None;
+    let top = page_style.height_pt - page_style.margin_top_pt;
+    let mut page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+    let mut y = top;
+    let mut layouts: std::collections::BTreeMap<usize, export_table::TableLayout> =
+        std::collections::BTreeMap::new();
 
-    // Pagination is authoritative.  Every fragment is emitted on the page
-    // selected by `WriterDocument::paginate`, so a long document can never be
-    // silently truncated when the first page fills up.
-    let mut numbered_index = 0usize;
-    for page_data in &pages {
-        let page = pdf.add_page(page_style.width_pt, page_style.height_pt);
-        let mut y = page_style.height_pt - page_style.margin_top_pt;
-
-        let mut previous_block_id = None;
-        for fragment in &page_data.fragments {
-            let block = doc
-                .blocks
-                .iter()
-                .find(|block| block.id == fragment.block_id);
-            let Some(block) = block else { continue };
-            let font_size = page_style.font_size_for_kind(block.kind.as_str());
-            let line_height = font_size * page_style.line_height;
-            if previous_block_id.is_some() && previous_block_id != Some(fragment.block_id) {
-                y -= page_style.body_font_size_pt * page_style.line_height;
-            }
-
-            let marker = if previous_block_id != Some(fragment.block_id) {
-                match block.kind.as_str() {
-                    "list-bulleted" => {
-                        numbered_index = 0;
-                        Some("- ".to_string())
-                    }
-                    "list-numbered" => {
-                        numbered_index += 1;
-                        Some(format!("{numbered_index}. "))
-                    }
-                    _ => {
-                        numbered_index = 0;
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-            let marker = marker.unwrap_or_default();
-            // `wrap_utf8_ranges` includes a hard newline in the fragment that
-            // precedes it.  The newline consumes the line box but must not be
-            // emitted as a second PDF text line.
-            let line = fragment.text.strip_suffix('\n').unwrap_or(&fragment.text);
-            if block.kind.as_str() == crate::TABLE_BLOCK_KIND {
-                let cached = matches!(&table, Some((id, _)) if *id == block.id);
-                if !cached {
-                    table = Some((
-                        block.id,
-                        TableLayout::new(block.text.as_str(), &body, column),
-                    ));
-                }
-                if let Some((_, layout)) = &table {
-                    let shift = align_shift(block.style.alignment, column, layout.width);
-                    let origin = (page_style.margin_left_pt + shift, y);
-                    export_table::draw_line(
-                        &mut pdf,
-                        page,
-                        block.text.as_str(),
-                        fragment.start,
-                        layout,
-                        origin,
-                        &body,
-                    );
-                }
-            } else if !marker.is_empty() || !line.is_empty() {
-                let style = match block.kind.as_str() {
-                    "heading1" => TextStyle {
-                        size_pt: 15.0,
-                        bold: true,
-                        ..Default::default()
-                    },
-                    "heading2" => TextStyle {
-                        size_pt: 13.0,
-                        bold: true,
-                        ..Default::default()
-                    },
-                    _ => body.clone(),
-                };
-                // Center and right alignment place the line inside the text column.
-                let line_width = loom_pdf::text_width_pt(&format!("{marker}{line}"), &style);
-                let shift = align_shift(block.style.alignment, column, line_width);
-                let start = StyledLine {
+    for line in pdf_lines(doc, &page_style, &body, column) {
+        y -= line.gap;
+        if y - line.height < page_style.margin_bottom_pt && y < top {
+            page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+            y = top;
+        }
+        let block = &doc.blocks[line.block];
+        match &line.content {
+            LineContent::Text {
+                start,
+                end,
+                marker,
+                style,
+            } => {
+                let text = &block.text.as_str()[*start..*end];
+                let width = export_flow::line_width(marker, text, &block.runs, style, *start);
+                let shift = align_shift(block.style.alignment, column, width);
+                let text_line = StyledLine {
                     x: page_style.margin_left_pt + shift,
                     y,
-                    marker: &marker,
-                    text: line,
-                    text_start: fragment.start,
+                    marker,
+                    text,
+                    text_start: *start,
                     runs: &block.runs,
                 };
-                draw_styled_line(&mut pdf, page, &start, &style);
+                draw_styled_line(&mut pdf, page, &text_line, style);
             }
-            y -= line_height;
-            previous_block_id = Some(fragment.block_id);
+            LineContent::TableRow { start } => {
+                let layout = layouts
+                    .entry(line.block)
+                    .or_insert_with(|| TableLayout::new(block.text.as_str(), &body, column));
+                let shift = align_shift(block.style.alignment, column, layout.width);
+                let origin = (page_style.margin_left_pt + shift, y);
+                export_table::draw_line(
+                    &mut pdf,
+                    page,
+                    block.text.as_str(),
+                    *start,
+                    layout,
+                    origin,
+                    line.height,
+                );
+            }
         }
+        y -= line.height;
     }
     pdf.serialize()
 }
@@ -472,8 +546,9 @@ mod tests {
         let pdf = export_pdf(&document);
 
         let column = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        // The body is drawn at the document model's body size.
         let body = loom_pdf::TextStyle {
-            size_pt: style.body_font_size_pt,
+            size_pt: loom_text::CharacterStyle::default().font_size,
             ..Default::default()
         };
         let width = |text: &str| loom_pdf::text_width_pt(text, &body);
@@ -493,6 +568,149 @@ mod tests {
         assert!(
             (right - want_right).abs() < 3.0,
             "right line starts at {right}, expected about {want_right}"
+        );
+    }
+
+    /// One text draw read back from the content stream.
+    struct Drawn {
+        x: f32,
+        size: f32,
+        bold: bool,
+        text: String,
+    }
+
+    /// Every `(text) Tj` in the page content, with its position and font.
+    fn drawn_text(pdf: &[u8]) -> Vec<Drawn> {
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(found) = content[from..].find(" Td (") {
+            let at = from + found;
+            let tail = &content[at.saturating_sub(120)..at];
+            let words: Vec<&str> = tail.split_whitespace().collect();
+            // "... /F2 12.00 Tf BT 72.00 700.00 Td (text) Tj"
+            let n = words.len();
+            let x: f32 = words[n - 2].parse().expect("x");
+            let size: f32 = words[n - 5].parse().expect("size");
+            let font = words[n - 6];
+            let text_start = at + " Td (".len();
+            let text_end = text_start + content[text_start..].find(") Tj").expect("end");
+            out.push(Drawn {
+                x,
+                size,
+                bold: font == "/F2" || font == "/F4",
+                text: content[text_start..text_end].to_string(),
+            });
+            from = text_end;
+        }
+        out
+    }
+
+    #[test]
+    fn export_pdf_uses_the_document_model_sizes_for_headings_and_body() {
+        let mut document = WriterDocument::new("sizes", "Sizes");
+        document.push(RichBlock::new(document.next_id(), "heading1", "Title"));
+        document.push(RichBlock::new(
+            document.next_id(),
+            "paragraph",
+            "Body words",
+        ));
+        let pdf = export_pdf(&document);
+        let drawn = drawn_text(&pdf);
+        let size_of = |text: &str| {
+            drawn
+                .iter()
+                .find(|d| d.text == text)
+                .unwrap_or_else(|| panic!("{text:?} is drawn"))
+                .size
+        };
+        assert!((size_of("Title") - 24.0).abs() < 0.01, "H1 is 24 pt");
+        assert!((size_of("Body words") - 12.0).abs() < 0.01, "body is 12 pt");
+        assert!(
+            drawn
+                .iter()
+                .find(|d| d.text == "Title")
+                .expect("title")
+                .bold,
+            "H1 is bold"
+        );
+    }
+
+    #[test]
+    fn export_pdf_keeps_every_line_and_appended_bold_run_inside_the_right_margin() {
+        let mut document = WriterDocument::new("wrap", "Wrap");
+        let body = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor "
+            .repeat(4);
+        let mut block =
+            RichBlock::new(document.next_id(), "paragraph", &format!("{body}Bold tail"));
+        // Right alignment is where a bold run appended to a line can run past
+        // the margin: the line is placed from its regular-face width.
+        block.style.alignment = loom_text::Alignment::Right;
+        let start = body.len();
+        block.runs.push(loom_text::StyleRun {
+            start,
+            end: start + "Bold tail".len(),
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        });
+        document.push(block);
+        let pdf = export_pdf(&document);
+        let style = document.page.page_style();
+        let right = style.width_pt - style.margin_right_pt;
+        let left = style.margin_left_pt;
+        let drawn = drawn_text(&pdf);
+        assert!(drawn.len() > 3, "the paragraph wraps onto several lines");
+        for piece in &drawn {
+            let width = loom_pdf::text_width_pt(
+                &piece.text,
+                &loom_pdf::TextStyle {
+                    size_pt: piece.size,
+                    bold: piece.bold,
+                    ..Default::default()
+                },
+            );
+            assert!(
+                piece.x >= left - 0.05 && piece.x + width <= right + 0.05,
+                "{:?} spans {}..{} outside the margins {left}..{right}",
+                piece.text,
+                piece.x,
+                piece.x + width
+            );
+        }
+    }
+
+    #[test]
+    fn a_freshly_inserted_empty_table_exports_visible_columns() {
+        let mut document = WriterDocument::new("table", "Table");
+        document
+            .insert_table_block(usize::MAX, 2, 3)
+            .expect("insert");
+        let pdf = export_pdf(&document);
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        // Each rule is "x y m x2 y2 l S"; a vertical rule has equal x values.
+        let mut vertical_x: Vec<i64> = Vec::new();
+        let mut from = 0;
+        while let Some(found) = content[from..].find(" l S") {
+            let at = from + found;
+            let words: Vec<&str> = content[..at].split_whitespace().collect();
+            let n = words.len();
+            // "... x1 y1 m x2 y2 l S"
+            let x1: f32 = words[n - 5].parse().expect("x1");
+            let x2: f32 = words[n - 2].parse().expect("x2");
+            if (x1 - x2).abs() < 0.01 {
+                let key = (x1 * 100.0).round() as i64;
+                if !vertical_x.contains(&key) {
+                    vertical_x.push(key);
+                }
+            }
+            from = at + " l S".len();
+        }
+        assert!(
+            vertical_x.len() >= 4,
+            "three columns need four vertical rules, found {}",
+            vertical_x.len()
         );
     }
 }

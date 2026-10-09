@@ -6,6 +6,7 @@
 //! model can desync. This module lives outside `lib.rs` to keep the crate
 //! root within its registered byte ceiling.
 
+use crate::comments::TextEdit;
 use crate::{RichBlock, WriterDocument, WriterTable};
 
 /// Block kind for markdown table blocks.
@@ -123,6 +124,166 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     }
 }
 
+/// A table block's place in the new editor text: the old block index it came
+/// from and the byte range it now occupies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MappedTable {
+    pub old_index: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Maps every table block of `old_blocks` through `edit` onto `new_text`.
+///
+/// A table keeps its identity when the edit lies in it or at its edges, so a
+/// typed or deleted character changes the table's text instead of turning its
+/// lines into paragraphs. Its span is then snapped to whole lines, so the text
+/// around it keeps its own lines. A table the edit removes entirely has no span.
+pub(crate) fn map_tables_through_edit(
+    old_blocks: &[RichBlock],
+    new_text: &str,
+    edit: TextEdit,
+) -> Vec<MappedTable> {
+    let mut mapped: Vec<MappedTable> = Vec::new();
+    let mut offset = 0usize;
+    for (old_index, block) in old_blocks.iter().enumerate() {
+        let len = block.text.len_bytes();
+        if block.kind == TABLE_BLOCK_KIND {
+            if let Some((start, end)) = map_span(offset, offset + len, edit, new_text) {
+                // Spans come out in order; an overlap can only be introduced by
+                // an edit that merges two tables' lines, and the later table is
+                // then rebuilt from its lines.
+                let overlaps = mapped.last().is_some_and(|previous| start <= previous.end);
+                if !overlaps {
+                    mapped.push(MappedTable {
+                        old_index,
+                        start,
+                        end,
+                    });
+                }
+            }
+        }
+        offset += len + 1;
+    }
+    mapped
+}
+
+/// The new byte range of the old span `start..end` after `edit`, snapped to
+/// whole lines of `new_text`, or `None` when the edit removed the span.
+fn map_span(start: usize, end: usize, edit: TextEdit, new_text: &str) -> Option<(usize, usize)> {
+    let TextEdit {
+        old_start,
+        old_end,
+        new_start,
+        new_end,
+    } = edit;
+    let inserted = new_text.get(new_start..new_end)?;
+    let delta = new_end as isize - new_start as isize - (old_end as isize - old_start as isize);
+    let shift = |position: usize| (position as isize + delta) as usize;
+
+    // The start moves past any newline typed at its edge, so that newline
+    // becomes a paragraph before the table.
+    let mapped_start = if start < old_start {
+        start
+    } else if start > old_end {
+        shift(start)
+    } else if start == old_start {
+        match inserted.rfind('\n') {
+            Some(index) => new_start + index + 1,
+            None => new_start,
+        }
+    } else {
+        new_end
+    };
+    // The end stops before a newline typed at its edge, so that newline becomes
+    // a paragraph after the table. Anything typed inside the table stays in it.
+    let mapped_end = if end < old_start {
+        end
+    } else if end > old_end {
+        shift(end)
+    } else if end == old_start {
+        match inserted.find('\n') {
+            Some(index) => new_start + index,
+            None => new_end,
+        }
+    } else {
+        new_end
+    };
+    if mapped_start >= mapped_end || !new_text.is_char_boundary(mapped_start) {
+        return None;
+    }
+    let region = &new_text[mapped_start..mapped_end];
+    if region.trim().is_empty() {
+        return None;
+    }
+    let line_start = new_text[..mapped_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let line_end = new_text[mapped_end..]
+        .find('\n')
+        .map_or(new_text.len(), |index| mapped_end + index);
+    Some((line_start, line_end))
+}
+
+/// Splits `text` into paragraphs at its newlines, except inside the mapped
+/// table spans, which each form one paragraph. Returns each paragraph's text
+/// and, for a table, the old block index it must keep. Without tables this is
+/// the same split as `text.split('\n')`.
+pub(crate) fn split_editor_text(
+    text: &str,
+    tables: &[MappedTable],
+) -> (Vec<String>, Vec<Option<usize>>) {
+    let mut paragraphs = Vec::new();
+    let mut forced = Vec::new();
+    let mut tables = tables.iter().peekable();
+    let mut position = 0usize;
+    loop {
+        if let Some(table) = tables.next_if(|table| table.start == position) {
+            paragraphs.push(text[table.start..table.end].to_string());
+            forced.push(Some(table.old_index));
+            if table.end >= text.len() {
+                break;
+            }
+            // The newline after a table is the separator, not part of it.
+            position = table.end + 1;
+            continue;
+        }
+        match text[position..].find('\n') {
+            Some(offset) => {
+                paragraphs.push(text[position..position + offset].to_string());
+                forced.push(None);
+                position += offset + 1;
+            }
+            None => {
+                paragraphs.push(text[position..].to_string());
+                forced.push(None);
+                break;
+            }
+        }
+    }
+    (paragraphs, forced)
+}
+
+/// Keeps table blocks matched to their own paragraphs: a table paragraph takes
+/// its table block, and no ordinary paragraph inherits a table block's
+/// identity, kind or style.
+pub(crate) fn pin_table_matches(
+    old_blocks: &[RichBlock],
+    forced: &[Option<usize>],
+    matches: &mut [Option<usize>],
+) {
+    for (index, found) in matches.iter_mut().enumerate() {
+        match forced[index] {
+            Some(old_index) => *found = Some(old_index),
+            None => {
+                if found.is_some_and(|old_index| old_blocks[old_index].kind == TABLE_BLOCK_KIND) {
+                    *found = None;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +378,87 @@ mod tests {
         let selection = document.selection();
         assert!(selection.anchor <= document.editor_text().len());
         let _ = TextSelection::caret(0);
+    }
+
+    /// A paragraph, a 3x2 table and a paragraph after it.
+    fn document_with_table_between_paragraphs() -> WriterDocument {
+        let mut table = WriterTable::new("table-1", 3, 2);
+        table.set(0, 0, "Region");
+        table.set(0, 1, "Sales");
+        table.set(1, 0, "North");
+        table.set(1, 1, "10");
+        table.set(2, 0, "South");
+        table.set(2, 1, "7");
+        let mut document = WriterDocument::new("doc", "Doc");
+        document
+            .blocks
+            .push(RichBlock::new(1, "paragraph", "Intro"));
+        document
+            .blocks
+            .push(RichBlock::new(2, TABLE_BLOCK_KIND, &table.to_markdown()));
+        document
+            .blocks
+            .push(RichBlock::new(3, "paragraph", "Outro"));
+        document
+    }
+
+    fn kinds(document: &WriterDocument) -> Vec<String> {
+        document
+            .blocks
+            .iter()
+            .map(|b| b.kind.as_str().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn typing_in_a_table_cell_keeps_the_table_one_block() {
+        let mut document = document_with_table_between_paragraphs();
+        let text = document.editor_text();
+        let at = text.find("North").expect("cell text") + "North".len();
+        let mut edited = text.clone();
+        edited.insert(at, 'X');
+        document
+            .replace_editor_text_at(&edited, Some(at + 1))
+            .expect("cell edit");
+
+        assert_eq!(
+            kinds(&document),
+            ["paragraph", TABLE_BLOCK_KIND, "paragraph"],
+            "the table stays one table block"
+        );
+        assert_eq!(document.blocks[0].text.as_str(), "Intro");
+        assert_eq!(document.blocks[2].text.as_str(), "Outro");
+        let table = document.table_from_block(2).expect("table parses");
+        assert_eq!(table.rows[1][0], "NorthX");
+        assert_eq!(table.rows[1][1], "10", "other cells are untouched");
+
+        let pdf = crate::export_pdf(&document);
+        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        assert!(!content.contains('|'), "no pipe characters are printed");
+        assert!(
+            content.contains("(NorthX) Tj"),
+            "the edited cell is printed"
+        );
+    }
+
+    #[test]
+    fn enter_after_a_table_starts_a_paragraph_and_keeps_the_table() {
+        let mut document = document_with_table_between_paragraphs();
+        let table_text = document.blocks[1].text.as_str().to_string();
+        let text = document.editor_text();
+        let table_end = text.find("Outro").expect("next paragraph") - 1;
+        let mut edited = text.clone();
+        edited.insert(table_end, '\n');
+        document
+            .replace_editor_text_at(&edited, Some(table_end + 1))
+            .expect("enter");
+
+        assert_eq!(
+            kinds(&document),
+            ["paragraph", TABLE_BLOCK_KIND, "paragraph", "paragraph"]
+        );
+        assert_eq!(document.blocks[1].text.as_str(), table_text);
+        assert_eq!(document.blocks[2].text.as_str(), "");
+        assert_eq!(document.blocks[3].text.as_str(), "Outro");
     }
 }
