@@ -1,12 +1,14 @@
 import { LabeledToolbar, ToolbarSpacer } from "toolkit.slint";
 import { LoomToolbarItem, LoomOverflowTrigger } from "foundation.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
+import { SheetToolbarLayout } from "toolbar_layout.slint";
 
 /// One icon-over-label row in three groups: View/Zoom/Add Sheet on the
 /// reading-start side, Chart/Table/Text/Shape/Image in the middle, and
 /// Export plus the two inspector tabs on the reading-end side. Items that
 /// open a menu report their window x through `toggle-menu`; every direct item
-/// sends a command id through `command`.
+/// sends a command id through `command`. When the window is compact, Add Sheet,
+/// Chart, Shape and Image move into the More actions menu instead.
 export component SheetActionToolbar inherits LabeledToolbar {
     in property <bool> inspector-visible: false;
     in property <int> inspector-tab: 0;
@@ -63,14 +65,14 @@ export component SheetActionToolbar inherits LabeledToolbar {
             icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
             clicked => { root.toggle-menu(2, self.absolute-position.x); }
         }
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "plus"; label: "Add Sheet";
             clicked => { root.command("sheets.add_sheet"); }
         }
 
         ToolbarSpacer { }
 
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "chart"; label: "Chart";
             clicked => { root.command("sheets.insert_chart"); }
         }
@@ -82,11 +84,11 @@ export component SheetActionToolbar inherits LabeledToolbar {
             icon: "text"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
             clicked => { root.toggle-menu(4, self.absolute-position.x); }
         }
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "shape"; label: "Shape";
             clicked => { root.command("sheets.insert_shape"); }
         }
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "image"; label: "Image";
             clicked => { root.command("sheets.insert_image"); }
         }
@@ -138,11 +140,11 @@ export component SheetActionToolbar inherits LabeledToolbar {
 
         ToolbarSpacer { }
 
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "image"; label: "Image";
             clicked => { root.command("sheets.insert_image"); }
         }
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "shape"; label: "Shape";
             clicked => { root.command("sheets.insert_shape"); }
         }
@@ -154,14 +156,14 @@ export component SheetActionToolbar inherits LabeledToolbar {
             icon: "table"; label: "Table"; checked: root.menu-kind == 3; focus-request: root.request(3);
             clicked => { root.toggle-menu(3, self.absolute-position.x + self.width); }
         }
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "chart"; label: "Chart";
             clicked => { root.command("sheets.insert_chart"); }
         }
 
         ToolbarSpacer { }
 
-        LoomToolbarItem {
+        if !SheetToolbarLayout.compact : LoomToolbarItem {
             icon: "plus"; label: "Add Sheet";
             clicked => { root.command("sheets.add_sheet"); }
         }

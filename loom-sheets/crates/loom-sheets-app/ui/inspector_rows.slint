@@ -68,6 +68,7 @@ component SheetStepButtons inherits HorizontalLayout {
         icon: self.plus ? "plus" : "minus";
         label: self.plus ? root.increase-label : root.decrease-label;
         tooltip: self.plus ? root.increase-tip : root.decrease-tip;
+        text-scale: Theme.text-scale;
         clicked => { if (self.plus) { root.increase(); } else { root.decrease(); } }
     }
 }

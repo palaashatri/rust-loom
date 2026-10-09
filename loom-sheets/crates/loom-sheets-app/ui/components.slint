@@ -31,8 +31,30 @@ export component SheetSelectionOverlay inherits Rectangle {
     x: 0px;
     y: 0px;
     background: transparent;
-    border-width: root.active ? 2px : 0px;
+    border-width: root.active && Theme.active-theme != "high-contrast" ? 2px : 0px;
     border-color: root.outline-color;
+
+    // High contrast draws a 3px active ring: a paper hairline on the outside,
+    // which contrasts with the black gridline beside the cell, and a 2px ink ring
+    // inside it.
+    if root.active && Theme.active-theme == "high-contrast" : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        border-width: 1px;
+        border-color: Theme.palette().paper;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: parent.height - 2px;
+            background: transparent;
+            border-width: 2px;
+            border-color: Theme.palette().paper-ink;
+        }
+    }
 
     if !root.active && root.in-selection && root.edge-top : Rectangle { y: 0px; width: parent.width; height: 2px; background: root.outline-color; }
     if !root.active && root.in-selection && root.edge-bottom : Rectangle { y: parent.height - 2px; width: parent.width; height: 2px; background: root.outline-color; }

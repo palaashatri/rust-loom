@@ -117,24 +117,37 @@ fn workbook_window_title_uses_the_saved_file_or_a_truthful_unsaved_name() {
     assert_eq!(
         workbook_window_title(
             Some(std::path::Path::new("/tmp/Household.loomtable")),
+            None,
             "Example Budget",
             false
         ),
         "Household.loomtable"
     );
-    assert_eq!(workbook_window_title(None, "Sheet1", false), "Untitled");
-    assert_eq!(workbook_window_title(None, "Checklist", false), "Checklist");
     assert_eq!(
-        workbook_window_title(None, "Checklist", true),
+        workbook_window_title(None, None, "Sheet1", false),
+        "Untitled"
+    );
+    assert_eq!(
+        workbook_window_title(None, None, "Checklist", false),
+        "Checklist"
+    );
+    assert_eq!(
+        workbook_window_title(None, None, "Checklist", true),
         "Checklist *"
     );
     assert_eq!(
         workbook_window_title(
             Some(std::path::Path::new("/tmp/Household.loomtable")),
+            None,
             "Example Budget",
             true
         ),
         "Household.loomtable *"
+    );
+    assert_eq!(
+        workbook_window_title(None, Some("sales"), "Sheet 1", true),
+        "sales *",
+        "an imported file is named by its file stem"
     );
 }
 
@@ -157,7 +170,7 @@ fn close_prompt_names_the_same_document_as_the_window_title() {
     for (save_path, sheet_name, expected) in cases {
         let state = state_with_identity(save_path.clone(), sheet_name);
         let display = workbook_display_name(&state);
-        let title = workbook_window_title(save_path.as_deref(), sheet_name, false);
+        let title = workbook_window_title(save_path.as_deref(), None, sheet_name, false);
         assert_eq!(display, expected, "display name for {sheet_name:?}");
         assert_eq!(
             display,

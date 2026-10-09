@@ -88,7 +88,10 @@ export component SheetInspector inherits LoomPanel {
                 color: Theme.palette().ink-secondary;
                 horizontal-stretch: 1;
                 min-width: 0px;
-                wrap: word-wrap;
+                wrap: no-wrap;
+                overflow: elide;
+                accessible-role: text;
+                accessible-label: "Format and table properties";
             }
             LoomButton {
                 label: "Close";
@@ -111,7 +114,10 @@ export component SheetInspector inherits LoomPanel {
                 horizontal-stretch: 1;
                 min-width: 0px;
                 horizontal-alignment: right;
-                wrap: word-wrap;
+                wrap: no-wrap;
+                overflow: elide;
+                accessible-role: text;
+                accessible-label: "Format and table properties";
             }
         }
 
@@ -191,6 +197,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle bold formatting (Cell inspector)";
                             tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-bold;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-bold(); }
                         }
                         LoomIconButton {
@@ -198,6 +205,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle italic formatting (Cell inspector)";
                             tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-italic;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-italic(); }
                         }
                         LoomIconButton {
@@ -205,6 +213,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle underline formatting (Cell inspector)";
                             tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-underline;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-underline(); }
                         }
                     }
@@ -216,6 +225,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle underline formatting (Cell inspector)";
                             tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-underline;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-underline(); }
                         }
                         LoomIconButton {
@@ -223,6 +233,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle italic formatting (Cell inspector)";
                             tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-italic;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-italic(); }
                         }
                         LoomIconButton {
@@ -230,6 +241,7 @@ export component SheetInspector inherits LoomPanel {
                             label: "Toggle bold formatting (Cell inspector)";
                             tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-bold;
+                            text-scale: Theme.text-scale;
                             clicked => { root.toggle-bold(); }
                         }
                     }
@@ -253,6 +265,8 @@ export component SheetInspector inherits LoomPanel {
                         LoomToggle {
                             label: "Border";
                             checked <=> root.cell-border;
+                            accessible-checkable: true;
+                            accessible-checked: root.cell-border;
                             toggled => { root.toggle-borders(); }
                         }
                     }

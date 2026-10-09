@@ -34,8 +34,8 @@ use loom_sheets_core::{
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
-    ComponentHandle, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
-    VecModel,
+    ComponentHandle, Global, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer,
+    SharedString, VecModel,
 };
 
 slint::include_modules!();
@@ -1059,8 +1059,10 @@ fn project_sheet_inner_with_preview(
         sheet.cells.len(),
         formulas
     )));
+    // A single cell has no selection statistics to show. Clear the right-hand
+    // status rather than leave a stale statistic or a placeholder.
     if app.get_selection_count() <= 1 {
-        app.set_status_right("Offline".into());
+        app.set_status_right("".into());
     }
     actions::sync_chart_to_app(app, sheet);
 }
@@ -1679,7 +1681,15 @@ fn moved_focus(app: &SheetsApp, sheet: &Sheet, from: CellRef, delta: (i32, i32))
 
 fn navigate_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
     let selection = selection_from_app(app);
-    let next = moved_focus(app, sheet, selection.focus, (row_delta, col_delta));
+    // A page move starts from the anchor, where the selection began, as in other
+    // spreadsheets: Shift+Page Down extends from there, and a plain Page Up then
+    // moves a page up from it instead of collapsing onto it.
+    let origin = if row_delta == grid_navigation::PAGE || row_delta == -grid_navigation::PAGE {
+        selection.anchor
+    } else {
+        selection.focus
+    };
+    let next = moved_focus(app, sheet, origin, (row_delta, col_delta));
     update_selection(app, sheet, &evaluate(sheet), next);
 }
 
@@ -1718,11 +1728,16 @@ pub(crate) fn configure_direction(app: &SheetsApp, rtl: bool) {
     app.set_rtl(rtl);
 }
 
+/// Effective (text-scaled) width below which the labeled toolbar row cannot fit
+/// its insert commands. They move into More actions instead of being clipped.
+const COMPACT_TOOLBAR_BELOW: f32 = 600.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ResponsiveToolbarState {
     icon_only: bool,
     overflow: bool,
     labeled: bool,
+    compact: bool,
 }
 
 fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
@@ -1732,11 +1747,14 @@ fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
         icon_only: width < policy.get_priority_1_icon_only_below(),
         overflow: width < policy.get_priority_2_overflow_below(),
         labeled: width >= policy.get_priority_2_overflow_below(),
+        compact: width < COMPACT_TOOLBAR_BELOW,
     }
 }
 
 pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     let state = layout_breakpoints(app, width);
+    app.global::<SheetToolbarLayout>()
+        .set_compact(state.compact);
     app.set_icon_only_toolbar(state.icon_only);
     app.set_labeled_toolbar(state.labeled);
     app.set_show_quick_formulas(state.labeled);
@@ -1808,6 +1826,8 @@ pub(crate) struct GuiState {
     /// Revision of a Retry Recovery checkpoint whose outcome is still unreported.
     pub(crate) recovery_retry_revision: Cell<Option<u64>>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
+    /// File stem of an imported CSV or XLSX that has no Loom save path yet.
+    pub(crate) import_stem: RefCell<Option<String>>,
     /// Workbook state from the last completed save/open/new operation.
     /// Comparing document content, rather than undo depth, means undoing back
     /// to the saved state clears the dirty flag.
@@ -1865,6 +1885,7 @@ impl GuiState {
             worker_saved_baseline_revision: Cell::new(None),
             pending_cell_commit: Cell::new(None),
             recovery_retry_revision: Cell::new(None),
+            import_stem: RefCell::new(None),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
@@ -2079,11 +2100,20 @@ pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
 /// the replacement prompt. A saved file is named by its filename; an unsaved
 /// document is named by its sheet so a created template never contradicts the
 /// tab and title the user is looking at.
-pub(crate) fn workbook_identity_name(save_path: Option<&Path>, sheet_name: &str) -> String {
+pub(crate) fn workbook_identity_name(
+    save_path: Option<&Path>,
+    import_stem: Option<&str>,
+    sheet_name: &str,
+) -> String {
     save_path
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
+        .or_else(|| {
+            import_stem
+                .filter(|stem| !stem.is_empty())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| match sheet_name {
             "" | "Sheet1" | "Sheet 1" => "Untitled".to_string(),
             name => name.to_string(),
@@ -2093,16 +2123,18 @@ pub(crate) fn workbook_identity_name(save_path: Option<&Path>, sheet_name: &str)
 pub(crate) fn workbook_display_name(state: &GuiState) -> String {
     workbook_identity_name(
         state.save_path.borrow().as_deref(),
+        state.import_stem.borrow().as_deref(),
         state.current.borrow().name.as_str(),
     )
 }
 
 pub(crate) fn workbook_window_title(
     save_path: Option<&Path>,
+    import_stem: Option<&str>,
     sheet_name: &str,
     dirty: bool,
 ) -> String {
-    let title = workbook_identity_name(save_path, sheet_name);
+    let title = workbook_identity_name(save_path, import_stem, sheet_name);
     if dirty {
         format!("{title} *")
     } else {
@@ -2113,6 +2145,7 @@ pub(crate) fn workbook_window_title(
 pub(crate) fn sync_window_title(app: &SheetsApp, state: &GuiState) {
     let mut title = workbook_window_title(
         state.save_path.borrow().as_deref(),
+        state.import_stem.borrow().as_deref(),
         state.current.borrow().name.as_str(),
         state.is_dirty(),
     );

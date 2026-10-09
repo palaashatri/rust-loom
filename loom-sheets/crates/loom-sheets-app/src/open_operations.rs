@@ -483,14 +483,23 @@ pub(super) fn replace_opened_workbook(
     *state.current.borrow_mut() = sheets[active].clone();
     *state.sheets.borrow_mut() = sheets;
     *state.active_sheet_index.borrow_mut() = active;
-    *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
+    let native = is_native_workbook(&path);
+    // An imported CSV or XLSX is not a Loom workbook yet. It is named after its
+    // file and stays unsaved until the user saves it.
+    *state.import_stem.borrow_mut() = if native {
+        None
+    } else {
+        path.file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+    };
+    *state.save_path.borrow_mut() = native.then_some(path);
     state.undo_stack.borrow_mut().clear();
     state.redo_stack.borrow_mut().clear();
     *state.sheet_histories.borrow_mut() =
         vec![(Vec::new(), Vec::new()); state.sheets.borrow().len()];
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
-    state.mark_saved();
+    state.set_startup_baseline(!native);
     sync_window_title(app, state);
 }
 
@@ -510,6 +519,7 @@ pub(super) fn begin_new_workbook(
     *state.sheets.borrow_mut() = vec![sheet];
     *state.active_sheet_index.borrow_mut() = 0;
     *state.save_path.borrow_mut() = None;
+    *state.import_stem.borrow_mut() = None;
     state.undo_stack.borrow_mut().clear();
     state.redo_stack.borrow_mut().clear();
     *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];

@@ -1,9 +1,11 @@
 import { LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { SheetToolbarLayout } from "toolbar_layout.slint";
 
 /// The "More actions" menu: file and history commands that have no toolbar
-/// item. Up/Down move over the enabled rows, Return or Space run the selected
-/// one, Escape closes. Every row sends a command id through `command`.
+/// item, plus the insert and add commands while the toolbar is compact. Up/Down
+/// move over the enabled rows, Return or Space run the selected one, Escape
+/// closes. Every row sends a command id through `command`.
 export component SheetToolbarOverflow inherits Rectangle {
     in property <bool> open: false;
     in property <bool> available: false;
@@ -23,17 +25,24 @@ export component SheetToolbarOverflow inherits Rectangle {
     }
 
     property <int> selected: 2;
-    property <[string]> labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
-    property <[string]> ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette"];
-    property <[string]> shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K"];
+    property <[string]> base-labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
+    property <[string]> base-ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette"];
+    property <[string]> base-shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K"];
+    property <[string]> compact-labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands", "Add Sheet", "Chart", "Shape", "Image"];
+    property <[string]> compact-ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette", "sheets.add_sheet", "sheets.insert_chart", "sheets.insert_shape", "sheets.insert_image"];
+    property <[string]> compact-shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K", "", "", "", ""];
+    property <[string]> labels: SheetToolbarLayout.compact ? root.compact-labels : root.base-labels;
+    property <[string]> ids: SheetToolbarLayout.compact ? root.compact-ids : root.base-ids;
+    property <[string]> shortcuts: SheetToolbarLayout.compact ? root.compact-shortcuts : root.base-shortcuts;
+    property <int> row-count: root.labels.length;
     pure function enabled-at(idx: int) -> bool {
         return idx == 0 ? root.can-undo : idx == 1 ? root.can-redo : true;
     }
     /// The next enabled row in `delta` direction (Undo and Redo may be off).
     function step(delta: int) {
-        root.selected = Math.mod(root.selected + delta + 7, 7);
-        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + 7, 7); }
-        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + 7, 7); }
+        root.selected = Math.mod(root.selected + delta + root.row-count, root.row-count);
+        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + root.row-count, root.row-count); }
+        if (!root.enabled-at(root.selected)) { root.selected = Math.mod(root.selected + delta + root.row-count, root.row-count); }
     }
 
     visible: root.open && root.available;

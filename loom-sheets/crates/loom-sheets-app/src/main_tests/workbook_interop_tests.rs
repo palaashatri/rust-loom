@@ -484,7 +484,8 @@ fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
     assert!(state.undo_stack.borrow().is_empty());
     assert!(state.redo_stack.borrow().is_empty());
     assert!(state.save_path.borrow().is_none());
-    assert!(!state.is_dirty());
+    // An imported workbook is unsaved work until it is saved as a Loom workbook.
+    assert!(state.is_dirty());
     assert!(app
         .get_status_left()
         .contains("dropped: unsupported area charts"));

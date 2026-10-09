@@ -23,6 +23,9 @@ fn layout_breakpoints_match_supported_width_boundaries() {
                 icon_only,
                 overflow,
                 labeled,
+                // Every width in this table is at least 600 px, so the toolbar
+                // keeps its insert commands.
+                compact: false,
             }
         );
         apply_layout_breakpoints(&app, width);
@@ -331,17 +334,15 @@ fn assert_inspector_and_toolbar_fit(
         );
     }
 
-    // The toolbar is always the icon-over-label row; every item must stay inside
-    // the window at every scale, and the More actions menu holds the rest.
+    // The toolbar is always the icon-over-label row; every item in it must stay
+    // inside the window at every scale. Add Sheet, Chart, Shape and Image move
+    // into the More actions menu when the row is compact, so they are checked for
+    // reachability after the menu opens below.
     for label in [
         "View",
         "Zoom",
-        "Add Sheet",
-        "Chart",
         "Table",
         "Text",
-        "Shape",
-        "Image",
         "Export",
         "Format",
         "Organize",
@@ -352,6 +353,14 @@ fn assert_inspector_and_toolbar_fit(
 
     app.set_toolbar_overflow_open(true);
     let _ = snapshot_component(&app, width, height, 1.0).expect("render toolbar overflow");
+    for label in ["Add Sheet", "Chart", "Shape", "Image"] {
+        assert!(
+            ElementHandle::find_by_accessible_label(&app, label)
+                .next()
+                .is_some(),
+            "{label:?} must be on the toolbar or in More actions at {text_scale}x in {theme} at {width}x{height}"
+        );
+    }
     let actions = ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
     let mut previous_bottom = None;
     for label in actions {

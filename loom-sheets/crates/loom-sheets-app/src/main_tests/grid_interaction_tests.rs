@@ -586,6 +586,87 @@ fn page_home_and_ctrl_end_keys_move_by_more_than_a_cell() {
 }
 
 #[test]
+fn plain_page_up_after_shift_page_down_moves_a_page_up_from_the_anchor() {
+    use crate::grid_navigation::PAGE;
+    let (app, state) = super::grid_pointer_tests::projected(&[("A1", "x")]);
+    crate::tab_run::register_navigation(&app, &state);
+    crate::wire_selection_extension(&app, &state);
+    app.invoke_navigate_selection(99, 0);
+    let start = crate::selection_from_app(&app);
+    app.invoke_extend_selection(PAGE, 0);
+    let extended = crate::selection_from_app(&app);
+    assert_eq!(
+        extended.anchor, start.anchor,
+        "Shift+Page Down keeps the anchor"
+    );
+    let page = extended.focus.row - extended.anchor.row;
+    assert!(page > 0, "a page has rows");
+    app.invoke_navigate_selection(-PAGE, 0);
+    let after = crate::selection_from_app(&app);
+    assert_eq!(
+        after.anchor, after.focus,
+        "a plain move collapses the selection"
+    );
+    assert_eq!(
+        after.focus.row,
+        start.anchor.row.saturating_sub(page),
+        "plain Page Up moves one page up from where the selection began"
+    );
+}
+
+#[test]
+fn the_high_contrast_active_cell_ring_is_three_pixels_and_stands_off_the_gridline() {
+    fn channel(c: u8) -> f64 {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    fn luminance(p: [u8; 4]) -> f64 {
+        0.2126 * channel(p[0]) + 0.7152 * channel(p[1]) + 0.0722 * channel(p[2])
+    }
+    fn contrast(a: [u8; 4], b: [u8; 4]) -> f64 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+    let (app, state) =
+        super::grid_pointer_tests::projected(&[("A1", "a"), ("B1", "b"), ("A2", "c"), ("B2", "d")]);
+    crate::tab_run::register_navigation(&app, &state);
+    crate::apply_theme(&app, "high-contrast");
+    app.invoke_navigate_selection(1, 1);
+    crate::project_current(&app, &state);
+    let image = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    let cell =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "B2, value d")
+            .next()
+            .expect("the active cell");
+    let origin = cell.absolute_position();
+    let x = origin.x.round() as u32;
+    let y = (origin.y + cell.size().height / 2.0).round() as u32;
+    let px = |dx: u32| image.get_pixel(x + dx, y).0;
+    let (outer, inner, second, fill) = (px(0), px(1), px(2), px(3));
+    let gridline = [0, 0, 0, 255];
+    assert!(
+        luminance(inner) < 0.05 && luminance(second) < 0.05,
+        "the ink ring is two pixels: {inner:?} {second:?}"
+    );
+    assert!(
+        luminance(fill) > 0.9,
+        "the cell interior is outside the ring: {fill:?}"
+    );
+    assert!(
+        contrast(outer, gridline) >= 3.0,
+        "the outer ring must contrast 3:1 with the black gridline: {outer:?}"
+    );
+    assert!(
+        contrast(outer, inner) >= 3.0,
+        "the two rings must contrast 3:1: {outer:?} {inner:?}"
+    );
+}
+
+#[test]
 fn typed_history_undo_redo_restores_exact_raw_values() {
     let mut sheet = Sheet::new("history");
     let cell = CellRef::parse("A1").unwrap();

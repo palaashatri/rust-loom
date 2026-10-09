@@ -335,7 +335,7 @@ pub(crate) fn load_workbook_with_report(path: &Path) -> Result<LoadedWorkbook, S
         let csv = std::str::from_utf8(&bytes).map_err(|e| format!("csv utf8: {e}"))?;
         return Ok(LoadedWorkbook {
             workbook: WorkbookFile {
-                sheets: vec![from_csv_sniffed("imported", csv)],
+                sheets: vec![from_csv_sniffed("Sheet 1", csv)],
                 active: 0,
             },
             warnings: Vec::new(),

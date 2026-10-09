@@ -56,6 +56,8 @@ mod grid_interaction_tests;
 mod grid_pointer_tests;
 #[path = "main_tests/grid_tab_enter_tests.rs"]
 mod grid_tab_enter_tests;
+#[path = "main_tests/import_title_tests.rs"]
+mod import_title_tests;
 #[path = "main_tests/layout_tests.rs"]
 mod layout_tests;
 #[path = "main_tests/mutation_guard_tests.rs"]
@@ -72,6 +74,8 @@ mod save_operations_journeys;
 mod scale_surfaces_tests;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
+#[path = "main_tests/toolbar_responsive_tests.rs"]
+mod toolbar_responsive_tests;
 #[path = "main_tests/toolbar_tests.rs"]
 mod toolbar_tests;
 #[path = "main_tests/workbook_interop_tests.rs"]

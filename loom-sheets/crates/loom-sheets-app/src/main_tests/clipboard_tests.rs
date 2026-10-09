@@ -1,7 +1,7 @@
 use super::*;
-use crate::system_clipboard::{get_text, set_external_text_for_test};
+use crate::system_clipboard::{get_text, set_external_text_for_test, set_write_fails_for_test};
 
-fn state_with(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
+pub(super) fn state_with(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
     set_platform();
     set_external_text_for_test(None);
     let app = SheetsApp::new().expect("create SheetsApp");
@@ -142,5 +142,60 @@ fn cut_clears_the_cells_and_a_missing_clipboard_pastes_nothing() {
         raw(&state, "A9"),
         "gone",
         "with no system clipboard the private copy is used"
+    );
+}
+
+#[test]
+fn an_empty_system_clipboard_read_after_copy_pastes_the_private_copy() {
+    let (app, state) = state_with(&[("A1", "10"), ("B1", "=A1*2")]);
+    select(&app, &state, "A1", "B1");
+    app.invoke_copy_selection();
+    // Some clipboard backends (X11 under WSLg) read back an empty string.
+    set_external_text_for_test(Some(""));
+    select(&app, &state, "D5", "D5");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "D5"), "10");
+    assert_eq!(
+        raw(&state, "E5"),
+        "=D5*2",
+        "the private copy keeps its formula"
+    );
+    assert_eq!(app.get_status_left().as_str(), "Pasted 2 cells at D5");
+}
+
+#[test]
+fn a_failed_system_write_pastes_the_private_copy_not_stale_clipboard_text() {
+    let (app, state) = state_with(&[("A1", "10"), ("B1", "=A1*2")]);
+    set_external_text_for_test(Some("stale text from before"));
+    set_write_fails_for_test(true);
+    select(&app, &state, "A1", "B1");
+    app.invoke_copy_selection();
+    set_write_fails_for_test(false);
+    select(&app, &state, "D5", "D5");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "D5"), "10");
+    assert_eq!(raw(&state, "E5"), "=D5*2");
+}
+
+#[test]
+fn copy_and_paste_status_use_the_singular_for_one_cell() {
+    let (app, state) = state_with(&[("A1", "x")]);
+    select(&app, &state, "A1", "A1");
+    app.invoke_copy_selection();
+    assert_eq!(app.get_status_left().as_str(), "Copied A1 (1 cell)");
+    select(&app, &state, "C3", "C3");
+    app.invoke_paste_selection();
+    assert_eq!(app.get_status_left().as_str(), "Pasted 1 cell at C3");
+}
+
+#[test]
+fn the_status_line_does_not_claim_offline_for_a_single_cell() {
+    let (app, state) = state_with(&[("A1", "x")]);
+    select(&app, &state, "A1", "A1");
+    project_current(&app, &state);
+    assert!(
+        !app.get_status_right().contains("Offline"),
+        "status line: {:?}",
+        app.get_status_right()
     );
 }

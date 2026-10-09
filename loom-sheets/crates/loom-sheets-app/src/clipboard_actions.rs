@@ -26,7 +26,17 @@ use crate::{
 /// that came from elsewhere.
 struct LastCopy {
     origin: CellRef,
-    external_text: String,
+    /// The text Copy wrote to the system clipboard; `None` when that write failed.
+    external_text: Option<String>,
+}
+
+/// "1 cell" or "N cells".
+fn cells_label(count: usize) -> String {
+    if count == 1 {
+        "1 cell".to_string()
+    } else {
+        format!("{count} cells")
+    }
 }
 
 thread_local! {
@@ -91,11 +101,11 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     let values = evaluate_current(state);
     let text = encode_tsv(&external_rows(&state.current.borrow(), &values, sel));
     let origin = sel.range().start;
-    let _ = crate::system_clipboard::set_text(&text);
+    let written = crate::system_clipboard::set_text(&text);
     LAST_COPY.with(|last| {
         *last.borrow_mut() = Some(LastCopy {
             origin,
-            external_text: text,
+            external_text: written.then_some(text),
         });
     });
     *state.clipboard.borrow_mut() = Some(data);
@@ -112,10 +122,14 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
     let from_us = LAST_COPY.with(|last| {
         let last = last.borrow();
         last.as_ref()
-            .filter(|last| match system.as_deref() {
-                Some(text) => text == last.external_text,
-                // No readable system clipboard: the private copy is all there is.
-                None => true,
+            .filter(|last| match (&last.external_text, system.as_deref()) {
+                // Our write failed, so the system clipboard cannot hold this copy.
+                (None, _) => true,
+                // Nothing readable (no clipboard, an empty string, or a failed
+                // read): the private copy is all there is.
+                (Some(_), None | Some("")) => true,
+                // Another program has not replaced what Copy wrote.
+                (Some(written), Some(text)) => text == written,
             })
             .map(|last| last.origin)
     });
@@ -201,9 +215,9 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                 let sel = selection_from_app(&app);
                 let count = copy_to_clipboards(&state, sel);
                 app.set_status_left(SharedString::from(format!(
-                    "Copied {} ({} cells)",
+                    "Copied {} ({})",
                     sel.label(),
-                    count
+                    cells_label(count)
                 )));
             }
         });
@@ -230,9 +244,9 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     sync_menu_state(&menu_service, &app, &state);
                 }
                 app.set_status_left(SharedString::from(format!(
-                    "Cut {} ({} cells)",
+                    "Cut {} ({})",
                     sel.label(),
-                    count
+                    cells_label(count)
                 )));
             }
         });
@@ -256,8 +270,8 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(
-                        "Pasted {} cells at {}",
-                        pasted,
+                        "Pasted {} at {}",
+                        cells_label(pasted),
                         sel.focus.to_a1()
                     )));
                 }

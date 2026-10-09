@@ -31,9 +31,23 @@ pub(crate) fn get_text() -> Option<String> {
 }
 
 #[cfg(test)]
+thread_local! {
+    static WRITE_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
 pub(crate) fn set_text(text: &str) -> bool {
+    if WRITE_FAILS.with(std::cell::Cell::get) {
+        return false;
+    }
     FAKE.with(|fake| *fake.borrow_mut() = Some(text.to_string()));
     true
+}
+
+/// Test hook: make writes fail the way an unavailable clipboard does.
+#[cfg(test)]
+pub(crate) fn set_write_fails_for_test(fails: bool) {
+    WRITE_FAILS.with(|flag| flag.set(fails));
 }
 
 /// Test hook: act as another program changing the clipboard (or clearing it).

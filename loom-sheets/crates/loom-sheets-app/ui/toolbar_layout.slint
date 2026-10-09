@@ -1,0 +1,6 @@
+/// Toolbar layout that Rust derives from the window width and text scale. When
+/// `compact` is set, the toolbar moves its insert and add commands into the
+/// More actions menu so the row fits and the overflow button stays visible.
+export global SheetToolbarLayout {
+    in-out property <bool> compact: false;
+}
