@@ -213,3 +213,7 @@ fn pseudorandom_address(index: u32) -> u32 {
     }
     (left << 11) | right
 }
+
+#[cfg(test)]
+#[path = "perf_bench_tests.rs"]
+mod perf_bench_tests;

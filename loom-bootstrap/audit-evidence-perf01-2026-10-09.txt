@@ -1,0 +1,92 @@
+== environment
+CPU(s):                                  12
+Model name:                              12th Gen Intel(R) Core(TM) i5-12400F
+Thread(s) per core:                      2
+Core(s) per socket:                      6
+Mem:           15880         848        3544           4       11734       15032
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+HEAD: 0bc6705 (product code unchanged)
+== bench lines
+PERF_ATTRIBUTION step=project_current cells=1000000 n=10 p50_ms=38.93 p95_ms=41.33 max_ms=41.33
+PERF_ATTRIBUTION step=workbook_sheets_copy cells=1000000 n=10 p50_ms=118.10 p95_ms=145.14 max_ms=145.14
+PERF_ATTRIBUTION step=recompute_dirty_from_saved cells=1000000 n=10 p50_ms=505.36 p95_ms=550.98 max_ms=550.98
+PERF_ATTRIBUTION step=sort_table_on_sheet_copy cells=1000000 n=10 p50_ms=908.02 p95_ms=965.82 max_ms=965.82
+PERF evaluate formulas=10000 populated_cells=10500 elapsed_ms=14.8
+PERF scroll_projection cells=1000000 frames=60 p95_ms=0.21 max_ms=0.21
+PERF initial_load cells=1000000 worker_evaluation_ms=253.8 recovery_package_ms=561.2 recovery_checkpoint_ms=46.8 recovery_dir_bytes=28105408
+PERF cell_commit cells=1000000 ui_prepare_ms=0.023 mailbox_ms=0.020 worker_evaluation_ms=251.509 recovery_package_ms=0.000 recovery_journal_ms=0.124
+PERF edit_durability cells=1000000 one_edit_journal_ms=0.12 recovery_dir_bytes=28106428
+PERF_EXPORT format=csv cells=1000000 rep=0 ui_callback_ms=0.053 worker_ms=237.8 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=0 ui_callback_ms=0.028 worker_ms=1069.9 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=1 ui_callback_ms=0.032 worker_ms=281.9 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=1 ui_callback_ms=0.041 worker_ms=1015.7 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=2 ui_callback_ms=0.028 worker_ms=246.1 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=2 ui_callback_ms=0.031 worker_ms=1083.0 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=3 ui_callback_ms=0.028 worker_ms=260.0 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=3 ui_callback_ms=0.028 worker_ms=1044.5 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=4 ui_callback_ms=0.030 worker_ms=258.8 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=4 ui_callback_ms=0.034 worker_ms=1030.3 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=5 ui_callback_ms=0.025 worker_ms=255.9 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=5 ui_callback_ms=0.028 worker_ms=1070.5 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=6 ui_callback_ms=0.028 worker_ms=253.6 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=6 ui_callback_ms=0.029 worker_ms=1082.7 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=7 ui_callback_ms=0.032 worker_ms=267.3 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=7 ui_callback_ms=0.030 worker_ms=1072.6 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=8 ui_callback_ms=0.119 worker_ms=263.3 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=8 ui_callback_ms=0.036 worker_ms=1048.8 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=9 ui_callback_ms=0.033 worker_ms=252.5 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=9 ui_callback_ms=0.032 worker_ms=1069.4 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=0 ui_callback_ms=0.058 worker_ms=270.4 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=0 ui_callback_ms=0.036 worker_ms=992.8 file_bytes=27148503
+PERF_FRAME label=unique-1m-pseudorandom-2048x2048 cells=1000000 frames=90 os=linux scroll_callback_ms p50=2.62 p95=3.23 max=3.57 software_render_ms p50=22.93 p95=29.11 max=34.71
+FRAME_BENCH os=linux cells=300000 scroll_callback_ms median=2.06 p95=2.74 max=3.36; software_render_ms median=27.72 p95=34.88 max=39.92
+PERF_HISTORY sorts=1 undo_entries=1 accounted_mib=3.8 resident_growth_mib=248.3
+PERF_HISTORY sorts=2 undo_entries=2 accounted_mib=7.6 resident_growth_mib=415.4
+PERF_HISTORY sorts=3 undo_entries=2 accounted_mib=7.6 resident_growth_mib=506.0
+PERF_EXPORT format=csv cells=1000000 rep=0 ui_callback_ms=0.059 worker_ms=246.9 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=0 ui_callback_ms=0.030 worker_ms=1042.5 file_bytes=27148503
+PERF_EXPORT format=csv cells=1000000 rep=1 ui_callback_ms=0.029 worker_ms=270.8 file_bytes=6194307
+PERF_EXPORT format=xlsx cells=1000000 rep=1 ui_callback_ms=0.033 worker_ms=1055.7 file_bytes=27148503
+PERF_UI step=format_bold cells=1000004 n=3 callback_ms p50=128.35 p95=157.11 max=157.11 ui_apply_result_ms p50=43.15 max=46.95 worker_ms eval_p50=142.2 package_p50=426.4 write_p50=64.8
+PERF_UI step=undo_format cells=1000004 n=3 callback_ms p50=926.52 p95=981.69 max=981.69 ui_apply_result_ms p50=43.80 max=45.26 worker_ms eval_p50=147.8 package_p50=414.7 write_p50=68.9
+PERF_UI step=redo_format cells=1000004 n=3 callback_ms p50=840.28 p95=893.67 max=893.67 ui_apply_result_ms p50=45.72 max=47.66 worker_ms eval_p50=156.5 package_p50=430.5 write_p50=67.6
+PERF_UI step=row_insert_add_row cells=1000004 n=3 callback_ms p50=260.84 p95=292.60 max=292.60 ui_apply_result_ms p50=43.40 max=45.32 worker_ms eval_p50=138.8 package_p50=398.2 write_p50=67.3
+PERF_UI step=sort_ascending cells=1000004 n=3 callback_ms p50=987.79 p95=1058.53 max=1058.53 ui_apply_result_ms p50=42.48 max=44.34 worker_ms eval_p50=136.5 package_p50=399.2 write_p50=64.3
+PERF_UI step=undo_sort cells=1000004 n=3 callback_ms p50=1023.20 p95=1033.16 max=1033.16 ui_apply_result_ms p50=43.40 max=46.10 worker_ms eval_p50=147.2 package_p50=397.5 write_p50=66.2
+PERF_UI step=paste_one_cell cells=1000004 n=3 callback_ms p50=180.85 p95=184.04 max=184.04 ui_apply_result_ms p50=47.73 max=49.73 worker_ms eval_p50=130.4 package_p50=388.7 write_p50=66.4
+PERF_MICRO step=sheet_clone cells=1000000 n=20 p50_ms=123.07 p95_ms=134.19 max_ms=168.90
+PERF_MICRO step=workbook_sheets_copy_x2 cells=1000000 n=20 p50_ms=124.94 p95_ms=147.25 max_ms=152.84
+PERF_MICRO step=sheet_dimensions_scan cells=1000000 n=20 p50_ms=24.04 p95_ms=24.78 max_ms=26.95
+PERF_MICRO step=formula_count_scan cells=1000000 n=20 p50_ms=37.88 p95_ms=44.08 max_ms=45.85
+PERF_MICRO step=workbook_to_json cells=1000000 n=20 p50_ms=275.33 p95_ms=290.81 max_ms=298.91
+PERF_MICRO step=evaluate_no_formulas cells=1000000 n=20 p50_ms=243.63 p95_ms=263.58 max_ms=269.44
+PERF_UI step=format_bold cells=1000021 n=20 callback_ms p50=124.84 p95=131.24 max=164.87 ui_apply_result_ms p50=48.56 max=55.10 worker_ms eval_p50=134.2 package_p50=390.2 write_p50=67.2
+PERF_UI step=undo_format cells=1000021 n=20 callback_ms p50=910.90 p95=965.38 max=981.94 ui_apply_result_ms p50=48.26 max=54.46 worker_ms eval_p50=140.2 package_p50=419.7 write_p50=69.7
+PERF_UI step=redo_format cells=1000021 n=20 callback_ms p50=923.19 p95=949.24 max=961.27 ui_apply_result_ms p50=49.25 max=60.91 worker_ms eval_p50=141.2 package_p50=422.0 write_p50=69.8
+PERF_UI step=row_insert_add_row cells=1000021 n=20 callback_ms p50=299.23 p95=332.67 max=337.18 ui_apply_result_ms p50=48.62 max=51.93 worker_ms eval_p50=136.9 package_p50=394.8 write_p50=67.0
+PERF_UI step=sort_ascending cells=1000021 n=20 callback_ms p50=1033.79 p95=1056.24 max=1057.17 ui_apply_result_ms p50=50.26 max=54.49 worker_ms eval_p50=137.0 package_p50=392.6 write_p50=67.1
+PERF_UI step=undo_sort cells=1000021 n=20 callback_ms p50=1056.36 p95=1089.60 max=1101.23 ui_apply_result_ms p50=48.33 max=52.29 worker_ms eval_p50=143.3 package_p50=417.9 write_p50=68.6
+PERF_UI step=paste_one_cell cells=1000021 n=20 callback_ms p50=188.63 p95=200.43 max=200.52 ui_apply_result_ms p50=49.26 max=54.80 worker_ms eval_p50=144.4 package_p50=392.1 write_p50=67.6
+PERF_UI step=format_bold cells=1000002 n=1 callback_ms p50=178.17 p95=178.17 max=178.17 ui_apply_result_ms p50=48.37 max=48.37 worker_ms eval_p50=113.3 package_p50=454.6 write_p50=65.8
+PERF_UI step=undo_format cells=1000002 n=1 callback_ms p50=944.67 p95=944.67 max=944.67 ui_apply_result_ms p50=49.76 max=49.76 worker_ms eval_p50=166.9 package_p50=456.0 write_p50=71.8
+PERF_UI step=redo_format cells=1000002 n=1 callback_ms p50=956.61 p95=956.61 max=956.61 ui_apply_result_ms p50=46.31 max=46.31 worker_ms eval_p50=170.5 package_p50=431.1 write_p50=69.8
+PERF_UI step=row_insert_add_row cells=1000002 n=1 callback_ms p50=316.10 p95=316.10 max=316.10 ui_apply_result_ms p50=46.73 max=46.73 worker_ms eval_p50=147.0 package_p50=384.8 write_p50=67.2
+PERF_UI step=sort_ascending cells=1000002 n=1 callback_ms p50=1091.69 p95=1091.69 max=1091.69 ui_apply_result_ms p50=46.19 max=46.19 worker_ms eval_p50=133.8 package_p50=418.0 write_p50=65.3
+PERF_UI step=undo_sort cells=1000002 n=1 callback_ms p50=1064.33 p95=1064.33 max=1064.33 ui_apply_result_ms p50=47.35 max=47.35 worker_ms eval_p50=148.0 package_p50=414.7 write_p50=68.5
+PERF_UI step=paste_one_cell cells=1000002 n=1 callback_ms p50=187.94 p95=187.94 max=187.94 ui_apply_result_ms p50=46.66 max=46.66 worker_ms eval_p50=135.9 package_p50=404.5 write_p50=66.9
+== RSS (KiB)
+-- blank-live.time
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:45.01
+	Maximum resident set size (kbytes): 200468
+-- chain-10k-headless.time
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.10
+	Maximum resident set size (kbytes): 37916
+-- chain-10k-live.time
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:45.01
+	Maximum resident set size (kbytes): 214236
+-- unique-1m-headless.time
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.90
+	Maximum resident set size (kbytes): 362596
+-- unique-1m-live.time
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:45.05
+	Maximum resident set size (kbytes): 950900
