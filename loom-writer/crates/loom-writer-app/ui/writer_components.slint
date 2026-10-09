@@ -1,4 +1,4 @@
-import { LoomStatusBar, LoomStatusText, LoomButton } from "foundation.slint";
+import { LoomStatusBar, LoomStatusText, LoomIconButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import { FindBar } from "find_bar.slint";
@@ -357,18 +357,16 @@ export component WriterPageCanvas inherits Rectangle {
                     key-pressed(event) => { return root.key-pressed(event); }
                 }
             }
-            for comment in root.comment-rects : LoomButton {
+            // An icon-only chip: its label is spoken, never drawn, so it cannot
+            // run past the page edge at any zoom or text scale.
+            for comment in root.comment-rects : LoomIconButton {
                 visible: comment.marker;
                 enabled: comment.marker;
                 x: page.width - page.page-padding / 2 - self.width / 2;
                 y: page.page-padding + comment.y * root.page-zoom - self.height / 2;
-                width: 24px;
-                min-width: 24px;
-                preferred-width: 24px;
-                height: 24px;
+                text-scale: Theme.text-scale;
                 icon: "comment";
                 label: comment.label;
-                variant: "ghost";
                 clicked => { root.activate-comment(comment.comment-id); }
             }
         }

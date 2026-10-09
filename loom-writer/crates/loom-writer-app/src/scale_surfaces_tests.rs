@@ -390,6 +390,54 @@ fn a_comment_marker_stays_clear_of_the_docked_inspector_at_1280() {
     }
 }
 
+/// At 1.5x zoom the comment chip is an icon whose label is spoken, not a
+/// sentence drawn beside it. Nothing the chip draws may cross the page's edges.
+#[test]
+fn a_comment_chip_stays_inside_the_page_at_zoom_one_and_a_half() {
+    let mut document = super::actions_tests::text_document(
+        "A paragraph with a remark on some of the words in it.",
+    );
+    let block_id = document.blocks[0].id;
+    document
+        .add_comment_thread(block_id, 2, 30, "Check this wording")
+        .expect("comment");
+    let (app, state) = super::actions_tests::test_state(
+        document,
+        std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    apply_layout_breakpoints(&app, 1280);
+    apply_state(&app, &state);
+    app.invoke_page_zoom_changed(1.5);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+
+    // The editor sits inside one page margin on each side (72 pt, at 1.5x),
+    // so the page's edges are the editor's edges widened by that margin.
+    let editor = ElementHandle::find_by_accessible_label(&app, "Document body")
+        .next()
+        .expect("the editor");
+    let margin = 72.0 * 1.5;
+    let left = editor.absolute_position().x - margin;
+    let right = editor.absolute_position().x + editor.size().width + margin;
+
+    let chip = ElementHandle::find_by_accessible_label(&app, "Show comment by You on page")
+        .find(|element| element.size().width > 0.0)
+        .expect("the comment has a page chip");
+    let mut parts = vec![(chip.absolute_position(), chip.size())];
+    chip.visit_descendants(|part| {
+        parts.push((part.absolute_position(), part.size()));
+        std::ops::ControlFlow::<()>::Continue(())
+    });
+    for (position, size) in parts {
+        assert!(
+            position.x >= left - 0.5 && position.x + size.width <= right + 0.5,
+            "a part of the comment chip spans {}..{} but the page spans {left}..{right}",
+            position.x,
+            position.x + size.width
+        );
+    }
+}
+
 #[test]
 fn inspector_shortcut_hints_name_the_platform_modifier() {
     let (width, height) = (1280.0f32, 800.0f32);

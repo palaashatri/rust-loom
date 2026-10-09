@@ -124,6 +124,19 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     }
 }
 
+/// Calls `visit` with each piece of a block's text that counts toward the word
+/// and character totals. A paragraph counts whole. A table counts each cell's
+/// text, so its pipes, padding and header separator are not words.
+pub(crate) fn for_each_counted_text(kind: &str, text: &str, mut visit: impl FnMut(&str)) {
+    if kind == TABLE_BLOCK_KIND {
+        for cell in parse_table_markdown(text).rows.iter().flatten() {
+            visit(cell.as_str());
+        }
+    } else {
+        visit(text);
+    }
+}
+
 /// A table block's place in the new editor text: the old block index it came
 /// from and the byte range it now occupies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,5 +473,30 @@ mod tests {
         assert_eq!(document.blocks[1].text.as_str(), table_text);
         assert_eq!(document.blocks[2].text.as_str(), "");
         assert_eq!(document.blocks[3].text.as_str(), "Outro");
+    }
+
+    #[test]
+    fn table_cells_count_as_words_and_characters_not_as_markdown() {
+        let mut document = WriterDocument::new("counts", "Counts");
+        document
+            .blocks
+            .push(RichBlock::new(1, "paragraph", "Intro words here"));
+        document.blocks.push(RichBlock::new(
+            2,
+            TABLE_BLOCK_KIND,
+            "| Item | Qty |\n| --- | --- |\n| Apples | 3 |",
+        ));
+
+        // The paragraph has 3 words and 16 characters. The table's cells are
+        // Item, Qty, Apples and 3: 4 words and 14 characters. Pipes, padding and
+        // dashes are Markdown syntax and count for nothing.
+        let stats = document.statistics();
+        assert_eq!(stats.word_count, 7);
+        assert_eq!(stats.char_count, 30);
+        assert_eq!(stats.char_count_no_spaces, 28);
+        // The status bar also counts the one character between the two blocks.
+        assert_eq!(document.text_counts(), (7, 31));
+        let pagination = document.estimate_pagination();
+        assert_eq!((pagination.words, pagination.characters), (7, 31));
     }
 }

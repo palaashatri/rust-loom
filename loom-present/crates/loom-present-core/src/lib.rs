@@ -5,6 +5,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+mod pdf_export;
 mod pictures;
 mod pptx_export;
 mod pptx_titles;
@@ -1306,133 +1307,7 @@ pub fn load_presentation(bytes: &[u8]) -> Result<PresentationDocument, String> {
     Ok(document)
 }
 
-pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
-    use loom_pdf::{PathStyle, PdfDocument, TextStyle};
-    let mut pdf = PdfDocument::new();
-    let mut pdf_images: std::collections::BTreeMap<String, usize> = Default::default();
-    let style_title = TextStyle {
-        size_pt: 18.0,
-        bold: true,
-        ..Default::default()
-    };
-    let style_body = TextStyle {
-        size_pt: 12.0,
-        bold: false,
-        ..Default::default()
-    };
-
-    // Preserve the 16:9 authoring plane inside a landscape PDF page. PDF's
-    // origin is bottom-left while Present's scene origin is top-left, so each
-    // element receives an explicit transform rather than being laid out in a
-    // synthetic vertical text list.
-    const PAGE_WIDTH: f32 = 842.0;
-    const PAGE_HEIGHT: f32 = 595.0;
-    let scale = (PAGE_WIDTH / SLIDE_WIDTH).min(PAGE_HEIGHT / SLIDE_HEIGHT);
-    let offset_x = (PAGE_WIDTH - SLIDE_WIDTH * scale) / 2.0;
-    let offset_y = (PAGE_HEIGHT - SLIDE_HEIGHT * scale) / 2.0;
-
-    for slide in &doc.slides {
-        let page = pdf.add_page(PAGE_WIDTH, PAGE_HEIGHT);
-        let has_title = slide
-            .elements
-            .iter()
-            .any(|element| element.element_type == ElementType::Title);
-        if !has_title {
-            // Legacy/document-only slides may not contain a title element;
-            // keep their title visible at the top-left as a deterministic
-            // fallback while still using slide-space coordinates.
-            let title_x = offset_x + 40.0 * scale;
-            let title_y = offset_y + (SLIDE_HEIGHT - 70.0) * scale;
-            pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
-        }
-        for elem in &slide.elements {
-            let radians = normalize_angle_degrees(elem.rotation_deg).to_radians();
-            let (sin, cos) = radians.sin_cos();
-            // The matrix carries the scene-to-page scale. Keep the emitted
-            // geometry in slide-local units so rectangles and text are not
-            // scaled a second time.
-            let width = elem.width;
-            let height = elem.height;
-            let center_x = offset_x + (elem.x + elem.width / 2.0) * scale;
-            let center_y = offset_y + (SLIDE_HEIGHT - elem.y - elem.height / 2.0) * scale;
-            // Present's scene has a top-left origin and y-down coordinates;
-            // PDF user space has a bottom-left origin and y-up coordinates.
-            // Compose the clockwise scene rotation with that y flip so local
-            // element coordinates stay intuitive for both text and paths.
-            let a = scale * cos;
-            let b = -scale * sin;
-            let c = -scale * sin;
-            let d = -scale * cos;
-            let e = center_x - (a * elem.width / 2.0 + c * elem.height / 2.0);
-            let f = center_y - (b * elem.width / 2.0 + d * elem.height / 2.0);
-            let transform = [a, b, c, d, e, f];
-
-            match elem.element_type {
-                ElementType::ShapeRectangle | ElementType::ShapeCircle | ElementType::StatCard => {
-                    let style = if elem.element_type == ElementType::StatCard {
-                        PathStyle::filled((0.16, 0.36, 0.72))
-                    } else {
-                        PathStyle::filled((0.84, 0.88, 0.96))
-                    };
-                    pdf.draw_rect_with_transform(page, (0.0, 0.0, width, height), style, transform);
-                    if !elem.content.trim().is_empty() {
-                        pdf.draw_text_with_transform(
-                            page,
-                            10.0,
-                            style_body.size_pt + 6.0,
-                            &elem.content,
-                            &style_body,
-                            transform,
-                        );
-                    }
-                }
-                ElementType::Title => {
-                    pdf.draw_text_with_transform(
-                        page,
-                        10.0,
-                        style_title.size_pt + 6.0,
-                        &elem.content,
-                        &style_title,
-                        transform,
-                    );
-                }
-                ElementType::Picture => {
-                    if let Some(asset) = doc.asset_for(elem) {
-                        let index = match pdf_images.get(&asset.id) {
-                            Some(index) => Some(*index),
-                            None => pictures::pdf_image(asset).ok().map(|image| {
-                                let index = pdf.add_image(image);
-                                pdf_images.insert(asset.id.clone(), index);
-                                index
-                            }),
-                        };
-                        if let Some(index) = index {
-                            pdf.draw_image_with_transform(page, index, (width, height), transform);
-                        }
-                    }
-                }
-                ElementType::Subtitle | ElementType::BodyText => {
-                    // A line feed is not a line break inside one PDF string, so each
-                    // line is drawn on its own baseline.
-                    for (index, line) in elem.content.split('\n').enumerate() {
-                        if line.is_empty() {
-                            continue;
-                        }
-                        pdf.draw_text_with_transform(
-                            page,
-                            8.0,
-                            style_body.size_pt + 4.0 + index as f32 * style_body.size_pt * 1.3,
-                            line.trim_end_matches('\r'),
-                            &style_body,
-                            transform,
-                        );
-                    }
-                }
-            }
-        }
-    }
-    pdf.serialize()
-}
+pub use pdf_export::export_pdf;
 
 /// Builds slides from an indented text outline: top-level lines become slide titles,
 /// indented child lines (any consistent leading whitespace >= 2 spaces or one tab) become

@@ -2,7 +2,7 @@
 //! it replaces unsaved work, and does not call itself a theme.
 
 use super::*;
-use i_slint_backend_testing::ElementHandle;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use loom_desktop::ScriptedFileDialogs;
 
 fn launched(session: PresentationSession) -> (PresentApp, Rc<GuiState>) {
@@ -205,4 +205,38 @@ fn nothing_in_the_chooser_or_its_entry_points_is_called_a_theme() {
             "{gone} must not be offered"
         );
     }
+}
+
+#[test]
+fn the_template_cards_fill_one_row_of_the_chooser_at_1280() {
+    let (app, _state) = launched(empty_session());
+    app.window().set_size(slint::PhysicalSize::new(1280, 800));
+    app.set_theme_chooser_open(true);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render chooser");
+    let cards: Vec<(f32, f32, f32, f32)> = slide_layouts::TEMPLATE_NAMES
+        .iter()
+        .map(|label| {
+            // The category list also has a "Blank" label; only the card is a button.
+            let card = ElementHandle::find_by_accessible_label(&app, label)
+                .find(|element| {
+                    element.accessible_role() == Some(AccessibleRole::Button)
+                        && element.size().width > 0.0
+                })
+                .unwrap_or_else(|| panic!("the {label} card is drawn"));
+            let (at, size) = (card.absolute_position(), card.size());
+            (at.x, at.y, at.x + size.width, at.y + size.height)
+        })
+        .collect();
+    // The dialog is 1160 px wide: a 220 px sidebar, then content with 24 px of
+    // padding on each side, so 892 px. Four cards that fill it span that width.
+    let left = cards.iter().map(|card| card.0).fold(f32::MAX, f32::min);
+    let right = cards.iter().map(|card| card.2).fold(f32::MIN, f32::max);
+    assert!(
+        right - left >= 880.0,
+        "the cards span {left}..{right}, not the 892 px content width: {cards:?}"
+    );
+    assert!(
+        cards.iter().all(|card| (card.1 - cards[0].1).abs() < 1.0),
+        "the four cards share one row: {cards:?}"
+    );
 }

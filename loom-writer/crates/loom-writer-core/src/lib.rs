@@ -668,14 +668,15 @@ impl WriterDocument {
         let mut chars_no_spaces = 0;
         let mut sentences = 0;
         for b in &self.blocks {
-            let text = b.text.as_str();
-            chars += text.chars().count();
-            chars_no_spaces += text.chars().filter(|c| !c.is_whitespace()).count();
-            words += text.split_whitespace().count();
-            sentences += text
-                .chars()
-                .filter(|&c| c == '.' || c == '!' || c == '?')
-                .count();
+            tables::for_each_counted_text(&b.kind, b.text.as_str(), |text| {
+                chars += text.chars().count();
+                chars_no_spaces += text.chars().filter(|c| !c.is_whitespace()).count();
+                words += text.split_whitespace().count();
+                sentences += text
+                    .chars()
+                    .filter(|&c| c == '.' || c == '!' || c == '?')
+                    .count();
+            });
         }
         let reading_time = if words > 0 {
             (words as f32 / 200.0).max(0.1)
@@ -723,9 +724,14 @@ impl WriterDocument {
 
     /// Estimate long-form document metrics including page count, word count, character count, and reading time.
     pub fn estimate_pagination(&self) -> PaginationMetrics {
-        let plain = self.plain_text();
-        let words = plain.split_whitespace().count();
-        let characters = plain.chars().count();
+        // Blocks are joined by one line break each, which counts as a character.
+        let (mut words, mut characters) = (0, self.blocks.len().saturating_sub(1));
+        for block in &self.blocks {
+            tables::for_each_counted_text(&block.kind, block.text.as_str(), |text| {
+                words += text.split_whitespace().count();
+                characters += text.chars().count();
+            });
+        }
         let pages_by_words = words.div_ceil(250);
         let pages_by_chars = characters.div_ceil(1500);
         let total_pages = pages_by_words.max(pages_by_chars).max(1);

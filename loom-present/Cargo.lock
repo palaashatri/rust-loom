@@ -3077,6 +3077,7 @@ dependencies = [
  "i-slint-backend-winit",
  "i-slint-core",
  "image",
+ "loom-command",
  "loom-desktop",
  "loom-package",
  "loom-present-core",

@@ -35,6 +35,7 @@ struct CachedBlock {
     graphemes: usize,
     font_bits: u32,
     width_bits: u32,
+    kind: String,
     text: String,
     runs: Vec<StyleRun>,
     lines: Rc<[WrappedLine]>,
@@ -73,6 +74,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         if let Some(hit) = cache.blocks.get_mut(&block.id) {
             if hit.font_bits == font_bits
                 && hit.width_bits == width_bits
+                && hit.kind == block.kind
                 && hit.text == text
                 && hit.runs == block.runs
             {
@@ -95,14 +97,18 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                 advance_pt: text_advance(&text[start..end], start, &block.runs, font_size),
             })
             .collect();
-        let words = text.split_whitespace().count();
-        let chars = text.chars().count();
+        let (mut words, mut chars) = (0, 0);
+        crate::tables::for_each_counted_text(&block.kind, text, |part| {
+            words += part.split_whitespace().count();
+            chars += part.chars().count();
+        });
         let graphemes = crate::grapheme_count(text);
         cache.blocks.insert(
             block.id,
             CachedBlock {
                 font_bits,
                 width_bits,
+                kind: block.kind.clone(),
                 text: text.to_string(),
                 runs: block.runs.clone(),
                 lines: lines.clone(),

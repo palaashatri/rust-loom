@@ -4,6 +4,8 @@
 //! byte ceiling. Public names are re-exported from the crate root so the
 //! public API surface is unchanged.
 
+use std::rc::Rc;
+
 use crate::export_flow;
 use crate::export_table::{self, TableLayout};
 use crate::{PageStyle, WriterDocument};
@@ -114,7 +116,8 @@ enum LineContent {
         style: loom_pdf::TextStyle,
     },
     TableRow {
-        start: usize,
+        layout: Rc<TableLayout>,
+        row: usize,
     },
 }
 
@@ -163,19 +166,20 @@ fn pdf_lines(
         let kind = block.kind.as_str();
         let text = block.text.as_str();
         if kind == crate::TABLE_BLOCK_KIND {
-            let mut offset = 0usize;
-            let mut first = true;
-            for row in text.split('\n') {
-                if !crate::parse_table_markdown(row).rows.is_empty() {
-                    lines.push(PdfLine {
-                        block: index,
-                        content: LineContent::TableRow { start: offset },
-                        gap: if first { gap } else { 0.0 },
-                        height: body.size_pt * page_style.line_height,
-                    });
-                    first = false;
-                }
-                offset += row.len() + 1;
+            // Row heights depend on the wrapped cells, so the table is laid out
+            // here, where pagination needs the heights.
+            let line_height = body.size_pt * page_style.line_height;
+            let layout = Rc::new(TableLayout::new(text, body, column, line_height));
+            for row in 0..layout.row_count() {
+                lines.push(PdfLine {
+                    block: index,
+                    content: LineContent::TableRow {
+                        layout: Rc::clone(&layout),
+                        row,
+                    },
+                    gap: if row == 0 { gap } else { 0.0 },
+                    height: layout.row_height(row),
+                });
             }
             continue;
         }
@@ -242,8 +246,6 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     let top = page_style.height_pt - page_style.margin_top_pt;
     let mut page = pdf.add_page(page_style.width_pt, page_style.height_pt);
     let mut y = top;
-    let mut layouts: std::collections::BTreeMap<usize, export_table::TableLayout> =
-        std::collections::BTreeMap::new();
 
     for line in pdf_lines(doc, &page_style, &body, column) {
         y -= line.gap;
@@ -272,21 +274,10 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 };
                 draw_styled_line(&mut pdf, page, &text_line, style);
             }
-            LineContent::TableRow { start } => {
-                let layout = layouts
-                    .entry(line.block)
-                    .or_insert_with(|| TableLayout::new(block.text.as_str(), &body, column));
+            LineContent::TableRow { layout, row } => {
                 let shift = align_shift(block.style.alignment, column, layout.width);
                 let origin = (page_style.margin_left_pt + shift, y);
-                export_table::draw_line(
-                    &mut pdf,
-                    page,
-                    block.text.as_str(),
-                    *start,
-                    layout,
-                    origin,
-                    line.height,
-                );
+                export_table::draw_row(&mut pdf, page, layout, *row, origin);
             }
         }
         y -= line.height;

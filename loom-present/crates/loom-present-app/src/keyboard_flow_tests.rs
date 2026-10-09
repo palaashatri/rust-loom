@@ -361,6 +361,34 @@ fn menu_keys_do_nothing_while_a_modal_owns_the_keyboard() {
 }
 
 #[test]
+fn the_palette_ranks_word_starts_above_plain_substrings() {
+    let s = launched();
+    ctrl(&s.app, "k");
+    type_text(&s.app, "ex");
+    let labels: Vec<String> = s
+        .app
+        .get_palette_commands()
+        .iter()
+        .map(|item| item.label.to_string())
+        .collect();
+    let position = |label: &str| {
+        labels
+            .iter()
+            .position(|found| found == label)
+            .unwrap_or_else(|| panic!("{label:?} matches 'ex': {labels:?}"))
+    };
+    let add_text = position("Add Text");
+    assert!(
+        position("Export PDF") < add_text,
+        "a prefix match: {labels:?}"
+    );
+    assert!(
+        position("Start or Exit Slideshow") < add_text,
+        "a word start beats a substring inside a word: {labels:?}"
+    );
+}
+
+#[test]
 fn ctrl_k_palette_runs_a_command_and_escape_closes_it_returning_focus() {
     let s = launched();
     let page = focus_weak(&s.app);

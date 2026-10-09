@@ -30,6 +30,7 @@ export component MiniSlide inherits Rectangle {
         height: 100%;
         editing-enabled: false;
         fit-screen: true;
+        miniature: true;
         background: transparent;
         element-labels: root.rows.labels;
         element-contents: root.rows.contents;
@@ -89,6 +90,7 @@ component PresentSlideThumbnail inherits Rectangle {
     HorizontalLayout {
         spacing: Theme.tokens.space.sm;
         padding: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
         // The slide number sits at the reading-start edge: left in LTR, right in RTL.
         if !Theme.rtl : Text {
             text: (root.index + 1) + "";
@@ -98,18 +100,13 @@ component PresentSlideThumbnail inherits Rectangle {
             color: Theme.palette().ink-secondary;
             vertical-alignment: top;
         }
-        Rectangle {
+        // The miniature draws the thumbnail's only frame, at the slide's own 16:9
+        // size, so the row centres it. A second frame around the row was the double
+        // frame at larger text sizes.
+        mini := MiniSlide {
             horizontal-stretch: 1;
-            border-radius: Theme.tokens.metrics.radius-small;
-            border-width: 1px;
-            border-color: Theme.palette().paper-line;
-            background: Theme.palette().paper;
-            clip: true;
-            mini := MiniSlide {
-                width: 100%;
-                rows: root.rows;
-                description: root.title;
-            }
+            rows: root.rows;
+            description: root.title;
         }
         if Theme.rtl : Text {
             text: (root.index + 1) + "";

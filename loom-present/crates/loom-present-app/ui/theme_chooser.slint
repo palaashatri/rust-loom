@@ -254,7 +254,7 @@ export component PresentThemeChooser inherits Rectangle {
                             }
                         }
 
-                        PresentThemeCategory { icon: "new"; label: "All Templates"; active: root.theme-category == 0; clicked => { root.pick-category(0); } }
+                        PresentThemeCategory { icon: "grid"; label: "All Templates"; active: root.theme-category == 0; clicked => { root.pick-category(0); } }
                         PresentThemeCategory { icon: "document"; label: "Basic"; active: root.theme-category == 1; clicked => { root.pick-category(1); } }
                         PresentThemeCategory { icon: "slide"; label: "Layouts"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
                         PresentThemeCategory { icon: "stop"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
@@ -285,33 +285,60 @@ export component PresentThemeChooser inherits Rectangle {
                         overflow: elide;
                     }
 
-                    // Two rows of two cards. Right-to-left reads each row from the
-                    // right, so the second card of a row sits at its start.
-                    VerticalLayout {
-                        spacing: Theme.tokens.space.xl;
+                    // The cards form a grid with as many columns as the width holds (four at most),
+                    // each card as wide as its share, so the row fills the content at any width.
+                    // Right-to-left starts each row at the right edge.
+                    theme-grid := Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                        property <length> gap: Theme.tokens.space.xl;
+                        property <float> columns: max(1.0, min(4.0, floor((self.width + self.gap) / (200px + self.gap))));
+                        property <length> card-width: (self.width - self.gap * (self.columns - 1)) / self.columns;
+                        // A card is its 16:9 preview, its caption and its padding.
+                        property <length> card-height: (self.card-width - 20px) * 0.5625 + 38px + 22px * max(1.0, Theme.text-scale);
+                        // Each card's place among the cards this category shows.
+                        property <float> slot-0: 0;
+                        property <float> slot-1: root.theme-visible(0) ? 1 : 0;
+                        property <float> slot-2: self.slot-1 + (root.theme-visible(1) ? 1 : 0);
+                        property <float> slot-3: self.slot-2 + (root.theme-visible(2) ? 1 : 0);
+                        property <float> count: self.slot-3 + (root.theme-visible(3) ? 1 : 0);
+                        property <float> rows: ceil(self.count / self.columns);
+                        height: self.rows * self.card-height + max(0.0, self.rows - 1.0) * self.gap;
 
-                        if !Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; } }
-                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; } }
+                        function x-of(slot: float) -> length {
+                            return (Theme.rtl ? columns - 1 - mod(slot, columns) : mod(slot, columns)) * (card-width + gap);
                         }
-                        if Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            alignment: end;
-                            if root.theme-visible(1) : PresentThemeOption { theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; } }
-                            if root.theme-visible(0) : PresentThemeOption { theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; } }
+                        function y-of(slot: float) -> length {
+                            return floor(slot / columns) * (card-height + gap);
                         }
 
-                        if !Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; } }
-                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; } }
+                        if root.theme-visible(0) : PresentThemeOption {
+                            theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; }
+                            preview-width: theme-grid.card-width - 20px;
+                            preview-height: self.preview-width * 0.5625;
+                            x: theme-grid.x-of(theme-grid.slot-0);
+                            y: theme-grid.y-of(theme-grid.slot-0);
                         }
-                        if Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            alignment: end;
-                            if root.theme-visible(3) : PresentThemeOption { theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; } }
-                            if root.theme-visible(2) : PresentThemeOption { theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; } }
+                        if root.theme-visible(1) : PresentThemeOption {
+                            theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; }
+                            preview-width: theme-grid.card-width - 20px;
+                            preview-height: self.preview-width * 0.5625;
+                            x: theme-grid.x-of(theme-grid.slot-1);
+                            y: theme-grid.y-of(theme-grid.slot-1);
+                        }
+                        if root.theme-visible(2) : PresentThemeOption {
+                            theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; }
+                            preview-width: theme-grid.card-width - 20px;
+                            preview-height: self.preview-width * 0.5625;
+                            x: theme-grid.x-of(theme-grid.slot-2);
+                            y: theme-grid.y-of(theme-grid.slot-2);
+                        }
+                        if root.theme-visible(3) : PresentThemeOption {
+                            theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; }
+                            preview-width: theme-grid.card-width - 20px;
+                            preview-height: self.preview-width * 0.5625;
+                            x: theme-grid.x-of(theme-grid.slot-3);
+                            y: theme-grid.y-of(theme-grid.slot-3);
                         }
                     }
 

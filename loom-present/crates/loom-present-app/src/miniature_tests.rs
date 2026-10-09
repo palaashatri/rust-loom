@@ -331,3 +331,38 @@ fn an_empty_placeholder_draws_nothing_in_its_thumbnail() {
         "an empty placeholder drew {drawn} pixels in its thumbnail"
     );
 }
+
+/// At 2x text scale a thumbnail is one framed miniature: its frame sits on the
+/// slide's own top edge. A frame drawn around a taller row, with the slide
+/// inside it, is the double frame the thumbnails showed at this scale.
+#[test]
+fn a_thumbnail_at_two_times_text_is_one_frame_on_the_slide_edge() {
+    let s = launched();
+    Theme::get(&s.app).set_text_scale(2.0);
+    refresh(&s.app, &s.state);
+    render(&s.app);
+    let count = s.state.session.borrow().document.slides.len();
+    let image = snapshot_component(&s.app, 1280.0, 800.0, SCALE).expect("render");
+    // Slide 2 is not selected, so its background is the plain surface colour.
+    let button = device_area(&thumbnail(&s.app, 1, count));
+    let mini = device_area(
+        &thumbnail(&s.app, 1, count)
+            .query_descendants()
+            .match_type_name("MiniSlide")
+            .find_first()
+            .expect("the second thumbnail's slide"),
+    );
+    let (x0, y0, x1, _) = slide_box(&image, mini);
+    let column = (x0 + x1) / 2;
+    // Below the button's own 1 px border and inside its padding, where only the surface shows.
+    let padding = button.1 + 5;
+    let background = *image.get_pixel(column, padding);
+    let frame_top = (padding..=y0)
+        .find(|&y| *image.get_pixel(column, y) != background)
+        .unwrap_or(y0);
+    assert!(
+        y0 - frame_top <= 2,
+        "the frame starts {} device pixels above the slide, so a second frame surrounds it",
+        y0 - frame_top
+    );
+}

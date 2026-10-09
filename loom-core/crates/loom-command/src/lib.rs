@@ -494,44 +494,18 @@ impl CommandRegistry {
         self.specs.is_empty()
     }
 
-    /// Search commands with deterministic scoring for palette filtering.
+    /// Search commands with deterministic scoring for palette filtering. A
+    /// command ranks by [`match_score`].
     pub fn search(&self, query: &str) -> Vec<(&CommandSpec, u32)> {
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
+        if query.trim().is_empty() {
             return Vec::new();
         }
         let mut results: Vec<(&CommandSpec, u32)> = self
             .specs
             .values()
             .filter_map(|spec| {
-                let mut score = 0u32;
-                let label_lower = spec.label.to_lowercase();
-                let id_lower = spec.id.0.to_lowercase();
-                let category_lower = spec.category.to_lowercase();
-
-                if label_lower == q {
-                    score += 100;
-                } else if label_lower.starts_with(&q) {
-                    score += 50;
-                } else if label_lower.contains(&q) {
-                    score += 30;
-                }
-
-                if id_lower == q {
-                    score += 40;
-                } else if id_lower.contains(&q) {
-                    score += 20;
-                }
-
-                if category_lower.contains(&q) {
-                    score += 10;
-                }
-
-                if score > 0 {
-                    Some((spec, score))
-                } else {
-                    None
-                }
+                let score = match_score(query, &spec.label, &spec.id.0, &spec.category);
+                (score > 0).then_some((spec, score))
             })
             .collect();
 
@@ -543,6 +517,51 @@ impl CommandRegistry {
         });
         results
     }
+}
+
+/// How well a command matches a palette query: zero when it does not, and a higher
+/// score ranks first. The label sets the tier: a label equal to the query beats one
+/// that starts with it, which beats one where a word starts with it, which beats one
+/// that only contains it somewhere inside a word. The id and category add up to 50 at
+/// most, so they order commands within a tier and never lift one out of it.
+pub fn match_score(query: &str, label: &str, id: &str, category: &str) -> u32 {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return 0;
+    }
+    let label = label.to_lowercase();
+    let id = id.to_lowercase();
+    let category = category.to_lowercase();
+    let mut score = if label == query {
+        1000
+    } else if label.starts_with(&query) {
+        500
+    } else if starts_a_word(&label, &query) {
+        400
+    } else if label.contains(&query) {
+        300
+    } else {
+        0
+    };
+    if id == query {
+        score += 40;
+    } else if id.contains(&query) {
+        score += 20;
+    }
+    if category.contains(&query) {
+        score += 10;
+    }
+    score
+}
+
+/// Whether `query` starts a word somewhere in `text`: at the very start, or right
+/// after a character that is not a letter or digit.
+fn starts_a_word(text: &str, query: &str) -> bool {
+    text.match_indices(query)
+        .any(|(index, _)| match text[..index].chars().next_back() {
+            None => true,
+            Some(before) => !before.is_alphanumeric(),
+        })
 }
 
 #[cfg(test)]
@@ -648,6 +667,25 @@ mod tests {
         assert_eq!(res.len(), 3);
         assert_eq!(res[0].0.id.as_str(), "file.save");
         assert_eq!(res[1].0.id.as_str(), "file.save_as");
+    }
+
+    #[test]
+    fn search_ranks_word_starts_above_plain_substrings() {
+        let mut r = CommandRegistry::new();
+        // Registered first, so only the score can put it below the others.
+        r.register(CommandSpec::new("present.add-text", "Add Text"));
+        r.register(CommandSpec::new(
+            "present.preview",
+            "Start or Exit Slideshow",
+        ));
+        r.register(CommandSpec::new("present.export-pdf", "Export PDF"));
+
+        let order: Vec<&str> = r
+            .search("ex")
+            .iter()
+            .map(|(spec, _)| spec.label.as_str())
+            .collect();
+        assert_eq!(order, ["Export PDF", "Start or Exit Slideshow", "Add Text"]);
     }
 
     #[test]

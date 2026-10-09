@@ -19,6 +19,9 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <bool> editing-enabled: true;
     /// Slideshow mode: the slide fills the window and text scales with it.
     in property <bool> fit-screen: false;
+    /// A thumbnail: the slide's own 1 px frame is the only frame around it, so it
+    /// casts no shadow of its own.
+    in property <bool> miniature: false;
     /// Editor zoom: 1.0 fits the pane, smaller values shrink the slide.
     in property <float> zoom: 1.0;
     in property <[float]> snap-guides-x: [];
@@ -91,9 +94,9 @@ export component PresentSlideCanvas inherits Rectangle {
             border-width: 1px;
             border-color: Theme.palette().border;
             background: Theme.palette().paper;
-            drop-shadow-blur: 16px;
-            drop-shadow-offset-y: 6px;
-            drop-shadow-color: Theme.palette().shadow;
+            drop-shadow-blur: root.miniature ? 0px : 16px;
+            drop-shadow-offset-y: root.miniature ? 0px : 6px;
+            drop-shadow-color: root.miniature ? transparent : Theme.palette().shadow;
             clip: true;
 
             canvas-touch := TouchArea {

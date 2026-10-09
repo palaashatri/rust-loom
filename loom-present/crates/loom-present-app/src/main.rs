@@ -3000,14 +3000,8 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
 }
 
 fn rebuild_palette(app: &PresentApp, query: &str) {
-    let query_lower = query.trim().to_lowercase();
-    let items: Vec<CommandPaletteItem> = master_palette(app)
+    let items: Vec<CommandPaletteItem> = palette_rank::matching(master_palette(app), query)
         .into_iter()
-        .filter(|c| {
-            query_lower.is_empty()
-                || c.label.to_lowercase().contains(&query_lower)
-                || c.id.to_lowercase().contains(&query_lower)
-        })
         .map(|c| CommandPaletteItem {
             id: c.id.into(),
             label: c.label.into(),
@@ -3086,15 +3080,11 @@ fn wire_palette(app: &PresentApp) {
         let app_ref = app.as_weak();
         app.on_palette_invoked(move |index| {
             if let Some(app) = app_ref.upgrade() {
-                let query = app.get_palette_query().trim().to_lowercase();
-                let command = master_palette(&app)
-                    .into_iter()
-                    .filter(|c| {
-                        query.is_empty()
-                            || c.label.to_lowercase().contains(&query)
-                            || c.id.to_lowercase().contains(&query)
-                    })
-                    .nth(index as usize);
+                // The rows shown come from the same ranking, so the index picks the row shown.
+                let command =
+                    palette_rank::matching(master_palette(&app), &app.get_palette_query())
+                        .into_iter()
+                        .nth(index as usize);
                 if let Some(command) = command {
                     app.set_palette_open(false);
                     match command.action {
@@ -3157,6 +3147,7 @@ mod keyboard_flow_tests;
 mod local_menu;
 mod menu_models;
 mod model_sync;
+mod palette_rank;
 mod picture_view;
 mod presenter;
 mod presenter_thumbs;
