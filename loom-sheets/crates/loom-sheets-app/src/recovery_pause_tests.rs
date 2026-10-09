@@ -7,6 +7,7 @@ use crate::recovery_policy::CadenceLimits;
 use crate::workbook_io::workbook_package_bytes;
 use loom_production::fault_injection::{self, FaultStep};
 use loom_production::RecoveryJournal;
+use loom_sheets_core::workbook_to_json;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -388,8 +388,19 @@ pub struct WorkbookFile {
     pub active: usize,
 }
 
+thread_local! {
+    static WORKBOOK_SERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Whole-workbook serializations run on this thread. Regression tests read it
+/// to show that an edit, an undo, or a redo does not serialize the workbook.
+pub fn workbook_serializations_on_this_thread() -> usize {
+    WORKBOOK_SERIALIZATIONS.with(std::cell::Cell::get)
+}
+
 /// Serialize a workbook (all tabs + active index) to `.loomtable` content.
 pub fn workbook_to_json(sheets: &[Sheet], active: usize) -> String {
+    WORKBOOK_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     let payload = PersistedWorkbook {
         version: Some(1),
         active: active.min(sheets.len().saturating_sub(1)),
@@ -397,6 +408,43 @@ pub fn workbook_to_json(sheets: &[Sheet], active: usize) -> String {
     };
     serde_json::to_string(&payload).expect("workbook model is JSON serializable")
 }
+
+/// Whether two workbook states would save the same content. This agrees with
+/// comparing [`workbook_to_json`] output, but it never serializes the cells:
+/// each cell map is compared by its digest, and only the small per-sheet layout
+/// (name, sizes, freeze, chart, objects) is serialized.
+pub fn workbook_states_match(
+    left: &[Sheet],
+    left_active: usize,
+    right: &[Sheet],
+    right_active: usize,
+) -> bool {
+    left.len() == right.len()
+        && left_active.min(left.len().saturating_sub(1))
+            == right_active.min(right.len().saturating_sub(1))
+        && left.iter().zip(right).all(|(a, b)| {
+            a.cells.digest() == b.cells.digest()
+                && a.styles.digest() == b.styles.digest()
+                && a.alignments.digest() == b.alignments.digest()
+                && layout_json(a) == layout_json(b)
+        })
+}
+
+/// The saved form of a sheet without its cell maps, which are compared by digest.
+fn layout_json(sheet: &Sheet) -> String {
+    let layout = Sheet {
+        cells: crate::BandedMap::new(),
+        alignments: crate::BandedMap::new(),
+        styles: crate::BandedMap::new(),
+        ..sheet.clone()
+    };
+    serde_json::to_string(&PersistedSheet::from(&layout))
+        .expect("sheet layout is JSON serializable")
+}
+
+#[cfg(test)]
+#[path = "persistence_match_tests.rs"]
+mod match_tests;
 
 /// Parse workbook JSON back; unknown trailing keys are ignored.
 pub fn workbook_from_json(s: &str) -> Result<WorkbookFile, String> {

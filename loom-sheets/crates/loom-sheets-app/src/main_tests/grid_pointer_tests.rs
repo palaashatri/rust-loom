@@ -28,7 +28,7 @@ pub(super) fn projected(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
                 return;
             }
             if let Some(app) = app_ref.upgrade() {
-                select_cell(&app, &state.current.borrow(), r, c);
+                select_cell(&app, &state, r, c);
                 project_current(&app, &state);
             }
         }

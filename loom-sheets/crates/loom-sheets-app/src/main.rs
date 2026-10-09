@@ -21,16 +21,19 @@ use loom_desktop::{
     CommandAction, CommandStateProjection, DesktopError, FileDialogService, FileFilter,
     MenuBarService, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
+use loom_sheets_core::persistence::workbook_states_match;
 use loom_sheets_core::persistence::WorkbookFile;
 #[cfg(test)]
 use loom_sheets_core::sheet_to_json;
 use loom_sheets_core::style::CellStyle;
 use loom_sheets_core::workbook::evaluate_workbook;
 #[cfg(test)]
+use loom_sheets_core::workbook_to_json;
+#[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, workbook_to_json, CellAlignment, CellRange, CellRef, GridSelection, NumberFormat,
-    RangeEdit, Sheet, SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, RangeEdit, Sheet,
+    SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
@@ -1049,15 +1052,11 @@ fn project_sheet_inner_with_preview(
         sheet.col_width(selected.col)
     )));
     app.set_sheet_name(sheet.name.as_str().into());
-    let formulas = sheet
-        .cells
-        .values()
-        .filter(|c| c.raw.trim_start().starts_with('='))
-        .count();
+    // Counted by the cell map as it changes, so the status line costs no scan.
     app.set_status_summary(SharedString::from(format!(
         "{} cells · {} formulas",
         sheet.cells.len(),
-        formulas
+        sheet.cells.formula_count()
     )));
     // A single cell has no selection statistics to show. Clear the right-hand
     // status rather than leave a stale statistic or a placeholder.
@@ -1266,6 +1265,8 @@ pub(crate) enum SheetTransaction {
         before: Box<Sheet>,
         after: Box<Sheet>,
     },
+    /// A sort's new row order. It keeps one number per row, not a sheet copy.
+    Rows(loom_sheets_core::RowOrder),
     /// Workbook-level tab operation (add/delete/rename sheet). Boxed to keep
     /// the enum size bounded; applied only via `restore_workbook_state`, never
     /// through the single-sheet `apply`/`revert` below.
@@ -1319,6 +1320,7 @@ impl SheetTransaction {
             SheetTransaction::Snapshot { after, .. } => {
                 *sheet = (**after).clone();
             }
+            SheetTransaction::Rows(order) => order.apply(sheet),
             // Workbook transactions span the whole tab strip and are applied
             // only via `restore_workbook_state` at the undo/redo sites below.
             SheetTransaction::Workbook { .. } => {}
@@ -1346,6 +1348,7 @@ impl SheetTransaction {
             SheetTransaction::Snapshot { before, .. } => {
                 *sheet = (**before).clone();
             }
+            SheetTransaction::Rows(order) => order.revert(sheet),
             // See `apply`: workbook transactions restore via `restore_workbook_state`.
             SheetTransaction::Workbook { .. } => {}
         }
@@ -1368,69 +1371,20 @@ pub(crate) fn commit_transaction(
 /// drops, so long editing sessions cannot grow memory without bound.
 pub(crate) const MAX_HISTORY_ENTRIES: usize = 200;
 
-/// Maximum owned history data retained by one undo or redo stack.
+/// Maximum memory one undo or redo stack may keep alive, counted as the bytes
+/// its entries really hold.
 ///
-/// Entries are full document snapshots for workbook operations and sparse
-/// deltas for cell operations. The byte cap is checked after every push so a
-/// long editing session cannot retain an unbounded amount of user data even
-/// when individual entries are large.
-pub(crate) const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
+/// Entries are whole-sheet snapshots for structural operations, which share
+/// every cell band they did not change, and sparse deltas for cell operations.
+/// Each shared band is counted once. The cap is checked after every push so a
+/// long editing session cannot retain an unbounded amount of memory. The cap
+/// is 256 MiB: the accounting now counts the real footprint of a cell map
+/// (about 70 bytes per short cell), so a single structural edit to a
+/// million-cell sheet fits and stays undoable.
+pub(crate) const MAX_HISTORY_BYTES: usize = 256 * 1024 * 1024;
 
-fn sheet_history_bytes(sheet: &Sheet) -> usize {
-    let cells = sheet
-        .cells
-        .values()
-        .map(|cell| cell.raw.capacity())
-        .sum::<usize>();
-    let objects = sheet
-        .objects
-        .iter()
-        .map(|object| {
-            object.label.capacity()
-                + object.path.capacity()
-                + object.embedded.as_ref().map_or(0, Vec::capacity)
-                + object.asset.as_ref().map_or(0, String::capacity)
-        })
-        .sum::<usize>();
-    std::mem::size_of_val(sheet)
-        + sheet.name.capacity()
-        + cells
-        + objects
-        + sheet.col_widths.len() * std::mem::size_of::<(u32, f32)>()
-        + sheet.row_heights.len() * std::mem::size_of::<(u32, f32)>()
-        + sheet.alignments.len() * std::mem::size_of::<(CellRef, CellAlignment)>()
-        + sheet.styles.len() * std::mem::size_of::<(CellRef, CellStyle)>()
-}
-
-fn workbook_state_bytes(state: &WorkbookUndoState) -> usize {
-    std::mem::size_of_val(state) + state.sheets.iter().map(sheet_history_bytes).sum::<usize>()
-}
-
-fn transaction_bytes(tx: &SheetTransaction) -> usize {
-    match tx {
-        SheetTransaction::Range(edit) => edit.memory_bytes(),
-        SheetTransaction::Batch(edits) => edits.iter().map(RangeEdit::memory_bytes).sum(),
-        SheetTransaction::Alignment { before, .. } => {
-            std::mem::size_of_val(tx)
-                + before.capacity() * std::mem::size_of::<(CellRef, CellAlignment)>()
-        }
-        SheetTransaction::Style { before, after } => {
-            std::mem::size_of_val(tx)
-                + (before.capacity() + after.capacity())
-                    * std::mem::size_of::<(CellRef, CellStyle)>()
-        }
-        SheetTransaction::Snapshot { before, after } => {
-            std::mem::size_of_val(tx) + sheet_history_bytes(before) + sheet_history_bytes(after)
-        }
-        SheetTransaction::Workbook { before, after } => {
-            std::mem::size_of_val(tx) + workbook_state_bytes(before) + workbook_state_bytes(after)
-        }
-    }
-}
-
-pub(crate) fn history_bytes(stack: &[SheetTransaction]) -> usize {
-    stack.iter().map(transaction_bytes).sum()
-}
+mod history_accounting;
+pub(crate) use history_accounting::history_bytes;
 
 /// Push a transaction, evicting the oldest entry past the bound.
 pub(crate) fn push_history(stack: &mut Vec<SheetTransaction>, tx: SheetTransaction) {
@@ -1662,14 +1616,17 @@ pub(crate) fn fill_target_range(source: CellRange) -> Option<CellRange> {
     ))
 }
 
-pub(crate) fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
+/// Move the selection to a cell. The status line reads the cached values the
+/// projection already uses, so moving the selection never re-evaluates the sheet.
+pub(crate) fn select_cell(app: &SheetsApp, state: &GuiState, r: i32, c: i32) {
     if r < 0 || c < 0 {
         return;
     }
     let (r, c) = (r as u32, c as u32);
     let refr = CellRef { row: r, col: c };
-    let vals = evaluate(sheet);
-    update_selection(app, sheet, &vals, refr);
+    let vals = values_for_projection(state);
+    let sheet = state.current.borrow();
+    update_selection(app, &sheet, &vals, refr);
 }
 
 /// Where a key move of `delta` takes the active cell, counting a page as the
@@ -1994,15 +1951,17 @@ impl GuiState {
     }
 
     /// Recheck full content after undo/redo, where the edit marker alone would
-    /// stay set even after returning exactly to the last saved workbook.
+    /// stay set even after returning exactly to the last saved workbook. The
+    /// check compares cell digests, so it costs the same for any workbook size.
     pub(crate) fn recompute_dirty_from_saved(&self) {
         let Some(saved) = self.last_saved.borrow().clone() else {
             self.dirty_content.set(true);
             return;
         };
         let current = workbook_sheets(self);
-        self.dirty_content
-            .set(workbook_to_json(&current.0, current.1) != workbook_to_json(&saved.0, saved.1));
+        self.dirty_content.set(!workbook_states_match(
+            &current.0, current.1, &saved.0, saved.1,
+        ));
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
@@ -2715,7 +2674,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 return;
             }
             if let Some(app) = app_ref.upgrade() {
-                select_cell(&app, &state.current.borrow(), r, c);
+                select_cell(&app, &state, r, c);
                 project_current(&app, &state);
             }
         });

@@ -14,6 +14,7 @@ pub use charts::{
     ChartKind, ChartPlacement, ChartSeries, ChartSpec, ChartUpdatePolicy, SheetChart,
 };
 
+pub mod banded;
 pub mod dates;
 pub mod functions;
 pub(crate) mod functions_date;
@@ -31,10 +32,12 @@ mod number_text;
 pub mod objects;
 pub mod persistence;
 pub mod refs;
+pub mod row_order;
 pub mod style;
 mod style_fit;
 pub mod workbook;
 pub mod xlsx;
+pub use banded::{BandedMap, StoredValue};
 pub use interop::{
     from_csv, from_csv_sniffed, from_csv_with_dialect, parse_csv_records, sniff_csv_dialect,
     to_csv, to_csv_with_formulas, to_csv_with_values, CsvDialect,
@@ -43,6 +46,7 @@ pub use objects::{SheetObject, SheetObjectKind};
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };
+pub use row_order::RowOrder;
 pub use style::{CellAlignment, CellStyle};
 pub use xlsx::{
     export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
@@ -360,7 +364,7 @@ impl CalcError {
 }
 
 /// A cell in the workbook.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Cell {
     /// Raw input: a formula like `=A1+B2` or a literal.
     pub raw: String,
@@ -370,6 +374,16 @@ impl Cell {
     /// Is this a formula? (starts with `=`)
     pub fn is_formula(&self) -> bool {
         self.raw.starts_with('=')
+    }
+}
+
+impl banded::StoredValue for Cell {
+    fn is_formula(&self) -> bool {
+        self.raw.starts_with('=')
+    }
+
+    fn heap_bytes(&self) -> usize {
+        self.raw.capacity()
     }
 }
 
@@ -432,12 +446,13 @@ impl RawCellEdit {
 /// A single worksheet.
 #[derive(Debug, Clone, Default)]
 pub struct Sheet {
-    /// Cells keyed by coordinate.
-    pub cells: BTreeMap<CellRef, Cell>,
+    /// Cells keyed by coordinate. Row bands are shared copy-on-write, so
+    /// cloning a sheet does not copy its cells.
+    pub cells: BandedMap<Cell>,
     /// Alignment styles keyed by cell coordinate.
-    pub alignments: BTreeMap<CellRef, CellAlignment>,
+    pub alignments: BandedMap<CellAlignment>,
     /// Cell formatting styles keyed by cell coordinate.
-    pub styles: BTreeMap<CellRef, CellStyle>,
+    pub styles: BandedMap<CellStyle>,
     /// Sheet name.
     pub name: String,
     /// Frozen top rows count.
@@ -459,9 +474,9 @@ impl Sheet {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            cells: BTreeMap::new(),
-            alignments: BTreeMap::new(),
-            styles: BTreeMap::new(),
+            cells: BandedMap::new(),
+            alignments: BandedMap::new(),
+            styles: BandedMap::new(),
             freeze_rows: 0,
             freeze_cols: 0,
             col_widths: BTreeMap::new(),
@@ -606,7 +621,7 @@ pub fn format_number_percentage(value: f64, decimals: usize) -> String {
 }
 
 /// Standard spreadsheet cell numeric display formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum NumberFormat {
     #[default]
     General,
@@ -1331,20 +1346,11 @@ impl Sheet {
 
     /// Return bounding box of used cells: (min_col, min_row, max_col, max_row), if non-empty.
     pub fn used_range(&self) -> Option<(u32, u32, u32, u32)> {
-        if self.cells.is_empty() {
-            return None;
-        }
-        let mut min_col = u32::MAX;
-        let mut min_row = u32::MAX;
-        let mut max_col = 0;
-        let mut max_row = 0;
-        for r in self.cells.keys() {
-            min_col = min_col.min(r.col);
-            min_row = min_row.min(r.row);
-            max_col = max_col.max(r.col);
-            max_row = max_row.max(r.row);
-        }
-        Some((min_col, min_row, max_col, max_row))
+        // The cell map keeps its bounds current on every write, so this costs
+        // one step per row band rather than one step per cell.
+        self.cells
+            .extent()
+            .map(|e| (e.min_col, e.min_row, e.max_col, e.max_row))
     }
 
     /// Return the sparse worksheet's addressable dimensions.
@@ -2939,11 +2945,16 @@ impl SheetModel {
     /// Returns a temporary sheet whose formulas have named ranges expanded to A1 syntax.
     pub fn resolved_sheet(&self) -> Sheet {
         let mut sheet = self.sheet.clone();
-        for cell in sheet.cells.values_mut() {
+        // Without named ranges there is nothing to expand, so the shared cell
+        // bands stay shared instead of being copied for an identical rewrite.
+        if self.named_ranges.is_empty() {
+            return sheet;
+        }
+        sheet.cells.for_each_value_mut(|cell| {
             if cell.is_formula() {
                 cell.raw = expand_named_ranges(&cell.raw, &self.named_ranges);
             }
-        }
+        });
         sheet
     }
 
@@ -3021,60 +3032,9 @@ impl SheetModel {
         relative_column: u32,
         ascending: bool,
     ) -> Result<(), String> {
-        let sort_column = range
-            .start
-            .col
-            .checked_add(relative_column)
-            .ok_or_else(|| "sort column overflow".to_string())?;
-        if sort_column > range.end.col {
-            return Err("sort column is outside the range".into());
-        }
         let values = self.evaluate();
-        let mut rows: Vec<u32> = (range.start.row..=range.end.row).collect();
-        rows.sort_by(|left, right| {
-            let left_value = values
-                .get(&CellRef {
-                    row: *left,
-                    col: sort_column,
-                })
-                .cloned()
-                .unwrap_or(Value::Empty);
-            let right_value = values
-                .get(&CellRef {
-                    row: *right,
-                    col: sort_column,
-                })
-                .cloned()
-                .unwrap_or(Value::Empty);
-            let ordering = compare_values(&left_value, &right_value);
-            if ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            }
-        });
-        let original = self.sheet.cells.clone();
-        for (destination_offset, source_row) in rows.into_iter().enumerate() {
-            let destination_row = range.start.row + destination_offset as u32;
-            for col in range.start.col..=range.end.col {
-                let source = CellRef {
-                    row: source_row,
-                    col,
-                };
-                let destination = CellRef {
-                    row: destination_row,
-                    col,
-                };
-                match original.get(&source) {
-                    Some(cell) => {
-                        self.sheet.cells.insert(destination, cell.clone());
-                    }
-                    None => {
-                        self.sheet.cells.remove(&destination);
-                    }
-                }
-            }
-        }
+        let order = RowOrder::sorted(range, relative_column, ascending, &values)?;
+        order.apply(&mut self.sheet);
         Ok(())
     }
 }

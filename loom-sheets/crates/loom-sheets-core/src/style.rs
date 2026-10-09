@@ -1,9 +1,10 @@
 //! Cell style and formatting model for Loom Sheets.
 
+use crate::banded::StoredValue;
 use crate::{format_cell_display, format_number_currency, format_number_percentage, NumberFormat};
 
 /// Text alignment within a spreadsheet cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum CellAlignment {
     #[default]
     General,
@@ -12,9 +13,16 @@ pub enum CellAlignment {
     Right,
 }
 
+impl StoredValue for CellAlignment {
+    /// The saved file records only non-default alignments.
+    fn is_persisted(&self) -> bool {
+        *self != CellAlignment::General
+    }
+}
+
 /// Cell fill swatch. Fixed tints stay legible on the paper surface in every
 /// theme; the grid maps variants to paint, JSON persists their names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FillColor {
     /// No fill (paper background).
     #[default]
@@ -101,7 +109,7 @@ impl FillColor {
 }
 
 /// Visual and numerical formatting style applied to a worksheet cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CellStyle {
     /// Bold text weight.
     pub bold: bool,
@@ -119,6 +127,13 @@ pub struct CellStyle {
     pub fill: FillColor,
     /// Explicit font size in px (`None` follows the theme body size).
     pub font_size: Option<u8>,
+}
+
+impl StoredValue for CellStyle {
+    /// The saved file records only styles that differ from the default.
+    fn is_persisted(&self) -> bool {
+        !self.is_default()
+    }
 }
 
 impl CellStyle {

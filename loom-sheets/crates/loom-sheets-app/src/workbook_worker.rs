@@ -7,8 +7,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use std::time::Instant;
 
+use loom_sheets_core::persistence::workbook_states_match;
 use loom_sheets_core::workbook::evaluate_workbook;
-use loom_sheets_core::{workbook_to_json, CellRef, Sheet, Value};
+use loom_sheets_core::{CellRef, Sheet, Value};
 
 use crate::cell_edit_recovery::CellEditRecovery;
 use crate::export_operations::{
@@ -1175,7 +1176,7 @@ fn workbook_differs_from_baseline(
 ) -> bool {
     match baseline {
         Some((saved_sheets, saved_active)) => {
-            workbook_to_json(saved_sheets, *saved_active) != workbook_to_json(sheets, active_sheet)
+            !workbook_states_match(saved_sheets, *saved_active, sheets, active_sheet)
         }
         None => true,
     }

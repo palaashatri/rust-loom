@@ -7,7 +7,7 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
     CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
-    SheetChart, SheetModel, SheetObject,
+    SheetChart, SheetObject,
 };
 use slint::{ComponentHandle, Image, Model, SharedString, VecModel};
 
@@ -234,7 +234,7 @@ pub(crate) fn register_sheet_actions(
                     "",
                 );
                 if committed {
-                    select_cell(&app, &state.current.borrow(), next_row as i32, 0);
+                    select_cell(&app, &state, next_row as i32, 0);
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!("Added row {}", next_row + 1)));
@@ -253,12 +253,14 @@ pub(crate) fn register_sheet_actions(
                     return;
                 }
                 let sel = selection_from_app(&app);
-                let sorted = sort_table(
+                let keys = sort_keys(&state);
+                let sorted = sort_table_with_keys(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     true,
+                    keys.as_deref(),
                 );
                 if sorted {
                     apply_sheet(&app, &state);
@@ -844,13 +846,13 @@ pub(crate) fn register_sheet_actions(
                 after_sheets[active_idx].name = trimmed.clone();
                 // Keep cross-sheet references pointing at the renamed tab.
                 for sheet in &mut after_sheets {
-                    for cell in sheet.cells.values_mut() {
+                    sheet.cells.for_each_value_mut(|cell| {
                         if cell.is_formula() {
                             cell.raw = loom_sheets_core::refs::rename_sheet_in_formula(
                                 &cell.raw, &old_name, &trimmed,
                             );
                         }
-                    }
+                    });
                 }
                 commit_workbook_transaction(&state, after_sheets, active_idx, None);
                 apply_sheet(&app, &state);
@@ -885,7 +887,7 @@ pub(crate) fn register_sheet_actions(
                     &col_letter,
                 );
                 if committed {
-                    select_cell(&app, &state.current.borrow(), 0, next_col as i32);
+                    select_cell(&app, &state, 0, next_col as i32);
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!("Added column {col_letter}")));
@@ -1039,12 +1041,7 @@ pub(crate) fn register_sheet_actions(
                         );
                         let dims = state.current.borrow().dimensions();
                         let target_row = cell.row.min(dims.rows.saturating_sub(1));
-                        select_cell(
-                            &app,
-                            &state.current.borrow(),
-                            target_row as i32,
-                            cell.col as i32,
-                        );
+                        select_cell(&app, &state, target_row as i32, cell.col as i32);
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_status_left(SharedString::from(format!(
@@ -1084,12 +1081,7 @@ pub(crate) fn register_sheet_actions(
                         );
                         let dims = state.current.borrow().dimensions();
                         let target_col = cell.col.min(dims.cols.saturating_sub(1));
-                        select_cell(
-                            &app,
-                            &state.current.borrow(),
-                            cell.row as i32,
-                            target_col as i32,
-                        );
+                        select_cell(&app, &state, cell.row as i32, target_col as i32);
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_status_left(SharedString::from(format!(
@@ -1127,12 +1119,14 @@ pub(crate) fn register_sheet_actions(
                     return;
                 }
                 let sel = selection_from_app(&app);
-                let sorted = sort_table(
+                let keys = sort_keys(&state);
+                let sorted = sort_table_with_keys(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     true,
+                    keys.as_deref(),
                 );
                 if sorted {
                     apply_sheet(&app, &state);
@@ -1154,12 +1148,14 @@ pub(crate) fn register_sheet_actions(
                     return;
                 }
                 let sel = selection_from_app(&app);
-                let sorted = sort_table(
+                let keys = sort_keys(&state);
+                let sorted = sort_table_with_keys(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     false,
+                    keys.as_deref(),
                 );
                 if sorted {
                     apply_sheet(&app, &state);
@@ -1518,12 +1514,7 @@ pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
 /// and leaves that row and everything below it where it is.
 pub(crate) fn sortable_last_row(sheet: &Sheet) -> u32 {
     let last_used = sheet.dimensions().rows.saturating_sub(1);
-    let first_formula_row = sheet
-        .cells
-        .iter()
-        .filter(|(at, cell)| at.row >= 1 && cell.is_formula())
-        .map(|(at, _)| at.row)
-        .min();
+    let first_formula_row = sheet.cells.first_formula_row_from(1);
     match first_formula_row {
         Some(row) => row.saturating_sub(1).min(last_used),
         None => last_used,
@@ -1549,12 +1540,27 @@ pub(crate) fn sort_status(sheet: &Sheet, sorted: bool, direction: &str) -> Strin
 }
 
 /// Sort table rows preserving header row 0 with undo transaction recording.
+/// Sort with keys evaluated from the sheet alone. The app's callbacks pass
+/// cached keys instead, so only the tests and benches need this form.
+#[cfg(test)]
 pub(crate) fn sort_table(
     sheet: &mut Sheet,
     undo_stack: &mut Vec<SheetTransaction>,
     redo_stack: &mut Vec<SheetTransaction>,
     col_idx: u32,
     ascending: bool,
+) -> bool {
+    sort_table_with_keys(sheet, undo_stack, redo_stack, col_idx, ascending, None)
+}
+
+/// [`sort_table`] with sort keys the caller already holds, if any.
+pub(crate) fn sort_table_with_keys(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    col_idx: u32,
+    ascending: bool,
+    keys: Option<&std::collections::HashMap<CellRef, loom_sheets_core::Value>>,
 ) -> bool {
     let dims = sheet.dimensions();
     let last_row = sortable_last_row(sheet);
@@ -1568,25 +1574,33 @@ pub(crate) fn sort_table(
             col: dims.cols.saturating_sub(1),
         },
     );
-    let before = sheet.clone();
-    let mut model = SheetModel::new(sheet.clone());
     let clamped_col = col_idx.min(dims.cols.saturating_sub(1));
-    if model.sort_rows(range, clamped_col, ascending).is_ok() {
-        let mut after = model.sheet;
-        after.objects = before.objects.clone();
-        commit_transaction(
-            sheet,
-            undo_stack,
-            redo_stack,
-            SheetTransaction::Snapshot {
-                before: Box::new(before),
-                after: Box::new(after),
-            },
-        );
+    // Sort keys come from the caller's results when it has them, otherwise from
+    // one evaluation. The result is a row order, so the undo entry costs a few
+    // bytes per row instead of a copy of the sheet.
+    let owned;
+    let values = match keys {
+        Some(values) => values,
+        None => {
+            owned = loom_sheets_core::evaluate(sheet);
+            &owned
+        }
+    };
+    if let Ok(order) = loom_sheets_core::RowOrder::sorted(range, clamped_col, ascending, values) {
+        commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Rows(order));
         true
     } else {
         false
     }
+}
+
+/// Sort keys the active tab's cached results provide. Only a single-tab
+/// workbook qualifies: its results are exactly its own evaluation, while a
+/// multi-tab workbook keeps evaluating the tab alone, as it always has.
+pub(crate) fn sort_keys(
+    state: &GuiState,
+) -> Option<Rc<std::collections::HashMap<CellRef, loom_sheets_core::Value>>> {
+    (state.sheets.borrow().len() == 1).then(|| crate::evaluate_current(state))
 }
 
 /// Delete active worksheet in multi-sheet workbook.

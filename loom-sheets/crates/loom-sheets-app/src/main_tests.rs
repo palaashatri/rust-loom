@@ -64,6 +64,8 @@ mod layout_tests;
 mod mutation_guard_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
+#[path = "main_tests/perf_regression_tests.rs"]
+mod perf_regression_tests;
 #[path = "main_tests/recovery_pause_ui_tests.rs"]
 mod recovery_pause_ui_tests;
 #[path = "main_tests/rtl_tests.rs"]
