@@ -95,6 +95,7 @@ export component SheetsApp inherits Window {
     in property <[string]> column-headers: [];
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
+    in property <[string]> cell-labels: [];
     in property <[int]> cell-alignments: [];
     in property <[bool]> cell-bolds: [];
     in property <[bool]> cell-italics: [];
@@ -109,7 +110,7 @@ export component SheetsApp inherits Window {
     in property <bool> cell-bold: false;
     in property <bool> cell-italic: false;
     in property <bool> cell-underline: false;
-    in property <bool> cell-border: false;
+    in-out property <bool> cell-border: false;
     in property <int> cell-fill: -1;
     in property <int> cell-font-size: 14;
     in property <string> cell-font-label: "14";
@@ -520,6 +521,7 @@ export component SheetsApp inherits Window {
                         column-headers: root.column-headers;
                         row-headers: root.row-headers;
                         cells: root.cells;
+                        cell-labels: root.cell-labels;
                         cell-alignments: root.cell-alignments;
                         cell-bolds: root.cell-bolds;
                         cell-italics: root.cell-italics;
@@ -567,10 +569,10 @@ export component SheetsApp inherits Window {
                     }
 
                     worksheet-objects := SheetObjectLayer {
-                        x: 36px;
-                        y: 26px;
-                        width: max(1px, parent.width - 36px);
-                        height: max(1px, parent.height - 26px);
+                        x: 36px * max(1.0, Theme.text-scale);
+                        y: 26px * max(1.0, Theme.text-scale);
+                        width: max(1px, parent.width - 36px * max(1.0, Theme.text-scale));
+                        height: max(1px, parent.height - 26px * max(1.0, Theme.text-scale));
                         objects: root.object-views;
                         selected-object <=> root.selected-object;
                         keyboard-state <=> root.object-state;
@@ -643,7 +645,7 @@ export component SheetsApp inherits Window {
                     cell-bold: root.cell-bold;
                     cell-italic: root.cell-italic;
                     cell-underline: root.cell-underline;
-                    cell-border: root.cell-border;
+                    cell-border <=> root.cell-border;
                     cell-fill: root.cell-fill;
                     cell-font-size: root.cell-font-size;
                     cell-font-label: root.cell-font-label;

@@ -195,7 +195,7 @@ fn csv_fields_outside_quotes(line: &str, delimiter: char) -> Vec<&str> {
 /// Import a CSV into a sheet.
 pub fn from_csv(name: &str, csv: &str) -> Sheet {
     let mut sheet = Sheet::new(name);
-    let records = parse_csv_records(csv, ',');
+    let records = parse_csv_records(without_utf8_bom(csv), ',');
     for (row, fields) in records.iter().enumerate() {
         for (col, f) in fields.iter().enumerate() {
             let cr = CellRef {
@@ -274,7 +274,10 @@ pub fn to_csv_with_formulas(sheet: &Sheet) -> String {
 /// during import.
 pub fn from_csv_with_dialect(name: &str, csv: &str, delimiter: char) -> Sheet {
     let mut sheet = Sheet::new(name);
-    for (row, fields) in parse_csv_records(csv, delimiter).iter().enumerate() {
+    for (row, fields) in parse_csv_records(without_utf8_bom(csv), delimiter)
+        .iter()
+        .enumerate()
+    {
         for (col, raw) in fields.iter().enumerate() {
             sheet.cells.insert(
                 CellRef {
@@ -293,10 +296,17 @@ pub fn from_csv_with_dialect(name: &str, csv: &str, delimiter: char) -> Sheet {
 /// Import CSV after sniffing comma, semicolon, tab, or pipe dialects.
 /// Empty input keeps the legacy empty-sheet behavior.
 pub fn from_csv_sniffed(name: &str, csv: &str) -> Sheet {
+    let csv = without_utf8_bom(csv);
     let delimiter = sniff_csv_dialect(csv)
         .map(|dialect| dialect.delimiter)
         .unwrap_or(',');
     from_csv_with_dialect(name, csv, delimiter)
+}
+
+/// Excel writes a UTF-8 byte order mark at the start of a CSV file. It is not
+/// cell content, so every importer reads the text after it.
+fn without_utf8_bom(csv: &str) -> &str {
+    csv.strip_prefix('\u{feff}').unwrap_or(csv)
 }
 
 fn csv_escape(value: &str) -> String {
@@ -314,6 +324,18 @@ fn csv_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::{from_csv_with_dialect, CellRef, Sheet};
+
+    #[test]
+    fn csv_import_ignores_a_leading_utf8_byte_order_mark() {
+        // Excel writes a UTF-8 byte order mark. It is not part of the first
+        // cell, so every import path must read "Café" and not "\u{feff}Café".
+        let csv = "\u{feff}Café,Zoë\n1,2\n";
+        for sheet in [from_csv_sniffed("imported", csv), from_csv("imported", csv)] {
+            assert_eq!(sheet.raw(CellRef::parse("A1").unwrap()), Some("Café"));
+            assert_eq!(sheet.raw(CellRef::parse("B1").unwrap()), Some("Zoë"));
+            assert_eq!(sheet.raw(CellRef::parse("A2").unwrap()), Some("1"));
+        }
+    }
 
     #[test]
     fn shared_formula_index_translates_relative_mixed_and_quoted_refs() {

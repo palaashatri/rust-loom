@@ -690,8 +690,11 @@ fn a_pointer_click_on_a_cell_reports_that_cell() {
         let clicked = clicked.clone();
         app.on_cell_clicked(move |row, col| clicked.set(Some((row, col))));
     }
-    let cell = i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "C3")
-        .next()
+    // A cell is named by its address, value and formula: "C3, empty", "C3, value 1, ...".
+    let cell = i_slint_backend_testing::ElementQuery::from_root(&app)
+        .match_descendants()
+        .match_predicate(|e| e.accessible_label().is_some_and(|l| l.starts_with("C3, ")))
+        .find_first()
         .expect("cell C3 is in the accessibility tree");
     let position = cell.absolute_position();
     let size = cell.size();

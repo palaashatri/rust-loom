@@ -11,8 +11,43 @@ use loom_sheets_core::{
 
 use crate::assets;
 
+/// The first tab of a new workbook. The document is called "Untitled" in the
+/// title bar; the tab is a sheet, so it carries its own name.
+pub(crate) const BLANK_SHEET_NAME: &str = "Sheet 1";
+
 pub(crate) fn blank_sheet() -> Sheet {
-    Sheet::new("Untitled")
+    Sheet::new(BLANK_SHEET_NAME)
+}
+
+/// UTF-8 byte order mark. Excel reads a CSV as the system code page unless the
+/// file starts with it, so every CSV export writes it.
+const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
+
+/// True when a stored or recovered workbook is nothing but an untouched starter:
+/// the blank first tab (named "Untitled" by earlier builds) or the example.
+/// Nothing the user did is in it, so there is nothing to recover.
+pub(crate) fn is_untouched_starter(file: &loom_sheets_core::persistence::WorkbookFile) -> bool {
+    let [sheet] = file.sheets.as_slice() else {
+        return false;
+    };
+    let mut candidate = sheet.clone();
+    if candidate.name == "Untitled" {
+        candidate.name = BLANK_SHEET_NAME.to_string();
+    }
+    let candidate_json = workbook_to_json(std::slice::from_ref(&candidate), 0);
+    [blank_sheet(), starter_workbook()]
+        .iter()
+        .any(|starter| workbook_to_json(std::slice::from_ref(starter), 0) == candidate_json)
+}
+
+/// The bytes of a CSV export of the active sheet: the byte order mark, then
+/// the formula-preserving text.
+pub(crate) fn csv_file_bytes(sheet: &Sheet) -> Vec<u8> {
+    let text = loom_sheets_core::to_csv_with_formulas(sheet);
+    let mut bytes = Vec::with_capacity(UTF8_BOM.len() + text.len());
+    bytes.extend_from_slice(&UTF8_BOM);
+    bytes.extend_from_slice(text.as_bytes());
+    bytes
 }
 
 /// A small, editable budget workbook used by explicit example/smoke captures.
@@ -273,7 +308,7 @@ pub(crate) fn load_sheet(path: &Path) -> Result<Sheet, String> {
         .sheets
         .get(workbook.active)
         .cloned()
-        .unwrap_or_else(|| Sheet::new("Untitled")))
+        .unwrap_or_else(blank_sheet))
 }
 
 /// Load a workbook: all tabs plus the active tab index. Legacy single-sheet

@@ -882,7 +882,10 @@ fn escape_from_object_mode_reveals_the_selected_cell() {
     let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("re-render after Escape");
 
     assert_eq!(app.get_object_state(), 0, "Escape leaves object navigation");
-    let revealed: Vec<_> = ElementHandle::find_by_accessible_label(&app, "A1").collect();
+    let revealed: Vec<_> = i_slint_backend_testing::ElementQuery::from_root(&app)
+        .match_descendants()
+        .match_predicate(|e| e.accessible_label().is_some_and(|l| l.starts_with("A1, ")))
+        .find_all();
     assert!(
         !revealed.is_empty(),
         "the selected cell must be back in the accessibility tree after Escape"

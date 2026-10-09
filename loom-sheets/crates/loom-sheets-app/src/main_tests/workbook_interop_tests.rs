@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn csv_export_starts_with_a_utf8_byte_order_mark_and_reimports_accents() {
+    // Excel reads a CSV as the system code page unless it starts with a UTF-8
+    // byte order mark. The mark must be present on export and invisible on import.
+    let mut sheet = blank_sheet();
+    sheet.set_str("A1", "Café Zoë");
+    let bytes = crate::workbook_io::csv_file_bytes(&sheet);
+    assert_eq!(
+        &bytes[..3],
+        &[0xEF, 0xBB, 0xBF],
+        "the CSV export starts with the UTF-8 byte order mark"
+    );
+    let path = std::env::temp_dir().join(format!("loom-sheets-bom-{}.csv", std::process::id()));
+    std::fs::write(&path, &bytes).expect("write the exported CSV");
+    let loaded = crate::workbook_io::load_sheet(&path);
+    let _ = std::fs::remove_file(&path);
+    let loaded = loaded.expect("reimport the exported CSV");
+    assert_eq!(
+        loaded.raw(CellRef::parse("A1").unwrap()),
+        Some("Café Zoë"),
+        "the byte order mark is not part of the first cell"
+    );
+}
+
 fn longest_white_run(image: &image::RgbaImage, x: u32) -> u32 {
     let mut longest = 0;
     let mut current = 0;

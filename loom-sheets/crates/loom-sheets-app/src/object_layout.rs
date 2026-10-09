@@ -95,7 +95,7 @@ pub(crate) fn editor_dimensions_with_preview(
             anchor.row,
             rendered_object_extent(height, zoom, MIN_RENDERED_OBJECT_HEIGHT) as f32 / zoom
                 + OBJECT_HANDLE_OVERHANG / zoom,
-            crate::GRID_ROW_HEIGHT,
+            crate::GRID_ROW_HEIGHT * zoom,
             &custom_rows,
             1_048_576,
         ));

@@ -443,7 +443,7 @@ fn every_template_card_creates_its_advertised_sheet() {
 
     // (template index, expected sheet name, probe cell, expected display)
     let cases = [
-        (0, "Untitled", "A1", ""),
+        (0, "Sheet 1", "A1", ""),
         (1, "Monthly Budget", "B4", "1600"),
         (2, "Invoice", "D2", "1700"),
         (3, "Checklist", "B7", "2"),

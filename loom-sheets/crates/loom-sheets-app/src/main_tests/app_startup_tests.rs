@@ -35,10 +35,21 @@ fn inspector_capture_flag_is_supported() {
 }
 
 #[test]
-fn new_workbook_is_blank_and_named_untitled() {
+fn new_workbook_first_tab_is_sheet_one_in_the_tab_and_the_xlsx_export() {
+    // The document is "Untitled" in the title bar; its first tab is a sheet
+    // name, so it must not repeat the document name.
     let sheet = blank_sheet();
     assert!(sheet.cells.is_empty());
-    assert_eq!(sheet.name, "Untitled");
+    assert_eq!(sheet.name, "Sheet 1");
+    let bytes = loom_sheets_core::export_xlsx_sheets(std::slice::from_ref(&sheet))
+        .expect("export the blank workbook");
+    let imported = loom_sheets_core::import_xlsx_sheets(&bytes).expect("reimport the export");
+    let names: Vec<&str> = imported.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Sheet 1"],
+        "the exported first sheet keeps its tab name"
+    );
 }
 
 #[test]

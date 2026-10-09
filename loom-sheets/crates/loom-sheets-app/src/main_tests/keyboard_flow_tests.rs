@@ -17,6 +17,8 @@ const HEIGHT: f32 = 800.0;
 struct Stop {
     name: String,
     role: Option<AccessibleRole>,
+    /// Whether the control under focus reports itself enabled.
+    enabled: Option<bool>,
     x: f32,
     y: f32,
     w: f32,
@@ -219,17 +221,19 @@ fn stop(app: &SheetsApp) -> Option<Stop> {
             best = Some((score, element));
         }
     }
-    let (name, role) = best
+    let (name, role, enabled) = best
         .map(|(_, e)| {
             (
                 e.accessible_label().unwrap().to_string(),
                 e.accessible_role(),
+                e.accessible_enabled(),
             )
         })
         .unwrap_or_default();
     Some(Stop {
         name,
         role,
+        enabled,
         x: origin.x,
         y: origin.y,
         w: geometry.size.width,
@@ -744,6 +748,60 @@ fn reads_in_order(stops: &[&Stop]) -> bool {
             w[1].y > w[0].y
         }
     })
+}
+
+#[test]
+fn a_typed_value_is_stored_exactly_whether_the_grid_or_the_formula_bar_has_focus() {
+    // Typing "42" right after launch must store "42": no seeded space, and
+    // the same result whichever control holds focus when the first key lands.
+    for formula_bar_first in [false, true] {
+        let s = launched(&[]);
+        if formula_bar_first {
+            s.app.invoke_focus_formula_bar();
+            render(&s.app);
+        }
+        type_text(&s.app, "42");
+        press(&s.app, Key::Return);
+        let stored = s
+            .state
+            .current
+            .borrow()
+            .raw(CellRef::parse("A1").unwrap())
+            .map(str::to_owned);
+        assert_eq!(
+            stored.as_deref(),
+            Some("42"),
+            "formula bar focused first: {formula_bar_first}"
+        );
+    }
+}
+
+#[test]
+fn a_disabled_control_never_takes_keyboard_focus_in_the_inspector() {
+    for tab_index in [0, 1] {
+        let s = launched(&[("A1", "1")]);
+        s.app.set_inspector_tab(tab_index);
+        render(&s.app);
+        let grid = focus_weak(&s.app);
+        press(&s.app, Key::F6);
+        shift_key(&s.app, Key::F6);
+        let mut visited = Vec::new();
+        for _ in 0..120 {
+            visited.push(stop(&s.app).expect("a focused control"));
+            tab(&s.app);
+            if same_focus(&focus_weak(&s.app), &grid) {
+                break;
+            }
+        }
+        for visit in &visited {
+            assert_ne!(
+                visit.enabled,
+                Some(false),
+                "tab {tab_index}: disabled control {:?} took keyboard focus",
+                visit.name
+            );
+        }
+    }
 }
 
 #[test]

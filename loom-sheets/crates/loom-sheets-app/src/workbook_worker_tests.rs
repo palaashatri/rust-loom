@@ -621,6 +621,59 @@ fn startup_restores_the_saved_active_tab_and_worker_values_match_evaluation() {
 }
 
 #[test]
+fn an_untouched_stored_draft_is_replaced_so_later_edits_are_not_based_on_it() {
+    let temporary = ScratchDirectory::new();
+    // The previous build wrote an untouched blank, its only tab named "Untitled",
+    // into the versioned recovery store and then was force-killed.
+    let (worker, _) =
+        WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("start worker");
+    worker
+        .initialize_workbook(1, 0, vec![Sheet::new("Untitled")])
+        .expect("initialize the stale blank");
+    worker.wait_for_result(1).expect("stale blank result");
+    drop(worker);
+
+    let (worker, startup) =
+        WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("restart worker");
+    assert!(
+        startup.restored_payload.is_some(),
+        "the stale blank is stored"
+    );
+    worker
+        .initialize_workbook_replacing_stored_draft(1, 0, vec![Sheet::new("Sheet 1")])
+        .expect("initialize the fresh blank");
+    worker.wait_for_result(1).expect("initial result");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 0,
+            sheet: 0,
+            cell: CellRef::parse("A1").unwrap(),
+            raw: Some("42".to_string()),
+        })
+        .expect("send cell edit");
+    worker.wait_for_result(2).expect("edit result");
+    drop(worker);
+
+    // Relaunch after the crash: the edit restores on the fresh blank, not on
+    // the stale "Untitled" checkpoint it would otherwise sit on.
+    let (_worker, startup) =
+        WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("restart worker");
+    let restored = crate::restore_workbook_from_snapshot(
+        startup
+            .restored_payload
+            .as_deref()
+            .expect("the edit is recovered"),
+    )
+    .expect("restore the recovered workbook");
+    assert_eq!(restored.sheets[0].name, "Sheet 1");
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("A1").unwrap()),
+        Some("42")
+    );
+}
+
+#[test]
 fn startup_migrates_legacy_recovery_after_v1_baseline_publication() {
     let temporary = ScratchDirectory::new();
     let recovery_path = temporary.path();

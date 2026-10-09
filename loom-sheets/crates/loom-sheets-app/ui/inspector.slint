@@ -24,7 +24,7 @@ export component SheetInspector inherits LoomPanel {
     in property <bool> cell-bold: false;
     in property <bool> cell-italic: false;
     in property <bool> cell-underline: false;
-    in property <bool> cell-border: false;
+    in-out property <bool> cell-border: false;
     in property <int> cell-fill: -1;
     in property <int> cell-font-size: 14;
     in property <string> cell-font-label: "14";
@@ -248,10 +248,12 @@ export component SheetInspector inherits LoomPanel {
                     HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         alignment: Theme.rtl ? end : start;
-                        LoomButton {
+                        // A switch, not a button: its on/off value is announced, and it
+                        // follows the cell's border state in both directions.
+                        LoomToggle {
                             label: "Border";
-                            variant: root.cell-border ? "primary" : "ghost";
-                            clicked => { root.toggle-borders(); }
+                            checked <=> root.cell-border;
+                            toggled => { root.toggle-borders(); }
                         }
                     }
                     Text {
@@ -264,7 +266,7 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
                     LoomSectionHeader { title: "Data Format"; }
-                    SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
+                    SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; choice-names: ["Number", "Currency", "Percent", "Decimal places"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
                     SheetStepperRow {
                         label: "Decimals";
                         field-label: "Decimals count";

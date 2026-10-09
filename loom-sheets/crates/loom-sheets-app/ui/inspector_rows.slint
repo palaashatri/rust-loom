@@ -168,6 +168,8 @@ export component SheetFillRow inherits HorizontalLayout {
 /// reading-start edge.
 export component SheetChoiceRow inherits HorizontalLayout {
     in property <[string]> choices: [];
+    // Spoken names for the choices whose captions are symbols ("123", "$").
+    in property <[string]> choice-names: [];
     in property <int> current: 0;
     callback chosen(int);
 
@@ -176,6 +178,7 @@ export component SheetChoiceRow inherits HorizontalLayout {
     for slot in root.choices.length : LoomButton {
         property <int> k: Theme.rtl ? root.choices.length - 1 - slot : slot;
         label: root.choices[self.k];
+        accessible-name: root.choice-names.length > self.k ? root.choice-names[self.k] : "";
         variant: root.current == self.k ? "primary" : "ghost";
         clicked => { root.chosen(self.k); }
     }

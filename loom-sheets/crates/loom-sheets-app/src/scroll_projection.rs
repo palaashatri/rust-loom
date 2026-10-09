@@ -70,6 +70,12 @@ pub(super) fn apply_grid(
     sync_model!(app, get_cells, set_cells, shared(grid.cells));
     sync_model!(
         app,
+        get_cell_labels,
+        set_cell_labels,
+        shared(grid.cell_labels)
+    );
+    sync_model!(
+        app,
         get_cell_alignments,
         set_cell_alignments,
         grid.cell_alignments
@@ -125,6 +131,7 @@ fn scrolled_viewport(
     sheet: &Sheet,
     zoom: f32,
 ) -> (SheetViewport, SheetDimensions, bool) {
+    let text = text_scale(app);
     let mut dimensions = SheetDimensions::new(
         app.get_workbook_rows().max(1) as u32,
         app.get_workbook_cols().max(1) as u32,
@@ -132,12 +139,12 @@ fn scrolled_viewport(
     let viewport_width = if app.get_grid_viewport_width() > 1.0 {
         app.get_grid_viewport_width()
     } else {
-        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH * text
     };
     let viewport_height = if app.get_grid_viewport_height() > 1.0 {
         app.get_grid_viewport_height()
     } else {
-        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
+        GRID_ROW_HEIGHT * zoom * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT * text
     };
     let default_col_width = valid_dimension(app.get_grid_col_width(), GRID_COL_WIDTH * zoom);
     let default_row_height = GRID_ROW_HEIGHT * zoom;
@@ -158,11 +165,12 @@ fn scrolled_viewport(
                 (-app.get_grid_scroll_y()).max(0.0),
             ),
             (
-                (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
-                (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
+                (viewport_width - GRID_ROW_HEADER_WIDTH * text).max(default_col_width),
+                (viewport_height - GRID_COLUMN_HEADER_HEIGHT * text).max(default_row_height),
             ),
             dimensions,
             default_col_width,
+            default_row_height,
             &scaled_rows,
             &scaled_cols,
         )
@@ -206,7 +214,7 @@ fn grown_dimensions(dimensions: SheetDimensions, viewport: SheetViewport) -> She
 /// but keep their decoded images.
 pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     let sheet = state.current.borrow();
-    let zoom = zoom_factor(app);
+    let zoom = grid_zoom(app);
     let (viewport, dimensions, grew) = scrolled_viewport(app, &sheet, zoom);
     // New rows change the scrollable extent, which only a full grid update
     // publishes.

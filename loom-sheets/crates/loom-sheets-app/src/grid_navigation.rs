@@ -46,7 +46,7 @@ pub(crate) fn destination(
 use loom_sheets_core::SheetViewport;
 
 use crate::{
-    dimension_size, zoom_factor, SheetsApp, DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS,
+    dimension_size, grid_zoom, text_scale, SheetsApp, DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS,
     GRID_COLUMN_HEADER_HEIGHT, GRID_COL_WIDTH, GRID_ROW_HEADER_WIDTH, GRID_ROW_HEIGHT,
 };
 
@@ -58,20 +58,23 @@ pub(crate) fn reveal_selected(
     viewport: &mut SheetViewport,
     selected: CellRef,
 ) {
-    let zoom = zoom_factor(app);
-    let (width, height) =
-        if app.get_grid_viewport_width() > 1.0 && app.get_grid_viewport_height() > 1.0 {
-            (
-                app.get_grid_viewport_width(),
-                app.get_grid_viewport_height(),
-            )
-        } else {
-            (
-                GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH,
-                GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT,
-            )
-        };
+    let zoom = grid_zoom(app);
+    let text = text_scale(app);
+    let (width, height) = if app.get_grid_viewport_width() > 1.0
+        && app.get_grid_viewport_height() > 1.0
+    {
+        (
+            app.get_grid_viewport_width(),
+            app.get_grid_viewport_height(),
+        )
+    } else {
+        (
+            GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH * text,
+            GRID_ROW_HEIGHT * zoom * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT * text,
+        )
+    };
     let default_col_width = GRID_COL_WIDTH * zoom;
+    let default_row_height = GRID_ROW_HEIGHT * zoom;
     let cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()
@@ -84,13 +87,13 @@ pub(crate) fn reveal_selected(
         .collect();
     let fit_cols = fit_count(
         viewport.first_col,
-        (width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
+        (width - GRID_ROW_HEADER_WIDTH * text).max(default_col_width),
         |index| dimension_size(index, default_col_width, &cols),
     );
     let fit_rows = fit_count(
         viewport.first_row,
-        (height - GRID_COLUMN_HEADER_HEIGHT).max(GRID_ROW_HEIGHT),
-        |index| dimension_size(index, GRID_ROW_HEIGHT, &rows),
+        (height - GRID_COLUMN_HEADER_HEIGHT * text).max(default_row_height),
+        |index| dimension_size(index, default_row_height, &rows),
     );
     reveal_fully(viewport, selected, (fit_rows, fit_cols));
 }

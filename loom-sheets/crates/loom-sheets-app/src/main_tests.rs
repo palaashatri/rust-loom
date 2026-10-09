@@ -14,6 +14,12 @@ mod hostile_visual_tests;
 #[path = "main_tests/keyboard_flow_tests.rs"]
 mod keyboard_flow_tests;
 
+#[path = "main_tests/grid_accessibility_tests.rs"]
+mod grid_accessibility_tests;
+
+#[path = "main_tests/grid_scale_tests.rs"]
+mod grid_scale_tests;
+
 #[path = "main_tests/icon_accessibility_tests.rs"]
 mod icon_accessibility_tests;
 

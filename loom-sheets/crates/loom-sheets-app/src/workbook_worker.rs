@@ -77,6 +77,9 @@ struct InitializationRequest {
     active_sheet: usize,
     sheets: Vec<Sheet>,
     record_recovery: bool,
+    /// Discard the recovery store's contents first: they are an untouched
+    /// starter, so `sheets` becomes the only checkpoint.
+    replace_stored_checkpoint: bool,
     reply: SyncSender<WorkerModel>,
 }
 
@@ -255,7 +258,18 @@ impl WorkbookWorker {
         active_sheet: usize,
         sheets: Vec<Sheet>,
     ) -> Result<WorkerModel, String> {
-        self.initialize_workbook_inner(revision, active_sheet, sheets, true)
+        self.initialize_workbook_inner(revision, active_sheet, sheets, true, false)
+    }
+
+    /// Start a fresh workbook whose recovery store currently holds an untouched
+    /// starter. The stored starter is replaced by a checkpoint of `sheets`.
+    pub(crate) fn initialize_workbook_replacing_stored_draft(
+        &self,
+        revision: u64,
+        active_sheet: usize,
+        sheets: Vec<Sheet>,
+    ) -> Result<WorkerModel, String> {
+        self.initialize_workbook_inner(revision, active_sheet, sheets, true, true)
     }
 
     /// Install a temporary startup model without replacing a previous
@@ -266,7 +280,7 @@ impl WorkbookWorker {
         active_sheet: usize,
         sheets: Vec<Sheet>,
     ) -> Result<WorkerModel, String> {
-        self.initialize_workbook_inner(revision, active_sheet, sheets, false)
+        self.initialize_workbook_inner(revision, active_sheet, sheets, false, false)
     }
 
     fn initialize_workbook_inner(
@@ -275,6 +289,7 @@ impl WorkbookWorker {
         active_sheet: usize,
         sheets: Vec<Sheet>,
         record_recovery: bool,
+        replace_stored_checkpoint: bool,
     ) -> Result<WorkerModel, String> {
         let (reply, response) = mpsc::sync_channel(1);
         let mut mailbox = self
@@ -299,6 +314,7 @@ impl WorkbookWorker {
                 active_sheet,
                 sheets,
                 record_recovery,
+                replace_stored_checkpoint,
                 reply,
             }));
         drop(mailbox);
@@ -757,9 +773,10 @@ fn run_worker(
                 }
                 last_revision = initialization.revision;
                 let record_recovery = initialization.record_recovery;
+                let replace_stored_checkpoint = initialization.replace_stored_checkpoint;
                 sheets = initialization.sheets;
                 if sheets.is_empty() {
-                    sheets.push(Sheet::new("Untitled"));
+                    sheets.push(crate::workbook_io::blank_sheet());
                 }
                 mirror_is_recoverable = record_recovery;
                 active_sheet = initialization
@@ -780,6 +797,14 @@ fn run_worker(
                 let mut recovery_journal_duration = Duration::ZERO;
                 if record_recovery {
                     if let Some(recovery) = recovery.as_mut() {
+                        if replace_stored_checkpoint {
+                            // The stored checkpoint is an untouched starter, not a
+                            // draft: discard it so the fresh blank is the only base.
+                            if let Err(error) = recovery.discard_all() {
+                                recovery.mark_failed(error.clone());
+                                recovery_error = Some(error);
+                            }
+                        }
                         if recovery.needs_initial_checkpoint() {
                             #[cfg(test)]
                             let package_started = Instant::now();
@@ -862,7 +887,7 @@ fn run_worker(
                 if let Some(replacement) = batch.replacement {
                     sheets = replacement;
                     if sheets.is_empty() {
-                        sheets.push(Sheet::new("Untitled"));
+                        sheets.push(crate::workbook_io::blank_sheet());
                     }
                 }
                 let mut input_error = None;
@@ -1124,8 +1149,8 @@ fn export_at_revision(
             let sheet = sheets
                 .get(active_sheet)
                 .ok_or_else(|| format!("active sheet {} is unavailable", active_sheet + 1))?;
-            let csv = loom_sheets_core::to_csv_with_formulas(sheet);
-            loom_storage::atomic_write(&operation.path, csv.as_bytes())
+            let csv = crate::workbook_io::csv_file_bytes(sheet);
+            loom_storage::atomic_write(&operation.path, &csv)
                 .map_err(|error| format!("CSV write failed: {error}"))?;
             Ok(ExportOutputSummary::Csv {
                 sheet_name: sheet.name.clone(),

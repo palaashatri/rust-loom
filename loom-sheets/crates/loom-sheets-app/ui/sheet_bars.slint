@@ -149,12 +149,14 @@ export component FormulaNameBar inherits Rectangle {
 
         LoomIconButton {
             icon: "check";
+            text-scale: Theme.text-scale;
             label: "Commit formula";
             tooltip: "Apply the formula bar entry to the selected cell.";
             clicked => { root.commit(root.formula-edit-buffer); }
         }
         LoomIconButton {
             icon: "close";
+            text-scale: Theme.text-scale;
             label: "Cancel formula edit";
             tooltip: "Discard formula bar changes and keep the current cell value.";
             clicked => {
@@ -183,6 +185,7 @@ export component FormulaNameBar inherits Rectangle {
         }
         LoomIconButton {
             icon: "close";
+            text-scale: Theme.text-scale;
             label: "Cancel formula edit";
             tooltip: "Discard formula bar changes and keep the current cell value.";
             clicked => {
@@ -192,6 +195,7 @@ export component FormulaNameBar inherits Rectangle {
         }
         LoomIconButton {
             icon: "check";
+            text-scale: Theme.text-scale;
             label: "Commit formula";
             tooltip: "Apply the formula bar entry to the selected cell.";
             clicked => { root.commit(root.formula-edit-buffer); }

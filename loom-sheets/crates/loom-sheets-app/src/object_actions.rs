@@ -177,7 +177,7 @@ fn reveal_object(app: &SheetsApp, state: &Rc<GuiState>, index: usize) {
         .filter(|(preview_index, _, _, _)| *preview_index == index)
         .map(|(_, anchor, _, _)| anchor)
         .unwrap_or(object.anchor);
-    let zoom = crate::zoom_factor(app);
+    let zoom = crate::grid_zoom(app);
     let columns: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()
@@ -585,7 +585,7 @@ fn update_gesture(
                     gesture.before_anchor,
                     delta_x,
                     delta_y,
-                    crate::zoom_factor(app),
+                    crate::grid_zoom(app),
                 );
                 if gesture.preview_anchor == anchor {
                     false
@@ -600,7 +600,7 @@ fn update_gesture(
                     gesture.before_height,
                     delta_x,
                     delta_y,
-                    crate::zoom_factor(app),
+                    crate::grid_zoom(app),
                 );
                 if (gesture.preview_width, gesture.preview_height) == dimensions {
                     false

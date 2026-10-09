@@ -180,7 +180,7 @@ fn save_changes_replaces_only_after_the_native_save_succeeds() {
     );
     assert!(!app.get_save_changes_open());
     assert_eq!(state.pending_replacement.get(), None);
-    assert_eq!(state.current.borrow().name, "Untitled");
+    assert_eq!(state.current.borrow().name, "Sheet 1");
     drop(state.workbook_worker.borrow_mut().take());
     let _ = std::fs::remove_dir_all(recovery_path);
 }
@@ -242,7 +242,7 @@ fn save_changes_keeps_newer_edit_open_for_an_explicit_decision() {
 
     crate::open_operations::discard_changes_and_resume(&app, &state, &menu_service);
     assert!(!app.get_save_changes_open());
-    assert_eq!(state.current.borrow().name, "Untitled");
+    assert_eq!(state.current.borrow().name, "Sheet 1");
     drop(state.workbook_worker.borrow_mut().take());
     let _ = std::fs::remove_dir_all(recovery_path);
 }

@@ -12,9 +12,9 @@ use loom_sheets_core::{CellRange, CellRef, Sheet};
 use slint::{ComponentHandle, Model, SharedString};
 
 use crate::{
-    apply_sheet, commit_transaction, evaluate, project_current, project_current_without_reveal,
-    selection_from_app, sync_menu_state, update_selection_range, zoom_factor, GridPointer,
-    GridSelection, GuiState, SheetTransaction, SheetsApp, DEFAULT_VISIBLE_COLS,
+    apply_sheet, commit_transaction, evaluate, grid_zoom, project_current,
+    project_current_without_reveal, selection_from_app, sync_menu_state, update_selection_range,
+    GridPointer, GridSelection, GuiState, SheetTransaction, SheetsApp, DEFAULT_VISIBLE_COLS,
     DEFAULT_VISIBLE_ROWS,
 };
 
@@ -205,7 +205,7 @@ fn header_resized(
         return;
     }
     let index = index as u32;
-    let zoom = zoom_factor(app).max(0.1);
+    let zoom = grid_zoom(app).max(0.1);
     let (min, max) = if is_row {
         ROW_HEIGHT_RANGE
     } else {

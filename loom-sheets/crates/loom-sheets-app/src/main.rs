@@ -168,6 +168,7 @@ struct ProjectedSheetGrid {
     column_headers: Vec<String>,
     row_headers: Vec<String>,
     cells: Vec<String>,
+    cell_labels: Vec<String>,
     cell_alignments: Vec<i32>,
     cell_bolds: Vec<bool>,
     cell_italics: Vec<bool>,
@@ -175,6 +176,17 @@ struct ProjectedSheetGrid {
     cell_borders: Vec<bool>,
     cell_fills: Vec<i32>,
     cell_font_sizes: Vec<i32>,
+}
+
+/// What a screen reader announces for a worksheet cell: its address, then its
+/// value and, for a formula, the formula. An empty cell is announced as empty.
+fn accessible_cell_label(cell: CellRef, raw: Option<&str>, value: &str) -> String {
+    let address = cell.to_a1();
+    match raw.filter(|raw| !raw.is_empty()) {
+        None => format!("{address}, empty"),
+        Some(raw) if raw.starts_with('=') => format!("{address}, value {value}, formula {raw}"),
+        Some(_) => format!("{address}, value {value}"),
+    }
 }
 
 fn project_sheet_grid_with_values(
@@ -202,6 +214,7 @@ fn project_sheet_grid_with_values(
         .collect();
     let cap = (viewport.visible_rows * viewport.visible_cols) as usize;
     let mut cells = Vec::with_capacity(cap);
+    let mut cell_labels = Vec::with_capacity(cap);
     let mut cell_alignments = Vec::with_capacity(cap);
     let mut cell_bolds = Vec::with_capacity(cap);
     let mut cell_italics = Vec::with_capacity(cap);
@@ -235,6 +248,7 @@ fn project_sheet_grid_with_values(
                 sheet.col_width(col),
                 formatting::effective_font_size(style) as f32,
             );
+            cell_labels.push(accessible_cell_label(cell, sheet.raw(cell), &raw_val));
             cells.push(display_val);
             cell_alignments.push(align_code);
             cell_bolds.push(style.bold);
@@ -252,6 +266,7 @@ fn project_sheet_grid_with_values(
         column_headers,
         row_headers,
         cells,
+        cell_labels,
         cell_alignments,
         cell_bolds,
         cell_italics,
@@ -406,6 +421,7 @@ fn viewport_from_dimensions(
     (viewport_width, viewport_height): (f32, f32),
     dimensions: SheetDimensions,
     default_col_width: f32,
+    default_row_height: f32,
     row_heights: &std::collections::BTreeMap<u32, f32>,
     col_widths: &std::collections::BTreeMap<u32, f32>,
 ) -> SheetViewport {
@@ -419,10 +435,10 @@ fn viewport_from_dimensions(
     let viewport_height = if viewport_height.is_finite() && viewport_height > 0.0 {
         viewport_height
     } else {
-        GRID_ROW_HEIGHT
+        default_row_height
     };
     let content_width = dimension_extent(dimensions.cols, default_col_width, col_widths);
-    let content_height = dimension_extent(dimensions.rows, GRID_ROW_HEIGHT, row_heights);
+    let content_height = dimension_extent(dimensions.rows, default_row_height, row_heights);
     let max_scroll_x = (content_width - viewport_width).max(0.0);
     let max_scroll_y = (content_height - viewport_height).max(0.0);
     let scroll_x = if scroll_x.is_finite() {
@@ -438,7 +454,7 @@ fn viewport_from_dimensions(
     let first_col =
         dimension_index_at_offset(scroll_x, dimensions.cols, default_col_width, col_widths);
     let first_row =
-        dimension_index_at_offset(scroll_y, dimensions.rows, GRID_ROW_HEIGHT, row_heights);
+        dimension_index_at_offset(scroll_y, dimensions.rows, default_row_height, row_heights);
     // Materialize two extra columns and rows past the edge. The scroll offset
     // usually sits partway into the first cell, so an exact-fit window leaves
     // a blank strip on the far side until the next refresh.
@@ -453,8 +469,8 @@ fn viewport_from_dimensions(
     let visible_rows = dimension_visible_count(
         first_row,
         dimensions.rows,
-        viewport_height + 2.0 * GRID_ROW_HEIGHT,
-        GRID_ROW_HEIGHT,
+        viewport_height + 2.0 * default_row_height,
+        default_row_height,
         row_heights,
     )
     .min(dimensions.rows - first_row);
@@ -652,8 +668,10 @@ fn window_fill(app: &SheetsApp, zoom: f32) -> Option<(u32, u32)> {
     let height = app.get_grid_viewport_height();
     if width > 1.0 && height > 1.0 {
         Some((
-            ((width - GRID_ROW_HEADER_WIDTH).max(0.0) / (GRID_COL_WIDTH * zoom)) as u32,
-            ((height - GRID_COLUMN_HEADER_HEIGHT).max(0.0) / (GRID_ROW_HEIGHT * zoom)) as u32,
+            ((width - GRID_ROW_HEADER_WIDTH * text_scale(app)).max(0.0) / (GRID_COL_WIDTH * zoom))
+                as u32,
+            ((height - GRID_COLUMN_HEADER_HEIGHT * text_scale(app)).max(0.0)
+                / (GRID_ROW_HEIGHT * zoom)) as u32,
         ))
     } else {
         None
@@ -666,16 +684,17 @@ fn viewport_from_app(
     preview: Option<(usize, CellRef, u32, u32)>,
 ) -> SheetViewport {
     let selected = selection_from_app(app).focus;
-    let zoom = zoom_factor(app);
+    let zoom = grid_zoom(app);
+    let text = text_scale(app);
     let viewport_width = if app.get_grid_viewport_width() > 1.0 {
         app.get_grid_viewport_width()
     } else {
-        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH * text
     };
     let viewport_height = if app.get_grid_viewport_height() > 1.0 {
         app.get_grid_viewport_height()
     } else {
-        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
+        GRID_ROW_HEIGHT * zoom * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT * text
     };
     let dimensions = editor_dimensions_with_preview(
         sheet,
@@ -704,14 +723,33 @@ fn viewport_from_app(
     viewport_from_dimensions(
         (scroll_x, scroll_y),
         (
-            (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
-            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
+            (viewport_width - GRID_ROW_HEADER_WIDTH * text).max(default_col_width),
+            (viewport_height - GRID_COLUMN_HEADER_HEIGHT * text).max(default_row_height),
         ),
         dimensions,
         default_col_width,
+        default_row_height,
         &scaled_rows,
         &scaled_cols,
     )
+}
+
+/// Text scale of the window (1.0 = normal). The grid grows with it, as a
+/// spreadsheet does with display scaling, so larger text keeps its rows,
+/// columns and header bands legible.
+pub(crate) fn text_scale(app: &SheetsApp) -> f32 {
+    let scale = app.get_template_text_scale();
+    if scale.is_finite() {
+        scale.max(1.0)
+    } else {
+        1.0
+    }
+}
+
+/// The zoom the grid's geometry is laid out at: the user's zoom times the
+/// text scale. `zoom_factor` stays the user's own choice, for the zoom controls.
+pub(crate) fn grid_zoom(app: &SheetsApp) -> f32 {
+    zoom_factor(app) * text_scale(app)
 }
 
 /// Rendered zoom scale from the window (1.0 = 100%). Clamped so corrupt or
@@ -923,7 +961,9 @@ fn project_sheet_inner_with_preview(
     let selection = selection_from_app(app);
     let selected = selection.focus;
     let dimensions = sheet.dimensions();
-    let zoom = zoom_factor(app);
+    // Geometry is laid out at the grid zoom; the zoom controls keep the user's choice.
+    let zoom = grid_zoom(app);
+    let text = text_scale(app);
     let editor_dimensions = editor_dimensions_with_preview(
         sheet,
         selected,
@@ -946,10 +986,10 @@ fn project_sheet_inner_with_preview(
     }
     app.set_view_row_origin(viewport.first_row as i32);
     app.set_view_col_origin(viewport.first_col as i32);
-    app.set_zoom_factor(zoom);
+    app.set_zoom_factor(zoom_factor(app));
     app.set_zoom_level(SharedString::from(format!(
         "{}%",
-        (zoom * 100.0).round() as i32
+        (zoom_factor(app) * 100.0).round() as i32
     )));
     let geometry = grid_geometry(sheet, editor_dimensions, viewport, zoom);
     // Flickable coordinates are negative because its content is translated
@@ -964,10 +1004,10 @@ fn project_sheet_inner_with_preview(
         let viewport_width = if app.get_grid_viewport_width() > 1.0 {
             app.get_grid_viewport_width()
         } else {
-            GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+            GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH * text
         };
         let max_scroll_x =
-            (geometry.content_width + GRID_ROW_HEADER_WIDTH - viewport_width).max(0.0);
+            (geometry.content_width + GRID_ROW_HEADER_WIDTH * text - viewport_width).max(0.0);
         app.set_grid_scroll_x(-current_scroll_x.min(max_scroll_x));
     }
     if viewport.first_row != projected_before_reveal.first_row {
@@ -976,10 +1016,10 @@ fn project_sheet_inner_with_preview(
         let viewport_height = if app.get_grid_viewport_height() > 1.0 {
             app.get_grid_viewport_height()
         } else {
-            GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
+            GRID_ROW_HEIGHT * zoom * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT * text
         };
         let max_scroll_y =
-            (geometry.content_height + GRID_COLUMN_HEADER_HEIGHT - viewport_height).max(0.0);
+            (geometry.content_height + GRID_COLUMN_HEADER_HEIGHT * text - viewport_height).max(0.0);
         app.set_grid_scroll_y(-current_scroll_y.min(max_scroll_y));
     }
     let grid = project_sheet_grid_with_values(sheet, vals, viewport);
@@ -1633,7 +1673,7 @@ pub(crate) fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
 /// Where a key move of `delta` takes the active cell, counting a page as the
 /// rows that fit in the window.
 fn moved_focus(app: &SheetsApp, sheet: &Sheet, from: CellRef, delta: (i32, i32)) -> CellRef {
-    let page = window_fill(app, zoom_factor(app)).map_or(DEFAULT_VISIBLE_ROWS, |(_, rows)| rows);
+    let page = window_fill(app, grid_zoom(app)).map_or(DEFAULT_VISIBLE_ROWS, |(_, rows)| rows);
     grid_navigation::destination(sheet, from, delta, page)
 }
 
@@ -2217,7 +2257,7 @@ fn sync_current_to_tabs(state: &GuiState) {
     let active = *state.active_sheet_index.borrow();
     let mut sheets = state.sheets.borrow_mut();
     if active >= sheets.len() {
-        sheets.resize_with(active + 1, || Sheet::new("Untitled"));
+        sheets.resize_with(active + 1, workbook_io::blank_sheet);
     }
     sheets[active] = current;
 }
@@ -2376,8 +2416,10 @@ pub(crate) fn register_history_actions(
 /// it as unsaved. The bool is true exactly when the workbook was recovered.
 fn startup_workbook(recovered: Option<WorkbookFile>, example: bool) -> (WorkbookFile, bool) {
     match recovered {
-        Some(file) => (file, true),
-        None => (
+        // An untouched starter in the store is not a draft: the window closed
+        // before any edit, so there is nothing to recover or to ask about.
+        Some(file) if !workbook_io::is_untouched_starter(&file) => (file, true),
+        _ => (
             WorkbookFile {
                 sheets: vec![if example {
                     starter_workbook()
@@ -2441,13 +2483,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         export_completion_sender,
     )?;
     let startup_recovery_error = startup.recovery_error.clone();
-    let (fallback, recovered_unsaved) = startup_workbook(
-        startup
-            .restored_payload
-            .as_deref()
-            .and_then(restore_workbook_from_snapshot),
-        args.example,
-    );
+    let stored_draft = startup
+        .restored_payload
+        .as_deref()
+        .and_then(restore_workbook_from_snapshot);
+    // The store holds only an untouched starter: the fresh blank replaces it,
+    // so no later checkpoint or journal entry is built on the stale tab.
+    let replace_stored_starter = startup.restored_payload.is_some()
+        && stored_draft
+            .as_ref()
+            .is_some_and(workbook_io::is_untouched_starter);
+    let (fallback, recovered_unsaved) = startup_workbook(stored_draft, args.example);
     let startup_open = args.open.as_ref().map(PathBuf::from);
     let mut initial = fallback;
     if initial.sheets.is_empty() {
@@ -2491,6 +2537,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let initial_revision = state.next_worker_revision();
     let initial_model = if startup_open.is_some() {
         worker.initialize_workbook_without_recovery(
+            initial_revision,
+            initial.active,
+            initial.sheets,
+        )?
+    } else if replace_stored_starter {
+        worker.initialize_workbook_replacing_stored_draft(
             initial_revision,
             initial.active,
             initial.sheets,
@@ -2784,6 +2836,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.invoke_focus_template_chooser();
     } else {
         app.invoke_focus_grid();
+        // Activation of the shown window can restore a different focus item
+        // (the formula bar was seen focused at launch on Windows). Asking again
+        // from the event loop, once the window is active, keeps the grid first,
+        // so the first typed value lands in a cell.
+        let app_ref = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if !app.get_xlsx_import_warning_open() && !app.get_template_chooser_open() {
+                    app.invoke_focus_grid();
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
     }
     if args.objects && args.open.is_none() {
         // Keep the scalar selection in sync with the projected selection list.

@@ -1,5 +1,5 @@
 use super::*;
-use i_slint_backend_testing::ElementHandle;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 
 #[test]
 fn sheets_inspector_remains_available_and_remembers_the_user_choice_at_compact_width() {
@@ -300,6 +300,94 @@ fn cell_inspector_rows_are_evenly_spaced_and_reachable_at_every_size() {
 
 /// Each control sits under the heading of its own group: Font size under Font
 /// Style, the fill swatches under Borders & Fill and before Data Format.
+#[test]
+fn the_number_format_choices_are_named_by_what_they_do() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+    // Only buttons count: a button's visible caption is also exposed as a text node.
+    let buttons = |label: &str| -> Vec<ElementHandle> {
+        ElementHandle::find_by_accessible_label(&app, label)
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .collect()
+    };
+    for name in ["Number", "Currency", "Percent", "Decimal places"] {
+        assert_eq!(
+            buttons(name).len(),
+            1,
+            "one data-format button named {name:?}"
+        );
+    }
+    for glyph in ["123", "$", "%", "1.23"] {
+        assert!(
+            buttons(glyph).is_empty(),
+            "a data-format button is still named only by its glyph {glyph:?}"
+        );
+    }
+}
+
+#[test]
+fn the_border_control_is_a_switch_that_reports_and_runs_the_border_action() {
+    use slint::platform::PointerEventButton;
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let runs = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counter = runs.clone();
+    app.on_toggle_borders(move || counter.set(counter.get() + 1));
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+    let border = |app: &SheetsApp| {
+        // The switch's caption is also exposed as a text node, so match the switch.
+        let found: Vec<_> = ElementHandle::find_by_accessible_label(app, "Border")
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Switch))
+            .collect();
+        assert_eq!(found.len(), 1, "one Border switch");
+        found.into_iter().next().expect("Border switch")
+    };
+
+    // The inspector's border state is shown as a switch with an on/off value,
+    // not as a plain button or a heading.
+    app.set_cell_border(false);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    assert_eq!(
+        border(&app).accessible_role(),
+        Some(i_slint_backend_testing::AccessibleRole::Switch)
+    );
+    assert_eq!(
+        border(&app).accessible_value().as_deref(),
+        Some("unchecked")
+    );
+    app.set_cell_border(true);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    assert_eq!(border(&app).accessible_value().as_deref(), Some("checked"));
+
+    // Activating it runs the same border action as the menu and palette.
+    let target = border(&app);
+    let origin = target.absolute_position();
+    let size = target.size();
+    let at = slint::LogicalPosition::new(origin.x + size.width / 2.0, origin.y + size.height / 2.0);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: at,
+            button: PointerEventButton::Left,
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: at,
+            button: PointerEventButton::Left,
+        });
+    assert_eq!(
+        runs.get(),
+        1,
+        "the Border switch runs the border action once"
+    );
+}
+
 #[test]
 fn cell_inspector_controls_sit_under_their_own_headings() {
     set_platform();

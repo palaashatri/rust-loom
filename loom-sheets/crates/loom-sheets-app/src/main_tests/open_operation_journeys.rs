@@ -838,14 +838,20 @@ fn failed_async_startup_open_preserves_fallback_path_and_recovery() {
 
 #[test]
 fn startup_marks_a_recovered_workbook_unsaved_but_not_a_fresh_one() {
+    let mut edited = blank_sheet();
+    edited.set_str("A1", "42");
     let recovered = WorkbookFile {
-        sheets: vec![blank_sheet()],
+        sheets: vec![edited],
         active: 0,
     };
-    let (_, unsaved) = startup_workbook(Some(recovered), false);
+    let (restored, unsaved) = startup_workbook(Some(recovered), false);
     assert!(
         unsaved,
         "recovered contents exist only in the recovery store"
+    );
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("A1").unwrap()),
+        Some("42")
     );
 
     let (fresh, unsaved) = startup_workbook(None, false);
@@ -856,4 +862,33 @@ fn startup_marks_a_recovered_workbook_unsaved_but_not_a_fresh_one() {
     let (example, unsaved) = startup_workbook(None, true);
     assert!(!unsaved);
     assert_eq!(example.sheets[0].name, "Example Budget");
+}
+
+#[test]
+fn an_untouched_starter_left_in_the_recovery_store_is_not_a_draft() {
+    // A window that was force-killed before any edit leaves its starter in the
+    // store. That is not unsaved work: relaunch must show a clean blank tab.
+    // The "Untitled" tab name from before the rename is still an untouched blank.
+    for name in ["Sheet 1", "Untitled"] {
+        let stored = WorkbookFile {
+            sheets: vec![Sheet::new(name)],
+            active: 0,
+        };
+        let (fresh, unsaved) = startup_workbook(Some(stored), false);
+        assert!(
+            !unsaved,
+            "an untouched {name:?} tab must not reopen as an unsaved draft"
+        );
+        assert_eq!(fresh.sheets[0].name, "Sheet 1");
+        assert!(fresh.sheets[0].cells.is_empty());
+    }
+    let stored_example = WorkbookFile {
+        sheets: vec![starter_workbook()],
+        active: 0,
+    };
+    let (_, unsaved) = startup_workbook(Some(stored_example), false);
+    assert!(
+        !unsaved,
+        "an untouched example stored by an earlier session is not a draft"
+    );
 }

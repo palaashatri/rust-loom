@@ -28,12 +28,15 @@ export component SheetHeaders inherits Rectangle {
     in property <[length]> grid-row-heights: [];
     in property <length> grid-scroll-x: 0px;
     in property <length> grid-scroll-y: 0px;
+    // The pinned bands grow with the text scale, as the grid's rows and cells do.
+    property <length> band-w: 36px * max(1.0, Theme.text-scale);
+    property <length> band-h: 26px * max(1.0, Theme.text-scale);
 
     Rectangle {
         x: 0px;
         y: 0px;
-        width: 36px;
-        height: 26px;
+        width: root.band-w;
+        height: root.band-h;
         background: Theme.palette().surface-sunken;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -46,20 +49,22 @@ export component SheetHeaders inherits Rectangle {
     }
 
     Rectangle {
-        x: 36px;
+        x: root.band-w;
         y: 0px;
-        width: max(1px, parent.width - 36px);
-        height: 26px;
+        width: max(1px, parent.width - root.band-w);
+        height: root.band-h;
         clip: true;
 
         HorizontalLayout {
             x: root.grid-scroll-x + root.grid-col-offset;
             y: 0px;
             width: root.grid-visible-width;
-            height: 26px;
+            height: root.band-h;
             spacing: 0px;
 
             for c in root.cols : Rectangle {
+                accessible-role: text;
+                accessible-label: "Column " + root.column-headers[c];
                 min-width: root.grid-column-widths[c];
                 max-width: root.grid-column-widths[c];
                 property <bool> is-col-selected: c + root.view-col-origin == root.selected-col;
@@ -76,6 +81,7 @@ export component SheetHeaders inherits Rectangle {
                 }
                 Text {
                     text: root.column-headers[c];
+                    accessible-role: AccessibleRole.none;
                     font-size: Theme.type.caption * root.zoom-factor;
                     font-weight: is-col-selected ? 700 : 500;
                     color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
@@ -112,19 +118,21 @@ export component SheetHeaders inherits Rectangle {
 
     Rectangle {
         x: 0px;
-        y: 26px;
-        width: 36px;
-        height: max(1px, parent.height - 26px);
+        y: root.band-h;
+        width: root.band-w;
+        height: max(1px, parent.height - root.band-h);
         clip: true;
 
         VerticalLayout {
             x: 0px;
             y: root.grid-scroll-y + root.grid-row-offset;
-            width: 36px;
+            width: root.band-w;
             height: root.grid-visible-height;
             spacing: 0px;
 
             for r in root.rows : Rectangle {
+                accessible-role: text;
+                accessible-label: "Row " + root.row-headers[r];
                 min-height: root.grid-row-heights[r];
                 max-height: root.grid-row-heights[r];
                 property <bool> is-row-selected: r + root.view-row-origin == root.selected-row;
@@ -141,6 +149,7 @@ export component SheetHeaders inherits Rectangle {
                 }
                 Text {
                     text: root.row-headers[r];
+                    accessible-role: AccessibleRole.none;
                     font-size: Theme.type.caption * root.zoom-factor;
                     font-weight: is-row-selected ? 700 : 500;
                     color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
