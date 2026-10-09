@@ -24,52 +24,55 @@ component LoomCaptionButton inherits Rectangle {
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
 
+    // The caption glyph grows with text scale so it keeps its weight beside
+    // the scaled caption text and the scaled icons.
+    property <length> glyph-size: 10px * max(1.0, Theme.text-scale);
     property <color> glyph: touch.has-hover && root.kind == "close"
         ? (Theme.active-theme == "light" ? Theme.palette().paper : Theme.palette().paper-ink) : Theme.palette().ink;
 
     if root.kind == "minimize" : Rectangle {
-        x: (parent.width - 10px) / 2;
+        x: (parent.width - root.glyph-size) / 2;
         y: parent.height / 2;
-        width: 10px;
+        width: root.glyph-size;
         height: 1px;
         background: root.glyph;
     }
     if root.kind == "maximize" : Rectangle {
-        x: (parent.width - 10px) / 2;
-        y: (parent.height - 10px) / 2;
-        width: 10px;
-        height: 10px;
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
         border-width: 1px;
         border-color: root.glyph;
     }
     if root.kind == "restore" : Rectangle {
-        x: (parent.width - 10px) / 2;
-        y: (parent.height - 10px) / 2;
-        width: 10px;
-        height: 10px;
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
         Rectangle {
-            x: 2px;
+            x: root.glyph-size * 0.2;
             y: 0px;
-            width: 8px;
-            height: 8px;
+            width: root.glyph-size * 0.8;
+            height: root.glyph-size * 0.8;
             border-width: 1px;
             border-color: root.glyph;
         }
         Rectangle {
             x: 0px;
-            y: 2px;
-            width: 8px;
-            height: 8px;
+            y: root.glyph-size * 0.2;
+            width: root.glyph-size * 0.8;
+            height: root.glyph-size * 0.8;
             border-width: 1px;
             border-color: root.glyph;
             background: touch.has-hover && root.kind == "close" ? transparent : Theme.palette().chrome;
         }
     }
     if root.kind == "close" : Path {
-        x: (parent.width - 10px) / 2;
-        y: (parent.height - 10px) / 2;
-        width: 10px;
-        height: 10px;
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
         viewbox-width: 10;
         viewbox-height: 10;
         stroke: root.glyph;

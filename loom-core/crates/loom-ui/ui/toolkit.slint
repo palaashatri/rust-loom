@@ -125,7 +125,7 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         spacing: 2px; padding-top: 4px; padding-bottom: 4px; padding-left: 4px; padding-right: 4px;
         alignment: center; cross-axis-alignment: center;
         Icon {
-            size: 18px; icon: root.icon;
+            size: 18px * max(1.0, Theme.text-scale); icon: root.icon;
             tint: !root.enabled ? Theme.palette().ink-disabled
                 : root.checked ? Theme.palette().accent : Theme.palette().ink;
         }

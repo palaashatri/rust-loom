@@ -260,8 +260,9 @@ export global ResponsivePolicy {
     in-out property <length> context-toolbar-height: 40px;
     in-out property <length> labeled-toolbar-min-height: 48px;
     in-out property <length> labeled-toolbar-max-height: 52px;
-    /// Extra labeled-row height for a scaled 10 px caption (grows with Theme.text-scale).
-    out property <length> toolbar-label-extra: (max(1.0, Theme.text-scale) - 1.0) * 14px;
+    /// Extra labeled-row height for a scaled 10 px caption and the 18 px toolbar
+    /// icon, which both grow with Theme.text-scale (14 px caption + 18 px icon per unit).
+    out property <length> toolbar-label-extra: (max(1.0, Theme.text-scale) - 1.0) * 32px;
 
     public pure function priority-1-icon-only(width: length) -> bool {
         return width < priority-1-icon-only-below;

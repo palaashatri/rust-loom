@@ -442,3 +442,52 @@ fn high_contrast_segmented_control_draws_no_partial_dividers() {
         "high-contrast segmented control draws a divider between Animate and Document but not between Format and Animate"
     );
 }
+
+fn named_button(app: &PresentApp, label: &str) -> ElementHandle {
+    ElementHandle::find_by_accessible_label(app, label)
+        .find(|e| e.accessible_role() == Some(AccessibleRole::Button))
+        .unwrap_or_else(|| panic!("no button named {label:?}"))
+}
+
+#[test]
+fn toolbar_icons_and_caption_glyphs_scale_with_text() {
+    let session = launched();
+    let app = &session.app;
+    let mut measured = Vec::new();
+    for scale in [1.0f32, 2.0] {
+        Theme::get(app).set_text_scale(scale);
+        snapshot_component(app, 1440.0, 900.0, 1.0).unwrap();
+        let add = named_button(app, "Add Slide");
+        let icon = add
+            .query_descendants()
+            .match_type_name("Icon")
+            .find_first()
+            .expect("toolbar icon");
+        let close = named_button(app, "Close window");
+        let glyph = close
+            .query_descendants()
+            .match_type_name("Path")
+            .find_first()
+            .expect("close glyph");
+        measured.push((icon.size().width, glyph.size().width));
+        for label in ["Add Slide", "Insert", "Play", "Close window"] {
+            let b = named_button(app, label);
+            let p = b.absolute_position();
+            let s = b.size();
+            assert!(
+                p.x >= -0.5 && p.x + s.width <= 1440.5 && p.y + s.height <= 900.5,
+                "{label} leaves the window at {scale}x: {p:?} {s:?}"
+            );
+        }
+    }
+    let (icon1, glyph1) = measured[0];
+    let (icon2, glyph2) = measured[1];
+    assert!(
+        icon2 >= icon1 * 1.5,
+        "toolbar icon did not grow with text scale: {icon1} -> {icon2}"
+    );
+    assert!(
+        glyph2 >= glyph1 * 1.5,
+        "window-control glyph did not grow with text scale: {glyph1} -> {glyph2}"
+    );
+}
