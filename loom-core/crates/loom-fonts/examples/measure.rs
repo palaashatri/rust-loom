@@ -69,7 +69,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..rounds {
         total += catalog
-            .layout_line(sentence, &font, 12.0, loom_fonts::TextDirection::Auto)
+            .layout_text(sentence, &font, 12.0, loom_fonts::TextDirection::Auto)
             .width;
     }
     println!(

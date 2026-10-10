@@ -17,7 +17,14 @@ pub enum FontError {
     Io(String),
     /// The bytes are not a usable font.
     Parse(String),
+    /// The file is larger than [`MAX_FONT_FILE_BYTES`].
+    TooLarge,
 }
+
+/// Largest font file [`crate::FontCatalog::load`] reads (128 MiB). Real CJK
+/// collections are well under this; anything bigger is refused rather than
+/// read into memory.
+pub const MAX_FONT_FILE_BYTES: u64 = 128 << 20;
 
 impl fmt::Display for FontError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -25,6 +32,7 @@ impl fmt::Display for FontError {
             Self::EmptyCatalog => f.write_str("no fonts are available"),
             Self::Io(message) => write!(f, "font file could not be read: {message}"),
             Self::Parse(message) => write!(f, "font data is not valid: {message}"),
+            Self::TooLarge => f.write_str("font file is larger than the supported limit"),
         }
     }
 }
@@ -43,9 +51,26 @@ pub enum TextDirection {
     RightToLeft,
 }
 
+/// One coordinate of a variable font's design space, in user units
+/// (`wght` 700, `wdth` 87.5).
+///
+/// Catalogue-produced values are never NaN, which is why `Eq` is implemented.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Variation {
+    /// Axis tag such as `*b"wght"`.
+    pub tag: [u8; 4],
+    /// The coordinate; clamped to the axis range when applied.
+    pub value: f32,
+}
+
+impl Eq for Variation {}
+
 /// Knobs for one shaping call.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ShapeSettings {
+    /// Variable-font coordinates to apply; empty means the default instance.
+    /// [`crate::FontRef::chain_setup`] says which to use for a resolved font.
+    pub variations: Vec<Variation>,
     /// Run direction. Callers that segment with [`crate::segment`] pass the
     /// run's direction; `Auto` suits a single-direction string.
     pub direction: TextDirection,
@@ -62,6 +87,7 @@ pub struct ShapeSettings {
 impl Default for ShapeSettings {
     fn default() -> Self {
         Self {
+            variations: Vec::new(),
             direction: TextDirection::Auto,
             script: None,
             language: None,
@@ -69,6 +95,16 @@ impl Default for ShapeSettings {
             ligatures: true,
         }
     }
+}
+
+/// Where a text decoration (underline, strikeout) sits and how thick it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Decoration {
+    /// Distance from the baseline to the top of the line; positive is above
+    /// the baseline, so an underline's offset is usually negative.
+    pub offset: f32,
+    /// Stroke thickness.
+    pub thickness: f32,
 }
 
 /// Typographic line metrics at a size.
@@ -86,6 +122,10 @@ pub struct LineMetrics {
     pub cap_height: Option<f32>,
     /// Height of lower-case x, when the font records it.
     pub x_height: Option<f32>,
+    /// Underline position and thickness from `post`, when recorded.
+    pub underline: Option<Decoration>,
+    /// Strikeout position and thickness from `OS/2`, when recorded.
+    pub strikeout: Option<Decoration>,
 }
 
 #[derive(Clone)]
@@ -197,8 +237,14 @@ impl LoadedFace {
             / f32::from(self.units_per_em)
     }
 
-    /// Ascent, descent and line gap at `size`.
+    /// Ascent, descent and line gap at `size` for the default instance.
     pub fn line_metrics(&self, size: f32) -> LineMetrics {
+        self.line_metrics_at(size, &[])
+    }
+
+    /// Like [`LoadedFace::line_metrics`] at the variable-font coordinates
+    /// `variations` (ignored by a static font).
+    pub fn line_metrics_at(&self, size: f32, variations: &[Variation]) -> LineMetrics {
         let Some(font) = self.font() else {
             return LineMetrics {
                 ascent: 0.0,
@@ -207,12 +253,27 @@ impl LoadedFace {
                 line_height: 0.0,
                 cap_height: None,
                 x_height: None,
+                underline: None,
+                strikeout: None,
             };
         };
-        let metrics = font.metrics(Size::new(size), LocationRef::default());
+        let metrics = if variations.is_empty() {
+            font.metrics(Size::new(size), LocationRef::default())
+        } else {
+            let location = font.axes().location(
+                variations
+                    .iter()
+                    .map(|v| (skrifa::Tag::new(&v.tag), v.value)),
+            );
+            font.metrics(Size::new(size), &location)
+        };
         let ascent = metrics.ascent.max(0.0);
         let descent = (-metrics.descent).max(0.0);
         let line_gap = metrics.leading.max(0.0);
+        let decoration = |d: skrifa::metrics::Decoration| Decoration {
+            offset: d.offset,
+            thickness: d.thickness,
+        };
         LineMetrics {
             ascent,
             descent,
@@ -220,6 +281,8 @@ impl LoadedFace {
             line_height: ascent + descent + line_gap,
             cap_height: metrics.cap_height,
             x_height: metrics.x_height,
+            underline: metrics.underline.map(decoration),
+            strikeout: metrics.strikeout.map(decoration),
         }
     }
 
@@ -233,7 +296,20 @@ impl LoadedFace {
         let Some(font) = self.font().filter(|_| !text.is_empty()) else {
             return Shaped::empty(rtl_requested);
         };
-        let shaper = self.shaper_data.shaper(&font).build();
+        let instance = (!settings.variations.is_empty()).then(|| {
+            harfrust::ShaperInstance::from_variations(
+                &font,
+                settings.variations.iter().map(|v| harfrust::Variation {
+                    tag: Tag::new(&v.tag),
+                    value: v.value,
+                }),
+            )
+        });
+        let shaper = self
+            .shaper_data
+            .shaper(&font)
+            .instance(instance.as_ref())
+            .build();
 
         let mut buffer = UnicodeBuffer::new();
         buffer.push_str(text);

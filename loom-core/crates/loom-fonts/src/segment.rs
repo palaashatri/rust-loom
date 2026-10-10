@@ -49,6 +49,37 @@ fn script_code(script: Script) -> Option<[u8; 4]> {
     }
 }
 
+/// The base embedding level for a paragraph direction (`None` detects it
+/// from the first strong character).
+pub(crate) fn base_level(base: TextDirection) -> Option<Level> {
+    match base {
+        TextDirection::Auto => None,
+        TextDirection::LeftToRight => Some(Level::ltr()),
+        TextDirection::RightToLeft => Some(Level::rtl()),
+    }
+}
+
+/// The script of each character of `text` (in `chars()` order), resolved so
+/// common characters follow the previous script and leading ones take the
+/// first script that appears. `None` only when nothing has a script.
+pub(crate) fn resolve_scripts(text: &str) -> Vec<Option<[u8; 4]>> {
+    let mut scripts: Vec<Option<[u8; 4]>> = text.chars().map(|c| script_code(c.script())).collect();
+    let mut previous = scripts.iter().flatten().next().copied();
+    for slot in &mut scripts {
+        match slot {
+            Some(code) => previous = Some(*code),
+            None => *slot = previous,
+        }
+    }
+    scripts
+}
+
+/// True for characters that take their script and face from their
+/// neighbours: spaces, digits, punctuation, symbols and combining marks.
+pub(crate) fn is_script_neutral(ch: char) -> bool {
+    matches!(ch.script(), Script::Common | Script::Inherited)
+}
+
 /// Splits `text` into runs in logical order.
 ///
 /// `base` is the paragraph direction; `Auto` takes it from the first strong
@@ -57,25 +88,10 @@ pub fn segment(text: &str, base: TextDirection) -> Vec<TextRun> {
     if text.is_empty() {
         return Vec::new();
     }
-    let level = match base {
-        TextDirection::Auto => None,
-        TextDirection::LeftToRight => Some(Level::ltr()),
-        TextDirection::RightToLeft => Some(Level::rtl()),
-    };
-    let info = BidiInfo::new(text, level);
+    let info = BidiInfo::new(text, base_level(base));
 
-    // Resolve each character's script: common characters follow the previous
-    // script, and leading ones take the first script that appears.
     let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut scripts: Vec<Option<[u8; 4]>> =
-        chars.iter().map(|(_, c)| script_code(c.script())).collect();
-    let mut previous = scripts.iter().flatten().next().copied();
-    for slot in &mut scripts {
-        match slot {
-            Some(code) => previous = Some(*code),
-            None => *slot = previous,
-        }
-    }
+    let scripts = resolve_scripts(text);
 
     let mut runs: Vec<TextRun> = Vec::new();
     for (position, &(start, ch)) in chars.iter().enumerate() {
@@ -166,6 +182,30 @@ mod tests {
         assert_eq!(visual_order(&[0, 1, 1, 0]), vec![0, 2, 1, 3]);
         assert_eq!(visual_order(&[0, 0, 0]), vec![0, 1, 2]);
         assert!(visual_order(&[]).is_empty());
+    }
+
+    #[test]
+    fn spaces_digits_punctuation_and_marks_are_neutral() {
+        for ch in [
+            ' ', '7', ',', '-', '\u{20ac}', '\u{301}', '\u{200d}', '\u{fe0f}',
+        ] {
+            assert!(is_script_neutral(ch), "{ch:?}");
+        }
+        for ch in ['a', 'Z', '\u{4e2d}', '\u{5e9}', '\u{416}'] {
+            assert!(!is_script_neutral(ch), "{ch:?}");
+        }
+    }
+
+    #[test]
+    fn common_characters_take_the_previous_script_and_leading_ones_the_first() {
+        let scripts = resolve_scripts("  a1 \u{416},");
+        let latin = Some(*b"Latn");
+        let cyrillic = Some(*b"Cyrl");
+        assert_eq!(
+            scripts,
+            [latin, latin, latin, latin, latin, cyrillic, cyrillic]
+        );
+        assert!(resolve_scripts("123 ").iter().all(Option::is_none));
     }
 
     #[test]

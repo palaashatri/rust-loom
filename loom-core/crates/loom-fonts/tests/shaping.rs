@@ -2,7 +2,8 @@ mod common;
 
 use common::Lcg;
 use loom_fonts::{
-    FallbackPolicy, FontCatalog, FontRef, LoadedFace, ScanConfig, ShapeSettings, TextDirection,
+    Affinity, FallbackPolicy, FontCatalog, FontRef, LoadedFace, ScanConfig, ShapeSettings,
+    TextDirection,
 };
 use std::sync::Arc;
 
@@ -293,7 +294,7 @@ fn layout_line_matches_a_single_shape_for_plain_text() {
     let catalog = catalog();
     let (face, font) = face(&catalog, 400, false);
     let text = "Plain left to right text, with numbers 12345.";
-    let layout = catalog.layout_line(text, &font, 15.0, TextDirection::Auto);
+    let layout = catalog.layout_text(text, &font, 15.0, TextDirection::Auto);
     assert!(!layout.estimated);
     let direct = face.text_width(text, 15.0);
     assert!((layout.width - direct).abs() < 0.5);
@@ -302,8 +303,8 @@ fn layout_line_matches_a_single_shape_for_plain_text() {
     assert!((catalog.text_width(text, &font, 15.0) - layout.width).abs() < 1e-6);
     // Caret mapping through the layout agrees with the run's own stops.
     for offset in [0, 5, 12, text.len()] {
-        let x = layout.x_at_offset(text, offset);
-        assert_eq!(layout.offset_at_x(text, x), offset);
+        let x = layout.x_at_offset(offset, Affinity::Leading);
+        assert_eq!(layout.offset_at_x(x), (offset, Affinity::Leading));
     }
 }
 
@@ -312,7 +313,7 @@ fn layout_line_orders_bidi_runs_visually_and_tiles_the_text() {
     let catalog = catalog();
     let (_, font) = face(&catalog, 400, false);
     let text = "abc \u{5e9}\u{5dc}\u{5d5}\u{5dd} def";
-    let layout = catalog.layout_line(text, &font, 16.0, TextDirection::Auto);
+    let layout = catalog.layout_text(text, &font, 16.0, TextDirection::Auto);
     assert!(layout.runs.iter().any(|r| r.rtl));
     let mut covered: Vec<(usize, usize)> = layout
         .runs
@@ -335,7 +336,7 @@ fn layout_line_orders_bidi_runs_visually_and_tiles_the_text() {
     // Logical start of the Hebrew run is at its right edge.
     let hebrew = text.find('\u{5e9}').unwrap();
     let run = layout.runs.iter().find(|r| r.rtl).unwrap();
-    let at_start = layout.x_at_offset(text, hebrew);
+    let at_start = layout.x_at_offset(hebrew, Affinity::Leading);
     assert!((at_start - (run.x + run.shaped.width)).abs() < 1e-3);
 }
 
@@ -343,9 +344,9 @@ fn layout_line_orders_bidi_runs_visually_and_tiles_the_text() {
 fn layout_line_of_empty_text_is_empty() {
     let catalog = catalog();
     let (_, font) = face(&catalog, 400, false);
-    let layout = catalog.layout_line("", &font, 16.0, TextDirection::Auto);
+    let layout = catalog.layout_text("", &font, 16.0, TextDirection::Auto);
     assert!(layout.runs.is_empty() && layout.width == 0.0 && !layout.estimated);
-    assert_eq!(layout.offset_at_x("", 5.0), 0);
+    assert_eq!(layout.offset_at_x(5.0), (0, Affinity::Leading));
 }
 
 #[test]
@@ -358,7 +359,7 @@ fn layout_estimates_when_no_face_can_be_loaded() {
     let catalog = FontCatalog::scan(&config);
     let font = catalog.resolve("F0000", 400, false).unwrap();
     std::fs::remove_file(&paths[0]).unwrap();
-    let layout = catalog.layout_line("abcd", &font, 10.0, TextDirection::Auto);
+    let layout = catalog.layout_text("abcd", &font, 10.0, TextDirection::Auto);
     assert!(layout.estimated);
     assert!((layout.width - 20.0).abs() < 1e-4);
 }

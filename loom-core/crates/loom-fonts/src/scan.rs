@@ -1,7 +1,7 @@
 //! Finding font files and describing them, with an optional persistent cache.
 
 use crate::bundled::bundled_faces;
-use crate::info::{EmbeddingPermission, FaceInfo, FaceSource};
+use crate::info::{EmbeddingPermission, FaceInfo, FaceSource, NamedInstance, VariationAxis};
 use crate::resolve::FallbackPolicy;
 use crate::sfnt::{read_faces, FileReader, SliceReader};
 use std::collections::{HashMap, HashSet};
@@ -96,6 +96,11 @@ pub struct ScanLimits {
     pub max_depth: usize,
     /// Wall-clock budget; the scan stops and reports `truncated` after it.
     pub max_duration: Option<Duration>,
+    /// Most directory entries (files, directories and everything else)
+    /// examined in one scan. Entries are streamed, so a directory holding
+    /// millions of unrelated files stops the scan here instead of exhausting
+    /// memory.
+    pub max_entries: usize,
 }
 
 impl Default for ScanLimits {
@@ -104,6 +109,7 @@ impl Default for ScanLimits {
             max_files: 20_000,
             max_depth: 8,
             max_duration: Some(Duration::from_secs(20)),
+            max_entries: 200_000,
         }
     }
 }
@@ -139,10 +145,10 @@ impl ScanConfig {
     }
 }
 
-/// A file that was looked at and skipped.
+/// A file or directory that was looked at and skipped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanIssue {
-    /// The file.
+    /// The file or directory.
     pub path: PathBuf,
     /// Why it was skipped.
     pub reason: String,
@@ -151,6 +157,8 @@ pub struct ScanIssue {
 /// What a scan did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScanReport {
+    /// Directory entries examined while walking the directories.
+    pub entries_examined: usize,
     /// Candidate font files found (by extension).
     pub files_seen: usize,
     /// Files whose tables were read.
@@ -181,7 +189,22 @@ pub struct ScanCache {
     entries: HashMap<PathBuf, CacheEntry>,
 }
 
-const CACHE_HEADER: &str = "loom-fonts-cache\t1";
+const CACHE_HEADER: &str = "loom-fonts-cache\t2";
+
+fn tag_hex(tag: [u8; 4]) -> String {
+    tag.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn parse_tag_hex(text: &str) -> Option<[u8; 4]> {
+    if text.len() != 8 || !text.is_ascii() {
+        return None;
+    }
+    let mut tag = [0u8; 4];
+    for (slot, pair) in tag.iter_mut().zip(text.as_bytes().chunks(2)) {
+        *slot = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(tag)
+}
 
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -214,6 +237,14 @@ fn unescape(text: &str) -> String {
         }
     }
     out
+}
+
+/// The most recently added face of the file being parsed.
+fn last_face<'a>(
+    entries: &'a mut HashMap<PathBuf, CacheEntry>,
+    current: &Option<PathBuf>,
+) -> Option<&'a mut FaceInfo> {
+    entries.get_mut(current.as_ref()?)?.faces.last_mut()
 }
 
 impl ScanCache {
@@ -264,6 +295,25 @@ impl ScanCache {
                     flags,
                     face.embedding.code(),
                 ));
+                for alias in &face.aliases {
+                    out.push_str(&format!("alias\t{}\n", escape(alias)));
+                }
+                for axis in &face.axes {
+                    out.push_str(&format!(
+                        "axis\t{}\t{}\t{}\t{}\n",
+                        tag_hex(axis.tag),
+                        axis.min,
+                        axis.default,
+                        axis.max
+                    ));
+                }
+                for instance in &face.instances {
+                    out.push_str(&format!("instance\t{}", escape(&instance.style)));
+                    for coord in &instance.coords {
+                        out.push_str(&format!("\t{coord}"));
+                    }
+                    out.push('\n');
+                }
             }
         }
         out
@@ -314,6 +364,9 @@ impl ScanCache {
                         entry.faces.push(FaceInfo {
                             family: unescape(family),
                             legacy_family: unescape(legacy),
+                            aliases: Vec::new(),
+                            axes: Vec::new(),
+                            instances: Vec::new(),
                             style: unescape(style),
                             full_name: unescape(full),
                             postscript_name: unescape(ps),
@@ -328,6 +381,45 @@ impl ScanCache {
                             index,
                         });
                     }
+                }
+                ["alias", name] => {
+                    let Some(face) = last_face(&mut entries, &current) else {
+                        return Self::new();
+                    };
+                    face.aliases.push(unescape(name));
+                }
+                ["axis", tag, min, default, max] => {
+                    let parsed = (
+                        parse_tag_hex(tag),
+                        min.parse::<f32>(),
+                        default.parse::<f32>(),
+                        max.parse::<f32>(),
+                    );
+                    let (Some(tag), Ok(min), Ok(default), Ok(max)) = parsed else {
+                        return Self::new();
+                    };
+                    let Some(face) = last_face(&mut entries, &current) else {
+                        return Self::new();
+                    };
+                    face.axes.push(VariationAxis {
+                        tag,
+                        min,
+                        default,
+                        max,
+                    });
+                }
+                ["instance", style, coords @ ..] => {
+                    let coords: Result<Vec<f32>, _> = coords.iter().map(|c| c.parse()).collect();
+                    let Ok(coords) = coords else {
+                        return Self::new();
+                    };
+                    let Some(face) = last_face(&mut entries, &current) else {
+                        return Self::new();
+                    };
+                    face.instances.push(NamedInstance {
+                        style: unescape(style),
+                        coords,
+                    });
                 }
                 _ => return Self::new(),
             }
@@ -348,7 +440,37 @@ struct Walk<'a> {
     limits: &'a ScanLimits,
     start: Instant,
     files: Vec<PathBuf>,
+    issues: Vec<ScanIssue>,
+    /// Canonical paths of the directories already entered, so a symlink to an
+    /// ancestor (or to a directory reached another way) is not entered twice.
+    visited: HashSet<PathBuf>,
+    entries: usize,
     truncated: bool,
+}
+
+/// What one directory entry is, after following a symlink.
+enum EntryKind {
+    File,
+    Dir,
+    Other,
+}
+
+fn classify(entry: &fs::DirEntry, path: &Path) -> EntryKind {
+    let Ok(kind) = entry.file_type() else {
+        return EntryKind::Other;
+    };
+    let resolved = if kind.is_symlink() {
+        // Symlinked files and directories are followed. A dangling link
+        // resolves to nothing and is skipped.
+        fs::metadata(path).ok().map(|m| (m.is_file(), m.is_dir()))
+    } else {
+        Some((kind.is_file(), kind.is_dir()))
+    };
+    match resolved {
+        Some((true, _)) => EntryKind::File,
+        Some((_, true)) => EntryKind::Dir,
+        _ => EntryKind::Other,
+    }
 }
 
 impl Walk<'_> {
@@ -358,8 +480,19 @@ impl Walk<'_> {
             .is_some_and(|limit| self.start.elapsed() >= limit)
     }
 
-    /// Visits `dir`, files before subdirectories, both in name order, so the
-    /// result is deterministic whatever the filesystem returns.
+    fn issue(&mut self, path: &Path, reason: String) {
+        self.issues.push(ScanIssue {
+            path: path.to_path_buf(),
+            reason,
+        });
+    }
+
+    /// Visits `dir`, files before subdirectories, both in name order, so a
+    /// complete scan is deterministic whatever order the filesystem returns.
+    ///
+    /// Entries are streamed: the limits are checked before each one is
+    /// examined, and only font files and subdirectories are kept, so a
+    /// directory of a million unrelated files costs a counter, not a listing.
     fn visit(&mut self, dir: &Path, depth: usize) {
         if self.truncated {
             return;
@@ -368,35 +501,65 @@ impl Walk<'_> {
             self.truncated = true;
             return;
         }
-        let Ok(read) = fs::read_dir(dir) else { return };
-        let mut entries: Vec<_> = read.filter_map(Result::ok).collect();
-        entries.sort_by_key(fs::DirEntry::file_name);
-        let mut subdirs = Vec::new();
-        for entry in entries {
-            let path = entry.path();
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            // Symlinked files are followed; symlinked directories are not, so
-            // a link cycle cannot loop the scan.
-            let is_file = kind.is_file()
-                || (kind.is_symlink() && fs::metadata(&path).is_ok_and(|m| m.is_file()));
-            if is_file {
-                if is_font_file(&path) {
-                    if self.files.len() >= self.limits.max_files {
-                        self.truncated = true;
-                        return;
-                    }
-                    self.files.push(path);
-                }
-            } else if kind.is_dir() {
-                subdirs.push(path);
-            }
-        }
-        if depth >= self.limits.max_depth {
+        let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        if !self.visited.insert(canonical) {
             return;
         }
-        for sub in subdirs {
+        let read = match fs::read_dir(dir) {
+            Ok(read) => read,
+            // A directory that is not there (a default location this
+            // machine never created) is normal.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => {
+                self.issue(dir, format!("directory could not be read: {error}"));
+                return;
+            }
+        };
+        let mut files: Vec<(std::ffi::OsString, PathBuf)> = Vec::new();
+        // Real directories sort before symlinked ones, so a tree is entered
+        // by its real path and the alias that points at it is skipped.
+        let mut subdirs: Vec<(bool, std::ffi::OsString, PathBuf)> = Vec::new();
+        for entry in read {
+            if self.entries >= self.limits.max_entries || self.out_of_time() {
+                self.truncated = true;
+                break;
+            }
+            self.entries += 1;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.issue(dir, format!("directory entry could not be read: {error}"));
+                    continue;
+                }
+            };
+            let path = entry.path();
+            match classify(&entry, &path) {
+                EntryKind::File if is_font_file(&path) => {
+                    if self.files.len() + files.len() >= self.limits.max_files {
+                        self.truncated = true;
+                        break;
+                    }
+                    files.push((entry.file_name(), path));
+                }
+                EntryKind::Dir => {
+                    let linked = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+                    subdirs.push((linked, entry.file_name(), path));
+                }
+                _ => {}
+            }
+        }
+        files.sort();
+        subdirs.sort();
+        self.files.extend(files.into_iter().map(|(_, path)| path));
+        if self.truncated || subdirs.is_empty() {
+            return;
+        }
+        if depth >= self.limits.max_depth {
+            // Directories exist below the limit: the catalogue is partial.
+            self.truncated = true;
+            return;
+        }
+        for (_, _, sub) in subdirs {
             self.visit(&sub, depth + 1);
             if self.truncated {
                 return;
@@ -441,15 +604,17 @@ pub(crate) fn scan(config: &ScanConfig, cache: &mut ScanCache) -> Scanned {
         limits: &config.limits,
         start,
         files: Vec::new(),
+        issues: Vec::new(),
+        visited: HashSet::new(),
+        entries: 0,
         truncated: false,
     };
-    let mut visited_roots = HashSet::new();
     for dir in &config.dirs {
-        if visited_roots.insert(dir.clone()) {
-            walk.visit(dir, 0);
-        }
+        walk.visit(dir, 0);
     }
     report.truncated = walk.truncated;
+    report.entries_examined = walk.entries;
+    report.issues.append(&mut walk.issues);
 
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     for path in walk.files {

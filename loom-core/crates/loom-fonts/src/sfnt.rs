@@ -5,7 +5,10 @@
 //! the handful of small tables that describe a face: `head`, `OS/2`, `post`
 //! (16 bytes) and `name`. Glyph data is never touched.
 
-use crate::info::{EmbeddingPermission, FaceInfo, FaceSource};
+use crate::info::{
+    normalize_family, EmbeddingPermission, FaceInfo, FaceSource, NamedInstance, VariationAxis,
+    MAX_ALIASES,
+};
 use skrifa::raw::tables::name::Name;
 use skrifa::raw::{FontData, FontRead};
 use skrifa::string::StringId;
@@ -21,6 +24,16 @@ const MAX_NAME_TABLE: u64 = 4 << 20;
 const MAX_COLLECTION_FONTS: u32 = 256;
 /// Most table records accepted in one font's directory.
 const MAX_TABLES: u16 = 1024;
+/// Largest `fvar` table read (axes and instance records are tiny).
+const MAX_FVAR_TABLE: usize = 1 << 20;
+/// Most variation axes accepted (OpenType allows 64k; real fonts have a few).
+const MAX_AXES: usize = 64;
+/// Most named instances read from one font.
+const MAX_INSTANCES: usize = 512;
+/// Longest alias name kept, in characters.
+const MAX_ALIAS_CHARS: usize = 128;
+/// Most `name` records examined when collecting aliases.
+const MAX_NAME_RECORDS_SCANNED: usize = 4096;
 
 /// Why a file was not turned into a face.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -218,6 +231,15 @@ fn read_one(
         })
         .ok_or(SfntError::NoName)?;
     let legacy_family = legacy.unwrap_or_else(|| family.clone());
+    let aliases = family_aliases(&names, &[&family, &legacy_family]);
+
+    let (axes, instances) = if variable {
+        prefix(b"fvar", MAX_FVAR_TABLE)
+            .and_then(|table| read_fvar(&table, &names))
+            .unwrap_or_default()
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let style = names
         .get(StringId::TYPOGRAPHIC_SUBFAMILY_NAME)
         .or_else(|| names.get(StringId::SUBFAMILY_NAME))
@@ -246,6 +268,7 @@ fn read_one(
     Ok(FaceInfo {
         family,
         legacy_family,
+        aliases,
         style,
         full_name,
         postscript_name: postscript,
@@ -254,11 +277,84 @@ fn read_one(
         italic,
         monospace: fixed_pitch != 0,
         variable,
+        axes,
+        instances,
         embedding: EmbeddingPermission::from_fs_type(fs_type),
         subsetting_allowed: fs_type & 0x0100 == 0,
         source: source.clone(),
         index,
     })
+}
+
+/// Other-language and other-platform family names (name IDs 1 and 16), minus
+/// the primary names and repeats, in `name` table order and bounded.
+fn family_aliases(names: &NameStrings<'_>, primary: &[&str]) -> Vec<String> {
+    let mut seen: Vec<String> = primary.iter().map(|n| normalize_family(n)).collect();
+    let mut aliases = Vec::new();
+    for id in [StringId::FAMILY_NAME, StringId::TYPOGRAPHIC_FAMILY_NAME] {
+        for text in names.all(id) {
+            if aliases.len() >= MAX_ALIASES {
+                return aliases;
+            }
+            let key = normalize_family(&text);
+            if text.chars().count() > MAX_ALIAS_CHARS || seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            aliases.push(text);
+        }
+    }
+    aliases
+}
+
+fn fixed_to_f32(raw: u32) -> f32 {
+    (raw as i32) as f32 / 65536.0
+}
+
+/// Parses an `fvar` table: axes and named instances. Returns `None` for a
+/// table that is too short for what it declares.
+fn read_fvar(
+    table: &[u8],
+    names: &NameStrings<'_>,
+) -> Option<(Vec<VariationAxis>, Vec<NamedInstance>)> {
+    let axes_offset = usize::from(be_u16(table, 4)?);
+    let axis_count = usize::from(be_u16(table, 8)?);
+    let axis_size = usize::from(be_u16(table, 10)?);
+    let instance_count = usize::from(be_u16(table, 12)?);
+    let instance_size = usize::from(be_u16(table, 14)?);
+    if axis_count == 0 || axis_count > MAX_AXES || axis_size < 20 {
+        return None;
+    }
+    let mut axes = Vec::with_capacity(axis_count);
+    for index in 0..axis_count {
+        let at = axes_offset + index * axis_size;
+        let tag: [u8; 4] = table.get(at..at + 4)?.try_into().ok()?;
+        axes.push(VariationAxis {
+            tag,
+            min: fixed_to_f32(be_u32(table, at + 4)?),
+            default: fixed_to_f32(be_u32(table, at + 8)?),
+            max: fixed_to_f32(be_u32(table, at + 12)?),
+        });
+    }
+    let mut instances = Vec::new();
+    let first = axes_offset + axis_count * axis_size;
+    if instance_size >= 4 + axis_count * 4 {
+        for index in 0..instance_count.min(MAX_INSTANCES) {
+            let at = first + index * instance_size;
+            let Some(name_id) = be_u16(table, at) else {
+                break;
+            };
+            let coords: Option<Vec<f32>> = (0..axis_count)
+                .map(|axis| be_u32(table, at + 4 + axis * 4).map(fixed_to_f32))
+                .collect();
+            let Some(coords) = coords else { break };
+            instances.push(NamedInstance {
+                style: names.get(StringId::new(name_id)).unwrap_or_default(),
+                coords,
+            });
+        }
+    }
+    Some((axes, instances))
 }
 
 /// Name records of one font, picked by language preference.
@@ -271,6 +367,24 @@ impl<'a> NameStrings<'a> {
         Name::read(FontData::new(bytes))
             .map(|table| Self { table })
             .map_err(|_| SfntError::NoName)
+    }
+
+    /// Every non-empty string for `id`, in every language and platform, in
+    /// table order. Reads at most [`MAX_NAME_RECORDS_SCANNED`] records.
+    fn all(&self, id: StringId) -> Vec<String> {
+        let data = self.table.string_data();
+        self.table
+            .name_record()
+            .iter()
+            .take(MAX_NAME_RECORDS_SCANNED)
+            .filter(|record| record.name_id() == id)
+            .filter_map(|record| record.string(data).ok())
+            .map(|string| {
+                let text: String = string.chars().filter(|c| *c != '\0').collect();
+                text.trim().to_owned()
+            })
+            .filter(|text| !text.is_empty())
+            .collect()
     }
 
     /// The best non-empty string for `id`: Windows English, then other

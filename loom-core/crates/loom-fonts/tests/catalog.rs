@@ -394,8 +394,10 @@ fn loaded_faces_are_cached_and_evicted_within_the_budget() {
     let dir = TempDir::new("budget");
     write_family_variants(dir.path(), 6);
     let catalog = FontCatalog::scan(&config(vec![dir.path().to_owned()]));
-    catalog.set_load_budget(1); // below any single face: keep only the newest
     let ids: Vec<_> = catalog.faces_in_order().map(|(id, _)| id).collect();
+    // Room for exactly one face: the cache keeps the newest and evicts the rest.
+    let one = catalog.load(ids[0]).unwrap().bytes().len();
+    catalog.set_load_budget(one);
     let a = catalog.load(ids[0]).unwrap();
     assert_eq!(catalog.loaded_count(), 1);
     let again = catalog.load(ids[0]).unwrap();
@@ -403,9 +405,13 @@ fn loaded_faces_are_cached_and_evicted_within_the_budget() {
         std::sync::Arc::ptr_eq(&a, &again),
         "cache hit shares the face"
     );
+    // Other faces of different sizes either replace it or are not retained;
+    // either way the bytes held never exceed the budget.
     catalog.load(ids[1]).unwrap();
+    assert!(catalog.loaded_bytes() <= one);
     catalog.load(ids[2]).unwrap();
-    assert_eq!(catalog.loaded_count(), 1, "older faces were evicted");
+    assert!(catalog.loaded_bytes() <= one);
+    assert!(catalog.loaded_count() <= 1, "older faces were evicted");
     // An evicted face still loads again.
     assert!(catalog.load(ids[0]).unwrap().text_width("abc", 10.0) > 0.0);
 }

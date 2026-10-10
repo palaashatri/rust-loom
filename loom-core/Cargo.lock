@@ -2908,6 +2908,7 @@ dependencies = [
  "harfrust",
  "skrifa 0.42.1",
  "unicode-bidi",
+ "unicode-linebreak",
  "unicode-script",
  "unicode-segmentation",
 ]

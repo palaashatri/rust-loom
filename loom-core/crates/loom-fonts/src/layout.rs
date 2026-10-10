@@ -1,20 +1,53 @@
-//! One line of text laid out with a resolved font: bidi and script
-//! segmentation, per-character fallback and shaping, placed left to right.
+//! A laid out line: shaped runs in visual order plus the caret index built
+//! from them, so hit-testing, caret placement and selection rectangles are
+//! answered from tables computed once.
 
-use crate::catalog::FontCatalog;
-use crate::face::{LoadedFace, ShapeSettings, TextDirection};
+use crate::face::{Decoration, Variation};
 use crate::info::FaceId;
-use crate::resolve::FontRef;
-use crate::segment::{segment, visual_order};
-use crate::shaped::Shaped;
-use std::cell::RefCell;
+use crate::shaped::{CaretStop, Shaped};
+use crate::work::{self, lower_bound};
 use std::ops::Range;
-use std::sync::Arc;
 
-/// A shaped piece of a line drawn with one face.
+/// Which character a caret at a logical offset belongs to. At most places
+/// the two choices are the same point on screen; at a bidi boundary they are
+/// two different points, and an editor must remember which one the user is at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Affinity {
+    /// The leading edge of the character that starts at the offset (the
+    /// caret belongs to the character after it). Also what a hit test reports
+    /// when both choices are the same point.
+    Leading,
+    /// The trailing edge of the character that ends at the offset (the caret
+    /// belongs to the character before it).
+    Trailing,
+}
+
+/// One place a caret can sit on a line.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaretPosition {
+    /// Logical byte offset.
+    pub offset: usize,
+    /// Which side of the boundary the caret belongs to.
+    pub affinity: Affinity,
+    /// Distance from the line's left edge.
+    pub x: f32,
+}
+
+/// A horizontal extent of a selection on one line. The caller supplies the
+/// vertical extent from the line's baseline, `ascent` and `descent`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionRect {
+    /// Distance from the line's left edge.
+    pub x: f32,
+    /// Extent to the right of `x`.
+    pub width: f32,
+}
+
+/// A shaped piece of a line drawn with one face, size and style.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LaidOutRun {
-    /// Byte range of the line's text this run covers.
+    /// Byte range of the paragraph text this run covers (of the line text for
+    /// [`crate::FontCatalog::layout_line`]).
     pub range: Range<usize>,
     /// The face the run was shaped with.
     pub face: FaceId,
@@ -24,273 +57,313 @@ pub struct LaidOutRun {
     pub shaped: Shaped,
     /// Distance from the line's left edge to the run's left edge.
     pub x: f32,
+    /// Index of the [`crate::StyledRun`] / [`crate::StyledSpan`] the text
+    /// came from.
+    pub style: usize,
+    /// Font size the run was shaped at.
+    pub size: f32,
+    /// This face is lighter than the requested bold with no named instance to
+    /// supply it; a renderer may embolden. Judged per face, so a fallback face
+    /// that has a real bold is not emboldened.
+    pub synthetic_bold: bool,
+    /// This face has no italic; a renderer may slant.
+    pub synthetic_italic: bool,
+    /// Variable-font coordinates the run was shaped with; draw the glyphs at
+    /// the same coordinates.
+    pub variations: Vec<Variation>,
+    /// Ascent of this run's face at its size.
+    pub ascent: f32,
+    /// Descent of this run's face at its size.
+    pub descent: f32,
+    /// Line gap the run's face recommends at its size.
+    pub line_gap: f32,
+    /// Underline placement for this face and size, when it records one.
+    pub underline: Option<Decoration>,
+    /// Strikeout placement for this face and size, when it records one.
+    pub strikeout: Option<Decoration>,
+    /// Caret stops of this run: absolute byte offsets, x from the line's left
+    /// edge, ascending by offset.
+    pub caret_stops: Vec<CaretStop>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Boundary {
+    offset: usize,
+    leading: f32,
+    trailing: f32,
+}
+
+/// Caret lookup tables for one line.
+#[derive(Clone, Debug, PartialEq, Default)]
+struct LineIndex {
+    /// One entry per caret boundary, ascending by offset.
+    boundaries: Vec<Boundary>,
+    /// Every distinct caret position, ascending by x (ties by offset).
+    visual: Vec<CaretPosition>,
+}
+
+impl LineIndex {
+    fn from_boundaries(boundaries: Vec<Boundary>) -> Self {
+        let mut visual = Vec::with_capacity(boundaries.len() * 2);
+        for boundary in &boundaries {
+            visual.push(CaretPosition {
+                offset: boundary.offset,
+                affinity: Affinity::Leading,
+                x: boundary.leading,
+            });
+            if boundary.trailing != boundary.leading {
+                visual.push(CaretPosition {
+                    offset: boundary.offset,
+                    affinity: Affinity::Trailing,
+                    x: boundary.trailing,
+                });
+            }
+        }
+        visual.sort_by(|a, b| {
+            work::add_steps(1);
+            a.x.total_cmp(&b.x).then(a.offset.cmp(&b.offset))
+        });
+        Self { boundaries, visual }
+    }
+
+    /// Builds the index from runs given in visual order.
+    ///
+    /// Taken in logical order, each run contributes the stops of its own
+    /// characters; where two runs meet the earlier one's last stop is the
+    /// boundary's trailing position and the later one's first stop its
+    /// leading position.
+    fn from_runs(runs: &[LaidOutRun], line_start: usize) -> Self {
+        let mut order: Vec<usize> = (0..runs.len()).collect();
+        order.sort_by_key(|&i| runs[i].range.start);
+        let mut boundaries: Vec<Boundary> = Vec::new();
+        for &i in &order {
+            for stop in &runs[i].caret_stops {
+                work::add_steps(1);
+                match boundaries.last_mut() {
+                    Some(last) if last.offset == stop.offset => last.leading = stop.x,
+                    _ => boundaries.push(Boundary {
+                        offset: stop.offset,
+                        leading: stop.x,
+                        trailing: stop.x,
+                    }),
+                }
+            }
+        }
+        if boundaries.is_empty() {
+            return Self::single(line_start, 0.0);
+        }
+        Self::from_boundaries(boundaries)
+    }
+
+    fn single(offset: usize, x: f32) -> Self {
+        Self::from_boundaries(vec![Boundary {
+            offset,
+            leading: x,
+            trailing: x,
+        }])
+    }
+
+    /// An index for text nothing could be measured for: half an em per
+    /// character, so a caret can still be placed and clicked.
+    fn estimated(text: &str, line: &Range<usize>, widths: &dyn Fn(usize, char) -> f32) -> Self {
+        let mut boundaries = Vec::new();
+        let mut x = 0.0_f32;
+        for (i, ch) in text[line.clone()].char_indices() {
+            let offset = line.start + i;
+            boundaries.push(Boundary {
+                offset,
+                leading: x,
+                trailing: x,
+            });
+            x += widths(offset, ch);
+        }
+        boundaries.push(Boundary {
+            offset: line.end,
+            leading: x,
+            trailing: x,
+        });
+        Self::from_boundaries(boundaries)
+    }
 }
 
 /// A laid out line. Runs are in visual (left to right) order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineLayout {
+    /// The part of the paragraph text this line covers.
+    pub range: Range<usize>,
     /// The runs, left to right.
     pub runs: Vec<LaidOutRun>,
     /// Total advance width.
     pub width: f32,
+    /// Largest run ascent on the line (positive, above the baseline). For an
+    /// empty line, the ascent of the style at its position, so an empty
+    /// paragraph still has a caret height.
+    pub ascent: f32,
+    /// Largest run descent on the line (positive, below the baseline).
+    pub descent: f32,
+    /// Largest line gap recommended by the faces on the line.
+    pub line_gap: f32,
     /// True when no face could be loaded and `width` is a rough estimate
     /// (half an em per character); the line has no runs.
     pub estimated: bool,
+    index: LineIndex,
 }
 
 impl LineLayout {
-    /// The caret x for byte `offset` of the laid out text.
-    pub fn x_at_offset(&self, text: &str, offset: usize) -> f32 {
-        let offset = offset.min(text.len());
-        let Some(run) = self
-            .runs
-            .iter()
-            .find(|r| r.range.start <= offset && offset < r.range.end)
-            .or_else(|| self.runs.iter().max_by_key(|r| r.range.end))
-        else {
-            return if self.estimated { self.width } else { 0.0 };
-        };
-        let relative = offset.saturating_sub(run.range.start);
-        run.x + run.shaped.x_at_offset(&text[run.range.clone()], relative)
-    }
-
-    /// The byte offset of the boundary nearest to horizontal position `x`.
-    pub fn offset_at_x(&self, text: &str, x: f32) -> usize {
-        if self.runs.is_empty() {
-            return if x <= 0.0 { 0 } else { text.len() };
-        }
-        let run = self
-            .runs
-            .iter()
-            .find(|r| x < r.x + r.shaped.width)
-            .unwrap_or_else(|| &self.runs[self.runs.len() - 1]);
-        let local = run.shaped.offset_at_x(&text[run.range.clone()], x - run.x);
-        run.range.start + local
-    }
-}
-
-/// Lazily loaded chain faces, so a fallback CJK font is read only when a
-/// character needs it.
-struct Chain<'a> {
-    catalog: &'a FontCatalog,
-    ids: &'a [FaceId],
-    slots: RefCell<Vec<Option<Option<Arc<LoadedFace>>>>>,
-}
-
-impl<'a> Chain<'a> {
-    fn new(catalog: &'a FontCatalog, ids: &'a [FaceId]) -> Self {
+    /// A line with no glyphs: `range` is the (possibly empty) text it covers.
+    pub(crate) fn blank(range: Range<usize>, ascent: f32, descent: f32, line_gap: f32) -> Self {
+        let at = range.start;
         Self {
-            catalog,
-            ids,
-            slots: RefCell::new(vec![None; ids.len()]),
-        }
-    }
-
-    fn get(&self, index: usize) -> Option<Arc<LoadedFace>> {
-        let mut slots = self.slots.borrow_mut();
-        slots[index]
-            .get_or_insert_with(|| self.catalog.load(self.ids[index]).ok())
-            .clone()
-    }
-
-    fn covers(&self, index: usize, ch: char) -> bool {
-        self.get(index).is_some_and(|face| face.covers(ch))
-    }
-}
-
-/// Characters that should stay with the face of the text before them rather
-/// than start a fallback run of their own.
-fn follows_previous(ch: char) -> bool {
-    ch.is_whitespace()
-        || ch.is_ascii_punctuation()
-        || ch.is_ascii_digit()
-        || matches!(
-            ch,
-            '\u{0300}'..='\u{036F}'
-                | '\u{1AB0}'..='\u{1AFF}'
-                | '\u{1DC0}'..='\u{1DFF}'
-                | '\u{200C}'..='\u{200D}'
-                | '\u{20D0}'..='\u{20FF}'
-                | '\u{FE00}'..='\u{FE0F}'
-                | '\u{FE20}'..='\u{FE2F}'
-        )
-}
-
-/// Splits `range` of `text` into stretches that share one chain index.
-///
-/// Each character takes the first chain face that covers it. Spaces, digits,
-/// ASCII punctuation and combining marks keep the previous character's face
-/// when it covers them, so a fallback run is not fragmented by a space. A
-/// character no face covers stays with the previous face (it draws as that
-/// face's missing-glyph box).
-pub(crate) fn split_by_coverage(
-    text: &str,
-    range: Range<usize>,
-    chain_len: usize,
-    covers: &dyn Fn(usize, char) -> bool,
-) -> Vec<(Range<usize>, usize)> {
-    let mut parts: Vec<(Range<usize>, usize)> = Vec::new();
-    for (offset, ch) in text[range.clone()].char_indices() {
-        let start = range.start + offset;
-        let end = start + ch.len_utf8();
-        let previous = parts.last().map(|(_, face)| *face);
-        let face = match previous {
-            Some(prev) if follows_previous(ch) && covers(prev, ch) => prev,
-            _ => (0..chain_len)
-                .find(|&i| covers(i, ch))
-                .or(previous)
-                .unwrap_or(0),
-        };
-        match parts.last_mut() {
-            Some((span, last)) if *last == face => span.end = end,
-            _ => parts.push((start..end, face)),
-        }
-    }
-    parts
-}
-
-impl FontCatalog {
-    /// Lays out `text` (one line, no line breaks) at `size` with `font`.
-    ///
-    /// `base` is the paragraph direction; pass `Auto` unless the paragraph
-    /// has an explicit one.
-    pub fn layout_line(
-        &self,
-        text: &str,
-        font: &FontRef,
-        size: f32,
-        base: TextDirection,
-    ) -> LineLayout {
-        let estimate = |text: &str| LineLayout {
+            range,
             runs: Vec::new(),
-            width: text.chars().filter(|c| !c.is_control()).count() as f32 * size * 0.5,
-            estimated: true,
-        };
-        if text.is_empty() {
-            return LineLayout {
-                runs: Vec::new(),
-                width: 0.0,
-                estimated: false,
-            };
+            width: 0.0,
+            ascent,
+            descent,
+            line_gap,
+            estimated: false,
+            index: LineIndex::single(at, 0.0),
         }
-        let chain = Chain::new(self, &font.chain);
-        if (0..font.chain.len()).all(|i| chain.get(i).is_none()) {
-            return estimate(text);
-        }
-        // A face that fails to load covers nothing, so its characters move on
-        // to the next face; the primary slot still anchors uncovered ones.
-        let covers = |index: usize, ch: char| chain.covers(index, ch);
+    }
 
-        struct Piece {
-            range: Range<usize>,
-            chain_index: usize,
-            level: u8,
-            script: Option<[u8; 4]>,
+    /// An estimate for a line nothing could measure.
+    pub(crate) fn estimated(
+        text: &str,
+        range: Range<usize>,
+        widths: &dyn Fn(usize, char) -> f32,
+        ascent: f32,
+        descent: f32,
+    ) -> Self {
+        let index = LineIndex::estimated(text, &range, widths);
+        let width = index.boundaries.last().map_or(0.0, |b| b.leading);
+        Self {
+            range,
+            runs: Vec::new(),
+            width,
+            ascent,
+            descent,
+            line_gap: 0.0,
+            estimated: true,
+            index,
         }
-        let mut pieces: Vec<Piece> = Vec::new();
-        for run in segment(text, base) {
-            for (range, chain_index) in
-                split_by_coverage(text, run.range.clone(), font.chain.len(), &covers)
-            {
-                pieces.push(Piece {
-                    range,
-                    chain_index,
-                    level: run.level,
-                    script: run.script,
-                });
+    }
+
+    /// Assembles a layout from shaped runs (visual order).
+    pub(crate) fn from_runs(range: Range<usize>, runs: Vec<LaidOutRun>) -> Self {
+        let width = runs.last().map_or(0.0, |r| r.x + r.shaped.width);
+        let ascent = runs.iter().map(|r| r.ascent).fold(0.0, f32::max);
+        let descent = runs.iter().map(|r| r.descent).fold(0.0, f32::max);
+        let line_gap = runs.iter().map(|r| r.line_gap).fold(0.0, f32::max);
+        let index = LineIndex::from_runs(&runs, range.start);
+        Self {
+            range,
+            runs,
+            width,
+            ascent,
+            descent,
+            line_gap,
+            estimated: false,
+            index,
+        }
+    }
+
+    /// `ascent + descent + line_gap`: the line's natural height at 100% line
+    /// spacing.
+    pub fn line_height(&self) -> f32 {
+        self.ascent + self.descent + self.line_gap
+    }
+
+    /// The caret x for byte `offset` of the paragraph text.
+    ///
+    /// An offset inside a grapheme cluster (or a ligature that cannot be
+    /// split) maps to the next boundary; offsets outside the line clamp to
+    /// its ends. At a bidi boundary `affinity` picks which of the two carets
+    /// is meant; elsewhere both return the same x. `O(log n)`.
+    pub fn x_at_offset(&self, offset: usize, affinity: Affinity) -> f32 {
+        let boundaries = &self.index.boundaries;
+        let Some(last) = boundaries.last() else {
+            return 0.0;
+        };
+        let at = lower_bound(boundaries, |b| b.offset < offset);
+        let boundary = boundaries.get(at).unwrap_or(last);
+        match affinity {
+            Affinity::Leading => boundary.leading,
+            Affinity::Trailing => boundary.trailing,
+        }
+    }
+
+    /// The caret nearest to horizontal position `x` (distance from the
+    /// line's left edge): its byte offset and which side of the boundary it
+    /// sits on. Positions beyond either end clamp to the first or last
+    /// caret. Where two logical positions share one point on screen the lower
+    /// offset is reported, and a point that is the same for both affinities
+    /// reports [`Affinity::Leading`]. `O(log n)`.
+    pub fn offset_at_x(&self, x: f32) -> (usize, Affinity) {
+        let visual = &self.index.visual;
+        let at = lower_bound(visual, |p| p.x < x);
+        let below = at.checked_sub(1).map(|i| visual[i]);
+        let above = visual.get(at).copied();
+        let best = match (below, above) {
+            (Some(b), Some(a)) => {
+                if (x - b.x).abs() <= (a.x - x).abs() {
+                    b
+                } else {
+                    a
+                }
+            }
+            (Some(only), None) | (None, Some(only)) => only,
+            (None, None) => return (self.range.start, Affinity::Leading),
+        };
+        (best.offset, best.affinity)
+    }
+
+    /// Every caret position on the line, left to right. Arrow-key movement in
+    /// visual order steps through this list.
+    pub fn caret_positions(&self) -> &[CaretPosition] {
+        &self.index.visual
+    }
+
+    /// The horizontal extents covered by the logical byte `range`, left to
+    /// right, touching extents merged. A range crossing a bidi boundary can
+    /// give several. Parts of the range outside the line are ignored.
+    pub fn selection_rects(&self, range: Range<usize>) -> Vec<SelectionRect> {
+        let start = range.start.max(self.range.start);
+        let end = range.end.min(self.range.end);
+        let mut spans: Vec<(f32, f32)> = Vec::new();
+        if start >= end {
+            return Vec::new();
+        }
+        for run in &self.runs {
+            let from = start.max(run.range.start);
+            let to = end.min(run.range.end);
+            if from >= to {
+                continue;
+            }
+            let stop_x = |offset: usize| {
+                let at = lower_bound(&run.caret_stops, |s| s.offset < offset);
+                run.caret_stops
+                    .get(at)
+                    .or(run.caret_stops.last())
+                    .map_or(run.x, |s| s.x)
+            };
+            let (a, b) = (stop_x(from), stop_x(to));
+            if a != b {
+                spans.push((a.min(b), a.max(b)));
             }
         }
-
-        let levels: Vec<u8> = pieces.iter().map(|p| p.level).collect();
-        let order = visual_order(&levels);
-        let mut runs = Vec::with_capacity(pieces.len());
-        let mut x = 0.0_f32;
-        for logical in order {
-            let piece = &pieces[logical];
-            // The primary may have failed to load: use the first face that did.
-            let used = std::iter::once(piece.chain_index)
-                .chain(0..font.chain.len())
-                .find(|&i| chain.get(i).is_some());
-            let Some((used, face)) = used.and_then(|i| chain.get(i).map(|f| (i, f))) else {
-                continue;
-            };
-            let rtl = piece.level % 2 == 1;
-            let settings = ShapeSettings {
-                direction: if rtl {
-                    TextDirection::RightToLeft
-                } else {
-                    TextDirection::LeftToRight
-                },
-                script: piece.script,
-                ..ShapeSettings::default()
-            };
-            let shaped = face.shape(&text[piece.range.clone()], size, &settings);
-            let width = shaped.width;
-            runs.push(LaidOutRun {
-                range: piece.range.clone(),
-                face: font.chain[used],
-                rtl,
-                shaped,
-                x,
-            });
-            x += width;
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (left, right) in spans {
+            match merged.last_mut() {
+                Some(last) if left <= last.1 + 0.01 => last.1 = last.1.max(right),
+                _ => merged.push((left, right)),
+            }
         }
-        LineLayout {
-            runs,
-            width: x,
-            estimated: false,
-        }
-    }
-
-    /// Width of `text` at `size` with `font`, including fallback faces.
-    pub fn text_width(&self, text: &str, font: &FontRef, size: f32) -> f32 {
-        self.layout_line(text, font, size, TextDirection::Auto)
-            .width
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn covers_only<'a>(tables: &'a [&'a str]) -> impl Fn(usize, char) -> bool + 'a {
-        move |index, ch| tables[index].contains(ch)
-    }
-
-    #[test]
-    fn everything_covered_by_the_primary_stays_one_part() {
-        let covers = covers_only(&["abc def", ""]);
-        let parts = split_by_coverage("abc def", 0..7, 2, &covers);
-        assert_eq!(parts, vec![(0..7, 0)]);
-    }
-
-    #[test]
-    fn an_uncovered_character_moves_to_the_first_face_that_has_it() {
-        let covers = covers_only(&["ab ", "XY"]);
-        let parts = split_by_coverage("abXYab", 0..6, 2, &covers);
-        assert_eq!(parts, vec![(0..2, 0), (2..4, 1), (4..6, 0)]);
-    }
-
-    #[test]
-    fn spaces_and_digits_do_not_fragment_a_fallback_run() {
-        let covers = covers_only(&["ab 1", "XY 1"]);
-        // The space after Y is covered by the previous (fallback) face.
-        let parts = split_by_coverage("aXY Yb", 0..6, 2, &covers);
-        assert_eq!(parts, vec![(0..1, 0), (1..5, 1), (5..6, 0)]);
-    }
-
-    #[test]
-    fn a_character_nobody_covers_stays_with_the_previous_face() {
-        let covers = covers_only(&["ab", "X"]);
-        let parts = split_by_coverage("aXqb", 0..4, 2, &covers);
-        assert_eq!(parts, vec![(0..1, 0), (1..3, 1), (3..4, 0)]);
-    }
-
-    #[test]
-    fn multibyte_characters_split_on_boundaries() {
-        let text = "a\u{4E2D}b";
-        let covers = covers_only(&["ab", "\u{4E2D}"]);
-        let parts = split_by_coverage(text, 0..text.len(), 2, &covers);
-        assert_eq!(parts, vec![(0..1, 0), (1..4, 1), (4..5, 0)]);
+        merged
+            .into_iter()
+            .map(|(left, right)| SelectionRect {
+                x: left,
+                width: right - left,
+            })
+            .collect()
     }
 }

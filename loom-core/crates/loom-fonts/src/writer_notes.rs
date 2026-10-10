@@ -19,18 +19,34 @@
 //!   are local to one machine and one scan.
 //! * For each style run call [`FontCatalog::resolve`] once and keep the
 //!   [`FontRef`] in a small map keyed by `(family, weight, italic)`.
-//! * Measure a style run with [`FontCatalog::layout_line`] (or
-//!   [`FontCatalog::text_width`]). Shaping is per style run, so kerning does
-//!   not cross a bold/regular boundary; that matches what the page draws,
-//!   because Slint also shapes each styled span separately.
-//! * Line breaking: shape the whole paragraph once per style run and cut at
-//!   grapheme boundaries using [`Shaped::caret_stops`], whose `x` values are
-//!   exact cumulative advances. Do not sum per-character widths; kerning and
-//!   ligatures make that wrong. Cache `Shaped` per `(block text hash, style,
-//!   size)`; the catalogue itself does not cache shaping.
-//! * Line height comes from [`LoadedFace::line_metrics`] of the largest run on
-//!   the line (`line_height` is ascent + descent + gap); keep Writer's
-//!   explicit line-spacing multiplier on top.
+//! * Describe a paragraph once with [`Paragraph::new`]: its text, one
+//!   [`StyledSpan`] per character-style run, and the paragraph direction. This
+//!   resolves bidi levels and scripts over the whole paragraph, which a
+//!   wrapped line needs (a line that starts mid-way through a Hebrew
+//!   paragraph is not laid out like the same words on their own). Then call
+//!   [`FontCatalog::layout_paragraph_line`] for each line's byte range. For
+//!   a single line of styled runs, [`FontCatalog::layout_line`] takes
+//!   [`StyledRun`]s directly; [`FontCatalog::layout_text`] is the one-style
+//!   convenience, and [`FontCatalog::text_width`] gives just the width.
+//!   Shaping is per piece (one style, one face, one script, one direction),
+//!   so kerning does not cross a bold/regular boundary; that matches what the
+//!   page draws, because Slint also shapes each styled span separately.
+//! * Line breaking: take the candidate break offsets from
+//!   [`line_break_opportunities`] (UAX #14), measure with the layout, and cut
+//!   at the last opportunity that fits. Do not sum per-character widths;
+//!   kerning and ligatures make that wrong. Cache the [`LineLayout`] per
+//!   `(block text hash, style, size, line range)`; the catalogue itself does
+//!   not cache shaping.
+//! * Line height: [`LineLayout::ascent`] and [`LineLayout::descent`] are the
+//!   largest over the runs on the line (and are set for an empty line, so an
+//!   empty paragraph has a caret height); `line_height()` adds the largest
+//!   gap. Keep Writer's explicit line-spacing multiplier on top.
+//! * Draw each [`LaidOutRun`] with its own face, size and
+//!   [`LaidOutRun::variations`]; embolden or slant only when that run's
+//!   `synthetic_bold` / `synthetic_italic` say so (fallback faces are judged
+//!   separately). [`LaidOutRun::underline`] and `strikeout` give the line
+//!   positions. A variable font's named instances are matched during
+//!   [`FontCatalog::resolve`], so "bold" is a real bold when the font has one.
 //! * Text size is linear: shape once at a reference size and scale if zoom
 //!   changes. Do not round advances; PDF export and the page must agree.
 //!
@@ -42,21 +58,24 @@
 //!
 //! # 2. Caret placement and hit-testing
 //!
-//! * Caret x for a byte offset: [`LineLayout::x_at_offset`]. Pointer to
-//!   offset: [`LineLayout::offset_at_x`]. Both work on grapheme boundaries
-//!   and split ligature clusters evenly.
-//! * Ask for a layout once per visible line and keep the [`CaretStop`] list;
-//!   hit-testing a click is then a nearest-stop search.
-//! * Selection rectangles are the x-range between two stops of the same run.
-//!   A selection that crosses a bidi boundary is several rectangles, one per
-//!   [`LaidOutRun`] it touches.
-//! * Left/Right arrow moves in visual order: step through the sorted stops by
-//!   `x`, not by offset. Home/End use the line's first and last stop.
+//! * Caret x for a byte offset: [`LineLayout::x_at_offset`] with an
+//!   [`Affinity`]. Pointer to caret: [`LineLayout::offset_at_x`], which
+//!   returns the offset and the affinity. Both work on grapheme boundaries,
+//!   split ligature clusters evenly, and are `O(log n)` on tables built once
+//!   with the layout; keep the [`LineLayout`], not the stops.
+//! * At a bidi boundary one logical offset has two carets on screen. Keep the
+//!   affinity with the caret: `Leading` is the leading edge of the character
+//!   that starts at the offset, `Trailing` the trailing edge of the character
+//!   that ends there. Typing at a boundary inherits the side the caret is on.
+//! * Selection rectangles: [`LineLayout::selection_rects`] returns the
+//!   horizontal extents of a logical range, merged where they touch; a
+//!   selection that crosses a bidi boundary can be several.
+//! * Left/Right arrow moves in visual order: step through
+//!   [`LineLayout::caret_positions`], which is sorted by `x`. Home/End use
+//!   the first and last position.
 //! * Writer's document model stays logical (byte offsets); only the view
 //!   converts. Right-to-left paragraphs need the paragraph direction passed to
-//!   [`FontCatalog::layout_line`] and the caret's affinity stored at a run
-//!   boundary (leading edge of the next run versus trailing edge of the
-//!   previous one).
+//!   [`Paragraph::new`].
 //!
 //! # 3. The font picker model
 //!
@@ -99,3 +118,15 @@
 //!   when it is small, otherwise fall back to the current base-14 path.
 //! * Widths in the PDF must come from the same shaping as the page layout so
 //!   line breaks in the PDF equal those on screen.
+//! * A run with non-empty [`LaidOutRun::variations`] was shaped at a named
+//!   instance of a variable font; the font file alone describes the default
+//!   instance. Embedding it needs the instance's outlines (an instancer or a
+//!   static-instance subset), otherwise draw that run with a base-14 font.
+
+#[cfg(doc)]
+use crate::{line_break_opportunities, Availability, CaretStop};
+#[cfg(doc)]
+use crate::{
+    Affinity, EmbeddingPermission, FaceId, FaceInfo, FontCatalog, FontRef, LaidOutRun, LineLayout,
+    LoadedFace, Paragraph, ScanCache, Shaped, ShapedGlyph, StyledRun, StyledSpan,
+};

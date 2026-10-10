@@ -2,14 +2,17 @@
 //! and lazily loaded faces for shaping.
 
 use crate::bundled::bundled_bytes;
-use crate::face::{FontError, LoadedFace};
+use crate::face::{FontError, LoadedFace, MAX_FONT_FILE_BYTES};
 use crate::info::{normalize_family, FaceId, FaceInfo, FaceSource};
 use crate::resolve::{
-    best_match, generic_chain, metric_compatible, Candidate, FallbackPolicy, FontRef,
+    best_match, generic_chain, instance_candidate, instance_variations, metric_compatible,
+    Candidate, FaceSetup, FallbackPolicy, FontRef,
 };
 use crate::scan::{scan, ScanCache, ScanConfig, ScanReport};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// The family always appended to a fallback chain.
@@ -59,19 +62,33 @@ impl LoadCache {
         }
     }
 
-    fn insert(&mut self, id: FaceId, face: Arc<LoadedFace>) {
-        let size = face.bytes().len();
-        if self.faces.insert(id, face).is_none() {
-            self.order.push_back(id);
-            self.sizes.insert(id, size);
-            self.bytes += size;
+    /// Keeps `face` when it fits the budget. Bytes compiled into the binary
+    /// cost no heap and count as zero. A face larger than the whole budget is
+    /// not retained at all, so `bytes` never exceeds `budget`.
+    fn insert(&mut self, id: FaceId, face: Arc<LoadedFace>, size: usize) {
+        if size > self.budget {
+            return;
         }
-        // Evict oldest first, but never the face just inserted.
-        while self.bytes > self.budget && self.order.len() > 1 {
-            if let Some(old) = self.order.pop_front() {
-                self.faces.remove(&old);
-                self.bytes -= self.sizes.remove(&old).unwrap_or(0);
-            }
+        if let Some(old) = self.faces.insert(id, face) {
+            drop(old);
+            self.bytes -= self.sizes.insert(id, size).unwrap_or(0);
+            self.order.retain(|queued| *queued != id);
+        } else {
+            self.sizes.insert(id, size);
+        }
+        self.order.push_back(id);
+        self.bytes += size;
+        self.evict_to_budget();
+    }
+
+    /// Drops the oldest faces until the retained bytes fit the budget.
+    fn evict_to_budget(&mut self) {
+        while self.bytes > self.budget {
+            let Some(old) = self.order.pop_front() else {
+                break;
+            };
+            self.faces.remove(&old);
+            self.bytes -= self.sizes.remove(&old).unwrap_or(0);
         }
     }
 }
@@ -152,7 +169,10 @@ impl FontCatalog {
         let mut family_seen = HashSet::new();
         for (index, face) in faces.iter().enumerate() {
             let index = index as u32;
-            for name in [&face.family, &face.legacy_family] {
+            let names = [&face.family, &face.legacy_family]
+                .into_iter()
+                .chain(&face.aliases);
+            for name in names {
                 let list = by_name.entry(normalize_family(name)).or_default();
                 if list.last() != Some(&index) {
                     list.push(index);
@@ -185,9 +205,15 @@ impl FontCatalog {
     }
 
     /// Changes the memory budget for loaded font bytes.
+    ///
+    /// The budget is a hard ceiling on retained heap bytes: lowering it evicts
+    /// at once, and a face larger than the whole budget is still returned by
+    /// [`FontCatalog::load`] but is not kept (so it is re-read on every load).
+    /// Bundled faces live in the binary and do not count.
     pub fn set_load_budget(&self, bytes: usize) {
         if let Ok(mut cache) = self.loaded.lock() {
             cache.budget = bytes;
+            cache.evict_to_budget();
         }
     }
 
@@ -243,29 +269,51 @@ impl FontCatalog {
         self.faces.get(id.index())
     }
 
+    /// The best face of the family called `normalized` for the request.
+    ///
+    /// A variable font contributes its default instance and each of its named
+    /// instances as separate candidates, so a request for bold is met by the
+    /// font's Bold instance (and reported with that instance's coordinates)
+    /// instead of being marked for synthetic emboldening.
     fn match_family(
         &self,
         normalized: &str,
         weight: u16,
         italic: bool,
-    ) -> Option<(FaceId, bool, bool)> {
+    ) -> Option<(FaceId, FaceSetup)> {
         let indices = self.by_name.get(normalized)?;
-        let candidates: Vec<Candidate> = indices
-            .iter()
-            .map(|&i| {
-                let face = &self.faces[i as usize];
-                Candidate {
-                    weight: face.weight,
-                    width: face.width,
-                    italic: face.italic,
-                }
-            })
-            .collect();
+        let mut candidates: Vec<Candidate> = Vec::new();
+        // Which face, and which of its named instances, each candidate is.
+        let mut origin: Vec<(u32, Option<usize>)> = Vec::new();
+        for &i in indices {
+            let face = &self.faces[i as usize];
+            let base = Candidate {
+                weight: face.weight,
+                width: face.width,
+                italic: face.italic,
+            };
+            candidates.push(base);
+            origin.push((i, None));
+            for (k, instance) in face.instances.iter().enumerate() {
+                candidates.push(instance_candidate(base, &face.axes, &instance.coords));
+                origin.push((i, Some(k)));
+            }
+        }
         let found = best_match(&candidates, weight, italic)?;
+        let (face_index, instance) = origin[found.index];
+        let variations = instance
+            .map(|k| {
+                let face = &self.faces[face_index as usize];
+                instance_variations(&face.axes, &face.instances[k].coords)
+            })
+            .unwrap_or_default();
         Some((
-            FaceId(indices[found.index]),
-            found.synthetic_bold,
-            found.synthetic_italic,
+            FaceId(face_index),
+            FaceSetup {
+                variations,
+                synthetic_bold: found.synthetic_bold,
+                synthetic_italic: found.synthetic_italic,
+            },
         ))
     }
 
@@ -313,14 +361,22 @@ impl FontCatalog {
                 .find_map(|name| self.match_family(&name, weight, italic));
         }
         // Whatever is left: the first face of the catalogue.
-        let (first, synthetic_bold, synthetic_italic) =
-            primary.unwrap_or((FaceId(0), weight >= 600, italic));
+        let (first, first_setup) = primary.unwrap_or((
+            FaceId(0),
+            FaceSetup {
+                variations: Vec::new(),
+                synthetic_bold: weight >= 600,
+                synthetic_italic: italic,
+            },
+        ));
 
         let mut chain = vec![first];
+        let mut chain_setup = vec![first_setup.clone()];
         for name in self.fallback_names() {
-            if let Some((id, _, _)) = self.match_family(&name, weight, italic) {
+            if let Some((id, setup)) = self.match_family(&name, weight, italic) {
                 if !chain.contains(&id) {
                     chain.push(id);
+                    chain_setup.push(setup);
                 }
             }
         }
@@ -331,8 +387,9 @@ impl FontCatalog {
             chain,
             substituted,
             metric_compatible: metric_compatible_hit,
-            synthetic_bold,
-            synthetic_italic,
+            synthetic_bold: first_setup.synthetic_bold,
+            synthetic_italic: first_setup.synthetic_italic,
+            chain_setup,
         })
     }
 
@@ -389,22 +446,28 @@ impl FontCatalog {
         let info = self
             .face(id)
             .ok_or_else(|| FontError::Parse("unknown face handle".into()))?;
-        let face = match &info.source {
+        let (face, retained) = match &info.source {
             FaceSource::Bundled(name) => {
                 let bytes = bundled_bytes(name)
                     .ok_or_else(|| FontError::Io(format!("bundled face {name} is missing")))?;
-                LoadedFace::from_static(bytes, info.index)?
+                (LoadedFace::from_static(bytes, info.index)?, 0)
             }
             FaceSource::File(path) => {
-                let bytes = fs::read(path).map_err(|e| FontError::Io(e.to_string()))?;
-                LoadedFace::from_vec(bytes, info.index)?
+                let bytes = read_capped(path)?;
+                let len = bytes.len();
+                (LoadedFace::from_vec(bytes, info.index)?, len)
             }
         };
         let face = Arc::new(face);
         if let Ok(mut cache) = self.loaded.lock() {
-            cache.insert(id, Arc::clone(&face));
+            cache.insert(id, Arc::clone(&face), retained);
         }
         Ok(face)
+    }
+
+    /// Bytes of font data currently held in memory by the load cache.
+    pub fn loaded_bytes(&self) -> usize {
+        self.loaded.lock().map_or(0, |c| c.bytes)
     }
 
     /// Number of faces currently held in memory.
@@ -427,9 +490,74 @@ impl FontCatalog {
     }
 }
 
+/// Reads a font file, refusing anything over [`MAX_FONT_FILE_BYTES`] without
+/// allocating for it. The length is checked from metadata first and again on
+/// the bytes actually read, so a file that grows between the two is caught.
+fn read_capped(path: &Path) -> Result<Vec<u8>, FontError> {
+    let io = |error: std::io::Error| FontError::Io(error.to_string());
+    let file = File::open(path).map_err(io)?;
+    let len = file.metadata().map_err(io)?.len();
+    read_limited(file, len, MAX_FONT_FILE_BYTES)
+}
+
+/// Reads at most `limit` bytes from `reader`, which is said to hold
+/// `declared` bytes. A declared length over the limit is refused without
+/// reading; a reader that turns out to hold more than the limit is refused
+/// after reading at most `limit + 1` bytes.
+fn read_limited(reader: impl Read, declared: u64, limit: u64) -> Result<Vec<u8>, FontError> {
+    if declared > limit {
+        return Err(FontError::TooLarge);
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(declared).unwrap_or(0));
+    reader
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| FontError::Io(error.to_string()))?;
+    if bytes.len() as u64 > limit {
+        return Err(FontError::TooLarge);
+    }
+    Ok(bytes)
+}
+
 fn source_key(face: &FaceInfo) -> String {
     match &face.source {
         FaceSource::Bundled(name) => format!("0{name}"),
         FaceSource::File(path) => format!("1{}#{}", path.to_string_lossy(), face.index),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn a_declared_length_over_the_limit_is_refused_unread() {
+        struct Unreadable;
+        impl Read for Unreadable {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("must not be read");
+            }
+        }
+        assert_eq!(read_limited(Unreadable, 101, 100), Err(FontError::TooLarge));
+    }
+
+    #[test]
+    fn a_file_that_grows_past_its_declared_length_is_still_capped() {
+        // Declared 10 bytes but actually 500: the read stops at limit + 1.
+        let data = vec![7u8; 500];
+        assert_eq!(
+            read_limited(Cursor::new(&data), 10, 100),
+            Err(FontError::TooLarge)
+        );
+        // Exactly the limit is allowed, one more is not.
+        assert_eq!(
+            read_limited(Cursor::new(&data[..100]), 100, 100).map(|b| b.len()),
+            Ok(100)
+        );
+        assert_eq!(
+            read_limited(Cursor::new(&data[..101]), 100, 100),
+            Err(FontError::TooLarge)
+        );
     }
 }

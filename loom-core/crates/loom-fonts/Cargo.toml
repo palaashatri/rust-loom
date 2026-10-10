@@ -10,6 +10,12 @@ description = "Font catalogue, fallback resolution, shaping and text metrics"
 default = ["bundled-inter"]
 # Embeds the Inter faces that loom-ui already ships so the catalogue is never
 # empty and measurement matches what the shell draws.
+#
+# The faces must be embedded once per binary. An application whose shell
+# already embeds Inter (Slint `import` of the same files) depends on this
+# crate with `default-features = false`; an application that registers fonts
+# with the shell from `loom_fonts::bundled_faces()` must keep this feature on
+# and must not let the shell embed them a second time.
 bundled-inter = []
 
 [dependencies]
@@ -18,5 +24,7 @@ bundled-inter = []
 skrifa = { version = "0.42", default-features = false, features = ["std"] }
 harfrust = { version = "0.8", default-features = false, features = ["std"] }
 unicode-bidi = "0.3"
+# UAX #14 line-break opportunities (Apache-2.0; already in the lockfile).
+unicode-linebreak = "0.1"
 unicode-script = "0.5"
 unicode-segmentation = "1"
