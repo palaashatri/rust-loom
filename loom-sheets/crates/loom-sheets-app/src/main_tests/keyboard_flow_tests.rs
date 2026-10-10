@@ -783,7 +783,6 @@ fn a_disabled_control_never_takes_keyboard_focus_in_the_inspector() {
         s.app.set_inspector_tab(tab_index);
         render(&s.app);
         let grid = focus_weak(&s.app);
-        press(&s.app, Key::F6);
         shift_key(&s.app, Key::F6);
         let mut visited = Vec::new();
         for _ in 0..120 {
@@ -813,8 +812,7 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
         let grid = focus_weak(&s.app);
 
         // The grid keeps Tab for the cell cursor, so F6 is how the keyboard leaves
-        // it: toolbar first, then Shift+F6 for the inspector.
-        press(&s.app, Key::F6);
+        // it: Shift+F6 goes straight to the inspector.
         shift_key(&s.app, Key::F6);
         assert!(focus_name(&s.app).starts_with("Inspector"));
         let mut stops = vec![(focus_weak(&s.app), stop(&s.app).unwrap())];
@@ -927,7 +925,6 @@ fn alt_letters_and_f10_open_menus_while_editing_without_typing_into_the_cell() {
 
     // The inspector search field is a text field too.
     let s = launched(&[]);
-    press(&s.app, Key::F6);
     shift_key(&s.app, Key::F6);
     tab_to(&s.app, "Search");
     alt(&s.app, "e");
@@ -973,18 +970,28 @@ fn f6_leaves_the_grid_for_the_toolbar_and_the_inspector_and_comes_back() {
     );
     press(&s.app, Key::F6);
     assert!(
+        focus_name(&s.app).starts_with("Inspector"),
+        "F6 from the toolbar goes on to the open inspector, not {:?}",
+        focus_name(&s.app)
+    );
+    press(&s.app, Key::F6);
+    assert!(
         same_focus(&focus_weak(&s.app), &grid),
-        "F6 from the toolbar returns to the grid"
+        "F6 from the inspector returns to the grid"
     );
 
-    // Shift+F6 walks the panels: grid, toolbar, inspector, grid.
-    shift_key(&s.app, Key::F6);
-    assert_eq!(focus_name(&s.app), "View");
+    // Shift+F6 walks back: grid, inspector, toolbar, grid.
     shift_key(&s.app, Key::F6);
     assert!(
         focus_name(&s.app).starts_with("Inspector"),
-        "Shift+F6 goes on to the open inspector, not {:?}",
+        "Shift+F6 from the grid goes to the open inspector, not {:?}",
         focus_name(&s.app)
+    );
+    shift_key(&s.app, Key::F6);
+    assert_eq!(
+        focus_name(&s.app),
+        "View",
+        "Shift+F6 goes on to the toolbar"
     );
     shift_key(&s.app, Key::F6);
     assert!(
@@ -992,8 +999,17 @@ fn f6_leaves_the_grid_for_the_toolbar_and_the_inspector_and_comes_back() {
         "Shift+F6 returns to the grid"
     );
 
-    // Without an inspector the panel walk skips straight back.
+    // Without an inspector the panel walk skips straight back. Hiding the inspector
+    // moves focus to its toggle, so the walk starts again from the grid.
     s.app.set_show_inspector(false);
+    // Let the inspector-visibility handler run before focus moves back to the grid.
+    render(&s.app);
+    s.app.invoke_focus_grid();
+    render(&s.app);
+    press(&s.app, Key::F6);
+    assert_eq!(focus_name(&s.app), "View");
+    press(&s.app, Key::F6);
+    assert!(same_focus(&focus_weak(&s.app), &grid));
     shift_key(&s.app, Key::F6);
     assert_eq!(focus_name(&s.app), "View");
     shift_key(&s.app, Key::F6);

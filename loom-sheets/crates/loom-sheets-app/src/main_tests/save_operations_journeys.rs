@@ -783,3 +783,43 @@ fn save_coordinator_rejects_overlap_and_stale_generation() {
     coordinator.clear(active);
     assert!(coordinator.begin(8, 13, None).is_ok());
 }
+
+#[test]
+fn save_as_adds_the_loomtable_extension_to_the_chosen_name() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let directory = std::env::temp_dir().join(format!(
+        "loom-sheets-save-as-extension-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("create save directory");
+    let chosen = directory.join("ledger");
+    let state = Rc::new(GuiState::new(
+        Sheet::new("Data"),
+        None,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new(
+            [],
+            [Some(chosen.clone())],
+        )),
+        FileFilter::new("Workbook", ["loomtable"]).expect("workbook filter"),
+        FileFilter::new("CSV", ["csv"]).expect("import filter"),
+        FileFilter::new("CSV", ["csv"]).expect("CSV filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("XLSX filter"),
+    ));
+    let recovery_dir = attach_test_worker(&app, &state, "save-as-extension");
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    crate::save_current_sheet(&app, &state, true).expect("start Save As");
+    wait_for_save_test_completion(&app, &state, &menu_service);
+
+    let saved = directory.join("ledger.loomtable");
+    assert!(saved.exists(), "Save As writes the .loomtable file");
+    assert!(
+        !chosen.exists(),
+        "the name without the extension is never written"
+    );
+    assert_eq!(state.save_path.borrow().as_deref(), Some(saved.as_path()));
+    drop(state.workbook_worker.borrow_mut().take());
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+    let _ = std::fs::remove_dir_all(&directory);
+}

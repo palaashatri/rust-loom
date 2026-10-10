@@ -186,6 +186,33 @@ pub struct PaletteCommand {
     pub id: &'static str,
     pub label: &'static str,
     pub shortcut: &'static str,
+    /// Other words people type for this command, such as file format names.
+    pub keywords: &'static str,
+}
+
+/// Search words for commands whose label does not name the way people look
+/// for them.
+fn keywords_for(id: &str) -> &'static str {
+    match id {
+        "sheets.export-csv" => "csv comma separated values spreadsheet",
+        "sheets.export-xlsx" => "xlsx excel spreadsheet office",
+        "sheets.open" => "xlsx csv excel file",
+        _ => "",
+    }
+}
+
+/// True when the query matches the command: the whole phrase appears in one of
+/// its fields, or every word of the query appears in some field.
+pub fn command_matches(command: &PaletteCommand, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    let fields = [command.label, command.id, command.keywords].map(|field| field.to_lowercase());
+    fields.iter().any(|field| field.contains(&query))
+        || query
+            .split_whitespace()
+            .all(|word| fields.iter().any(|field| field.contains(word)))
 }
 
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
@@ -463,6 +490,7 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
         id,
         label,
         shortcut,
+        keywords: keywords_for(id),
     })
     .filter(|c| match c.action {
         PaletteAction::Undo => app.get_can_undo(),
@@ -478,11 +506,7 @@ pub fn rebuild_palette(app: &SheetsApp, query: &str) {
     let query_lower = query.trim().to_lowercase();
     let items: Vec<CommandPaletteItem> = master_palette(app)
         .into_iter()
-        .filter(|c| {
-            query_lower.is_empty()
-                || c.label.to_lowercase().contains(&query_lower)
-                || c.id.to_lowercase().contains(&query_lower)
-        })
+        .filter(|c| command_matches(c, &query_lower))
         .map(|c| CommandPaletteItem {
             id: c.id.into(),
             label: c.label.into(),
@@ -575,5 +599,53 @@ pub fn wire_palette(app: &SheetsApp) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    fn command(id: &'static str, label: &'static str) -> PaletteCommand {
+        PaletteCommand {
+            action: PaletteAction::SaveSheet,
+            id,
+            label,
+            shortcut: "",
+            keywords: keywords_for(id),
+        }
+    }
+
+    #[test]
+    fn export_xlsx_is_found_by_its_name_and_by_the_words_people_type() {
+        let xlsx = command("sheets.export-xlsx", "Export Excel (.xlsx)");
+        assert!(command_matches(&xlsx, "Export XLSX"));
+        assert!(command_matches(&xlsx, "xlsx"));
+        assert!(command_matches(&xlsx, "excel"));
+        assert!(command_matches(&xlsx, "export excel"));
+        assert!(command_matches(&xlsx, "office"));
+        assert!(!command_matches(&xlsx, "csv"));
+        assert!(!command_matches(&xlsx, "export pdf"));
+    }
+
+    #[test]
+    fn csv_export_keeps_its_own_words_and_the_phrases_that_already_matched() {
+        let csv = command("sheets.export-csv", "Export CSV");
+        assert!(command_matches(&csv, "export csv"));
+        assert!(command_matches(&csv, "comma"));
+        assert!(!command_matches(&csv, "xlsx"));
+        let save_as = command("sheets.save-as", "Save Workbook As");
+        assert!(command_matches(&save_as, "save workbook"));
+        assert!(
+            command_matches(&save_as, "   "),
+            "a blank query lists every command"
+        );
+    }
+
+    #[test]
+    fn a_query_containing_a_word_no_field_has_matches_nothing() {
+        let csv = command("sheets.export-csv", "Export CSV");
+        assert!(!command_matches(&csv, "zzz"));
+        assert!(!command_matches(&csv, "export zzz"));
     }
 }

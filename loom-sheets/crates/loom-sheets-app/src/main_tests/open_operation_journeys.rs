@@ -844,7 +844,7 @@ fn startup_marks_a_recovered_workbook_unsaved_but_not_a_fresh_one() {
         sheets: vec![edited],
         active: 0,
     };
-    let (restored, unsaved) = startup_workbook(Some(recovered), false);
+    let (restored, unsaved) = crate::startup_session::startup_workbook(Some(recovered), false);
     assert!(
         unsaved,
         "recovered contents exist only in the recovery store"
@@ -854,12 +854,12 @@ fn startup_marks_a_recovered_workbook_unsaved_but_not_a_fresh_one() {
         Some("42")
     );
 
-    let (fresh, unsaved) = startup_workbook(None, false);
+    let (fresh, unsaved) = crate::startup_session::startup_workbook(None, false);
     assert!(!unsaved, "a blank start has nothing to lose");
     assert_eq!(fresh.sheets.len(), 1);
     assert_eq!(fresh.active, 0);
 
-    let (example, unsaved) = startup_workbook(None, true);
+    let (example, unsaved) = crate::startup_session::startup_workbook(None, true);
     assert!(!unsaved);
     assert_eq!(example.sheets[0].name, "Example Budget");
 }
@@ -874,7 +874,7 @@ fn an_untouched_starter_left_in_the_recovery_store_is_not_a_draft() {
             sheets: vec![Sheet::new(name)],
             active: 0,
         };
-        let (fresh, unsaved) = startup_workbook(Some(stored), false);
+        let (fresh, unsaved) = crate::startup_session::startup_workbook(Some(stored), false);
         assert!(
             !unsaved,
             "an untouched {name:?} tab must not reopen as an unsaved draft"
@@ -886,7 +886,7 @@ fn an_untouched_starter_left_in_the_recovery_store_is_not_a_draft() {
         sheets: vec![starter_workbook()],
         active: 0,
     };
-    let (_, unsaved) = startup_workbook(Some(stored_example), false);
+    let (_, unsaved) = crate::startup_session::startup_workbook(Some(stored_example), false);
     assert!(
         !unsaved,
         "an untouched example stored by an earlier session is not a draft"

@@ -91,7 +91,7 @@ fn bench_journal_durability_after_one_ten_and_one_hundred_unsaved_edits() {
                 let mut sheets = sheet_with_cells(workbook_cells);
                 let (mut recovery, _) = CellEditRecovery::open_at(scratch.base()).expect("open");
                 recovery
-                    .checkpoint_package(workbook_package_bytes(&sheets, 0).unwrap(), false)
+                    .checkpoint_package(workbook_package_bytes(&sheets, 0).unwrap(), false, None)
                     .expect("baseline checkpoint");
                 for edit in 0..unsaved {
                     let cell = CellRef {

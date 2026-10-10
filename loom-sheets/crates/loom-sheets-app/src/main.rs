@@ -54,14 +54,19 @@ use analysis::{plan_chart, plan_chart_in_range};
 
 mod assets;
 
+mod sort_header;
+mod startup_session;
 mod workbook_io;
 #[cfg(test)]
 pub(crate) use workbook_io::load_workbook_with_report;
 #[cfg(test)]
 pub(crate) use workbook_io::workbook_package_bytes;
+// Read back by the test modules only; the window restores through startup_session.
+#[cfg(test)]
+pub(crate) use workbook_io::restore_workbook_from_snapshot;
 pub(crate) use workbook_io::{
-    blank_sheet, load_sheet, load_workbook, restore_workbook_from_snapshot, save_sheet,
-    save_workbook, starter_workbook, template_sheet, LoadedWorkbook,
+    blank_sheet, load_sheet, load_workbook, save_sheet, save_workbook, starter_workbook,
+    template_sheet, LoadedWorkbook,
 };
 
 mod xlsx_import;
@@ -884,7 +889,10 @@ pub(crate) fn record_workbook_snapshot(state: &GuiState) -> Result<(), String> {
     let (sheets, active) = workbook_sheets(state);
     let document_generation = state.open_operations.borrow().document_generation();
     let revision = state.next_worker_revision();
-    if let Err(error) = worker.submit_replacement(revision, active, sheets) {
+    // The store records the file the workbook saves to, so a restart can return
+    // an unsaved draft to it.
+    let source = state.save_path.borrow().clone();
+    if let Err(error) = worker.submit_replacement(revision, active, sheets, source) {
         state.mark_worker_submission_failure(revision, error.clone());
         return Err(error);
     }
@@ -2290,7 +2298,8 @@ pub(crate) fn save_current_sheet(
         None => state
             .dialogs
             .save_file(&save_request(state))
-            .map_err(|error| error.to_string())?,
+            .map_err(|error| error.to_string())?
+            .map(workbook_io::with_workbook_extension),
     };
     let Some(path) = path else {
         app.set_status_left("Save cancelled".into());
@@ -2408,28 +2417,6 @@ pub(crate) fn register_history_actions(
     }
 }
 
-/// Picks the workbook a session starts with. A recovered workbook has no save
-/// path: its contents exist only in the recovery store, so the caller must show
-/// it as unsaved. The bool is true exactly when the workbook was recovered.
-fn startup_workbook(recovered: Option<WorkbookFile>, example: bool) -> (WorkbookFile, bool) {
-    match recovered {
-        // An untouched starter in the store is not a draft: the window closed
-        // before any edit, so there is nothing to recover or to ask about.
-        Some(file) if !workbook_io::is_untouched_starter(&file) => (file, true),
-        _ => (
-            WorkbookFile {
-                sheets: vec![if example {
-                    starter_workbook()
-                } else {
-                    blank_sheet()
-                }],
-                active: 0,
-            },
-            false,
-        ),
-    }
-}
-
 /// Shift+arrow extends the selected range.
 fn wire_selection_extension(app: &SheetsApp, state: &Rc<GuiState>) {
     let state = state.clone();
@@ -2481,39 +2468,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         export_completion_sender,
     )?;
     let startup_recovery_error = startup.recovery_error.clone();
-    let stored_draft = startup
-        .restored_payload
-        .as_deref()
-        .and_then(restore_workbook_from_snapshot);
-    // The store holds only an untouched starter: the fresh blank replaces it,
-    // so no later checkpoint or journal entry is built on the stale tab.
-    let replace_stored_starter = startup.restored_payload.is_some()
-        && stored_draft
-            .as_ref()
-            .is_some_and(workbook_io::is_untouched_starter);
-    let (fallback, recovered_unsaved) = startup_workbook(stored_draft, args.example);
-    let startup_open = args.open.as_ref().map(PathBuf::from);
-    let mut initial = fallback;
-    if initial.sheets.is_empty() {
-        initial.sheets.push(blank_sheet());
-    }
-    initial.active = initial.active.min(initial.sheets.len() - 1);
-    if startup_open.is_none() {
-        let initial_sheet = &mut initial.sheets[initial.active];
-        if args.objects {
-            object_actions::seed_demo_objects(initial_sheet);
-        }
-        if args.chart {
-            let chart = if initial_sheet.name == "Example Budget" {
-                plan_chart_in_range(initial_sheet, 0, 1, 1, 3).ok()
-            } else {
-                plan_chart(initial_sheet, 0, 1).ok()
-            };
-            if let Some(chart) = chart {
-                initial_sheet.chart = Some(chart);
-            }
-        }
-    }
     let workbook_filter = FileFilter::new("Loom Sheets workbook", ["loomtable"])
         .map_err(|error| error.to_string())?;
     let import_filter =
@@ -2533,26 +2487,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     *state.save_operations.borrow_mut() = save_operations;
     *state.export_operations.borrow_mut() = export_operations;
     let initial_revision = state.next_worker_revision();
-    let initial_model = if startup_open.is_some() {
-        worker.initialize_workbook_without_recovery(
-            initial_revision,
-            initial.active,
-            initial.sheets,
-        )?
-    } else if replace_stored_starter {
-        worker.initialize_workbook_replacing_stored_draft(
-            initial_revision,
-            initial.active,
-            initial.sheets,
-        )?
-    } else {
-        worker.initialize_workbook(initial_revision, initial.active, initial.sheets)?
-    };
+    let startup_open = args.open.as_ref().map(PathBuf::from);
+    let session = startup_session::begin(
+        &worker,
+        &startup,
+        initial_revision,
+        &startup_session::StartupChoices {
+            example: args.example,
+            objects: args.objects,
+            chart: args.chart,
+            requested: startup_open.clone(),
+        },
+    )?;
     state.last_queued_worker_revision.set(initial_revision);
     let initial_generation = state.open_operations.borrow().document_generation();
     worker_failure::mark_full_resync_accepted(&state, initial_generation, initial_revision);
-    state.install_workbook(initial_model.sheets, initial_model.active_sheet);
-    state.set_startup_baseline(recovered_unsaved && startup_open.is_none());
+    state.install_workbook(session.model.sheets, session.model.active_sheet);
+    *state.save_path.borrow_mut() = session.save_path.clone();
+    state.set_startup_baseline(session.recovered_unsaved);
     *state.workbook_worker.borrow_mut() = Some(worker);
     if args.objects && startup_open.is_none() {
         app.set_selected_object(0);
@@ -2805,6 +2757,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     project_current(&app, &state);
     app.set_status_left("Calculating…".into());
+    if session.recovered_unsaved {
+        let name = workbook_display_name(&state);
+        app.set_status_left(SharedString::from(startup_session::restored_status(&name)));
+    }
     if let Some(error) = startup_recovery_error {
         app.set_status_right(SharedString::from(format!(
             "Recovery journal unavailable: {error}"
@@ -2816,7 +2772,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.show().map_err(|e| e.to_string())?;
     let _worker_completion_timer = start_workbook_worker_timer(&app, &state, &menu_service);
     let _open_completion_timer = start_file_timer_after_show(&app, &state, &menu_service);
-    if let Some(path) = startup_open {
+    if let Some(path) = startup_open.filter(|_| session.opens_file) {
         start_startup_open(
             &app,
             &state,

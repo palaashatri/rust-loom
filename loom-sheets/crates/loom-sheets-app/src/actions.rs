@@ -262,7 +262,7 @@ pub(crate) fn register_sheet_actions(
                     true,
                     keys.as_deref(),
                 );
-                if sorted {
+                if sorted.is_some() {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                 }
@@ -1128,7 +1128,7 @@ pub(crate) fn register_sheet_actions(
                     true,
                     keys.as_deref(),
                 );
-                if sorted {
+                if sorted.is_some() {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                 }
@@ -1157,7 +1157,7 @@ pub(crate) fn register_sheet_actions(
                     false,
                     keys.as_deref(),
                 );
-                if sorted {
+                if sorted.is_some() {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                 }
@@ -1521,17 +1521,19 @@ pub(crate) fn sortable_last_row(sheet: &Sheet) -> u32 {
     }
 }
 
-/// Status line for a finished (or impossible) sort.
-pub(crate) fn sort_status(sheet: &Sheet, sorted: bool, direction: &str) -> String {
+/// Status line for a finished (or impossible) sort. `sorted` is the first row
+/// the sort moved, as [`sort_table_with_keys`] reports it.
+pub(crate) fn sort_status(sheet: &Sheet, sorted: Option<u32>, direction: &str) -> String {
     let last_used = sheet.dimensions().rows.saturating_sub(1);
     let last_row = sortable_last_row(sheet);
-    if !sorted {
+    let Some(first_row) = sorted else {
         return "Nothing to sort: a sort needs at least two rows of data above any formulas"
             .to_string();
-    }
+    };
     if last_row < last_used {
         format!(
-            "Sorted rows 2–{} {direction}; rows with formulas stayed in place",
+            "Sorted rows {}–{} {direction}; rows with formulas stayed in place",
+            first_row + 1,
             last_row + 1
         )
     } else {
@@ -1539,7 +1541,6 @@ pub(crate) fn sort_status(sheet: &Sheet, sorted: bool, direction: &str) -> Strin
     }
 }
 
-/// Sort table rows preserving header row 0 with undo transaction recording.
 /// Sort with keys evaluated from the sheet alone. The app's callbacks pass
 /// cached keys instead, so only the tests and benches need this form.
 #[cfg(test)]
@@ -1550,10 +1551,12 @@ pub(crate) fn sort_table(
     col_idx: u32,
     ascending: bool,
 ) -> bool {
-    sort_table_with_keys(sheet, undo_stack, redo_stack, col_idx, ascending, None)
+    sort_table_with_keys(sheet, undo_stack, redo_stack, col_idx, ascending, None).is_some()
 }
 
-/// [`sort_table`] with sort keys the caller already holds, if any.
+/// Sort the table's rows with an undo transaction. The first row stays in place
+/// only when it looks like a header (see `sort_header`). Returns the first row
+/// the sort moved, or `None` when there were too few rows to sort.
 pub(crate) fn sort_table_with_keys(
     sheet: &mut Sheet,
     undo_stack: &mut Vec<SheetTransaction>,
@@ -1561,20 +1564,11 @@ pub(crate) fn sort_table_with_keys(
     col_idx: u32,
     ascending: bool,
     keys: Option<&std::collections::HashMap<CellRef, loom_sheets_core::Value>>,
-) -> bool {
-    let dims = sheet.dimensions();
+) -> Option<u32> {
     let last_row = sortable_last_row(sheet);
-    if last_row < 2 {
-        return false;
+    if last_row < 1 {
+        return None;
     }
-    let range = CellRange::new(
-        CellRef { row: 1, col: 0 },
-        CellRef {
-            row: last_row,
-            col: dims.cols.saturating_sub(1),
-        },
-    );
-    let clamped_col = col_idx.min(dims.cols.saturating_sub(1));
     // Sort keys come from the caller's results when it has them, otherwise from
     // one evaluation. The result is a row order, so the undo entry costs a few
     // bytes per row instead of a copy of the sheet.
@@ -1586,14 +1580,30 @@ pub(crate) fn sort_table_with_keys(
             &owned
         }
     };
-    if let Ok(order) = loom_sheets_core::RowOrder::sorted(range, clamped_col, ascending, values) {
-        commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Rows(order));
-        true
-    } else {
-        false
+    let first_row = u32::from(crate::sort_header::first_row_is_header(sheet, values));
+    if last_row <= first_row {
+        return None;
+    }
+    let dims = sheet.dimensions();
+    let range = CellRange::new(
+        CellRef {
+            row: first_row,
+            col: 0,
+        },
+        CellRef {
+            row: last_row,
+            col: dims.cols.saturating_sub(1),
+        },
+    );
+    let clamped_col = col_idx.min(dims.cols.saturating_sub(1));
+    match loom_sheets_core::RowOrder::sorted(range, clamped_col, ascending, values) {
+        Ok(order) => {
+            commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Rows(order));
+            Some(first_row)
+        }
+        Err(_) => None,
     }
 }
-
 /// Sort keys the active tab's cached results provide. Only a single-tab
 /// workbook qualifies: its results are exactly its own evaluation, while a
 /// multi-tab workbook keeps evaluating the tab alone, as it always has.

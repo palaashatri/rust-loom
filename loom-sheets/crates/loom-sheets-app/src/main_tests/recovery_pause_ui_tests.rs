@@ -37,7 +37,7 @@ impl Session {
             let package =
                 crate::workbook_io::workbook_package_bytes(&sheets, active).expect("package");
             other
-                .checkpoint_package(package, false)
+                .checkpoint_package(package, false, None)
                 .expect("the other window checkpoints a draft");
         }
         let (worker, startup) = workbook_worker::WorkbookWorker::start_at_with_completions(

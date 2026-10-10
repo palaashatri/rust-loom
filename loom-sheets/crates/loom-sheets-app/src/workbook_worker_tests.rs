@@ -134,6 +134,7 @@ fn replacement_drops_older_deltas_and_keeps_later_deltas() {
         revision: 3,
         active_sheet: 0,
         sheets: vec![replacement],
+        source: None,
     });
     pending.merge(cell(4, b1, "new B1"));
 
@@ -208,7 +209,7 @@ fn worker_evaluates_replacement_then_a_cell_delta() {
     sheet.set_str("A1", "2");
     sheet.set_str("B1", "=A1+3");
     worker
-        .submit_replacement(1, 0, vec![sheet])
+        .submit_replacement(1, 0, vec![sheet], None)
         .expect("send initial workbook");
     let first = worker.wait_for_result(1).expect("first result");
     assert_eq!(value(&first, "B1"), &Value::Number(5.0));
@@ -479,7 +480,7 @@ fn queued_file_operations_fail_until_worker_input_is_resynchronized() {
     let mut resynchronized = Sheet::new("Data");
     resynchronized.set_str("A1", "2");
     worker
-        .submit_replacement(3, 0, vec![resynchronized])
+        .submit_replacement(3, 0, vec![resynchronized], None)
         .expect("queue full workbook resynchronization");
     worker
         .wait_for_result(3)
@@ -934,7 +935,7 @@ fn save_barrier_flushes_pending_work_and_compacts_recovery() {
         workbook_package_bytes(std::slice::from_ref(&sheet), 0).expect("saved workbook package");
 
     worker
-        .submit_replacement(1, 0, vec![sheet])
+        .submit_replacement(1, 0, vec![sheet], None)
         .expect("queue pending workbook");
     worker
         .queue_save(1, 1, 1, None, save_path)
@@ -1090,7 +1091,7 @@ fn worker_reports_recovery_failure_and_keeps_evaluated_values() {
     sheet.set_str("A1", "7");
     sheet.set_str("B1", "=A1+1");
     worker
-        .submit_replacement(1, 0, vec![sheet])
+        .submit_replacement(1, 0, vec![sheet], None)
         .expect("send workbook");
     let result = worker.wait_for_result(1).expect("calculated result");
 
@@ -1108,7 +1109,7 @@ fn shutdown_drains_the_last_pending_edit_to_recovery() {
     sheet.set_str("A1", "2");
     sheet.set_str("B1", "=A1+1");
     worker
-        .submit_replacement(1, 0, vec![sheet])
+        .submit_replacement(1, 0, vec![sheet], None)
         .expect("send initial workbook");
     worker
         .submit_cell(CellUpdate {
@@ -1135,5 +1136,45 @@ fn shutdown_drains_the_last_pending_edit_to_recovery() {
     assert_eq!(
         values[0].get(&CellRef::parse("B1").unwrap()),
         Some(&Value::Number(10.0))
+    );
+}
+
+#[test]
+fn a_replacement_records_its_file_so_a_restart_restores_the_draft_under_it() {
+    let temporary = ScratchDirectory::new();
+    let source = temporary.path().join("saved.loomtable");
+    let (worker, _) =
+        WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("start worker");
+    let mut sheet = Sheet::new("Data");
+    sheet.set_str("A1", "10");
+    worker
+        .submit_replacement(1, 0, vec![sheet], Some(source.clone()))
+        .expect("queue the saved workbook");
+    worker.wait_for_result(1).expect("saved workbook result");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 0,
+            sheet: 0,
+            cell: CellRef::parse("A1").unwrap(),
+            raw: Some("42".to_string()),
+        })
+        .expect("queue the unsaved edit");
+    worker.wait_for_result(2).expect("edit result");
+    drop(worker);
+
+    let (_, startup) =
+        WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("restart worker");
+    assert_eq!(startup.restored_source, Some(source));
+    let recovered = crate::restore_workbook_from_snapshot(
+        startup
+            .restored_payload
+            .as_deref()
+            .expect("the unsaved draft is stored"),
+    )
+    .expect("restore the draft");
+    assert_eq!(
+        recovered.sheets[0].raw(CellRef::parse("A1").unwrap()),
+        Some("42")
     );
 }

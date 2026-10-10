@@ -76,6 +76,8 @@ mod save_operations_journeys;
 mod scale_surfaces_tests;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
+#[path = "main_tests/startup_draft_journeys.rs"]
+mod startup_draft_journeys;
 #[path = "main_tests/toolbar_responsive_tests.rs"]
 mod toolbar_responsive_tests;
 #[path = "main_tests/toolbar_tests.rs"]

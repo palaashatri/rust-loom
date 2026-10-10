@@ -42,6 +42,8 @@ pub(super) struct RecoveryIdentity {
     pub(super) session_id: String,
     pub(super) workbook_id: String,
     pub(super) baseline_id: String,
+    /// The file this workbook saves to, or `None` while it is untitled.
+    pub(super) source: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -515,13 +517,24 @@ impl CellEditRecovery {
                 ));
             }
         };
-        self.checkpoint_package(package, false)
+        let source = self.current_source();
+        self.checkpoint_package(package, false, source.as_deref())
     }
 
+    /// The file the current checkpoint belongs to, or `None` while untitled.
+    pub(crate) fn current_source(&self) -> Option<PathBuf> {
+        self.identity
+            .as_ref()
+            .and_then(|identity| identity.source.clone())
+    }
+
+    /// Write a complete checkpoint. `source` is the file the workbook saves to,
+    /// so a restart can return the draft to that file.
     pub(crate) fn checkpoint_package(
         &mut self,
         package: Vec<u8>,
         new_workbook: bool,
+        source: Option<&Path>,
     ) -> Result<(), String> {
         let limits = self.recovery_limits();
         if package.len() as u64 > limits.package_bytes {
@@ -531,6 +544,7 @@ impl CellEditRecovery {
                 limits.package_bytes
             ));
         }
+        let source = recorded_source(source);
         let identity = match &self.identity {
             Some(current) => RecoveryIdentity {
                 session_id: current.session_id.clone(),
@@ -540,11 +554,13 @@ impl CellEditRecovery {
                     current.workbook_id.clone()
                 },
                 baseline_id: new_identity_id(),
+                source,
             },
             None => RecoveryIdentity {
                 session_id: new_identity_id(),
                 workbook_id: new_identity_id(),
                 baseline_id: new_identity_id(),
+                source,
             },
         };
         let schema = encode_checkpoint_identity(&identity);
@@ -881,11 +897,42 @@ fn new_identity_id() -> String {
     format!("{:x}-{:x}-{:x}", std::process::id(), timestamp, sequence)
 }
 
+/// The source path as the store records it: absolute, and only when it is valid
+/// UTF-8. A path that cannot be recorded restores as untitled, which keeps the
+/// draft and never writes it to the wrong file.
+fn recorded_source(source: Option<&Path>) -> Option<PathBuf> {
+    let source = source?;
+    let absolute = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
+    absolute.to_str().is_some().then_some(absolute)
+}
+
 fn encode_checkpoint_identity(identity: &RecoveryIdentity) -> String {
-    format!(
+    let mut schema = format!(
         "{VERSIONED_SCHEMA_PREFIX};session={};workbook={};baseline={}",
         identity.session_id, identity.workbook_id, identity.baseline_id
-    )
+    );
+    if let Some(source) = identity.source.as_deref().and_then(Path::to_str) {
+        // Hex keeps ';' and '=' in a file name from reading as schema syntax.
+        schema.push_str(";source=");
+        schema.push_str(&hex_encode(source.as_bytes()));
+    }
+    schema
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hex_decode(text: &str) -> Option<Vec<u8>> {
+    let digits = text.as_bytes();
+    if digits.len() % 2 != 0 || !digits.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    let value = |digit: u8| (digit as char).to_digit(16).map(|value| value as u8);
+    digits
+        .chunks_exact(2)
+        .map(|pair| Some(value(pair[0])? * 16 + value(pair[1])?))
+        .collect()
 }
 
 pub(super) fn parse_checkpoint_identity(schema: &str) -> Result<RecoveryIdentity, String> {
@@ -911,6 +958,23 @@ pub(super) fn parse_checkpoint_identity(schema: &str) -> Result<RecoveryIdentity
         .and_then(|part| part.strip_prefix("baseline="))
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Sheets recovery checkpoint has no baseline identity".to_string())?;
+    // Checkpoints written before the source was recorded have no such field.
+    let source = match parts.next() {
+        None => None,
+        Some(part) => {
+            let encoded = part.strip_prefix("source=").ok_or_else(|| {
+                "Sheets recovery checkpoint identity has extra fields".to_string()
+            })?;
+            let bytes = hex_decode(encoded)
+                .ok_or_else(|| "Sheets recovery checkpoint source is not valid hex".to_string())?;
+            let text = String::from_utf8(bytes)
+                .map_err(|_| "Sheets recovery checkpoint source is not UTF-8".to_string())?;
+            if text.is_empty() {
+                return Err("Sheets recovery checkpoint source is empty".into());
+            }
+            Some(PathBuf::from(text))
+        }
+    };
     if parts.next().is_some() {
         return Err("Sheets recovery checkpoint identity has extra fields".into());
     }
@@ -918,6 +982,7 @@ pub(super) fn parse_checkpoint_identity(schema: &str) -> Result<RecoveryIdentity
         session_id: session_id.to_string(),
         workbook_id: workbook_id.to_string(),
         baseline_id: baseline_id.to_string(),
+        source,
     })
 }
 

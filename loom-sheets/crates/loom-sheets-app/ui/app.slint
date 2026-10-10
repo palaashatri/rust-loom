@@ -25,7 +25,7 @@ export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
     default-font-family: Theme.ui-font-family;
-    // Windows/Linux draw their own frame (menu and title share a row); macOS keeps its native one.
+    // Windows and Linux draw their own frame; macOS keeps its native one.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -320,18 +320,18 @@ export component SheetsApp inherits Window {
     // Tab moves the cell cursor; F6 and Shift+F6 cycle the regions (`region`).
 
     property <int> region: 0;
-    function cycle-region(panels: bool) {
-        let from = root.object-state != 0 || grid-surface.grid-has-focus ? 0 : root.region;
-        if (panels) {
-            if (from == 3 && root.inspector-visible) { root.region = 4; inspector-panel.focus-inspector(); }
-            else if (from == 0) { root.region = 3; root.object-state = 0; action-toolbar.focus-first(); }
-            else { root.region = 0; grid-surface.focus-grid(); }
-        } else if (root.object-state != 0 || !grid-surface.grid-has-focus) { root.object-state = 0; root.region = 0; grid-surface.focus-grid(); }
+    function cycle-region(backwards: bool) {
+        let outside = !grid-surface.grid-has-focus;
+        if (root.object-state != 0) { root.object-state = 0; root.region = 0; grid-surface.focus-grid(); }
+        else if (outside && !backwards && root.region == 3 && root.inspector-visible) { root.region = 4; inspector-panel.focus-inspector(); }
+        else if (outside && backwards && root.region == 4) { root.region = 3; action-toolbar.focus-first(); }
+        else if (outside) { root.region = 0; grid-surface.focus-grid(); }
+        else if (backwards && root.inspector-visible) { root.region = 4; inspector-panel.focus-inspector(); }
+        else if (backwards) { root.region = 3; action-toolbar.focus-first(); }
         else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
         else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }
         else { root.region = 3; action-toolbar.focus-first(); }
-    }
-    public function close-toolbar-menu() {
+    }    public function close-toolbar-menu() {
         root.toolbar-menu = 0;
         grid-surface.focus-grid();
     }
@@ -427,7 +427,7 @@ export component SheetsApp inherits Window {
                 title: root.window-title;
                 maximized: root.maximized;
                 drag-requested => { root.window-drag(); }
-                // `maximized` and `minimized` are Slint's own window properties.
+                // Slint's own maximized and minimized window properties.
                 toggle-maximize => { root.maximized = !root.maximized; }
                 minimize => { root.minimized = true; }
                 close => { root.window-close(); }

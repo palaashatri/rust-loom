@@ -285,13 +285,13 @@ fn journal_failure_pauses_recovery_and_only_a_covering_checkpoint_clears_it() {
     // A retry whose checkpoint fails again must not clear the pause.
     fault_injection::inject(&scratch.versioned(), FaultStep::CheckpointPayload, 0, 1);
     worker
-        .submit_replacement(5, active, sheets.clone())
+        .submit_replacement(5, active, sheets.clone(), None)
         .unwrap();
     assert!(worker.wait_for_result(5).unwrap().recovery_error.is_some());
     assert!(worker.recovery_pause().is_some());
 
     worker
-        .submit_replacement(6, active, sheets.clone())
+        .submit_replacement(6, active, sheets.clone(), None)
         .unwrap();
     let healed = worker.wait_for_result(6).unwrap();
     assert!(healed.recovery_error.is_none());
@@ -387,7 +387,11 @@ fn run_fault_scenario(step: FaultStep) {
     let (mut recovery, restored) = CellEditRecovery::open_at(&base).expect("open recovery");
     assert!(restored.is_none());
     recovery
-        .checkpoint_package(workbook_package_bytes(&sheets, active).unwrap(), false)
+        .checkpoint_package(
+            workbook_package_bytes(&sheets, active).unwrap(),
+            false,
+            None,
+        )
         .expect("baseline checkpoint");
     let accepted_edit = edit(&mut sheets, "A2", "accepted edit");
     recovery
@@ -415,7 +419,7 @@ fn run_fault_scenario(step: FaultStep) {
         | FaultStep::CheckpointPointer => {
             let package = workbook_package_bytes(&sheets, active).unwrap();
             assert!(
-                recovery.checkpoint_package(package, false).is_err(),
+                recovery.checkpoint_package(package, false, None).is_err(),
                 "{step:?}: a failed checkpoint must be reported"
             );
             // The previous generation and its journal must still be intact.
@@ -424,7 +428,7 @@ fn run_fault_scenario(step: FaultStep) {
         FaultStep::JournalRewrite => {
             let package = workbook_package_bytes(&sheets, active).unwrap();
             assert!(
-                recovery.checkpoint_package(package, false).is_err(),
+                recovery.checkpoint_package(package, false, None).is_err(),
                 "{step:?}: a failed compaction must be reported"
             );
             // The new pointer was already published, so it is authoritative and
@@ -450,7 +454,7 @@ fn run_fault_scenario(step: FaultStep) {
     let (mut reopened, _) = CellEditRecovery::open_at(&base).expect("reopen after fault");
     let package = workbook_package_bytes(&sheets, active).unwrap();
     reopened
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect("a fresh checkpoint succeeds once the disk recovers");
     assert!(reopened.failure().is_none());
     drop(reopened);
@@ -489,7 +493,11 @@ fn later_write_failures_after_earlier_successes_are_also_reported() {
     let (mut sheets, active) = workbook();
     let (mut recovery, _) = CellEditRecovery::open_at(scratch.base()).unwrap();
     recovery
-        .checkpoint_package(workbook_package_bytes(&sheets, active).unwrap(), false)
+        .checkpoint_package(
+            workbook_package_bytes(&sheets, active).unwrap(),
+            false,
+            None,
+        )
         .unwrap();
     // Let two appends through, then fail the third.
     fault_injection::inject(&versioned, FaultStep::JournalAppend, 2, 1);
@@ -513,7 +521,11 @@ fn recovery_with_three_edits(scratch: &Scratch) {
     let (mut sheets, active) = workbook();
     let (mut recovery, _) = CellEditRecovery::open_at(scratch.base()).unwrap();
     recovery
-        .checkpoint_package(workbook_package_bytes(&sheets, active).unwrap(), false)
+        .checkpoint_package(
+            workbook_package_bytes(&sheets, active).unwrap(),
+            false,
+            None,
+        )
         .unwrap();
     for address in ["C1", "C2", "C3"] {
         let change = edit(&mut sheets, address, "v");

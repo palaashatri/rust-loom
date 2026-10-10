@@ -65,6 +65,8 @@ pub(crate) enum WorkerUpdateKind {
 
 pub(crate) struct WorkerStartup {
     pub(crate) restored_payload: Option<Vec<u8>>,
+    /// The file the restored draft saves to; `None` for an untitled draft.
+    pub(crate) restored_source: Option<PathBuf>,
     pub(crate) recovery_error: Option<String>,
 }
 
@@ -90,6 +92,7 @@ enum PendingUpdate {
         revision: u64,
         active_sheet: usize,
         sheets: Vec<Sheet>,
+        source: Option<PathBuf>,
     },
     Active {
         revision: u64,
@@ -102,6 +105,7 @@ struct PendingBatch {
     revision: u64,
     active_sheet: usize,
     replacement: Option<Vec<Sheet>>,
+    replacement_source: Option<PathBuf>,
     cells: HashMap<(usize, CellRef), Option<String>>,
 }
 
@@ -126,10 +130,12 @@ impl PendingBatch {
             PendingUpdate::Replace {
                 active_sheet,
                 sheets,
+                source,
                 ..
             } => {
                 self.active_sheet = active_sheet;
                 self.replacement = Some(sheets);
+                self.replacement_source = source;
                 self.cells.clear();
             }
             PendingUpdate::Active { active_sheet, .. } => {
@@ -325,16 +331,19 @@ impl WorkbookWorker {
             .map_err(|error| format!("workbook initialization failed: {error}"))
     }
 
+    /// Replace the whole workbook. `source` is the file it now saves to.
     pub(crate) fn submit_replacement(
         &self,
         revision: u64,
         active_sheet: usize,
         sheets: Vec<Sheet>,
+        source: Option<PathBuf>,
     ) -> Result<(), String> {
         self.queue(PendingUpdate::Replace {
             revision,
             active_sheet,
             sheets,
+            source,
         })
     }
 
@@ -599,17 +608,22 @@ fn open_recovery(
     result: Result<(CellEditRecovery, Option<Vec<u8>>), String>,
 ) -> (Option<CellEditRecovery>, WorkerStartup) {
     match result {
-        Ok((recovery, restored_payload)) => (
-            Some(recovery),
-            WorkerStartup {
-                restored_payload,
-                recovery_error: None,
-            },
-        ),
+        Ok((recovery, restored_payload)) => {
+            let restored_source = recovery.current_source();
+            (
+                Some(recovery),
+                WorkerStartup {
+                    restored_payload,
+                    restored_source,
+                    recovery_error: None,
+                },
+            )
+        }
         Err(error) => (
             None,
             WorkerStartup {
                 restored_payload: None,
+                restored_source: None,
                 recovery_error: Some(error),
             },
         ),
@@ -760,7 +774,9 @@ fn run_worker(
                             Ok(package) => {
                                 // A failure latches inside the recovery writer
                                 // and pauses edit admission below.
-                                let _ = recovery.checkpoint_package(package, false);
+                                let source = recovery.current_source();
+                                let _ =
+                                    recovery.checkpoint_package(package, false, source.as_deref());
                             }
                             Err(error) => recovery.mark_failed(error),
                         }
@@ -818,7 +834,10 @@ fn run_worker(
                             let journal_started = Instant::now();
                             match package {
                                 Ok(payload) => {
-                                    if let Err(error) = recovery.checkpoint_package(payload, false)
+                                    // A fresh store starts from the blank or example
+                                    // workbook, which has no file.
+                                    if let Err(error) =
+                                        recovery.checkpoint_package(payload, false, None)
                                     {
                                         recovery_error = Some(error);
                                     }
@@ -885,6 +904,7 @@ fn run_worker(
                     (false, false) => WorkerUpdateKind::ActiveTab,
                 };
                 let is_replacement = batch.replacement.is_some();
+                let replacement_source = batch.replacement_source;
                 if let Some(replacement) = batch.replacement {
                     sheets = replacement;
                     if sheets.is_empty() {
@@ -947,7 +967,11 @@ fn run_worker(
                         #[cfg(test)]
                         let journal_started = Instant::now();
                         match package {
-                            Ok(payload) => match recovery.checkpoint_package(payload, true) {
+                            Ok(payload) => match recovery.checkpoint_package(
+                                payload,
+                                true,
+                                replacement_source.as_deref(),
+                            ) {
                                 Ok(()) => mirror_is_recoverable = true,
                                 Err(error) => recovery_error = Some(error),
                             },
@@ -1062,7 +1086,11 @@ fn run_worker(
                             let saved_baseline = (sheets.clone(), active_sheet);
                             baseline = Some(saved_baseline.clone());
                             let checkpoint_result = Some(match recovery.as_mut() {
-                                Some(recovery) => recovery.checkpoint_package(payload, false),
+                                Some(recovery) => recovery.checkpoint_package(
+                                    payload,
+                                    false,
+                                    Some(checkpoint.path.as_path()),
+                                ),
                                 None => Err(startup_error.clone().unwrap_or_else(|| {
                                     "recovery writer is unavailable".to_string()
                                 })),

@@ -462,3 +462,46 @@ fn workbook_from_package(
     assets::attach_workbook_assets(&mut workbook, arch)?;
     Ok(workbook)
 }
+
+/// Save As names a Loom workbook with `.loomtable`: the chosen name gets the
+/// extension unless it already ends in it (any letter case).
+pub(crate) fn with_workbook_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    let Some(name) = path.file_name().map(std::ffi::OsStr::to_os_string) else {
+        return path;
+    };
+    let already = name
+        .to_str()
+        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".loomtable"));
+    if already {
+        return path;
+    }
+    let mut named = name;
+    named.push(".loomtable");
+    path.with_file_name(named)
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_chosen_name_without_the_extension_gets_loomtable() {
+        assert_eq!(
+            with_workbook_extension(PathBuf::from("/work/budget")),
+            PathBuf::from("/work/budget.loomtable")
+        );
+        assert_eq!(
+            with_workbook_extension(PathBuf::from("/work/budget.csv")),
+            PathBuf::from("/work/budget.csv.loomtable")
+        );
+    }
+
+    #[test]
+    fn a_name_already_ending_in_loomtable_is_kept_in_any_case() {
+        for name in ["budget.loomtable", "Budget.LOOMTABLE"] {
+            let path = PathBuf::from("/work").join(name);
+            assert_eq!(with_workbook_extension(path.clone()), path);
+        }
+    }
+}

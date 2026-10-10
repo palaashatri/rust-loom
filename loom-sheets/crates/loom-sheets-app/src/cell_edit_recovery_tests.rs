@@ -54,7 +54,7 @@ fn checkpoint_fixture(base: &Path) -> Vec<u8> {
         CellEditRecovery::open_at(base).expect("open empty versioned recovery");
     assert!(restored.is_none());
     recovery
-        .checkpoint_package(package.clone(), false)
+        .checkpoint_package(package.clone(), false, None)
         .expect("write baseline checkpoint");
     drop(recovery);
     package
@@ -353,7 +353,7 @@ fn legacy_migration_publishes_and_verifies_before_cleaning_complete_workbook() {
         CellEditRecovery::open_at(fixture.path()).expect("open legacy recovery");
     assert_eq!(restored, Some(package.clone()));
     recovery
-        .checkpoint_package(package.clone(), false)
+        .checkpoint_package(package.clone(), false, None)
         .expect("publish versioned baseline and migrate legacy files");
     drop(recovery);
 
@@ -448,7 +448,7 @@ fn legacy_migration_waits_for_accepted_startup_replacement() {
     let selected_package = workbook_package_bytes(&[selected.clone(), report.clone()], 1)
         .expect("selected workbook package");
     worker
-        .submit_replacement(2, 1, vec![selected, report])
+        .submit_replacement(2, 1, vec![selected, report], None)
         .expect("accept startup replacement");
     let result = worker
         .wait_for_result(2)
@@ -610,7 +610,7 @@ fn missing_migration_receipt_with_recreated_legacy_state_fails_closed() {
         CellEditRecovery::open_at(fixture.path()).expect("open legacy-only recovery");
     assert_eq!(restored, Some(original_legacy_package.clone()));
     recovery
-        .checkpoint_package(original_legacy_package.clone(), false)
+        .checkpoint_package(original_legacy_package.clone(), false, None)
         .expect("migrate legacy checkpoint");
     drop(recovery);
     assert!(legacy_entry_bytes(fixture.path()).is_empty());
@@ -660,7 +660,7 @@ fn legacy_migration_publication_failure_preserves_legacy_bytes_and_prepared_rece
     fs::create_dir(&pointer_temporary).expect("block checkpoint pointer publication");
 
     let error = recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect_err("blocked pointer publication must fail");
     assert!(error.contains("blocked"), "unexpected failure: {error}");
     assert_eq!(legacy_entry_bytes(fixture.path()), legacy_before);
@@ -688,7 +688,7 @@ fn legacy_migration_refuses_a_changed_legacy_source_before_publication() {
     let changed_files = legacy_entry_bytes(fixture.path());
 
     let error = recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect_err("changed source must refuse migration");
     assert!(error.contains("changed"), "unexpected failure: {error}");
     assert_eq!(legacy_entry_bytes(fixture.path()), changed_files);
@@ -709,7 +709,7 @@ fn legacy_migration_refuses_unknown_legacy_entries_before_publication() {
     let entries_before = legacy_entry_bytes(fixture.path());
 
     let error = recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect_err("unknown entry must refuse migration");
     assert!(error.contains("unknown"), "unexpected failure: {error}");
     assert_eq!(legacy_entry_bytes(fixture.path()), entries_before);
@@ -787,7 +787,7 @@ fn ordinary_checkpoint_capacity_refusal_preserves_checkpoint_journal_and_sequenc
         recovery.set_recovery_limits_for_test(limits);
 
         let error = recovery
-            .checkpoint_package(original_package, false)
+            .checkpoint_package(original_package, false, None)
             .expect_err("ordinary checkpoint must refuse injected capacity limit");
 
         assert!(
@@ -974,7 +974,7 @@ fn assert_capacity_refusal(limits: (u64, u64, u64), expected_error: &str) {
     assert_eq!(recovery.migration_limits_for_test(), Some(limits));
 
     let error = recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect_err("capacity refusal must fail before publication");
     assert!(
         error.contains(expected_error),
@@ -998,7 +998,7 @@ fn legacy_migration_retries_verified_partial_cleanup() {
     let (mut recovery, _) =
         CellEditRecovery::open_at(fixture.path()).expect("open legacy recovery");
     recovery
-        .checkpoint_package(package.clone(), false)
+        .checkpoint_package(package.clone(), false, None)
         .expect("publish versioned baseline");
     drop(recovery);
 
@@ -1035,7 +1035,7 @@ fn legacy_migration_marker_reports_files_recreated_by_an_older_binary() {
     let (mut recovery, _) =
         CellEditRecovery::open_at(fixture.path()).expect("open legacy recovery");
     recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect("migrate legacy recovery");
     drop(recovery);
     let (name, bytes) = legacy_before.iter().next().expect("legacy file");
@@ -1060,7 +1060,7 @@ fn legacy_migration_rejects_receipt_path_traversal_before_touching_outside_files
     let (mut recovery, _) =
         CellEditRecovery::open_at(fixture.path()).expect("open legacy recovery");
     recovery
-        .checkpoint_package(package, false)
+        .checkpoint_package(package, false, None)
         .expect("migrate legacy recovery");
     drop(recovery);
 
@@ -1429,4 +1429,109 @@ fn ordinary_append_unsupported_legacy_entry_does_not_attempt_fallback() {
         fs::read(&unknown_path).expect("unsupported entry survives"),
         unknown_bytes
     );
+}
+
+#[test]
+fn a_restart_returns_the_file_the_last_checkpoint_was_saved_to() {
+    let fixture = RecoveryFixture::new();
+    // Separators and '=' in the file name must survive the schema round trip.
+    let source = fixture.path().join("budget; q3 = final.loomtable");
+    let package = workbook_package_bytes(&[baseline_sheet("baseline")], 0).expect("package");
+    let (mut recovery, restored) =
+        CellEditRecovery::open_at(fixture.path()).expect("open empty recovery");
+    assert!(restored.is_none());
+    recovery
+        .checkpoint_package(package.clone(), true, Some(&source))
+        .expect("checkpoint the saved file");
+    assert_eq!(recovery.current_source(), Some(source.clone()));
+    drop(recovery);
+
+    let (recovery, restored) =
+        CellEditRecovery::open_at(fixture.path()).expect("reopen after a force kill");
+    assert_eq!(restored, Some(package));
+    assert_eq!(recovery.current_source(), Some(source));
+}
+
+#[test]
+fn an_edit_after_a_restart_stays_on_the_recorded_file() {
+    let fixture = RecoveryFixture::new();
+    let source = fixture.path().join("ledger.loomtable");
+    let package = workbook_package_bytes(&[baseline_sheet("baseline")], 0).expect("package");
+    let (mut recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("open recovery");
+    recovery
+        .checkpoint_package(package.clone(), true, Some(&source))
+        .expect("checkpoint the saved file");
+    drop(recovery);
+
+    let (mut recovery, restored) = CellEditRecovery::open_at(fixture.path()).expect("reopen");
+    assert_eq!(restored, Some(package));
+    let edited = workbook_package_bytes(&[baseline_sheet("edited")], 0).expect("package");
+    let cell = CellRef::parse("A1").unwrap();
+    recovery
+        .record_cells(0, [(0, cell, Some("edited".to_string()))], || {
+            Ok(edited.clone())
+        })
+        .expect("journal the unsaved edit");
+    drop(recovery);
+
+    let (recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("reopen with the edit");
+    assert_eq!(recovery.current_source(), Some(source));
+}
+
+#[test]
+fn a_save_to_another_file_moves_the_recorded_source_and_keeps_the_edits() {
+    let fixture = RecoveryFixture::new();
+    let first = fixture.path().join("first.loomtable");
+    let second = fixture.path().join("second.loomtable");
+    let package = workbook_package_bytes(&[baseline_sheet("saved as")], 0).expect("package");
+    let (mut recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("open recovery");
+    recovery
+        .checkpoint_package(package.clone(), true, Some(&first))
+        .expect("checkpoint the first file");
+    recovery
+        .checkpoint_package(package.clone(), false, Some(&second))
+        .expect("save as the second file");
+    drop(recovery);
+
+    let (recovery, restored) = CellEditRecovery::open_at(fixture.path()).expect("reopen");
+    assert_eq!(restored, Some(package));
+    assert_eq!(recovery.current_source(), Some(second));
+}
+
+#[test]
+fn an_untitled_checkpoint_restores_without_a_source() {
+    let fixture = RecoveryFixture::new();
+    let package = workbook_package_bytes(&[baseline_sheet("untitled")], 0).expect("package");
+    let (mut recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("open recovery");
+    recovery
+        .checkpoint_package(package.clone(), true, None)
+        .expect("checkpoint the untitled workbook");
+    drop(recovery);
+
+    let (recovery, restored) = CellEditRecovery::open_at(fixture.path()).expect("reopen");
+    assert_eq!(restored, Some(package));
+    assert_eq!(recovery.current_source(), None);
+}
+
+#[test]
+fn a_checkpoint_schema_without_a_source_parses_as_untitled() {
+    let identity =
+        parse_checkpoint_identity("loom.sheets.recovery/1;session=s;workbook=w;baseline=b")
+            .expect("a schema written before sources were recorded still parses");
+    assert_eq!(identity.source, None);
+}
+
+#[test]
+fn a_malformed_recorded_source_fails_closed() {
+    let prefix = "loom.sheets.recovery/1;session=s;workbook=w;baseline=b";
+    assert!(parse_checkpoint_identity(&format!("{prefix};source=zz")).is_err());
+    assert!(parse_checkpoint_identity(&format!("{prefix};source=")).is_err());
+    assert!(parse_checkpoint_identity(&format!("{prefix};source=ff")).is_err());
+    assert!(parse_checkpoint_identity(&format!("{prefix};source=6f6b;extra")).is_err());
+}
+
+fn baseline_sheet(value: &str) -> Sheet {
+    let mut sheet = Sheet::new("Data");
+    sheet.set_str("A1", value);
+    sheet
 }

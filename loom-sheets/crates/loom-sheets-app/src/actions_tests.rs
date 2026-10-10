@@ -1386,6 +1386,104 @@ fn sort_leaves_formula_rows_in_place_and_keeps_formulas_valid() {
             .any(|v| matches!(v, loom_sheets_core::Value::Error(_))),
         "no cell may evaluate to an error after sorting: {values:?}"
     );
-    let status = sort_status(&sheet, true, "descending");
+    let status = sort_status(&sheet, Some(1), "descending");
     assert!(status.contains("formulas stayed in place"), "{status}");
+}
+
+#[test]
+fn sort_keeps_a_text_header_row_and_orders_the_data_under_it() {
+    let mut sheet = Sheet::new("Data");
+    for (cell, raw) in [
+        ("A1", "Item"),
+        ("B1", "Price"),
+        ("A2", "Apples"),
+        ("B2", "3"),
+        ("A3", "Pears"),
+        ("B3", "1"),
+        ("A4", "Figs"),
+        ("B4", "2"),
+    ] {
+        sheet.set_str(cell, raw);
+    }
+    let (mut undo, mut redo) = (Vec::new(), Vec::new());
+    assert_eq!(
+        sort_table_with_keys(&mut sheet, &mut undo, &mut redo, 1, true, None),
+        Some(1),
+        "a text header over numbers is kept, so sorting starts at row 2"
+    );
+    let column: Vec<String> = (0..4)
+        .map(|row| {
+            sheet
+                .raw(CellRef { row, col: 0 })
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(column, ["Item", "Pears", "Figs", "Apples"]);
+}
+
+#[test]
+fn sort_moves_a_numeric_first_row_with_the_data() {
+    let mut sheet = Sheet::new("Data");
+    for (cell, raw) in [
+        ("A1", "10"),
+        ("B1", "c"),
+        ("A2", "7"),
+        ("B2", "b"),
+        ("A3", "12"),
+        ("B3", "a"),
+    ] {
+        sheet.set_str(cell, raw);
+    }
+    let (mut undo, mut redo) = (Vec::new(), Vec::new());
+    assert_eq!(
+        sort_table_with_keys(&mut sheet, &mut undo, &mut redo, 0, true, None),
+        Some(0),
+        "numbers in the first row are data, so every row sorts"
+    );
+    let column: Vec<String> = (0..3)
+        .map(|row| {
+            sheet
+                .raw(CellRef { row, col: 0 })
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(column, ["7", "10", "12"]);
+}
+
+#[test]
+fn sort_keeps_a_bold_first_row_as_the_header_without_numbers_below() {
+    let mut sheet = Sheet::new("Data");
+    for (cell, raw) in [("A1", "Name"), ("B1", "City"), ("A2", "Zed"), ("A3", "Amy")] {
+        sheet.set_str(cell, raw);
+    }
+    for cell in ["A1", "B1"] {
+        let cell = CellRef::parse(cell).expect("cell");
+        sheet.set_cell_style(
+            cell,
+            loom_sheets_core::style::CellStyle {
+                bold: true,
+                ..loom_sheets_core::style::CellStyle::default()
+            },
+        );
+    }
+    let (mut undo, mut redo) = (Vec::new(), Vec::new());
+    assert_eq!(
+        sort_table_with_keys(&mut sheet, &mut undo, &mut redo, 0, true, None),
+        Some(1)
+    );
+    assert_eq!(sheet.raw(CellRef::parse("A1").expect("cell")), Some("Name"));
+    assert_eq!(sheet.raw(CellRef::parse("A2").expect("cell")), Some("Amy"));
+}
+
+#[test]
+fn a_single_row_has_nothing_to_sort_even_without_a_header() {
+    let mut sheet = Sheet::new("Data");
+    sheet.set_str("A1", "5");
+    let (mut undo, mut redo) = (Vec::new(), Vec::new());
+    assert_eq!(
+        sort_table_with_keys(&mut sheet, &mut undo, &mut redo, 0, true, None),
+        None
+    );
 }

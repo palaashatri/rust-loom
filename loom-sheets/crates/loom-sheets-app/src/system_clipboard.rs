@@ -7,17 +7,42 @@
 //! developer's real clipboard.
 
 #[cfg(not(test))]
+thread_local! {
+    /// This process's clipboard connection. On X11 the copied text is served by
+    /// the process that owns the selection, and dropping the connection gives
+    /// the text up. So the connection is opened once and kept for the process.
+    static OWNER: std::cell::RefCell<Option<copypasta::ClipboardContext>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(not(test))]
+fn with_clipboard<T>(
+    action: impl FnOnce(&mut copypasta::ClipboardContext) -> Option<T>,
+) -> Option<T> {
+    OWNER.with(|owner| {
+        let mut owner = owner.borrow_mut();
+        if owner.is_none() {
+            *owner = copypasta::ClipboardContext::new().ok();
+        }
+        action(owner.as_mut()?)
+    })
+}
+
+#[cfg(not(test))]
 pub(crate) fn get_text() -> Option<String> {
-    use copypasta::{ClipboardContext, ClipboardProvider};
-    ClipboardContext::new().ok()?.get_contents().ok()
+    use copypasta::ClipboardProvider;
+    with_clipboard(|context| context.get_contents().ok())
 }
 
 #[cfg(not(test))]
 pub(crate) fn set_text(text: &str) -> bool {
-    use copypasta::{ClipboardContext, ClipboardProvider};
-    ClipboardContext::new()
-        .and_then(|mut context| context.set_contents(text.to_string()))
-        .is_ok()
+    use copypasta::ClipboardProvider;
+    let written = with_clipboard(|context| context.set_contents(text.to_string()).ok());
+    if written.is_none() {
+        // A failed write may mean a broken connection: the next write opens a new one.
+        OWNER.with(|owner| *owner.borrow_mut() = None);
+    }
+    written.is_some()
 }
 
 #[cfg(test)]

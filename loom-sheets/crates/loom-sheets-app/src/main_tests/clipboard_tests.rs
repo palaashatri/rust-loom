@@ -199,3 +199,24 @@ fn the_status_line_does_not_claim_offline_for_a_single_cell() {
         app.get_status_right()
     );
 }
+
+#[test]
+fn copied_text_stays_on_the_system_clipboard_after_the_sheet_changes() {
+    // On X11 the copied text is served by this process only while its clipboard
+    // owner lives, so the owner is kept for the process. This test uses the
+    // injected stand-in: it checks that later edits do not change what Copy gave
+    // the system clipboard. The live X11 owner is checked separately.
+    let (app, state) = state_with(&[("A1", "copied")]);
+    select(&app, &state, "A1", "A1");
+    app.invoke_copy_selection();
+    state.current.borrow_mut().set_str("A1", "changed");
+    assert_eq!(get_text().as_deref(), Some("copied"));
+    select(&app, &state, "A1", "A1");
+    app.invoke_cut_selection();
+    assert_eq!(raw(&state, "A1"), "", "Cut clears the cell");
+    assert_eq!(
+        get_text().as_deref(),
+        Some("changed"),
+        "Cut replaces the clipboard with the cell it cleared"
+    );
+}
