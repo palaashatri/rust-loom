@@ -1,4 +1,5 @@
 use super::*;
+use crate::startup_recovery::startup_sessions;
 use loom_desktop::{CommandSource, ScriptedFileDialogs};
 
 fn test_state() -> GuiState {
@@ -1223,7 +1224,8 @@ fn presenter_view_follows_the_deck_and_drives_navigation() {
 
 #[test]
 fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
-    let (fresh, baseline) = startup_sessions(None, None).expect("fresh start");
+    let plan = startup_sessions(None, None).expect("fresh start");
+    let (fresh, baseline) = (plan.session, plan.baseline);
     assert!(
         presentation_documents_match(&fresh.document, &baseline.document),
         "fresh start is clean"
@@ -1234,7 +1236,8 @@ fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
         .document
         .add_slide("Added before the crash", "content");
     let bytes = save_presentation_session(&draft).expect("serialize draft");
-    let (restored, baseline) = startup_sessions(Some(&bytes), None).expect("recovered start");
+    let plan = startup_sessions(Some(&bytes), None).expect("recovered start");
+    let (restored, baseline) = (plan.session, plan.baseline);
     assert!(
         presentation_documents_match(&restored.document, &draft.document),
         "the draft is what opens"
@@ -1248,7 +1251,9 @@ fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
         "the baseline is what a start without recovery would show"
     );
 
-    let (_, baseline) = startup_sessions(Some(b"not a deck"), None).expect("corrupt recovery");
+    let baseline = startup_sessions(Some(b"not a deck"), None)
+        .expect("corrupt recovery")
+        .baseline;
     assert!(
         presentation_documents_match(&baseline.document, &empty_session().document),
         "unreadable recovery data falls back to the blank deck"

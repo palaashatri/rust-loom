@@ -41,6 +41,8 @@ export component PresentSlideCanvas inherits Rectangle {
     callback canvas-released(float, float);
     callback canvas-cancelled;
     callback canvas-key-pressed(string, bool, bool) -> EventResult;
+    /// F6 or Shift+F6 pressed on the slide or one of its objects.
+    callback region-key(bool);
     callback element-pressed(int, bool);
     callback element-moved(int, float, float);
     callback element-released(int);
@@ -77,6 +79,7 @@ export component PresentSlideCanvas inherits Rectangle {
             if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta && root.start-editing()) {
                 return accept;
             }
+            if (event.text == Key.F6) { root.region-key(event.modifiers.shift); return accept; }
             return root.canvas-key-pressed(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta);
         }
 

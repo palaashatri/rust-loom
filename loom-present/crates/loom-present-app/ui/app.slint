@@ -68,6 +68,9 @@ export component PresentApp inherits Window {
         }
     }
     property <int> focus-view-tick: 0;
+    // Bumped by F6 to move focus into the inspector's tabs or the active thumbnail.
+    in-out property <int> inspector-focus-tick: 0;
+    in-out property <int> strip-focus-tick: 0;
     property <int> focus-zoom-tick: 0;
     /// Escape in the View or Zoom menu: close it and focus the item that opened it.
     function dismiss-view-menus() {
@@ -175,6 +178,26 @@ export component PresentApp inherits Window {
             app-focus.focus();
             slide-canvas.focus-slide();
         }
+    }
+
+    /// A new active slide takes keyboard focus, unless a menu or dialog has it.
+    public function focus-slide-after-change() {
+        if (!root.palette-open && !root.theme-chooser-open && !root.save-changes-open && !root.view-menu-open && !root.zoom-menu-open && !root.toolbar-overflow-open && root.local-menu-open-index < 0) {
+            root.focus-editor();
+        }
+    }
+    /// F6 walks the regions (slide, toolbar, inspector, strip); Shift+F6 walks back.
+    public function cycle-region(start: int, backwards: bool) {
+        let inspector = root.show-inspector && !root.is-preview-mode;
+        let strip = root.show-navigator && !root.is-preview-mode;
+        let target = start == 0 ? (backwards ? (strip ? 3 : (inspector ? 2 : 1)) : 1)
+            : start == 1 ? (backwards ? 0 : (inspector ? 2 : (strip ? 3 : 0)))
+            : start == 2 ? (backwards ? 1 : (strip ? 3 : 0))
+            : (backwards ? (inspector ? 2 : 1) : 0);
+        if (target == 0) { root.focus-editor(); }
+        else if (target == 1) { root.focus-view-tick += 1; }
+        else if (target == 2) { root.inspector-focus-tick += 1; }
+        else { root.strip-focus-tick += 1; }
     }
 
     init => { root.focus-editor(); }
@@ -326,6 +349,8 @@ export component PresentApp inherits Window {
                 else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.prev-slide(); }
                 return accept;
             }
+            if (event.text == Key.Escape) { root.focus-editor(); return accept; }
+            if (event.text == Key.F6) { root.cycle-region(1, event.modifiers.shift); return accept; }
             if (event.text == Key.F5) { root.toggle-preview-mode(); return accept; }
             // Ctrl+Alt+Up and Ctrl+Alt+Down move the selected slide (Alt alone is the menu key).
             if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.alt) {
@@ -432,7 +457,7 @@ export component PresentApp inherits Window {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                if root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
+                if root.rtl && root.show-inspector && !root.is-preview-mode : inspector-rtl := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
@@ -453,9 +478,11 @@ export component PresentApp inherits Window {
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
                     open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                    region-key(backwards) => { root.cycle-region(2, backwards); }
+                    focus-request: root.inspector-focus-tick;
                 }
 
-                if !root.rtl && !root.is-preview-mode && root.show-navigator : PresentSlideStrip {
+                if !root.rtl && !root.is-preview-mode && root.show-navigator : strip-ltr := PresentSlideStrip {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
@@ -470,6 +497,8 @@ export component PresentApp inherits Window {
                     reorder-slide(from, to) => { root.reorder-slide(from, to); }
                     drag-finished => { root.focus-editor(); }
                     window-changed(first, count) => { root.strip-window-changed(first, count); }
+                    region-key(backwards) => { root.cycle-region(3, backwards); }
+                    focus-active-tick: root.strip-focus-tick;
                 }
 
                 // Center Canvas & Notes
@@ -527,6 +556,7 @@ export component PresentApp inherits Window {
                         handle-released(idx, kind) => { root.handle-released(idx, kind); }
                         handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
                         content-edited(text) => { root.update-element-content(text); }
+                        region-key(backwards) => { root.cycle-region(0, backwards); }
                     }
                     }
 
@@ -582,7 +612,7 @@ export component PresentApp inherits Window {
                     }
                 }
 
-                if root.rtl && !root.is-preview-mode && root.show-navigator : PresentSlideStrip {
+                if root.rtl && !root.is-preview-mode && root.show-navigator : strip-rtl := PresentSlideStrip {
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
@@ -597,9 +627,11 @@ export component PresentApp inherits Window {
                     reorder-slide(from, to) => { root.reorder-slide(from, to); }
                     drag-finished => { root.focus-editor(); }
                     window-changed(first, count) => { root.strip-window-changed(first, count); }
+                    region-key(backwards) => { root.cycle-region(3, backwards); }
+                    focus-active-tick: root.strip-focus-tick;
                 }
 
-                if !root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
+                if !root.rtl && root.show-inspector && !root.is-preview-mode : inspector-ltr := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
@@ -620,6 +652,8 @@ export component PresentApp inherits Window {
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
                     open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                    region-key(backwards) => { root.cycle-region(2, backwards); }
+                    focus-request: root.inspector-focus-tick;
                 }
             }
 
@@ -691,20 +725,38 @@ export component PresentApp inherits Window {
         create-theme(idx) => { root.create-theme(idx); }
     }
 
-    LocalMenuPopup {
+    // A key the open menu does not use closes it and returns the keyboard to the slide.
+    menu-keys := FocusScope {
         x: 0px;
         y: 36px;
         width: root.width;
         height: root.height - 36px;
-        menu-enabled: root.local-menu-visible && root.custom-chrome && !root.is-preview-mode;
-        labels: root.local-menu-labels;
-        items: root.local-menu-popup-items;
-        open-index <=> root.local-menu-open-index;
-        selected-index: root.local-menu-popup-selected-index;
-        menu-opened(index) => { root.local-menu-opened(index); }
-        menu-move(direction) => { root.local-menu-move(direction); }
-        menu-closed => { root.focus-editor(); }
-        menu-action(id) => { root.local-menu-action(id); }
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (root.local-menu-open-index < 0) { return reject; }
+            if (event.text == Key.Escape || event.text == Key.F10 || event.text == Key.UpArrow || event.text == Key.DownArrow || event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.Return || event.text == Key.Space || LocalMenu.target(event) >= 0) { return reject; }
+            root.local-menu-open-index = -1;
+            root.focus-editor();
+            if (!event.modifiers.control && !event.modifiers.meta) { root.window-key-unhandled(event.text); }
+            return accept;
+        }
+
+        LocalMenuPopup {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            menu-enabled: root.local-menu-visible && root.custom-chrome && !root.is-preview-mode;
+            labels: root.local-menu-labels;
+            items: root.local-menu-popup-items;
+            open-index <=> root.local-menu-open-index;
+            selected-index: root.local-menu-popup-selected-index;
+            menu-opened(index) => { root.local-menu-opened(index); }
+            menu-move(direction) => { root.local-menu-move(direction); }
+            menu-closed => { root.focus-editor(); }
+            menu-action(id) => { root.local-menu-action(id); }
+        }
     }
 
     palette := CommandPalette {

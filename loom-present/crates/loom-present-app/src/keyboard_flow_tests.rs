@@ -515,6 +515,112 @@ fn inspector_tab_buttons_and_toolbar_commands_run_from_the_keyboard() {
     assert_eq!(s.app.get_inspector_tab(), 1);
 }
 
+#[test]
+fn a_typed_letter_closes_an_open_menu_instead_of_going_into_it() {
+    let s = launched();
+    let page = focus_weak(&s.app);
+    alt(&s.app, "s");
+    assert_eq!(
+        s.app.get_local_menu_open_index(),
+        3,
+        "the Slide menu is open"
+    );
+    tap(&s.app, "x");
+    assert_eq!(
+        s.app.get_local_menu_open_index(),
+        -1,
+        "a typed letter closes the menu"
+    );
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "focus returns to the slide"
+    );
+    assert_eq!(slide_count(&s), 3, "nothing ran from the menu");
+}
+
+#[test]
+fn escape_from_the_toolbar_returns_focus_to_the_slide() {
+    let s = launched();
+    let page = focus_weak(&s.app);
+    focus_toolbar_item(&s.app, "Add Slide");
+    press(&s.app, Key::Escape);
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "Escape returns focus to the slide, not the toolbar"
+    );
+}
+
+#[test]
+fn ctrl_shift_n_from_the_toolbar_moves_focus_to_the_new_slide() {
+    let s = launched();
+    let page = focus_weak(&s.app);
+    focus_toolbar_item(&s.app, "Add Slide");
+    chord(&s.app, &[Key::Control, Key::Shift], "N");
+    assert_eq!(slide_count(&s), 4, "Ctrl+Shift+N adds a slide");
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "focus is on the new slide, not the toolbar"
+    );
+}
+
+#[test]
+fn after_a_slide_is_chosen_from_the_strip_tab_reaches_its_first_object() {
+    let s = launched();
+    let page = focus_weak(&s.app);
+    tab_to(&s.app, "Slide 2 of 3, The creative system");
+    press(&s.app, Key::Return);
+    assert_eq!(
+        active_slide(&s),
+        1,
+        "Enter on the thumbnail chooses slide 2"
+    );
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "focus moves to the slide, not left on the thumbnail"
+    );
+    tab(&s.app);
+    assert!(
+        focus_name(&s.app).contains("Title: The creative system"),
+        "Tab reaches the slide's first object, got {:?}",
+        focus_name(&s.app)
+    );
+}
+
+#[test]
+fn f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back() {
+    let s = launched();
+    let page = focus_weak(&s.app);
+    press(&s.app, Key::F6);
+    assert_eq!(
+        focus_name(&s.app),
+        "View",
+        "F6 reaches the first toolbar item"
+    );
+    press(&s.app, Key::F6);
+    assert_eq!(
+        focus_name(&s.app),
+        "Inspector Tabs",
+        "F6 again reaches the inspector"
+    );
+    press(&s.app, Key::F6);
+    assert!(
+        focus_name(&s.app).starts_with("Slide 1 of 3"),
+        "F6 again reaches the slide strip, got {:?}",
+        focus_name(&s.app)
+    );
+    press(&s.app, Key::F6);
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "F6 from the strip returns to the slide"
+    );
+    shift_key(&s.app, Key::F6);
+    assert!(
+        focus_name(&s.app).starts_with("Slide 1 of 3"),
+        "Shift+F6 goes back to the strip, got {:?}",
+        focus_name(&s.app)
+    );
+}
+
 fn request_close(app: &PresentApp) {
     app.window().dispatch_event(WindowEvent::CloseRequested);
     render(app);

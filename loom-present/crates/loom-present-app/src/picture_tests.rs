@@ -2,6 +2,7 @@
 //! save and reopen, export, and the strip thumbnails.
 
 use super::*;
+use crate::startup_recovery::startup_sessions;
 use loom_desktop::ScriptedFileDialogs;
 use loom_package::zip::PackageArchive;
 use slint::Model;
@@ -362,7 +363,8 @@ fn pdf_and_pptx_exports_through_the_app_include_the_picture() {
 #[test]
 fn a_fresh_start_is_a_blank_deck_and_the_sample_stays_reachable() {
     set_platform();
-    let (fresh, baseline) = startup_sessions(None, None).expect("fresh start");
+    let plan = startup_sessions(None, None).expect("fresh start");
+    let (fresh, baseline) = (plan.session, plan.baseline);
     assert_eq!(fresh.document.title, "Untitled Presentation");
     assert_eq!(fresh.document.len(), 1);
     assert!(fresh.document.slides[0]

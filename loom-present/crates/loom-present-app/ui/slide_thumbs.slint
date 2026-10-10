@@ -61,6 +61,9 @@ component PresentSlideThumbnail inherits Rectangle {
     /// Ctrl+Up (-1) or Ctrl+Down (1) on the focused thumbnail.
     callback move-requested(int);
     changed want-focus => { if (root.want-focus == root.index) { thumb-focus.focus(); } }
+    /// Bumped by the controller to move focus to the active slide's thumbnail.
+    in property <int> focus-tick: 0;
+    changed focus-tick => { if (root.active) { thumb-focus.focus(); } }
 
     // The strip fixes every row to one height (see `PresentSlideStrip`) so it
     // can place rows without measuring them.
@@ -123,7 +126,7 @@ component PresentSlideThumbnail inherits Rectangle {
 /// elements, so a long deck costs what fits on screen, not what the deck holds.
 /// `window-changed` reports which slides those are; the controller fills the
 /// thumbnails of exactly those slides.
-export component PresentSlideStrip inherits Rectangle {
+export component PresentSlideStrip inherits FocusScope {
     in property <[string]> titles: [];
     in property <[ThumbRows]> thumbs: [];
     in property <int> active-index: 0;
@@ -142,6 +145,10 @@ export component PresentSlideStrip inherits Rectangle {
     callback drag-finished;
     /// First slide index and number of slides currently instantiated.
     callback window-changed(int, int);
+    /// F6 or Shift+F6 pressed in the strip (its thumbnails and buttons pass keys up).
+    callback region-key(bool);
+    /// Bumped by F6 to move keyboard focus to the active slide's thumbnail.
+    in property <int> focus-active-tick: 0;
 
     // Every row has one height, so row `n` sits at `n * pitch` without measuring.
     property <length> row-height: (strip-flick.width - 24px - 3 * Theme.tokens.space.sm) * 0.5625 + 2 * Theme.tokens.space.sm;
@@ -167,9 +174,14 @@ export component PresentSlideStrip inherits Rectangle {
     property <int> drop-target: root.drop-gap > root.drag-from ? root.drop-gap - 1 : root.drop-gap;
 
     width: max(220px, 4 * Theme.tokens.metrics.control-height * max(1.0, Theme.text-scale) + 3 * Theme.tokens.space.xs + 2 * Theme.tokens.space.sm);
-    background: Theme.palette().panel;
-    border-width: 1px;
-    border-color: Theme.palette().border;
+    // Keys from the thumbnails and the strip's buttons pass up to this scope, which
+    // handles F6. It is not a Tab stop and takes no click of its own.
+    focus-on-tab-navigation: false;
+    focus-on-click: false;
+    key-pressed(event) => {
+        if (event.text == Key.F6) { root.region-key(event.modifiers.shift); return accept; }
+        return reject;
+    }
     accessible-role: list;
     accessible-label: "Slides";
     accessible-description: root.announcement;
@@ -199,6 +211,15 @@ export component PresentSlideStrip inherits Rectangle {
         if (had-focus) { root.announcement = "Move cancelled"; }
         root.end-drag();
         if (had-focus) { root.drag-finished(); }
+    }
+
+    // The strip's panel: its background and frame, drawn beneath everything else.
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Theme.palette().panel;
+        border-width: 1px;
+        border-color: Theme.palette().border;
     }
 
     // While a thumbnail is dragged the strip owns the keyboard: Escape cancels
@@ -260,6 +281,7 @@ export component PresentSlideStrip inherits Rectangle {
                 active: self.slide == root.active-index;
                 dragged: root.dragging && self.slide == root.drag-from;
                 want-focus: root.focus-target;
+                focus-tick: root.focus-active-tick;
                 clicked => { root.select-slide(self.slide); }
                 move-requested(delta) => {
                     let to = self.slide + delta;

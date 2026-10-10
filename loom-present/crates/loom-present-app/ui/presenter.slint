@@ -133,15 +133,31 @@ export component PresenterWindow inherits Window {
                     VerticalLayout {
                         padding: Theme.tokens.space.lg;
                         spacing: Theme.tokens.space.sm;
+                        // The slide on screen is the primary preview: first, and as wide as the panel.
+                        Text {
+                            text: "Current";
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        MiniSlide {
+                            rows: root.current-rows;
+                            description: "Current slide: " + root.slide-title;
+                        }
                         Text {
                             text: "Next";
                             font-size: Theme.type.caption;
                             font-weight: 600;
                             color: Theme.palette().ink-secondary;
                         }
-                        if root.has-next : MiniSlide {
-                            rows: root.next-rows;
-                            description: "Next slide: " + root.next-title;
+                        // The next slide is a smaller preview; short windows leave it out.
+                        if root.has-next && root.roomy : HorizontalLayout {
+                            MiniSlide {
+                                horizontal-stretch: 3;
+                                rows: root.next-rows;
+                                description: "Next slide: " + root.next-title;
+                            }
+                            Rectangle { horizontal-stretch: 2; }
                         }
                         if !root.has-next : Rectangle {
                             height: 64px;
@@ -167,16 +183,6 @@ export component PresenterWindow inherits Window {
                             color: Theme.palette().ink;
                             accessible-role: text;
                             accessible-label: root.has-next ? "Next slide: " + root.next-title : "No next slide";
-                        }
-                        if root.roomy : Text {
-                            text: "Current";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink-secondary;
-                        }
-                        if root.roomy : MiniSlide {
-                            rows: root.current-rows;
-                            description: "Current slide: " + root.slide-title;
                         }
                         Rectangle { vertical-stretch: 1; }
                     }

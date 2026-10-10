@@ -239,29 +239,6 @@ fn initial_session(args: &Args) -> Result<PresentationSession, String> {
     }
 }
 
-/// The deck to show at startup and the snapshot "saved" is compared with.
-///
-/// A recovered deck was never saved, so it is compared with the deck the window
-/// would have opened without recovery: it then reads as unsaved and closing asks
-/// first. Using the recovered deck as its own baseline made restored work look
-/// clean. A requested file wins over recovery and is its own baseline.
-fn startup_sessions(
-    recovered: Option<&[u8]>,
-    open: Option<&Path>,
-) -> Result<(PresentationSession, PresentationSession), String> {
-    if let Some(path) = open {
-        let session = load_session(path)?;
-        return Ok((session.clone(), session));
-    }
-    let fresh = empty_session();
-    Ok(
-        match recovered.and_then(|bytes| load_presentation_session(bytes).ok()) {
-            Some(draft) => (draft, fresh),
-            None => (fresh.clone(), fresh),
-        },
-    )
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum HandleKind {
     #[default]
@@ -653,6 +630,8 @@ fn refresh_without_recovery(app: &PresentApp, state: &GuiState) {
 fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     let session = state.session.borrow();
     let document = &session.document;
+    let slide_changed =
+        slide_focus::active_slide_changed(document.active_slide().map(|slide| slide.id.as_str()));
     presenter::sync(&session);
     file_title::sync(app, state);
     app.set_can_undo(session.can_undo());
@@ -850,8 +829,15 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     if recover {
         recovery_deferred::note_edit(app);
     }
+    // The borrows end before focus moves: focusing an object selects it, which
+    // borrows the session again.
+    drop(drag);
+    drop(session);
     if let Some(menu_service) = &state.menu_service {
         sync_menu_state(menu_service, app, state);
+    }
+    if slide_changed {
+        app.invoke_focus_slide_after_change();
     }
 }
 
@@ -1121,7 +1107,7 @@ fn save_current_deck(
     app.set_status_right(deck_status_text(state).into());
     app.set_deck_dirty(deck_is_dirty(state));
     recovery_deferred::invalidate();
-    match checkpoint_snapshot_recovery(bytes) {
+    match checkpoint_snapshot_recovery(recovery_draft::wrap(Some(path.as_path()), &bytes)) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(
             app,
@@ -1512,8 +1498,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let inspector_available = configure_responsive_layout(&app, args.size);
     let recovered = initialize_snapshot_recovery()?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
-    let (initial, saved_baseline) =
-        startup_sessions(recovered.as_deref(), initial_path.as_deref())?;
+    let mut startup =
+        startup_recovery::startup_sessions(recovered.as_deref(), initial_path.as_deref())?;
+    // A draft of another file is written to a file of its own before recovery is
+    // reset, so opening this file never loses it.
+    let kept = match startup.kept.take() {
+        Some(kept) => {
+            let directory = startup_recovery::kept_drafts_directory()?;
+            let path = startup_recovery::write_kept_draft(
+                &directory,
+                &kept,
+                startup_recovery::unix_seconds(),
+            )?;
+            reset_recovery_store()?;
+            Some((kept.name, path))
+        }
+        None => None,
+    };
+    let (initial, saved_baseline) = (startup.session, startup.baseline);
     let deck_filter =
         FileFilter::new("Loom Present deck", ["loomdeck"]).map_err(|error| error.to_string())?;
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
@@ -1525,7 +1527,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
-        save_path: RefCell::new(initial_path),
+        save_path: RefCell::new(startup.save_path),
         dialogs,
         deck_filter,
         pdf_filter,
@@ -1559,6 +1561,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     wire_palette(&app);
     refresh(&app, &state);
+    match (kept, startup.restored) {
+        (Some((name, path)), _) => set_status(
+            &app,
+            format!("Unsaved changes to {name} were kept in {}", path.display()),
+        ),
+        (None, Some(name)) => set_status(&app, format!("Restored unsaved changes to {name}")),
+        (None, None) => {}
+    }
     if args.theme_chooser {
         app.set_theme_chooser_open(true);
     }
@@ -1732,6 +1742,17 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
     });
 }
 
+/// Empties the recovery store and opens it again, so this session records from an
+/// empty store. The caller has written anything it must keep first.
+fn reset_recovery_store() -> Result<(), String> {
+    recovery_deferred::invalidate();
+    let closed = PRESENT_RECOVERY.with(|slot| slot.borrow_mut().take());
+    if let Some(recovery) = closed {
+        recovery.clear().map_err(|error| error.to_string())?;
+    }
+    initialize_snapshot_recovery().map(|_| ())
+}
+
 /// The window is really closing: drop the recovery data so a discarded or saved
 /// deck is not offered again. A crash never reaches here, so it stays recoverable.
 fn end_session_recovery() {
@@ -1770,7 +1791,8 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let state = state.clone();
         app.on_recovery_flush(move || {
             if let Ok(session) = state.session.try_borrow() {
-                recovery_deferred::flush(&session);
+                let source = state.save_path.borrow().clone();
+                recovery_deferred::flush(&session, source.as_deref());
             }
         });
     }
@@ -3155,14 +3177,19 @@ mod picture_view;
 mod presenter;
 mod presenter_thumbs;
 mod recovery_deferred;
+mod recovery_draft;
 #[cfg(test)]
 mod scaling_tests;
+mod slide_focus;
 #[cfg(test)]
 mod slide_layout_tests;
 mod slide_layouts;
 mod slide_order;
 #[cfg(test)]
 mod slide_order_tests;
+mod startup_recovery;
+#[cfg(test)]
+mod startup_recovery_tests;
 #[cfg(test)]
 mod template_chooser_tests;
 mod view_state;
@@ -3187,6 +3214,8 @@ mod ui_font_tests;
 mod accessibility_tests;
 #[cfg(test)]
 mod deck_guard_tests;
+#[cfg(test)]
+mod layout_bounds_tests;
 #[cfg(test)]
 mod miniature_tests;
 #[cfg(test)]

@@ -11,12 +11,13 @@
 //! the store was cleared.
 
 use std::cell::Cell;
+use std::path::Path;
 use std::time::Duration;
 
-use loom_present_core::{save_presentation_session, PresentationSession};
+use loom_present_core::PresentationSession;
 use slint::{ComponentHandle, Timer, TimerMode};
 
-use crate::PresentApp;
+use crate::{recovery_draft, PresentApp};
 
 /// How long after the first unrecorded change the draft is written.
 pub(crate) const WRITE_DELAY: Duration = Duration::from_millis(600);
@@ -74,19 +75,21 @@ fn content_of(session: &PresentationSession) -> PresentationSession {
 }
 
 /// Write the draft if it is stale: copy the content now, serialize it on a
-/// worker thread and record the result when it comes back.
-pub(crate) fn flush(session: &PresentationSession) {
+/// worker thread and record the result when it comes back. `source` is the file
+/// the deck is saved to, so the draft can be restored under that name.
+pub(crate) fn flush(session: &PresentationSession, source: Option<&Path>) {
     if !STALE.with(|stale| stale.replace(false)) {
         return;
     }
     #[cfg(test)]
     JOBS.with(|jobs| jobs.set(jobs.get() + 1));
     let content = content_of(session);
+    let source = source.map(Path::to_path_buf);
     let epoch = EPOCH.with(Cell::get);
     let spawned = std::thread::Builder::new()
         .name("present-recovery".into())
         .spawn(move || {
-            let Ok(bytes) = save_presentation_session(&content) else {
+            let Ok(bytes) = recovery_draft::payload(&content, source.as_deref()) else {
                 return;
             };
             // Without a running event loop there is nowhere to record it.

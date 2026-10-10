@@ -35,6 +35,9 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         if editable {
             app.invoke_focus_editor();
             crate::set_status(&app, "Press Enter or F2 to edit the selected text");
+        } else {
+            // Nothing editable is selected, so the letter has nowhere to go: say so.
+            crate::set_status(&app, "Select a text object, then press Enter or F2 to type");
         }
     });
 }

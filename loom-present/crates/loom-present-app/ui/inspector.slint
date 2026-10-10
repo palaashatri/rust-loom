@@ -24,6 +24,20 @@ component InspectorPropertyRow inherits Rectangle {
     }
 }
 
+/// A section heading on the controls' edge. The shared header insets its text to
+/// sit under a panel title (`space.xl`), but the inspector's controls start at the
+/// panel edge, so the header moves back by that inset. Its box grows by the same
+/// amount, so the text keeps its place at the reading end.
+component InspectorHeading inherits Rectangle {
+    in property <string> title: "Section";
+    height: Theme.tokens.metrics.panel-header-height;
+    LoomSectionHeader {
+        title: root.title;
+        x: Theme.rtl ? 0px : -Theme.tokens.space.xl;
+        width: parent.width + Theme.tokens.space.xl;
+    }
+}
+
 export component PresentInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     in-out property <int> active-template-index: 1;
@@ -47,178 +61,199 @@ export component PresentInspector inherits LoomPanel {
     callback update-element-content(string);
     callback set-transition(int);
     callback open-theme-chooser;
+    /// F6 or Shift+F6 pressed inside the inspector.
+    callback region-key(bool);
+
+    /// Bumped by F6 to move keyboard focus to the Format / Animate / Document tabs.
+    in property <int> focus-request: 0;
+    changed focus-request => { tabs.grab-focus(); }
 
     accessible-role: groupbox;
     accessible-label: "Slide inspector";
     width: 280px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
 
-    VerticalLayout {
-        spacing: Theme.tokens.space.md;
-        padding: Theme.tokens.space.md;
-        alignment: start;
-
-        LoomSegmentedControl {
-            items: ["Format", "Animate", "Document"];
-            current <=> root.inspector-tab;
-            label: "Inspector Tabs";
+    // Keys from inside the inspector pass through this scope on their way up, so F6
+    // can move between the window's regions. It is not a Tab stop and takes no click.
+    inspector-region := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        focus-on-tab-navigation: false;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.F6) { root.region-key(event.modifiers.shift); return accept; }
+            return reject;
         }
 
-        if root.inspector-tab == 0 : VerticalLayout {
+        VerticalLayout {
+            width: parent.width;
+            height: parent.height;
             spacing: Theme.tokens.space.md;
+            padding: Theme.tokens.space.md;
+            alignment: start;
 
-            LoomSectionHeader { title: "Slide Layout"; }
-            LoomSegmentedControl {
-                items: ["Title", "Content", "2 Col", "Image"];
-                current <=> root.active-template-index;
-                label: "Layout Template";
-                selected(idx) => { root.apply-template(idx); }
+            tabs := LoomSegmentedControl {
+                items: ["Format", "Animate", "Document"];
+                current <=> root.inspector-tab;
+                label: "Inspector Tabs";
             }
 
-            if root.selection-count == 0 : Text {
-                text: "Select an object to edit its position and style.";
-                wrap: word-wrap;
-                horizontal-alignment: Theme.rtl ? right : left;
-                font-size: Theme.type.body;
-                color: Theme.palette().ink-secondary;
-            }
-            if root.selection-count > 0 : LoomSectionHeader { title: "Selected Element"; }
-            if root.selection-count > 0 : Rectangle {
-                min-height: 48px * max(1.0, Theme.text-scale);
-                border-radius: Theme.tokens.metrics.radius-small;
-                border-width: 1px;
-                border-color: Theme.palette().border;
-                background: Theme.palette().selection-soft;
-                VerticalLayout {
-                    padding: Theme.tokens.space.sm;
-                    spacing: Theme.tokens.space.xs;
-                    Text {
-                        text: root.active-element-label;
-                        font-size: Theme.type.body;
-                        font-weight: 600;
-                        color: Theme.palette().ink;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
-                        font-size: Theme.type.micro;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        overflow: elide;
-                    }
+            if root.inspector-tab == 0 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+
+                InspectorHeading { title: "Slide Layout"; }
+                LoomSegmentedControl {
+                    items: ["Title", "Content", "2 Col", "Image"];
+                    current <=> root.active-template-index;
+                    label: "Layout Template";
+                    selected(idx) => { root.apply-template(idx); }
                 }
-            }
 
-            if root.selection-count > 0 && root.content-editable : InspectorPropertyRow {
-                label: "Content";
-                Rectangle {
-                    height: Theme.scaled-control-height;
+                if root.selection-count == 0 : Text {
+                    text: "Select an object to edit its position and style.";
+                    wrap: word-wrap;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink-secondary;
+                }
+                if root.selection-count > 0 : InspectorHeading { title: "Selected Element"; }
+                if root.selection-count > 0 : Rectangle {
+                    min-height: 48px * max(1.0, Theme.text-scale);
                     border-radius: Theme.tokens.metrics.radius-small;
                     border-width: 1px;
                     border-color: Theme.palette().border;
-                    background: Theme.palette().surface-raised;
-                    clip: true;
-                    // Sized to the field, not to its text: a long title must scroll inside
-                    // the field rather than push the caret off the panel.
-                    HorizontalLayout {
-                        padding-left: Theme.tokens.space.sm;
-                        padding-right: Theme.tokens.space.sm;
-                        TextInput {
-                            min-width: 0px;
-                            horizontal-stretch: 1;
-                            text: root.active-element-content;
+                    background: Theme.palette().selection-soft;
+                    VerticalLayout {
+                        padding: Theme.tokens.space.sm;
+                        spacing: Theme.tokens.space.xs;
+                        Text {
+                            text: root.active-element-label;
                             font-size: Theme.type.body;
+                            font-weight: 600;
                             color: Theme.palette().ink;
-                            vertical-alignment: center;
                             horizontal-alignment: Theme.rtl ? right : left;
-                            single-line: true;
-                            accessible-label: "Selected element text";
-                            edited => { root.update-element-content(self.text); }
+                            overflow: elide;
                         }
+                        Text {
+                            text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
+                            font-size: Theme.type.micro;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.selection-count > 0 && root.content-editable : InspectorPropertyRow {
+                    label: "Content";
+                    Rectangle {
+                        height: Theme.scaled-control-height;
+                        border-radius: Theme.tokens.metrics.radius-small;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        background: Theme.palette().surface-raised;
+                        clip: true;
+                        // Sized to the field, not to its text: a long title must scroll inside
+                        // the field rather than push the caret off the panel.
+                        HorizontalLayout {
+                            padding-left: Theme.tokens.space.sm;
+                            padding-right: Theme.tokens.space.sm;
+                            TextInput {
+                                min-width: 0px;
+                                horizontal-stretch: 1;
+                                text: root.active-element-content;
+                                font-size: Theme.type.body;
+                                color: Theme.palette().ink;
+                                vertical-alignment: center;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                                single-line: true;
+                                accessible-label: "Selected element text";
+                                edited => { root.update-element-content(self.text); }
+                            }
+                        }
+                    }
+                }
+
+                if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
+                if root.selection-count > 0 : InspectorPropertyRow {
+                    label: "Position";
+                    Text {
+                        text: root.element-x-text + " × " + root.element-y-text;
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                if root.selection-count > 0 : InspectorPropertyRow {
+                    label: "Size";
+                    Text {
+                        text: root.element-width-text + " × " + root.element-height-text;
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                if root.selection-count > 0 : InspectorPropertyRow {
+                    label: "Rotation";
+                    Text {
+                        text: root.element-rotation-text;
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
             }
 
-            if root.selection-count > 0 : LoomSectionHeader { title: "Geometry"; }
-            if root.selection-count > 0 : InspectorPropertyRow {
-                label: "Position";
-                Text {
-                    text: root.element-x-text + " × " + root.element-y-text;
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
-                    overflow: elide;
+            if root.inspector-tab == 1 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                InspectorHeading { title: "Slide Transition"; }
+                LoomSegmentedControl {
+                    items: ["None", "Dissolve", "Push", "Morph"];
+                    current <=> root.transition-index;
+                    label: "Transition Type";
+                    selected(idx) => { root.set-transition(idx); }
                 }
             }
-            if root.selection-count > 0 : InspectorPropertyRow {
-                label: "Size";
-                Text {
-                    text: root.element-width-text + " × " + root.element-height-text;
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-            if root.selection-count > 0 : InspectorPropertyRow {
-                label: "Rotation";
-                Text {
-                    text: root.element-rotation-text;
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-        }
 
-        if root.inspector-tab == 1 : VerticalLayout {
-            spacing: Theme.tokens.space.md;
-            LoomSectionHeader { title: "Slide Transition"; }
-            LoomSegmentedControl {
-                items: ["None", "Dissolve", "Push", "Morph"];
-                current <=> root.transition-index;
-                label: "Transition Type";
-                selected(idx) => { root.set-transition(idx); }
-            }
-        }
-
-        if root.inspector-tab == 2 : VerticalLayout {
-            spacing: Theme.tokens.space.md;
-            LoomSectionHeader { title: "New Presentation"; }
-            LoomButton {
-                icon: "format";
-                label: "New from Template...";
-                variant: "secondary";
-                clicked => { root.open-theme-chooser(); }
-            }
-            LoomSectionHeader { title: "Slide Size"; }
-            InspectorPropertyRow {
-                label: "Aspect ratio";
-                Text {
-                    text: root.aspect-ratio-wide ? "16:9 Wide" : "4:3 Standard";
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
+            if root.inspector-tab == 2 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                InspectorHeading { title: "New Presentation"; }
+                LoomButton {
+                    icon: "format";
+                    label: "New from Template...";
+                    variant: "secondary";
+                    clicked => { root.open-theme-chooser(); }
+                }
+                InspectorHeading { title: "Slide Size"; }
+                InspectorPropertyRow {
+                    label: "Aspect ratio";
+                    Text {
+                        text: root.aspect-ratio-wide ? "16:9 Wide" : "4:3 Standard";
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                    }
+                }
+                InspectorHeading { title: "Deck Information"; }
+                InspectorPropertyRow {
+                    label: "Slides";
+                    Text {
+                        text: root.slide-count-text;
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                    }
                 }
             }
-            LoomSectionHeader { title: "Deck Information"; }
-            InspectorPropertyRow {
-                label: "Slides";
-                Text {
-                    text: root.slide-count-text;
-                    font-size: Theme.type.body;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
-                }
-            }
-        }
 
-        Rectangle { vertical-stretch: 1; background: transparent; }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+        }
     }
 }
