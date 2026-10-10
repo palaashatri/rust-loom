@@ -1,0 +1,239 @@
+Loom Sheets new-function differential check against real Microsoft Excel
+Date: 2026-10-10   Host: Windows 11, Excel 16.0 build 20430 (COM, Visible=false, DisplayAlerts=false), host locale en-IN
+Input: spc-excel-check.txt (data A1:A5=10..50, B1:B5=1..5, C1:C3=apple,banana,cherry)
+Comparison: numbers 1e-9 relative, text exact (case-sensitive), errors by code; Excel value read from Value2 (Formula2 entry).
+
+SUMMARY: total 65  PASS 58  FAIL 7  (of FAIL, Excel rejected the formula: 1)
+  CORPUS : PASS 5  FAIL 0
+  SURE : PASS 40  FAIL 4
+  GUESS : PASS 7  FAIL 1
+  CHECK : PASS 6  FAIL 2
+Stray EXCEL.EXE processes killed: 1; pre-existing user Excel processes left alone: 0
+
+PASS  [CORPUS]  =TEXT(0.5,"# ?/?")
+      excel: " 1/2" (text)   loom: " 1/2" (text)
+PASS  [CORPUS]  =TEXT(0,"# ?/?")
+      excel: "0    " (text)   loom: "0    " (text)
+PASS  [CORPUS]  =TEXT(-5,"# ?/?")
+      excel: "-5    " (text)   loom: "-5    " (text)
+PASS  [CORPUS]  =TEXT(1234.5678,"# ?/?")
+      excel: "1234 4/7" (text)   loom: "1234 4/7" (text)
+PASS  [CORPUS]  =TEXT(1/3,"# ?/?")
+      excel: " 1/3" (text)   loom: " 1/3" (text)
+PASS  [SURE]  =TEXT(0.333,"?/?")
+      excel: "1/3" (text)   loom: "1/3" (text)
+PASS  [SURE]  =TEXT(0.142857,"?/?")
+      excel: "1/7" (text)   loom: "1/7" (text)
+PASS  [SURE]  =TEXT(1.5,"?/?")
+      excel: "3/2" (text)   loom: "3/2" (text)
+PASS  [SURE]  =TEXT(0.375,"?/8")
+      excel: "3/8" (text)   loom: "3/8" (text)
+PASS  [GUESS]  =TEXT(0.3,"?/8")
+      excel: "2/8" (text)   loom: "2/8" (text)
+PASS  [GUESS]  =TEXT(2,"# ?/?")
+      excel: "2    " (text)   loom: "2    " (text)
+PASS  [GUESS]  =TEXT(0.999,"# ?/?")
+      excel: "1    " (text)   loom: "1    " (text)
+PASS  [GUESS]  =TEXT(1.25,"# ??/16")
+      excel: "1  4/16" (text)   loom: "1  4/16" (text)
+FAIL  [GUESS]  =TEXT(0.4,"# ??/??")
+      excel: "  2/5 " (text)   loom: "  2/ 5" (text)
+PASS  [SURE]  =TEXT(-0.5,"?/?")
+      excel: "-1/2" (text)   loom: "-1/2" (text)
+FAIL  [SURE]  =TEXT(-5,"[<0]0;0")
+      excel: "5" (text)   loom: "-5" (text)
+PASS  [SURE]  =TEXT(4,"[<0]0;0")
+      excel: "4" (text)   loom: "4" (text)
+PASS  [SURE]  =TEXT(1500,"[>=1000]0.0,""K"";0")
+      excel: "1.5K" (text)   loom: "1.5K" (text)
+FAIL  [CHECK]  =TEXT(-5,"[<0]""neg""0;0")
+      excel: "neg5" (text)   loom: "-neg5" (text)
+PASS  [SURE]  =TEXT(12345,"0.00E-00")
+      excel: "1.23E04" (text)   loom: "1.23E04" (text)
+PASS  [SURE]  =TEXT(0.00123,"0.00E-00")
+      excel: "1.23E-03" (text)   loom: "1.23E-03" (text)
+PASS  [SURE]  =TEXT(12345,"##0.0E+0")
+      excel: "12.3E+3" (text)   loom: "12.3E+3" (text)
+PASS  [SURE]  =TEXT(0.00012345,"##0.0E+0")
+      excel: "123.5E-6" (text)   loom: "123.5E-6" (text)
+PASS  [SURE]  =TEXT(99999.9,"##0.0E+0")
+      excel: "100.0E+3" (text)   loom: "100.0E+3" (text)
+PASS  [CHECK]  =TEXT(12345,"#0.0E+0")
+      excel: "1.2E+4" (text)   loom: "1.2E+4" (text)
+PASS  [SURE]  =PERCENTILE.INC(A1:A5,0.25)
+      excel: 20 (num)   loom: 20 (num)
+PASS  [SURE]  =PERCENTILE.EXC(A1:A5,0.25)
+      excel: 15 (num)   loom: 15 (num)
+PASS  [SURE]  =QUARTILE.EXC(A1:A5,1)
+      excel: 15 (num)   loom: 15 (num)
+PASS  [SURE]  =PERCENTRANK.INC(A1:A5,20)
+      excel: 0.25 (num)   loom: 0.25 (num)
+PASS  [SURE]  =PERCENTRANK.EXC(A1:A5,20)
+      excel: 0.333 (num)   loom: 0.333 (num)
+PASS  [SURE]  =RANK.AVG(30,A1:A5)
+      excel: 3 (num)   loom: 3 (num)
+PASS  [SURE]  =CORREL(A1:A5,B1:B5)
+      excel: 0.99999999999999978 (num)   loom: 1 (num)
+PASS  [SURE]  =SLOPE(A1:A5,B1:B5)
+      excel: 10 (num)   loom: 10 (num)
+PASS  [SURE]  =INTERCEPT(A1:A5,B1:B5)
+      excel: 0 (num)   loom: 0 (num)
+PASS  [SURE]  =FORECAST(6,A1:A5,B1:B5)
+      excel: 60 (num)   loom: 60 (num)
+PASS  [SURE]  =FORECAST.LINEAR(6,A1:A5,B1:B5)
+      excel: 60 (num)   loom: 60 (num)
+PASS  [SURE]  =IPMT(0.1,1,2,1000)
+      excel: -100 (num)   loom: -100 (num)
+PASS  [CHECK]  =IPMT(0.1,2,2,1000,0,1)
+      excel: -47.619047619047613 (num)   loom: -47.619047619047663 (num)
+PASS  [CHECK]  =PPMT(0.1,2,2,1000,0,1)
+      excel: -476.19047619047626 (num)   loom: -476.19047619047575 (num)
+PASS  [SURE]  =XNPV(0.1,B1:B2,A1:A2)
+      excel: 2.9947843370260561 (num)   loom: 2.9947843370260561 (num)
+PASS  [SURE]  =SLN(30000,7500,10)
+      excel: 2250 (num)   loom: 2250 (num)
+PASS  [SURE]  =SYD(30000,7500,10,1)
+      excel: 4090.909090909091 (num)   loom: 4090.909090909091 (num)
+FAIL  [SURE]  =DB(1000000,100000,6,1,7)
+      excel: 186083.33333333334 (num)   loom: 186083.33 (num)   note: rel diff 1.79E-008
+FAIL  [SURE]  =DB(1000000,100000,6,2,7)
+      excel: 259639.41666666666 (num)   loom: 259639.42 (num)   note: rel diff 1.28E-008
+PASS  [SURE]  =DDB(2400,300,10,1)
+      excel: 480 (num)   loom: 480 (num)
+FAIL  [CHECK]  =DATEDIF(DATE(2001,1,31),DATE(2001,3,1),"MD")
+      excel: -2 (num)   loom: 0 (num)   note: rel diff 1.00E+000
+PASS  [SURE]  =DATEDIF(DATE(2001,1,15),DATE(2002,3,10),"YM")
+      excel: 1 (num)   loom: 1 (num)
+PASS  [CHECK]  =YEARFRAC(DATE(2011,1,1),DATE(2013,1,1),1)
+      excel: 2.0009124087591244 (num)   loom: 2.0009124087591244 (num)
+PASS  [SURE]  =YEARFRAC(DATE(2012,1,1),DATE(2012,7,30),1)
+      excel: 0.57650273224043713 (num)   loom: 0.57650273224043713 (num)
+PASS  [GUESS]  =WEEKNUM(DATE(2012,3,9),2)
+      excel: 11 (num)   loom: 11 (num)
+PASS  [SURE]  =WEEKNUM(DATE(2012,1,1),21)
+      excel: 52 (num)   loom: 52 (num)
+PASS  [SURE]  =ISOWEEKNUM(DATE(2012,3,9))
+      excel: 10 (num)   loom: 10 (num)
+PASS  [SURE]  =NETWORKDAYS.INTL(DATE(2012,10,1),DATE(2012,10,31),11)
+      excel: 27 (num)   loom: 27 (num)
+PASS  [SURE]  =WORKDAY.INTL(DATE(2012,10,1),10,17)
+      excel: 41194 (num)   loom: 41194 (num)
+PASS  [SURE]  =XMATCH(35,A1:A5,-1)
+      excel: 3 (num)   loom: 3 (num)
+PASS  [SURE]  =XMATCH(20,A1:A5,0,-1)
+      excel: 2 (num)   loom: 2 (num)
+PASS  [SURE]  =LET(x,2,y,x+1,x*y)
+      excel: 6 (num)   loom: 6 (num)
+FAIL  [SURE]  =LET(x,1,x,x+10,x)
+      excel: <Excel rejected formula> (syntax)   loom: 11 (num)   note: Exception from HRESULT: 0x800A03EC
+PASS  [CHECK]  =LARGE(A1:A5,2.5)
+      excel: 30 (num)   loom: 30 (num)
+PASS  [SURE]  =TEXTBEFORE("Red-Green-Blue","-",-2)
+      excel: "Red" (text)   loom: "Red" (text)
+PASS  [SURE]  =TEXTAFTER("Red-Green-Blue","-",-2)
+      excel: "Green-Blue" (text)   loom: "Green-Blue" (text)
+PASS  [GUESS]  =TEXTBEFORE("abc","x",1,0,1)
+      excel: "abc" (text)   loom: "abc" (text)
+PASS  [GUESS]  =TEXTAFTER("abc","x",1,0,1)
+      excel: "" (text)   loom: "" (text)
+PASS  [SURE]  =CHOOSECOLS(A1:B5,3)
+      excel: #VALUE! (err)   loom: #VALUE! (err)
+PASS  [CHECK]  =TAKE(A1:A5,0)
+      excel: #CALC! (err)   loom: #CALC! (err)
+
+==== MISMATCH DIAGNOSIS (7 FAIL) ====
+1. =TEXT(0.4,"# ??/??")  excel "  2/5 "  loom "  2/ 5"
+   Rule: fraction denominator placeholders (?) pad with trailing spaces, not leading ones; numerator and
+   integer part still pad on the left. See probe rows below ("??/??" -> " 2/5 ", "# ?/??" -> " 2/5 ", "# ??/?" -> "  2/5").
+2. =TEXT(-5,"[<0]0;0")  excel "5"  loom "-5"      (SURE)
+3. =TEXT(-5,"[<0]""neg""0;0")  excel "neg5"  loom "-neg5"   (CHECK)
+   Rule (2 and 3, from the conditional-section probes below): the minus sign is NOT printed when the selected
+   section's condition (explicit, or the implied complement of an earlier condition) accepts only
+   non-positive numbers: [<0], [<=n] or [<n] with n<=0, and the implied else of [>0] / [>=0]. It IS printed
+   when the accepted set includes positives: [<10]0;0 -> "-5", and [>=1000]0;0 -> "-5" (implied else is <1000).
+4. =DB(1000000,100000,6,1,7)  excel 186083.33333333334  loom expectation 186083.33   (SURE)
+5. =DB(1000000,100000,6,2,7)  excel 259639.41666666666  loom expectation 259639.42   (SURE)
+   Excel does not round the result; only the rate is rounded to 3 places. The tag-file values are the
+   documentation's display-rounded figures. Loom's db() source (finance_more.rs) already returns the unrounded
+   value, so this is a wrong expectation in the list, not a Loom rule to change (cargo was not run to confirm).
+6. =DATEDIF(DATE(2001,1,31),DATE(2001,3,1),"MD")  excel -2  loom 0   (CHECK)
+   Rule: MD = end - DATE(endYear, endMonth-1, startDay) with day overflow and no clamp; negative results are
+   returned as-is (do not clamp to 0). Probes below confirm 8 more cases.
+7. =LET(x,1,x,x+10,x)  Excel rejects the formula on entry (0x800A03EC)  loom 11   (SURE tag was wrong)
+   Rule: duplicate LET names are an error (LET(x,1,x,2,x) is rejected too); Loom should not evaluate it.
+
+NOT in the 7 FAILs but wrong for the k edge cases (PASS only because LARGE(2.5) agrees):
+   LARGE uses ceil(k)-th largest, SMALL uses floor(k)-th smallest, and k<1 or k>COUNT is #NUM! on the raw k.
+   Loom's nth() uses ceil(k) for both and applies ceil before the k<1 check: SMALL(...,2.2) would give 30 (Excel 20)
+   and LARGE/SMALL(...,0.5) would return the 1st value (Excel #NUM!). SMALL(...,5.5) is #NUM! in Excel.
+   Other observation: TEXT(0.4,"# 0/0") -> "2/5" and "# 00/00" -> "02/05" (no separator space with 0 placeholders and
+   a zero integer part); Loom behaviour for these was not in the list.
+
+==== FOLLOW-UP EXCEL PROBES (formula => Excel value; same data block, same method) ====
+=TEXT(-5,"[<0]0;0")  =>  "5"
+=TEXT(-5,"[<10]0;0")  =>  "-5"
+=TEXT(-5,"[>0]0;0")  =>  "5"
+=TEXT(-5,"[>0]0;[<0]0")  =>  "5"
+=TEXT(-5,"[<-3]0.0;0")  =>  "5.0"
+=TEXT(-5,"[>=1000]0;0")  =>  "-5"
+=TEXT(-5,"[>=1000]0;[<0]0;0")  =>  "5"
+=TEXT(-5,"[<0]""neg""0;0")  =>  "neg5"
+=TEXT(-5,"[<0]0")  =>  "5"
+=TEXT(-5,"[>0]0")  =>  "5"
+=TEXT(-5,"[<=-5]0;0")  =>  "5"
+=TEXT(-1500,"[<=-1000]0.0,""K"";0")  =>  "1.5K"
+=TEXT(-1500,"[>=1000]0.0,""K"";0")  =>  "-1500"
+=TEXT(5,"[>10]0;0")  =>  "5"
+=TEXT(-5,"0;0")  =>  "5"
+=TEXT(-5,"0")  =>  "-5"
+=TEXT(-5,"[Red][<0]0;0")  =>  "5"
+=TEXT(-5,"[<0]0;[<-10]0;0")  =>  "5"
+=TEXT(5,"[<0]0;0")  =>  "5"
+=TEXT(-0.5,"[<0]0.0;0")  =>  "0.5"
+=TEXT(0.4,"# ??/??")  =>  "  2/5 "
+=TEXT(0.4,"??/??")  =>  " 2/5 "
+=TEXT(0.4,"?/??")  =>  "2/5 "
+=TEXT(0.04,"# ??/??")  =>  "  1/25"
+=TEXT(0.25,"# ?/??")  =>  " 1/4 "
+=TEXT(0.5,"# ???/???")  =>  "   1/2  "
+=TEXT(0.123,"??/??")  =>  " 8/65"
+=TEXT(1.4,"# ??/??")  =>  "1  2/5 "
+=TEXT(0.4,"# ?/??")  =>  " 2/5 "
+=TEXT(0.4,"# ??/?")  =>  "  2/5"
+=TEXT(0.4,"# 0/0")  =>  "2/5"
+=TEXT(0.4,"# 00/00")  =>  "02/05"
+=TEXT(0.75,"# ??/??")  =>  "  3/4 "
+=TEXT(0.4,"# ??/10")  =>  "  4/10"
+=TEXT(1.4,"# ?/??")  =>  "1 2/5 "
+=DATEDIF(DATE(2001,1,31),DATE(2001,3,1),"MD")  =>  -2
+=DATEDIF(DATE(2001,1,30),DATE(2001,3,1),"MD")  =>  -1
+=DATEDIF(DATE(2000,1,31),DATE(2000,3,1),"MD")  =>  -1
+=DATEDIF(DATE(2001,3,31),DATE(2001,5,1),"MD")  =>  0
+=DATEDIF(DATE(2001,1,15),DATE(2001,2,10),"MD")  =>  26
+=DATEDIF(DATE(2001,1,15),DATE(2001,3,20),"MD")  =>  5
+=DATEDIF(DATE(2001,12,31),DATE(2002,1,1),"MD")  =>  1
+=DATEDIF(DATE(2001,1,31),DATE(2001,2,28),"MD")  =>  28
+=DATEDIF(DATE(2001,5,31),DATE(2001,7,1),"MD")  =>  0
+=DATEDIF(DATE(2001,1,29),DATE(2001,3,1),"MD")  =>  0
+=LARGE(A1:A5,2.2)  =>  30
+=LARGE(A1:A5,2.9)  =>  30
+=SMALL(A1:A5,2.2)  =>  20
+=SMALL(A1:A5,2.9)  =>  20
+=LARGE(A1:A5,0.5)  =>  #NUM!
+=LARGE(A1:A5,5.0001)  =>  #NUM!
+=DB(1000000,100000,6,3,7)  =>  176814.44275000002
+=DB(1000000,100000,6,7,7)  =>  15845.098473848073
+=DB(1000000,100000,6,1)  =>  319000
+=LET(x,1,x,2,x)  =>  <rejected>
+
+---- LARGE/SMALL k probes ----
+=SMALL(A1:A5,5.5)  =>  #NUM!
+=SMALL(A1:A5,0.99)  =>  #NUM!
+=SMALL(A1:A5,5.999)  =>  #NUM!
+=SMALL(A1:A5,6)  =>  #NUM!
+=LARGE(A1:A5,5.5)  =>  #NUM!
+=LARGE(A1:A5,1)  =>  50
+=LARGE(A1:A5,0.99)  =>  #NUM!
+=LARGE(A1:A5,5)  =>  10
+=LARGE(A1:A5,1.01)  =>  40
+=LARGE(A1:A5,4.999)  =>  10
