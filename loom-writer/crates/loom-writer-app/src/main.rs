@@ -22,10 +22,13 @@ mod outline;
 mod palette_catalog;
 mod palette_wiring;
 mod projection;
-use palette_catalog::{dispatch_palette_action, master_palette};
+use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 mod reading_time;
 mod recovery;
+mod recovery_draft;
+mod table_rules;
 mod toolbar_commands;
+mod typing_style;
 mod view_state;
 mod window_chrome;
 
@@ -361,6 +364,9 @@ fn blank_startup_document() -> WriterDocument {
 
 /// Hint shown in the status bar (not in the document) on a fresh blank start.
 const START_HINT: &str = "Start typing, or press Ctrl+K for commands";
+
+/// Status shown when an edit would change a table's divider row.
+const TABLE_DIVIDER_REFUSAL: &str = "The table divider row is not editable.";
 
 fn apply_startup_hint(app: &WriterApp, document: &WriterDocument, restored_or_requested: bool) {
     if !restored_or_requested && document.is_empty() {
@@ -968,11 +974,10 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
             })
             .collect()
     } else {
-        registry
-            .search(trimmed)
+        ranked_matches(registry, trimmed)
             .into_iter()
-            .filter(|(spec, _)| spec.enabled)
-            .filter_map(|(spec, _)| {
+            .filter(|spec| spec.enabled)
+            .filter_map(|spec| {
                 let palette = master_palette(app)
                     .into_iter()
                     .find(|c| c.id == spec.id.as_str())?;
@@ -1307,7 +1312,7 @@ fn save_current_document(
     let document = state.current.borrow().clone();
     save_file(&path, &document)?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    let checkpoint_result = recovery::checkpoint_document(&document);
+    let checkpoint_result = recovery::checkpoint_document(&document, Some(path.as_path()));
     *state.last_saved.borrow_mut() = document;
     file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));
@@ -1407,9 +1412,11 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
 }
 
 /// The left status text: the document's counts, with paragraphs named as
-/// writers name them (the model's block is an implementation term).
+/// writers name them (the model's block is an implementation term). Text that
+/// has words also says how long it takes to read, so the estimate stays on
+/// screen without a card that could cover the inspector's controls.
 fn status_left_text(word_count: usize, char_count: usize, paragraph_count: usize) -> String {
-    format!(
+    let counts = format!(
         "{} {} · {} {} · {} {}",
         word_count,
         if word_count == 1 { "word" } else { "words" },
@@ -1421,7 +1428,11 @@ fn status_left_text(word_count: usize, char_count: usize, paragraph_count: usize
         } else {
             "paragraphs"
         }
-    )
+    );
+    match reading_time::minutes_for_words(word_count) {
+        minutes if minutes > 0 => format!("{counts} · ~{minutes} min read"),
+        _ => counts,
+    }
 }
 
 /// Recompute only the page display projection.  This is intentionally
@@ -2003,7 +2014,8 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     let current = state.current.borrow();
     apply_document_with_viewport(app, &current, viewport);
     if recovery_write == RecoveryWrite::Now {
-        if let Err(error) = recovery::record_document(&current) {
+        if let Err(error) = recovery::record_document(&current, state.save_path.borrow().as_deref())
+        {
             warn_recovery_failed(app, &error);
         }
     }
@@ -2103,6 +2115,39 @@ fn history_now_ms(state: &GuiState) -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
+/// Text typed at a collapsed caret takes the style pending there (Ctrl+B, Ctrl+I
+/// or Ctrl+U with no selection). The pending style then follows the caret past
+/// the typed text. `before` is the selection the edit started from.
+fn apply_pending_typing_style(
+    document: &mut WriterDocument,
+    before: TextSelection,
+    typed_end: usize,
+) {
+    let caret = before.focus;
+    if !before.is_collapsed() || typed_end <= caret {
+        typing_style::retain_at(typed_end);
+        return;
+    }
+    let style = typing_style::at(caret);
+    if style.bold.is_none() && style.italic.is_none() && style.underline.is_none() {
+        typing_style::retain_at(typed_end);
+        return;
+    }
+    if let Some(on) = style.bold {
+        set_selection_bold(document, DocumentSelection::range(caret, typed_end), on);
+    }
+    if let Some(on) = style.italic {
+        set_selection_italic(document, DocumentSelection::range(caret, typed_end), on);
+    }
+    if let Some(on) = style.underline {
+        set_selection_underline(document, DocumentSelection::range(caret, typed_end), on);
+    }
+    typing_style::store(typing_style::PendingStyle {
+        caret: typed_end,
+        ..style
+    });
+}
+
 /// Apply a keystroke or paste as a coalescing typing edit. The recovery draft is
 /// written shortly afterwards instead of inside the callback; see
 /// [`recovery::DeferredWrite`]. `next` must differ from the current document, as a
@@ -2138,7 +2183,11 @@ std::thread_local! {
 /// Write the recovery draft now if typing left it stale.
 fn flush_deferred_recovery(app: &WriterApp, state: &GuiState) {
     if recovery::DEFERRED.with(recovery::DeferredWrite::fire) {
-        if let Err(error) = recovery::record_document_deferred(app, &state.current.borrow()) {
+        if let Err(error) = recovery::record_document_deferred(
+            app,
+            &state.current.borrow(),
+            state.save_path.borrow().clone(),
+        ) {
             warn_recovery_failed(app, &error);
         }
     }
@@ -2562,6 +2611,44 @@ fn wire_writer_shared_callbacks(
                 if state.syncing_editor.get() {
                     return;
                 }
+                // The divider row of a table is not text: an edit that would change it
+                // is refused, and the editor is set back to the document.
+                let touches_divider = {
+                    let current = state.current.borrow();
+                    let dividers = table_rules::divider_ranges(&current);
+                    !dividers.is_empty()
+                        && table_rules::edit_touches_divider(
+                            &current.editor_text(),
+                            text.as_str(),
+                            &dividers,
+                        )
+                };
+                if touches_divider {
+                    apply_state(&app, &state);
+                    app.set_status_left(SharedString::from(TABLE_DIVIDER_REFUSAL));
+                    return;
+                }
+                // Text typed right after a table starts a paragraph of its own.
+                let table_ends = table_rules::table_ends(&state.current.borrow());
+                let broken = if table_ends.is_empty() {
+                    None
+                } else {
+                    table_rules::break_after_table(
+                        &state.current.borrow().editor_text(),
+                        text.as_str(),
+                        &table_ends,
+                        focus.max(0) as usize,
+                    )
+                };
+                let (text, anchor, focus) = match broken {
+                    Some((edited, caret)) => {
+                        let caret = caret.min(i32::MAX as usize) as i32;
+                        let anchor = if anchor == focus { caret } else { anchor };
+                        (SharedString::from(edited), anchor, caret)
+                    }
+                    None => (text, anchor, focus),
+                };
+                let before = state.current.borrow().selection();
                 let mut next = state.current.borrow().clone();
                 let text_changed = match next
                     .replace_editor_text_at(text.as_str(), usize::try_from(focus).ok())
@@ -2577,6 +2664,7 @@ fn wire_writer_shared_callbacks(
                     focus.max(0) as usize,
                 ));
                 if text_changed {
+                    apply_pending_typing_style(&mut next, before, focus.max(0) as usize);
                     apply_typing(&app, &state, next);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
                 } else if state.current.borrow().selection() != next.selection() {
@@ -2602,6 +2690,20 @@ fn wire_writer_shared_callbacks(
         let menu_service = menu_service.clone();
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    // No text to format: the style applies to the text typed next here.
+                    let now_on = typing_style::toggle(
+                        selection.focus,
+                        typing_style::InlineStyle::Bold,
+                        app.get_is_bold(),
+                    );
+                    app.set_status_right(SharedString::from(typing_style::announcement(
+                        typing_style::InlineStyle::Bold,
+                        now_on,
+                    )));
+                    return;
+                }
                 // Toolbar/Shortcut/A11y share one registry gate with the palette and menu.
                 let guard = state
                     .registry
@@ -2619,11 +2721,6 @@ fn wire_writer_shared_callbacks(
                     return;
                 }
                 let enabled = app.get_is_bold();
-                let selection = selection_from_app(&app);
-                if selection.is_collapsed() {
-                    app.set_status_right("Select text to apply bold".into());
-                    return;
-                }
                 let mut next = state.current.borrow().clone();
                 // Selection-aware formatting maps the global TextSelection offsets
                 // to per-block spans (`selection_text_spans`), splits existing
@@ -2653,8 +2750,77 @@ fn wire_writer_shared_callbacks(
         let state = state.clone();
         let app_ref = app.as_weak();
         let menu_service = menu_service.clone();
+        app.on_toggle_underline(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    // No text to format: the style applies to the text typed next here.
+                    let now_on = typing_style::toggle(
+                        selection.focus,
+                        typing_style::InlineStyle::Underline,
+                        app.get_is_underline(),
+                    );
+                    app.set_status_right(SharedString::from(typing_style::announcement(
+                        typing_style::InlineStyle::Underline,
+                        now_on,
+                    )));
+                    return;
+                }
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "writer.style.underline",
+                        InvocationSource::Toolbar,
+                    ));
+                if matches!(guard, Err(CommandError::Disabled(_))) {
+                    app.set_status_right("Select text to apply underline".into());
+                    return;
+                } else if guard.is_err() {
+                    app.set_status_right("Underline command failed".into());
+                    return;
+                }
+                let enabled = app.get_is_underline();
+                let mut next = state.current.borrow().clone();
+                set_selection_underline(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_writer_menu_if_present(&menu_service, &app, &state);
+                let announcement = if enabled {
+                    "Underline removed from selection"
+                } else {
+                    "Underline applied to selection"
+                };
+                app.set_status_right(SharedString::from(announcement));
+                app.set_selection_announcement(SharedString::from(announcement));
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    // No text to format: the style applies to the text typed next here.
+                    let now_on = typing_style::toggle(
+                        selection.focus,
+                        typing_style::InlineStyle::Italic,
+                        app.get_is_italic(),
+                    );
+                    app.set_status_right(SharedString::from(typing_style::announcement(
+                        typing_style::InlineStyle::Italic,
+                        now_on,
+                    )));
+                    return;
+                }
                 let guard = state
                     .registry
                     .lock()
@@ -2671,11 +2837,6 @@ fn wire_writer_shared_callbacks(
                     return;
                 }
                 let enabled = app.get_is_italic();
-                let selection = selection_from_app(&app);
-                if selection.is_collapsed() {
-                    app.set_status_right("Select text to apply italic".into());
-                    return;
-                }
                 let mut next = state.current.borrow().clone();
                 set_selection_italic(
                     &mut next,
@@ -2939,6 +3100,30 @@ fn wire_writer_shared_callbacks(
                 if state.syncing_editor.get() {
                     return;
                 }
+                let raw_focus = focus.max(0) as usize;
+                let previous = state.current.borrow().selection().focus;
+                let caret = table_rules::skip_divider(&state.current.borrow(), previous, raw_focus);
+                if caret != raw_focus {
+                    // The caret stepped onto a table divider: carry on past it.
+                    let anchor = anchor.max(0) as usize;
+                    let selection = if anchor == raw_focus {
+                        TextSelection::caret(caret)
+                    } else {
+                        TextSelection::range(anchor, caret)
+                    };
+                    state.current.borrow_mut().set_selection(selection);
+                    apply_state(&app, &state);
+                    reveal_caret(&app, &state);
+                    return;
+                }
+                // A caret past the end of the text can be an edit still arriving; the
+                // document clamps it, so only a caret that really moved drops the style.
+                let clamped = state
+                    .current
+                    .borrow()
+                    .clamp_selection(TextSelection::caret(raw_focus))
+                    .focus;
+                typing_style::retain_at(clamped);
                 let mut current = state.current.borrow_mut();
                 let changed = project_selection_event(&app, &mut current, anchor, focus);
                 drop(current);
@@ -3296,9 +3481,17 @@ fn wire_writer_shared_callbacks(
     }
 }
 
-fn initialize_recovery_for_gui(app: &WriterApp, command_line_open: bool) -> Option<WriterDocument> {
-    match recovery::initialize_editing_session(command_line_open) {
-        Ok(recovered) => recovered,
+fn initialize_recovery_for_gui(
+    app: &WriterApp,
+    open: Option<&Path>,
+) -> Option<recovery::StartupRecovery> {
+    match recovery::initialize_editing_session(open) {
+        Ok(startup) => {
+            if let Some(notice) = startup.notice.as_deref() {
+                app.set_status_left(SharedString::from(notice));
+            }
+            Some(startup)
+        }
         Err(error) => {
             eprintln!("Writer recovery initialization failed: {error}");
             app.set_status_left(SharedString::from(
@@ -3348,18 +3541,37 @@ fn wire_writer_inspector_toggle(
 /// sample). The draft then reads as unsaved and closing it asks first; using
 /// the draft itself as the baseline would make restored work look clean.
 fn startup_documents(
-    recovered: Option<WriterDocument>,
+    recovered: Option<recovery_draft::RecoveredDraft>,
     open: Option<&str>,
     template: Option<TemplateId>,
 ) -> Result<(WriterDocument, WriterDocument), String> {
-    let fresh = match open {
-        Some(path) => load_file(Path::new(path))?,
+    // The saved file is the baseline: the requested file, or else the file a
+    // recovered draft was edited from. The template is used only without one.
+    let baseline = open
+        .map(PathBuf::from)
+        .or_else(|| recovered.as_ref().and_then(|draft| draft.source.clone()));
+    let fresh = match baseline {
         None => template
             .map(template_document)
             .unwrap_or_else(blank_startup_document),
+        Some(path) => match load_file(&path) {
+            Ok(document) => document,
+            // A draft whose file has since disappeared still opens and reads as
+            // unsaved; saving recreates the file.
+            Err(_)
+                if recovered
+                    .as_ref()
+                    .is_some_and(|draft| draft.source.is_some()) =>
+            {
+                template
+                    .map(template_document)
+                    .unwrap_or_else(blank_startup_document)
+            }
+            Err(error) => return Err(error),
+        },
     };
     Ok(match recovered {
-        Some(draft) => (draft, fresh),
+        Some(draft) => (draft.document, fresh),
         None => (fresh.clone(), fresh),
     })
 }
@@ -3383,7 +3595,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // Every interactive editing session owns a recovery slot, including a
     // document opened from the command line.  Opening a requested file only
     // changes which document wins; it must never disable the safety net.
-    let recovered = initialize_recovery_for_gui(&app, args.open.is_some());
+    let recovered = initialize_recovery_for_gui(&app, args.open.as_deref().map(Path::new))
+        .and_then(|startup| startup.draft);
     let document_filter =
         FileFilter::new("Loom Writer document", ["loomdoc"]).map_err(|error| error.to_string())?;
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
@@ -3400,13 +3613,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             &provisional_history,
         );
     }
+    // A recovered draft keeps the file it was edited from, so Save writes back
+    // to it; otherwise the window saves to the requested file, if any.
+    let save_path = match &recovered {
+        Some(draft) => draft.source.clone(),
+        None => args.open.as_ref().map(PathBuf::from),
+    };
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
         last_saved: RefCell::new(initial_saved_document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
-        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+        save_path: RefCell::new(save_path),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -3596,53 +3815,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     wire_writer_inspector_toggle(&app, &state, Some(menu_service.clone()));
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_toggle_underline(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "writer.style.underline",
-                        InvocationSource::Toolbar,
-                    ));
-                if matches!(guard, Err(CommandError::Disabled(_))) {
-                    app.set_status_right("Select text to apply underline".into());
-                    return;
-                } else if guard.is_err() {
-                    app.set_status_right("Underline command failed".into());
-                    return;
-                }
-                let enabled = app.get_is_underline();
-                let selection = selection_from_app(&app);
-                if selection.is_collapsed() {
-                    app.set_status_right("Select text to apply underline".into());
-                    return;
-                }
-                let mut next = state.current.borrow().clone();
-                set_selection_underline(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    !enabled,
-                );
-                next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                sync_menu_state(&menu_service, &app, &state);
-                let announcement = if enabled {
-                    "Underline removed from selection"
-                } else {
-                    "Underline applied to selection"
-                };
-                app.set_status_right(SharedString::from(announcement));
-                app.set_selection_announcement(SharedString::from(announcement));
-            }
-        });
-    }
 
     // ── Strikethrough ──────────────────────────────────────────────────────
     {
@@ -4467,12 +4639,11 @@ fn wire_palette(app: &WriterApp) {
                         })
                         .nth(index as usize)
                 } else {
-                    // Deterministic palette order from registry.search
-                    registry
-                        .search(&q)
+                    // Deterministic palette order, shared with the rows above
+                    ranked_matches(&registry, &q)
                         .into_iter()
-                        .filter(|(spec, _)| spec.enabled)
-                        .filter_map(|(spec, _)| {
+                        .filter(|spec| spec.enabled)
+                        .filter_map(|spec| {
                             master_palette(&app)
                                 .into_iter()
                                 .find(|c| c.id == spec.id.as_str())
@@ -4532,6 +4703,10 @@ mod scale_surfaces_tests;
 
 #[cfg(test)]
 mod keyboard_flow_tests;
+#[cfg(test)]
+mod table_rules_tests;
+#[cfg(test)]
+mod typing_style_tests;
 
 #[cfg(test)]
 mod inspector_startup_tests;

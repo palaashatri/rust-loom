@@ -13,16 +13,20 @@ use crate::{RichBlock, WriterDocument, TABLE_BLOCK_KIND};
 pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
     let mut out = String::new();
     let mut numbered_index = 0usize;
-    // List items and table rows end without a blank line; the next block must
-    // be separated or Markdown readers fold it into the list item or table.
-    let mut open_block = false;
+    // Paragraphs and headings end with a blank line; list items and table rows end
+    // with one newline. After such a line, a blank line comes before the next block,
+    // except before the next item of the same list, which stays tight. Without it,
+    // Markdown readers fold the next block into the item or table above.
+    let mut previous: Option<&str> = None;
     for block in &doc.blocks {
         let kind = block.kind.as_str();
-        let is_list = matches!(kind, "list-bulleted" | "list-numbered");
-        if open_block && !is_list {
-            out.push('\n');
+        if let Some(before) = previous {
+            let tight_item = is_list_item(before) && before == kind;
+            if ends_with_one_newline(before) && !tight_item {
+                out.push('\n');
+            }
         }
-        open_block = is_list || kind == TABLE_BLOCK_KIND;
+        previous = Some(kind);
         match kind {
             "heading1" => out.push_str(&format!("# {}\n\n", inline(block))),
             "heading2" => out.push_str(&format!("## {}\n\n", inline(block))),
@@ -50,6 +54,16 @@ pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
         }
     }
     out
+}
+
+/// Whether a block kind is one item of a bulleted or numbered list.
+fn is_list_item(kind: &str) -> bool {
+    matches!(kind, "list-bulleted" | "list-numbered")
+}
+
+/// Whether a block of this kind ends its Markdown with one newline, not a blank line.
+fn ends_with_one_newline(kind: &str) -> bool {
+    is_list_item(kind) || kind == TABLE_BLOCK_KIND
 }
 
 /// The block's text with its runs written as Markdown emphasis.
@@ -154,4 +168,31 @@ fn escape(text: &str) -> String {
         out.push(ch);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{RichBlock, WriterDocument, TABLE_BLOCK_KIND};
+
+    #[test]
+    fn blocks_are_separated_so_markdown_readers_do_not_merge_them() {
+        let mut doc = WriterDocument::new("markdown-blocks", "Markdown blocks");
+        for (id, kind, text) in [
+            (1, "list-bulleted", "Apples"),
+            (2, "list-bulleted", "Pears"),
+            (3, "list-numbered", "First"),
+            (4, "list-numbered", "Second"),
+            (5, TABLE_BLOCK_KIND, "| A | B |\n| --- | --- |\n| 1 | 2 |"),
+            (6, "paragraph", "After the table"),
+            (7, "list-bulleted", "Last"),
+        ] {
+            doc.push(RichBlock::new(id, kind, text));
+        }
+        // Items of one list stay tight; a change of list, a table and a paragraph
+        // each get a blank line before them.
+        assert_eq!(
+            doc.to_markdown(),
+            "- Apples\n- Pears\n\n1. First\n2. Second\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter the table\n\n- Last\n"
+        );
+    }
 }

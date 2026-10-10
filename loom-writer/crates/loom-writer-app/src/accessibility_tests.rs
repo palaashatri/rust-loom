@@ -68,6 +68,49 @@ fn every_interactive_element_in_the_writer_window_has_an_accessible_name() {
     }
 }
 
+fn document_body(app: &WriterApp) -> ElementHandle {
+    ElementHandle::find_by_accessible_label(app, "Document body")
+        .next()
+        .expect("the document body is in the accessibility tree")
+}
+
+/// The document body is the text node assistive technology reads. Its value is
+/// the whole document, not only the pages on screen, and it follows edits.
+#[test]
+fn the_document_body_exposes_the_whole_document_as_its_accessible_value() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let mut document = WriterDocument::new("long", "Long document");
+    for n in 1..=120 {
+        document.push(RichBlock::new(
+            n,
+            "paragraph",
+            &format!("Paragraph number {n} of a long document."),
+        ));
+    }
+    let (app, state) = test_state(document, dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    apply_state(&app, &state);
+    let _ =
+        loom_test_support::capture::snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render");
+    let value = |app: &WriterApp| {
+        document_body(app)
+            .accessible_value()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let expected = state.current.borrow().editor_text();
+    assert_eq!(value(&app), expected, "the value is the whole document");
+
+    let edited = format!("Typed at the top. {expected}");
+    app.invoke_document_edited(edited.into(), 18, 18);
+    assert_eq!(
+        value(&app),
+        state.current.borrow().editor_text(),
+        "the value follows an edit"
+    );
+    assert!(value(&app).starts_with("Typed at the top. Paragraph number 1 "));
+}
+
 // --- keyboard focus without a click -----------------------------------------
 
 use slint::platform::{Key, WindowEvent};

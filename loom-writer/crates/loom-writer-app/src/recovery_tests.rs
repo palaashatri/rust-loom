@@ -100,23 +100,26 @@ fn opened_session_recovers_unsaved_edit_after_process_restart() {
     match child_mode().as_deref() {
         Some("record") => {
             let open_path = PathBuf::from(std::env::var_os(OPEN_PATH).expect("fixture path"));
-            assert!(recovery::initialize_editing_session(true)
+            assert!(recovery::initialize_editing_session(Some(&open_path))
                 .expect("initialize recovery for --open")
+                .draft
                 .is_none());
             let mut document = load_file(&open_path).expect("open saved fixture");
             let edited = format!("{}\n{CRASH_MARKER}", document.editor_text());
             document
                 .replace_editor_text(&edited)
                 .expect("apply simulated user edit");
-            let (app, state) = make_test_state(document, None);
+            let (app, state) = make_test_state(document, Some(open_path.clone()));
             apply_state(&app, &state);
             // Exit without Rust destructors, like the app being killed before Save.
             std::process::exit(0);
         }
         Some("restore") => {
-            let document = recovery::initialize_editing_session(false)
+            let document = recovery::initialize_editing_session(None)
                 .expect("initialize ordinary launch")
-                .expect("recover the unsaved document");
+                .draft
+                .expect("recover the unsaved document")
+                .document;
             assert!(document.editor_text().contains(CRASH_MARKER));
             std::process::exit(0);
         }
@@ -142,7 +145,8 @@ const WRITE_FAILURE_TEST: &str = "recovery_tests::interactive_recovery_write_fai
 fn interactive_recovery_write_failures_are_visible() {
     match child_mode().as_deref() {
         Some("fail-write") => {
-            recovery::initialize_editing_session(true).expect("initialize recovery");
+            recovery::initialize_editing_session(Some(Path::new("unused.loomdoc")))
+                .expect("initialize recovery");
             let directory =
                 loom_production::snapshot::application_state_directory("org.loom.writer")
                     .expect("resolve recovery directory");
@@ -227,7 +231,7 @@ fn initialization_failure_is_visible_on_startup() {
                 .expect("block recovery directory creation");
             set_platform();
             let app = WriterApp::new().expect("create Writer UI for startup failure");
-            assert!(initialize_recovery_for_gui(&app, false).is_none());
+            assert!(initialize_recovery_for_gui(&app, None).is_none());
             assert_eq!(
                 app.get_status_left(),
                 "Recovery unavailable. Save regularly; crash recovery may be out of date."
@@ -354,21 +358,22 @@ fn an_intentional_close_clears_recovery_but_a_crash_does_not() {
     // Session 1 types a draft and then dies without closing: the slot is simply
     // dropped, as in a crash.
     let first = session(|| {
-        assert!(recovery::initialize_editing_session(false)
+        assert!(recovery::initialize_editing_session(None)
             .expect("start")
+            .draft
             .is_none());
         let mut draft = WriterDocument::new("draft", "Draft");
         draft.replace_paragraphs("typed before the crash");
-        recovery::record_document(&draft).expect("record");
+        recovery::record_document(&draft, None).expect("record");
         None
     });
     assert!(first.is_none());
 
     // Session 2 is offered the draft, then the user closes deliberately.
     let second = session(|| {
-        let restored = recovery::initialize_editing_session(false).expect("restart");
+        let restored = recovery::initialize_editing_session(None).expect("restart");
         recovery::discard_document_recovery().expect("clear on close");
-        restored.map(|document| first_text(&document))
+        restored.draft.map(|draft| first_text(&draft.document))
     });
     assert_eq!(
         second.as_deref(),
@@ -378,9 +383,10 @@ fn an_intentional_close_clears_recovery_but_a_crash_does_not() {
 
     // Session 3 starts clean: the discarded draft does not come back.
     let third = session(|| {
-        recovery::initialize_editing_session(false)
+        recovery::initialize_editing_session(None)
             .expect("start again")
-            .map(|document| first_text(&document))
+            .draft
+            .map(|draft| first_text(&draft.document))
     });
     assert_eq!(
         third, None,
@@ -392,4 +398,215 @@ fn an_intentional_close_clears_recovery_but_a_crash_does_not() {
         None => std::env::remove_var(STATE_HOME_ENV),
     }
     let _ = std::fs::remove_dir_all(root);
+}
+
+fn path_from_env(name: &str) -> PathBuf {
+    PathBuf::from(std::env::var_os(name).unwrap_or_else(|| panic!("{name} is set")))
+}
+
+/// Another saved file, written beside the fixture the child edits.
+fn named_fixture(root: &Path, name: &str, text: &str) -> PathBuf {
+    let path = root.join(name);
+    let mut document = WriterDocument::new(name, name);
+    document.replace_paragraphs(text);
+    std::fs::write(
+        &path,
+        loom_writer_core::save_document(&document).expect("serialize fixture"),
+    )
+    .expect("write fixture");
+    path
+}
+
+/// Type into the file at `open_path` and die without saving, as a crash does.
+fn record_unsaved_edit_for(open_path: &Path) -> ! {
+    let startup = recovery::initialize_editing_session(Some(open_path))
+        .expect("initialize recovery for --open");
+    assert!(
+        startup.draft.is_none(),
+        "no draft exists before the first edit"
+    );
+    let mut document = load_file(open_path).expect("open saved fixture");
+    let edited = format!("{}\n{CRASH_MARKER}", document.editor_text());
+    document
+        .replace_editor_text(&edited)
+        .expect("apply simulated user edit");
+    let (app, state) = make_test_state(document, Some(open_path.to_path_buf()));
+    apply_state(&app, &state);
+    // Exit without Rust destructors, like the app being killed before Save.
+    std::process::exit(0);
+}
+
+const SAME_FILE_TEST: &str =
+    "recovery_tests::a_draft_for_the_opened_file_restores_as_unsaved_and_saves_back";
+
+/// Double-clicking the file it was typed into must not discard the typing.
+#[test]
+fn a_draft_for_the_opened_file_restores_as_unsaved_and_saves_back() {
+    match child_mode().as_deref() {
+        Some("edit") => record_unsaved_edit_for(&path_from_env(OPEN_PATH)),
+        Some("relaunch") => {
+            let open_path = path_from_env(OPEN_PATH);
+            let (app, state) =
+                make_test_state(WriterDocument::new("placeholder", "Placeholder"), None);
+            let startup =
+                initialize_recovery_for_gui(&app, Some(&open_path)).expect("initialize recovery");
+            assert_eq!(
+                app.get_status_left().as_str(),
+                "Restored unsaved changes to saved-test"
+            );
+            let draft = startup.draft.expect("the draft for this file is restored");
+            assert_eq!(draft.source.as_deref(), Some(open_path.as_path()));
+            assert!(draft.document.editor_text().contains(CRASH_MARKER));
+            let open_text = open_path.to_string_lossy().into_owned();
+            let (document, saved) =
+                startup_documents(Some(draft), Some(&open_text), None).expect("startup documents");
+            assert!(
+                !document_content_equal(&document, &saved),
+                "a restored draft reads as unsaved"
+            );
+            *state.current.borrow_mut() = document;
+            *state.last_saved.borrow_mut() = saved;
+            *state.save_path.borrow_mut() = Some(open_path.clone());
+            apply_state(&app, &state);
+            assert_eq!(
+                app.get_window_title().as_str(),
+                "saved-test * - Loom Writer"
+            );
+            assert!(save_current_document(&app, &state, false).expect("save restored draft"));
+            std::process::exit(0);
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {}
+    }
+
+    let root = isolated_root();
+    std::fs::create_dir_all(&root).expect("create isolated test root");
+    let open_path = saved_fixture(&root);
+    assert!(run_child(SAME_FILE_TEST, "edit", &root, Some(&open_path), None).success());
+    assert!(run_child(SAME_FILE_TEST, "relaunch", &root, Some(&open_path), None).success());
+    let on_disk = load_file(&open_path).expect("the saved file loads");
+    assert!(
+        on_disk.editor_text().contains(CRASH_MARKER),
+        "Save writes the restored draft to the file it came from"
+    );
+    std::fs::remove_dir_all(root).expect("remove isolated test data");
+}
+
+const KEEP_DRAFT_TEST: &str =
+    "recovery_tests::opening_another_file_keeps_the_draft_for_a_later_launch";
+
+/// Opening a different file must set the draft aside, never overwrite it, and
+/// offer it again later; a deliberate discard ends it for good.
+#[test]
+fn opening_another_file_keeps_the_draft_for_a_later_launch() {
+    match child_mode().as_deref() {
+        Some("edit") => record_unsaved_edit_for(&path_from_env(OPEN_PATH)),
+        Some("open-other") => {
+            let other = path_from_env(OPEN_PATH);
+            let startup =
+                recovery::initialize_editing_session(Some(&other)).expect("open another file");
+            assert!(
+                startup.draft.is_none(),
+                "another file opens as itself, not with the draft"
+            );
+            std::process::exit(0);
+        }
+        Some("plain") => {
+            let open_path = path_from_env(OPEN_PATH);
+            let startup = recovery::initialize_editing_session(None).expect("ordinary launch");
+            let draft = startup
+                .draft
+                .expect("the kept draft is offered on the next launch");
+            assert!(draft.document.editor_text().contains(CRASH_MARKER));
+            assert_eq!(draft.source.as_deref(), Some(open_path.as_path()));
+            recovery::discard_document_recovery().expect("the user discards the draft");
+            std::process::exit(0);
+        }
+        Some("plain-again") => {
+            let startup = recovery::initialize_editing_session(None).expect("ordinary launch");
+            assert!(
+                startup.draft.is_none(),
+                "a discarded draft does not come back"
+            );
+            std::process::exit(0);
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {}
+    }
+
+    let root = isolated_root();
+    std::fs::create_dir_all(&root).expect("create isolated test root");
+    let open_path = saved_fixture(&root);
+    let other_path = named_fixture(&root, "other-file.loomdoc", "A different saved file.");
+    assert!(run_child(KEEP_DRAFT_TEST, "edit", &root, Some(&open_path), None).success());
+    assert!(run_child(
+        KEEP_DRAFT_TEST,
+        "open-other",
+        &root,
+        Some(&other_path),
+        None
+    )
+    .success());
+    assert!(run_child(KEEP_DRAFT_TEST, "plain", &root, Some(&open_path), None).success());
+    assert!(run_child(KEEP_DRAFT_TEST, "plain-again", &root, None, None).success());
+    std::fs::remove_dir_all(root).expect("remove isolated test data");
+}
+
+const LEGACY_DRAFT_TEST: &str =
+    "recovery_tests::drafts_saved_before_paths_were_recorded_still_restore";
+
+/// Drafts written by the previous format are bare packages with no file.
+#[test]
+fn drafts_saved_before_paths_were_recorded_still_restore() {
+    match child_mode().as_deref() {
+        Some("legacy") => {
+            let mut document = WriterDocument::new("legacy", "Legacy");
+            document.replace_paragraphs(&format!("Legacy draft {CRASH_MARKER}"));
+            let package =
+                loom_writer_core::save_document(&document).expect("serialize legacy draft");
+            let mut store = loom_production::snapshot::SnapshotRecovery::open("org.loom.writer")
+                .expect("open recovery");
+            store
+                .record("writer state", package)
+                .expect("record legacy draft");
+            std::process::exit(0);
+        }
+        Some("plain") => {
+            let startup = recovery::initialize_editing_session(None).expect("ordinary launch");
+            let draft = startup.draft.expect("the legacy draft restores");
+            assert!(draft.document.editor_text().contains(CRASH_MARKER));
+            assert!(draft.source.is_none(), "a legacy draft has no file");
+            std::process::exit(0);
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {}
+    }
+
+    let root = isolated_root();
+    std::fs::create_dir_all(&root).expect("create isolated test root");
+    assert!(run_child(LEGACY_DRAFT_TEST, "legacy", &root, None, None).success());
+    assert!(run_child(LEGACY_DRAFT_TEST, "plain", &root, None, None).success());
+    std::fs::remove_dir_all(root).expect("remove isolated test data");
+}
+
+/// A path survives the draft container exactly, including spaces, accents and
+/// a newline; a bare package still decodes and has no file.
+#[test]
+fn a_draft_keeps_the_exact_path_it_was_edited_from() {
+    let package = b"native package bytes".to_vec();
+    let sources = [
+        Some(PathBuf::from("/home/writer/Q3 plan (final) é.loomdoc")),
+        Some(PathBuf::from("/tmp/odd\nname.loomdoc")),
+        None,
+    ];
+    for source in sources {
+        let payload = crate::recovery_draft::encode(source.as_deref(), &package);
+        let (decoded, bytes) = crate::recovery_draft::decode(&payload).expect("payload decodes");
+        assert_eq!(decoded, source);
+        assert_eq!(bytes, package.as_slice());
+    }
+    let (decoded, bytes) =
+        crate::recovery_draft::decode(&package).expect("a legacy payload decodes");
+    assert_eq!(decoded, None);
+    assert_eq!(bytes, package.as_slice());
 }

@@ -11,13 +11,16 @@ const PLACEHOLDER: &str = "Type your text here...";
 fn status_bar_counts_paragraphs_and_drops_the_offline_prefix() {
     let app = editor(1280.0, 800.0, 1.0);
     apply_document(&app, &text_document("Hello"));
-    assert_eq!(app.get_status_left(), "1 word · 5 chars · 1 paragraph");
+    assert_eq!(
+        app.get_status_left(),
+        "1 word · 5 chars · 1 paragraph · ~1 min read"
+    );
     assert_eq!(app.get_status_right(), "Caret at character 1");
 
     let two = text_document("First\n\nSecond");
     apply_document(&app, &two);
     assert!(
-        app.get_status_left().ends_with(" paragraphs"),
+        app.get_status_left().contains(" paragraphs"),
         "got {}",
         app.get_status_left()
     );

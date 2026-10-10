@@ -9,7 +9,7 @@ export component WriterShortcutScope inherits FocusScope {
     in property <bool> save-changes-open;
     in property <int> toolbar-menu-kind;
     callback open-menu-for-key(KeyEvent) -> bool;
-    callback focus-page();
+    callback leave-chrome(bool);
     callback open-palette();
     callback new-doc();
     callback open-doc();
@@ -32,7 +32,7 @@ export component WriterShortcutScope inherits FocusScope {
     }
     key-pressed(event) => {
         if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open) { return reject; }
-        if (event.text == Key.F6) { root.focus-page(); return accept; }
+        if (event.text == Key.F6) { root.leave-chrome(event.modifiers.shift); return accept; }
         if (event.text == Key.F3) {
             if (event.modifiers.shift) { FindBar.find-previous(); } else { FindBar.find-next(); }
             return accept;

@@ -268,6 +268,41 @@ fn rightmost(items: &[Rect], label: &str) -> Rect {
 }
 
 #[test]
+fn the_lists_control_is_not_covered_by_the_page_card_at_double_text_at_1024() {
+    let (width, height) = (1024.0f32, 720.0f32);
+    let app = editor(width, height, 2.0);
+    open_surface(&app, "inspector");
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+    let items = rects(&app);
+    let status_top = ElementHandle::find_by_element_type_name(&app, "WriterStatusBar")
+        .next()
+        .expect("the status bar is in the element tree")
+        .absolute_position()
+        .y;
+    // The page card is listed only while it is on screen. Scrolled to the top of
+    // the inspector it must be out of view, not drawn over the Lists control.
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Page 1 of 1")
+            .next()
+            .is_none(),
+        "the page card is drawn over the top of the inspector"
+    );
+    for label in ["None", "Bulleted", "Numbered"] {
+        let segment = rightmost(&items, label);
+        assert!(
+            segment.2 >= 0.0 && segment.2 + segment.4 <= status_top,
+            "the Lists control {label} {segment:?} must end above the status bar at {status_top}"
+        );
+        if let Some(cover) = items
+            .iter()
+            .find(|other| other.0 != label && overlap(&segment, other))
+        {
+            panic!("the Lists control {label} {segment:?} is covered by {cover:?}");
+        }
+    }
+}
+
+#[test]
 fn inspector_icon_buttons_and_font_stepper_grow_with_text_and_stay_inside_the_window() {
     let (width, height) = (1280.0f32, 800.0f32);
     let mut bold_widths = Vec::new();

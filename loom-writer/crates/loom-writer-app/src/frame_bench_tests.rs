@@ -316,7 +316,7 @@ fn writer_keystroke_stage_profile() {
             apply_document_with_viewport(&app, &base, *state.viewport.borrow());
         });
         stage("recovery::record_document", &mut || {
-            let _ = recovery::record_document(&base);
+            let _ = recovery::record_document(&base, None);
         });
         stage("document_is_dirty", &mut || {
             let _ = document_is_dirty(&state);

@@ -66,6 +66,7 @@ export component WriterInspector inherits LoomPanel {
     callback delete-comment(string);
     callback navigate-comment(string);
     callback close-requested;
+    callback f6-pressed(bool);
 
     public function focus-first-control() {
         tab-control.grab-focus();
@@ -90,6 +91,11 @@ export component WriterInspector inherits LoomPanel {
         key-pressed(event) => {
             if (root.active && event.text == Key.Escape) {
                 root.close-requested();
+                return accept;
+            }
+            // F6 moves on to the page; the inspector is where the cycle is entered from.
+            if (root.active && event.text == Key.F6) {
+                root.f6-pressed(event.modifiers.shift);
                 return accept;
             }
             return reject;
@@ -546,6 +552,38 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Page Setup"; }
 
+            // The page summary sits at the top of Page Setup, inside the scroll area,
+            // so the sections above it, including Lists, are never covered at large text.
+            HorizontalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+                padding-bottom: Theme.tokens.space.xl;
+                Rectangle {
+                    height: 52px;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: "Page 1 of " + root.page-count;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    background: Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+
+                    VerticalLayout {
+                        padding-left: Theme.tokens.space.md;
+                        padding-right: Theme.tokens.space.md;
+                        spacing: 2px;
+                        alignment: center;
+
+                        Text {
+                            text: "Page 1 of " + root.page-count;
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+                    }
+                }
+            }
+
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
@@ -582,41 +620,6 @@ export component WriterInspector inherits LoomPanel {
         }
         }
 
-        // Persistent bottom document status card (pinned below the scroll area)
-        HorizontalLayout {
-            padding-left: Theme.tokens.space.xl;
-            padding-right: Theme.tokens.space.xl;
-            padding-bottom: Theme.tokens.space.xl;
-            Rectangle {
-                height: 52px;
-                border-radius: Theme.tokens.metrics.radius-medium;
-                background: Theme.palette().surface-sunken;
-                border-width: 1px;
-                border-color: Theme.palette().border;
-
-                VerticalLayout {
-                    padding-left: Theme.tokens.space.md;
-                    padding-right: Theme.tokens.space.md;
-                    spacing: 2px;
-                    alignment: center;
-
-                    Text {
-                        text: "Page 1 of " + root.page-count;
-                        font-size: Theme.type.caption;
-                        font-weight: 600;
-                        color: Theme.palette().ink;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                    }
-                    Text {
-                        text: root.reading-time-mins > 0 ? ("~" + root.reading-time-mins + " min read") : "";
-                        font-size: Theme.type.micro;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        overflow: elide;
-                    }
-                }
-            }
-        }
         }
     }
 }

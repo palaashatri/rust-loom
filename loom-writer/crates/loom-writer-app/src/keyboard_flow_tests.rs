@@ -472,9 +472,87 @@ fn backspace_after_ctrl_a_clears_the_palette_search() {
     assert!(!s.app.get_palette_query_selected());
 }
 
+#[test]
+fn f6_cycles_page_toolbar_inspector_and_shift_f6_runs_it_backwards() {
+    let s = launched("Hello world");
+    let page = focus_weak(&s.app);
+    assert!(
+        s.app.get_show_inspector(),
+        "the inspector is open at this size"
+    );
+
+    // Forward: page -> toolbar -> inspector -> page.
+    press(&s.app, Key::F6);
+    assert_eq!(
+        focus_name(&s.app),
+        "View",
+        "F6 from the page lands on the first toolbar item"
+    );
+    press(&s.app, Key::F6);
+    assert_ne!(
+        focus_name(&s.app),
+        "View",
+        "F6 from the toolbar goes to the inspector"
+    );
+    assert!(!same_focus(&focus_weak(&s.app), &page));
+    press(&s.app, Key::F6);
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "F6 from the inspector returns to the page"
+    );
+
+    // Backward: page -> inspector -> toolbar -> page.
+    shift_key(&s.app, Key::F6);
+    assert!(
+        !same_focus(&focus_weak(&s.app), &page),
+        "Shift+F6 from the page goes to the inspector"
+    );
+    shift_key(&s.app, Key::F6);
+    assert_eq!(
+        focus_name(&s.app),
+        "View",
+        "Shift+F6 from the inspector goes to the toolbar"
+    );
+    shift_key(&s.app, Key::F6);
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "Shift+F6 from the toolbar returns to the page"
+    );
+}
+
+#[test]
+fn ctrl_u_with_no_selection_underlines_the_next_typed_text_from_the_keyboard() {
+    let s = launched("Hello");
+    press(&s.app, Key::End);
+    assert_eq!(
+        s.state.current.borrow().selection(),
+        TextSelection::caret(5),
+        "End puts the caret after the text"
+    );
+    ctrl(&s.app, "u");
+    assert_eq!(
+        s.app.get_status_right().as_str(),
+        "Underline on for new text",
+        "after Ctrl+U (menu actions {:?}, left {:?}, state {:?})",
+        s.actions.borrow(),
+        s.app.get_status_left().as_str(),
+        s.state.current.borrow().selection()
+    );
+    type_text(&s.app, "!");
+    let document = s.state.current.borrow();
+    assert_eq!(document.plain_text(), "Hello!");
+    assert!(
+        document.blocks[0]
+            .runs
+            .iter()
+            .any(|run| run.start <= 5 && 5 < run.end && run.style.underline),
+        "the typed ! is underlined"
+    );
+}
+
 fn open_toolbar_menu(s: &Session, name: &str) {
     s.app.invoke_focus_page();
-    shift_key(&s.app, Key::F6);
+    press(&s.app, Key::F6);
     for _ in 0..12 {
         if focus_name(&s.app) == name {
             press(&s.app, Key::Return);
@@ -488,8 +566,8 @@ fn open_toolbar_menu(s: &Session, name: &str) {
 #[test]
 fn toolbar_is_reachable_in_order_and_every_menu_works_from_the_keyboard() {
     let s = launched("Hello");
-    // Shift+F6 leaves the page for the toolbar's first item.
-    shift_key(&s.app, Key::F6);
+    // F6 leaves the page for the toolbar's first item.
+    press(&s.app, Key::F6);
     assert_eq!(focus_name(&s.app), "View");
     let mut seen = vec![focus_name(&s.app)];
     for _ in 0..9 {
@@ -862,6 +940,8 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
             !same_focus(&focus_weak(&s.app), &page),
             "F6 leaves the page"
         );
+        // The first F6 lands on the toolbar; the second hands over to the inspector.
+        press(&s.app, Key::F6);
 
         let stops = walk_until(&s.app, &page, 120);
         assert_each_stop_is_usable(&stops);
@@ -940,7 +1020,7 @@ fn type_format_find_and_save_without_a_pointer() {
     assert!(s.app.get_is_bold(), "Ctrl+B bolds the selection");
     ctrl(&s.app, "i");
     assert!(s.app.get_is_italic(), "Ctrl+I italicises it");
-    // Underline is wired by the live window only; count the request here.
+    // Count the request here; the handler itself is covered by typing_style_tests.
     let underlines = Rc::new(Cell::new(0));
     let seen = underlines.clone();
     s.app.on_toggle_underline(move || seen.set(seen.get() + 1));
@@ -995,7 +1075,7 @@ fn outline_headings_are_keyboard_reachable_and_escape_closes_the_pane() {
 
     // Every heading is a Tab stop with its title as the name.
     s.app.invoke_focus_page();
-    shift_key(&s.app, Key::F6);
+    press(&s.app, Key::F6);
     tab_to(&s.app, "Intro");
     tab(&s.app);
     assert_eq!(focus_name(&s.app), "Middle");
@@ -1013,7 +1093,7 @@ fn outline_headings_are_keyboard_reachable_and_escape_closes_the_pane() {
     );
 
     // Escape closes the pane from a heading.
-    shift_key(&s.app, Key::F6);
+    press(&s.app, Key::F6);
     tab_to(&s.app, "End");
     press(&s.app, Key::Escape);
     assert!(!s.app.get_show_navigator(), "Escape closed the outline");

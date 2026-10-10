@@ -240,10 +240,9 @@ export component WriterApp inherits Window {
         FindBar.page-focus-tick += 1;
     }
 
-    /// F6 / Shift+F6 from the page: Tab inside the page types a tab, so this is
-    /// how the keyboard leaves it. F6 goes to the inspector (or the toolbar when
-    /// it is closed); Shift+F6 goes to the toolbar. F6 anywhere else returns to
-    /// the page.
+    /// F6 cycles the keyboard through the page, the toolbar and the open
+    /// inspector: page, toolbar, inspector, page. Shift+F6 runs the cycle
+    /// backwards. Tab inside the page types a tab, so the page passes F6 on.
     /// Alt+letter or F10 opens the in-window menu named by that key. The page
     /// text box would otherwise type the letter, so it asks first too.
     function open-menu-for-key(event: KeyEvent) -> bool {
@@ -253,13 +252,40 @@ export component WriterApp inherits Window {
         return true;
     }
 
-    public function leave-page(backwards: bool) {
-        if (backwards || !root.inspector-visible) {
-            action-toolbar.focus-first();
-        } else if (root.compact-inspector-layout) {
+    public function focus-inspector() {
+        if (root.compact-inspector-layout) {
             compact-inspector.focus-first-control();
         } else {
             docked-inspector.focus-first-control();
+        }
+    }
+
+    /// From the page: F6 goes to the toolbar; Shift+F6 goes back to the open
+    /// inspector, or to the toolbar when no inspector is open.
+    public function leave-page(backwards: bool) {
+        if (backwards && root.inspector-visible) {
+            root.focus-inspector();
+        } else {
+            action-toolbar.focus-first();
+        }
+    }
+
+    /// From the toolbar, or any control outside the page and inspector: F6 goes
+    /// to the open inspector, or to the page; Shift+F6 goes to the page.
+    public function leave-chrome(backwards: bool) {
+        if (!backwards && root.inspector-visible) {
+            root.focus-inspector();
+        } else {
+            root.focus-page();
+        }
+    }
+
+    /// From the inspector: F6 goes to the page; Shift+F6 goes back to the toolbar.
+    public function leave-inspector(backwards: bool) {
+        if (backwards) {
+            action-toolbar.focus-first();
+        } else {
+            root.focus-page();
         }
     }
 
@@ -322,7 +348,7 @@ export component WriterApp inherits Window {
         save-changes-open: root.save-changes-open;
         toolbar-menu-kind: root.toolbar-menu-kind;
         open-menu-for-key(event) => { return root.open-menu-for-key(event); }
-        focus-page => { root.focus-page(); }
+        leave-chrome(backwards) => { root.leave-chrome(backwards); }
         open-palette => { root.open-palette(); }
         new-doc => { root.new-doc(); }
         open-doc => { root.open-doc(); }
@@ -460,6 +486,7 @@ export component WriterApp inherits Window {
                     comment-focus-pending <=> root.comment-focus-pending;
                     quiet-open <=> root.inspector-quiet-open;
                     close-requested => { root.toggle-inspector(); }
+                    f6-pressed(backwards) => { root.leave-inspector(backwards); }
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
                     is-underline <=> root.is-underline;
@@ -535,6 +562,7 @@ export component WriterApp inherits Window {
             comment-focus-pending <=> root.comment-focus-pending;
             quiet-open <=> root.inspector-quiet-open;
             close-requested => { root.toggle-inspector(); }
+            f6-pressed(backwards) => { root.leave-inspector(backwards); }
             is-bold <=> root.is-bold;
             is-italic <=> root.is-italic;
             is-underline <=> root.is-underline;

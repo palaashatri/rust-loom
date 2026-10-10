@@ -2,6 +2,48 @@
 //! command id it dispatches through the same callbacks as the toolbar and menus.
 
 use crate::{dispatch_command, WriterApp};
+use loom_command::{CommandRegistry, CommandSpec};
+
+/// Other words a command answers to, besides its label. A query that equals one
+/// of them lifts the command above commands that only share the word in a label
+/// ("Insert Markdown Table" shares "markdown" with "Export Markdown").
+const PALETTE_ALIASES: &[(&str, &[&str])] = &[("file.export_md", &["markdown", "md", ".md"])];
+
+/// Score added to a command for answering to the query exactly. Registry scores
+/// top out at 1000 for an exact label, so an alias wins a tie within a tier.
+const ALIAS_BONUS: u32 = 100;
+
+/// The registry's matches for `query`, best first. The registry's own order
+/// breaks ties, and aliases add [`ALIAS_BONUS`]. The palette lists these rows
+/// and Enter runs the first of them, so every search path uses this one order.
+pub(crate) fn ranked_matches<'a>(
+    registry: &'a CommandRegistry,
+    query: &str,
+) -> Vec<&'a CommandSpec> {
+    let query = query.trim().to_lowercase();
+    let mut matches: Vec<(u32, &CommandSpec)> = registry
+        .search(&query)
+        .into_iter()
+        .map(|(spec, score)| (score + alias_bonus(spec.id.as_str(), &query), spec))
+        .collect();
+    matches.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(a.1.order.cmp(&b.1.order))
+            .then(a.1.id.cmp(&b.1.id))
+    });
+    matches.into_iter().map(|(_, spec)| spec).collect()
+}
+
+fn alias_bonus(id: &str, query: &str) -> u32 {
+    let answers_to_query = PALETTE_ALIASES
+        .iter()
+        .any(|(alias_id, words)| *alias_id == id && words.contains(&query));
+    if answers_to_query {
+        ALIAS_BONUS
+    } else {
+        0
+    }
+}
 
 /// Commands exposed through the command palette. Each palette entry maps to
 /// one of the application callbacks, so palette invocation and toolbar clicks

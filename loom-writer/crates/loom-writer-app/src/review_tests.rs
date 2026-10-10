@@ -544,8 +544,8 @@ fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
     // Recovered text that differs from the baseline is unsaved work.
     let mut draft = sample_document();
     draft.replace_paragraphs("Words that only exist in a recovered draft");
-    let (document, saved) =
-        startup_documents(Some(draft.clone()), None, None).expect("recovered start");
+    let (document, saved) = startup_documents(Some(untitled_draft(draft.clone())), None, None)
+        .expect("recovered start");
     assert!(
         document_content_equal(&document, &draft),
         "the draft is what opens"
@@ -557,16 +557,71 @@ fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
 
     // A recovered draft identical to the baseline has nothing to lose.
     let (document, saved) =
-        startup_documents(Some(blank_startup_document()), None, None).expect("identical draft");
+        startup_documents(Some(untitled_draft(blank_startup_document())), None, None)
+            .expect("identical draft");
     assert!(document_content_equal(&document, &saved));
 
     // The baseline follows the requested template, not always the sample.
     let (_, report_saved) =
-        startup_documents(Some(draft), None, Some(TemplateId::Report)).expect("template baseline");
+        startup_documents(Some(untitled_draft(draft)), None, Some(TemplateId::Report))
+            .expect("template baseline");
     assert!(document_content_equal(
         &report_saved,
         &template_document(TemplateId::Report)
     ));
+}
+
+/// A recovered draft that was never tied to a file.
+fn untitled_draft(document: WriterDocument) -> crate::recovery_draft::RecoveredDraft {
+    crate::recovery_draft::RecoveredDraft {
+        document,
+        source: None,
+    }
+}
+
+#[test]
+fn a_recovered_draft_is_compared_with_the_file_it_came_from() {
+    let dir = std::env::temp_dir().join(format!("loom-draft-baseline-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create test directory");
+    let path = dir.join("Essay.loomdoc");
+    let mut saved = WriterDocument::new("essay", "Essay");
+    saved.replace_paragraphs("Saved on disk");
+    std::fs::write(
+        &path,
+        loom_writer_core::save_document(&saved).expect("serialize saved file"),
+    )
+    .expect("write saved file");
+    let mut edited = saved.clone();
+    edited.replace_paragraphs("Edited, never saved");
+    let draft = crate::recovery_draft::RecoveredDraft {
+        document: edited.clone(),
+        source: Some(path.clone()),
+    };
+
+    // A plain launch compares the draft with its file, not with the template.
+    let (document, baseline) =
+        startup_documents(Some(draft.clone()), None, Some(TemplateId::Report))
+            .expect("plain launch");
+    assert!(document_content_equal(&document, &edited));
+    assert!(
+        document_content_equal(&baseline, &saved),
+        "the baseline is the saved file"
+    );
+
+    // Launching with the same file gives the same comparison.
+    let open = path.to_string_lossy().into_owned();
+    let (_, baseline) =
+        startup_documents(Some(draft.clone()), Some(&open), None).expect("same file");
+    assert!(document_content_equal(&baseline, &saved));
+
+    // A file that has since disappeared still restores the draft, which reads
+    // as unsaved; saving recreates the file.
+    std::fs::remove_file(&path).expect("remove the saved file");
+    let (document, baseline) =
+        startup_documents(Some(draft), Some(&open), None).expect("draft for a missing file");
+    assert!(document_content_equal(&document, &edited));
+    assert!(!document_content_equal(&document, &baseline));
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -860,7 +915,8 @@ fn first_launch_opens_a_blank_untitled_document_with_a_hint_outside_it() {
     // A recovered draft keeps its own status and still reads as unsaved.
     let mut draft = blank_startup_document();
     draft.replace_paragraphs("recovered words");
-    let (recovered, baseline) = startup_documents(Some(draft), None, None).expect("recovered");
+    let (recovered, baseline) =
+        startup_documents(Some(untitled_draft(draft)), None, None).expect("recovered");
     assert!(!document_content_equal(&recovered, &baseline));
 }
 

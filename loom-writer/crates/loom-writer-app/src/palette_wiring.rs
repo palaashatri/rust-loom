@@ -90,11 +90,10 @@ pub(super) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
                             })
                             .nth(index as usize)
                     } else {
-                        registry
-                            .search(&q)
+                        crate::palette_catalog::ranked_matches(&registry, &q)
                             .into_iter()
-                            .filter(|(spec, _)| spec.enabled)
-                            .filter_map(|(spec, _)| {
+                            .filter(|spec| spec.enabled)
+                            .filter_map(|spec| {
                                 master_palette(&app)
                                     .into_iter()
                                     .find(|c| c.id == spec.id.as_str())
@@ -270,6 +269,53 @@ mod tests {
             labels.iter().any(|label| label == "Export Markdown (.md)"),
             "searching Markdown lists the export command, got {labels:?}"
         );
+    }
+
+    #[test]
+    fn markdown_search_ranks_the_export_first_and_enter_exports() {
+        use slint::Model;
+        let _guard = watchdog();
+        let dir =
+            std::env::temp_dir().join(format!("loom-palette-markdown-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test directory");
+        let path = dir.join("Notes.md");
+        let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+            [],
+            [Some(path.clone())],
+        ));
+        let (app, state) = test_state(text_document("Exported words"), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        wire(&app, &state);
+        apply_state(&app, &state);
+        app.invoke_open_palette();
+        app.set_palette_query("MARKDOWN".into());
+        app.invoke_palette_query_changed("MARKDOWN".into());
+        let commands = app.get_palette_commands();
+        let first = commands
+            .row_data(0)
+            .expect("a Markdown match")
+            .label
+            .to_string();
+        assert_eq!(
+            first, "Export Markdown (.md)",
+            "the export outranks Insert Markdown Table"
+        );
+        app.invoke_palette_invoked(0);
+        let status = format!(
+            "left {:?}, right {:?}",
+            app.get_status_left().as_str(),
+            app.get_status_right().as_str()
+        );
+        assert!(
+            path.is_file(),
+            "Enter on the export writes the file ({status})"
+        );
+        let written = std::fs::read_to_string(&path).expect("read the exported file");
+        assert!(
+            written.contains("Exported words"),
+            "the export holds the document"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
