@@ -16,7 +16,17 @@ default = ["bundled-inter"]
 # crate with `default-features = false`; an application that registers fonts
 # with the shell from `loom_fonts::bundled_faces()` must keep this feature on
 # and must not let the shell embed them a second time.
-bundled-inter = []
+#
+# `bundled-inter` is both groups. An application that only needs the four faces
+# a document is set in (Writer, and the PDF writer it embeds) asks for
+# `bundled-inter-text` alone, so the binary carries four faces and not six:
+# the weights group is the two intermediate weights (Medium, SemiBold) that
+# only a font picker offers, and the shell already embeds those itself.
+bundled-inter = ["bundled-inter-text", "bundled-inter-weights"]
+# Regular, Italic, Bold and Bold Italic.
+bundled-inter-text = []
+# Medium and SemiBold.
+bundled-inter-weights = []
 
 [dependencies]
 # skrifa and harfrust share read-fonts 0.39 (both are already pulled in by

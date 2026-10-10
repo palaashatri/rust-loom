@@ -1,20 +1,32 @@
-//! Text measurement matched to the bundled Inter face.
+//! Text measurement matched to the bundled Inter faces.
 //!
 //! Line breaking, caret placement, selection and comment rectangles and
 //! pointer hit-testing must all agree with the glyphs the page actually draws,
-//! and with the PDF export, which wraps with the same advances. Characters the
-//! bundled Inter faces cover are measured by `loom_pdf::text_width_pt`, which
-//! reads the advances from the font programs the PDF embeds, so the editor and
-//! the exported file break lines at the same places. Weight is bold only where
-//! a character run asks for it (weight 700 and up, as the page markup renders
-//! it). Kerning is not applied.
+//! and with the PDF export, which wraps with the same advances. The page draws
+//! with Inter, shaped with kerning, so text is shaped here the same way
+//! through `loom-fonts` ([`faces`] loads the bundled faces once and remembers
+//! each distinct word's advances; [`measure`] lays pieces end to end). Weight
+//! is bold only where a character run asks for it (weight 700 and up, as the
+//! page markup renders it) and italic follows the run; the run's font family
+//! and size are not drawn by the page markup, so they are not measured
+//! either.
 //!
 //! Characters Inter lacks (CJK, emoji) are drawn by whatever font the window
-//! falls back to; their widths are estimates.
+//! falls back to; their widths are estimates. The PDF export measures them at
+//! the advance it writes them with (see [`pdf`]).
 
-use loom_pdf::{is_measured_exactly, text_width_pt, TextStyle};
+mod faces;
+mod measure;
+mod pdf;
+
+#[cfg(test)]
+mod kerning_tests;
+
 use loom_text::{FontWeight, StyleRun};
-use unicode_segmentation::UnicodeSegmentation;
+
+pub(crate) use faces::Style;
+pub(crate) use measure::{LineMeasure, Uncovered};
+pub(crate) use pdf::{drawn_size, pdf_text_width, InterShaper};
 
 /// Whether a character weight draws in the bold face: the editor's page markup
 /// renders weights from Bold (700) up in bold and the rest in regular, and the
@@ -23,59 +35,31 @@ pub(crate) fn is_bold_weight(weight: FontWeight) -> bool {
     weight.numeric() >= FontWeight::Bold.numeric()
 }
 
-/// Advance of a character Inter lacks, in 1/1000 em: full-width scripts and
-/// emoji take one em, letters and everything else a typical advance.
-fn estimated_units(ch: char, bold: bool) -> f32 {
-    match ch {
-        c if (c as u32) >= 0x2E80 => 1000.0,
-        c if c.is_alphabetic() => {
-            if bold {
-                610.0
-            } else {
-                590.0
-            }
-        }
-        _ => {
-            if bold {
-                600.0
-            } else {
-                570.0
-            }
-        }
-    }
-}
-
-fn is_bold_at(runs: &[StyleRun], position: usize) -> bool {
-    runs.iter()
-        .find(|run| run.start <= position && position < run.end)
-        .is_some_and(|run| is_bold_weight(run.style.weight))
-}
-
-/// A grapheme's width in points. A grapheme Inter covers is measured as the
-/// PDF export measures it (accent sequences compose into one glyph); any other
-/// takes the estimate for its base character, since marks that follow add none.
-fn grapheme_width(grapheme: &str, position: usize, runs: &[StyleRun], font_size: f32) -> f32 {
-    let bold = is_bold_at(runs, position);
-    if grapheme.chars().all(is_measured_exactly) {
-        let style = TextStyle {
-            size_pt: font_size,
-            bold,
-            ..TextStyle::default()
-        };
-        return text_width_pt(grapheme, &style);
-    }
-    grapheme
-        .chars()
-        .next()
-        .map_or(0.0, |ch| estimated_units(ch, bold) * font_size / 1000.0)
+/// The measure of a whole block's text as the editor draws it.
+pub(crate) fn block_measure(text: &str, runs: &[StyleRun], font_size: f32) -> LineMeasure {
+    LineMeasure::new(
+        text,
+        0,
+        runs,
+        font_size,
+        Style::default(),
+        Uncovered::Estimate,
+    )
 }
 
 /// Width in points of `text`, which starts at byte `text_start` of its block
-/// (so character runs, expressed in block offsets, line up).
+/// (so character runs, expressed in block offsets, line up). The text is
+/// shaped on its own: kerning against a neighbour outside it is not applied.
 pub fn text_advance(text: &str, text_start: usize, runs: &[StyleRun], font_size: f32) -> f32 {
-    text.grapheme_indices(true)
-        .map(|(index, grapheme)| grapheme_width(grapheme, text_start + index, runs, font_size))
-        .sum()
+    LineMeasure::new(
+        text,
+        text_start,
+        runs,
+        font_size,
+        Style::default(),
+        Uncovered::Estimate,
+    )
+    .width()
 }
 
 /// The byte offset in `text` nearest to horizontal position `x` (points from
@@ -88,63 +72,32 @@ pub fn offset_at_x(
     font_size: f32,
     x: f32,
 ) -> usize {
-    let visible = text.trim_end_matches('\n');
-    let mut left = 0.0_f32;
-    for (index, grapheme) in visible.grapheme_indices(true) {
-        let width = grapheme_width(grapheme, text_start + index, runs, font_size);
-        if x < left + width / 2.0 {
-            return index;
-        }
-        left += width;
-    }
-    visible.len()
+    let visible = text.trim_end_matches('\n').len();
+    LineMeasure::new(
+        text,
+        text_start,
+        runs,
+        font_size,
+        Style::default(),
+        Uncovered::Estimate,
+    )
+    .offset_at_x(x, visible)
 }
 
 /// Split a block's text into the byte ranges of its lines so that each line
-/// fits `max_width` points, breaking after whitespace where possible and inside
-/// a word only when one word is wider than a line. A hard line break ends its
-/// line and is part of it. Spaces may hang past the edge, as in any editor.
+/// fits `max_width` points, breaking after whitespace where possible and
+/// inside a word only when one word is wider than a line. A hard line break
+/// ends its line and is part of it. Spaces may hang past the edge, as in any
+/// editor. (The layout wraps through its cached [`LineMeasure`]; this is the
+/// same computation from scratch, which the tests compare against.)
+#[cfg(test)]
 pub(crate) fn wrap_by_width(
     text: &str,
     runs: &[StyleRun],
     font_size: f32,
     max_width: f32,
 ) -> Vec<(usize, usize)> {
-    if text.is_empty() {
-        return vec![(0, 0)];
-    }
-    let mut ranges = Vec::new();
-    let mut line_start = 0usize;
-    let mut width = 0.0_f32;
-    let mut last_break: Option<usize> = None;
-    for (index, grapheme) in text.grapheme_indices(true) {
-        if grapheme == "\n" {
-            ranges.push((line_start, index + 1));
-            line_start = index + 1;
-            width = 0.0;
-            last_break = None;
-            continue;
-        }
-        let glyph = grapheme_width(grapheme, index, runs, font_size);
-        let is_space = grapheme.chars().any(char::is_whitespace);
-        if !is_space && index > line_start && width + glyph > max_width {
-            let end = last_break
-                .filter(|break_at| *break_at > line_start)
-                .unwrap_or(index);
-            ranges.push((line_start, end));
-            line_start = end;
-            width = text_advance(&text[line_start..index], line_start, runs, font_size);
-            last_break = None;
-        }
-        width += glyph;
-        if is_space {
-            last_break = Some(index + grapheme.len());
-        }
-    }
-    if line_start < text.len() {
-        ranges.push((line_start, text.len()));
-    }
-    ranges
+    block_measure(text, runs, font_size).wrap(text, max_width)
 }
 
 #[cfg(test)]
@@ -163,26 +116,27 @@ mod tests {
         }
     }
 
+    /// The width of `text` shaped in one piece straight through `loom-fonts`,
+    /// without any of this module's word splitting or caching.
+    fn shaped_in_one_piece(text: &str, size: f32, bold: bool, italic: bool) -> f32 {
+        use loom_fonts::FontCatalog;
+        let catalog = FontCatalog::bundled_only();
+        let font = catalog
+            .resolve("Inter", if bold { 700 } else { 400 }, italic)
+            .expect("Inter");
+        catalog
+            .load(font.primary())
+            .expect("face")
+            .text_width(text, size)
+    }
+
     #[test]
-    fn widths_are_the_advances_the_pdf_embeds_and_scale_with_size() {
-        let at = |text: &str, size: f32, bold: bool| {
-            text_width_pt(
-                text,
-                &TextStyle {
-                    size_pt: size,
-                    bold,
-                    ..TextStyle::default()
-                },
-            )
-        };
+    fn widths_are_the_shaped_advances_of_the_embedded_face_and_scale_with_size() {
         let hello = text_advance("Hello", 0, &[], 10.0);
-        // Per-character sums of the PDF's own measurement.
-        let by_hand: f32 = "Hello"
-            .chars()
-            .map(|c| at(&c.to_string(), 10.0, false))
-            .sum();
-        assert!((hello - by_hand).abs() < 1e-4, "{hello} vs {by_hand}");
-        assert!((hello - at("Hello", 10.0, false)).abs() < 1e-4);
+        assert!(
+            (hello - shaped_in_one_piece("Hello", 10.0, false, false)).abs() < 1e-3,
+            "{hello}"
+        );
         assert!((text_advance("Hello", 0, &[], 20.0) - 2.0 * hello).abs() < 1e-3);
         assert_eq!(text_advance("", 0, &[], 12.0), 0.0);
         assert_eq!(
@@ -196,7 +150,7 @@ b",
             text_advance("ab", 0, &[], 12.0)
         );
         // Inter Regular 'H' is 743/1000 em: the old hand table said 744.
-        assert!((at("H", 1000.0, false) - 743.0).abs() < 1.0);
+        assert!((text_advance("H", 0, &[], 1000.0) - 743.0).abs() < 1.0);
     }
 
     #[test]

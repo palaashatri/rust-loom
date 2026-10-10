@@ -80,6 +80,34 @@ pub fn embedded_fonts(pdf: &[u8]) -> Result<Vec<EmbeddedFont>, String> {
     Ok(fonts.into_values().collect())
 }
 
+/// The spacing numbers of every `TJ` array in every page's content stream, in
+/// drawing order: thousandths of an em to move back (positive) or forward
+/// (negative) after the glyph before the number. Empty when no run was spaced
+/// by a [`crate::RunShaper`].
+pub fn spacing_adjustments(pdf: &[u8]) -> Result<Vec<f32>, String> {
+    let document = Document::parse(pdf)?;
+    let mut numbers = Vec::new();
+    for page in document.pages()? {
+        let content = String::from_utf8_lossy(&document.stream(page.contents)?).into_owned();
+        let mut in_array = false;
+        for token in content.split_whitespace() {
+            match token {
+                "[" => in_array = true,
+                "]" => in_array = false,
+                _ if in_array && !token.starts_with('<') => {
+                    numbers.push(
+                        token
+                            .parse::<f32>()
+                            .map_err(|e| format!("bad TJ number {token:?}: {e}"))?,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(numbers)
+}
+
 /// Checks the whole file's structure: header and trailer, every xref entry,
 /// every object (so every stream's `/Length`), the page tree, each embedded
 /// font against its program, and every page's text. `Ok` means the file is
@@ -455,9 +483,39 @@ impl<'a> Document<'a> {
         let mut announced: Option<String> = None;
         let mut replacement: Option<String> = None;
         let mut expect_actual = false;
+        // Inside a `[ ... ] TJ` array: the text its glyph strings show. The
+        // spacing numbers are dropped and the array reads as the one literal
+        // and `Tj` a run without spacing adjustments would have been.
+        let mut array: Option<String> = None;
         for line in content.lines() {
             let mut tokens = Vec::new();
             for token in line.split(' ') {
+                if token == "[" {
+                    array = Some(String::new());
+                    continue;
+                }
+                if let Some(shown_in_array) = array.as_mut() {
+                    if token == "]" {
+                        let shown = array.take().unwrap_or_default();
+                        tokens.push(format!("({})", escape_literal(&shown)));
+                        continue;
+                    }
+                    if let Some(hex) = token
+                        .strip_prefix('<')
+                        .and_then(|t| t.strip_suffix('>'))
+                        .filter(|t| !t.starts_with('<'))
+                    {
+                        let shown = decode_glyphs(hex, cmaps.get(font.as_str()), &font)?;
+                        let shown = replacement.take().unwrap_or(shown);
+                        run.push_str(&shown);
+                        shown_in_array.push_str(&shown);
+                    }
+                    continue;
+                }
+                if token == "TJ" {
+                    tokens.push("Tj".to_string());
+                    continue;
+                }
                 if token == "/ActualText" {
                     expect_actual = true;
                 } else if let Some(name) = token.strip_prefix('/') {

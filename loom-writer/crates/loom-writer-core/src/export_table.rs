@@ -3,9 +3,10 @@
 //! separator row, so a table reads as a table rather than as Markdown source.
 //! A row is as tall as its tallest wrapped cell.
 
-use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
+use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
 
 use crate::parse_table_markdown;
+use crate::text_metrics::pdf_text_width;
 
 /// Space between a cell's text and each of its column rules.
 const CELL_PAD_X_PT: f32 = 5.0;
@@ -51,11 +52,11 @@ impl TableLayout {
         for (index, row) in table.rows.iter().enumerate() {
             let style = cell_style(body, table.header_row && index == 0);
             for (column, cell) in row.iter().enumerate() {
-                let whole = text_width_pt(cell, &style) + 2.0 * CELL_PAD_X_PT;
+                let whole = pdf_text_width(cell, &style) + 2.0 * CELL_PAD_X_PT;
                 natural[column] = natural[column].max(whole);
                 let longest = cell
                     .split_whitespace()
-                    .map(|word| text_width_pt(word, &style))
+                    .map(|word| pdf_text_width(word, &style))
                     .fold(0.0, f32::max);
                 shortest[column] = shortest[column].max(longest + 2.0 * CELL_PAD_X_PT);
             }
@@ -203,7 +204,7 @@ fn wrap(text: &str, style: &TextStyle, max_width: f32) -> Vec<String> {
         } else {
             format!("{line} {word}")
         };
-        if text_width_pt(&joined, style) <= limit {
+        if pdf_text_width(&joined, style) <= limit {
             line = joined;
             continue;
         }
@@ -212,7 +213,7 @@ fn wrap(text: &str, style: &TextStyle, max_width: f32) -> Vec<String> {
         }
         for ch in word.chars() {
             line.push(ch);
-            if line.chars().count() > 1 && text_width_pt(&line, style) > limit {
+            if line.chars().count() > 1 && pdf_text_width(&line, style) > limit {
                 let next = line.pop().unwrap_or(ch);
                 lines.push(std::mem::take(&mut line));
                 line.push(next);
@@ -233,8 +234,9 @@ fn cell_style(body: &TextStyle, header: bool) -> TextStyle {
 
 #[cfg(test)]
 mod tests {
+    use crate::text_metrics::pdf_text_width;
     use crate::{export_pdf, RichBlock, WriterDocument, WriterTable, TABLE_BLOCK_KIND};
-    use loom_pdf::{text_width_pt, TextStyle};
+    use loom_pdf::TextStyle;
 
     const HEADER: &[&str] = &["Quarter", "Notes", "Owner"];
     const LONG: &[&str] = &[
@@ -444,7 +446,7 @@ mod tests {
                 bold,
                 ..TextStyle::default()
             };
-            let end = x + text_width_pt(&text, &style);
+            let end = x + pdf_text_width(&text, &style);
             assert!(
                 end <= columns[index + 1] + 0.01,
                 "{text:?} runs to {end}, past its column edge {}",

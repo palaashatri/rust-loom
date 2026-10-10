@@ -18,5 +18,6 @@ loom-package = { path = "../loom-core/crates/loom-package" }
 loom-text = { path = "../loom-core/crates/loom-text" }
 loom-command = { path = "../loom-core/crates/loom-command" }
 loom-pdf = { path = "../loom-core/crates/loom-pdf" }
+loom-fonts = { path = "../loom-core/crates/loom-fonts", default-features = false, features = ["bundled-inter-text"] }
 loom-ui = { path = "../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../loom-core/crates/loom-test-support" }

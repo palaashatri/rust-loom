@@ -3059,6 +3059,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-fonts"
+version = "0.1.0"
+dependencies = [
+ "harfrust",
+ "skrifa 0.42.1",
+ "unicode-bidi",
+ "unicode-linebreak",
+ "unicode-script",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "loom-package"
 version = "0.1.0"
 dependencies = [
@@ -3070,6 +3082,7 @@ name = "loom-pdf"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "loom-fonts",
  "subsetter",
  "ttf-parser",
 ]
@@ -3145,6 +3158,7 @@ version = "0.1.0"
 dependencies = [
  "loom-command",
  "loom-document",
+ "loom-fonts",
  "loom-package",
  "loom-pdf",
  "loom-text",

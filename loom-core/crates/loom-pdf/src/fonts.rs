@@ -3,6 +3,8 @@
 //!
 //! Faces come from `loom-ui`'s bundled font directory (SIL OFL 1.1), so the PDF,
 //! the editors and the exported text all measure with the same glyph advances.
+//! The bytes are the ones `loom-fonts` embeds ([`loom_fonts::bundled_faces`]):
+//! one copy per binary serves the font catalogue and the PDF writer.
 
 use std::fmt::Debug;
 use std::sync::OnceLock;
@@ -11,10 +13,25 @@ use ttf_parser::Face;
 
 use crate::text::{compat_expansion, is_not_drawn};
 
-const REGULAR: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Regular.ttf");
-const BOLD: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Bold.ttf");
-const ITALIC: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Italic.ttf");
-const BOLD_ITALIC: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-BoldItalic.ttf");
+/// The bundled file of each face, indexed like [`inter`] (regular, bold,
+/// italic, bold italic).
+const INTER_FILES: [&str; 4] = [
+    "Inter-Regular.ttf",
+    "Inter-Bold.ttf",
+    "Inter-Italic.ttf",
+    "Inter-BoldItalic.ttf",
+];
+
+/// The bytes of a bundled face. `loom-fonts` is a dependency with its
+/// `bundled-inter` feature on, so a missing face is a build error in this
+/// crate's manifest, not a runtime condition.
+fn bundled_bytes(file: &str) -> &'static [u8] {
+    loom_fonts::bundled_faces()
+        .iter()
+        .find(|(name, _)| *name == file)
+        .map(|(_, bytes)| *bytes)
+        .unwrap_or_else(|| panic!("loom-fonts does not bundle {file}"))
+}
 
 /// PostScript names of the bundled faces, indexed like [`inter`].
 const INTER_NAMES: [&str; 4] = [
@@ -181,15 +198,11 @@ pub(crate) fn inter_index(bold: bool, italic: bool) -> usize {
 pub(crate) fn inter(index: usize) -> &'static Font {
     static FACES: OnceLock<[Font; 4]> = OnceLock::new();
     &FACES.get_or_init(|| {
-        let load = |i: usize, data: &'static [u8]| {
-            Font::new(INTER_NAMES[i], data).expect("bundled Inter face must parse")
+        let load = |i: usize| {
+            Font::new(INTER_NAMES[i], bundled_bytes(INTER_FILES[i]))
+                .expect("bundled Inter face must parse")
         };
-        [
-            load(0, REGULAR),
-            load(1, BOLD),
-            load(2, ITALIC),
-            load(3, BOLD_ITALIC),
-        ]
+        [load(0), load(1), load(2), load(3)]
     })[index]
 }
 

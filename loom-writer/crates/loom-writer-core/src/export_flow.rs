@@ -1,39 +1,32 @@
 //! Line breaking for the PDF export. Lines are wrapped with the widths the PDF
-//! draws with (the embedded Inter faces, bold and italic per run, measured from
-//! the font program itself), so a line and its appended runs never pass the
-//! right margin. The editor measures with the same advances and breaks at the
-//! same places (see `text_metrics`), so a page of the PDF reads like the page
-//! on screen.
+//! draws with: the embedded Inter faces, bold and italic per run, shaped with
+//! kerning exactly as the editor shapes them and spaced that way in the file
+//! (see `text_metrics`), so a line and its appended runs never pass the right
+//! margin. The editor measures with the same advances and breaks at the same
+//! places, so a page of the PDF reads like the page on screen.
 
-use loom_pdf::{text_width_pt, TextStyle};
+use loom_pdf::TextStyle;
 use loom_text::StyleRun;
-use unicode_segmentation::UnicodeSegmentation;
 
-use crate::text_metrics::is_bold_weight;
+use crate::text_metrics::{drawn_size, pdf_text_width, LineMeasure, Style, Uncovered};
 
-/// The PDF style of the character at byte `index`: the block's base style with
-/// the bold and italic of the run that covers it. Bold follows the editor's
-/// rule: weight 700 and up (Semibold draws as regular in both).
-pub(crate) fn run_style(base: &TextStyle, runs: &[StyleRun], index: usize) -> TextStyle {
-    let mut style = base.clone();
-    if let Some(run) = runs
-        .iter()
-        .find(|run| run.start <= index && index < run.end)
-    {
-        style.bold |= is_bold_weight(run.style.weight);
-        style.italic |= run.style.italic;
-    }
-    style
+/// The text of one block measured as the PDF draws it: `base` is the face
+/// the block starts from (headings are bold) and the runs add bold or italic.
+fn measure(text: &str, text_start: usize, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+    LineMeasure::new(
+        text,
+        text_start,
+        runs,
+        drawn_size(base),
+        Style {
+            bold: base.bold,
+            italic: base.italic,
+        },
+        Uncovered::Drawn,
+    )
 }
 
-/// The advance of one grapheme (a character and the marks that follow it)
-/// when set in `style`.
-fn advance(grapheme: &str, style: &TextStyle) -> f32 {
-    text_width_pt(grapheme, style)
-}
-
-/// The width of `marker` followed by `text`, with each grapheme in its own
-/// run style.
+/// The width of `marker` followed by `text`, with each run in its own style.
 pub(crate) fn line_width(
     marker: &str,
     text: &str,
@@ -41,15 +34,12 @@ pub(crate) fn line_width(
     base: &TextStyle,
     text_start: usize,
 ) -> f32 {
-    let mut width = if marker.is_empty() {
+    let marker = if marker.is_empty() {
         0.0
     } else {
-        text_width_pt(marker, base)
+        pdf_text_width(marker, base)
     };
-    for (offset, grapheme) in text.grapheme_indices(true) {
-        width += advance(grapheme, &run_style(base, runs, text_start + offset));
-    }
-    width
+    marker + measure(text, text_start, runs, base).width()
 }
 
 /// Breaks `text` into lines whose drawn width stays within `width` points; the
@@ -92,14 +82,9 @@ fn wrap_segment(
     first_width: f32,
     width: f32,
 ) -> Vec<(usize, usize)> {
-    // Measure every grapheme once, in the face its run selects.
-    let chars: Vec<(usize, &str, f32)> = text
-        .grapheme_indices(true)
-        .map(|(index, grapheme)| {
-            let style = run_style(base, runs, origin + index);
-            (index, grapheme, advance(grapheme, &style))
-        })
-        .collect();
+    // Measure every grapheme once, in the face its run selects and kerned
+    // against its neighbours in the same run.
+    let chars: Vec<(usize, &str, f32)> = measure(text, origin, runs, base).graphemes(text);
 
     // The current line runs from `line_start`. `to_word` is its width up to the
     // end of its last word, `last_word_end` that byte, and `spaces` the width of
@@ -228,6 +213,46 @@ mod tests {
         assert!(mixed > regular, "bold m is wider than regular m");
     }
 
+    /// Text full of pairs Inter kerns (AV, VA, AT, TA, To, Wa, Yo, P., F, ...),
+    /// where kerned and unkerned widths differ by several percent.
+    const KERNED: [&str; 3] = [
+        "AVATAR Toyota Wave Type Yellow. AVAILABLE WAYS TO TRAVEL: To Tokyo, Vancouver, \
+         Taipei, Yokohama; AWAY, TAWA, YAWAY. Wavy tall towers waver over Tavaris.",
+        "Typography: Ty Tw Te To Ta; P. P, F. F, T. T, V. V, W. W, Y. Y, AV AVATAR AVATAR \
+         \"AV\" 'Yo' (Wa) [Te] LT LY LV L' and the TAWAY TOYOTA WAVE.",
+        "Rev. Prof. Yvette Tavares-Wyatt of Vaduz visited Tulsa, Waco and Yuma on Tuesday.",
+    ];
+
+    #[test]
+    fn the_kerned_samples_are_wrapped_where_only_kerned_widths_fit() {
+        let base = TextStyle {
+            size_pt: 11.0,
+            ..Default::default()
+        };
+        let mut witnessed = 0;
+        for text in KERNED {
+            for width in (60..=470).step_by(7) {
+                let width = width as f32;
+                for (start, end) in wrap(text, &[], &base, width, width) {
+                    let line = text[start..end].trim_end();
+                    let kerned = line_width("", line, &[], &base, start);
+                    let natural = loom_pdf::text_width_pt(line, &base);
+                    // A word wider than the column is cut between graphemes; the
+                    // kerning of the pair at the cut is not credited to either
+                    // line, so such a line may be a fraction of a point wider.
+                    assert!(kerned <= width + 1.0, "{line:?} is {kerned} in {width}");
+                    if natural > width + 0.01 {
+                        witnessed += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            witnessed > 10,
+            "{witnessed} lines fit only because of kerning: the samples must discriminate"
+        );
+    }
+
     #[test]
     fn lines_break_at_the_same_bytes_as_the_editor_layout() {
         use crate::text_metrics::wrap_by_width;
@@ -237,6 +262,9 @@ mod tests {
             "A short paragraph.",
             "Before xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx after.",
             "Leading and  double  spaces   inside, ending with a space ",
+            KERNED[0],
+            KERNED[1],
+            KERNED[2],
         ];
         let bold_runs = |text: &str| {
             let start = text.find(' ').unwrap_or(0) + 1;

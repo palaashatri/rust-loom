@@ -12,6 +12,17 @@ loom-package = { workspace = true }
 loom-text = { workspace = true }
 loom-command = { workspace = true }
 loom-pdf = { workspace = true }
+# Text is measured by shaping Inter with kerning, as the page draws it. The
+# bundled Inter files are embedded once per binary: the workspace asks
+# loom-fonts for `bundled-inter-text` only (Regular, Italic, Bold, Bold Italic:
+# the faces a document is set in, so the catalogue is never empty and a width
+# measured here is a width the shell draws), and loom-pdf reads the same bytes
+# from loom-fonts rather than including its own copy. The one other copy in
+# the binary is the window shell's, from the Slint `import` of the same files;
+# nothing in this crate registers fonts with the shell. The default
+# `bundled-inter` feature would add Medium and SemiBold, which the shell
+# already embeds and no document measures with.
+loom-fonts = { workspace = true }
 unicode-segmentation = "1.13"
 
 [dev-dependencies]

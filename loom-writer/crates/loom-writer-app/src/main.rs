@@ -1608,6 +1608,10 @@ fn writer_pointer_offset(
         } else {
             0.0
         };
+        // A line no nearer than the best so far is never chosen; skip shaping it.
+        if nearest.is_some_and(|(best_distance, _)| distance >= best_distance) {
+            continue;
+        }
         let alignment_offset = match block.style.alignment {
             loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
@@ -4677,6 +4681,8 @@ mod docx_export_tests;
 mod find_tests;
 #[cfg(test)]
 mod frame_bench_tests;
+#[cfg(test)]
+mod kerned_highlight_tests;
 #[cfg(test)]
 mod page_stack_tests;
 #[cfg(test)]

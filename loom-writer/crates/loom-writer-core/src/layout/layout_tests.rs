@@ -140,9 +140,19 @@ impl WriterDocument {
                     .unwrap_or(style.body_font_size_pt);
                 let line_height = font_size * style.line_height * zoom;
                 let runs = block.map_or(&[][..], |block| block.runs.as_slice());
-                let line_width =
-                    crate::text_metrics::text_advance(&source.text, source.start, runs, font_size)
-                        * zoom;
+                // The line's width is its place in the whole block's text.
+                let line_width = match block {
+                    Some(block) => {
+                        crate::text_metrics::block_measure(block.text.as_str(), runs, font_size)
+                            .advance(source.start, source.end)
+                    }
+                    None => crate::text_metrics::text_advance(
+                        &source.text,
+                        source.start,
+                        runs,
+                        font_size,
+                    ),
+                } * zoom;
                 let fragment_bounds = PageRect {
                     x: content_x,
                     y: line_y,
@@ -264,9 +274,12 @@ impl WriterDocument {
                 };
                 let block = &self.blocks[block_index];
                 let font_size = style.font_size_for_kind(block.kind.as_str());
-                let advance = |text: &str, start: usize| {
-                    crate::text_metrics::text_advance(text, start, &block.runs, font_size) * zoom
-                };
+                // A substring's width is its place in the whole block's text:
+                // kerning acts across the substring's edges.
+                let positions =
+                    crate::text_metrics::block_measure(block.text.as_str(), &block.runs, font_size);
+                let advance =
+                    |text: &str, start: usize| positions.advance(start, start + text.len()) * zoom;
                 let available_width =
                     (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
                 let alignment_offset = match block.style.alignment {

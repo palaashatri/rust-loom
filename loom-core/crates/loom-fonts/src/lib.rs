@@ -18,7 +18,7 @@
 //!   built once (with [`Affinity`] at bidi boundaries).
 //! * [`line_break_opportunities`] gives UAX #14 break positions for wrapping.
 //!
-//! See [`writer_notes`] for how Writer is expected to use it.
+//! See [`writer_notes`] for how Writer uses it.
 //!
 //! # Bundled faces
 //!
@@ -30,6 +30,13 @@
 //! crate with `default-features = false`, and one that instead registers the
 //! faces from [`bundled_faces`] must make sure the shell does not also embed
 //! them. Either way the binary then carries one copy rather than two.
+//!
+//! An application that measures text and writes PDFs (Writer) cannot take the
+//! shell's copy, which Slint does not expose, so this crate holds the one copy
+//! of the four faces a document is set in (`bundled-inter-text`): the PDF
+//! writer, which embeds those faces in every file, reads its bytes from
+//! [`bundled_faces`] instead of including them a second time. The only other
+//! copy in such a binary is the shell's own.
 
 mod bundled;
 mod catalog;

@@ -35,6 +35,15 @@
 //! show Inter's `.notdef` box unless a [`FontFallback`] is installed with
 //! [`PdfDocument::set_font_fallback`].
 //!
+//! # Kerning
+//!
+//! A run is set at the font's own advances unless a [`RunShaper`] is
+//! installed with [`PdfDocument::set_run_shaper`]. With one, each cluster is
+//! spaced as the shaper reports (kerning, mostly) by writing the run as a
+//! `TJ` array; the glyphs and the extractable text are unchanged. An editor
+//! that draws with kerning and wraps with kerned widths installs the shaper
+//! it measures with, so a line that fits on screen fits in the file.
+//!
 //! The output is validated in tests by re-parsing the xref table and object
 //! bodies and by reading the text back through `inspect`, which is part of the
 //! public API only with the `test-support` feature.
@@ -45,15 +54,18 @@ mod fonts;
 mod image;
 #[cfg(any(test, feature = "test-support"))]
 pub mod inspect;
+mod shaping;
+#[cfg(test)]
+mod shaping_tests;
 #[cfg(test)]
 mod tests;
 mod text;
 
 pub use fonts::{FallbackFont, FontFallback};
 pub use image::PdfImage;
+pub use shaping::{ClusterAdvance, RunShaper};
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use embed::{deflate, stream_object, FaceSlot};
@@ -161,6 +173,8 @@ pub struct PdfDocument {
     /// (regular, bold, italic, bold italic); fallback faces follow.
     faces: Vec<FaceSlot>,
     fallback: Option<Arc<dyn FontFallback>>,
+    /// Spaces the clusters of each run as an editor's shaper does, when set.
+    run_shaper: Option<Arc<dyn RunShaper>>,
     /// How each (character, Inter face) has been set, so the fallback hook
     /// runs once per distinct character and style.
     resolved: HashMap<(char, usize), Resolved>,
@@ -200,6 +214,13 @@ impl PdfDocument {
     /// with Inter's `.notdef` advance.
     pub fn set_font_fallback(&mut self, fallback: Arc<dyn FontFallback>) {
         self.fallback = Some(fallback);
+    }
+
+    /// Install the shaper that spaces the clusters of every run drawn from now
+    /// on (see [`RunShaper`]). [`text_width_pt`] is not affected; it measures
+    /// at the font's own advances.
+    pub fn set_run_shaper(&mut self, shaper: Arc<dyn RunShaper>) {
+        self.run_shaper = Some(shaper);
     }
 
     /// Why fallback faces the hook returned were not used (see
@@ -360,12 +381,18 @@ impl PdfDocument {
             TextStyle::default().size_pt
         };
         let size = format!("{size:.2}");
+        let inter = fonts::inter(fonts::inter_index(style.bold, style.italic));
         let mut shown: Vec<(usize, u16, Option<char>)> = Vec::new();
+        // Per set character, for spacing by a shaper: what Inter would advance
+        // it by, and where its glyphs end in `shown`.
+        let mut set: Vec<shaping::CharSet> = Vec::new();
+        let mut kept = String::new();
         for ch in text.chars() {
             if text::is_not_drawn(ch) {
                 continue;
             }
-            match self.resolve(ch, style) {
+            let resolved = self.resolve(ch, style);
+            match resolved {
                 Resolved::One(slot) => {
                     let (gid, actual) = self.encode_char(slot, ch);
                     shown.push((slot, gid, actual));
@@ -378,20 +405,41 @@ impl PdfDocument {
                     }
                 }
             }
+            if self.run_shaper.is_some() {
+                let nominal = match resolved {
+                    Resolved::One(slot)
+                        if self.faces[slot].font_name() == inter.name
+                            && inter.glyph(ch).is_some() =>
+                    {
+                        Some(inter.to_1000(inter.char_advance_units(ch) as f32))
+                    }
+                    Resolved::Many(_) => Some(inter.to_1000(inter.char_advance_units(ch) as f32)),
+                    Resolved::One(_) => None,
+                };
+                set.push(shaping::CharSet {
+                    nominal,
+                    glyph_end: shown.len(),
+                });
+                kept.push(ch);
+            }
         }
         let first = shown.first()?.0;
+        let mut spacing = self
+            .run_shaper
+            .clone()
+            .and_then(|shaper| shaper.clusters(&kept, style.bold, style.italic))
+            .and_then(|clusters| shaping::adjustments(&clusters, &set))
+            .unwrap_or_default()
+            .into_iter()
+            .peekable();
         let select = |slot: usize| format!("/{} {size} Tf", self.faces[slot].resource);
-        let mut out = String::new();
-        let mut hex = String::new();
+        let mut run = shaping::TextRun::default();
         let mut current = first;
-        for (slot, gid, actual) in shown {
+        for (index, (slot, gid, actual)) in shown.into_iter().enumerate() {
             if slot != current || actual.is_some() {
-                if !hex.is_empty() {
-                    let _ = write!(out, "<{hex}> Tj ");
-                    hex.clear();
-                }
+                run.flush(false);
                 if slot != current {
-                    let _ = write!(out, "{} ", select(slot));
+                    run.raw(&format!("{} ", select(slot)));
                     current = slot;
                 }
             }
@@ -403,20 +451,24 @@ impl PdfDocument {
                         .iter()
                         .map(|unit| format!("{unit:04X}"))
                         .collect();
-                    let _ = write!(
-                        out,
-                        "/Span << /ActualText <FEFF{utf16}> >> BDC <{gid:04X}> Tj EMC "
-                    );
+                    run.raw(&format!("/Span << /ActualText <FEFF{utf16}> >> BDC "));
+                    run.glyph(gid);
+                    if let Some((_, amount)) = spacing.next_if(|(at, _)| *at == index) {
+                        run.adjust(amount);
+                    }
+                    run.flush(false);
+                    run.raw("EMC ");
                 }
                 None => {
-                    let _ = write!(hex, "{gid:04X}");
+                    run.glyph(gid);
+                    if let Some((_, amount)) = spacing.next_if(|(at, _)| *at == index) {
+                        run.adjust(amount);
+                    }
                 }
             }
         }
-        if !hex.is_empty() {
-            let _ = write!(out, "<{hex}> Tj ");
-        }
-        Some((select(first), out.trim_end().to_string()))
+        run.flush(true);
+        Some((select(first), run.finish().trim_end().to_string()))
     }
 
     /// Draw text at the baseline position `(x, y)` (bottom-left origin,

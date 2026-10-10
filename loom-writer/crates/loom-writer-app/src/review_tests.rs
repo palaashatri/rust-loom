@@ -704,6 +704,69 @@ fn a_caret_drawn_at_an_offset_is_hit_at_the_same_offset() {
 }
 
 #[test]
+fn a_caret_in_kerned_text_with_bold_runs_and_combining_marks_is_hit_at_its_offset() {
+    use loom_text::{CharacterStyle, FontWeight, StyleRun};
+
+    // Kerned pairs (AV, VA, AT, TA, To, Wa), bold stretches that begin and end
+    // inside kerned pairs, and decomposed accents: the caret is placed from the
+    // kerned positions and a click must map back to the same grapheme boundary.
+    let mut document = WriterDocument::new("kern-hit", "Kern hit");
+    document.replace_paragraphs(
+        "AVATAR Toyota Wave\nTAWA bold and plain AVATAR TAWA\nCafe\u{301} cre\u{300}me A\u{30a}ngstro\u{308}m na\u{ef}ve Yo-yo.",
+    );
+    let bold = |start, end| StyleRun {
+        start,
+        end,
+        style: CharacterStyle {
+            weight: FontWeight::Bold,
+            ..Default::default()
+        },
+    };
+    // "Toyota" (block 0), "TAWA bold" and "AVAT" (block 1), "Yo-yo" (block 2).
+    document.blocks[0].runs.push(bold(7, 13));
+    document.blocks[1].runs.push(bold(0, 9));
+    document.blocks[1].runs.push(bold(20, 24));
+    let last = document.blocks[2].text.len_bytes();
+    document.blocks[2].runs.push(bold(last - 6, last - 1));
+
+    let style = document.page.page_style();
+    let viewport = PageViewport {
+        width: style.width_pt,
+        height: style.height_pt,
+        zoom: 1.0,
+        scroll_x: 0.0,
+        scroll_y: 0.0,
+    };
+    let length = document.editor_text().len();
+    let mut checked = 0;
+    for offset in 0..=length {
+        if !document.editor_text().is_char_boundary(offset) {
+            continue;
+        }
+        // A caret inside a grapheme (between a letter and its accent) is
+        // drawn, and hit, at the start of that grapheme.
+        let expected = document.clamp_selection(TextSelection::caret(offset)).focus;
+        document.set_selection(TextSelection::caret(offset));
+        let layout = document.layout(&style, viewport).expect("layout");
+        let base = layout.page_bounds[0];
+        let caret = layout
+            .selection_rects
+            .iter()
+            .find(|rect| rect.start == rect.end)
+            .expect("a caret rectangle");
+        let x = caret.rect.x - base.x - style.margin_left_pt;
+        let y = caret.rect.y - base.y - style.margin_top_pt + caret.rect.height / 2.0;
+        assert_eq!(
+            writer_pointer_offset(&document, viewport, x, y),
+            Some(expected),
+            "a click on the caret drawn at offset {offset} must land on {expected}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 80, "the text was exercised ({checked} offsets)");
+}
+
+#[test]
 fn double_and_triple_clicks_on_the_page_select_a_word_and_a_paragraph() {
     let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
     let (app, state) = test_state(text_document("Alpha beta gamma\nSecond paragraph"), dialogs);

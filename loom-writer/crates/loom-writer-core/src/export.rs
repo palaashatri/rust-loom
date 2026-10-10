@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crate::export_flow;
 use crate::export_table::{self, TableLayout};
-use crate::text_metrics::is_bold_weight;
+use crate::text_metrics::{is_bold_weight, pdf_text_width, InterShaper};
 use crate::{PageStyle, WriterDocument};
 
 /// Exports a document to a `.docx` archive Word opens directly; see
@@ -40,12 +40,12 @@ fn draw_styled_line(
     line: &StyledLine<'_>,
     base: &loom_pdf::TextStyle,
 ) {
-    use loom_pdf::{text_width_pt, PathStyle};
+    use loom_pdf::PathStyle;
 
     let mut x = line.x;
     if !line.marker.is_empty() {
         pdf.draw_text(page, x, line.y, line.marker, base);
-        x += text_width_pt(line.marker, base);
+        x += pdf_text_width(line.marker, base);
     }
     let end = line.text_start + line.text.len();
     let mut cuts = vec![0, line.text.len()];
@@ -60,23 +60,41 @@ fn draw_styled_line(
     }
     cuts.sort_unstable();
     cuts.dedup();
+    // One piece per stretch of one style. Adjacent runs that draw alike are
+    // one piece, because the editor shapes (and so kerns) them as one.
+    let mut pieces: Vec<(usize, usize, loom_pdf::TextStyle, bool, bool)> = Vec::new();
     for pair in cuts.windows(2) {
         let (from, to) = (pair[0], pair[1]);
-        let piece = &line.text[from..to];
         let position = line.text_start + from;
         let run = line
             .runs
             .iter()
             .find(|run| run.start <= position && position < run.end);
         let mut style = base.clone();
-        let mut underline = false;
+        let (mut underline, mut strikethrough) = (false, false);
         if let Some(run) = run {
             style.bold |= is_bold_weight(run.style.weight);
             style.italic |= run.style.italic;
             underline = run.style.underline;
+            strikethrough = run.style.strikethrough;
         }
+        match pieces.last_mut() {
+            Some(last)
+                if last.1 == from
+                    && last.2.bold == style.bold
+                    && last.2.italic == style.italic
+                    && last.3 == underline
+                    && last.4 == strikethrough =>
+            {
+                last.1 = to;
+            }
+            _ => pieces.push((from, to, style, underline, strikethrough)),
+        }
+    }
+    for (from, to, style, underline, _) in pieces {
+        let piece = &line.text[from..to];
         pdf.draw_text(page, x, line.y, piece, &style);
-        let width = text_width_pt(piece, &style);
+        let width = pdf_text_width(piece, &style);
         if underline && !piece.trim().is_empty() {
             let rule_y = line.y - style.size_pt * 0.12;
             pdf.draw_line(
@@ -201,7 +219,7 @@ fn pdf_lines(
         };
         let style = block_style(kind, body, page_style);
         let height = style.size_pt * page_style.line_height;
-        let marker_width = loom_pdf::text_width_pt(&marker, &style);
+        let marker_width = pdf_text_width(&marker, &style);
         let ranges = export_flow::wrap(
             text,
             &block.runs,
@@ -238,6 +256,9 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     use loom_pdf::{PdfDocument, TextStyle};
     let page_style = doc.page.page_style();
     let mut pdf = PdfDocument::new();
+    // Runs are spaced as the editor shapes them (kerning), the way lines were
+    // measured and wrapped, so a line that fits on the page fits in the file.
+    pdf.set_run_shaper(std::sync::Arc::new(InterShaper));
     // The editor draws body text at the page style's size, so the PDF sets it
     // at that size too and wraps at the same places.
     let body = TextStyle {
@@ -573,7 +594,7 @@ mod tests {
             size_pt: style.body_font_size_pt,
             ..Default::default()
         };
-        let width = |text: &str| loom_pdf::text_width_pt(text, &body);
+        let width = |text: &str| crate::text_metrics::pdf_text_width(text, &body);
         let left = line_x(&pdf, "left line");
         let center = line_x(&pdf, "centered line");
         let right = line_x(&pdf, "right line");
@@ -689,7 +710,7 @@ mod tests {
         let drawn = drawn_text(&pdf);
         assert!(drawn.len() > 3, "the paragraph wraps onto several lines");
         for piece in &drawn {
-            let width = loom_pdf::text_width_pt(
+            let width = crate::text_metrics::pdf_text_width(
                 &piece.text,
                 &loom_pdf::TextStyle {
                     size_pt: piece.size,

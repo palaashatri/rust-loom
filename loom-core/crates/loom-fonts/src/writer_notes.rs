@@ -1,14 +1,20 @@
-//! Design note: how Writer should adopt this crate.
+//! Design note: how Writer uses this crate, and what remains.
 //!
-//! Nothing here is code; it records the intended integration so the first
-//! Writer change can follow it. Writer is untouched by this crate's
-//! introduction: `loom-writer-core::text_metrics` still measures with two
-//! hard-coded Inter advance tables.
+//! Nothing here is code. `loom-writer-core::text_metrics` now measures the
+//! bundled Inter faces through this crate: each distinct word (with the space
+//! after it, which Inter Bold kerns a full stop and a comma against) is shaped
+//! once per face with kerning, its per-grapheme advances are cached, and
+//! carets, selection rectangles, hit-testing, line breaking and the PDF export
+//! all read the same positions. The PDF writer spaces its runs by the same
+//! advances (`loom_pdf::RunShaper`). What is *not* done, and what the sections
+//! below still describe, is measuring with the family a style names (the page
+//! markup draws every run in Inter, so there is nothing to measure it with),
+//! the system font scan and the font picker.
 //!
 //! # 1. Measuring with the selected font
 //!
-//! Replace `text_metrics::glyph_units` (per-character table lookups) with the
-//! catalogue:
+//! Once the page can draw a family other than Inter, replace the bundled-only
+//! measurement with the catalogue:
 //!
 //! * Hold one `Arc<FontCatalog>` for the process. Start with
 //!   [`FontCatalog::bundled_only`] so the window is usable immediately, scan

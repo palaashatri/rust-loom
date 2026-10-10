@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use loom_text::StyleRun;
 
-use crate::text_metrics::{text_advance, wrap_by_width};
+use crate::text_metrics::{block_measure, LineMeasure};
 use crate::{
     floor_grapheme_boundary, DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect,
     PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection, VisibleRange, WriterDocument,
@@ -38,6 +38,8 @@ struct CachedBlock {
     kind: String,
     text: String,
     runs: Vec<StyleRun>,
+    /// Where every grapheme of the text sits, independent of the wrap width.
+    measure: Rc<LineMeasure>,
     lines: Rc<[WrappedLine]>,
     words: usize,
     chars: usize,
@@ -71,30 +73,34 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         let generation = cache.generation;
         let text = block.text.as_str();
         let (font_bits, width_bits) = (font_size.to_bits(), width.to_bits());
+        // The grapheme positions depend on the text, runs and size only, so a
+        // block that is re-wrapped at a new width keeps them.
+        let mut reusable: Option<Rc<LineMeasure>> = None;
         if let Some(hit) = cache.blocks.get_mut(&block.id) {
-            if hit.font_bits == font_bits
-                && hit.width_bits == width_bits
-                && hit.kind == block.kind
-                && hit.text == text
-                && hit.runs == block.runs
-            {
-                hit.seen = generation;
-                return BlockInfo {
-                    lines: hit.lines.clone(),
-                    words: hit.words,
-                    chars: hit.chars,
-                    graphemes: hit.graphemes,
-                };
+            if hit.font_bits == font_bits && hit.text == text && hit.runs == block.runs {
+                if hit.width_bits == width_bits && hit.kind == block.kind {
+                    hit.seen = generation;
+                    return BlockInfo {
+                        lines: hit.lines.clone(),
+                        words: hit.words,
+                        chars: hit.chars,
+                        graphemes: hit.graphemes,
+                    };
+                }
+                reusable = Some(hit.measure.clone());
             }
         }
         #[cfg(test)]
         WRAP_MISSES.with(|misses| misses.set(misses.get() + 1));
-        let lines: Rc<[WrappedLine]> = wrap_by_width(text, &block.runs, font_size, width)
+        let measure =
+            reusable.unwrap_or_else(|| Rc::new(block_measure(text, &block.runs, font_size)));
+        let lines: Rc<[WrappedLine]> = measure
+            .wrap(text, width)
             .into_iter()
             .map(|(start, end)| WrappedLine {
                 start,
                 end,
-                advance_pt: text_advance(&text[start..end], start, &block.runs, font_size),
+                advance_pt: measure.advance(start, end),
             })
             .collect();
         let (mut words, mut chars) = (0, 0);
@@ -111,6 +117,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                 kind: block.kind.clone(),
                 text: text.to_string(),
                 runs: block.runs.clone(),
+                measure,
                 lines: lines.clone(),
                 words,
                 chars,
@@ -141,6 +148,25 @@ fn end_pass(block_count: usize) {
             cache.blocks.retain(|_, block| block.seen == generation);
         }
     });
+}
+
+/// Where every grapheme of `block` sits at `font_size`: from the cache when
+/// the block is unchanged since it was wrapped, else measured now. Carets and
+/// selection rectangles are read from this, so they land where the glyphs the
+/// page draws are, kerning included.
+fn block_positions(block: &RichBlock, font_size: f32) -> Rc<LineMeasure> {
+    let text = block.text.as_str();
+    let cached = WRAP_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .blocks
+            .get(&block.id)
+            .filter(|hit| {
+                hit.font_bits == font_size.to_bits() && hit.text == text && hit.runs == block.runs
+            })
+            .map(|hit| hit.measure.clone())
+    });
+    cached.unwrap_or_else(|| Rc::new(block_measure(text, &block.runs, font_size)))
 }
 
 /// One wrapped line placed on a page.
@@ -592,13 +618,23 @@ fn rects_for_lines(
     let available_width =
         (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
     let mut result = Vec::new();
+    // The last block measured: a selection covers many lines of few blocks.
+    let mut measured: Option<(usize, Rc<LineMeasure>)> = None;
     for at in lo..hi.max(lo) {
         let line = &lines[at];
         let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let source = &block.text.as_str()[line.start..line.end];
-        let advance =
-            |text: &str, start: usize| text_advance(text, start, &block.runs, font_size) * zoom;
+        let positions = match &measured {
+            Some((index, positions)) if *index == line.block_index => positions.clone(),
+            _ => {
+                let positions = block_positions(block, font_size);
+                measured = Some((line.block_index, positions.clone()));
+                positions
+            }
+        };
+        // Block byte offsets in, points out.
+        let advance = |from: usize, to: usize| positions.advance(from, to) * zoom;
         let alignment_offset = match block.style.alignment {
             loom_text::Alignment::Center => ((available_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (available_width - line.bounds.width).max(0.0),
@@ -611,17 +647,17 @@ fn rects_for_lines(
         if overlap_start < overlap_end {
             let local_start = overlap_start - global_start;
             let local_end = overlap_end - global_start;
-            let prefix = &source[..local_start.min(source.len())];
-            let selected = &source[local_start.min(source.len())..local_end.min(source.len())];
+            let from = line.start + local_start.min(source.len());
+            let to = line.start + local_end.min(source.len());
             result.push(SelectionRect {
                 page_index: line.page,
                 block_id: block.id,
                 start: line.start + local_start,
                 end: line.start + local_end,
                 rect: PageRect {
-                    x: line_x + advance(prefix, line.start),
+                    x: line_x + advance(line.start, from),
                     y: line.bounds.y,
-                    width: advance(selected, line.start + local_start),
+                    width: advance(from, to),
                     height: line.bounds.height,
                 },
             });
@@ -647,7 +683,7 @@ fn rects_for_lines(
                     start: line.start + local,
                     end: line.start + local,
                     rect: PageRect {
-                        x: line_x + advance(&source[..local], line.start),
+                        x: line_x + advance(line.start, line.start + local),
                         y: line.bounds.y,
                         width: 1.0,
                         height: line.bounds.height,

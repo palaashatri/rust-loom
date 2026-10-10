@@ -13,6 +13,13 @@ description = "Deterministic PDF 1.4 writer for Loom export with embedded, subse
 test-support = []
 
 [dependencies]
+# The four bundled Inter files this crate embeds in every PDF. loom-fonts
+# embeds them once per binary (`bundled-inter-text`) and this crate reads them
+# from there instead of including a second copy. Only that group is asked for:
+# a binary that depends on loom-fonts with the default features adds the two
+# intermediate weights, and cargo unions the features, so nothing here forces
+# them on.
+loom-fonts = { path = "../loom-fonts", default-features = false, features = ["bundled-inter-text"] }
 # Glyph lookup, advances and cmap reading for the bundled Inter faces.
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # TrueType subsetting for the embedded font programs.
