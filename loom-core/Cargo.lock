@@ -2902,6 +2902,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-fonts"
+version = "0.1.0"
+dependencies = [
+ "harfrust",
+ "skrifa 0.42.1",
+ "unicode-bidi",
+ "unicode-script",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "loom-history"
 version = "0.1.0"
 dependencies = [

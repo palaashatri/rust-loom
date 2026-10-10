@@ -1,0 +1,22 @@
+[package]
+name = "loom-fonts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Font catalogue, fallback resolution, shaping and text metrics"
+
+[features]
+default = ["bundled-inter"]
+# Embeds the Inter faces that loom-ui already ships so the catalogue is never
+# empty and measurement matches what the shell draws.
+bundled-inter = []
+
+[dependencies]
+# skrifa and harfrust share read-fonts 0.39 (both are already pulled in by
+# Slint's text stack, so the dependency graph does not grow for these two).
+skrifa = { version = "0.42", default-features = false, features = ["std"] }
+harfrust = { version = "0.8", default-features = false, features = ["std"] }
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+unicode-segmentation = "1"
