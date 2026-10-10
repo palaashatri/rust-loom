@@ -55,6 +55,15 @@ pub(crate) fn to_bool(value: Value) -> Result<bool, CalcError> {
     }
 }
 
+/// A row-major block as a result: one cell stays a scalar, anything larger is
+/// an array that spills into the cells around the formula.
+pub(crate) fn spill(cells: Vec<Value>, rows: usize, cols: usize) -> Value {
+    if rows == 1 && cols == 1 {
+        return cells.into_iter().next().unwrap_or(Value::Empty);
+    }
+    Value::Array(cells, rows, cols)
+}
+
 /// Round to 15 significant digits, removing binary representation noise.
 pub(crate) fn clean(value: f64) -> f64 {
     if value == 0.0 || !value.is_finite() {

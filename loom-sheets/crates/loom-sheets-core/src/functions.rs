@@ -5,6 +5,41 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{eval_expr, CalcError, CellRef, Value};
 
+mod date_more;
+mod dynamic_arrays;
+mod finance_more;
+mod inventory;
+mod let_binding;
+mod lookup_more;
+mod stats_more;
+mod text_more;
+
+/// Functions whose result can be an array that spills into the cells around
+/// the formula. Workbook evaluation tracks spill dependencies for any formula
+/// that calls one of them.
+pub(crate) const ARRAY_RESULT_FUNCTIONS: &[&str] = &[
+    "SEQUENCE",
+    "TRANSPOSE",
+    "SORT",
+    "SORTBY",
+    "UNIQUE",
+    "FILTER",
+    "XLOOKUP",
+    "RANDARRAY",
+    "TAKE",
+    "DROP",
+    "VSTACK",
+    "HSTACK",
+    "TOCOL",
+    "TOROW",
+    "WRAPROWS",
+    "WRAPCOLS",
+    "CHOOSECOLS",
+    "CHOOSEROWS",
+    "EXPAND",
+    "TEXTSPLIT",
+];
+
 /// Evaluates extended built-in functions for the formula engine.
 pub(crate) fn eval_extended_function(
     name: &str,
@@ -30,6 +65,27 @@ pub(crate) fn eval_extended_function(
         return Some(v);
     }
     if let Some(v) = crate::functions_date::eval_date_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = date_more::eval_date_more_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = finance_more::eval_finance_more_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = stats_more::eval_stats_more_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = text_more::eval_text_more_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = lookup_more::eval_lookup_more_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = dynamic_arrays::eval_dynamic_array_function(name, raw_args, lookup) {
+        return Some(v);
+    }
+    if let Some(v) = let_binding::eval_let_function(name, raw_args, lookup) {
         return Some(v);
     }
     match name {

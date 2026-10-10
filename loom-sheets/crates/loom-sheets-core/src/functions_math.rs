@@ -223,7 +223,7 @@ fn sumproduct(args: &[Expr], lookup: Lookup) -> Calc {
         .sum())
 }
 
-fn random_unit() -> f64 {
+pub(crate) fn random_unit() -> f64 {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
     let mut hasher = RandomState::new().build_hasher();

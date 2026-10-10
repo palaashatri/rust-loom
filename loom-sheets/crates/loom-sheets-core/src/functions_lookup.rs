@@ -145,7 +145,7 @@ fn eval_columns(raw_args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -> Option<
 }
 
 /// Find the index of a lookup value in an array according to match and search modes.
-fn find_lookup_index(
+pub(crate) fn find_lookup_index(
     lookup_value: &Value,
     array: &[Value],
     match_mode: i32,

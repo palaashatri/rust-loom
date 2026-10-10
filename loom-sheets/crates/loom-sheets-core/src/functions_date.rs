@@ -38,7 +38,7 @@ pub(crate) fn eval_date_function(name: &str, args: &[Expr], lookup: Lookup) -> O
 }
 
 /// A date argument: a number, or text that reads as a date or a time.
-fn serial_arg(args: &[Expr], index: usize, lookup: Lookup) -> Calc {
+pub(crate) fn serial_arg(args: &[Expr], index: usize, lookup: Lookup) -> Calc {
     match eval_expr(&args[index], lookup) {
         Value::Text(text) => match text.trim().parse::<f64>() {
             Ok(n) if n.is_finite() => Ok(n),
@@ -50,7 +50,7 @@ fn serial_arg(args: &[Expr], index: usize, lookup: Lookup) -> Calc {
     }
 }
 
-fn whole_serial(serial: f64) -> Result<i64, CalcError> {
+pub(crate) fn whole_serial(serial: f64) -> Result<i64, CalcError> {
     if !(0.0..(MAX_SERIAL + 1) as f64).contains(&serial) {
         return Err(CalcError::Num);
     }

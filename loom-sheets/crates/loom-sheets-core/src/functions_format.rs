@@ -1,11 +1,16 @@
 //! Excel number/date format codes for the `TEXT` function.
 //!
-//! Supported: up to four `;` sections (positive; negative; zero; text),
-//! `0 # ?` digit placeholders, `.`, thousands `,` and trailing-comma scaling,
-//! `%`, `E+00` scientific, quoted and escaped literals, `[colour]` and
-//! `[$sym-locale]` brackets, `@` text, `General`, and date/time codes
-//! (`yyyy yy mmmm mmm mm m dddd ddd dd d hh h mm ss AM/PM [h] [m] [s]`).
-//! Fraction formats (`# ?/?`) are not supported and report `#VALUE!`.
+//! Supported: up to four `;` sections (positive; negative; zero; text) and
+//! conditional sections (`[>=1000]`, `[<0]`), `0 # ?` digit placeholders, `.`,
+//! thousands `,` and trailing-comma scaling, `%`, `E+00` and `E-00` scientific
+//! (with engineering exponents such as `##0.0E+0`), fraction formats (`# ?/?`,
+//! `?/8`), quoted and escaped literals, `[colour]` and `[$sym-locale]`
+//! brackets, `@` text, `General`, and date/time codes (`yyyy yy mmmm mmm mm m
+//! dddd ddd dd d hh h mm ss AM/PM [h] [m] [s]`). Repeat (`*x`) and fill (`_x`)
+//! codes add no width here: `*x` is dropped and `_x` is one space.
+
+mod conditions;
+mod fractions;
 
 use crate::dates::{serial_to_ymd, MAX_SERIAL};
 use crate::CalcError;
@@ -42,6 +47,24 @@ pub(crate) fn format_number(n: f64, code: &str) -> Result<String, CalcError> {
     let sections = split_sections(code);
     if sections.len() > 4 {
         return Err(CalcError::Value);
+    }
+    let split: Vec<(Option<conditions::Condition>, &str)> = sections
+        .iter()
+        .map(|section| conditions::split_leading(section))
+        .collect();
+    if split.iter().any(|(condition, _)| condition.is_some()) {
+        // A conditional section shows its own sign: the condition, not the
+        // section position, decides which section applies.
+        let rules: Vec<_> = split.iter().map(|(condition, _)| *condition).collect();
+        let Some(index) = conditions::choose(&rules, n) else {
+            return Ok(String::new());
+        };
+        let body = format_section(split[index].1, n.abs(), n < 0.0)?;
+        return Ok(if n < 0.0 && !body.is_empty() {
+            format!("-{body}")
+        } else {
+            body
+        });
     }
     let (section, add_minus) = match (sections.len(), n) {
         (1, _) => (&sections[0], n < 0.0),
@@ -111,7 +134,8 @@ enum Tok {
     Point,
     Comma,
     Percent,
-    Exp(usize),
+    /// `E+0` or `E-0`: the digit width, and whether a positive exponent gets a sign.
+    Exp(usize, bool),
     Text,
     Lit(String),
     /// Date/time codes kept as the raw run of one letter, e.g. `mmm`.
@@ -177,8 +201,9 @@ fn tokenize(section: &str) -> Vec<Tok> {
             '%' => tokens.push(Tok::Percent),
             '@' => tokens.push(Tok::Text),
             'E' | 'e' if matches!(chars.get(i + 1), Some('+') | Some('-')) => {
+                let always_sign = chars[i + 1] == '+';
                 let zeros = chars[i + 2..].iter().take_while(|x| **x == '0').count();
-                tokens.push(Tok::Exp(zeros.max(1)));
+                tokens.push(Tok::Exp(zeros.max(1), always_sign));
                 i += 2 + zeros;
                 continue;
             }
@@ -240,6 +265,9 @@ fn format_section(section: &str, n: f64, negative: bool) -> Result<String, CalcE
             format_date(&tokens, n)
         };
     }
+    if let Some(fraction) = fractions::parse(section) {
+        return fractions::render(&fraction, n);
+    }
     format_digits(&tokens, n)
 }
 
@@ -252,11 +280,6 @@ fn round_decimals(value: f64, decimals: usize) -> f64 {
 }
 
 fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
-    if tokens.iter().any(|t| matches!(t, Tok::Lit(l) if l == "/"))
-        && tokens.iter().any(|t| matches!(t, Tok::Digit('?')))
-    {
-        return Err(CalcError::Value);
-    }
     let first_digit = tokens
         .iter()
         .position(|t| matches!(t, Tok::Digit(_) | Tok::Point));
@@ -273,14 +296,14 @@ fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
     };
     let last = tokens
         .iter()
-        .rposition(|t| matches!(t, Tok::Digit(_) | Tok::Point | Tok::Comma | Tok::Exp(_)))
+        .rposition(|t| matches!(t, Tok::Digit(_) | Tok::Point | Tok::Comma | Tok::Exp(..)))
         .unwrap_or(first);
     let (prefix, run, suffix) = (&tokens[..first], &tokens[first..=last], &tokens[last + 1..]);
 
     let percents = tokens.iter().filter(|t| **t == Tok::Percent).count();
     let point = run.iter().position(|t| *t == Tok::Point);
     let exponent = run.iter().find_map(|t| match t {
-        Tok::Exp(width) => Some(*width),
+        Tok::Exp(width, always_sign) => Some((*width, *always_sign)),
         _ => None,
     });
     let digit_end = run
@@ -313,20 +336,30 @@ fn format_digits(tokens: &[Tok], n: f64) -> Result<String, CalcError> {
     let mut value = n * 100f64.powi(percents as i32) / 1000f64.powi(scale_commas as i32);
 
     let mut exp_text = String::new();
-    if let Some(width) = exponent {
-        let int_count = int_places.len().max(1) as i32;
-        let mut power = if value == 0.0 {
+    if let Some((width, always_sign)) = exponent {
+        // With several integer placeholders the exponent is a multiple of their
+        // count (`##0.0E+0` shows 12345 as 12.3E+3), as in engineering notation.
+        let places = int_places.len().max(1) as i32;
+        let floor_log = if value == 0.0 {
             0
         } else {
-            value.log10().floor() as i32 - (int_count - 1)
+            value.log10().floor() as i32
         };
+        let mut power = floor_log.div_euclid(places) * places;
         let mut mantissa = value / 10f64.powi(power);
-        if round_decimals(mantissa, frac_places.len()) >= 10f64.powi(int_count) {
-            power += 1;
+        if round_decimals(mantissa, frac_places.len()) >= 10f64.powi(places) {
+            power += places;
             mantissa = value / 10f64.powi(power);
         }
         value = mantissa;
-        let sign = if power < 0 { '-' } else { '+' };
+        // `E-` shows a sign only when the exponent is negative.
+        let sign = if power < 0 {
+            "-"
+        } else if always_sign {
+            "+"
+        } else {
+            ""
+        };
         exp_text = format!("E{sign}{:0width$}", power.abs(), width = width);
     }
 
@@ -525,7 +558,7 @@ fn format_date(tokens: &[Tok], serial: f64) -> Result<String, CalcError> {
             Tok::Comma => out.push(','),
             Tok::Percent => out.push('%'),
             Tok::Digit(d) => out.push(*d),
-            Tok::Exp(_) | Tok::Text => {}
+            Tok::Exp(..) | Tok::Text => {}
         }
     }
     Ok(out)
@@ -616,6 +649,28 @@ mod tests {
     }
 
     #[test]
+    fn conditional_sections_choose_by_the_value() {
+        let scaled = "[>=1000000]0.0,,\"M\";[>=1000]0.0,\"K\";0";
+        assert_eq!(n(1_500_000.0, scaled), "1.5M");
+        assert_eq!(n(2500.0, scaled), "2.5K");
+        assert_eq!(n(7.0, scaled), "7");
+        // A condition decides the sign: the matched section shows the minus.
+        assert_eq!(n(-5.0, "[<0]0;0"), "-5");
+        assert_eq!(n(4.0, "[<0]0;0"), "4");
+    }
+
+    #[test]
+    fn exponent_signs_and_engineering_multiples() {
+        // `E-` shows a minus only for a negative exponent; `E+` always shows the sign.
+        assert_eq!(n(12345.0, "0.00E-00"), "1.23E04");
+        assert_eq!(n(0.00123, "0.00E-00"), "1.23E-03");
+        // Several integer placeholders make the exponent a multiple of their count.
+        assert_eq!(n(12345.0, "##0.0E+0"), "12.3E+3");
+        assert_eq!(n(0.000_123_45, "##0.0E+0"), "123.5E-6");
+        assert_eq!(n(99_999.9, "##0.0E+0"), "100.0E+3");
+    }
+
+    #[test]
     fn dates_and_times() {
         assert_eq!(n(45292.0, "yyyy-mm-dd"), "2024-01-01");
         assert_eq!(n(45292.0, "dd/mm/yyyy"), "01/01/2024");
@@ -635,7 +690,7 @@ mod tests {
         assert_eq!(format_text("abc", "@"), "abc");
         assert_eq!(format_text("abc", "\"<\"@\">\""), "<abc>");
         assert_eq!(format_text("abc", "0.00"), "abc");
-        assert_eq!(format_number(0.5, "# ?/?"), Err(CalcError::Value));
+        assert_eq!(n(0.5, "# ?/?"), " 1/2");
         assert_eq!(format_number(-1.0, "yyyy"), Err(CalcError::Value));
     }
 }

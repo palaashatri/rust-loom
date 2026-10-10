@@ -348,7 +348,7 @@ fn expression_may_spill(expr: &Expr) -> bool {
         Expr::Unary(inner) => expression_may_spill(inner),
         Expr::Binary { lhs, rhs, .. } => expression_may_spill(lhs) || expression_may_spill(rhs),
         Expr::Func { name, args } => {
-            ["SEQUENCE", "TRANSPOSE", "SORT", "UNIQUE", "FILTER"]
+            crate::functions::ARRAY_RESULT_FUNCTIONS
                 .iter()
                 .any(|array_function| name.eq_ignore_ascii_case(array_function))
                 || args.iter().any(expression_may_spill)
