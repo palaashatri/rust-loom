@@ -80,6 +80,8 @@ mod sheet_action_tests;
 mod toolbar_responsive_tests;
 #[path = "main_tests/toolbar_tests.rs"]
 mod toolbar_tests;
+#[path = "main_tests/ui_font_tests.rs"]
+mod ui_font_tests;
 #[path = "main_tests/workbook_interop_tests.rs"]
 mod workbook_interop_tests;
 #[path = "main_tests/workbook_state_tests.rs"]

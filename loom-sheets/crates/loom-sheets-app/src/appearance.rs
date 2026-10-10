@@ -9,3 +9,4 @@ use crate::SheetsApp;
 pub(crate) const APPLICATION_ID: &str = "org.loom.sheets";
 
 loom_desktop::appearance_bindings!(SheetsApp, set_status_left);
+loom_desktop::ui_font_bindings!(SheetsApp, crate::Theme);

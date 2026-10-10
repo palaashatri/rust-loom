@@ -9,3 +9,4 @@ use crate::PresentApp;
 pub(crate) const APPLICATION_ID: &str = "org.loom.present";
 
 loom_desktop::appearance_bindings!(PresentApp, set_status_left);
+loom_desktop::ui_font_bindings!(PresentApp, crate::Theme);

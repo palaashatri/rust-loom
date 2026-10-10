@@ -24,7 +24,7 @@ export { GridPointer, CellSpill } from "grid_pointer.slint";
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
-    default-font-family: "Inter";
+    default-font-family: Theme.ui-font-family;
     // Windows/Linux draw their own frame (menu and title share a row); macOS keeps its native one.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
@@ -53,7 +53,6 @@ export component SheetsApp inherits Window {
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
-    property <length> responsive-width: root.width / max(root.template-text-scale, 1.0);
     in-out property <bool> toolbar-overflow-open: false;
     /// Open toolbar menu: 0 none, 1 View, 2 Zoom, 3 Table, 4 Text, 5 Export.
     in-out property <int> toolbar-menu: 0;

@@ -20,7 +20,7 @@ export component PresentApp inherits Window {
     // The OS window title, set from the deck name and unsaved state.
     in property <string> os-window-title: "Loom Present";
     title: root.os-window-title;
-    default-font-family: "Inter";
+    default-font-family: Theme.ui-font-family;
     // Windows and Linux draw their own frame so the menu and the title share
     // one row. macOS keeps the native frame and global menu bar.
     in property <bool> custom-chrome: false;

@@ -213,6 +213,7 @@ export component SheetObjectLayer inherits Rectangle {
             width: parent.width - 2 * Theme.tokens.space.sm;
             height: parent.height - 2 * Theme.tokens.space.sm;
             text: object-label;
+            font-family: Theme.document-font-family;
             color: root.objects[idx].fill >= 0 && root.objects[idx].fill <= 6
                 ? Theme.palette().paper-ink
                 : Theme.palette().ink;

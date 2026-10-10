@@ -145,6 +145,15 @@ export global Theme {
     // property rather than a function so a primitive can read it from a pure
     // measurement context such as `preferred-width`.
     in-out property <float> text-scale: 1.0;
+    // The face for window chrome: menus, toolbars, inspectors, dialogs, status
+    // text and tabs. It is the bundled Inter until a desktop host sets the
+    // platform's own interface face at startup (loom-desktop `ui_font`), so
+    // headless captures and tests look the same on every machine.
+    in-out property <string> ui-font-family: "Inter";
+    // The face for document content: page text, cell text, slide text and
+    // speaker notes. Always the bundled Inter, so layout and pagination never
+    // depend on which fonts a machine has installed.
+    out property <string> document-font-family: "Inter";
     // Width of one in-window menu label; grows with text so labels never touch.
     out property <length> menu-label-width: 64px + 40px * (max(1.0, root.text-scale) - 1.0);
     // Standard control height grown by the extra line height scaled body text needs.

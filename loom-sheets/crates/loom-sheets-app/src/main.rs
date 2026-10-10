@@ -2462,6 +2462,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         appearance::APPLICATION_ID,
         args.theme_explicit.then_some(args.theme.as_str()),
     );
+    appearance::apply_ui_font(&app, false);
     app.set_template_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));

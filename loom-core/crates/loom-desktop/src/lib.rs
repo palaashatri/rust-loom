@@ -18,6 +18,7 @@ pub mod appearance_bindings;
 pub mod macos_menu;
 pub mod menu;
 pub mod ui_bindings;
+pub mod ui_font;
 pub use appearance::{Appearance, AppearanceStore};
 pub use menu::{
     build_standard_menu_bar, standard_command_state_projection, CommandAction, CommandSource,

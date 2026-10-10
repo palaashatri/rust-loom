@@ -8,7 +8,7 @@ export { ThumbRows } from "present_components.slint";
 // the audience screen; on one display it is simply a rehearsal view.
 export component PresenterWindow inherits Window {
     title: "Presenter View";
-    default-font-family: "Inter";
+    default-font-family: Theme.ui-font-family;
     min-width: 640px;
     min-height: 420px;
     preferred-width: 960px;
@@ -63,6 +63,7 @@ export component PresenterWindow inherits Window {
                     }
                     Text {
                         text: root.slide-title;
+                        font-family: Theme.document-font-family;
                         font-size: Theme.type.heading;
                         font-weight: 700;
                         color: Theme.palette().ink;
@@ -112,6 +113,7 @@ export component PresenterWindow inherits Window {
                         }
                         Text {
                             text: root.notes == "" ? "No notes for this slide." : root.notes;
+                            font-family: Theme.document-font-family;
                             wrap: word-wrap;
                             font-size: Theme.type.body-large * 1.25;
                             color: root.notes == "" ? Theme.palette().ink-secondary : Theme.palette().ink;
@@ -158,6 +160,7 @@ export component PresenterWindow inherits Window {
                         Text {
                             visible: root.has-next;
                             text: root.next-title;
+                            font-family: Theme.document-font-family;
                             wrap: word-wrap;
                             font-size: Theme.type.body-large;
                             font-weight: 600;

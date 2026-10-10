@@ -35,6 +35,7 @@ export component PresentNotesEditor inherits Rectangle {
     }
 
     notes-input := TextInput {
+        font-family: Theme.document-font-family;
         x: Theme.rtl ? Theme.tokens.space.xl - Theme.tokens.space.lg : Theme.tokens.space.lg;
         y: Theme.tokens.space.sm;
         width: max(1px, root.width - Theme.tokens.space.xl);

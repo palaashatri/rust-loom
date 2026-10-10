@@ -2240,6 +2240,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
+    appearance::apply_ui_font(&app, true);
     let mut doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
         None => args
@@ -3373,6 +3374,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         appearance::APPLICATION_ID,
         args.theme_explicit.then_some(args.theme.as_str()),
     );
+    appearance::apply_ui_font(&app, false);
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -3870,6 +3872,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    appearance::apply_ui_font(&app, true);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
@@ -4532,5 +4535,7 @@ mod keyboard_flow_tests;
 
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod ui_font_tests;
 #[cfg(test)]
 mod writer_chrome_tests;

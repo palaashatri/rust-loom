@@ -931,6 +931,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     Theme::get(&app).set_text_scale(args.text_scale);
+    appearance::apply_ui_font(&app, true);
     let inspector_available = configure_responsive_layout(&app, args.size);
     let initial = initial_session(args)?;
     let state = GuiState {
@@ -1175,6 +1176,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    appearance::apply_ui_font(&app, true);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
@@ -1503,6 +1505,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         appearance::APPLICATION_ID,
         args.theme_explicit.then_some(args.theme.as_str()),
     );
+    appearance::apply_ui_font(&app, false);
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -3177,6 +3180,8 @@ mod scale_surfaces_tests;
 mod text_scale_tests;
 #[cfg(test)]
 mod toolbar_tests;
+#[cfg(test)]
+mod ui_font_tests;
 
 #[cfg(test)]
 mod accessibility_tests;

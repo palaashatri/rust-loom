@@ -41,6 +41,7 @@ impl PaletteProbe for SheetsApp {
 pub fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    crate::appearance::apply_ui_font(&app, true);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let sheet = match &args.open {
@@ -75,6 +76,7 @@ pub fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
 pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(out_dir).map_err(|error| format!("journey output: {error}"))?;
     let app = SheetsApp::new().map_err(|error| error.to_string())?;
+    crate::appearance::apply_ui_font(&app, true);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()

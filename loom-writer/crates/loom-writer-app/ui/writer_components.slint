@@ -89,6 +89,7 @@ component WriterDocumentEditor inherits Rectangle {
         width: root.width;
         height: root.height;
         text: root.placeholder;
+        font-family: Theme.document-font-family;
         font-size: root.font-size;
         color: Theme.palette().paper-muted;
         vertical-alignment: top;
@@ -138,6 +139,7 @@ component WriterDocumentEditor inherits Rectangle {
             width: 14px * root.page-zoom;
             height: block.height * root.page-zoom;
             text: block.marker;
+            font-family: Theme.document-font-family;
             visible: block.marker != "";
             font-size: block.font-size * root.page-zoom;
             color: Theme.palette().paper-ink;
@@ -149,6 +151,7 @@ component WriterDocumentEditor inherits Rectangle {
             x: block.x * root.page-zoom;
             y: block.y * root.page-zoom;
             text: block.content;
+            default-font-family: Theme.document-font-family;
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             default-font-size: block.font-size * root.page-zoom;
@@ -185,6 +188,7 @@ component WriterDocumentEditor inherits Rectangle {
     }
 
     editor := TextInput {
+        font-family: Theme.document-font-family;
         x: 0px;
         y: 0px;
         width: root.width;

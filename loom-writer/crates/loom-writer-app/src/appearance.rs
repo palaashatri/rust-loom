@@ -12,6 +12,7 @@ use crate::WriterApp;
 pub(crate) const APPLICATION_ID: &str = "org.loom.writer";
 
 loom_desktop::appearance_bindings!(WriterApp, set_status_left);
+loom_desktop::ui_font_bindings!(WriterApp, crate::Theme);
 
 /// The four appearance commands for Writer's command registry, so the palette
 /// finds them and every surface shares one command id.

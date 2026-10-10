@@ -29,6 +29,7 @@ pub mod image_diff;
 pub mod journey;
 pub mod mirror;
 pub mod png;
+pub mod region;
 pub mod snapshot;
 
 pub use capture::{snapshot_component, CaptureError};

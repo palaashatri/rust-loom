@@ -163,6 +163,9 @@ export component LoomTextField inherits VerticalLayout {
     in property <string> description: "";
     in property <string> placeholder: "";
     in-out property <string> value: "";
+    // The face of the typed value. Empty keeps the window's chrome face; a
+    // document field passes Theme.document-font-family.
+    in property <string> value-font-family: "";
     in property <bool> enabled: true;
     in property <bool> invalid: false;
     callback edited(string);
@@ -224,6 +227,7 @@ export component LoomTextField inherits VerticalLayout {
             height: parent.height;
             horizontal-alignment: Theme.rtl ? right : left;
             text <=> root.value;
+            font-family: root.value-font-family;
             accessible-role: AccessibleRole.text-input;
             accessible-label: root.label;
             accessible-description: root.description != "" ? root.description : root.title != "" ? root.title : root.label;

@@ -223,6 +223,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
                     height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
                     text: root.element-contents[idx];
+                    font-family: Theme.document-font-family;
                     font-size: text-px;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
@@ -240,6 +241,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
                     height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
                     text: root.element-placeholders[idx];
+                    font-family: Theme.document-font-family;
                     font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display : Theme.tokens.typography.body-large) * slide.text-scale;
                     color: Theme.palette().paper-muted;
                     opacity: 0.6;
@@ -290,6 +292,7 @@ export component PresentSlideCanvas inherits Rectangle {
                 // Double-click edits the text where it stands. The editor sits
                 // over the text with the same type, so nothing jumps.
                 if root.editing-enabled && root.editing-idx == idx : TextInput {
+                    font-family: Theme.document-font-family;
                     x: Theme.tokens.space.sm * slide.text-scale;
                     y: Theme.tokens.space.xs * slide.text-scale;
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);

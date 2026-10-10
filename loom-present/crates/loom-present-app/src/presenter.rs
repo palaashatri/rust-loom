@@ -146,6 +146,7 @@ fn copy_theme(app: &PresentApp, window: &PresenterWindow) {
     let theme = Theme::get(window);
     theme.set_appearance(source.get_appearance());
     theme.set_active_theme(source.get_active_theme());
+    theme.set_ui_font_family(source.get_ui_font_family());
 }
 
 /// Re-applies the main window's appearance to an open presenter window.

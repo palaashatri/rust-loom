@@ -275,6 +275,7 @@ export component SheetTable inherits Rectangle {
                                 width: parent.width - 16px;
                                 height: parent.height;
                                 text: spill-kind == 1 ? "" : root.cells[r * root.cols.length + c];
+                                font-family: Theme.document-font-family;
                                 accessible-role: AccessibleRole.none;
                                 font-size: font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
                                 font-weight: is-bold ? 700 : 400;
@@ -312,6 +313,7 @@ export component SheetTable inherits Rectangle {
                                     width: parent.width - 16px;
                                     height: parent.height;
                                     text: root.edit-text;
+                                    font-family: Theme.document-font-family;
                                     font-size: font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
                                     color: Theme.palette().paper-ink;
                                     horizontal-alignment: left;
