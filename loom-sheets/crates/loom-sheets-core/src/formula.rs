@@ -1,6 +1,7 @@
 //! Formula lexer, parser and expression tree. `parse_formula` turns the text of a
 //! cell into an `Expr` tree; the evaluator in `lib.rs` and the function modules walk it.
 
+use crate::functions::let_binding::repeats_a_name;
 use crate::{CalcError, CellRef, Value};
 
 /// Token types for the formula lexer.
@@ -613,7 +614,8 @@ pub fn parse_formula(body: &str) -> Result<Formula, CalcError> {
     let tokens = lex(body)?;
     let mut p = Parser::new(tokens);
     let root = p.parse_expr()?;
-    if p.pos != p.tokens.len() {
+    // Excel refuses to enter a LET that binds one name twice, so that is a parse error.
+    if p.pos != p.tokens.len() || repeats_a_name(&root) {
         return Err(CalcError::Parse);
     }
     Ok(Formula { root })

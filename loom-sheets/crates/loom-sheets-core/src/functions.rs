@@ -9,7 +9,7 @@ mod date_more;
 mod dynamic_arrays;
 mod finance_more;
 mod inventory;
-mod let_binding;
+pub(crate) mod let_binding;
 mod lookup_more;
 mod stats_more;
 mod text_more;

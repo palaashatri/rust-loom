@@ -3,7 +3,8 @@
 //! placeholders (the denominator is the closest fraction within its digits) or a
 //! fixed denominator. A value with no fraction part leaves the fraction blank,
 //! and a format with no integer placeholder folds the whole part into the
-//! numerator, so `?/?` shows 3/2 for 1.5.
+//! numerator, so `?/?` shows 3/2 for 1.5. A `?` placeholder pads with spaces (a
+//! denominator's spaces follow its digits) and a `0` placeholder pads with zeros.
 
 use super::{layout_integer, push_literal, tokenize};
 use crate::CalcError;
@@ -113,6 +114,37 @@ fn best_fraction(x: f64, max_den: u64) -> (u64, u64) {
     }
 }
 
+/// What fills a numerator or denominator up to its placeholder width: `0` shows
+/// zeros, `?` shows spaces, and `#` adds no padding.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Fill {
+    Zeros,
+    Spaces,
+    Nothing,
+}
+
+fn fill_of(placeholders: &str) -> Fill {
+    if placeholders.contains('0') {
+        Fill::Zeros
+    } else if placeholders.contains('?') {
+        Fill::Spaces
+    } else {
+        Fill::Nothing
+    }
+}
+
+/// A numerator is right-aligned in its width and a denominator left-aligned, so a
+/// `?` denominator keeps its spaces after the digits: `2/5 ` as Excel shows it.
+fn fill_number(value: u64, width: usize, fill: Fill, denominator: bool) -> String {
+    let digits = value.to_string();
+    match fill {
+        Fill::Zeros => format!("{digits:0>width$}"),
+        Fill::Spaces if denominator => format!("{digits:<width$}"),
+        Fill::Spaces => format!("{digits:>width$}"),
+        Fill::Nothing => digits,
+    }
+}
+
 /// Render a non-negative number in a fraction format. The caller adds a sign.
 pub(super) fn render(fraction: &Fraction, n: f64) -> Result<String, CalcError> {
     let numerator_width = fraction.numerator.chars().count();
@@ -158,19 +190,35 @@ pub(super) fn render(fraction: &Fraction, n: f64) -> Result<String, CalcError> {
     } else {
         String::new()
     };
-    out.push_str(&layout_integer(
-        &tokenize(&fraction.integer),
-        &digits,
-        false,
-    ));
+    let integer = layout_integer(&tokenize(&fraction.integer), &digits, false);
+    // `0` digits print their own zeros, so an empty integer part leaves no separator space.
+    // A fixed denominator such as `10` is digits, not a placeholder, so it does not count.
+    let zero_digits = fill_of(&fraction.numerator) == Fill::Zeros
+        || (fixed.is_none() && fill_of(&fraction.denominator) == Fill::Zeros);
+    if zero_digits && digits.is_empty() && !fraction.integer.contains('0') {
+        out.push_str(integer.trim_end_matches(' '));
+    } else {
+        out.push_str(&integer);
+    }
     if numerator == 0 {
         // A zero fraction part is blank, slash included.
         out.push_str(&" ".repeat(numerator_width + 1 + denominator_width));
     } else {
-        out.push_str(&format!("{numerator:>numerator_width$}/"));
+        out.push_str(&fill_number(
+            numerator,
+            numerator_width,
+            fill_of(&fraction.numerator),
+            false,
+        ));
+        out.push('/');
         match fixed {
             Some(_) => out.push_str(&denominator.to_string()),
-            None => out.push_str(&format!("{denominator:>denominator_width$}")),
+            None => out.push_str(&fill_number(
+                denominator,
+                denominator_width,
+                fill_of(&fraction.denominator),
+                true,
+            )),
         }
     }
     for token in tokenize(&fraction.suffix) {
@@ -214,6 +262,20 @@ mod tests {
     #[test]
     fn rounding_up_to_a_whole_number_carries() {
         assert_eq!(show(0.999, "# ?/?"), "1    ");
+    }
+
+    #[test]
+    fn question_marks_pad_like_excel_and_zero_digits_print_their_own_zeros() {
+        // `?` pads with spaces: the numerator on the left, the denominator on the right.
+        assert_eq!(show(0.4, "# ??/??"), "  2/5 ");
+        assert_eq!(show(0.4, "??/??"), " 2/5 ");
+        assert_eq!(show(0.25, "# ?/??"), " 1/4 ");
+        // `0` digits are zero-filled, and an empty integer part leaves no separator space.
+        assert_eq!(show(0.4, "# 0/0"), "2/5");
+        assert_eq!(show(0.4, "# 00/00"), "02/05");
+        assert_eq!(show(1.4, "# 0/0"), "1 2/5");
+        // A fixed denominator keeps the separator even though it contains a 0.
+        assert_eq!(show(0.4, "# ??/10"), "  4/10");
     }
 
     #[test]

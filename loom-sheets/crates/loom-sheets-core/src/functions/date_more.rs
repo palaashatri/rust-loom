@@ -222,8 +222,10 @@ fn datedif(args: &[Expr], lookup: Lookup) -> Calc {
             if d2 >= d1 {
                 d2 - d1
             } else {
+                // Days from the start day in the month before the end, with day overflow and
+                // no clamp: 2001-01-31 to 2001-03-01 is -2, as in Excel.
                 let (year, month) = if m2 == 1 { (y2 - 1, 12) } else { (y2, m2 - 1) };
-                (days_in_month(year, month) + d2 - d1).max(0)
+                days_in_month(year, month) + d2 - d1
             }
         }
         "YD" => {

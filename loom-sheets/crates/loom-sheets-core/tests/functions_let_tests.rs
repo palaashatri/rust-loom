@@ -32,8 +32,26 @@ fn let_binds_names_for_the_calculation() {
 #[test]
 fn each_value_sees_the_names_bound_before_it() {
     assert_eq!(number(eval(&[], "=LET(x,2,y,x+1,x*y)")), 6.0);
-    // A later binding of the same name shadows the earlier one.
-    assert_eq!(number(eval(&[], "=LET(x,1,x,x+10,x)")), 11.0);
+}
+
+#[test]
+fn a_name_bound_twice_in_one_let_is_rejected_on_entry() {
+    // Excel refuses to enter a LET that binds one name twice, so the cell reports a parse error.
+    assert_eq!(
+        eval(&[], "=LET(x,1,x,x+10,x)"),
+        Value::Error(CalcError::Parse)
+    );
+    // Names are case-insensitive, so X and x are the same name.
+    assert_eq!(eval(&[], "=LET(x,1,X,2,x)"), Value::Error(CalcError::Parse));
+    // Excel checks the whole formula, so a LET in a branch that is not taken is rejected too.
+    assert_eq!(
+        eval(&[], "=IF(FALSE,LET(a,1,a,2,a),0)"),
+        Value::Error(CalcError::Parse)
+    );
+    assert_eq!(
+        eval(&[], "=LET(x,1,LET(y,2,y,3,y)+x)"),
+        Value::Error(CalcError::Parse)
+    );
 }
 
 #[test]

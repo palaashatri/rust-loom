@@ -53,14 +53,14 @@ pub(crate) fn format_number(n: f64, code: &str) -> Result<String, CalcError> {
         .map(|section| conditions::split_leading(section))
         .collect();
     if split.iter().any(|(condition, _)| condition.is_some()) {
-        // A conditional section shows its own sign: the condition, not the
-        // section position, decides which section applies.
+        // A conditional section decides by its condition, not by its position,
+        // and a minus sign is dropped when that section admits no positive number.
         let rules: Vec<_> = split.iter().map(|(condition, _)| *condition).collect();
-        let Some(index) = conditions::choose(&rules, n) else {
+        let Some(selection) = conditions::select(&rules, n) else {
             return Ok(String::new());
         };
-        let body = format_section(split[index].1, n.abs(), n < 0.0)?;
-        return Ok(if n < 0.0 && !body.is_empty() {
+        let body = format_section(split[selection.index].1, n.abs(), n < 0.0)?;
+        return Ok(if n < 0.0 && selection.show_minus && !body.is_empty() {
             format!("-{body}")
         } else {
             body
@@ -654,9 +654,15 @@ mod tests {
         assert_eq!(n(1_500_000.0, scaled), "1.5M");
         assert_eq!(n(2500.0, scaled), "2.5K");
         assert_eq!(n(7.0, scaled), "7");
-        // A condition decides the sign: the matched section shows the minus.
-        assert_eq!(n(-5.0, "[<0]0;0"), "-5");
+        // Excel drops the minus when the selected section admits no positive number...
+        assert_eq!(n(-5.0, "[<0]0;0"), "5");
         assert_eq!(n(4.0, "[<0]0;0"), "4");
+        assert_eq!(n(-5.0, "[>0]0;0"), "5");
+        // ...and keeps it when the section also admits positive numbers.
+        assert_eq!(n(-5.0, "[<10]0;0"), "-5");
+        assert_eq!(n(-5.0, "[>=1000]0;0"), "-5");
+        // A lone conditional section also shows the numbers its condition does not select.
+        assert_eq!(n(-5.0, "[>0]0"), "5");
     }
 
     #[test]

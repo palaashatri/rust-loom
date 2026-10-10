@@ -34,21 +34,24 @@ pub(crate) fn eval_stats_function(name: &str, args: &[Expr], lookup: Lookup) -> 
     })
 }
 
-/// LARGE/SMALL(array, k): the k-th value counting from the top or bottom.
+/// LARGE/SMALL(array, k): LARGE takes the ceil(k)-th value from the top and SMALL
+/// the floor(k)-th from the bottom. k is checked as written, before it is rounded:
+/// anything below 1 or above the count is #NUM!.
 fn nth(args: &[Expr], lookup: Lookup, largest: bool) -> Calc {
     if args.len() != 2 {
         return Err(CalcError::Value);
     }
     let mut values = numbers(&args[..1], lookup)?;
-    let k = arg_number(args, 1, lookup)?.ceil();
+    let k = arg_number(args, 1, lookup)?;
     if values.is_empty() || k < 1.0 || k > values.len() as f64 {
         return Err(CalcError::Num);
     }
+    let rounded = if largest { k.ceil() } else { k.floor() };
     values.sort_by(|a, b| a.total_cmp(b));
     if largest {
         values.reverse();
     }
-    Ok(values[k as usize - 1])
+    Ok(values[rounded as usize - 1])
 }
 
 /// RANK(value, ref, [order]): 1 is the largest unless `order` is non-zero.

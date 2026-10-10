@@ -154,3 +154,50 @@ fn loom_formulas_match_real_excel() {
         bad.join("\n")
     );
 }
+
+/// Recorded Excel 16 results for the 2026-10-10 probes (`tests/fixtures/excel_probes.json`),
+/// compared the same way as the corpus. A `syntax` case is a formula Excel refuses on entry,
+/// so it passes only when Loom reports an error for it. No allow-list: every probe must match.
+#[test]
+fn excel_probes_match_real_excel() {
+    let raw = include_str!("fixtures/excel_probes.json");
+    let fixture: Json = serde_json::from_str(raw).expect("fixture parses");
+    let mut sheet = Sheet::new("t");
+    for (cell, value) in fixture["data"].as_object().unwrap() {
+        sheet.set_str(cell, value.as_str().unwrap());
+    }
+    let cases = fixture["cases"].as_array().unwrap();
+    for (i, case) in cases.iter().enumerate() {
+        sheet.set_str(&format!("AD{}", 1 + i * 10), case[0].as_str().unwrap());
+    }
+    let values = evaluate(&sheet);
+    let mut bad = Vec::new();
+    for (i, case) in cases.iter().enumerate() {
+        let (formula, kind, want) = (
+            case[0].as_str().unwrap(),
+            case[1].as_str().unwrap(),
+            &case[2],
+        );
+        let got = values
+            .get(&CellRef::parse(&format!("AD{}", 1 + i * 10)).unwrap())
+            .cloned()
+            .unwrap_or(Value::Empty);
+        let ok = match kind {
+            "syntax" => matches!(got, Value::Error(_)),
+            _ => matches(kind, want, &got),
+        };
+        if !ok {
+            bad.push(format!(
+                "{formula}\n    excel: {kind} {want}\n    loom:  {}",
+                describe(&got)
+            ));
+        }
+    }
+    println!("probes compared {}, mismatches {}", cases.len(), bad.len());
+    assert!(
+        bad.is_empty(),
+        "{} probes differ from Excel:\n{}",
+        bad.len(),
+        bad.join("\n")
+    );
+}

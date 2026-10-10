@@ -1,15 +1,15 @@
 //! LET(name1, value1, [name2, value2, ...], calculation) (spike C). Names are
-//! bound in order and each value sees the names bound before it; a later
-//! binding of a name shadows an earlier one. A value that is a reference stays
-//! a reference, so ranges keep working. Any other value is computed once and
-//! bound as a constant, so a volatile value such as RAND is drawn only once.
+//! bound in order and each value sees the names bound before it. A name bound
+//! twice in one LET is rejected when the formula is parsed, as Excel refuses it
+//! on entry (see `repeats_a_name`). A value that is a reference stays a
+//! reference, so ranges keep working. Any other value is computed once and bound
+//! as a constant, so a volatile value such as RAND is drawn only once.
 
 use crate::{eval_expr, CalcError, CellRef, Expr, Value};
 
 type Lookup<'a> = &'a dyn Fn(CellRef) -> Value;
 
-/// The names bound so far with their replacements; a later entry shadows an
-/// earlier one of the same name.
+/// The names bound so far with their replacements. A LET binds each name once.
 type Bindings = Vec<(String, Expr)>;
 
 /// Dispatch LET from the main evaluator.
@@ -39,10 +39,42 @@ fn let_function(args: &[Expr], lookup: Lookup) -> Value {
         } else {
             Expr::Constant(eval_expr(&value, lookup))
         };
-        bindings.retain(|(earlier, _)| earlier != bound);
         bindings.push((bound.clone(), replacement));
     }
     eval_expr(&substitute(calculation, &bindings), lookup)
+}
+
+/// True when a LET in `expr`, at any depth, binds the same name twice. Excel refuses
+/// such a formula on entry, so the parser rejects it even in a branch never evaluated.
+pub(crate) fn repeats_a_name(expr: &Expr) -> bool {
+    match expr {
+        Expr::Func { name, args } => {
+            (name == "LET" && bound_names_repeat(args)) || args.iter().any(repeats_a_name)
+        }
+        Expr::Unary(inner) => repeats_a_name(inner),
+        Expr::Binary { lhs, rhs, .. } => repeats_a_name(lhs) || repeats_a_name(rhs),
+        _ => false,
+    }
+}
+
+/// Whether the names bound by one LET's argument list (name and value pairs, then
+/// the calculation) include a name twice. Names are case-insensitive; the lexer
+/// stores them in upper case, so an exact comparison is enough.
+fn bound_names_repeat(args: &[Expr]) -> bool {
+    let Some((_, pairs)) = args.split_last() else {
+        return false;
+    };
+    let names: Vec<&String> = pairs
+        .chunks(2)
+        .filter_map(|pair| match pair.first() {
+            Some(Expr::Name(name)) => Some(name),
+            _ => None,
+        })
+        .collect();
+    names
+        .iter()
+        .enumerate()
+        .any(|(index, name)| names[..index].contains(name))
 }
 
 fn is_reference(expr: &Expr) -> bool {

@@ -174,17 +174,18 @@ fn straight_line_and_sum_of_years_digits_depreciation() {
 #[test]
 fn fixed_declining_balance_matches_the_microsoft_example() {
     // Rate is 0.319 (rounded to three places); the first year is a partial year.
+    // Excel does not round the result: these are its unrounded values.
     close(
         eval(&[], "=DB(1000000,100000,6,1,7)"),
-        186_083.333_333_333,
-        0.01,
+        186_083.333_333_333_34,
+        1e-6,
     );
     close(
         eval(&[], "=DB(1000000,100000,6,2,7)"),
-        259_639.416_666_666,
-        0.01,
+        259_639.416_666_666_66,
+        1e-6,
     );
-    close(eval(&[], "=DB(1000000,100000,6,1)"), 319_000.0, 0.01);
+    close(eval(&[], "=DB(1000000,100000,6,1)"), 319_000.0, 1e-6);
 }
 
 #[test]

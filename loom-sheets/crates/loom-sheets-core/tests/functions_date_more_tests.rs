@@ -158,6 +158,33 @@ fn datedif_rejects_reversed_dates_and_unknown_units() {
 }
 
 #[test]
+fn datedif_md_is_negative_when_the_start_day_is_after_the_end_day() {
+    // Counted from the start day in the month before the end, with day overflow and no clamp.
+    assert_eq!(
+        num(eval(&[], "=DATEDIF(DATE(2001,1,31),DATE(2001,3,1),\"MD\")")),
+        -2.0
+    );
+    assert_eq!(
+        num(eval(&[], "=DATEDIF(DATE(2001,1,30),DATE(2001,3,1),\"MD\")")),
+        -1.0
+    );
+    assert_eq!(
+        num(eval(
+            &[],
+            "=DATEDIF(DATE(2001,1,15),DATE(2001,2,10),\"MD\")"
+        )),
+        26.0
+    );
+    assert_eq!(
+        num(eval(
+            &[],
+            "=DATEDIF(DATE(2001,1,15),DATE(2001,3,20),\"MD\")"
+        )),
+        5.0
+    );
+}
+
+#[test]
 fn weeknum_numbers_weeks_from_the_week_containing_january_first() {
     assert_eq!(num(eval(&[], "=WEEKNUM(DATE(2012,3,9))")), 10.0);
     assert_eq!(num(eval(&[], "=WEEKNUM(DATE(2012,1,1))")), 1.0);

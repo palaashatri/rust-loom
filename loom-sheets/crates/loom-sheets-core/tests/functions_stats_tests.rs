@@ -1,7 +1,39 @@
 //! Statistical functions tests: LARGE, SMALL, RANK, STDEV, VAR, MODE,
 //! COUNTBLANK, SUMIFS, COUNTIFS, AVERAGEIFS.
 
-use loom_sheets_core::{evaluate, CellRef, Sheet, Value};
+use loom_sheets_core::{evaluate, CalcError, CellRef, Sheet, Value};
+
+/// Evaluate `formula` in Z1 against A1:A5 = 10, 20, 30, 40, 50.
+fn large_small(formula: &str) -> Value {
+    let mut sheet = Sheet::new("t");
+    for (row, value) in ["10", "20", "30", "40", "50"].iter().enumerate() {
+        sheet.set_str(&format!("A{}", row + 1), value);
+    }
+    sheet.set_str("Z1", formula);
+    evaluate(&sheet)
+        .get(&CellRef::parse("Z1").unwrap())
+        .cloned()
+        .unwrap_or(Value::Empty)
+}
+
+#[test]
+fn large_and_small_take_a_fractional_k_by_rounding_inside_the_range() {
+    // LARGE takes the ceil(k)-th largest and SMALL the floor(k)-th smallest.
+    assert_eq!(large_small("=LARGE(A1:A5,2.2)"), Value::Number(30.0));
+    assert_eq!(large_small("=LARGE(A1:A5,2.9)"), Value::Number(30.0));
+    assert_eq!(large_small("=LARGE(A1:A5,4.999)"), Value::Number(10.0));
+    assert_eq!(large_small("=SMALL(A1:A5,2.2)"), Value::Number(20.0));
+    assert_eq!(large_small("=SMALL(A1:A5,2.9)"), Value::Number(20.0));
+    // k is checked as written, before rounding: 0.5 would round up to 1 and 5.5 down to 5.
+    assert_eq!(
+        large_small("=LARGE(A1:A5,0.5)"),
+        Value::Error(CalcError::Num)
+    );
+    assert_eq!(
+        large_small("=SMALL(A1:A5,5.5)"),
+        Value::Error(CalcError::Num)
+    );
+}
 
 #[test]
 fn large_function() {
