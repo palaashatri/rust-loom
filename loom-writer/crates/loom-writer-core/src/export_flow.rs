@@ -1,7 +1,7 @@
 //! Line breaking for the PDF export. Lines are wrapped with the widths the PDF
-//! draws with (the base-14 Helvetica faces, bold and oblique per run), so a line
-//! and its appended runs never pass the right margin. The page editor's own
-//! metrics are not used here because the PDF draws different faces.
+//! draws with (the embedded Inter faces, bold and italic per run, measured from
+//! the font program itself), so a line and its appended runs never pass the
+//! right margin.
 
 use loom_pdf::{text_width_pt, TextStyle};
 use loom_text::{FontWeight, StyleRun};

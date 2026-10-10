@@ -1,22 +1,38 @@
-//! Minimal, deterministic PDF 1.4 writer.
+//! Deterministic PDF 1.4 writer with embedded fonts.
 //!
 //! Used by Loom Writer, Present and Sheets for PDF export. Scope is
 //! deliberately small (see the Internal PDF Writer ADR in root `AGENTS.md`):
 //!
-//! * Pages with text (built-in Helvetica, WinAnsi/Latin-1 encodable text),
-//!   rectangles, lines, RGB fill and stroke colors.
-//! * JPEG and raw RGB(A) images (see [`PdfImage`]); no font embedding, no stream
-//!   compression, no interactive features.
+//! * Pages with Unicode text, rectangles, lines, RGB fill and stroke colors.
+//!   Text is set in the bundled Inter faces (regular, bold, italic, bold
+//!   italic), embedded as subset TrueType `CIDFontType2` programs with a
+//!   `ToUnicode` CMap. Measurement ([`text_width_pt`]) reads the same glyph
+//!   advances the page uses.
+//! * JPEG and raw RGB(A) images (see [`PdfImage`]); no interactive features.
 //! * Deterministic output: no timestamps are written unless the caller
 //!   provides one (`PdfDocument::set_creation_date`).
 //!
+//! Inter has no CJK glyphs and Loom bundles no fallback font: such characters
+//! show Inter's `.notdef` box unless a [`FontFallback`] is installed with
+//! [`PdfDocument::set_font_fallback`].
+//!
 //! The output is validated in tests by re-parsing the xref table and object
-//! bodies, and by round-tripping the text operators.
+//! bodies and by reading the text back through [`inspect`].
 
+mod embed;
+mod fonts;
 mod image;
+pub mod inspect;
+#[cfg(test)]
+mod tests;
+
+pub use fonts::{FallbackFont, FontFallback};
 pub use image::PdfImage;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use embed::{deflate, stream_object, FaceSlot};
 
 /// A text string, optionally styled.
 #[derive(Debug, Clone)]
@@ -25,9 +41,9 @@ pub struct TextStyle {
     pub size_pt: f32,
     /// RGB stroke color 0..=1 used for fills.
     pub fill_rgb: (f32, f32, f32),
-    /// Bold (Helvetica-Bold).
+    /// Bold (Inter Bold).
     pub bold: bool,
-    /// Italic (Helvetica-Oblique).
+    /// Italic (Inter Italic; bold and italic together use Inter Bold Italic).
     pub italic: bool,
 }
 
@@ -88,11 +104,25 @@ struct Page {
 pub struct PageIndex(pub usize);
 
 /// A deterministic PDF document builder.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct PdfDocument {
     pages: Vec<Page>,
     creation_date: String,
     images: Vec<PdfImage>,
+    /// Fonts used so far, in first-use order. Inter faces take `F1`..`F4`
+    /// (regular, bold, italic, bold italic); fallback faces follow.
+    faces: Vec<FaceSlot>,
+    fallback: Option<Arc<dyn FontFallback>>,
+}
+
+impl std::fmt::Debug for PdfDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PdfDocument")
+            .field("pages", &self.pages)
+            .field("images", &self.images.len())
+            .field("fonts", &self.faces.len())
+            .finish()
+    }
 }
 
 impl PdfDocument {
@@ -100,9 +130,8 @@ impl PdfDocument {
     /// is a fixed value unless overridden with [`Self::set_creation_date`].
     pub fn new() -> Self {
         Self {
-            pages: Vec::new(),
             creation_date: "(D:20260101000000Z)".to_string(),
-            images: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -110,6 +139,13 @@ impl PdfDocument {
     /// `(D:20240101120000Z)`). Affects output determinism.
     pub fn set_creation_date(&mut self, date: impl Into<String>) {
         self.creation_date = date.into();
+    }
+
+    /// Install the source of fonts for characters Inter cannot show. The hook
+    /// only affects drawing; [`text_width_pt`] still measures those characters
+    /// with Inter's `.notdef` advance.
+    pub fn set_font_fallback(&mut self, fallback: Arc<dyn FontFallback>) {
+        self.fallback = Some(fallback);
     }
 
     /// Add a page of the given size (points).
@@ -127,23 +163,82 @@ impl PdfDocument {
         &mut self.pages[page.0]
     }
 
+    /// The slot for the font that shows `ch` in `style`, creating it on first use.
+    fn slot_for(&mut self, ch: char, style: &TextStyle) -> usize {
+        let index = fonts::inter_index(style.bold, style.italic);
+        let inter = fonts::inter(index);
+        let mut chosen = inter.clone();
+        if inter.glyph(ch).is_none() {
+            let extra = self
+                .fallback
+                .as_ref()
+                .and_then(|hook| hook.font_for(ch, style.bold, style.italic))
+                .and_then(|face| fonts::Font::new(face.name, face.data))
+                .filter(|font| font.glyph(ch).is_some());
+            if let Some(font) = extra {
+                chosen = font;
+            }
+        }
+        if let Some(at) = self.faces.iter().position(|s| s.font_name() == chosen.name) {
+            return at;
+        }
+        let resource = if chosen.name == inter.name {
+            format!("F{}", index + 1)
+        } else {
+            let custom = self
+                .faces
+                .iter()
+                .filter(|s| !fonts::is_bundled(s.font_name()))
+                .count();
+            format!("F{}", 5 + custom)
+        };
+        self.faces.push(FaceSlot::new(resource, chosen));
+        self.faces.len() - 1
+    }
+
+    /// Encode `text` as glyph strings. Returns the `Tf` operator for the first
+    /// face and the `Tj` sequence (later faces switch with their own `Tf`),
+    /// or `None` when nothing visible remains.
+    fn show_text(&mut self, text: &str, style: &TextStyle) -> Option<(String, String)> {
+        let size = format!("{:.2}", style.size_pt);
+        let mut runs: Vec<(usize, String)> = Vec::new();
+        for ch in text.chars() {
+            if fonts::is_invisible_control(ch) {
+                continue;
+            }
+            let slot = self.slot_for(ch, style);
+            let glyph = format!("{:04X}", self.faces[slot].encode(ch));
+            match runs.last_mut() {
+                Some((last, hex)) if *last == slot => hex.push_str(&glyph),
+                _ => runs.push((slot, glyph)),
+            }
+        }
+        let mut runs = runs.into_iter();
+        let (first, hex) = runs.next()?;
+        let select = |slot: usize| format!("/{} {size} Tf", self.faces[slot].resource);
+        let mut shown = format!("<{hex}> Tj");
+        for (slot, hex) in runs {
+            shown.push_str(&format!(" {} <{hex}> Tj", select(slot)));
+        }
+        Some((select(first), shown))
+    }
+
     /// Draw text at the baseline position `(x, y)` (bottom-left origin,
     /// matching PDF user space).
     pub fn draw_text(&mut self, page: PageIndex, x: f32, y: f32, text: &str, style: &TextStyle) {
-        let font = font_resource(style);
+        let Some((font, shown)) = self.show_text(text, style) else {
+            return;
+        };
         let (r, g, b) = style.fill_rgb;
         let (r, g, b) = (clip01(r), clip01(g), clip01(b));
         let p = self.page_mut(page);
         p.ops.push(format!(
-            "{} {} {} rg /{} {:.2} Tf BT {:.2} {:.2} Td ({}) Tj ET",
+            "{} {} {} rg {font} BT {:.2} {:.2} Td {shown} ET",
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            font,
-            style.size_pt,
             x,
             y,
-            escape_pdf_string(text)
         ));
     }
 
@@ -161,7 +256,9 @@ impl PdfDocument {
         style: &TextStyle,
         transform: [f32; 6],
     ) {
-        let font = font_resource(style);
+        let Some((font, shown)) = self.show_text(text, style) else {
+            return;
+        };
         let (r, g, b) = (
             clip01(style.fill_rgb.0),
             clip01(style.fill_rgb.1),
@@ -170,7 +267,7 @@ impl PdfDocument {
         let [a, b_matrix, c, d, e, f] = transform;
         let p = self.page_mut(page);
         p.ops.push(format!(
-            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg /{} {:.2} Tf BT 1 0 0 -1 {:.2} {:.2} Tm ({}) Tj ET Q",
+            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg {font} BT 1 0 0 -1 {:.2} {:.2} Tm {shown} ET Q",
             a,
             b_matrix,
             c,
@@ -180,11 +277,8 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            font,
-            style.size_pt,
             x,
             y,
-            escape_pdf_string(text)
         ));
     }
 
@@ -280,58 +374,70 @@ impl PdfDocument {
     ///
     /// Output is byte-for-byte deterministic for the same input.
     pub fn serialize(&self) -> Vec<u8> {
-        let n = self.pages.len() as i64;
+        let n = self.pages.len();
         // Object layout:
-        //   1                catalog
+        //   1               catalog
         //   2..2+n          pages
         //   2+n             page tree
-        //   3+n..7+n        the four shared base-14 font objects (F1..F4)
-        //   7+n..7+2n       content streams (page i is 7+n+i)
-        //   7+2n            info object
-        let catalog_ref = 1;
+        //   3+n..3+2n       content streams (page i is 3+n+i)
+        //   3+2n            info object
+        //   4+2n..          image XObjects, their soft masks, then font objects
         let pages_ref = 2 + n;
-        let first_font_ref = 3 + n;
-        let stream_ref = |i: usize| 7 + n + i as i64;
-        let info_ref = 7 + 2 * n;
-        // Image XObjects follow the info object; soft masks follow the images.
-        let image_ref = |i: usize| 8 + 2 * n + i as i64;
-        let mut next_mask = 8 + 2 * n + self.images.len() as i64;
-        let mask_refs: Vec<Option<i64>> = self
+        let stream_ref = |i: usize| 3 + n + i;
+        let info_ref = 3 + 2 * n;
+        let image_ref = |i: usize| 4 + 2 * n + i;
+        let mut next = 4 + 2 * n + self.images.len();
+        let mask_refs: Vec<Option<usize>> = self
             .images
             .iter()
             .map(|image| {
                 image.needs_mask().then(|| {
-                    let this = next_mask;
-                    next_mask += 1;
+                    let this = next;
+                    next += 1;
                     this
                 })
             })
             .collect();
 
+        // Font objects: a failed subset adds a CIDToGIDMap stream, so settle
+        // the programs first and number the objects from their counts.
+        let subsets: Vec<Option<Vec<u8>>> = self.faces.iter().map(FaceSlot::subset).collect();
+        let mut font_refs = Vec::with_capacity(self.faces.len());
+        for subset in &subsets {
+            font_refs.push(next);
+            next += 5 + usize::from(subset.is_none());
+        }
+        let font_resources = if self.faces.is_empty() {
+            String::new()
+        } else {
+            let list: Vec<String> = self
+                .faces
+                .iter()
+                .zip(&font_refs)
+                .map(|(face, at)| format!("/{} {at} 0 R", face.resource))
+                .collect();
+            format!(" /Font << {} >>", list.join(" "))
+        };
+
         let mut objects: Vec<Vec<u8>> = Vec::new();
         objects.push(format!("<< /Type /Catalog /Pages {pages_ref} 0 R >>").into_bytes());
         for (i, p) in self.pages.iter().enumerate() {
+            let xobjects = if p.images.is_empty() {
+                String::new()
+            } else {
+                let list: Vec<String> = p
+                    .images
+                    .iter()
+                    .map(|i| format!("/Im{i} {} 0 R", image_ref(*i)))
+                    .collect();
+                format!(" /XObject << {} >>", list.join(" "))
+            };
             objects.push(
                 format!(
                     "<< /Type /Page /Parent {pages_ref} 0 R /MediaBox [0 0 {:.2} {:.2}] \
-                     /Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >>{} >> \
-                     /Contents {} 0 R >>",
+                     /Resources <<{font_resources}{xobjects} >> /Contents {} 0 R >>",
                     p.width_pt,
                     p.height_pt,
-                    first_font_ref,
-                    first_font_ref + 1,
-                    first_font_ref + 2,
-                    first_font_ref + 3,
-                    if p.images.is_empty() {
-                        String::new()
-                    } else {
-                        let list: Vec<String> = p
-                            .images
-                            .iter()
-                            .map(|i| format!("/Im{i} {} 0 R", image_ref(*i)))
-                            .collect();
-                        format!(" /XObject << {} >>", list.join(" "))
-                    },
                     stream_ref(i)
                 )
                 .into_bytes(),
@@ -348,23 +454,11 @@ impl PdfDocument {
             )
             .into_bytes(),
         );
-        for base in FONT_BASES {
-            objects.push(
-                format!(
-                    "<< /Type /Font /Subtype /Type1 /BaseFont /{base} /Encoding /WinAnsiEncoding >>"
-                )
-                .into_bytes(),
-            );
-        }
         for p in &self.pages {
-            // Operators are ASCII and text was mapped to WinAnsi code points
-            // below 256, so one char is exactly one output byte.
-            let body: Vec<u8> = p.ops.join("\n").chars().map(|c| c as u8).collect();
-            let mut stream = Vec::new();
-            stream.extend_from_slice(format!("<< /Length {} >>\nstream\n", body.len()).as_bytes());
-            stream.extend_from_slice(&body);
-            stream.extend_from_slice(b"\nendstream");
-            objects.push(stream);
+            objects.push(stream_object(
+                "/Filter /FlateDecode",
+                &deflate(p.ops.join("\n").as_bytes()),
+            ));
         }
         objects.push(
             format!(
@@ -373,21 +467,24 @@ impl PdfDocument {
             )
             .into_bytes(),
         );
-        let _ = (catalog_ref, info_ref);
+        debug_assert_eq!(objects.len(), info_ref);
         let mut masks: Vec<Vec<u8>> = Vec::new();
         for (image, mask_ref) in self.images.iter().zip(&mask_refs) {
-            let (object, mask) = image.objects(*mask_ref);
+            let (object, mask) = image.objects(mask_ref.map(|m| m as i64));
             objects.push(object);
             masks.extend(mask);
         }
         objects.extend(masks);
+        for ((face, first), subset) in self.faces.iter().zip(&font_refs).zip(subsets) {
+            objects.extend(face.objects_with(*first, subset));
+        }
 
         // Assemble with an xref table.
         let mut out = Vec::new();
         out.extend_from_slice(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n");
-        let mut offsets: BTreeMap<i64, usize> = BTreeMap::new();
+        let mut offsets: BTreeMap<usize, usize> = BTreeMap::new();
         for (i, obj) in objects.iter().enumerate() {
-            offsets.insert(1 + i as i64, out.len());
+            offsets.insert(1 + i, out.len());
             out.extend_from_slice(format!("{} 0 obj\n", 1 + i).as_bytes());
             out.extend_from_slice(obj);
             out.extend_from_slice(b"\nendobj\n");
@@ -395,12 +492,12 @@ impl PdfDocument {
         let xref_pos = out.len();
         out.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
         out.extend_from_slice(b"0000000000 65535 f \n");
-        for i in 1..=objects.len() as i64 {
+        for i in 1..=objects.len() {
             out.extend_from_slice(format!("{:010} 00000 n \n", offsets[&i]).as_bytes());
         }
         out.extend_from_slice(
             format!(
-                "trailer\n<< /Size {} /Root {catalog_ref} 0 R /Info {info_ref} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n",
+                "trailer\n<< /Size {} /Root 1 0 R /Info {info_ref} 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n",
                 objects.len() + 1,
             )
             .as_bytes(),
@@ -417,364 +514,20 @@ fn fmt3(v: f32) -> String {
     format!("{:.3}", (v * 1000.0).round() / 1000.0)
 }
 
-/// Adobe Helvetica advance widths (1/1000 em) for ASCII 32..=126.
-const HELVETICA_WIDTHS: [u16; 95] = [
-    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
-    556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667,
-    611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
-    667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
-    222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
-];
-
-/// Adobe Helvetica-Bold advance widths (1/1000 em) for ASCII 32..=126.
-const HELVETICA_BOLD_WIDTHS: [u16; 95] = [
-    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
-    556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
-    611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
-    667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
-    278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
-];
-
-/// Width of `text` in points when set in the face `style` selects.
+/// Width of `text` in points when set in the Inter face `style` selects.
 ///
-/// Uses the published Helvetica metrics for ASCII and the typographic marks
-/// this writer maps to WinAnsi; other Latin-1 letters use a typical letter
-/// width. Oblique faces share their upright widths. Kerning is not applied,
-/// matching how PDF viewers set a plain `Tj`.
+/// Advances come from the font program the PDF embeds, so layout that wraps
+/// with this function matches what a viewer draws. Kerning is not applied,
+/// matching a plain `Tj`. Characters Inter lacks measure as its `.notdef` box
+/// (the width they are drawn with unless a fallback font is installed), and
+/// control characters measure zero.
 pub fn text_width_pt(text: &str, style: &TextStyle) -> f32 {
-    let table = if style.bold {
-        &HELVETICA_BOLD_WIDTHS
-    } else {
-        &HELVETICA_WIDTHS
-    };
+    let font = fonts::inter(fonts::inter_index(style.bold, style.italic));
     let units: u32 = text
         .chars()
-        .map(|ch| match ch {
-            ' '..='~' => u32::from(table[ch as usize - 32]),
-            '\u{2013}' | '\u{20AC}' => 556,
-            '\u{2014}' | '\u{2026}' | '\u{2122}' => 1000,
-            '\u{2018}' | '\u{2019}' => {
-                if style.bold {
-                    278
-                } else {
-                    222
-                }
-            }
-            '\u{201C}' | '\u{201D}' => {
-                if style.bold {
-                    500
-                } else {
-                    333
-                }
-            }
-            '\u{2022}' => 350,
-            _ => {
-                if style.bold {
-                    611
-                } else {
-                    556
-                }
-            }
-        })
+        .map(|ch| u32::from(font.char_advance_units(ch)))
         .sum();
-    units as f32 * style.size_pt / 1000.0
-}
-
-/// The four base-14 Helvetica faces, registered as `/F1`..`/F4` on every page.
-const FONT_BASES: [&str; 4] = [
-    "Helvetica",
-    "Helvetica-Bold",
-    "Helvetica-Oblique",
-    "Helvetica-BoldOblique",
-];
-
-/// Resource name of the face that matches `style`.
-fn font_resource(style: &TextStyle) -> &'static str {
-    match (style.bold, style.italic) {
-        (false, false) => "F1",
-        (true, false) => "F2",
-        (false, true) => "F3",
-        (true, true) => "F4",
-    }
-}
-
-/// WinAnsi byte for a character, or `None` when the base-14 fonts cannot show it.
-fn winansi_byte(ch: char) -> Option<u8> {
-    Some(match ch {
-        '\u{20AC}' => 0x80,
-        '\u{2026}' => 0x85,
-        '\u{2018}' => 0x91,
-        '\u{2019}' => 0x92,
-        '\u{201C}' => 0x93,
-        '\u{201D}' => 0x94,
-        '\u{2022}' => 0x95,
-        '\u{2013}' => 0x96,
-        '\u{2014}' => 0x97,
-        '\u{2122}' => 0x99,
-        c if (c as u32) < 0x80 || ((0xA0..0x100).contains(&(c as u32))) => c as u8,
-        _ => return None,
-    })
-}
-
-/// Escape text for a PDF literal string. Each returned `char` stands for one
-/// WinAnsi byte (always below 256); `serialize` writes it as a single byte.
-/// Characters outside WinAnsi become `?` instead of garbage bytes.
-fn escape_pdf_string(s: &str) -> String {
-    let mut out = String::new();
-    for ch in s.chars() {
-        match ch {
-            '(' => out.push_str("\\("),
-            ')' => out.push_str("\\)"),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(winansi_byte(c).map_or('?', char::from)),
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse_xref(bytes: &[u8]) -> (usize, Vec<usize>) {
-        // Operate on raw bytes: xref offsets are byte offsets, and a UTF-8
-        // lossy conversion of the binary header would shift indices.
-        let start = bytes
-            .windows(b"startxref".len())
-            .position(|w| w == b"startxref")
-            .expect("startxref present");
-        let after = &bytes[start + b"startxref".len()..];
-        let start_pos: usize = std::str::from_utf8(after)
-            .unwrap()
-            .split_whitespace()
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
-        let xref = std::str::from_utf8(&bytes[start_pos..]).unwrap();
-        let count_line = xref.lines().nth(1).unwrap();
-        let count: usize = count_line
-            .split_whitespace()
-            .nth(1)
-            .unwrap()
-            .parse()
-            .unwrap();
-        let entries: Vec<usize> = xref
-            .lines()
-            .skip(3)
-            .take(count - 1)
-            .map(|l| l.split_whitespace().next().unwrap().parse().unwrap())
-            .collect();
-        (start_pos, entries)
-    }
-
-    #[test]
-    fn serializes_valid_pdf() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(612.0, 792.0);
-        doc.draw_text(p, 72.0, 720.0, "Hello, Loom!", &TextStyle::default());
-        doc.draw_rect(
-            p,
-            72.0,
-            400.0,
-            100.0,
-            50.0,
-            PathStyle::filled((0.7, 0.3, 0.1)),
-        );
-        doc.draw_line(
-            p,
-            0.0,
-            0.0,
-            612.0,
-            792.0,
-            PathStyle::stroked((0.0, 0.0, 0.0), 1.0),
-        );
-        let bytes = doc.serialize();
-        assert!(bytes.starts_with(b"%PDF-1.4"));
-        assert!(bytes.ends_with(b"%%EOF\n"));
-
-        let (xref_pos, entries) = parse_xref(&bytes);
-        assert_eq!(
-            entries.len(),
-            9,
-            "catalog + page + pagetree + four fonts + stream + info"
-        );
-        // Object 1 must sit exactly at the recorded xref offset.
-        assert_eq!(&bytes[entries[0]..entries[0] + 7], b"1 0 obj");
-        // Every offset must point at a valid object header.
-        for (i, off) in entries.iter().enumerate() {
-            assert_eq!(
-                &bytes[*off..*off + 7],
-                format!("{} 0 obj", i + 1).as_bytes()
-            );
-        }
-        assert_eq!(&bytes[xref_pos..xref_pos + 4], b"xref");
-        // Text must be present in the stream.
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("Hello, Loom!"));
-        assert!(text.contains("/Type /Catalog"));
-        assert!(text.contains("/MediaBox [0 0 612.00 792.00]"));
-    }
-
-    #[test]
-    fn deterministic_output() {
-        let mut a = PdfDocument::new();
-        let pa = a.add_page(100.0, 100.0);
-        a.draw_text(pa, 10.0, 50.0, "same", &TextStyle::default());
-        let mut b = PdfDocument::new();
-        let pb = b.add_page(100.0, 100.0);
-        b.draw_text(pb, 10.0, 50.0, "same", &TextStyle::default());
-        assert_eq!(
-            a.serialize(),
-            b.serialize(),
-            "identical input -> identical bytes"
-        );
-    }
-
-    #[test]
-    fn escapes_special_characters() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(100.0, 100.0);
-        doc.draw_text(p, 10.0, 10.0, "a(b)\\c\nd", &TextStyle::default());
-        let bytes = doc.serialize();
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains(r"a\(b\)\\c\nd"), "PDF string escapes applied");
-    }
-
-    #[test]
-    fn bold_and_italic_font_selection() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(100.0, 100.0);
-        let style = TextStyle {
-            bold: true,
-            italic: true,
-            ..Default::default()
-        };
-        doc.draw_text(p, 10.0, 10.0, "x", &style);
-        let bytes = doc.serialize();
-        let text = String::from_utf8_lossy(&bytes);
-        // The page resources always name Helvetica; bold/oblique is expressed
-        // via the BaseFont in the font object. Here we assert the content
-        // stream emitted the font size.
-        assert!(text.contains("Tf BT"));
-    }
-
-    fn stream_bytes(bytes: &[u8]) -> &[u8] {
-        let start = bytes
-            .windows(7)
-            .position(|w| w == b"stream\n")
-            .expect("stream start")
-            + 7;
-        let end = bytes
-            .windows(10)
-            .position(|w| w == b"\nendstream")
-            .expect("stream end");
-        &bytes[start..end]
-    }
-
-    #[test]
-    fn latin1_and_typographic_text_is_written_as_single_winansi_bytes() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(200.0, 100.0);
-        doc.draw_text(
-            p,
-            10.0,
-            10.0,
-            "Caf\u{e9} \u{201c}q\u{201d} \u{2014} \u{20ac}5 \u{65e5}",
-            &TextStyle::default(),
-        );
-        let bytes = doc.serialize();
-        let body = stream_bytes(&bytes);
-        let needle: &[u8] = b"(Caf\xe9 \x93q\x94 \x97 \x805 ?)";
-        assert!(
-            body.windows(needle.len()).any(|w| w == needle),
-            "text must be one WinAnsi byte per character, not UTF-8: {:?}",
-            String::from_utf8_lossy(body)
-        );
-        assert!(
-            !body.windows(2).any(|w| w == [0xc3, 0xa9]),
-            "no UTF-8 sequence for e-acute may reach the stream"
-        );
-        let declared = format!("<< /Length {} >>", body.len());
-        assert!(String::from_utf8_lossy(&bytes).contains(&declared));
-        assert!(String::from_utf8_lossy(&bytes).contains("/Encoding /WinAnsiEncoding"));
-    }
-
-    #[test]
-    fn text_width_uses_helvetica_metrics_per_face() {
-        let regular = TextStyle {
-            size_pt: 10.0,
-            ..Default::default()
-        };
-        let bold = TextStyle {
-            size_pt: 10.0,
-            bold: true,
-            ..Default::default()
-        };
-        // H 722 + e 556 + l 222 + l 222 + o 556 = 2278 units.
-        assert!((text_width_pt("Hello", &regular) - 22.78).abs() < 0.001);
-        // Bold: H 722 + e 556 + l 278 + l 278 + o 611 = 2445 units.
-        assert!((text_width_pt("Hello", &bold) - 24.45).abs() < 0.001);
-        assert!((text_width_pt("", &regular)).abs() < f32::EPSILON);
-        assert!(
-            text_width_pt("Caf\u{e9}", &regular) > text_width_pt("Caf", &regular),
-            "non-ASCII letters still take width"
-        );
-    }
-
-    #[test]
-    fn mixed_styles_on_one_page_keep_their_own_fonts() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(200.0, 100.0);
-        let regular = TextStyle::default();
-        let bold = TextStyle {
-            bold: true,
-            ..Default::default()
-        };
-        let italic = TextStyle {
-            italic: true,
-            ..Default::default()
-        };
-        doc.draw_text(p, 10.0, 10.0, "plain", &regular);
-        doc.draw_text(p, 10.0, 30.0, "heavy", &bold);
-        doc.draw_text(p, 10.0, 50.0, "slanted", &italic);
-        let bytes = doc.serialize();
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("/F1 12.00 Tf BT 10.00 10.00 Td (plain)"));
-        assert!(text.contains("/F2 12.00 Tf BT 10.00 30.00 Td (heavy)"));
-        assert!(text.contains("/F3 12.00 Tf BT 10.00 50.00 Td (slanted)"));
-        for base in [
-            "Helvetica ",
-            "Helvetica-Bold ",
-            "Helvetica-Oblique ",
-            "Helvetica-BoldOblique ",
-        ] {
-            assert!(text.contains(&format!("/BaseFont /{base}")), "{base}");
-        }
-    }
-
-    #[test]
-    fn transformed_text_keeps_glyph_y_axis_upright() {
-        let mut doc = PdfDocument::new();
-        let p = doc.add_page(100.0, 100.0);
-        doc.draw_text_with_transform(
-            p,
-            0.0,
-            0.0,
-            "upright",
-            &TextStyle::default(),
-            [1.0, 0.0, 0.0, -1.0, 10.0, 20.0],
-        );
-        let bytes = doc.serialize();
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(
-            text.contains("BT 1 0 0 -1 0.00 0.00 Tm (upright) Tj"),
-            "transformed text must invert the local text y-axis exactly once"
-        );
-    }
+    units as f32 * style.size_pt / font.units_per_em()
 }
 
 #[cfg(test)]

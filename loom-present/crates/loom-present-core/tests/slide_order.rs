@@ -214,10 +214,12 @@ fn position(haystack: &[u8], needle: &str) -> usize {
 fn pdf_export_follows_the_new_order() {
     let mut session = deck();
     assert!(session.move_slide(4, 0));
+    // Page text is stored as glyph ids; read it back through the font maps.
     let pdf = export_pdf(&session.document);
+    let pdf = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     let at: Vec<usize> = ["Epsilon", "Alpha", "Beta", "Gamma", "Delta"]
         .iter()
-        .map(|name| position(&pdf, name))
+        .map(|name| position(pdf.as_bytes(), name))
         .collect();
     assert!(
         at.windows(2).all(|pair| pair[0] < pair[1]),

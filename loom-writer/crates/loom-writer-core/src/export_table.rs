@@ -246,7 +246,7 @@ mod tests {
 
     /// The page content as text, one character per byte as the PDF writes it.
     fn content(pdf: &[u8]) -> String {
-        pdf.iter().map(|&byte| char::from(byte)).collect()
+        loom_pdf::inspect::readable_content(pdf).expect("readable PDF")
     }
 
     /// Each drawn text run as (x, baseline y, text, bold), from `BT x y Td (text) Tj ET`.

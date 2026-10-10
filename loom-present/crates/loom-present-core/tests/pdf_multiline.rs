@@ -20,7 +20,7 @@ fn body(content: &str) -> SlideElement {
 
 /// `(text)` strings with the text-matrix baseline `y` that precedes them.
 fn lines(pdf: &[u8]) -> Vec<(f32, String)> {
-    let text: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+    let text = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
     let mut found = Vec::new();
     for op in text.lines().filter(|line| line.contains(" Tm (")) {
         let tm = op.split(" Tm (").next().unwrap();

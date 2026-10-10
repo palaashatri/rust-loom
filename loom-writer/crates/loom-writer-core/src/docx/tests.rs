@@ -413,8 +413,8 @@ fn every_text_run_states_its_font_family_and_size() {
     };
     let font =
         |family: &str, half_points: &str| (Some(family.to_string()), Some(half_points.to_string()));
-    // The editor's default is 12 pt Sans; Sans is written as Arial, the
-    // metric match for the Helvetica the PDF export draws.
+    // The editor's default is 12 pt Sans; Sans is written as Arial, a sans face
+    // every Word install has (the PDF export embeds Inter).
     assert_eq!(run_font("Plain body text"), font("Arial", "24"));
     // A heading keeps the 24 pt its heading style gives.
     assert_eq!(run_font("Heading text"), font("Arial", "48"));

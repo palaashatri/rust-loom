@@ -151,7 +151,12 @@ fn exports_omit_prompts_and_filler_for_a_new_slide() {
     app.invoke_update_element_content("Cover words".into());
 
     let session = state.session.borrow();
+    // Page text is glyph ids in the file; read it back through the font maps
+    // so the "must not contain" checks below can fail.
     let pdf = export_pdf(&session.document);
+    let pdf = loom_pdf::inspect::readable_content(&pdf)
+        .expect("readable PDF")
+        .into_bytes();
     let pptx = export_pptx(&session).expect("pptx");
     assert!(
         contains(&pdf, "Cover words"),

@@ -307,7 +307,7 @@ mod tests {
         assert!(expected_pages.len() > 1, "fixture must span multiple pages");
 
         let pdf_bytes = export_pdf(&document);
-        let pdf = String::from_utf8_lossy(&pdf_bytes);
+        let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
         for index in 0..80 {
             let text = format!("unique-paragraph-{index:03}");
             assert_eq!(
@@ -346,7 +346,7 @@ mod tests {
         document.push(block);
 
         let pdf = export_pdf(&document);
-        let text: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(text.contains("(one )"), "leading plain run: {text}");
         assert!(
             text.contains("/F2 ") && text.contains("(two)"),
@@ -382,18 +382,44 @@ mod tests {
         ));
 
         let pdf = export_pdf(&document);
-        let text: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(
             text.contains("/F2 ") && text.contains("Tf BT") && text.contains("(Caf\u{e9} menu)"),
-            "heading must be a single WinAnsi byte string in the bold face"
+            "heading is drawn in the bold face with its accent: {text}"
         );
         assert!(
-            text.contains("/F1 ") && text.contains("(It\u{92}s a plain body line.)"),
-            "body keeps the regular face and a WinAnsi apostrophe"
+            text.contains("/F1 ") && text.contains("(It\u{2019}s a plain body line.)"),
+            "body keeps the regular face and the typographic apostrophe: {text}"
         );
+        assert_eq!(
+            loom_pdf::inspect::page_text(&pdf).expect("page text"),
+            ["Caf\u{e9} menu\nIt\u{2019}s a plain body line."],
+            "the text reads back exactly, with no '?' substitutes"
+        );
+        let faces: Vec<String> = loom_pdf::inspect::embedded_fonts(&pdf)
+            .expect("fonts")
+            .into_iter()
+            .map(|font| font.base_font)
+            .collect();
         assert!(
-            !text.contains('\u{c3}'),
-            "no UTF-8 lead byte may reach the PDF"
+            faces.iter().any(|f| f.ends_with("+Inter-Bold"))
+                && faces.iter().any(|f| f.ends_with("+Inter-Regular")),
+            "headings and body embed their own Inter faces: {faces:?}"
+        );
+    }
+
+    #[test]
+    fn export_pdf_carries_non_latin_scripts_instead_of_question_marks() {
+        let mut document = WriterDocument::new("export-scripts", "Scripts");
+        document.push(RichBlock::new(
+            document.next_id(),
+            "paragraph",
+            "\u{395}\u{3bb}\u{3bb}\u{3b7}\u{3bd}\u{3b9}\u{3ba}\u{3ac} \u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}",
+        ));
+        let pdf = export_pdf(&document);
+        assert_eq!(
+            loom_pdf::inspect::page_text(&pdf).expect("page text"),
+            ["\u{395}\u{3bb}\u{3bb}\u{3b7}\u{3bd}\u{3b9}\u{3ba}\u{3ac} \u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}"]
         );
     }
 
@@ -403,7 +429,7 @@ mod tests {
         document.push(RichBlock::new(document.next_id(), "paragraph", "Hello"));
 
         let pdf_bytes = export_pdf(&document);
-        let pdf = String::from_utf8_lossy(&pdf_bytes);
+        let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
 
         // The PDF should contain "Hello" exactly once
         assert_eq!(
@@ -437,7 +463,7 @@ mod tests {
         }
 
         let pdf_bytes = export_pdf(&document);
-        let pdf = String::from_utf8_lossy(&pdf_bytes);
+        let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
 
         // "My Document" should not appear at all (title not in body)
         assert_eq!(
@@ -461,7 +487,7 @@ mod tests {
 
     /// Text x position of the line drawn as `(text) Tj`.
     fn line_x(pdf: &[u8], text: &str) -> f32 {
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
         let at = content
             .find(&format!(" Td ({text}) Tj"))
             .unwrap_or_else(|| panic!("{text:?} is drawn"));
@@ -471,7 +497,7 @@ mod tests {
 
     /// Text position (x, y) of the line drawn as `(text) Tj`.
     fn text_position(pdf: &[u8], text: &str) -> (f32, f32) {
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
         let at = content
             .find(&format!(" Td ({text}) Tj"))
             .unwrap_or_else(|| panic!("{text:?} is drawn"));
@@ -491,7 +517,7 @@ mod tests {
             "| Name | Qty |\n| --- | --- |\n| Ada | 3 |\n| Grace | 12 |",
         ));
         let pdf = export_pdf(&document);
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(!content.contains('|'), "no pipe characters are printed");
         assert!(!content.contains("---"), "the separator row is not printed");
 
@@ -572,7 +598,7 @@ mod tests {
 
     /// Every `(text) Tj` in the page content, with its position and font.
     fn drawn_text(pdf: &[u8]) -> Vec<Drawn> {
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
         let mut out = Vec::new();
         let mut from = 0;
         while let Some(found) = content[from..].find(" Td (") {
@@ -679,7 +705,7 @@ mod tests {
             .insert_table_block(usize::MAX, 2, 3)
             .expect("insert");
         let pdf = export_pdf(&document);
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         // Each rule is "x y m x2 y2 l S"; a vertical rule has equal x values.
         let mut vertical_x: Vec<i64> = Vec::new();
         let mut from = 0;

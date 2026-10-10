@@ -21,7 +21,8 @@ pub(super) const STYLE_TABLE: &str = "TableGrid";
 pub(super) const DEFAULT_SPACE_AFTER_TWIPS: i32 = 160;
 pub(super) const DEFAULT_LINE_TWIPS: i32 = 276;
 /// The face Writer's "Sans" text is written with, and the face of text that
-/// names none. Arial is the metric match for the Helvetica the PDF export draws.
+/// names none. Arial is a sans face every Word install has; the PDF export
+/// embeds Inter instead, so DOCX and PDF line breaks can differ slightly.
 pub(super) const SANS_FAMILY: &str = "Arial";
 
 /// `[Content_Types].xml`.

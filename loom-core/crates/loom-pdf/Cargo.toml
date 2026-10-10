@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Minimal deterministic PDF 1.4 writer for Loom export."
+description = "Deterministic PDF 1.4 writer for Loom export with embedded, subset Inter faces."
 
 [dependencies]
+# Glyph lookup, advances and cmap reading for the bundled Inter faces.
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+# TrueType subsetting for the embedded font programs.
+subsetter = { version = "0.2", default-features = false }
+# Flate compression of font programs and page content (pure Rust backend).
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }

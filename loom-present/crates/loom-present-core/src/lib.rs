@@ -2459,7 +2459,7 @@ mod tests {
         let doc = PresentationDocument::new("deck-pdf", "PDF Test");
         let pdf_bytes = export_pdf(&doc);
         assert!(!pdf_bytes.is_empty());
-        let pdf_text = String::from_utf8_lossy(&pdf_bytes);
+        let pdf_text = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
         assert!(
             pdf_text.contains("BT 1 0 0 -1"),
             "scene-transformed PDF text must cancel the y-axis flip"

@@ -18,7 +18,7 @@ struct Run {
 }
 
 fn content(pdf: &[u8]) -> String {
-    pdf.iter().map(|&byte| char::from(byte)).collect()
+    loom_pdf::inspect::readable_content(pdf).expect("readable PDF")
 }
 
 /// Every text run. Each is drawn as `q a b c d e f cm ... BT 1 0 0 -1 x y Tm (text) Tj ET Q`,
@@ -87,7 +87,8 @@ fn deck_with(elements: Vec<SlideElement>) -> PresentationDocument {
 #[test]
 fn the_page_has_the_slides_sixteen_by_nine_shape() {
     let pdf = export_pdf(&deck_with(Vec::new()));
-    let text = content(&pdf);
+    // The page box is in the object dictionary, not the (compressed) content.
+    let text = String::from_utf8_lossy(&pdf).into_owned();
     let at = text.find("/MediaBox [").expect("a page box") + "/MediaBox [".len();
     let numbers: Vec<f32> = text[at..]
         .split(']')

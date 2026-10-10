@@ -170,17 +170,18 @@ mod tests {
             doc.add_image(PdfImage::jpeg(4, 2, 3, vec![0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]).unwrap());
         doc.draw_image_with_transform(page, id, (40.0, 20.0), [1.0, 0.0, 0.0, -1.0, 10.0, 90.0]);
         let out = doc.serialize();
-        assert!(contains(&out, b"/XObject << /Im0 10 0 R >>"));
+        assert!(contains(&out, b"/XObject << /Im0 6 0 R >>"));
         assert!(contains(
             &out,
             b"/Subtype /Image /Width 4 /Height 2 /ColorSpace /DeviceRGB"
         ));
         assert!(contains(&out, b"/Filter /DCTDecode"));
         assert!(contains(&out, &[0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]));
-        assert!(contains(&out, b"/Im0 Do Q"));
-        // Object 10 (= 8 + 2n for one page) is the image; the xref covers every object.
-        assert!(contains(&out, b"\n10 0 obj\n<< /Type /XObject"));
-        assert!(contains(&out, b"/Size 11 "));
+        let content = crate::inspect::readable_content(&out).unwrap();
+        assert!(content.contains("/Im0 Do Q"), "{content}");
+        // Object 6 (= 4 + 2n for one page) is the image; the xref covers every object.
+        assert!(contains(&out, b"\n6 0 obj\n<< /Type /XObject"));
+        assert!(contains(&out, b"/Size 7 "));
     }
 
     #[test]
@@ -192,15 +193,15 @@ mod tests {
         let id = doc.add_image(PdfImage::rgb(2, 1, vec![9; 6], Some(vec![255, 128])).unwrap());
         doc.draw_image_with_transform(page, id, (10.0, 5.0), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let out = doc.serialize();
-        assert!(contains(&out, b"/SMask 11 0 R"));
+        assert!(contains(&out, b"/SMask 7 0 R"));
         assert!(contains(
             &out,
             b"
-11 0 obj
+7 0 obj
 << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray"
         ));
         assert!(contains(&out, &[255, 128]));
-        assert!(contains(&out, b"/Size 12 "));
+        assert!(contains(&out, b"/Size 8 "));
     }
 
     #[test]

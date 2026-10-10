@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(table.rows[1][1], "10", "other cells are untouched");
 
         let pdf = crate::export_pdf(&document);
-        let content: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(!content.contains('|'), "no pipe characters are printed");
         assert!(
             content.contains("(NorthX) Tj"),
