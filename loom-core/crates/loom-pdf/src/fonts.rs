@@ -9,6 +9,8 @@ use std::sync::OnceLock;
 
 use ttf_parser::Face;
 
+use crate::text::{compat_expansion, is_not_drawn};
+
 const REGULAR: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Regular.ttf");
 const BOLD: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Bold.ttf");
 const ITALIC: &[u8] = include_bytes!("../../loom-ui/ui/fonts/Inter-Italic.ttf");
@@ -25,7 +27,7 @@ const INTER_NAMES: [&str; 4] = [
 /// A font program supplied for characters the bundled Inter faces lack.
 ///
 /// `name` is a unique PostScript-style name (it keys the embedded copy);
-/// `data` is a TrueType or OpenType file that lives for the whole process
+/// `data` is a TrueType file that lives for the whole process
 /// (`include_bytes!`, or one deliberate `Box::leak` at startup).
 #[derive(Debug, Clone, Copy)]
 pub struct FallbackFont {
@@ -38,9 +40,15 @@ pub struct FallbackFont {
 /// Chooses a font for a character that no bundled Inter face can show.
 ///
 /// The PDF writer asks only after Inter's cmap has no glyph for `ch`, once per
-/// distinct character and face style per document. Returning `None` keeps the
-/// notdef box. Loom bundles no fallback font today; this is the seam where a
-/// CJK or symbol font plugs in later.
+/// distinct character and face style per document (the answer is cached).
+/// Returning `None` keeps the notdef box. Loom bundles no fallback font today;
+/// this is the seam where a CJK or symbol font plugs in later.
+///
+/// A returned face is accepted only if it is a single TrueType (`glyf`) font
+/// program: font collections (`.ttc`) and CFF/PostScript outlines are refused,
+/// as are names that collide with a bundled face or with another font program
+/// already used by the document. Each refusal is recorded in
+/// [`crate::PdfDocument::fallback_problems`] and the character shows `.notdef`.
 pub trait FontFallback: Debug + Send + Sync {
     /// A face covering `ch` in the requested style, if one is available.
     fn font_for(&self, ch: char, bold: bool, italic: bool) -> Option<FallbackFont>;
@@ -111,16 +119,42 @@ impl Font {
     }
 
     /// Advance of `ch` in font units, notdef when the face lacks the glyph.
-    /// Line breaks and other control characters take no space.
-    pub(crate) fn char_advance_units(&self, ch: char) -> u16 {
-        if is_invisible_control(ch) {
+    /// Characters that are not drawn (see [`crate::text::is_not_drawn`]) take
+    /// no space, and a character drawn as its plain expansion (a ligature code
+    /// point shown as `fi`, say) takes the expansion's width.
+    pub(crate) fn char_advance_units(&self, ch: char) -> u32 {
+        if is_not_drawn(ch) {
             return 0;
         }
         if (ch as u32) < 128 {
-            return self.ascii_advance[ch as usize];
+            return u32::from(self.ascii_advance[ch as usize]);
         }
-        self.glyph(ch)
-            .map_or(self.notdef_advance, |gid| self.advance_units(gid))
+        if let Some(gid) = self.glyph(ch) {
+            return u32::from(self.advance_units(gid));
+        }
+        match self.expansion(ch) {
+            Some((chars, len)) => chars[..len]
+                .iter()
+                .map(|part| u32::from(self.advance_units(self.glyph(*part).unwrap_or(0))))
+                .sum(),
+            None => u32::from(self.notdef_advance),
+        }
+    }
+
+    /// The plain characters `ch` is drawn as when this face has no glyph for
+    /// it, provided the face covers all of them.
+    pub(crate) fn expansion(&self, ch: char) -> Option<([char; 3], usize)> {
+        let (chars, len) = compat_expansion(ch)?;
+        chars[..len]
+            .iter()
+            .all(|part| self.glyph(*part).is_some())
+            .then_some((chars, len))
+    }
+
+    /// Whether this face draws `ch` exactly, so a width measured from it is
+    /// the width that is drawn: a glyph, an expansion, or no drawing at all.
+    pub(crate) fn measures_exactly(&self, ch: char) -> bool {
+        is_not_drawn(ch) || self.glyph(ch).is_some() || self.expansion(ch).is_some()
     }
 
     pub(crate) fn units_per_em(&self) -> f32 {
@@ -135,11 +169,6 @@ impl Font {
     pub(crate) fn face(&self) -> &Face<'static> {
         &self.face
     }
-}
-
-/// Characters that must never reach the page: they would draw as notdef boxes.
-pub(crate) fn is_invisible_control(ch: char) -> bool {
-    matches!(ch, '\u{0}'..='\u{1F}' | '\u{7F}'..='\u{9F}')
 }
 
 /// Index of the Inter face a style selects (0 regular, 1 bold, 2 italic,
@@ -167,4 +196,41 @@ pub(crate) fn inter(index: usize) -> &'static Font {
 /// Whether `name` is one of the bundled Inter faces.
 pub(crate) fn is_bundled(name: &str) -> bool {
     INTER_NAMES.contains(&name)
+}
+
+/// Parses a fallback face, refusing what the embedder cannot write correctly:
+/// bundled names, font collections and CFF/PostScript outlines.
+pub(crate) fn validate_fallback(face: FallbackFont) -> Result<Font, String> {
+    let name = face.name;
+    if name.is_empty() || name.contains(char::is_whitespace) || name.contains('/') {
+        return Err(format!(
+            "fallback font name {name:?} is not a PostScript name"
+        ));
+    }
+    if is_bundled(name) {
+        return Err(format!(
+            "fallback font {name:?} has the name of a bundled Inter face"
+        ));
+    }
+    if face.data.starts_with(b"ttcf") {
+        return Err(format!(
+            "fallback font {name:?} is a font collection (.ttc); supply one TrueType face"
+        ));
+    }
+    let font = Font::new(name, face.data)
+        .ok_or_else(|| format!("fallback font {name:?} is not a usable TrueType font"))?;
+    let tables = font.face().tables();
+    if face.data.starts_with(b"OTTO") || tables.glyf.is_none() || tables.cff.is_some() {
+        return Err(format!(
+            "fallback font {name:?} has CFF/PostScript outlines; only TrueType (glyf) \
+             faces can be embedded"
+        ));
+    }
+    Ok(font)
+}
+
+/// Whether [`crate::text_width_pt`] measures `ch` exactly as it is drawn: the
+/// bundled Inter faces have its glyph or a plain expansion, or it is not drawn.
+pub(crate) fn inter_measures_exactly(ch: char) -> bool {
+    inter(0).measures_exactly(ch)
 }

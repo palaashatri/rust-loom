@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use crate::export_flow;
 use crate::export_table::{self, TableLayout};
+use crate::text_metrics::is_bold_weight;
 use crate::{PageStyle, WriterDocument};
 
 /// Exports a document to a `.docx` archive Word opens directly; see
@@ -40,7 +41,6 @@ fn draw_styled_line(
     base: &loom_pdf::TextStyle,
 ) {
     use loom_pdf::{text_width_pt, PathStyle};
-    use loom_text::FontWeight;
 
     let mut x = line.x;
     if !line.marker.is_empty() {
@@ -71,10 +71,7 @@ fn draw_styled_line(
         let mut style = base.clone();
         let mut underline = false;
         if let Some(run) = run {
-            style.bold |= matches!(
-                run.style.weight,
-                FontWeight::Semibold | FontWeight::Bold | FontWeight::Black
-            );
+            style.bold |= is_bold_weight(run.style.weight);
             style.italic |= run.style.italic;
             underline = run.style.underline;
         }
@@ -137,12 +134,17 @@ fn is_heading(kind: &str) -> bool {
         .is_some_and(|level| matches!(level, "1" | "2" | "3" | "4" | "5" | "6"))
 }
 
-/// The style of a block's text: headings take the document model's size and
-/// are bold, as the DOCX export sets them; other blocks use the body style.
-fn block_style(kind: &str, body: &loom_pdf::TextStyle) -> loom_pdf::TextStyle {
+/// The style of a block's text: headings take the page style's size for their
+/// level (the size the editor draws them at) and are bold, as the DOCX export
+/// sets them; other blocks use the body style.
+fn block_style(
+    kind: &str,
+    body: &loom_pdf::TextStyle,
+    page_style: &PageStyle,
+) -> loom_pdf::TextStyle {
     if is_heading(kind) {
         loom_pdf::TextStyle {
-            size_pt: PageStyle::default().font_size_for_kind(kind),
+            size_pt: page_style.font_size_for_kind(kind),
             bold: true,
             ..body.clone()
         }
@@ -197,7 +199,7 @@ fn pdf_lines(
                 String::new()
             }
         };
-        let style = block_style(kind, body);
+        let style = block_style(kind, body, page_style);
         let height = style.size_pt * page_style.line_height;
         let marker_width = loom_pdf::text_width_pt(&marker, &style);
         let ranges = export_flow::wrap(
@@ -236,8 +238,10 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     use loom_pdf::{PdfDocument, TextStyle};
     let page_style = doc.page.page_style();
     let mut pdf = PdfDocument::new();
+    // The editor draws body text at the page style's size, so the PDF sets it
+    // at that size too and wraps at the same places.
     let body = TextStyle {
-        size_pt: loom_text::CharacterStyle::default().font_size,
+        size_pt: page_style.body_font_size_pt,
         fill_rgb: (0.15, 0.13, 0.11),
         ..Default::default()
     };
@@ -563,9 +567,10 @@ mod tests {
         let pdf = export_pdf(&document);
 
         let column = style.width_pt - style.margin_left_pt - style.margin_right_pt;
-        // The body is drawn at the document model's body size.
+        // The body is drawn at the page style's body size, which is the size
+        // the editor draws it at.
         let body = loom_pdf::TextStyle {
-            size_pt: loom_text::CharacterStyle::default().font_size,
+            size_pt: style.body_font_size_pt,
             ..Default::default()
         };
         let width = |text: &str| loom_pdf::text_width_pt(text, &body);
@@ -642,7 +647,11 @@ mod tests {
                 .size
         };
         assert!((size_of("Title") - 24.0).abs() < 0.01, "H1 is 24 pt");
-        assert!((size_of("Body words") - 12.0).abs() < 0.01, "body is 12 pt");
+        let body = PageStyle::default().body_font_size_pt;
+        assert!(
+            (size_of("Body words") - body).abs() < 0.01,
+            "body is the page style's {body} pt, the size the editor draws"
+        );
         assert!(
             drawn
                 .iter()
@@ -696,6 +705,95 @@ mod tests {
                 piece.x + width
             );
         }
+    }
+
+    /// ASCII sample paragraphs: a long sentence, a short line, and a word wider
+    /// than a line.
+    const PARAGRAPHS: [&str; 3] = [
+        "Loom Writer keeps your documents on your computer. Files are saved as \
+         packages that any copy of the app can read, and nothing is uploaded \
+         unless you choose to export it. Headings, lists and tables export too.",
+        "A short paragraph.",
+        "Before the long word, then xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\
+         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx after it.",
+    ];
+
+    #[test]
+    fn the_pdf_breaks_lines_where_the_editor_does() {
+        let mut document = WriterDocument::new("parity", "Parity");
+        for text in PARAGRAPHS {
+            document.push(RichBlock::new(document.next_id(), "paragraph", text));
+        }
+        let style = document.page.page_style();
+        assert_eq!(
+            style.body_font_size_pt, 11.0,
+            "the editor draws body text at 11 pt"
+        );
+
+        // Editor: the page fragments, one per wrapped line.
+        let editor: Vec<String> = document
+            .paginate(&style)
+            .expect("valid page layout")
+            .iter()
+            .flat_map(|page| page.fragments.iter())
+            .map(|fragment| fragment.text.trim_end().to_string())
+            .collect();
+        assert!(editor.len() > 6, "the sample wraps: {editor:?}");
+
+        // PDF: one drawn run per line, in reading order.
+        let pdf = export_pdf(&document);
+        let exported: Vec<String> = loom_pdf::inspect::page_text(&pdf)
+            .expect("page text")
+            .iter()
+            .flat_map(|page| {
+                page.lines()
+                    .map(|line| line.trim_end().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(exported, editor, "same lines, same breaks");
+
+        // And at the size the editor draws them: every run is 11 pt.
+        let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+        assert!(content.contains("/F1 11.00 Tf"), "{content}");
+        assert!(!content.contains("12.00 Tf"), "no 12 pt text");
+    }
+
+    #[test]
+    fn semibold_runs_are_regular_in_the_pdf_as_in_the_editor() {
+        use loom_text::{CharacterStyle, FontWeight, StyleRun};
+        let mut document = WriterDocument::new("weights", "Weights");
+        let mut block = RichBlock::new(document.next_id(), "paragraph", "one two three");
+        let run = |start, end, weight| StyleRun {
+            start,
+            end,
+            style: CharacterStyle {
+                weight,
+                ..Default::default()
+            },
+        };
+        block.runs = vec![
+            run(0, 3, FontWeight::Semibold),
+            run(8, 13, FontWeight::Bold),
+        ];
+        document.push(block);
+        let pdf = export_pdf(&document);
+        let faces: Vec<String> = loom_pdf::inspect::embedded_fonts(&pdf)
+            .expect("fonts")
+            .into_iter()
+            .map(|font| {
+                font.base_font
+                    .split('+')
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            faces,
+            ["Inter-Regular", "Inter-Bold"],
+            "semibold stays in the regular face; only bold uses the bold one"
+        );
     }
 
     #[test]

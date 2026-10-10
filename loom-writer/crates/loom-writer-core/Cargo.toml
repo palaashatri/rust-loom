@@ -15,4 +15,6 @@ loom-pdf = { workspace = true }
 unicode-segmentation = "1.13"
 
 [dev-dependencies]
+# `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.
+loom-pdf = { workspace = true, features = ["test-support"] }
 roxmltree = "0.21"

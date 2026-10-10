@@ -440,7 +440,7 @@ mod tests {
                 .position(|pair| x >= pair[0] - 0.01 && x < pair[1])
                 .unwrap_or_else(|| panic!("{text:?} starts at {x}, outside every column"));
             let style = TextStyle {
-                size_pt: 12.0,
+                size_pt: crate::PageStyle::default().body_font_size_pt,
                 bold,
                 ..TextStyle::default()
             };
@@ -451,5 +451,46 @@ mod tests {
                 columns[index + 1]
             );
         }
+    }
+
+    #[test]
+    fn a_long_word_stays_whole_next_to_a_very_wide_cell_of_short_words() {
+        let word = "Internationalization";
+        let sentence = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu \
+                        xi omicron pi rho sigma tau upsilon phi chi psi omega "
+            .repeat(6);
+        let sentence = sentence.trim();
+        let pdf = export_pdf(&table_document(&[&["Term", "Notes"], &[word, sentence]]));
+        let printed: Vec<String> = text_runs(&pdf).into_iter().map(|run| run.2).collect();
+        assert!(
+            printed.iter().any(|line| line == word),
+            "the long word sits on one line: {printed:?}"
+        );
+        let words: Vec<&str> = printed
+            .iter()
+            .flat_map(|line| line.split_whitespace())
+            .collect();
+        // Header (2) + the long word + every word of the sentence, none cut.
+        assert_eq!(words.len(), 2 + 1 + sentence.split_whitespace().count());
+        for expected in sentence.split_whitespace() {
+            assert!(words.contains(&expected), "{expected:?} was broken");
+        }
+    }
+
+    #[test]
+    fn narrowing_a_table_gives_each_column_its_longest_word_first() {
+        // Natural widths 120 and 900; longest words 120 and 55. In 468 the
+        // first column must not be squeezed below its longest word.
+        let widths = super::fit_columns(&[120.0, 900.0], &[120.0, 55.0], 468.0);
+        assert!(
+            (widths.iter().sum::<f32>() - 468.0).abs() < 0.01,
+            "{widths:?}"
+        );
+        assert!(widths[0] >= 120.0 - 0.01, "{widths:?}");
+        assert!(widths[1] >= 55.0, "{widths:?}");
+        // When even the longest words do not fit, the columns shrink together.
+        let squeezed = super::fit_columns(&[300.0, 300.0], &[250.0, 250.0], 400.0);
+        assert!((squeezed.iter().sum::<f32>() - 400.0).abs() < 0.01);
+        assert!((squeezed[0] - squeezed[1]).abs() < 0.01);
     }
 }

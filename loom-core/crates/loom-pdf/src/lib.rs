@@ -12,27 +12,58 @@
 //! * Deterministic output: no timestamps are written unless the caller
 //!   provides one (`PdfDocument::set_creation_date`).
 //!
+//! # What is drawn
+//!
+//! Drawing and measuring first prepare the text identically: invisible format
+//! characters (controls, soft hyphen, zero-width and directional marks,
+//! variation selectors, line and paragraph separators) are removed, emoji
+//! sequences collapse to their base character, and the result is put in
+//! canonical composed form (NFC), so `e` + U+0301 is the single glyph `é`.
+//! Inter's presentation-form ligature code points it has no glyph for are
+//! shown as their letters (`fi`), without a fallback font.
+//!
+//! # Copying text out
+//!
+//! Each embedded glyph has one `ToUnicode` entry: the first character that was
+//! drawn with it. When a different character is drawn with a glyph that
+//! already has an entry (Inter draws U+2019 and U+02BC with one glyph, for
+//! example) the glyph is wrapped in an `/ActualText` span carrying the
+//! character that was written, so extraction returns what the document said.
+//! `.notdef` boxes carry no text.
+//!
 //! Inter has no CJK glyphs and Loom bundles no fallback font: such characters
 //! show Inter's `.notdef` box unless a [`FontFallback`] is installed with
 //! [`PdfDocument::set_font_fallback`].
 //!
 //! The output is validated in tests by re-parsing the xref table and object
-//! bodies and by reading the text back through [`inspect`].
+//! bodies and by reading the text back through `inspect`, which is part of the
+//! public API only with the `test-support` feature.
 
+mod compose_data;
 mod embed;
 mod fonts;
 mod image;
+#[cfg(any(test, feature = "test-support"))]
 pub mod inspect;
 #[cfg(test)]
 mod tests;
+mod text;
 
 pub use fonts::{FallbackFont, FontFallback};
 pub use image::PdfImage;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use embed::{deflate, stream_object, FaceSlot};
+
+/// Smallest and largest page dimension the PDF 1.4 specification allows, in
+/// points (3 to 14,400).
+const PAGE_MIN_PT: f32 = 3.0;
+const PAGE_MAX_PT: f32 = 14_400.0;
+/// US Letter, used when a page size is not a usable number.
+const DEFAULT_PAGE_PT: (f32, f32) = (612.0, 792.0);
 
 /// A text string, optionally styled.
 #[derive(Debug, Clone)]
@@ -103,6 +134,23 @@ struct Page {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PageIndex(pub usize);
 
+/// How one character is set: with a single font slot, or as the plain
+/// characters of its expansion (an index into `PdfDocument::expansions`).
+#[derive(Debug, Clone, Copy)]
+enum Resolved {
+    One(usize),
+    Many(usize),
+}
+
+/// A fallback font program the document has been offered, by name.
+struct FallbackEntry {
+    name: &'static str,
+    /// Identity of the font bytes (address and length) that name was used for.
+    data: (usize, usize),
+    /// The parsed face, or `None` when it was refused.
+    font: Option<fonts::Font>,
+}
+
 /// A deterministic PDF document builder.
 #[derive(Default)]
 pub struct PdfDocument {
@@ -113,6 +161,12 @@ pub struct PdfDocument {
     /// (regular, bold, italic, bold italic); fallback faces follow.
     faces: Vec<FaceSlot>,
     fallback: Option<Arc<dyn FontFallback>>,
+    /// How each (character, Inter face) has been set, so the fallback hook
+    /// runs once per distinct character and style.
+    resolved: HashMap<(char, usize), Resolved>,
+    expansions: Vec<Vec<(usize, char)>>,
+    fallback_fonts: Vec<FallbackEntry>,
+    fallback_problems: Vec<String>,
 }
 
 impl std::fmt::Debug for PdfDocument {
@@ -148,8 +202,34 @@ impl PdfDocument {
         self.fallback = Some(fallback);
     }
 
-    /// Add a page of the given size (points).
+    /// Why fallback faces the hook returned were not used (see
+    /// [`FontFallback`]), in the order they were met, without repeats.
+    pub fn fallback_problems(&self) -> &[String] {
+        &self.fallback_problems
+    }
+
+    /// Add a page of the given size (points). A size that is not a finite
+    /// number between 3 and 14,400 points (the PDF 1.4 limits) cannot be
+    /// written; such a page is added at US Letter size instead. Use
+    /// [`Self::try_add_page`] to reject it.
     pub fn add_page(&mut self, width_pt: f32, height_pt: f32) -> PageIndex {
+        self.try_add_page(width_pt, height_pt)
+            .unwrap_or_else(|_| self.push_page(DEFAULT_PAGE_PT.0, DEFAULT_PAGE_PT.1))
+    }
+
+    /// Add a page, rejecting a width or height that is NaN, infinite or
+    /// outside 3..=14,400 points.
+    pub fn try_add_page(&mut self, width_pt: f32, height_pt: f32) -> Result<PageIndex, String> {
+        let usable = |v: f32| v.is_finite() && (PAGE_MIN_PT..=PAGE_MAX_PT).contains(&v);
+        if !usable(width_pt) || !usable(height_pt) {
+            return Err(format!(
+                "page size {width_pt} x {height_pt} pt is outside {PAGE_MIN_PT}..={PAGE_MAX_PT}"
+            ));
+        }
+        Ok(self.push_page(width_pt, height_pt))
+    }
+
+    fn push_page(&mut self, width_pt: f32, height_pt: f32) -> PageIndex {
         self.pages.push(Page {
             width_pt,
             height_pt,
@@ -163,64 +243,180 @@ impl PdfDocument {
         &mut self.pages[page.0]
     }
 
-    /// The slot for the font that shows `ch` in `style`, creating it on first use.
-    fn slot_for(&mut self, ch: char, style: &TextStyle) -> usize {
-        let index = fonts::inter_index(style.bold, style.italic);
-        let inter = fonts::inter(index);
-        let mut chosen = inter.clone();
-        if inter.glyph(ch).is_none() {
-            let extra = self
-                .fallback
-                .as_ref()
-                .and_then(|hook| hook.font_for(ch, style.bold, style.italic))
-                .and_then(|face| fonts::Font::new(face.name, face.data))
-                .filter(|font| font.glyph(ch).is_some());
-            if let Some(font) = extra {
-                chosen = font;
-            }
-        }
-        if let Some(at) = self.faces.iter().position(|s| s.font_name() == chosen.name) {
+    /// The slot of bundled face `index`, creating it on first use.
+    fn inter_slot(&mut self, index: usize) -> usize {
+        let name = fonts::inter(index).name;
+        if let Some(at) = self.faces.iter().position(|s| s.font_name() == name) {
             return at;
         }
-        let resource = if chosen.name == inter.name {
-            format!("F{}", index + 1)
-        } else {
-            let custom = self
-                .faces
-                .iter()
-                .filter(|s| !fonts::is_bundled(s.font_name()))
-                .count();
-            format!("F{}", 5 + custom)
-        };
-        self.faces.push(FaceSlot::new(resource, chosen));
+        self.faces.push(FaceSlot::new(
+            format!("F{}", index + 1),
+            fonts::inter(index).clone(),
+        ));
         self.faces.len() - 1
+    }
+
+    /// The slot of an accepted fallback face, creating it on first use.
+    fn fallback_slot(&mut self, font: fonts::Font) -> usize {
+        if let Some(at) = self.faces.iter().position(|s| s.font_name() == font.name) {
+            return at;
+        }
+        let custom = self
+            .faces
+            .iter()
+            .filter(|s| !fonts::is_bundled(s.font_name()))
+            .count();
+        self.faces
+            .push(FaceSlot::new(format!("F{}", 5 + custom), font));
+        self.faces.len() - 1
+    }
+
+    fn note_problem(&mut self, problem: String) {
+        if !self.fallback_problems.contains(&problem) {
+            self.fallback_problems.push(problem);
+        }
+    }
+
+    /// The accepted fallback face the hook names, parsed once per name.
+    fn fallback_font(&mut self, wanted: FallbackFont) -> Option<fonts::Font> {
+        let data = (wanted.data.as_ptr() as usize, wanted.data.len());
+        if let Some(entry) = self.fallback_fonts.iter().find(|e| e.name == wanted.name) {
+            if entry.data == data {
+                return entry.font.clone();
+            }
+            let problem = format!(
+                "fallback font name {:?} was given for two different font programs",
+                wanted.name
+            );
+            self.note_problem(problem);
+            return None;
+        }
+        let font = match fonts::validate_fallback(wanted) {
+            Ok(font) => Some(font),
+            Err(problem) => {
+                self.note_problem(problem);
+                None
+            }
+        };
+        self.fallback_fonts.push(FallbackEntry {
+            name: wanted.name,
+            data,
+            font: font.clone(),
+        });
+        font
+    }
+
+    /// How `ch` is set in `style`, decided once per character and style:
+    /// Inter's glyph, else a fallback font's, else its plain expansion
+    /// (`fi` for U+FB01), else Inter's `.notdef` box.
+    fn resolve(&mut self, ch: char, style: &TextStyle) -> Resolved {
+        let index = fonts::inter_index(style.bold, style.italic);
+        if let Some(known) = self.resolved.get(&(ch, index)) {
+            return *known;
+        }
+        let inter = fonts::inter(index);
+        let resolved = if inter.glyph(ch).is_some() {
+            Resolved::One(self.inter_slot(index))
+        } else if let Some(font) = self.fallback_face_for(ch, style) {
+            Resolved::One(self.fallback_slot(font))
+        } else if let Some((chars, len)) = inter.expansion(ch) {
+            let slot = self.inter_slot(index);
+            self.expansions
+                .push(chars[..len].iter().map(|part| (slot, *part)).collect());
+            Resolved::Many(self.expansions.len() - 1)
+        } else {
+            Resolved::One(self.inter_slot(index))
+        };
+        self.resolved.insert((ch, index), resolved);
+        resolved
+    }
+
+    /// The fallback face covering `ch`, when a hook is installed and accepted.
+    fn fallback_face_for(&mut self, ch: char, style: &TextStyle) -> Option<fonts::Font> {
+        let hook = self.fallback.clone()?;
+        let wanted = hook.font_for(ch, style.bold, style.italic)?;
+        let font = self.fallback_font(wanted)?;
+        font.glyph(ch).is_some().then_some(font)
+    }
+
+    /// The glyph id to write for `ch` in `slot`, and `ch` itself when it needs
+    /// an `/ActualText` span because the glyph's `ToUnicode` entry is another
+    /// character.
+    fn encode_char(&mut self, slot: usize, ch: char) -> (u16, Option<char>) {
+        let face = &mut self.faces[slot];
+        let gid = face.encode(ch);
+        let actual = (gid != 0 && face.mapped_char(gid) != Some(ch)).then_some(ch);
+        (gid, actual)
     }
 
     /// Encode `text` as glyph strings. Returns the `Tf` operator for the first
     /// face and the `Tj` sequence (later faces switch with their own `Tf`),
     /// or `None` when nothing visible remains.
     fn show_text(&mut self, text: &str, style: &TextStyle) -> Option<(String, String)> {
-        let size = format!("{:.2}", style.size_pt);
-        let mut runs: Vec<(usize, String)> = Vec::new();
+        let text = text::prepare(text);
+        let size = if style.size_pt.is_finite() && style.size_pt > 0.0 {
+            style.size_pt
+        } else {
+            TextStyle::default().size_pt
+        };
+        let size = format!("{size:.2}");
+        let mut shown: Vec<(usize, u16, Option<char>)> = Vec::new();
         for ch in text.chars() {
-            if fonts::is_invisible_control(ch) {
+            if text::is_not_drawn(ch) {
                 continue;
             }
-            let slot = self.slot_for(ch, style);
-            let glyph = format!("{:04X}", self.faces[slot].encode(ch));
-            match runs.last_mut() {
-                Some((last, hex)) if *last == slot => hex.push_str(&glyph),
-                _ => runs.push((slot, glyph)),
+            match self.resolve(ch, style) {
+                Resolved::One(slot) => {
+                    let (gid, actual) = self.encode_char(slot, ch);
+                    shown.push((slot, gid, actual));
+                }
+                Resolved::Many(at) => {
+                    for part in 0..self.expansions[at].len() {
+                        let (slot, plain) = self.expansions[at][part];
+                        let (gid, actual) = self.encode_char(slot, plain);
+                        shown.push((slot, gid, actual));
+                    }
+                }
             }
         }
-        let mut runs = runs.into_iter();
-        let (first, hex) = runs.next()?;
+        let first = shown.first()?.0;
         let select = |slot: usize| format!("/{} {size} Tf", self.faces[slot].resource);
-        let mut shown = format!("<{hex}> Tj");
-        for (slot, hex) in runs {
-            shown.push_str(&format!(" {} <{hex}> Tj", select(slot)));
+        let mut out = String::new();
+        let mut hex = String::new();
+        let mut current = first;
+        for (slot, gid, actual) in shown {
+            if slot != current || actual.is_some() {
+                if !hex.is_empty() {
+                    let _ = write!(out, "<{hex}> Tj ");
+                    hex.clear();
+                }
+                if slot != current {
+                    let _ = write!(out, "{} ", select(slot));
+                    current = slot;
+                }
+            }
+            match actual {
+                Some(ch) => {
+                    let mut units = [0u16; 2];
+                    let utf16: String = ch
+                        .encode_utf16(&mut units)
+                        .iter()
+                        .map(|unit| format!("{unit:04X}"))
+                        .collect();
+                    let _ = write!(
+                        out,
+                        "/Span << /ActualText <FEFF{utf16}> >> BDC <{gid:04X}> Tj EMC "
+                    );
+                }
+                None => {
+                    let _ = write!(hex, "{gid:04X}");
+                }
+            }
         }
-        Some((select(first), shown))
+        if !hex.is_empty() {
+            let _ = write!(out, "<{hex}> Tj ");
+        }
+        Some((select(first), out.trim_end().to_string()))
     }
 
     /// Draw text at the baseline position `(x, y)` (bottom-left origin,
@@ -237,8 +433,8 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            x,
-            y,
+            finite(x),
+            finite(y),
         ));
     }
 
@@ -264,7 +460,7 @@ impl PdfDocument {
             clip01(style.fill_rgb.1),
             clip01(style.fill_rgb.2),
         );
-        let [a, b_matrix, c, d, e, f] = transform;
+        let [a, b_matrix, c, d, e, f] = transform.map(finite);
         let p = self.page_mut(page);
         p.ops.push(format!(
             "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg {font} BT 1 0 0 -1 {:.2} {:.2} Tm {shown} ET Q",
@@ -277,8 +473,8 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            x,
-            y,
+            finite(x),
+            finite(y),
         ));
     }
 
@@ -297,10 +493,10 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            x,
-            y,
-            w,
-            h
+            finite(x),
+            finite(y),
+            finite(w),
+            finite(h)
         ));
     }
 
@@ -321,7 +517,7 @@ impl PdfDocument {
             clip01(style.rgb.2),
         );
         let op = if style.filled { "f" } else { "S" };
-        let [a, b_matrix, c, d, e, f] = transform;
+        let [a, b_matrix, c, d, e, f] = transform.map(finite);
         let p = self.page_mut(page);
         p.ops.push(format!(
             "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg {:.2} {:.2} {:.2} {:.2} re {op} Q",
@@ -334,10 +530,10 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            x,
-            y,
-            w,
-            h
+            finite(x),
+            finite(y),
+            finite(w),
+            finite(h)
         ));
     }
 
@@ -362,19 +558,31 @@ impl PdfDocument {
             fmt3(r),
             fmt3(g),
             fmt3(b),
-            style.width,
-            x1,
-            y1,
-            x2,
-            y2
+            finite(style.width),
+            finite(x1),
+            finite(y1),
+            finite(x2),
+            finite(y2)
         ));
     }
 
     /// Serialize the document to PDF bytes.
     ///
-    /// Output is byte-for-byte deterministic for the same input.
+    /// Output is byte-for-byte deterministic for the same input. A document
+    /// with no pages is written with one blank US Letter page, because a page
+    /// tree with no pages is not a valid PDF.
     pub fn serialize(&self) -> Vec<u8> {
-        let n = self.pages.len();
+        let blank = [Page {
+            width_pt: DEFAULT_PAGE_PT.0,
+            height_pt: DEFAULT_PAGE_PT.1,
+            ..Page::default()
+        }];
+        let pages: &[Page] = if self.pages.is_empty() {
+            &blank
+        } else {
+            &self.pages
+        };
+        let n = pages.len();
         // Object layout:
         //   1               catalog
         //   2..2+n          pages
@@ -421,7 +629,7 @@ impl PdfDocument {
 
         let mut objects: Vec<Vec<u8>> = Vec::new();
         objects.push(format!("<< /Type /Catalog /Pages {pages_ref} 0 R >>").into_bytes());
-        for (i, p) in self.pages.iter().enumerate() {
+        for (i, p) in pages.iter().enumerate() {
             let xobjects = if p.images.is_empty() {
                 String::new()
             } else {
@@ -454,7 +662,7 @@ impl PdfDocument {
             )
             .into_bytes(),
         );
-        for p in &self.pages {
+        for p in pages {
             objects.push(stream_object(
                 "/Filter /FlateDecode",
                 &deflate(p.ops.join("\n").as_bytes()),
@@ -506,8 +714,23 @@ impl PdfDocument {
     }
 }
 
+/// A colour component clamped to 0..=1; a NaN or infinite one is 0.
 fn clip01(v: f32) -> f32 {
-    v.clamp(0.0, 1.0)
+    if v.is_finite() {
+        v.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// A coordinate or length for a content stream; NaN and infinities are not
+/// numbers in PDF, so they become 0.
+pub(crate) fn finite(v: f32) -> f32 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
 }
 
 fn fmt3(v: f32) -> String {
@@ -517,17 +740,34 @@ fn fmt3(v: f32) -> String {
 /// Width of `text` in points when set in the Inter face `style` selects.
 ///
 /// Advances come from the font program the PDF embeds, so layout that wraps
-/// with this function matches what a viewer draws. Kerning is not applied,
-/// matching a plain `Tj`. Characters Inter lacks measure as its `.notdef` box
-/// (the width they are drawn with unless a fallback font is installed), and
-/// control characters measure zero.
+/// with this function matches what a viewer draws. The text is prepared exactly
+/// as drawing prepares it (invisible controls removed, NFC composition,
+/// emoji sequences reduced), so an accent sequence measures as the one glyph
+/// it is drawn as. Kerning is not applied, matching a plain `Tj`. Characters
+/// Inter lacks measure as its `.notdef` box (the width they are drawn with
+/// unless a fallback font is installed), except the ligature code points and
+/// special spaces that are drawn as their plain letters and measure as them.
 pub fn text_width_pt(text: &str, style: &TextStyle) -> f32 {
     let font = fonts::inter(fonts::inter_index(style.bold, style.italic));
-    let units: u32 = text
+    let units: u64 = text::prepare(text)
         .chars()
-        .map(|ch| u32::from(font.char_advance_units(ch)))
+        .map(|ch| u64::from(font.char_advance_units(ch)))
         .sum();
-    units as f32 * style.size_pt / font.units_per_em()
+    let width = units as f64 * f64::from(style.size_pt) / f64::from(font.units_per_em());
+    if width.is_finite() {
+        width as f32
+    } else {
+        0.0
+    }
+}
+
+/// Whether [`text_width_pt`] is exact for `ch`: the bundled Inter faces have a
+/// glyph for it, draw it as plain letters, or do not draw it at all. When this
+/// is `false` the character is drawn with a fallback font or as `.notdef`, and
+/// a caller that measures with its own estimate of such characters (a window
+/// that has fonts this crate does not) can keep doing so.
+pub fn is_measured_exactly(ch: char) -> bool {
+    fonts::inter_measures_exactly(ch)
 }
 
 #[cfg(test)]

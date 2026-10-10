@@ -19,7 +19,9 @@ pub(crate) struct FaceSlot {
     font: Font,
     remapper: GlyphRemapper,
     /// The character each new glyph id was first drawn for (`None` for
-    /// `.notdef`, id 0). Index = new glyph id.
+    /// `.notdef`, id 0). Index = new glyph id. This is the glyph's `ToUnicode`
+    /// entry; a different character drawn with the same glyph (U+2126 and
+    /// U+03A9 share one in Inter) is wrapped in `/ActualText` where it is shown.
     chars: Vec<Option<char>>,
 }
 
@@ -46,6 +48,12 @@ impl FaceSlot {
             self.chars.push(Some(ch));
         }
         new
+    }
+
+    /// The character the `ToUnicode` map gives glyph `gid`: the first character
+    /// drawn with it. `None` for `.notdef` (id 0).
+    pub(crate) fn mapped_char(&self, gid: u16) -> Option<char> {
+        self.chars.get(usize::from(gid)).copied().flatten()
     }
 
     /// The subset font program, or `None` if the subsetter rejects the font.

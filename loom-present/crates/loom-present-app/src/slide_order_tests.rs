@@ -851,11 +851,14 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn at(haystack: &[u8], needle: &str) -> usize {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle.as_bytes())
-        .unwrap_or_else(|| panic!("{needle:?} missing"))
+/// The zero-based PDF page whose extracted text holds . Page text is
+/// glyph ids in the file, so it is read back through the fonts'
+/// maps instead of searching the raw bytes.
+fn page_of(page_text: &[String], needle: &str) -> usize {
+    page_text
+        .iter()
+        .position(|text| text.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} missing from {page_text:?}"))
 }
 
 #[test]
@@ -899,7 +902,9 @@ fn save_reopen_and_both_exports_follow_the_new_order() {
 
     app.invoke_export_pdf();
     let bytes = std::fs::read(&pdf).expect("pdf");
-    let pages: Vec<usize> = order.iter().map(|t| at(&bytes, t)).collect();
+    let page_text = loom_pdf::inspect::page_text(&bytes).expect("readable PDF");
+    assert_eq!(page_text.len(), order.len(), "one PDF page per slide");
+    let pages: Vec<usize> = order.iter().map(|t| page_of(&page_text, t)).collect();
     assert!(
         pages.windows(2).all(|w| w[0] < w[1]),
         "PDF pages follow the new order: {pages:?}"

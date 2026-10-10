@@ -1,63 +1,45 @@
 //! Text measurement matched to the bundled Inter face.
 //!
 //! Line breaking, caret placement, selection and comment rectangles and
-//! pointer hit-testing must all agree with the glyphs the page actually draws.
-//! They used to assume every glyph is `0.52 em` wide, which is wider than Inter
-//! body text and narrower than its headings, so highlights drifted away from
-//! the text and clicks landed several characters off on long lines.
+//! pointer hit-testing must all agree with the glyphs the page actually draws,
+//! and with the PDF export, which wraps with the same advances. Characters the
+//! bundled Inter faces cover are measured by `loom_pdf::text_width_pt`, which
+//! reads the advances from the font programs the PDF embeds, so the editor and
+//! the exported file break lines at the same places. Weight is bold only where
+//! a character run asks for it (weight 700 and up, as the page markup renders
+//! it). Kerning is not applied.
 //!
-//! Advance widths below were read from `Inter-Regular.ttf` and `Inter-Bold.ttf`
-//! (the faces `loom-ui` bundles) in 1/1000 em. Weight is bold only where a
-//! character run asks for it, exactly as the page markup renders it. Kerning is
-//! not applied.
+//! Characters Inter lacks (CJK, emoji) are drawn by whatever font the window
+//! falls back to; their widths are estimates.
 
+use loom_pdf::{is_measured_exactly, text_width_pt, TextStyle};
 use loom_text::{FontWeight, StyleRun};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Inter Regular advance widths for ASCII 32..=126.
-const INTER_REGULAR: [u16; 95] = [
-    281, 288, 466, 633, 642, 982, 644, 300, 365, 365, 501, 662, 288, 460, 288, 360, 631, 407, 610,
-    618, 646, 608, 620, 566, 619, 620, 288, 302, 662, 662, 662, 511, 966, 690, 654, 730, 722, 601,
-    590, 746, 743, 269, 571, 672, 565, 903, 753, 765, 639, 765, 644, 642, 646, 744, 690, 985, 682,
-    679, 629, 365, 360, 365, 471, 456, 323, 562, 612, 571, 612, 583, 370, 613, 591, 242, 242, 549,
-    242, 876, 591, 600, 612, 612, 376, 528, 327, 591, 562, 818, 546, 562, 552, 426, 333, 426, 662,
-];
+/// Whether a character weight draws in the bold face: the editor's page markup
+/// renders weights from Bold (700) up in bold and the rest in regular, and the
+/// PDF export follows the same rule so both break lines identically.
+pub(crate) fn is_bold_weight(weight: FontWeight) -> bool {
+    weight.numeric() >= FontWeight::Bold.numeric()
+}
 
-/// Inter Bold advance widths for ASCII 32..=126.
-const INTER_BOLD: [u16; 95] = [
-    237, 338, 552, 649, 655, 1016, 672, 339, 377, 377, 559, 679, 334, 468, 334, 388, 674, 431, 630,
-    646, 676, 639, 649, 582, 651, 649, 334, 343, 679, 679, 679, 560, 1016, 747, 662, 740, 722, 607,
-    587, 750, 747, 281, 584, 719, 565, 932, 762, 771, 648, 777, 657, 655, 667, 732, 747, 1038, 738,
-    731, 664, 377, 388, 377, 487, 476, 365, 581, 630, 588, 630, 596, 398, 632, 623, 271, 271, 580,
-    271, 913, 623, 613, 630, 630, 407, 560, 366, 623, 600, 850, 580, 602, 573, 469, 372, 469, 679,
-];
-
-/// Advance of one character in 1/1000 em.
-fn glyph_units(ch: char, bold: bool) -> u32 {
-    let table = if bold { &INTER_BOLD } else { &INTER_REGULAR };
+/// Advance of a character Inter lacks, in 1/1000 em: full-width scripts and
+/// emoji take one em, letters and everything else a typical advance.
+fn estimated_units(ch: char, bold: bool) -> f32 {
     match ch {
-        ' '..='~' => u32::from(table[ch as usize - 32]),
-        '\n' | '\r' | '\u{200B}'..='\u{200D}' | '\u{0300}'..='\u{036F}' => 0,
-        '\u{2013}' => 600,
-        '\u{2014}' | '\u{2026}' => 1000,
-        '\u{2018}' | '\u{2019}' => 300,
-        '\u{201C}' | '\u{201D}' => 480,
-        '\u{2022}' => 480,
-        // CJK and other full-width scripts.
-        c if (c as u32) >= 0x2E80 => 1000,
-        // Accented Latin and other letters: a typical lower-case advance.
+        c if (c as u32) >= 0x2E80 => 1000.0,
         c if c.is_alphabetic() => {
             if bold {
-                610
+                610.0
             } else {
-                590
+                590.0
             }
         }
         _ => {
             if bold {
-                600
+                600.0
             } else {
-                570
+                570.0
             }
         }
     }
@@ -66,25 +48,34 @@ fn glyph_units(ch: char, bold: bool) -> u32 {
 fn is_bold_at(runs: &[StyleRun], position: usize) -> bool {
     runs.iter()
         .find(|run| run.start <= position && position < run.end)
-        .is_some_and(|run| matches!(run.style.weight, FontWeight::Bold | FontWeight::Black))
+        .is_some_and(|run| is_bold_weight(run.style.weight))
 }
 
-/// A grapheme's width: its base character, since marks that follow add none.
-fn grapheme_units(grapheme: &str, position: usize, runs: &[StyleRun]) -> u32 {
+/// A grapheme's width in points. A grapheme Inter covers is measured as the
+/// PDF export measures it (accent sequences compose into one glyph); any other
+/// takes the estimate for its base character, since marks that follow add none.
+fn grapheme_width(grapheme: &str, position: usize, runs: &[StyleRun], font_size: f32) -> f32 {
+    let bold = is_bold_at(runs, position);
+    if grapheme.chars().all(is_measured_exactly) {
+        let style = TextStyle {
+            size_pt: font_size,
+            bold,
+            ..TextStyle::default()
+        };
+        return text_width_pt(grapheme, &style);
+    }
     grapheme
         .chars()
         .next()
-        .map_or(0, |ch| glyph_units(ch, is_bold_at(runs, position)))
+        .map_or(0.0, |ch| estimated_units(ch, bold) * font_size / 1000.0)
 }
 
 /// Width in points of `text`, which starts at byte `text_start` of its block
 /// (so character runs, expressed in block offsets, line up).
 pub fn text_advance(text: &str, text_start: usize, runs: &[StyleRun], font_size: f32) -> f32 {
-    let units: u32 = text
-        .grapheme_indices(true)
-        .map(|(index, grapheme)| grapheme_units(grapheme, text_start + index, runs))
-        .sum();
-    units as f32 * font_size / 1000.0
+    text.grapheme_indices(true)
+        .map(|(index, grapheme)| grapheme_width(grapheme, text_start + index, runs, font_size))
+        .sum()
 }
 
 /// The byte offset in `text` nearest to horizontal position `x` (points from
@@ -100,7 +91,7 @@ pub fn offset_at_x(
     let visible = text.trim_end_matches('\n');
     let mut left = 0.0_f32;
     for (index, grapheme) in visible.grapheme_indices(true) {
-        let width = grapheme_units(grapheme, text_start + index, runs) as f32 * font_size / 1000.0;
+        let width = grapheme_width(grapheme, text_start + index, runs, font_size);
         if x < left + width / 2.0 {
             return index;
         }
@@ -122,7 +113,6 @@ pub(crate) fn wrap_by_width(
     if text.is_empty() {
         return vec![(0, 0)];
     }
-    let em = font_size / 1000.0;
     let mut ranges = Vec::new();
     let mut line_start = 0usize;
     let mut width = 0.0_f32;
@@ -135,7 +125,7 @@ pub(crate) fn wrap_by_width(
             last_break = None;
             continue;
         }
-        let glyph = grapheme_units(grapheme, index, runs) as f32 * em;
+        let glyph = grapheme_width(grapheme, index, runs, font_size);
         let is_space = grapheme.chars().any(char::is_whitespace);
         if !is_space && index > line_start && width + glyph > max_width {
             let end = last_break
@@ -174,21 +164,58 @@ mod tests {
     }
 
     #[test]
-    fn widths_follow_inter_and_scale_with_size() {
-        // H 744 + e 583... read from the table, not recomputed here.
+    fn widths_are_the_advances_the_pdf_embeds_and_scale_with_size() {
+        let at = |text: &str, size: f32, bold: bool| {
+            text_width_pt(
+                text,
+                &TextStyle {
+                    size_pt: size,
+                    bold,
+                    ..TextStyle::default()
+                },
+            )
+        };
         let hello = text_advance("Hello", 0, &[], 10.0);
-        let by_hand = (INTER_REGULAR[usize::from(b'H') - 32]
-            + INTER_REGULAR[usize::from(b'e') - 32]
-            + 2 * INTER_REGULAR[usize::from(b'l') - 32]
-            + INTER_REGULAR[usize::from(b'o') - 32]) as f32
-            / 100.0;
-        assert!((hello - by_hand).abs() < 1e-3);
+        // Per-character sums of the PDF's own measurement.
+        let by_hand: f32 = "Hello"
+            .chars()
+            .map(|c| at(&c.to_string(), 10.0, false))
+            .sum();
+        assert!((hello - by_hand).abs() < 1e-4, "{hello} vs {by_hand}");
+        assert!((hello - at("Hello", 10.0, false)).abs() < 1e-4);
         assert!((text_advance("Hello", 0, &[], 20.0) - 2.0 * hello).abs() < 1e-3);
         assert_eq!(text_advance("", 0, &[], 12.0), 0.0);
         assert_eq!(
-            text_advance("a\nb", 0, &[], 12.0),
+            text_advance(
+                "a
+b",
+                0,
+                &[],
+                12.0
+            ),
             text_advance("ab", 0, &[], 12.0)
         );
+        // Inter Regular 'H' is 743/1000 em: the old hand table said 744.
+        assert!((at("H", 1000.0, false) - 743.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn semibold_draws_as_regular_like_the_page_markup() {
+        let semibold = StyleRun {
+            start: 0,
+            end: 3,
+            style: CharacterStyle {
+                weight: FontWeight::Semibold,
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            text_advance("one", 0, &[semibold], 12.0),
+            text_advance("one", 0, &[], 12.0)
+        );
+        assert!(is_bold_weight(FontWeight::Bold));
+        assert!(is_bold_weight(FontWeight::Black));
+        assert!(!is_bold_weight(FontWeight::Semibold));
     }
 
     #[test]

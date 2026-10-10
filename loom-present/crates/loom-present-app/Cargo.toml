@@ -25,7 +25,7 @@ slint-build = "1.7"
 
 [dev-dependencies]
 loom-package.workspace = true
-loom-pdf.workspace = true
+loom-pdf = { workspace = true, features = ["test-support"] }
 i-slint-backend-testing = "1.17.1"
 # Raw key events, so a test can deliver Ctrl+Alt+Arrow the way winit does.
 i-slint-core = { version = "=1.17.1", default-features = false }

@@ -15,4 +15,6 @@ serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
+# `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.
+loom-pdf = { workspace = true, features = ["test-support"] }
 roxmltree = "0.21"

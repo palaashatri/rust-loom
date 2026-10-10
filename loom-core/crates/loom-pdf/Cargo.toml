@@ -6,6 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 description = "Deterministic PDF 1.4 writer for Loom export with embedded, subset Inter faces."
 
+[features]
+# Exposes the `inspect` module, which reads written PDFs back for tests.
+# Production code does not need it; test crates enable it through a
+# dev-dependency.
+test-support = []
+
 [dependencies]
 # Glyph lookup, advances and cmap reading for the bundled Inter faces.
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }

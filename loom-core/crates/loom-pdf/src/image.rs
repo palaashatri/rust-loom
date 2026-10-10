@@ -140,8 +140,8 @@ impl PdfDocument {
         if image >= self.images.len() {
             return;
         }
-        let [a, b, c, d, e, f] = transform;
-        let (w, h) = size;
+        let [a, b, c, d, e, f] = transform.map(crate::finite);
+        let (w, h) = (crate::finite(size.0), crate::finite(size.1));
         let p = self.page_mut(page);
         if !p.images.contains(&image) {
             p.images.push(image);
