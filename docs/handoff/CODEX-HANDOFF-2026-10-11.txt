@@ -353,3 +353,15 @@ Immediate next steps for Codex (in order):
      S1/S2 and the picker; record per-gate evidence.
   4. L9: write the AGENTS.md current-truth paragraph and ACCEPTED records only for apps
      whose gates all pass.
+
+11. WORKERS STOPPED (2026-10-11, at owner request)
+--------------------------------------------------
+All Claude workers were stopped. The round-6 patches (~/g1.patch, ~/g2.patch,
+~/g3.patch) were NEVER produced: the three round-6 clones held no code changes (empty
+diffs saved in ~/wip-backup). Treat round 6 as NOT STARTED and start the lanes from
+section 5 using the S1/S2/S3 defect list in section 10 as the brief. The Linux
+acceptance review was killed before reporting: its result is unknown, so re-run the
+Linux pass. Stray processes (cargo, rustc, test binaries, Xvfb) were terminated.
+AGENTS.md now carries a dated session record and updated status-table evidence cells
+(status/work columns unchanged). NOTE AGENTS.md is ~190 KB: lane L9 should move older
+dated paragraphs to docs/archive/AGENTS-ARCHIVE.md so worker prompts stay small.
