@@ -19,6 +19,7 @@ members = [
     "crates/loom-media-runtime",
     "crates/loom-fonts",
     "crates/loom-objects",
+    "crates/loom-clipboard",
 ]
 
 [workspace.package]
