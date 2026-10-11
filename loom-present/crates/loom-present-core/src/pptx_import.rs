@@ -41,7 +41,13 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
     }
     slide_parts.sort_unstable_by_key(|(number, _)| *number);
 
-    let mut doc = PresentationDocument::new("imported-deck", "Imported Presentation");
+    let title = archive
+        .get("docProps/core.xml")
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(extract_core_title)
+        .unwrap_or_else(|| "Imported Presentation".to_string());
+
+    let mut doc = PresentationDocument::new("imported-deck", title);
     doc.slides.clear();
 
     for (index, (slide_num, path)) in slide_parts.iter().enumerate() {
@@ -71,7 +77,8 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         slide.elements.extend(tables);
 
         // Extract charts (<p:graphicFrame> enclosing <c:chart>)
-        let charts = crate::charts::extract_pptx_slide_charts(&slide_xml);
+        let charts =
+            crate::charts::extract_pptx_slide_charts_with_rels(&slide_xml, &rids, &archive);
         slide.elements.extend(charts);
 
         // Extract pictures (<p:pic>)
@@ -356,6 +363,22 @@ fn parse_slide_pictures(
         }
     }
     elements
+}
+
+fn extract_core_title(xml: &str) -> Option<String> {
+    let start_tag = "<dc:title";
+    let start_idx = xml.find(start_tag)?;
+    let after_start = start_idx + start_tag.len();
+    let tag_close = xml[after_start..].find('>')?;
+    let content_start = after_start + tag_close + 1;
+    let end_idx = xml[content_start..].find("</dc:title>")?;
+    let raw = &xml[content_start..content_start + end_idx];
+    let title = xml_unescape(raw).trim().to_string();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
+    }
 }
 
 #[cfg(test)]

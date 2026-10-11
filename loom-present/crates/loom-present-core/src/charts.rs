@@ -2,7 +2,7 @@
 
 use crate::{ElementType, SlideElement, SLIDE_HEIGHT, SLIDE_WIDTH};
 use loom_objects::chart::Chart;
-use loom_objects::chart_ooxml::{c_chart_xml_to_chart, chart_to_c_chart_xml};
+use loom_objects::chart_ooxml::c_chart_xml_to_chart;
 
 const EMU_PER_UNIT: f64 = 12_192.0;
 
@@ -57,15 +57,19 @@ pub fn chart_element_from_clipboard(chart: Chart, id: impl Into<String>) -> Slid
     SlideElement::new_chart(id, x, y, width, height, chart)
 }
 
-/// Generates a PowerPoint `<p:graphicFrame>` enclosing a DrawingML chart.
-pub fn chart_graphic_frame(id: u32, element: &SlideElement, chart: &Chart) -> String {
+/// Generates a PowerPoint `<p:graphicFrame>` enclosing a DrawingML chart reference via relationship ID.
+pub fn chart_graphic_frame_with_rid(
+    id: u32,
+    element: &SlideElement,
+    chart: &Chart,
+    rid: &str,
+) -> String {
     let off_x = (f64::from(element.x) * EMU_PER_UNIT).round() as i64;
     let off_y = (f64::from(element.y) * EMU_PER_UNIT).round() as i64;
     let ext_cx = (f64::from(element.width) * EMU_PER_UNIT).round() as i64;
     let ext_cy = (f64::from(element.height) * EMU_PER_UNIT).round() as i64;
 
     let title_name = chart.title.as_deref().unwrap_or("Chart");
-    let chart_xml = chart_to_c_chart_xml(chart);
 
     format!(
         r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
@@ -80,15 +84,24 @@ pub fn chart_graphic_frame(id: u32, element: &SlideElement, chart: &Chart) -> St
   </p:xfrm>
   <a:graphic>
     <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
-      {chart_xml}
+      <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="{rid}"/>
     </a:graphicData>
   </a:graphic>
 </p:graphicFrame>"#
     )
 }
 
-/// Extracts chart slide elements from a slide XML string.
-pub fn extract_pptx_slide_charts(slide_xml: &str) -> Vec<SlideElement> {
+/// Generates a PowerPoint `<p:graphicFrame>` enclosing a DrawingML chart.
+pub fn chart_graphic_frame(id: u32, element: &SlideElement, chart: &Chart) -> String {
+    chart_graphic_frame_with_rid(id, element, chart, "rIdChart1")
+}
+
+/// Extracts chart slide elements from a slide XML string, resolving chart parts when available.
+pub fn extract_pptx_slide_charts_with_rels(
+    slide_xml: &str,
+    rids: &std::collections::BTreeMap<String, String>,
+    archive: &loom_package::zip::PackageArchive,
+) -> Vec<SlideElement> {
     let mut elements = Vec::new();
     let mut cursor = 0;
 
@@ -107,13 +120,39 @@ pub fn extract_pptx_slide_charts(slide_xml: &str) -> Vec<SlideElement> {
 
         // Extract geometry
         let (x, y, w, h) = extract_frame_bounds(frame_chunk);
+        let id = format!("pptx-chart-{}", elements.len() + 1);
 
-        // Extract chart
+        // 1. Try resolving via r:id from relationships
+        if let Some(chart_tag_pos) = frame_chunk.find("<c:chart") {
+            let chart_tag_slice = &frame_chunk[chart_tag_pos..];
+            if let Some(tag_close) = chart_tag_slice.find('>') {
+                let tag_str = &chart_tag_slice[..=tag_close];
+                if let Some(rid) = extract_attr_str(tag_str, "r:id") {
+                    if let Some(target_path) = rids.get(&rid) {
+                        if let Some(chart_bytes) = archive.get(target_path) {
+                            let chart_xml = String::from_utf8_lossy(chart_bytes);
+                            if let Ok(chart) = c_chart_xml_to_chart(&chart_xml, &id) {
+                                elements.push(SlideElement::new_chart(
+                                    id.clone(),
+                                    x,
+                                    y,
+                                    w,
+                                    h,
+                                    chart,
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to inline chartSpace
         if let Some(chart_start) = frame_chunk.find("<c:chartSpace") {
             let chart_slice = &frame_chunk[chart_start..];
             if let Some(chart_end) = chart_slice.find("</c:chartSpace>") {
                 let chart_xml = &chart_slice[..chart_end + "</c:chartSpace>".len()];
-                let id = format!("pptx-chart-{}", elements.len() + 1);
                 if let Ok(chart) = c_chart_xml_to_chart(chart_xml, &id) {
                     elements.push(SlideElement::new_chart(id, x, y, w, h, chart));
                 }
@@ -122,6 +161,21 @@ pub fn extract_pptx_slide_charts(slide_xml: &str) -> Vec<SlideElement> {
     }
 
     elements
+}
+
+fn extract_attr_str(tag: &str, attr: &str) -> Option<String> {
+    let needle = format!("{attr}=\"");
+    let pos = tag.find(&needle)?;
+    let start = pos + needle.len();
+    let end = tag[start..].find('"')?;
+    Some(tag[start..start + end].to_string())
+}
+
+/// Extracts chart slide elements from a slide XML string.
+pub fn extract_pptx_slide_charts(slide_xml: &str) -> Vec<SlideElement> {
+    let dummy_rids = std::collections::BTreeMap::new();
+    let dummy_archive = loom_package::zip::PackageArchive::new();
+    extract_pptx_slide_charts_with_rels(slide_xml, &dummy_rids, &dummy_archive)
 }
 
 fn extract_frame_bounds(chunk: &str) -> (f32, f32, f32, f32) {

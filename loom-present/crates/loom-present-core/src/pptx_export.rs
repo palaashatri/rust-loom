@@ -326,6 +326,7 @@ fn slide_xml(
     slide: &Slide,
     transition: &TransitionKind,
     picture_rids: &BTreeMap<String, String>,
+    chart_rids: &BTreeMap<String, String>,
 ) -> String {
     let background = hex_color(&slide.bg_color, "FFFFFF");
     let has_title = slide
@@ -359,8 +360,12 @@ fn slide_xml(
             }
         } else if element.element_type == ElementType::Chart {
             if let Some(chart) = element.chart() {
-                shapes.push_str(&crate::charts::chart_graphic_frame(
-                    next_id, element, &chart,
+                let rid = chart_rids
+                    .get(&element.id)
+                    .map(String::as_str)
+                    .unwrap_or("rIdChart1");
+                shapes.push_str(&crate::charts::chart_graphic_frame_with_rid(
+                    next_id, element, &chart, rid,
                 ));
             }
         } else {
@@ -591,6 +596,7 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
     let mut media: BTreeSet<String> = BTreeSet::new();
     let mut media_parts: Vec<(String, Vec<u8>)> = Vec::new();
     let mut media_types: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut chart_counter = 0usize;
     for (index, slide) in document.slides.iter().enumerate() {
         let number = index + 1;
         let transition = session
@@ -612,10 +618,30 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
                 media_types.insert(asset.format.extension(), asset.format.mime());
             }
         }
+        let mut chart_rids = BTreeMap::new();
+        let mut chart_rels: Vec<(String, String)> = Vec::new();
+        for element in &slide.elements {
+            if element.element_type == ElementType::Chart {
+                if let Some(chart) = element.chart() {
+                    chart_counter += 1;
+                    let rid = format!("rIdChart{}", chart_rels.len() + 1);
+                    chart_rids.insert(element.id.clone(), rid.clone());
+                    chart_rels.push((rid, format!("../charts/chart{chart_counter}.xml")));
+                    add(
+                        &format!("ppt/charts/chart{chart_counter}.xml"),
+                        Some(
+                            "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+                                .to_string(),
+                        ),
+                        loom_objects::chart_ooxml::chart_to_c_chart_xml(&chart),
+                    );
+                }
+            }
+        }
         add(
             &format!("ppt/slides/slide{number}.xml"),
             Some(format!("{CT}.slide+xml")),
-            slide_xml(document, slide, &transition, &picture_rids),
+            slide_xml(document, slide, &transition, &picture_rids, &chart_rids),
         );
         let mut rels = vec![(
             "rId1",
@@ -624,6 +650,9 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
         )];
         for (rid, target) in &picture_rels {
             rels.push((rid.as_str(), "image", target.clone()));
+        }
+        for (rid, target) in &chart_rels {
+            rels.push((rid.as_str(), "chart", target.clone()));
         }
         if !slide.speaker_notes.trim().is_empty() {
             rels.push((

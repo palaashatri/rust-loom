@@ -42,7 +42,10 @@ use style_json::{
     alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, parse_line_break,
     runs_json, selection_json,
 };
-pub use tables::{parse_table_markdown, INSERT_COLUMNS, INSERT_ROWS, TABLE_BLOCK_KIND};
+pub use tables::{
+    compute_cell_ranges, parse_table_markdown, TableArrowDirection, INSERT_COLUMNS, INSERT_ROWS,
+    TABLE_BLOCK_KIND,
+};
 pub use text_metrics::{offset_at_x, text_advance};
 
 /// Stable document id.

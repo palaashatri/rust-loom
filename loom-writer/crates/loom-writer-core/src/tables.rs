@@ -361,7 +361,7 @@ pub struct TableCellLocation {
 }
 
 /// Computes byte ranges (start, end) for each cell in the markdown table block text.
-pub(crate) fn compute_cell_ranges(text: &str) -> Vec<Vec<(usize, usize)>> {
+pub fn compute_cell_ranges(text: &str) -> Vec<Vec<(usize, usize)>> {
     let mut grid = Vec::new();
     let mut line_offset = 0;
 
