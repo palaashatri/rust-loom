@@ -58,6 +58,355 @@ impl WriterDocument {
         }
         Some(parse_table_markdown(block.text.as_str()))
     }
+
+    /// Locates the table cell containing the given offset in the canonical editor text.
+    pub fn table_cell_at_offset(&self, offset: usize) -> Option<TableCellLocation> {
+        let mut block_start = 0usize;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let block_len = block.text.len_bytes();
+            if block.kind == TABLE_BLOCK_KIND
+                && offset >= block_start
+                && offset <= block_start + block_len
+            {
+                let offset_in_block = offset - block_start;
+                let _table = parse_table_markdown(block.text.as_str());
+                let grid = compute_cell_ranges(block.text.as_str());
+                for (r, row_ranges) in grid.iter().enumerate() {
+                    for (c, &(start, end)) in row_ranges.iter().enumerate() {
+                        if offset_in_block >= start.saturating_sub(2) && offset_in_block <= end + 2
+                        {
+                            return Some(TableCellLocation {
+                                block_id: block.id,
+                                block_index: index,
+                                row: r,
+                                col: c,
+                                cell_start: block_start + start,
+                                cell_end: block_start + end,
+                            });
+                        }
+                    }
+                }
+                if let Some(first_range) = grid.first().and_then(|row| row.first()) {
+                    return Some(TableCellLocation {
+                        block_id: block.id,
+                        block_index: index,
+                        row: 0,
+                        col: 0,
+                        cell_start: block_start + first_range.0,
+                        cell_end: block_start + first_range.1,
+                    });
+                }
+            }
+            block_start += block_len + 1;
+        }
+        None
+    }
+
+    /// Navigates with Tab between cells in a table. At the final cell of a table,
+    /// a forward Tab appends a new row and places the caret in the first cell of the new row.
+    pub fn tab_navigate_table(&mut self, offset: usize, backwards: bool) -> Result<usize, String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        let rows = table.rows.len();
+        let cols = table.columns();
+        if rows == 0 || cols == 0 {
+            return Err("Empty table".to_string());
+        }
+
+        let (target_row, target_col) = if backwards {
+            if loc.col > 0 {
+                (loc.row, loc.col - 1)
+            } else if loc.row > 0 {
+                (loc.row - 1, cols - 1)
+            } else {
+                (0, 0)
+            }
+        } else if loc.col + 1 < cols {
+            (loc.row, loc.col + 1)
+        } else if loc.row + 1 < rows {
+            (loc.row + 1, 0)
+        } else {
+            // At the last cell of the table: append a new row
+            table.rows.push(vec![String::new(); cols]);
+            let new_markdown = table.to_markdown();
+            self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
+            (rows, 0)
+        };
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        if let Some((start, _)) = grid.get(target_row).and_then(|row| row.get(target_col)) {
+            let caret = block_start + start;
+            self.set_selection(crate::TextSelection::caret(caret));
+            Ok(caret)
+        } else {
+            Ok(offset)
+        }
+    }
+
+    /// Navigates between table cells using arrow keys.
+    pub fn arrow_navigate_table(
+        &mut self,
+        offset: usize,
+        direction: TableArrowDirection,
+    ) -> Option<usize> {
+        let loc = self.table_cell_at_offset(offset)?;
+        let block_idx = loc.block_index;
+        let table = self.table_from_block(loc.block_id)?;
+        let rows = table.rows.len();
+        let cols = table.columns();
+        if rows == 0 || cols == 0 {
+            return None;
+        }
+
+        let (target_row, target_col) = match direction {
+            TableArrowDirection::Up if loc.row > 0 => (loc.row - 1, loc.col),
+            TableArrowDirection::Down if loc.row + 1 < rows => (loc.row + 1, loc.col),
+            TableArrowDirection::Left if loc.col > 0 => (loc.row, loc.col - 1),
+            TableArrowDirection::Right if loc.col + 1 < cols => (loc.row, loc.col + 1),
+            _ => return None,
+        };
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        let (start, _) = grid.get(target_row).and_then(|row| row.get(target_col))?;
+        let caret = block_start + start;
+        self.set_selection(crate::TextSelection::caret(caret));
+        Some(caret)
+    }
+
+    /// Inserts a row into the table at the given offset, above or below the current row.
+    pub fn insert_table_row_at_offset(
+        &mut self,
+        offset: usize,
+        below: bool,
+    ) -> Result<usize, String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        let cols = table.columns();
+        let insert_idx = if below { loc.row + 1 } else { loc.row };
+        table.rows.insert(insert_idx, vec![String::new(); cols]);
+        let new_markdown = table.to_markdown();
+        self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        if let Some((start, _)) = grid.get(insert_idx).and_then(|row| row.first()) {
+            let caret = block_start + start;
+            self.set_selection(crate::TextSelection::caret(caret));
+            Ok(caret)
+        } else {
+            Ok(offset)
+        }
+    }
+
+    /// Deletes the table row containing the given offset.
+    pub fn delete_table_row_at_offset(&mut self, offset: usize) -> Result<usize, String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        if table.rows.len() <= 1 {
+            return Err("Cannot delete the only row of a table".to_string());
+        }
+        table.rows.remove(loc.row);
+        let new_markdown = table.to_markdown();
+        self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        let target_row = loc.row.min(table.rows.len() - 1);
+        let target_col = loc.col.min(table.columns() - 1);
+        if let Some((start, _)) = grid.get(target_row).and_then(|row| row.get(target_col)) {
+            let caret = block_start + start;
+            self.set_selection(crate::TextSelection::caret(caret));
+            Ok(caret)
+        } else {
+            Ok(block_start)
+        }
+    }
+
+    /// Inserts a column into the table at the given offset, to the left or right of current column.
+    pub fn insert_table_column_at_offset(
+        &mut self,
+        offset: usize,
+        right: bool,
+    ) -> Result<usize, String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        let insert_col = if right { loc.col + 1 } else { loc.col };
+        for row in &mut table.rows {
+            let idx = insert_col.min(row.len());
+            row.insert(idx, String::new());
+        }
+        let new_markdown = table.to_markdown();
+        self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        if let Some((start, _)) = grid.get(loc.row).and_then(|row| row.get(insert_col)) {
+            let caret = block_start + start;
+            self.set_selection(crate::TextSelection::caret(caret));
+            Ok(caret)
+        } else {
+            Ok(offset)
+        }
+    }
+
+    /// Deletes the table column containing the given offset.
+    pub fn delete_table_column_at_offset(&mut self, offset: usize) -> Result<usize, String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        if table.columns() <= 1 {
+            return Err("Cannot delete the only column of a table".to_string());
+        }
+        for row in &mut table.rows {
+            if loc.col < row.len() {
+                row.remove(loc.col);
+            }
+        }
+        let new_markdown = table.to_markdown();
+        self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
+
+        let block_start = self
+            .blocks
+            .iter()
+            .take(block_idx)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        let block_text = self.blocks[block_idx].text.as_str();
+        let grid = compute_cell_ranges(block_text);
+        let target_col = loc.col.min(table.columns().saturating_sub(1));
+        if let Some((start, _)) = grid.get(loc.row).and_then(|row| row.get(target_col)) {
+            let caret = block_start + start;
+            self.set_selection(crate::TextSelection::caret(caret));
+            Ok(caret)
+        } else {
+            Ok(block_start)
+        }
+    }
+}
+
+/// Direction for arrow key navigation within table cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableArrowDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Identifies the cell location and byte range of an offset within a table block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableCellLocation {
+    pub block_id: u64,
+    pub block_index: usize,
+    pub row: usize,
+    pub col: usize,
+    pub cell_start: usize,
+    pub cell_end: usize,
+}
+
+/// Computes byte ranges (start, end) for each cell in the markdown table block text.
+pub(crate) fn compute_cell_ranges(text: &str) -> Vec<Vec<(usize, usize)>> {
+    let mut grid = Vec::new();
+    let mut line_offset = 0;
+
+    for line in text.lines() {
+        let Some(first_pipe) = line.find('|') else {
+            line_offset += line.len() + 1;
+            continue;
+        };
+        let Some(last_pipe) = line.rfind('|') else {
+            line_offset += line.len() + 1;
+            continue;
+        };
+        if first_pipe >= last_pipe {
+            line_offset += line.len() + 1;
+            continue;
+        }
+
+        // Check if delimiter row
+        let inner = &line[first_pipe + 1..last_pipe];
+        let cells: Vec<&str> = inner.split('|').collect();
+        let is_delimiter = cells.iter().all(|c| {
+            let t = c.trim().replace(['-', ':', ' '], "");
+            t.is_empty() && !c.trim().is_empty()
+        });
+
+        if is_delimiter {
+            line_offset += line.len() + 1;
+            continue;
+        }
+
+        let mut row_cells = Vec::new();
+        let mut pipe_idx = first_pipe;
+        while let Some(next_pipe_rel) = line[pipe_idx + 1..].find('|') {
+            let next_pipe = pipe_idx + 1 + next_pipe_rel;
+            let cell_start = line_offset + pipe_idx + 2;
+            let cell_end = line_offset + next_pipe.saturating_sub(1);
+            row_cells.push((cell_start, cell_end.max(cell_start)));
+            pipe_idx = next_pipe;
+        }
+
+        grid.push(row_cells);
+        line_offset += line.len() + 1;
+    }
+
+    grid
 }
 
 /// Index in `document.blocks` after which a table inserted at `offset` lands.
@@ -599,5 +948,100 @@ mod tests {
 
         let converted_back = WriterTable::from_loom_table(&loom_table);
         assert_eq!(writer_table, converted_back);
+    }
+
+    #[test]
+    fn table_tab_navigates_and_appends_row_at_end() {
+        let mut document = document();
+        let _ = document.insert_table_block(usize::MAX, 2, 2).unwrap();
+        let block_idx = document.blocks.len() - 1;
+        let block_id = document.blocks[block_idx].id;
+
+        // Caret starts at (0, 0)
+        let initial_caret = document.selection().anchor;
+        let loc = document.table_cell_at_offset(initial_caret).unwrap();
+        assert_eq!((loc.row, loc.col), (0, 0));
+
+        // Tab to (0, 1)
+        let c1 = document.tab_navigate_table(initial_caret, false).unwrap();
+        let loc1 = document.table_cell_at_offset(c1).unwrap();
+        assert_eq!((loc1.row, loc1.col), (0, 1));
+
+        // Tab to (1, 0)
+        let c2 = document.tab_navigate_table(c1, false).unwrap();
+        let loc2 = document.table_cell_at_offset(c2).unwrap();
+        assert_eq!((loc2.row, loc2.col), (1, 0));
+
+        // Tab to (1, 1) - final cell
+        let c3 = document.tab_navigate_table(c2, false).unwrap();
+        let loc3 = document.table_cell_at_offset(c3).unwrap();
+        assert_eq!((loc3.row, loc3.col), (1, 1));
+
+        // Tab from final cell appends row and places caret at (2, 0)
+        let c4 = document.tab_navigate_table(c3, false).unwrap();
+        let loc4 = document.table_cell_at_offset(c4).unwrap();
+        assert_eq!((loc4.row, loc4.col), (2, 0));
+
+        let table = document.table_from_block(block_id).unwrap();
+        assert_eq!(table.rows.len(), 3);
+    }
+
+    #[test]
+    fn table_arrow_navigation_moves_between_cells() {
+        let mut document = document();
+        let _ = document.insert_table_block(usize::MAX, 3, 3).unwrap();
+        let initial_caret = document.selection().anchor;
+
+        // Down to (1, 0)
+        let down1 = document
+            .arrow_navigate_table(initial_caret, TableArrowDirection::Down)
+            .unwrap();
+        let loc_down1 = document.table_cell_at_offset(down1).unwrap();
+        assert_eq!((loc_down1.row, loc_down1.col), (1, 0));
+
+        // Right to (1, 1)
+        let right1 = document
+            .arrow_navigate_table(down1, TableArrowDirection::Right)
+            .unwrap();
+        let loc_r1 = document.table_cell_at_offset(right1).unwrap();
+        assert_eq!((loc_r1.row, loc_r1.col), (1, 1));
+
+        // Up to (0, 1)
+        let up1 = document
+            .arrow_navigate_table(right1, TableArrowDirection::Up)
+            .unwrap();
+        let loc_u1 = document.table_cell_at_offset(up1).unwrap();
+        assert_eq!((loc_u1.row, loc_u1.col), (0, 1));
+    }
+
+    #[test]
+    fn table_insert_and_delete_rows_and_columns() {
+        let mut document = document();
+        let _ = document.insert_table_block(usize::MAX, 2, 2).unwrap();
+        let block_idx = document.blocks.len() - 1;
+        let block_id = document.blocks[block_idx].id;
+        let caret = document.selection().anchor;
+
+        // Insert row below -> 3 rows
+        let c_row = document.insert_table_row_at_offset(caret, true).unwrap();
+        let table1 = document.table_from_block(block_id).unwrap();
+        assert_eq!(table1.rows.len(), 3);
+
+        // Delete row -> back to 2 rows
+        let c_del_row = document.delete_table_row_at_offset(c_row).unwrap();
+        let table2 = document.table_from_block(block_id).unwrap();
+        assert_eq!(table2.rows.len(), 2);
+
+        // Insert column right -> 3 cols
+        let c_col = document
+            .insert_table_column_at_offset(c_del_row, true)
+            .unwrap();
+        let table3 = document.table_from_block(block_id).unwrap();
+        assert_eq!(table3.columns(), 3);
+
+        // Delete column -> back to 2 cols
+        let _ = document.delete_table_column_at_offset(c_col).unwrap();
+        let table4 = document.table_from_block(block_id).unwrap();
+        assert_eq!(table4.columns(), 2);
     }
 }
