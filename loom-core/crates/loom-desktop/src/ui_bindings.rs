@@ -330,15 +330,23 @@ macro_rules! local_menu_bindings {
 macro_rules! window_chrome_bindings {
     ($app:ty) => {
         /// Whether this platform draws Loom's own title bar.
-        pub(crate) const USES_CUSTOM_CHROME: bool =
-            cfg!(any(target_os = "windows", target_os = "linux"));
+        /// Native window frames are default; custom chrome is an opt-in via LOOM_CUSTOM_CHROME=1.
+        pub(crate) const USES_CUSTOM_CHROME: bool = false;
 
-        /// Turn on custom chrome and connect its callbacks. Safe in headless
+        /// Whether custom chrome was requested via environment variable.
+        pub(crate) fn uses_custom_chrome() -> bool {
+            ::std::env::var("LOOM_CUSTOM_CHROME").is_ok_and(|v| v == "1")
+        }
+
+        /// Turn on custom chrome when requested and connect its callbacks. Safe in headless
         /// renders: window operations then find no winit window and do nothing.
         pub(crate) fn install(app: &$app) {
-            app.set_custom_chrome(USES_CUSTOM_CHROME);
+            let custom = uses_custom_chrome();
+            app.set_custom_chrome(custom);
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            wire_window_chrome(app);
+            if custom {
+                wire_window_chrome(app);
+            }
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux"))]

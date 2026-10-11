@@ -94,7 +94,8 @@ pub(super) fn loom_formula(excel_body: &str, names: &DefinedNames) -> String {
             let next = characters.get(position).copied();
             let stripped = word
                 .strip_prefix("_xlfn.")
-                .map(|rest| rest.strip_prefix("_xlws.").unwrap_or(rest));
+                .map(|rest| rest.strip_prefix("_xlws.").unwrap_or(rest))
+                .or_else(|| word.strip_prefix("_xlpm."));
             if let Some(rest) = stripped {
                 out.push_str(rest);
                 continue;
@@ -175,5 +176,18 @@ mod tests {
             "\"Rate\"&Local&Complex"
         );
         assert_eq!(loom_formula("Sheet!Rate", &names), "Sheet!Rate");
+    }
+
+    #[test]
+    fn xlpm_parameters_are_stripped_on_import() {
+        let names = DefinedNames::default();
+        assert_eq!(
+            loom_formula("_xlfn.LET(_xlpm.x,5,_xlpm.x*2)", &names),
+            "LET(x,5,x*2)"
+        );
+        assert_eq!(
+            loom_formula("_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)", &names),
+            "LAMBDA(x,y,x+y)"
+        );
     }
 }

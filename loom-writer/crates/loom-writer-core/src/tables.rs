@@ -43,7 +43,8 @@ impl WriterDocument {
             .iter()
             .take(insert_at)
             .map(|block| block.text.len_bytes() + 1)
-            .sum::<usize>();
+            .sum::<usize>()
+            + 2;
         self.set_selection(crate::TextSelection::caret(caret));
         Ok(next_id)
     }
@@ -100,11 +101,25 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     let mut header_row = false;
     for line in markdown.lines() {
         let trimmed = line.trim();
-        if !trimmed.starts_with('|') || !trimmed.ends_with('|') || trimmed.len() < 2 {
+        let Some(first_pipe) = trimmed.find('|') else {
+            if !trimmed.is_empty() {
+                rows.push(vec![trimmed.to_string()]);
+            }
+            continue;
+        };
+        let Some(last_pipe) = trimmed.rfind('|') else {
+            continue;
+        };
+        if first_pipe >= last_pipe {
+            if !trimmed.is_empty() {
+                rows.push(vec![trimmed.to_string()]);
+            }
             continue;
         }
-        let inner = &trimmed[1..trimmed.len() - 1];
-        let cells: Vec<String> = split_cells(inner)
+        let prefix = trimmed[..first_pipe].trim();
+        let suffix = trimmed[last_pipe + 1..].trim();
+        let inner = &trimmed[first_pipe + 1..last_pipe];
+        let mut cells: Vec<String> = split_cells(inner)
             .into_iter()
             .map(|cell| cell.trim().replace("\\|", "|"))
             .collect();
@@ -114,6 +129,24 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
         }) {
             header_row = true;
             continue;
+        }
+        if !prefix.is_empty() {
+            if let Some(first_cell) = cells.first_mut() {
+                if first_cell.is_empty() {
+                    *first_cell = prefix.to_string();
+                } else {
+                    *first_cell = format!("{prefix} {first_cell}");
+                }
+            }
+        }
+        if !suffix.is_empty() {
+            if let Some(last_cell) = cells.last_mut() {
+                if last_cell.is_empty() {
+                    *last_cell = suffix.to_string();
+                } else {
+                    *last_cell = format!("{last_cell} {suffix}");
+                }
+            }
         }
         rows.push(cells);
     }
@@ -498,5 +531,26 @@ mod tests {
         assert_eq!(document.text_counts(), (7, 31));
         let pagination = document.estimate_pagination();
         assert_eq!((pagination.words, pagination.characters), (7, 31));
+    }
+
+    #[test]
+    fn table_markdown_preserves_text_typed_before_first_pipe() {
+        let text = "TypedBefore| Col1 | Col2 |\n| --- | --- |\n| Val1 | Val2 |";
+        let parsed = parse_table_markdown(text);
+        assert_eq!(parsed.rows.len(), 2);
+        assert!(parsed.rows[0][0].contains("TypedBefore"));
+    }
+
+    #[test]
+    fn insert_table_places_caret_inside_first_cell() {
+        let mut document = document();
+        let _ = document.insert_table_block(usize::MAX, 2, 2).unwrap();
+        let block_offset = document
+            .blocks
+            .iter()
+            .take(document.blocks.len() - 1)
+            .map(|b| b.text.len_bytes() + 1)
+            .sum::<usize>();
+        assert_eq!(document.selection().anchor, block_offset + 2);
     }
 }

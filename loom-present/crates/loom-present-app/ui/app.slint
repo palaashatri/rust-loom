@@ -9,7 +9,7 @@ import { PresentInspector } from "inspector.slint";
 import { PresentThemeChooser } from "theme_chooser.slint";
 import {
     LoomButton, LoomIconButton, LoomTitleBar, LoomWindowResizeEdges,
-    LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+    LocalMenu, LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
@@ -280,7 +280,7 @@ export component PresentApp inherits Window {
     /// Alt+letter or F10 opens the in-window menu named by that key.
     function open-menu-for-key(event: KeyEvent) -> bool {
         let target = LocalMenu.target(event);
-        if (!root.local-menu-visible || !root.custom-chrome || root.is-preview-mode || target < 0) { return false; }
+        if (!root.local-menu-visible || root.is-preview-mode || target < 0) { return false; }
         root.local-menu-open-index = target;
         return true;
     }
@@ -406,7 +406,6 @@ export component PresentApp inherits Window {
                 title: root.deck-title + (root.deck-dirty ? " \u{2022}" : "");
                 maximized: root.maximized;
                 drag-requested => { root.window-drag(); }
-                // `maximized` and `minimized` are Slint's own window properties.
                 toggle-maximize => { root.maximized = !root.maximized; }
                 minimize => { root.minimized = true; }
                 close => { root.window-close(); }
@@ -414,6 +413,10 @@ export component PresentApp inherits Window {
                     labels: root.local-menu-labels;
                     open-index <=> root.local-menu-open-index;
                 }
+            }
+            if root.local-menu-visible && !root.custom-chrome && !root.is-preview-mode : LocalMenuBar {
+                labels: root.local-menu-labels;
+                open-index <=> root.local-menu-open-index;
             }
 
             if !root.is-preview-mode : action-toolbar := PresentActionToolbar {
@@ -747,7 +750,7 @@ export component PresentApp inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
-            menu-enabled: root.local-menu-visible && root.custom-chrome && !root.is-preview-mode;
+            menu-enabled: root.local-menu-visible && !root.is-preview-mode;
             labels: root.local-menu-labels;
             items: root.local-menu-popup-items;
             open-index <=> root.local-menu-open-index;

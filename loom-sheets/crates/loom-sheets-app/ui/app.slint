@@ -296,6 +296,7 @@ export component SheetsApp inherits Window {
     public function focus-grid() {
         grid-surface.focus-grid();
     }
+    public function focus-save-changes() { save-changes-dialog.focus-dialog(); }
     public function focus-objects() { worksheet-objects.focus-objects(); }
     public function reveal-selection() { root.reveal-selected-requested(); }
     public function focus-xlsx-import-warning() {
@@ -427,7 +428,6 @@ export component SheetsApp inherits Window {
                 title: root.window-title;
                 maximized: root.maximized;
                 drag-requested => { root.window-drag(); }
-                // Slint's own maximized and minimized window properties.
                 toggle-maximize => { root.maximized = !root.maximized; }
                 minimize => { root.minimized = true; }
                 close => { root.window-close(); }

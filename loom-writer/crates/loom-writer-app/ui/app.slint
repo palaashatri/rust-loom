@@ -2,7 +2,7 @@ import { TemplateChooserModal } from "template_chooser.slint";
 import { CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     LoomButton, LoomTitleBar, LoomWindowResizeEdges,
-    LocalMenu, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+    LocalMenu, LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { FindBar, FindBarOverlay } from "find_bar.slint";
@@ -246,7 +246,7 @@ export component WriterApp inherits Window {
     /// text box would otherwise type the letter, so it asks first too.
     function open-menu-for-key(event: KeyEvent) -> bool {
         let target = LocalMenu.target(event);
-        if (!root.local-menu-visible || !root.custom-chrome || target < 0) { return false; }
+        if (!root.local-menu-visible || target < 0) { return false; }
         root.local-menu-open-index = target;
         return true;
     }
@@ -375,6 +375,10 @@ export component WriterApp inherits Window {
                     labels: root.local-menu-labels;
                     open-index <=> root.local-menu-open-index;
                 }
+            }
+            if root.local-menu-visible && !root.custom-chrome : LocalMenuBar {
+                labels: root.local-menu-labels;
+                open-index <=> root.local-menu-open-index;
             }
 
             action-toolbar := WriterActionToolbar {
@@ -650,7 +654,7 @@ export component WriterApp inherits Window {
         y: 36px;
         width: root.width;
         height: root.height - 36px;
-        menu-enabled: root.local-menu-visible && root.custom-chrome;
+        menu-enabled: root.local-menu-visible;
         labels: root.local-menu-labels;
         items: root.local-menu-popup-items;
         open-index <=> root.local-menu-open-index;

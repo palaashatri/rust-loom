@@ -2784,7 +2784,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // initially visible view after the native window is shown; winit may
     // replace the focus item during presentation, so doing this before `show`
     // is not durable.
-    if app.get_xlsx_import_warning_open() {
+    if app.get_save_changes_open() {
+        app.invoke_focus_save_changes();
+    } else if app.get_xlsx_import_warning_open() {
         app.invoke_focus_xlsx_import_warning();
     } else if app.get_template_chooser_open() {
         app.invoke_focus_template_chooser();
@@ -2797,7 +2799,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         slint::invoke_from_event_loop(move || {
             if let Some(app) = app_ref.upgrade() {
-                if !app.get_xlsx_import_warning_open() && !app.get_template_chooser_open() {
+                if !app.get_save_changes_open()
+                    && !app.get_xlsx_import_warning_open()
+                    && !app.get_template_chooser_open()
+                {
                     app.invoke_focus_grid();
                 }
             }

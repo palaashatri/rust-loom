@@ -24,6 +24,7 @@ const FUTURE_FUNCTIONS: &[&str] = &[
     "RANDARRAY",
     "TEXTSPLIT",
     "LET",
+    "LAMBDA",
     "IFNA",
     "XOR",
     "DAYS",
@@ -121,7 +122,138 @@ pub(super) fn is_plausible_formula(raw: &str) -> bool {
         )
 }
 
+#[derive(Debug, Clone)]
+struct ParamScope {
+    start: usize,
+    end: usize,
+    params: Vec<String>,
+}
+
+fn split_top_level_args(text: &str) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut start = 0;
+    for (i, c) in text.char_indices() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => {
+                    args.push(&text[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+    }
+    if start < text.len() {
+        args.push(&text[start..]);
+    }
+    args
+}
+
+fn is_valid_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+fn extract_param_scopes(formula: &str) -> Vec<ParamScope> {
+    let mut scopes = Vec::new();
+    let chars: Vec<(usize, char)> = formula.char_indices().collect();
+    let len = chars.len();
+    for i in 0..len {
+        let (_, c) = chars[i];
+        if c.is_ascii_alphabetic() || c == '_' {
+            let mut j = i;
+            while j < len
+                && (chars[j].1.is_ascii_alphanumeric() || chars[j].1 == '_' || chars[j].1 == '.')
+            {
+                j += 1;
+            }
+            if j < len && chars[j].1 == '(' {
+                let name: String = chars[i..j].iter().map(|(_, ch)| *ch).collect();
+                let upper = name.to_ascii_uppercase();
+                if upper == "LET" || upper == "LAMBDA" {
+                    let open_paren = chars[j].0;
+                    let mut depth = 0i32;
+                    let mut close_paren = None;
+                    let mut quote: Option<char> = None;
+                    for k in j..len {
+                        let (k_byte, k_char) = chars[k];
+                        match quote {
+                            Some(q) => {
+                                if k_char == q {
+                                    quote = None;
+                                }
+                            }
+                            None => match k_char {
+                                '"' | '\'' => quote = Some(k_char),
+                                '(' => depth += 1,
+                                ')' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        close_paren = Some(k_byte);
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            },
+                        }
+                    }
+                    if let Some(close_byte) = close_paren {
+                        let inner = &formula[open_paren + 1..close_byte];
+                        let args = split_top_level_args(inner);
+                        let mut params = Vec::new();
+                        if upper == "LET" && args.len() >= 3 {
+                            let end_param_idx = if args.len() % 2 == 1 {
+                                args.len() - 1
+                            } else {
+                                args.len()
+                            };
+                            for idx in (0..end_param_idx).step_by(2) {
+                                let arg_trimmed = args[idx].trim();
+                                if is_valid_ident(arg_trimmed) {
+                                    params.push(arg_trimmed.to_ascii_uppercase());
+                                }
+                            }
+                        } else if upper == "LAMBDA" && args.len() >= 2 {
+                            for arg in &args[..args.len() - 1] {
+                                let arg_trimmed = arg.trim();
+                                if is_valid_ident(arg_trimmed) {
+                                    params.push(arg_trimmed.to_ascii_uppercase());
+                                }
+                            }
+                        }
+                        if !params.is_empty() {
+                            scopes.push(ParamScope {
+                                start: open_paren,
+                                end: close_byte,
+                                params,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    scopes
+}
+
 fn prefix_future_functions(formula: &str) -> String {
+    let param_scopes = extract_param_scopes(formula);
     let characters: Vec<char> = formula.chars().collect();
     let mut out = String::with_capacity(formula.len() + 8);
     let mut position = 0;
@@ -147,7 +279,7 @@ fn prefix_future_functions(formula: &str) -> String {
             }
             continue;
         }
-        if character.is_ascii_alphabetic() {
+        if character.is_ascii_alphabetic() || character == '_' {
             let start = position;
             while position < characters.len()
                 && (characters[position].is_ascii_alphanumeric()
@@ -163,6 +295,18 @@ fn prefix_future_functions(formula: &str) -> String {
                 out.push_str("_xlfn.");
             } else if is_call && WORKSHEET_FUNCTIONS.contains(&upper.as_str()) {
                 out.push_str("_xlfn._xlws.");
+            } else if !is_call {
+                let byte_pos = formula
+                    .char_indices()
+                    .nth(start)
+                    .map(|(b, _)| b)
+                    .unwrap_or(start);
+                let is_param = param_scopes.iter().any(|scope| {
+                    byte_pos > scope.start && byte_pos < scope.end && scope.params.contains(&upper)
+                });
+                if is_param {
+                    out.push_str("_xlpm.");
+                }
             }
             out.push_str(&word);
             continue;
@@ -176,6 +320,7 @@ fn prefix_future_functions(formula: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xlsx::formula_import::{loom_formula, DefinedNames};
 
     #[test]
     fn future_functions_get_their_prefix_outside_text() {
@@ -258,5 +403,30 @@ mod tests {
             assert!(in_file.starts_with("_xlfn._xlws."), "{call} -> {in_file}");
             assert_eq!(loom_formula(&in_file, &DefinedNames::default()), call);
         }
+    }
+
+    #[test]
+    fn let_and_lambda_parameters_are_prefixed_with_xlpm() {
+        assert_eq!(
+            excel_formula("=LET(x,5,x*2)", &[]),
+            "_xlfn.LET(_xlpm.x,5,_xlpm.x*2)"
+        );
+        assert_eq!(
+            excel_formula("=LET(x,1,y,x+1,x+y)", &[]),
+            "_xlfn.LET(_xlpm.x,1,_xlpm.y,_xlpm.x+1,_xlpm.x+_xlpm.y)"
+        );
+        assert_eq!(
+            excel_formula("=LAMBDA(x,y,x+y)", &[]),
+            "_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)"
+        );
+        let names = DefinedNames::default();
+        assert_eq!(
+            loom_formula("_xlfn.LET(_xlpm.x,5,_xlpm.x*2)", &names),
+            "LET(x,5,x*2)"
+        );
+        assert_eq!(
+            loom_formula("_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)", &names),
+            "LAMBDA(x,y,x+y)"
+        );
     }
 }
