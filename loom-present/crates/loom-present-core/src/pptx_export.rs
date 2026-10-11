@@ -241,8 +241,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 heading_font: false,
             },
         ),
-        // Pictures and tables are written by their own shape emitters.
-        ElementType::Picture | ElementType::Table => return String::new(),
+        // Pictures, tables, and charts are written by their own shape emitters.
+        ElementType::Picture | ElementType::Table | ElementType::Chart => return String::new(),
         ElementType::StatCard => (
             "rect",
             Some(STAT_FILL),
@@ -355,6 +355,12 @@ fn slide_xml(
             if let Some(table) = element.table() {
                 shapes.push_str(&crate::tables::table_graphic_frame(
                     next_id, element, &table,
+                ));
+            }
+        } else if element.element_type == ElementType::Chart {
+            if let Some(chart) = element.chart() {
+                shapes.push_str(&crate::charts::chart_graphic_frame(
+                    next_id, element, &chart,
                 ));
             }
         } else {

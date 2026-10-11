@@ -13,6 +13,7 @@ use loom_package::zip::{self, PackageArchive};
 use loom_text::ParagraphStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod charts;
 mod comments;
 mod docx;
 mod export;
@@ -30,6 +31,7 @@ mod tables;
 pub mod test_fonts;
 mod text_metrics;
 
+pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
 pub use layout::{DocumentFlow, FlowLine};

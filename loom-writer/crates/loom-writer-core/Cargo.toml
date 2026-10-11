@@ -34,4 +34,5 @@ unicode-segmentation = "1.13"
 [dev-dependencies]
 # `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.
 loom-pdf = { workspace = true, features = ["test-support"] }
+loom-clipboard = { path = "../../../loom-core/crates/loom-clipboard" }
 roxmltree = "0.21"

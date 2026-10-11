@@ -172,6 +172,8 @@ pub fn slides_from_pptx(pptx_bytes: &[u8]) -> Result<Vec<Slide>, String> {
         let mut slide = Slide::new(format!("pptx-slide-{}", index + 1), title, "imported-pptx");
         let tables = crate::tables::extract_pptx_slide_tables(&xml_str);
         slide.elements.extend(tables);
+        let charts = crate::charts::extract_pptx_slide_charts(&xml_str);
+        slide.elements.extend(charts);
         slides.push(slide);
     }
     Ok(slides)

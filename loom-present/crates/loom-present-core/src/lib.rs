@@ -16,6 +16,8 @@ pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use pptx_export::export_pptx;
 pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_pptx};
 use session_history::Snapshot;
+pub mod charts;
+pub use charts::*;
 pub use tables::*;
 
 /// Authoring-plane dimensions used by Present's scene and transform APIs.
@@ -34,6 +36,8 @@ pub enum ElementType {
     Picture,
     /// An embedded structured table; `content` is a JSON-serialized [`loom_objects::Table`].
     Table,
+    /// An embedded chart; `content` is a JSON-serialized [`loom_objects::Chart`].
+    Chart,
 }
 
 /// Interactive click action trigger for presentation slides and elements.
@@ -2363,6 +2367,7 @@ fn element_type_marker(element_type: &ElementType) -> &'static str {
         ElementType::StatCard => "stat-card",
         ElementType::Picture => "picture",
         ElementType::Table => "table",
+        ElementType::Chart => "chart",
     }
 }
 

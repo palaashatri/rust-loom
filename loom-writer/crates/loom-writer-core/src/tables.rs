@@ -410,7 +410,7 @@ pub(crate) fn compute_cell_ranges(text: &str) -> Vec<Vec<(usize, usize)>> {
 }
 
 /// Index in `document.blocks` after which a table inserted at `offset` lands.
-fn block_insert_index(document: &WriterDocument, offset: usize) -> usize {
+pub(crate) fn block_insert_index(document: &WriterDocument, offset: usize) -> usize {
     let mut cursor = 0usize;
     let total = document.editor_text().len();
     for (index, block) in document.blocks.iter().enumerate() {

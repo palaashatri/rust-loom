@@ -170,6 +170,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
                     : root.element-types[idx] == 5 ? Theme.palette().content-accent
                     : root.element-types[idx] == 7 ? Theme.palette().paper
+                    : root.element-types[idx] == 8 ? Theme.palette().paper
                     : transparent;
                 transform-origin: { x: self.width / 2, y: self.height / 2 };
                 transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;

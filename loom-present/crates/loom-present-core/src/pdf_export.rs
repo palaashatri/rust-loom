@@ -109,6 +109,11 @@ fn draw_element(
                 draw_table(pdf, page, transform, elem, &table);
             }
         }
+        ElementType::Chart => {
+            if let Some(chart) = elem.chart() {
+                draw_chart(pdf, page, transform, elem, &chart);
+            }
+        }
     }
 }
 
@@ -325,4 +330,82 @@ fn parse_hex_color_rgb(hex: &str) -> Option<(f32, f32, f32)> {
     let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
     let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
     Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
+}
+
+fn draw_chart(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    transform: [f32; 6],
+    elem: &SlideElement,
+    chart: &loom_objects::Chart,
+) {
+    // Card background
+    pdf.draw_rect_with_transform(
+        page,
+        (0.0, 0.0, elem.width, elem.height),
+        PathStyle::filled((0.98, 0.98, 0.98)),
+        transform,
+    );
+    pdf.draw_rect_with_transform(
+        page,
+        (0.0, 0.0, elem.width, elem.height),
+        PathStyle::stroked((0.85, 0.88, 0.90), 1.0),
+        transform,
+    );
+
+    // Title
+    if let Some(title) = &chart.title {
+        let title_style = TextStyle {
+            size_pt: 12.0 * UNITS_PER_EDITOR_PX,
+            bold: true,
+            ..TextStyle::default()
+        };
+        pdf.draw_text_with_transform(
+            page,
+            12.0 * UNITS_PER_EDITOR_PX,
+            18.0 * UNITS_PER_EDITOR_PX,
+            title,
+            &title_style,
+            transform,
+        );
+    }
+
+    if !chart.series.is_empty() && !chart.categories.is_empty() {
+        let norm_values = chart.normalized_series_values();
+        let cat_count = chart.categories.len();
+        let series_count = chart.series.len();
+        let plot_top = 28.0 * UNITS_PER_EDITOR_PX;
+        let plot_bottom = elem.height - 20.0 * UNITS_PER_EDITOR_PX;
+        let plot_h = (plot_bottom - plot_top).max(20.0);
+        let plot_left = 24.0 * UNITS_PER_EDITOR_PX;
+        let plot_right = elem.width - 24.0 * UNITS_PER_EDITOR_PX;
+        let plot_w = (plot_right - plot_left).max(40.0);
+        let cat_w = plot_w / cat_count as f32;
+        let bar_slot = cat_w * 0.8;
+        let bar_w = (bar_slot / series_count as f32).max(2.0);
+
+        let colors: [(f32, f32, f32); 4] = [
+            (0.145, 0.388, 0.922),
+            (0.063, 0.725, 0.506),
+            (0.961, 0.620, 0.043),
+            (0.937, 0.267, 0.267),
+        ];
+
+        for (c_idx, _cat) in chart.categories.iter().enumerate() {
+            let cat_x = plot_left + c_idx as f32 * cat_w + (cat_w - bar_slot) / 2.0;
+            for (s_idx, s_norm) in norm_values.iter().enumerate() {
+                let norm = s_norm.get(c_idx).copied().unwrap_or(0.0) as f32;
+                let bar_h = (plot_h * norm).max(2.0);
+                let x = cat_x + s_idx as f32 * bar_w;
+                let y = plot_bottom - bar_h;
+                let color = colors[s_idx % colors.len()];
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, y, bar_w - 1.0, bar_h),
+                    PathStyle::filled(color),
+                    transform,
+                );
+            }
+        }
+    }
 }
