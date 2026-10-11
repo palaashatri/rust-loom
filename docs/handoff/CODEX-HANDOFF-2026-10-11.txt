@@ -1,0 +1,292 @@
+LOOM - CODEX HANDOFF (2026-10-11)
+=================================
+
+Audience: Codex agents. Coder = GPT-6 "Luna". Hostile reviewer = GPT 6.1 "Sol" (Max).
+Everything below is designed so lanes run IN PARALLEL without colliding.
+
+Read order: (1) AGENTS.md at the repo root (constitution + live ledger; the only
+authoritative Markdown). (2) docs/handoff/LINUX-HANDOFF-2026-10-07.txt (older, still
+valid for gates and pitfalls). (3) this file. When files disagree, AGENTS.md wins.
+Do not create any other .md file (governance audit fails). This file is plain text.
+
+0. HONEST STATE IN ONE PARAGRAPH
+--------------------------------
+Loom = Rust + Slint local-first creative suite. v1 scope (owner decision 2026-10-06):
+Sheets, Writer, Present on Windows + Linux only. macOS out. Photo/Motion/Video/Studio/
+Encode are LOCKED (refactor-only). All three v1 apps are ACCEPTANCE_BLOCKED: they work
+end to end and pass most gates in tested flows, but no app has an ACCEPTED record. The
+last two hostile reviews (Windows live + Linux live, nightly 1a8bf46) found a severity-1
+crash-draft-loss bug in all three apps; it is now FIXED and pushed (51351ba Present,
+d0ea415 Writer, f1321af Sheets) but has NOT been re-verified in a live window. Do not
+claim production-ready. The AGENTS.md ledger has NOT yet been updated with this
+session's evidence (see lane L9): that is real outstanding work.
+
+1. REPO, BRANCH, BUILD RULES
+----------------------------
+- Repo https://github.com/palaashatri/rust-loom, branch main only. Last known head:
+  3041091 "feat(writer): kerned font-aware measurement via loom-fonts ...". CI for
+  e17f785 / 3041091 was still running when this was written: check Actions first.
+- Each app is its own cargo workspace: run cargo from inside loom-sheets / loom-writer /
+  loom-present / loom-core so .cargo/config.toml applies (Windows needs the 32 MiB stack
+  link flag there). Never run `cargo clean`, `git reset`, `git stash`, `git checkout --`
+  in a shared checkout.
+- Debug builds only (CARGO_INCREMENTAL=0). Timing claims need
+  CARGO_PROFILE_TEST_OPT_LEVEL=3 (debug is 10-30x slower and meaningless).
+- Byte ceilings are law: loom-bootstrap/contracts/code-quality.toml. NEVER raise one.
+  Current tight spots: loom-sheets-app/ui/app.slint 39,715 / 39,732 (17 bytes of
+  headroom), ui/chart.slint 32,725 / 32,768, Present ui/app.slint 42,705 / 42,883,
+  Sheets main.rs ~108.2k / 108,783. Extract a module instead.
+- Gates (run per touched app, then the four audits from the repo root):
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace --locked --no-fail-fast        (Sheets ~25 min; RTL/DPI matrix
+                                                           tests are slow in debug)
+    python3 loom-bootstrap/scripts/audit-code-structure.py
+    python3 loom-bootstrap/scripts/audit-ui-foundation.py
+    python3 loom-bootstrap/scripts/audit-governance.py
+    python3 loom-bootstrap/scripts/audit-assets.py
+  Windows: set PYTHONUTF8=1 and use `python` not `python3`.
+- GOVERNANCE TRAP: the live status table in AGENTS.md is parsed strictly. Work status
+  column must be exactly IN_PROGRESS or LOCKED. Writer/Present read LOCKED there during
+  the sheets phase; do not write anything else in that column.
+- Commit trailer used so far: "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>".
+  Use your own model's trailer.
+
+2. ENVIRONMENTS (what exists and the traps)
+-------------------------------------------
+Windows 11 (primary, i5-12400F, 32 GB): Office 16 installed (Excel/Word/PowerPoint COM
+works hidden; Visible=false, DisplayAlerts=false; kill stray processes). Interop scripts:
+loom-sheets/tests/interop/check_excel.ps1, loom-writer/tests/interop/check_word.ps1,
+loom-present/tests/interop/check_powerpoint.ps1 (fixtures come from #[ignore] tests
+`cargo test -p <core> --test interop_fixtures -- --ignored` with LOOM_INTEROP_OUT=dir).
+WSL2: distro is now `Ubuntu-E` (the original `Ubuntu` registration is broken: its disk
+was moved to E:\WSL\Ubuntu\ext4.vhdx after C: filled to 0 bytes). ALWAYS use
+`wsl -d Ubuntu-E -- bash /home/patri/script.sh` and write scripts through
+\\wsl$\Ubuntu-E\home\patri (quoting through `wsl -- bash -c '...'` is fragile).
+Detached `&` jobs do NOT survive when the wsl invocation exits: run long jobs as
+foreground/background tool tasks.
+DISK INCIDENT (do not repeat): four parallel app builds filled the host disk; ext4 went
+read-only. Each app target/ is 6-9 GB. Before every build check `df -h /` and the HOST
+volume (E:) free space; build ONE app per clone at a time; delete a clone's target/
+after its suite passes when free space < 25 GB. WSL has 12 cores but only 15 GB RAM:
+at most ~3 concurrent cargo jobs.
+Stale WSL clones (safe to delete targets; uncommitted WIP noted):
+  ~/rust-loom (old WIP, ignore), ~/font-loom, ~/exp-loom, ~/sv-loom, ~/spa-loom,
+  ~/spb-loom, ~/spc-loom, ~/spd-loom, ~/spe-loom, ~/spe2-loom: all merged upstream.
+  ~/wp-loom : UNCOMMITTED partial Writer font-picker work (agent was cut off by a rate
+  limit mid-edit of loom-writer-app/ui/app.slint). Inspect `git diff --stat` there; it
+  is a head start for lane L3, not trusted code.
+Linux GUI: WSLg is shared with the Windows clipboard and focus, and keystrokes from
+other tools leak in. Prefer a private Xvfb (no window manager) for scripted input and
+only use WSLg for screenshots. xdotool/AT-SPI usage and a focus guard are in
+.agents/skills/linux-desktop-input/SKILL.md.
+Nightly binaries: GitHub release `nightly` has windows/linux/macos archives per commit
+(unsigned). Use them for live review instead of building (saves 10+ GB).
+
+3. WHAT EXISTS (so nobody re-invents it)
+----------------------------------------
+- loom-core/crates/loom-fonts (NEW, merged): FontCatalog (system + bundled Inter,
+  name/weight/style parsing, aliases in all languages, variable-font instances,
+  bounded scan + ScanCache), resolve(family, weight, italic) with fallback chain and
+  `substituted`, shaping via harfrust/skrifa with kerning, per-paragraph bidi,
+  per-grapheme fallback, multi-run layout_line(&[StyledRun]), caret affinity,
+  O(log n) caret stops, selection_rects, UAX-14 line_break_opportunities.
+  131 tests. Not yet used by Sheets/Present.
+- loom-core/crates/loom-pdf: embedded SUBSET Inter (4 faces) as CIDFontType2 with
+  ToUnicode, /ActualText for shared glyphs, NFC composition, invisible-char handling,
+  TJ kerning via RunShaper trait, `inspect` (behind `test-support` feature) used by
+  tests. No CJK font is bundled: uncovered characters draw .notdef. Fallback hook exists
+  (FontFallback) but nothing wires a system font into it.
+- Writer core measures through loom-fonts (kerned; word+space cache). Editor and PDF
+  line breaks are tested equal at 11 pt body. Keystroke p95 3.4 ms @100 pages, 15.3 ms
+  @400 pages (budget 16.7); open 1.29 s @400 pages (budget 2 s); PDF export 323 ms @400.
+- Sheets: banded copy-on-write cells, row-order sort, revision/fingerprint dirty check.
+  1M-cell UI-thread callbacks p50: format 0.26 ms, undo 0.32 ms, add row 0.34 ms,
+  paste 0.53 ms, SORT 126 ms, UNDO-SORT 158 ms (still over 16.7 ms), worker-result
+  apply 15-19 ms. Peak RSS idle 929 MiB at 1M cells; during edits ~1.39 GiB harness
+  figure (proposed budget 1 GiB, owner has not set one). Undo history cap now 256 MiB.
+  Function library 175 of Excel's 521 names (+49 this session); 7 Excel mismatches
+  fixed; 126 recorded real-Excel probes in tests/fixtures/excel_probes.json.
+- Recovery: Sheets REC-02 closed for v1 (edit pause/retry/fault injection). All three
+  apps: a crash draft is never silently discarded when launched with a file path
+  (same-file draft restores as '<name> *'; others are quarantined/kept). Quarantined
+  Present drafts are only reachable via File > Open.
+- Chrome font: platform system UI font for chrome (Segoe UI Variable on Windows,
+  Noto/Cantarell/DejaVu on Linux), Inter for document content. LOOM_UI_FONT=system|<name>
+  override; tests and --screenshot default to Inter for determinism.
+- In-app Appearance (System/Light/Dark/High Contrast), real scale-factor and RTL
+  mirroring tests, keyboard-flow tests per app, UIA/AT-SPI tree shows 0 unnamed
+  interactive controls in all three apps.
+- Evidence files (plain text, repo): loom-bootstrap/audit-evidence-interop-2026-10-07.txt
+  (Linux LibreOffice), audit-evidence-interop-windows-2026-10-09.txt (Excel 47/48 -
+  the 1 FAIL is a fixture defect, the app writes a CSV BOM; Word 43/43; PowerPoint
+  35/35), audit-evidence-excel-functions-2026-10-10.txt, audit-evidence-perf01-2026-10-09.txt.
+
+4. CURRENT GATE PICTURE (evidence-based; none is ACCEPTED)
+----------------------------------------------------------
+Gate                  Sheets        Writer        Present     Evidence / gap
+2 visual              UNVERIFIED    UNVERIFIED    UNVERIFIED  renders viewed, no >1280 live, no human sign-off
+3 core workflow       PASS          PASS          PASS        live Win + Linux
+4 selection           PASS          PASS          PASS(part)  Present drag/resize not exercised live
+5 undo/persistence    PASS          PASS          PASS
+6 open/save/export    PASS          PASS          PASS        Office COM verified
+7 recovery            RE-VERIFY     RE-VERIFY     RE-VERIFY   sev-1 fix pushed, not re-run live
+8 keyboard            PASS          PASS          RE-VERIFY   Present Tab order fixed in 51351ba
+9 accessibility       UNVERIFIED    PARTIAL       UNVERIFIED  tree-verified only; no speech; Writer text iface unavailable in Slint
+10 performance        PARTIAL       PARTIAL       PARTIAL     Sheets sort/undo-sort 126/158 ms; no GPU frame times
+11 interop            PASS(part)    PASS(part)    PASS(part)  Office + LibreOffice; CJK PDF unsupported
+13 no sev1/2          RE-VERIFY     RE-VERIFY     RE-VERIFY   needs a fresh hostile pass on the newest nightly
+14 ACCEPTED record    none          none          none
+
+5. WORK LANES (all can run in parallel; one owner per path set)
+---------------------------------------------------------------
+Rule: a lane edits ONLY its listed paths. Shared files (loom-core/crates/loom-ui,
+loom-core/crates/loom-fonts, loom-pdf, AGENTS.md) are owned by exactly one lane below.
+Each coder works in its OWN fresh clone (see section 6), produces a patch, and a single
+integrator applies patches to main in dependency order and commits.
+
+L1 Sheets performance (Luna)       owns: loom-sheets/crates/loom-sheets-core/src/{sort*,
+   history*}, loom-sheets-app/src/{workbook_worker*,history_accounting,perf_bench_tests}.
+   Goal: move Sheet sort / undo-sort rebuilds to the worker with an async undo entry so
+   the UI thread stays <= 16.7 ms at 1M cells; stop copying Sheet.objects (images) on
+   snapshots; bring worker-result apply under 16 ms. Benches: LOOM_PERF_UI=1 etc.
+   (src/perf_bench_tests.rs). Fix the flaky test
+   save_completion_keeps_undo_to_the_previous_baseline_dirty (asserts before async save
+   completes): make it wait for completion.
+L2 Sheets UI/a11y/visual (Luna)    owns: loom-sheets-app/ui/**, src/main_tests/**_visual*,
+   inspector_tests. Open: app.slint has 17 bytes headroom: EXTRACT first. Items: disabled
+   icon buttons in high contrast barely differ (needs L6 token); sheet tab list nested
+   page-tab; format buttons expose no selected state; Border toggle checked state in HC
+   verify; recovered CSV import loses its source name after relaunch (recovery format
+   change: coordinate with L8 only if you touch loom-production); grid stays white in
+   dark theme (documented policy; decide with the owner); toolbar '...' overflow and '+'
+   tab do not scale at text scale 2.0.
+L3 Writer font picker (Luna)       owns: loom-writer/** except export*/pdf* (L4). Start
+   from ~/wp-loom partial WIP if useful. Spec: searchable keyboard-operable dropdown from
+   loom_fonts::FontCatalog (recent first, 'not installed' marker via resolve().substituted),
+   applies to selection/caret as ONE undo step, 'Mixed' state, page draws each run in its
+   family (Slint font-family per run, Inter fallback), measurement uses the run's
+   FontRef, DOCX w:rFonts carries the family, background catalogue scan with ScanCache so
+   the UI never blocks, generic names Sans/Serif/Mono mapped to concrete faces. Highlights
+   must stay aligned: extend kerned_highlight_tests with a second face (deterministic
+   fixture, not host fonts). Per-run font SIZE is also not drawn/measured today: do it if
+   cheap, else document.
+L4 Writer/Present export fidelity (Luna) owns: loom-writer-core/src/{export*,markdown,docx/**},
+   loom-present-core/src/pdf_export.rs, loom-pdf/**. Open: PDF still embeds only Inter;
+   non-Inter families and CJK need font embedding through the FontFallback hook fed by
+   loom-fonts (subset only when OS/2 fsType permits embedding; otherwise Inter + visible
+   status note); heading bold in PDF vs regular in editor can break lines differently;
+   DOCX export fonts Arial/Calibri defaults; Present PDF thumbnails text; ToUnicode
+   edge cases. NEVER let a new fallback path embed a whole .ttc or CFF-flavoured face as
+   FontFile2 (reviewer finding).
+L5 Present polish (Luna)           owns: loom-present/** except pdf_export. Open: thumbnail
+   titles unreadable at 1x/5 px (needs a device-scale-aware legibility rule: render the
+   miniature at the display scale, not as scaled layout); Morph transition plays as
+   Dissolve (no object matching): implement matching or rename it honestly; quarantined
+   drafts should be offered at next launch, not only via File > Open; Ctrl/Cmd shortcuts
+   while a menu is open only close the menu; drag/resize of objects has no live
+   evidence; shared Present palette ranking uses loom-command (shared: coordinate).
+L6 Shared UI (Luna)                owns: loom-core/crates/loom-ui/**, loom-core/crates/
+   loom-desktop/**, loom-command/**. Open: CommandPalette has no selection highlight on
+   Ctrl+A; LoomIconButton disabled state in high contrast; tab strip role nesting; menu
+   rows exposed as Text not MenuItem in UIA (focus stays on Window while a menu is open);
+   toolbar overflow icon does not scale at 2.0; the one-embedder rule for bundled Inter
+   (Cargo feature bundled-inter vs bundled-inter-text: verify no duplicate embedding).
+   Slint AccessKit panic: intermittent `RefCell already borrowed` in i-slint-backend-winit
+   winitwindowadapter.rs:1593 handle_focus_change while an accessibility client polls the
+   tree; not reproduced in 30 Linux cycles; if it recurs, capture the log and upstream it
+   (do not paper over with timers).
+L7 Sheets function library (Luna)  owns: loom-sheets-core/src/{functions*,formula*,
+   number_format*}. 346 of Excel's 521 names still missing (engineering 0/54, database,
+   cube, web are 0; math/trig 53 missing). Implement in new modules, differential-test
+   against real Excel on Windows (COM hidden) and add recorded probes like
+   tests/fixtures/excel_probes.json. Cell display NumberFormat is a 7-value enum:
+   imported codes ('# ?/?', 'h:mm:ss') stay lossy until CellStyle stores real codes
+   (touches the XLSX and .loomtable formats: write a migration + tests). Still unprobed:
+   '#'-only fraction placeholders, mixed ?/0 separator rule, LET duplicate case rules,
+   XMATCH binary-search modes, DBCS variants (FINDB...), '*x' repeat and '_x' width codes.
+L8 Interop + recovery platform checks (Luna) owns: loom-production/**, tests/interop/**.
+   Open: real full-volume disk-full test (only injected write errors exist); Windows
+   and macOS lock/pointer-replacement behaviour; DOCX/PPTX import does not exist (Writer
+   and Present export only): a design spike is backlog, not v1; LibreOffice is not
+   installed in WSL (Linux evidence needs `apt install libreoffice-core ...` with sudo).
+L9 Ledger + governance (Luna or a human) owns: AGENTS.md (only this lane edits it),
+   docs/archive/AGENTS-ARCHIVE.md, loom-bootstrap/contracts/**, GOV-02/03/04 cards.
+   Must do: add a dated current-truth paragraph for the work since 2026-10-09: Windows
+   and Linux final reviews, Office COM results, Excel function differential, PERF-01
+   measurements, fonts/PDF/measurement milestones, sev-1 fix, disk incident, plus the gate
+   table above with RE-VERIFY lines. Keep AGENTS.md under ~150 KB (move old paragraphs to
+   the archive). Do not mark any gate PASS without a cited evidence file.
+L10 CI/packaging (Luna)            owns: .github/**, packaging/**. Known: macOS-Intel
+   Sheets scroll-budget job is red and out of v1 (make non-required); per-branch
+   downloadable builds exist only for main nightly; nothing is signed (SmartScreen /
+   Gatekeeper warn); confirm archives launch on a clean machine.
+
+6. PARALLEL PROTOCOL
+--------------------
+1. Each lane: `git clone https://github.com/palaashatri/rust-loom.git ~/<lane>-loom`
+   (fresh), work there, never in another lane's clone or in the Windows checkout.
+2. Failing test first, then fix. Test behaviour (accessibility tree, element bounds,
+   pixels, exported bytes read by an independent reader), never source strings.
+3. Deliverable per lane = `git add -N . && git diff --binary > ~/<lane>.patch` (binary
+   because a Present test fixture contains NUL bytes) + a <30-line report: commands,
+   pass counts, changed files, anything NOT done, ceilings touched.
+4. Integrator applies patches to the Windows checkout with `git apply --3way`, runs the
+   audits, commits, pushes, watches CI (api.github.com/repos/palaashatri/rust-loom/
+   actions/runs). Apply order when patches overlap: L6 -> L4 -> L3 -> L1/L2/L5/L7.
+5. Hostile reviewer (Sol): receives the patch + report, re-runs the gates, mutation-
+   checks every new test (break the code under test; a test that cannot fail is not
+   evidence), drives the real nightly binary, and answers APPROVE / APPROVE_WITH_CHANGES /
+   REJECT with numbered findings, severity 1 (data loss/crash/corrupt export/unsafe),
+   2 (wrong output or broken primary workflow), 3 (polish). Reviewer is read-only on
+   product code. The integrator only merges APPROVE or fixed-then-re-reviewed patches.
+6. Final acceptance round (after lanes merge): one Sol pass on Windows (live, nightly
+   exe, UIA dump, Office COM on exports) and one on Linux (private Xvfb + AT-SPI, nightly
+   tar.gz). Output per-gate PASS/FAIL/UNVERIFIED with evidence paths. Only then may L9
+   record ACCEPTED, and only for an app whose every gate in AGENTS.md section 13 passes.
+
+7. REVIEWER CHECKLIST (Sol)
+--------------------------
+- Re-run: fmt, clippy -D warnings, workspace tests, four audits. Compare counts with the
+  lane report (reports have been wrong by omission before: e.g. a full suite 'passed'
+  while one RTL test never finished).
+- Diff reading: weakened/deleted tests, new allow()s, raised ceilings, dead code,
+  placebo controls, success messages without effect, README claims vs behaviour.
+- Data safety first: kill -9 mid-edit then relaunch with and without a file argument;
+  disk-full; two instances; Save/Export while recovery is paused; undo after save.
+- Real windows: keyboard-only walkthrough; RTL; text scale 1.5/2.0; scale factor 1.5/2;
+  1024x720..1920x1200; light/dark/high contrast; then a 100k and 1M cell Sheets file.
+- Exports opened by an independent reader (Excel/Word/PowerPoint COM on Windows,
+  LibreOffice / qpdf / Ghostscript on Linux).
+- Never type into a window unless it is verified foreground; earlier reviewers leaked
+  keystrokes into other apps.
+
+8. PITFALLS LEARNED THIS SESSION
+--------------------------------
+- Headless windows report width 0 before layout; absolute x from parent.width goes
+  negative (dialog buttons off-screen). Clamp with max(0px, ...).
+- cargo test does not rebuild the app binary: `cargo build -p loom-<app>-app` before
+  `--screenshot`.
+- A fixed `LoomButton` height (28 px) is cramped at 2.0 text scale.
+- Raw PDF byte greps no longer work (glyph ids): use loom_pdf::inspect (test-support).
+- Present's tests/pictures.rs contains NUL bytes: use `git diff --binary`.
+- A one-line shared edit (command_palette.slint) was made by two coders: expect
+  harmless duplicate hunks; use --3way.
+- Windows PowerShell 5.1 has no `&&`, no `wc`; Git Bash path conversion mangles
+  /mnt/c and \\wsl$ arguments (use MSYS_NO_PATHCONV=1 or PowerShell).
+- Agents that spawn their own polling monitors produce thousands of stale
+  notifications: forbid timer/monitor loops in worker prompts.
+- Power loss twice: everything uncommitted in WSL clones survived (ext4) but running
+  jobs died. Commit/push after every verified milestone.
+- Subagent usage limits hit mid-edit: re-read git status/diff before resuming a worker.
+- The owner's weekly usage budget is limited: prefer one Sol review per platform at the
+  end of a round over per-patch reviews; do not run duplicate full suites in many clones.
+
+9. OWNER PREFERENCES
+--------------------
+Autonomous work; commit and push every coherent verified milestone; Windows and Linux
+only; hostile reviewer mindset; never claim 'production ready' unless every gate has
+recorded evidence; keep disk usage low; integrate IDEAS from the external projects
+storytold/wordcraft|gridcraft|deckcraft (Apache-2.0/MIT, young, egui-based) but do not
+copy their code; use upstream crates as dependencies and write original code. Record any
+borrowed third-party crate and its license in the report and assets.toml where relevant.
