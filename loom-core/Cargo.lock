@@ -2945,6 +2945,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-objects"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "loom-package"
 version = "0.1.0"
 dependencies = [

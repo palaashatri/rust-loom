@@ -1,0 +1,13 @@
+[package]
+name = "loom-objects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared office object models: tables, charts, images, shapes and styles"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]

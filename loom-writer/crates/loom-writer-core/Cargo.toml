@@ -17,6 +17,7 @@ loom-package = { workspace = true }
 loom-text = { workspace = true }
 loom-command = { workspace = true }
 loom-pdf = { workspace = true }
+loom-objects = { workspace = true }
 # Text is measured by shaping Inter with kerning, as the page draws it. The
 # bundled Inter files are embedded once per binary: the workspace asks
 # loom-fonts for `bundled-inter-text` only (Regular, Italic, Bold, Bold Italic:

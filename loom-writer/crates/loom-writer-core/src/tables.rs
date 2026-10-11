@@ -157,6 +157,36 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     }
 }
 
+impl WriterTable {
+    /// Converts this `WriterTable` into a structured `loom_objects::Table`.
+    pub fn to_loom_table(&self) -> loom_objects::Table {
+        let cols = self.rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let mut table = loom_objects::Table::new(self.rows.len(), cols);
+        table.id = self.id.clone();
+        table.header_row = self.header_row;
+        for (r, row) in self.rows.iter().enumerate() {
+            for (c, cell_text) in row.iter().enumerate() {
+                table.set_cell_text(r, c, cell_text);
+            }
+        }
+        table
+    }
+
+    /// Migrates a `loom_objects::Table` into a `WriterTable`.
+    pub fn from_loom_table(table: &loom_objects::Table) -> Self {
+        let mut rows = Vec::with_capacity(table.row_count());
+        for row in &table.rows {
+            let cells = row.cells.iter().map(|c| c.content.text()).collect();
+            rows.push(cells);
+        }
+        Self {
+            id: table.id.clone(),
+            rows,
+            header_row: table.header_row,
+        }
+    }
+}
+
 /// Calls `visit` with each piece of a block's text that counts toward the word
 /// and character totals. A paragraph counts whole. A table counts each cell's
 /// text, so its pipes, padding and header separator are not words.
@@ -552,5 +582,22 @@ mod tests {
             .map(|b| b.text.len_bytes() + 1)
             .sum::<usize>();
         assert_eq!(document.selection().anchor, block_offset + 2);
+    }
+
+    #[test]
+    fn writer_table_converts_to_and_from_loom_objects_table() {
+        let mut writer_table = WriterTable::new("tbl-1", 2, 3);
+        writer_table.rows[0] = vec!["H1".into(), "H2".into(), "H3".into()];
+        writer_table.rows[1] = vec!["A".into(), "B".into(), "C".into()];
+        writer_table.header_row = true;
+
+        let loom_table = writer_table.to_loom_table();
+        assert_eq!(loom_table.row_count(), 2);
+        assert_eq!(loom_table.col_count(), 3);
+        assert_eq!(loom_table.cell_text(0, 0).as_deref(), Some("H1"));
+        assert_eq!(loom_table.cell_text(1, 2).as_deref(), Some("C"));
+
+        let converted_back = WriterTable::from_loom_table(&loom_table);
+        assert_eq!(writer_table, converted_back);
     }
 }
