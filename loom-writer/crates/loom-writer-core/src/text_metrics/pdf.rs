@@ -8,10 +8,7 @@ use super::faces::Style;
 use super::measure::{advances, LineMeasure, Uncovered};
 
 fn face_of(style: &TextStyle) -> Style {
-    Style {
-        bold: style.bold,
-        italic: style.italic,
-    }
+    Style::new(style.bold, style.italic)
 }
 
 /// Width in points of one run drawn in `style`: Inter shaped with kerning, as
@@ -46,7 +43,7 @@ pub(crate) struct InterShaper;
 
 impl RunShaper for InterShaper {
     fn clusters(&self, text: &str, bold: bool, italic: bool) -> Option<Vec<ClusterAdvance>> {
-        let found = advances(text, 0, &[], Style { bold, italic }, Uncovered::Drawn);
+        let found = advances(text, 0, &[], Style::new(bold, italic), Uncovered::Drawn);
         let clusters = (0..found.starts.len())
             .map(|index| {
                 let from = found.starts[index] as usize;

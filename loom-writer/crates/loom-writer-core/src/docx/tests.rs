@@ -662,6 +662,58 @@ fn documents_round_trip_through_the_importer() {
     assert!(blocks.iter().any(|b| b.text.as_str() == "Overview"));
 }
 
+#[test]
+fn a_chosen_family_is_written_for_every_script_slot_and_reads_back() {
+    let mut doc = WriterDocument::new("families", "Families");
+    let mut block = RichBlock::new(
+        doc.next_id(),
+        "paragraph",
+        "Plain Georgia Courier Mono Sans",
+    );
+    let family = |name: &str| styled(|style| style.font_family = name.into());
+    block.runs = vec![
+        run(6, 13, family("Georgia")),
+        run(14, 21, family("Courier Prime")),
+        run(22, 26, family("Mono")),
+        run(27, 31, family("Sans")),
+    ];
+    doc.push(block);
+    let export = export_docx(&doc).unwrap();
+    let parts = parts(&export);
+    let body = parse(&parts["word/document.xml"]);
+
+    // Read every text run back with the family it states.
+    let mut read_back: Vec<(String, String)> = Vec::new();
+    for r in all(&body, "r") {
+        let text: String = r
+            .children()
+            .filter(|c| is_w(c, "t"))
+            .filter_map(|c| c.text())
+            .collect();
+        if text.trim().is_empty() {
+            continue;
+        }
+        let fonts = child(child(r, "rPr").expect("run properties"), "rFonts").expect("rFonts");
+        // All four slots name the same family, so Word uses it for any script.
+        let ascii = w_attr(fonts, "ascii").expect("ascii");
+        for slot in ["hAnsi", "eastAsia", "cs"] {
+            assert_eq!(w_attr(fonts, slot), Some(ascii), "slot {slot} of {text:?}");
+        }
+        read_back.push((text.trim().to_owned(), ascii.to_owned()));
+    }
+    let pairs: Vec<(&str, &str)> = read_back
+        .iter()
+        .map(|(text, family)| (text.as_str(), family.as_str()))
+        .collect();
+    assert!(pairs.contains(&("Georgia", "Georgia")), "{pairs:?}");
+    assert!(pairs.contains(&("Courier", "Courier Prime")), "{pairs:?}");
+    // The generic names are written as the concrete Word faces.
+    assert!(pairs.contains(&("Mono", "Courier New")), "{pairs:?}");
+    assert!(pairs.contains(&("Sans", "Arial")), "{pairs:?}");
+    // The run that names no family keeps the default.
+    assert!(pairs.contains(&("Plain", "Arial")), "{pairs:?}");
+}
+
 /// Opt-in: writes the rich sample to `$LOOM_INTEROP_OUT/loom-writer-rich.docx`
 /// so it can be opened in real Word.
 #[test]

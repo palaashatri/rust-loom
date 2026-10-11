@@ -1,20 +1,21 @@
 //! A measured line of text: where every grapheme starts, in points.
 //!
 //! The text is cut into pieces that the page shapes separately (a change of
-//! bold, italic, underline or strikethrough starts a new piece, and so does
-//! white space), each piece is shaped in its Inter face with kerning, and the
-//! pieces' advances are laid end to end. Positions are therefore the ones the
-//! page draws a glyph at, which is what carets, selection rectangles,
-//! pointer hit-testing and line breaking need. Characters Inter does not cover
-//! are drawn by whatever font the window falls back to, so their widths are
-//! estimates ([`Uncovered::Estimate`]); the PDF export measures them at the
-//! advance it writes them with ([`Uncovered::Drawn`]).
+//! font family, bold, italic, underline or strikethrough starts a new piece,
+//! and so does white space), each piece is shaped in its face with kerning, and
+//! the pieces' advances are laid end to end. Positions are therefore the ones
+//! the page draws a glyph at, which is what carets, selection rectangles,
+//! pointer hit-testing and line breaking need. Characters the face does not
+//! cover are drawn by whatever font the window falls back to, so their widths
+//! are estimates ([`Uncovered::Estimate`]); the PDF export, which draws every
+//! run in Inter, measures them at the advance it writes them with
+//! ([`Uncovered::Drawn`]) and ignores the families runs name.
 
 use loom_pdf::TextStyle;
 use loom_text::StyleRun;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::faces::{self, Style};
+use super::faces::{self, Family, Style};
 
 /// What a grapheme Inter cannot draw is measured as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +29,14 @@ pub(crate) enum Uncovered {
     Drawn,
 }
 
+impl Uncovered {
+    /// The editor draws each run in the family it names; the PDF draws every
+    /// run in Inter, so measuring for it must not look at families.
+    fn honors_run_families(self) -> bool {
+        self == Self::Estimate
+    }
+}
+
 /// The attributes that make the page shape two stretches of text separately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Piece {
@@ -36,18 +45,24 @@ struct Piece {
     strikethrough: bool,
 }
 
-fn piece_at(runs: &[StyleRun], position: usize, base: Style) -> Piece {
+/// The attributes of the piece at `position`. `families` holds the measurement
+/// family of every run, or is empty when families are not honoured.
+fn piece_at(runs: &[StyleRun], families: &[Family], position: usize, base: Style) -> Piece {
     let mut piece = Piece {
         style: base,
         underline: false,
         strikethrough: false,
     };
-    if let Some(run) = runs
+    if let Some((index, run)) = runs
         .iter()
-        .find(|run| run.start <= position && position < run.end)
+        .enumerate()
+        .find(|(_, run)| run.start <= position && position < run.end)
     {
         piece.style.bold |= super::is_bold_weight(run.style.weight);
         piece.style.italic |= run.style.italic;
+        if let Some(family) = families.get(index) {
+            piece.style.family = *family;
+        }
         piece.underline = run.style.underline;
         piece.strikethrough = run.style.strikethrough;
     }
@@ -243,9 +258,16 @@ pub(super) fn advances(
             shaped: Vec::with_capacity(text.len()),
         },
     };
+    let families: Vec<Family> = if uncovered.honors_run_families() {
+        runs.iter()
+            .map(|run| faces::family_for(&run.style.font_family))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut word: Option<(Word, Piece)> = None;
     for (offset, grapheme) in text.grapheme_indices(true) {
-        let piece = piece_at(runs, text_start + offset, base);
+        let piece = piece_at(runs, &families, text_start + offset, base);
         let space = lone_space(grapheme);
         let index = builder.out.starts.len();
         builder.out.starts.push(offset as u32);

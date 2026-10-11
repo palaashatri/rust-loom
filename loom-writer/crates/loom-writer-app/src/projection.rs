@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use loom_writer_core::fonts;
 use loom_writer_core::{
     DocumentFlow, PageRect, PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection,
     WriterDocument,
@@ -120,6 +121,75 @@ fn fragment_block(block: &RichBlock, start: usize, end: usize) -> RichBlock {
     fragment
 }
 
+/// A stretch of one line set in one font family.
+struct Segment {
+    start: usize,
+    end: usize,
+    /// The family as the document stores it.
+    family: String,
+}
+
+/// The stretches of bytes `start..end` of `block` that are set in one family.
+/// Names that mean the same family (case, "Sans", the unnamed family) are one
+/// stretch, which is also where measurement shapes a new piece.
+fn line_segments(block: &RichBlock, start: usize, end: usize) -> Vec<Segment> {
+    let text = block.text.as_str();
+    let mut cuts = vec![start, end];
+    for run in &block.runs {
+        for edge in [run.start, run.end] {
+            if edge > start && edge < end && text.is_char_boundary(edge) {
+                cuts.push(edge);
+            }
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut segments: Vec<Segment> = Vec::new();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let family = block
+            .runs
+            .iter()
+            .find(|run| run.start <= from && from < run.end)
+            .map_or("", |run| run.style.font_family.as_str());
+        match segments.last_mut() {
+            Some(last) if fonts::same_family(&last.family, family) => last.end = to,
+            _ => segments.push(Segment {
+                start: from,
+                end: to,
+                family: family.to_owned(),
+            }),
+        }
+    }
+    if segments.is_empty() {
+        segments.push(Segment {
+            start,
+            end,
+            family: String::new(),
+        });
+    }
+    segments
+}
+
+/// The family the page draws `stored` in: empty for the document font, which
+/// the markup already uses, else the installed family that stands for it.
+fn drawn_family(stored: &str, cache: &mut HashMap<String, String>) -> String {
+    if fonts::is_document_font(stored) {
+        return String::new();
+    }
+    cache
+        .entry(stored.to_owned())
+        .or_insert_with(|| {
+            let drawn = fonts::resolve_family(stored).drawn;
+            if drawn == fonts::DEFAULT_FAMILY {
+                String::new()
+            } else {
+                drawn
+            }
+        })
+        .clone()
+}
+
 fn render_row(
     block: &RichBlock,
     x: f32,
@@ -127,6 +197,7 @@ fn render_row(
     width: f32,
     height: f32,
     marker: &str,
+    family: &str,
 ) -> WriterRenderBlock {
     let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
     WriterRenderBlock {
@@ -137,6 +208,7 @@ fn render_row(
         width,
         height,
         font_size: PageStyle::default().font_size_for_kind(block.kind.as_str()),
+        font_family: SharedString::from(family),
         alignment: writer_render_alignment(block.style.alignment),
         marker: SharedString::from(marker),
         unsupported,
@@ -183,7 +255,7 @@ fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlo
             let height = writer_render_height_for_width(block, font_size, content_width)
                 .max(font_size * style.line_height);
             let marker = list_marker(block.kind.as_str(), numbers[index]);
-            let row = render_row(block, 0.0, y, content_width, height, &marker);
+            let row = render_row(block, 0.0, y, content_width, height, &marker, "");
             y += height;
             row
         })
@@ -292,23 +364,77 @@ pub(crate) fn project(
 
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
     let numbers = list_numbers(doc);
-    let rows = flow
-        .lines_on(pages.clone())
-        .iter()
-        .map(|line| {
-            let block = &doc.blocks[line.block_index];
-            let font_size = style.font_size_for_kind(block.kind.as_str());
-            let marker = list_marker(block.kind.as_str(), numbers[line.block_index]);
-            render_row(
+    let mut families: HashMap<String, String> = HashMap::new();
+    let mut rows: Vec<WriterRenderBlock> = Vec::new();
+    for line in flow.lines_on(pages.clone()) {
+        let block = &doc.blocks[line.block_index];
+        let font_size = style.font_size_for_kind(block.kind.as_str());
+        let marker = list_marker(block.kind.as_str(), numbers[line.block_index]);
+        let x = ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
+        let y = ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
+        let height = (line.bounds.height / zoom).max(font_size * style.line_height);
+        let segments = line_segments(block, line.start, line.end);
+        if let [only] = segments.as_slice() {
+            let family = drawn_family(&only.family, &mut families);
+            rows.push(render_row(
                 &fragment_block(block, line.start, line.end),
-                ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
-                ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
+                x,
+                y,
                 content_width,
-                (line.bounds.height / zoom).max(font_size * style.line_height),
+                height,
                 &marker,
-            )
-        })
-        .collect();
+                &family,
+            ));
+            continue;
+        }
+        // Several families on one line: the page draws each stretch as its
+        // own row, placed where the selection highlight for that stretch is,
+        // so glyphs, caret and highlight come from one measurement.
+        let text = block.text.as_str();
+        let mut drawn_any = false;
+        for segment in &segments {
+            // The page markup strips white space at the start of a row, so a
+            // stretch is drawn from its first visible character and placed by
+            // the measurement of that character.
+            let stretch = &text[segment.start..segment.end];
+            let skipped = stretch.len() - stretch.trim_start().len();
+            let start = segment.start + skipped;
+            if start >= segment.end {
+                continue;
+            }
+            let from = line.global_start + (start - line.start);
+            let to = line.global_start + (segment.end - line.start);
+            let rects = flow.selection_rects(
+                doc,
+                &TextSelection::range(from, to),
+                line.page..line.page + 1,
+            );
+            let Some(found) = rects.first() else { continue };
+            let segment_x =
+                ((found.rect.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
+            let segment_width = found.rect.width / zoom;
+            // Left aligned at its measured position; the width runs on to the
+            // content edge so a rounding difference never wraps the stretch.
+            let width = (content_width - segment_x).max(segment_width) + 4.0;
+            let family = drawn_family(&segment.family, &mut families);
+            let mut row = render_row(
+                &fragment_block(block, start, segment.end),
+                segment_x,
+                y,
+                width,
+                height,
+                if drawn_any { "" } else { &marker },
+                &family,
+            );
+            row.alignment = writer_render_alignment(loom_text::Alignment::Left);
+            if drawn_any {
+                row.unsupported = false;
+                row.unsupported_label = SharedString::default();
+            }
+            drawn_any = true;
+            rows.push(row);
+        }
+    }
 
     let ranges = flow.selection_rects(doc, &doc.selection(), pages.clone());
     let mut selection_rects = ui_selection_rects(&style, zoom, base_page, &ranges);

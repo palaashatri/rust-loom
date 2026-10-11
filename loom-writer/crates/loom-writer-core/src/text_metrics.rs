@@ -1,24 +1,27 @@
-//! Text measurement matched to the bundled Inter faces.
+//! Text measurement matched to the faces the page draws.
 //!
 //! Line breaking, caret placement, selection and comment rectangles and
 //! pointer hit-testing must all agree with the glyphs the page actually draws,
 //! and with the PDF export, which wraps with the same advances. The page draws
-//! with Inter, shaped with kerning, so text is shaped here the same way
-//! through `loom-fonts` ([`faces`] loads the bundled faces once and remembers
-//! each distinct word's advances; [`measure`] lays pieces end to end). Weight
-//! is bold only where a character run asks for it (weight 700 and up, as the
-//! page markup renders it) and italic follows the run; the run's font family
-//! and size are not drawn by the page markup, so they are not measured
-//! either.
+//! each run in its family (Inter unless the run names another), shaped with
+//! kerning, so text is shaped here the same way through `loom-fonts`
+//! ([`faces`] loads the faces once and remembers each distinct word's
+//! advances; [`measure`] lays pieces end to end). Weight is bold only where a
+//! character run asks for it (weight 700 and up, as the page markup renders
+//! it) and italic follows the run. A run's font size is not drawn per run, so
+//! it is not measured per run.
 //!
-//! Characters Inter lacks (CJK, emoji) are drawn by whatever font the window
-//! falls back to; their widths are estimates. The PDF export measures them at
-//! the advance it writes them with (see [`pdf`]).
+//! Characters the run's face lacks (CJK in Inter, emoji) are drawn by whatever
+//! font the window falls back to; their widths are estimates. The PDF export,
+//! which draws every run in Inter, measures them at the advance it writes them
+//! with (see [`pdf`]).
 
 mod faces;
 mod measure;
 mod pdf;
 
+#[cfg(test)]
+mod family_tests;
 #[cfg(test)]
 mod kerning_tests;
 

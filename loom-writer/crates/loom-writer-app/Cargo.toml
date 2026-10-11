@@ -27,3 +27,8 @@ slint-build = "1.17.1"
 
 [dev-dependencies]
 i-slint-backend-testing = "1.17.1"
+# The fixture fonts the picker and highlight tests install.
+loom-writer-core = { path = "../loom-writer-core", features = ["test-support"] }
+# A test registers a fixture face with the window's font collection, so the
+# page can draw a family the machine does not have installed.
+slint = { version = "1.17.1", features = ["unstable-fontique-010"] }

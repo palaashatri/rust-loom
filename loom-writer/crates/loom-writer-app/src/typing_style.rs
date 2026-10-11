@@ -1,20 +1,33 @@
 //! Formatting for text typed at a collapsed caret.
 //!
-//! Ctrl+B, Ctrl+I and Ctrl+U with no selection set the style that the next typed
-//! text takes. The setting belongs to one caret position: moving the caret, or an
-//! edit made elsewhere, drops it.
+//! Ctrl+B, Ctrl+I and Ctrl+U with no selection, and a font family chosen from
+//! the font list, set the style that the next typed text takes. The setting
+//! belongs to one caret position: moving the caret, or an edit made elsewhere,
+//! drops it.
 
 use std::cell::RefCell;
 
 /// The character style that typed text takes at one caret. `None` keeps the
 /// style the text already has.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PendingStyle {
     /// UTF-8 byte offset of the caret the style was set at.
     pub(crate) caret: usize,
     pub(crate) bold: Option<bool>,
     pub(crate) italic: Option<bool>,
     pub(crate) underline: Option<bool>,
+    /// The font family as the document stores it (empty: the document font).
+    pub(crate) family: Option<String>,
+}
+
+impl PendingStyle {
+    /// True when nothing is pending.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.bold.is_none()
+            && self.italic.is_none()
+            && self.underline.is_none()
+            && self.family.is_none()
+    }
 }
 
 /// The character styles that Ctrl+B, Ctrl+I and Ctrl+U toggle.
@@ -41,13 +54,20 @@ std::thread_local! {
 
 /// The pending style for `caret`. Nothing set there gives an empty style.
 pub(crate) fn at(caret: usize) -> PendingStyle {
-    PENDING.with(|pending| match *pending.borrow() {
-        Some(style) if style.caret == caret => style,
+    PENDING.with(|pending| match &*pending.borrow() {
+        Some(style) if style.caret == caret => style.clone(),
         _ => PendingStyle {
             caret,
             ..PendingStyle::default()
         },
     })
+}
+
+/// Make the text typed next at `caret` take the font family `family`.
+pub(crate) fn set_family(caret: usize, family: &str) {
+    let mut pending = at(caret);
+    pending.family = Some(family.to_owned());
+    store(pending);
 }
 
 /// Store the pending style. It applies to text typed at its caret.
@@ -65,7 +85,7 @@ pub(crate) fn clear() {
 pub(crate) fn retain_at(caret: usize) {
     PENDING.with(|pending| {
         let mut pending = pending.borrow_mut();
-        if pending.is_some_and(|style| style.caret != caret) {
+        if pending.as_ref().is_some_and(|style| style.caret != caret) {
             *pending = None;
         }
     });

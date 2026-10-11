@@ -17,7 +17,6 @@ pub struct DocumentFormattingState {
     pub underline: bool,
     pub strikethrough: bool,
     pub heading_level: i32,
-    pub font_family_index: i32,
     pub font_size_pt: i32,
     pub alignment: i32,
     pub line_spacing_index: i32,
@@ -300,20 +299,67 @@ pub fn set_selection_strikethrough(
     });
 }
 
-#[allow(dead_code)]
+/// Set the font family of the selected text. `family` is the name the document
+/// stores: empty puts the text back in the document font. The whole selection
+/// is one mutation, so it is one undo step.
 pub fn set_selection_font_family(
     document: &mut WriterDocument,
     selection: DocumentSelection,
-    family_index: i32,
+    family: &str,
 ) {
-    let family = match family_index {
-        1 => "Serif",
-        2 => "Monospace",
-        _ => "Sans",
-    };
+    let family = family.trim();
     mutate_selection_character_styles(document, selection, |style| {
         style.font_family = family.to_string();
     });
+}
+
+/// The font family of a selection as the font field shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FontChoice {
+    /// Every character is set in this stored family (empty: the document font).
+    Single(String),
+    /// The selection holds more than one family.
+    Mixed,
+}
+
+/// The family of the selected text: the shared family, or `Mixed` when the
+/// characters differ. A collapsed caret reports the family typed text would
+/// take, which is the character before it.
+pub fn selection_font_family(
+    document: &WriterDocument,
+    selection: DocumentSelection,
+) -> FontChoice {
+    let spans = selection_text_spans(document, selection.clone());
+    if spans.is_empty() {
+        let family = caret_style(document, selection)
+            .map(|style| style.font_family)
+            .unwrap_or_default();
+        return FontChoice::Single(family);
+    }
+    let mut found: Option<String> = None;
+    for (block_index, start, end) in spans {
+        let block = &document.blocks[block_index];
+        let mut boundaries = BTreeSet::from([start, end]);
+        for run in &block.runs {
+            if run.start < end && run.end > start {
+                boundaries.insert(run.start.max(start).min(end));
+                boundaries.insert(run.end.max(start).min(end));
+            }
+        }
+        let boundaries: Vec<usize> = boundaries.into_iter().collect();
+        for pair in boundaries.windows(2) {
+            if pair[0] >= pair[1] {
+                continue;
+            }
+            let family = style_at(block, pair[0]).font_family;
+            match &found {
+                None => found = Some(family),
+                Some(first) if loom_writer_core::fonts::same_family(first, &family) => {}
+                Some(_) => return FontChoice::Mixed,
+            }
+        }
+    }
+    FontChoice::Single(found.unwrap_or_default())
 }
 
 #[allow(dead_code)]
@@ -548,7 +594,6 @@ pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
         underline: all_non_empty_blocks_match(document, |style| style.underline),
         strikethrough: all_non_empty_blocks_match(document, |style| style.strikethrough),
         heading_level: uniform_heading_level(document),
-        font_family_index: 0,
         font_size_pt: 11,
         alignment: uniform_alignment(document),
         line_spacing_index: 1,
@@ -623,29 +668,6 @@ pub fn formatting_state_for_selection(
         (style_at(&document.blocks[first_block], first_start).font_size as i32).max(6)
     };
 
-    let font_family_index = if spans.is_empty() {
-        match caret_style(document, selection.clone())
-            .map(|s| s.font_family.to_lowercase())
-            .as_deref()
-        {
-            Some(f) if f.contains("serif") => 1,
-            Some(f) if f.contains("mono") => 2,
-            _ => 0,
-        }
-    } else {
-        let (first_block, first_start, _) = spans[0];
-        let f = style_at(&document.blocks[first_block], first_start)
-            .font_family
-            .to_lowercase();
-        if f.contains("serif") {
-            1
-        } else if f.contains("mono") {
-            2
-        } else {
-            0
-        }
-    };
-
     let line_spacing_index = selected_blocks
         .first()
         .map(|index| {
@@ -665,7 +687,6 @@ pub fn formatting_state_for_selection(
         underline: style_matches(&|style| style.underline),
         strikethrough: style_matches(&|style| style.strikethrough),
         heading_level,
-        font_family_index,
         font_size_pt: if font_size_pt <= 0 { 11 } else { font_size_pt },
         alignment,
         line_spacing_index,
@@ -946,5 +967,77 @@ mod tests {
             );
         }
         assert_eq!(floor_in_document(&WriterDocument::new("e", "E"), 9), 0);
+    }
+
+    #[test]
+    fn a_family_is_applied_to_exactly_the_selection_as_one_mutation() {
+        let mut document = WriterDocument::new("family", "Family");
+        document.push(RichBlock::new(1, "paragraph", "alpha beta"));
+        document.push(RichBlock::new(2, "paragraph", "gamma delta"));
+        // Across the paragraph break: "beta" and "gamma".
+        set_selection_font_family(&mut document, DocumentSelection::range(6, 16), "Georgia");
+        let families = |block: usize| {
+            document.blocks[block]
+                .runs
+                .iter()
+                .map(|run| (run.start, run.end, run.style.font_family.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            families(0),
+            [(0, 6, String::new()), (6, 10, "Georgia".to_owned())]
+        );
+        assert_eq!(
+            families(1),
+            [(0, 5, "Georgia".to_owned()), (5, 11, String::new())]
+        );
+        // A collapsed caret changes no text: a pending style carries it instead.
+        let before = document.clone();
+        set_selection_font_family(&mut document, DocumentSelection::caret(3), "Courier");
+        assert_eq!(document, before);
+        // Choosing the default again clears the family and coalesces runs.
+        set_selection_font_family(&mut document, DocumentSelection::range(0, 16), "");
+        assert!(document.blocks.iter().all(|block| block
+            .runs
+            .iter()
+            .all(|run| run.style.font_family.is_empty())));
+    }
+
+    #[test]
+    fn the_font_field_reports_one_family_or_mixed() {
+        let mut document = WriterDocument::new("mixed", "Mixed");
+        document.push(RichBlock::new(1, "paragraph", "alpha beta gamma"));
+        set_selection_font_family(&mut document, DocumentSelection::range(6, 10), "Georgia");
+        // Wholly inside the styled run.
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::range(6, 10)),
+            FontChoice::Single("Georgia".to_owned())
+        );
+        // Wholly outside it.
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::range(0, 5)),
+            FontChoice::Single(String::new())
+        );
+        // Across the edge of the run: two families.
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::range(2, 8)),
+            FontChoice::Mixed
+        );
+        // A caret inside the run reports the family typing there would take.
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::caret(7)),
+            FontChoice::Single("Georgia".to_owned())
+        );
+        // The unnamed family and the old "Sans" are the same family.
+        set_selection_font_family(&mut document, DocumentSelection::range(0, 5), "Sans");
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::range(0, 5)),
+            FontChoice::Single("Sans".to_owned())
+        );
+        assert_eq!(
+            selection_font_family(&document, DocumentSelection::range(0, 6)),
+            FontChoice::Single("Sans".to_owned()),
+            "text with no family of its own is the same family as Sans"
+        );
     }
 }

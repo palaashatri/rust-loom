@@ -19,6 +19,7 @@ import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
+export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
@@ -145,7 +146,6 @@ export component WriterApp inherits Window {
     in-out property <bool> is-underline: false;
     in-out property <bool> is-strikethrough: false;
     in-out property <int> heading-level: 0;
-    in-out property <int> font-family-index: 0;
     in-out property <int> font-size-pt: 11;
     in-out property <int> text-alignment: 0;
     in-out property <int> line-spacing-index: 1;
@@ -191,7 +191,6 @@ export component WriterApp inherits Window {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-heading(int);
-    callback select-font-family(int);
     callback increase-font-size;
     callback decrease-font-size;
     callback select-alignment(int);
@@ -492,7 +491,6 @@ export component WriterApp inherits Window {
                     is-underline <=> root.is-underline;
                     is-strikethrough <=> root.is-strikethrough;
                     heading-level <=> root.heading-level;
-                    font-family-index <=> root.font-family-index;
                     font-size-pt <=> root.font-size-pt;
                     text-alignment <=> root.text-alignment;
                     line-spacing-index <=> root.line-spacing-index;
@@ -515,7 +513,6 @@ export component WriterApp inherits Window {
                     toggle-underline => { root.toggle-underline(); }
                     toggle-strikethrough => { root.toggle-strikethrough(); }
                     select-heading(idx) => { root.select-heading(idx); }
-                    select-font-family(idx) => { root.select-font-family(idx); }
                     increase-font-size => { root.increase-font-size(); }
                     decrease-font-size => { root.decrease-font-size(); }
                     select-alignment(idx) => { root.select-alignment(idx); }
@@ -568,7 +565,6 @@ export component WriterApp inherits Window {
             is-underline <=> root.is-underline;
             is-strikethrough <=> root.is-strikethrough;
             heading-level <=> root.heading-level;
-            font-family-index <=> root.font-family-index;
             font-size-pt <=> root.font-size-pt;
             text-alignment <=> root.text-alignment;
             line-spacing-index <=> root.line-spacing-index;
@@ -591,7 +587,6 @@ export component WriterApp inherits Window {
             toggle-underline => { root.toggle-underline(); }
             toggle-strikethrough => { root.toggle-strikethrough(); }
             select-heading(idx) => { root.select-heading(idx); }
-            select-font-family(idx) => { root.select-font-family(idx); }
             increase-font-size => { root.increase-font-size(); }
             decrease-font-size => { root.decrease-font-size(); }
             select-alignment(idx) => { root.select-alignment(idx); }

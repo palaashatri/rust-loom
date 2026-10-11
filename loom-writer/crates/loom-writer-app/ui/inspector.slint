@@ -4,6 +4,7 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { FontPicker, WriterFontField, WriterFontList } from "font_picker.slint";
 
 /// One anchored comment thread shown in the format inspector.
 export struct WriterCommentEntry {
@@ -22,7 +23,6 @@ export component WriterInspector inherits LoomPanel {
     // The platform modifier named in shortcut hints ("Ctrl" or "Cmd").
     in property <string> shortcut-modifier: "Ctrl";
     in-out property <int> heading-level: 0;
-    in-out property <int> font-family-index: 0;
     in-out property <int> font-size-pt: 11;
     in-out property <int> text-alignment: 0;
     in-out property <int> line-spacing-index: 1;
@@ -50,7 +50,6 @@ export component WriterInspector inherits LoomPanel {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-heading(int);
-    callback select-font-family(int);
     callback increase-font-size;
     callback decrease-font-size;
     callback select-alignment(int);
@@ -167,14 +166,10 @@ export component WriterInspector inherits LoomPanel {
                 padding-right: Theme.tokens.space.xl;
             Rectangle {
                 height: max(32px, Theme.scaled-control-height);
-                LoomSegmentedControl {
+                WriterFontField {
                     x: Theme.rtl ? font-stepper.width + Theme.tokens.space.sm : 0px;
                     y: (parent.height - self.height) / 2;
                     width: parent.width - font-stepper.width - Theme.tokens.space.sm;
-                    items: ["Sans", "Serif", "Mono"];
-                    current <=> root.font-family-index;
-                    label: "Font Family";
-                    selected(idx) => { root.select-font-family(idx); }
                 }
 
                 // Font size stepper
@@ -255,6 +250,8 @@ export component WriterInspector inherits LoomPanel {
                     }
                 }
             }
+            // The open list takes the room under the row; the panel scrolls.
+            if FontPicker.open : WriterFontList { }
             }
 
             // Character styles row, from the reading-start edge: Bold sits at the

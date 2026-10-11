@@ -18,6 +18,7 @@ mod docx;
 mod export;
 mod export_flow;
 mod export_table;
+pub mod fonts;
 mod layout;
 mod markdown;
 mod page_setup;
@@ -25,6 +26,8 @@ mod paragraph_match;
 mod search;
 mod style_json;
 mod tables;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_fonts;
 mod text_metrics;
 
 pub use docx::{export_docx, DocxExport};

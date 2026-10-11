@@ -18,10 +18,7 @@ fn measure(text: &str, text_start: usize, runs: &[StyleRun], base: &TextStyle) -
         text_start,
         runs,
         drawn_size(base),
-        Style {
-            bold: base.bold,
-            italic: base.italic,
-        },
+        Style::new(base.bold, base.italic),
         Uncovered::Drawn,
     )
 }

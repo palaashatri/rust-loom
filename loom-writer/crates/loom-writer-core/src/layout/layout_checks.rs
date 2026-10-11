@@ -167,6 +167,8 @@ fn the_window_lists_pages_near_the_viewport_and_is_never_empty() {
 
 #[test]
 fn an_edit_wraps_only_the_changed_block_and_counts_follow() {
+    // Replacing the font catalogue (another test's fixture) re-wraps everything.
+    let _serial = crate::test_fonts::serial();
     let mut doc = sample_document(600);
     let style = doc.page.page_style();
     let view = viewport(1.0, 0.0);

@@ -1,0 +1,265 @@
+import { LoomTextField } from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+/// One line of the font list: a section heading or a font. Only the lines
+/// around the selection are sent, so the list stays small however many fonts
+/// are installed.
+export struct FontPickerLine {
+    /// Position among the fonts; -1 for a heading.
+    index: int,
+    /// The font name, or the heading text.
+    label: string,
+    /// "Not installed", "In use" and so on; empty for none.
+    tag: string,
+    /// The family the name is previewed in; empty keeps the window's face.
+    family: string,
+    heading: bool,
+}
+
+/// State shared by the font field in the inspector and the controller. A
+/// global keeps it out of the window's own property and callback lists.
+export global FontPicker {
+    in-out property <bool> open: false;
+    in-out property <string> query: "";
+    in-out property <[FontPickerLine]> lines: [];
+    /// Index of the highlighted font, -1 when nothing matches.
+    in-out property <int> selected: -1;
+    in-out property <int> match-count: 0;
+    /// What the closed field shows: a family name or "Mixed".
+    in-out property <string> current: "Inter";
+    /// Why the current font is flagged, such as "Not installed".
+    in-out property <string> current-note: "";
+    /// The family the closed field previews the name in.
+    in-out property <string> current-family: "";
+    /// True while the system font scan is still running.
+    in-out property <bool> loading: false;
+    /// Raised to put the keyboard in the search field.
+    in-out property <int> search-focus-tick: 0;
+    /// Raised to put the keyboard back on the closed field.
+    in-out property <int> field-focus-tick: 0;
+    callback open-requested;
+    callback close-requested;
+    callback query-edited(string);
+    /// Move the highlight by this many fonts.
+    callback move(int);
+    callback choose(int);
+    /// A printable key pressed on the closed field.
+    callback type-ahead(string);
+}
+
+/// The closed font field: the family of the selection, which opens the list.
+/// Enter, Space and Down open it; typing a letter opens it filtered.
+export component WriterFontField inherits Rectangle {
+    height: Theme.scaled-control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: field-focus.has-focus ? 2px : 1px;
+    border-color: field-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
+    background: Theme.palette().surface;
+    accessible-role: none;
+
+    in property <int> focus-tick: FontPicker.field-focus-tick;
+    changed focus-tick => { field-focus.focus(); }
+    public function focus-field() { field-focus.focus(); }
+
+    // The focusable element carries the name, so the control is announced once.
+    field-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        accessible-role: combobox;
+        accessible-label: "Font family";
+        accessible-value: FontPicker.current + (FontPicker.current-note != "" ? ", " + FontPicker.current-note : "");
+        accessible-expandable: true;
+        accessible-expanded: FontPicker.open;
+        accessible-action-default => {
+            if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); }
+        }
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) { return reject; }
+            if (event.text == Key.Return || event.text == " " || event.text == Key.DownArrow) {
+                FontPicker.open-requested();
+                return accept;
+            }
+            if (event.text == Key.Escape || event.text == Key.Tab || event.text == Key.Backtab
+                || event.text == Key.F6 || event.text == Key.UpArrow || event.text == "") {
+                return reject;
+            }
+            FontPicker.type-ahead(event.text);
+            return accept;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            field-focus.focus();
+            if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+        alignment: Theme.rtl ? end : start;
+        Text {
+            text: FontPicker.current;
+            font-family: FontPicker.current-family == "" ? Theme.ui-font-family : FontPicker.current-family;
+            font-size: Theme.type.body;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+            horizontal-alignment: Theme.rtl ? right : left;
+            horizontal-stretch: 1;
+            overflow: elide;
+            accessible-role: none;
+        }
+        if FontPicker.current-note != "" : Text {
+            text: FontPicker.current-note;
+            font-size: Theme.type.caption;
+            color: Theme.palette().warning;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: "chevron-down";
+            tint: Theme.palette().ink-secondary;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}
+
+/// The open list under the field: a search box and the fonts around the
+/// highlight. Up and Down move, Page Up and Page Down move by a screen, Enter
+/// chooses, Escape closes. The mouse wheel scrolls.
+export component WriterFontList inherits Rectangle {
+    property <length> row-height: Theme.scaled-control-height;
+    height: layout.preferred-height + 2 * Theme.tokens.space.sm;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    background: Theme.palette().surface-raised;
+    accessible-role: groupbox;
+    accessible-label: "Font list";
+
+    in property <int> focus-tick: FontPicker.search-focus-tick;
+    changed focus-tick => { query.focus-input(); }
+    init => { query.focus-input(); }
+
+    FocusScope {
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) { FontPicker.close-requested(); return accept; }
+            if (event.text == Key.DownArrow) { FontPicker.move(1); return accept; }
+            if (event.text == Key.UpArrow) { FontPicker.move(-1); return accept; }
+            if (event.text == Key.PageDown) { FontPicker.move(8); return accept; }
+            if (event.text == Key.PageUp) { FontPicker.move(-8); return accept; }
+            if (event.text == Key.Return) {
+                if (FontPicker.selected >= 0) { FontPicker.choose(FontPicker.selected); }
+                return accept;
+            }
+            return reject;
+        }
+
+        layout := VerticalLayout {
+            padding: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
+
+            query := LoomTextField {
+                label: "Search fonts";
+                placeholder: "Search fonts";
+                value <=> FontPicker.query;
+                edited(text) => { FontPicker.query-edited(text); }
+            }
+
+            if FontPicker.lines.length == 0 : Text {
+                text: FontPicker.loading ? "Looking for installed fonts..." : "No matching fonts";
+                font-size: Theme.type.body;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: Theme.rtl ? right : left;
+                height: root.row-height;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+
+            Rectangle {
+                height: FontPicker.lines.length * root.row-height;
+                accessible-role: list;
+                accessible-label: "Fonts";
+                TouchArea {
+                    scroll-event(event) => {
+                        if (event.delta-y < 0) { FontPicker.move(1); } else if (event.delta-y > 0) { FontPicker.move(-1); }
+                        return accept;
+                    }
+                }
+                VerticalLayout {
+                    for line in FontPicker.lines : Rectangle {
+                        height: root.row-height;
+
+                        // A section heading: read as text, never as an option.
+                        if line.heading : Text {
+                            x: Theme.tokens.space.md;
+                            width: parent.width - 2 * Theme.tokens.space.md;
+                            height: parent.height;
+                            text: line.label;
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink-secondary;
+                            vertical-alignment: center;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            overflow: elide;
+                        }
+
+                        // A font: its name drawn in that font, with a note when
+                        // it is in use or not installed.
+                        if !line.heading : Rectangle {
+                            border-radius: Theme.tokens.metrics.radius-small;
+                            background: line.index == FontPicker.selected ? Theme.palette().selection-soft
+                                : row-touch.has-hover ? Theme.palette().surface-sunken
+                                : transparent;
+                            accessible-role: list-item;
+                            accessible-label: line.label + (line.tag != "" ? ", " + line.tag : "");
+                            accessible-checkable: true;
+                            accessible-checked: line.index == FontPicker.selected;
+                            accessible-action-default => { FontPicker.choose(line.index); }
+
+                            row-touch := TouchArea {
+                                clicked => { FontPicker.choose(line.index); }
+                            }
+                            HorizontalLayout {
+                                padding-left: Theme.tokens.space.md;
+                                padding-right: Theme.tokens.space.md;
+                                spacing: Theme.tokens.space.sm;
+                                alignment: Theme.rtl ? end : start;
+                                Text {
+                                    text: line.label;
+                                    font-family: line.family == "" ? Theme.ui-font-family : line.family;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: Theme.rtl ? right : left;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                    accessible-role: none;
+                                }
+                                if line.tag != "" : Text {
+                                    text: line.tag;
+                                    font-size: Theme.type.caption;
+                                    color: line.tag == "Not installed" ? Theme.palette().warning : Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    accessible-role: none;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if FontPicker.loading && FontPicker.lines.length > 0 : Text {
+                text: "Looking for installed fonts...";
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: Theme.rtl ? right : left;
+                accessible-role: none;
+            }
+        }
+    }
+}

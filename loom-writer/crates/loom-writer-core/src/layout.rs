@@ -33,6 +33,8 @@ struct WrappedLine {
 
 struct CachedBlock {
     graphemes: usize,
+    /// The font catalogue the measurement was made against.
+    epoch: u64,
     font_bits: u32,
     width_bits: u32,
     kind: String,
@@ -73,11 +75,16 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         let generation = cache.generation;
         let text = block.text.as_str();
         let (font_bits, width_bits) = (font_size.to_bits(), width.to_bits());
+        let epoch = crate::fonts::font_epoch();
         // The grapheme positions depend on the text, runs and size only, so a
         // block that is re-wrapped at a new width keeps them.
         let mut reusable: Option<Rc<LineMeasure>> = None;
         if let Some(hit) = cache.blocks.get_mut(&block.id) {
-            if hit.font_bits == font_bits && hit.text == text && hit.runs == block.runs {
+            if hit.epoch == epoch
+                && hit.font_bits == font_bits
+                && hit.text == text
+                && hit.runs == block.runs
+            {
                 if hit.width_bits == width_bits && hit.kind == block.kind {
                     hit.seen = generation;
                     return BlockInfo {
@@ -112,6 +119,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         cache.blocks.insert(
             block.id,
             CachedBlock {
+                epoch,
                 font_bits,
                 width_bits,
                 kind: block.kind.clone(),
@@ -156,13 +164,17 @@ fn end_pass(block_count: usize) {
 /// page draws are, kerning included.
 fn block_positions(block: &RichBlock, font_size: f32) -> Rc<LineMeasure> {
     let text = block.text.as_str();
+    let epoch = crate::fonts::font_epoch();
     let cached = WRAP_CACHE.with(|cache| {
         cache
             .borrow()
             .blocks
             .get(&block.id)
             .filter(|hit| {
-                hit.font_bits == font_size.to_bits() && hit.text == text && hit.runs == block.runs
+                hit.epoch == epoch
+                    && hit.font_bits == font_size.to_bits()
+                    && hit.text == text
+                    && hit.runs == block.runs
             })
             .map(|hit| hit.measure.clone())
     });

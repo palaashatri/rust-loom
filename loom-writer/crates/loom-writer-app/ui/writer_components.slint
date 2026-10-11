@@ -15,6 +15,8 @@ export struct WriterRenderBlock {
     y: length,
     width: length,
     font-size: length,
+    /// The family this row is drawn in; empty draws in the document font.
+    font-family: string,
     height: length,
     alignment: int,
     marker: string,
@@ -151,7 +153,7 @@ component WriterDocumentEditor inherits Rectangle {
             x: block.x * root.page-zoom;
             y: block.y * root.page-zoom;
             text: block.content;
-            default-font-family: Theme.document-font-family;
+            default-font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             default-font-size: block.font-size * root.page-zoom;

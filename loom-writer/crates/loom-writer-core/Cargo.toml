@@ -6,6 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 description = "Loom Writer document engine (headless, testable)"
 
+[features]
+# Font fixtures built from the bundled faces (`test_fonts`), for the
+# application's tests. Production builds do not carry them.
+test-support = []
+
 [dependencies]
 loom-document = { workspace = true }
 loom-package = { workspace = true }

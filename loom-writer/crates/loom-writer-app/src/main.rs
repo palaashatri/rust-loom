@@ -15,6 +15,8 @@ mod document_formatting;
 mod docx_export;
 mod file_title;
 mod find_bar;
+mod font_picker;
+mod font_store;
 mod local_menu;
 mod markdown_export;
 mod multi_click;
@@ -432,6 +434,17 @@ fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
     let bytes = loom_writer_core::save_document(doc).map_err(|error| error.to_string())?;
     loom_storage::atomic_write(path, &bytes)
         .map_err(|error| format!("atomic write {}: {error}", path.display()))
+}
+
+/// The status line after a PDF export. The PDF embeds only Inter, so a
+/// document set in other families says so once, naming them.
+fn pdf_export_message(path: &Path, doc: &WriterDocument) -> String {
+    let mut message = format!("Exported {}", path.display());
+    if let Some(note) = loom_writer_core::fonts::pdf_substitution_note(doc) {
+        message.push_str(". ");
+        message.push_str(&note);
+    }
+    message
 }
 
 fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
@@ -1379,7 +1392,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_is_italic(formatting.italic);
     app.set_is_underline(formatting.underline);
     app.set_is_strikethrough(formatting.strikethrough);
-    app.set_font_family_index(formatting.font_family_index);
+    font_picker::publish_current(app, doc);
     app.set_font_size_pt(formatting.font_size_pt);
     app.set_line_spacing_index(formatting.line_spacing_index);
     app.set_list_style_index(formatting.list_style_index);
@@ -2133,9 +2146,12 @@ fn apply_pending_typing_style(
         return;
     }
     let style = typing_style::at(caret);
-    if style.bold.is_none() && style.italic.is_none() && style.underline.is_none() {
+    if style.is_empty() {
         typing_style::retain_at(typed_end);
         return;
+    }
+    if let Some(family) = &style.family {
+        set_selection_font_family(document, DocumentSelection::range(caret, typed_end), family);
     }
     if let Some(on) = style.bold {
         set_selection_bold(document, DocumentSelection::range(caret, typed_end), on);
@@ -2459,6 +2475,7 @@ fn wire_writer_shared_callbacks(
     find_bar::wire(app, state);
     toolbar_commands::wire(app);
     outline::wire(app, state);
+    font_picker::wire(app, state);
     view_state::wire(app, state, menu_service.clone());
     {
         let state = state.clone();
@@ -3063,9 +3080,9 @@ fn wire_writer_shared_callbacks(
                 }
                 match state.dialogs.save_file(&writer_export_request(&state)) {
                     Ok(Some(path)) => match export_pdf_file(&path, &state.current.borrow()) {
-                        Ok(()) => app.set_status_left(SharedString::from(format!(
-                            "Exported {}",
-                            path.display()
+                        Ok(()) => app.set_status_left(SharedString::from(pdf_export_message(
+                            &path,
+                            &state.current.borrow(),
                         ))),
                         Err(error) => app
                             .set_status_left(SharedString::from(format!("Export failed: {error}"))),
@@ -3655,6 +3672,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let menu_service = Arc::new(NativeMenuBar::new());
     wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
     wire_close_guard(&app, &state);
+    // The installed fonts are scanned off this thread; until the scan lands
+    // the page and the font list use the bundled faces.
+    font_picker::start_live(&app, &state, appearance::APPLICATION_ID);
 
     let menu_bar = local_menu::writer_menu_bar();
     menu_service
@@ -3847,24 +3867,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             };
             app.set_status_right(SharedString::from(msg));
             app.set_selection_announcement(SharedString::from(msg));
-        });
-    }
-
-    // ── Font family ────────────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        app.on_select_font_family(move |index| {
-            let Some(app) = app_ref.upgrade() else { return };
-            let mut next = state.current.borrow().clone();
-            let sel = next.selection();
-            set_selection_font_family(
-                &mut next,
-                DocumentSelection::range(sel.anchor, sel.focus),
-                index,
-            );
-            next.set_selection(sel);
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
         });
     }
 

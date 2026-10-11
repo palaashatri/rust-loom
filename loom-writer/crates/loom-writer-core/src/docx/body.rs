@@ -317,7 +317,8 @@ impl RunProps {
         let mut out = String::new();
         let family = xml::attr(&self.family);
         out.push_str(&format!(
-            "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:cs=\"{family}\"/>"
+            "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" \
+             w:cs=\"{family}\"/>"
         ));
         if self.bold {
             out.push_str("<w:b/><w:bCs/>");
@@ -343,14 +344,19 @@ impl RunProps {
 }
 
 /// The Word face a Writer family is written as: "Sans" and an unnamed family
-/// are Arial, "Serif" and "Monospace" the usual Word faces, and any other name
-/// is kept as it is.
+/// are Arial, "Serif" and "Monospace" (or "Mono") the usual Word faces, and any
+/// other name is kept as it is, so a document set in Georgia opens in Georgia.
 fn family_name(name: &str) -> String {
-    match name.trim() {
-        "" | "Sans" => SANS_FAMILY.to_string(),
-        "Serif" => "Times New Roman".to_string(),
-        "Monospace" => "Courier New".to_string(),
-        other => other.to_string(),
+    let name = name.trim();
+    let is = |generic: &str| name.eq_ignore_ascii_case(generic);
+    if name.is_empty() || is("Sans") {
+        SANS_FAMILY.to_string()
+    } else if is("Serif") {
+        "Times New Roman".to_string()
+    } else if is("Monospace") || is("Mono") {
+        "Courier New".to_string()
+    } else {
+        name.to_string()
     }
 }
 

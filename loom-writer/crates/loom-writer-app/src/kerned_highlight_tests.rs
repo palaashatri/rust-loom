@@ -151,3 +151,67 @@ fn the_highlight_follows_a_bold_run_inside_a_kerned_line() {
         "the highlight ends {gap} px past the ink"
     );
 }
+
+/// Make the fixture faces known to the window's font collection, as an
+/// installed family is, so the page can draw a family this machine lacks.
+fn register_with_the_window(files: &[std::path::PathBuf]) {
+    use slint::fontique_010::{fontique, shared_collection};
+    set_platform();
+    let mut collection = shared_collection();
+    for file in files {
+        let bytes = std::fs::read(file).expect("fixture face");
+        collection.register_fonts(fontique::Blob::new(Arc::new(bytes)), None);
+    }
+}
+
+#[test]
+fn the_highlight_ends_where_a_line_set_in_another_family_ends() {
+    // "Wider" has Inter's glyphs at twice the advances: a measurement made in
+    // Inter would end the highlight halfway along the text.
+    let fonts = loom_writer_core::test_fonts::install(&[("Wider", 200)]);
+    register_with_the_window(&fonts.files("Wider"));
+    let text = "AVATAR TAWA Toyota Wave";
+    let mut document = text_document(text);
+    crate::document_formatting::set_selection_font_family(
+        &mut document,
+        crate::document_formatting::DocumentSelection::range(0, text.len()),
+        "Wider",
+    );
+    let (highlight, ink) = highlight_and_ink_right_edges(&document);
+    let (_, inter_ink) = highlight_and_ink_right_edges(&text_document(text));
+    let gap = highlight as f32 - ink as f32;
+    eprintln!("line in Wider: highlight ends {gap} px past the ink; Inter ink ends at {inter_ink}, Wider at {ink}");
+    assert!(
+        ink > inter_ink + 100,
+        "the page did not draw the wide family (ink ends at {ink}, Inter's at {inter_ink})"
+    );
+    // The fixture doubles each advance but not the glyph, so the last glyph
+    // leaves a gap of its own (about half an em, 11 px here) inside its
+    // advance. A highlight measured in Inter would end 100+ px before the ink.
+    assert!(
+        (-2.0..=16.0).contains(&gap),
+        "the highlight ends {gap} px past the ink"
+    );
+}
+
+#[test]
+fn the_highlight_follows_a_family_change_inside_a_line() {
+    let fonts = loom_writer_core::test_fonts::install(&[("Wider", 200)]);
+    register_with_the_window(&fonts.files("Wider"));
+    let text = "AVATAR TAWA Toyota Wave";
+    let mut document = text_document(text);
+    // "TAWA Toyota" in the wide family, the rest in Inter: the line is drawn as
+    // three stretches, and the last one must end where the highlight does.
+    crate::document_formatting::set_selection_font_family(
+        &mut document,
+        crate::document_formatting::DocumentSelection::range(7, 18),
+        "Wider",
+    );
+    let (highlight, ink) = highlight_and_ink_right_edges(&document);
+    let gap = highlight as f32 - ink as f32;
+    eprintln!("mixed families: highlight ends {gap} px past the ink");
+    assert!(
+        (-2.0..=3.0).contains(&gap),
+        "the highlight ends {gap} px past the ink"
+    );
+}
