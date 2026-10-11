@@ -726,3 +726,84 @@ fn writes_interop_sample_when_requested() {
     let export = export_docx(&rich_document()).unwrap();
     std::fs::write(dir.join("loom-writer-rich.docx"), export.bytes).unwrap();
 }
+
+#[test]
+fn test_import_docx_rich_document_fidelity() {
+    let source_doc = rich_document();
+    let export = export_docx(&source_doc).expect("export succeeds");
+    let imported = super::import_docx(&export.bytes).expect("import succeeds");
+
+    assert_eq!(imported.title, "Quarterly <Report> & Notes");
+
+    // Check headings
+    let headings: Vec<(&str, &str)> = imported
+        .blocks
+        .iter()
+        .filter(|b| b.kind.starts_with("heading"))
+        .map(|b| (b.kind.as_str(), b.text.as_str()))
+        .collect();
+    assert!(headings.contains(&("heading1", "Overview")));
+    assert!(headings.contains(&("heading2", "Details")));
+    assert!(headings.contains(&("heading6", "Deepest")));
+
+    // Check rich formatting runs in the styled paragraph
+    let styled_block = imported
+        .blocks
+        .iter()
+        .find(|b| b.text.as_str().starts_with("Plain bold italic"))
+        .expect("styled paragraph present");
+    assert!(!styled_block.runs.is_empty(), "must carry style runs");
+    assert!(
+        styled_block
+            .runs
+            .iter()
+            .any(|r| r.style.weight == FontWeight::Bold),
+        "must carry bold run"
+    );
+    assert!(
+        styled_block.runs.iter().any(|r| r.style.italic),
+        "must carry italic run"
+    );
+    assert!(
+        styled_block.runs.iter().any(|r| r.style.underline),
+        "must carry underline run"
+    );
+    assert!(
+        styled_block.runs.iter().any(|r| r.style.strikethrough),
+        "must carry strikethrough run"
+    );
+
+    // Check list blocks
+    let bulleted: Vec<&str> = imported
+        .blocks
+        .iter()
+        .filter(|b| b.kind == "list-bulleted")
+        .map(|b| b.text.as_str())
+        .collect();
+    assert!(bulleted.contains(&"Apples"));
+    assert!(bulleted.contains(&"Pears"));
+
+    let numbered: Vec<&str> = imported
+        .blocks
+        .iter()
+        .filter(|b| b.kind == "list-numbered")
+        .map(|b| b.text.as_str())
+        .collect();
+    assert!(numbered.contains(&"First"));
+    assert!(numbered.contains(&"Second"));
+
+    // Check table import
+    let table_block = imported
+        .blocks
+        .iter()
+        .find(|b| b.kind == TABLE_BLOCK_KIND)
+        .expect("table block must be imported");
+    assert!(
+        table_block.text.as_str().contains("Name"),
+        "table must contain header column Name"
+    );
+    assert!(
+        table_block.text.as_str().contains("Tea"),
+        "table must contain cell Tea"
+    );
+}

@@ -8,8 +8,11 @@
 
 mod body;
 mod comments;
+pub mod import;
 mod package;
 mod xml;
+
+pub use import::import_docx;
 
 use loom_package::zip::{ArchiveError, PackageArchive};
 

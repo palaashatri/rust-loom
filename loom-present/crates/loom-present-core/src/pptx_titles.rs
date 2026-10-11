@@ -181,7 +181,7 @@ pub fn slides_from_pptx(pptx_bytes: &[u8]) -> Result<Vec<Slide>, String> {
 
 /// The slide's title: the first paragraph of its title placeholder when it has one,
 /// otherwise the first paragraph on the slide.
-fn pptx_slide_title(slide_xml: &str) -> String {
+pub(crate) fn pptx_slide_title(slide_xml: &str) -> String {
     match title_placeholder_span(slide_xml) {
         Some((open, close)) => pptx_first_paragraph_title(&slide_xml[open..close]),
         None => pptx_first_paragraph_title(slide_xml),

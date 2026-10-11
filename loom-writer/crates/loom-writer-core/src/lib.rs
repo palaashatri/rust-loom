@@ -15,7 +15,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod charts;
 mod comments;
-mod docx;
+pub mod docx;
+pub use docx::import_docx;
 mod export;
 mod export_flow;
 mod export_table;
@@ -3866,120 +3867,8 @@ pub fn word_diff(old_text: &str, new_text: &str) -> Vec<WordDiffOp> {
 /// document spacing is not part of the semantic content. Err on unreadable archives or a
 /// missing `word/document.xml`.
 pub fn extract_docx_blocks(docx_bytes: &[u8]) -> Result<Vec<RichBlock>, String> {
-    let archive = PackageArchive::from_bytes(docx_bytes)
-        .map_err(|e| format!("unreadable docx archive: {e}"))?;
-    let document_xml = archive
-        .get("word/document.xml")
-        .ok_or_else(|| "docx archive missing word/document.xml".to_string())?;
-    let xml = std::str::from_utf8(document_xml)
-        .map_err(|_| "document.xml is not valid UTF-8".to_string())?;
-
-    let mut blocks: Vec<RichBlock> = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(open_rel) = xml[cursor..].find("<w:p>") {
-        let open_abs = cursor + open_rel;
-        let close_rel = match xml[open_abs..].find("</w:p>") {
-            Some(found) => found,
-            None => break,
-        };
-        let paragraph = &xml[open_abs..open_abs + close_rel];
-        cursor = open_abs + close_rel + "</w:p>".len();
-
-        // Heading level from the style element, when present.
-        let mut kind = "paragraph".to_string();
-        if let Some(style_start) = paragraph.find("<w:pStyle") {
-            if let Some(val_start) = paragraph[style_start..].find("w:val=\"Heading") {
-                let digits_start = style_start + val_start + "w:val=\"Heading".len();
-                let digits: String = paragraph[digits_start..]
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect();
-                if let Ok(level) = digits.parse::<u8>() {
-                    if (1..=6).contains(&level) {
-                        kind = format!("heading{level}");
-                    }
-                }
-            }
-        }
-
-        // Concatenate every <w:t ...>run</w:t> inside this paragraph.
-        let mut text = String::new();
-        let mut run_cursor = 0usize;
-        while let Some(run_open) = paragraph[run_cursor..].find("<w:t") {
-            let run_abs = run_cursor + run_open;
-            // Name-boundary check: <w:t must be followed by space, '>', or '/>'.
-            let after = &paragraph[run_abs + 4..];
-            if !after.starts_with('>') && !after.starts_with(' ') && !after.starts_with('/') {
-                run_cursor = run_abs + 4;
-                continue;
-            }
-            let Some(inner_rel) = paragraph[run_abs..].find('>') else {
-                break;
-            };
-            let content_start = run_abs + inner_rel + 1;
-            let Some(close_rel) = paragraph[content_start..].find("</w:t>") else {
-                break;
-            };
-            text.push_str(&xml_unescape(
-                &paragraph[content_start..content_start + close_rel],
-            ));
-            run_cursor = content_start + close_rel;
-        }
-
-        if text.trim().is_empty() {
-            continue;
-        }
-        blocks.push(RichBlock::new(blocks.len() as u64, &kind, &text));
-    }
-
-    Ok(blocks)
-}
-
-/// Unescapes the five predefined XML entities in one left-to-right pass.
-fn xml_unescape(value: &str) -> String {
-    if !value.contains('&') {
-        return value.to_string();
-    }
-    let mut out = String::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] == b'&' {
-            let rest = &value[index..];
-            if rest.starts_with("&lt;") {
-                out.push('<');
-                index += 4;
-                continue;
-            }
-            if rest.starts_with("&gt;") {
-                out.push('>');
-                index += 4;
-                continue;
-            }
-            if rest.starts_with("&quot;") {
-                out.push('"');
-                index += 6;
-                continue;
-            }
-            if rest.starts_with("&apos;") {
-                out.push('\'');
-                index += 6;
-                continue;
-            }
-            if rest.starts_with("&amp;") {
-                out.push('&');
-                index += 5;
-                continue;
-            }
-        }
-        let ch = value[index..]
-            .chars()
-            .next()
-            .expect("index on char boundary");
-        out.push(ch);
-        index += ch.len_utf8();
-    }
-    out
+    let doc = docx::import_docx(docx_bytes)?;
+    Ok(doc.blocks)
 }
 
 pub fn import_text_paragraphs(text: &str) -> Result<Vec<String>, String> {
