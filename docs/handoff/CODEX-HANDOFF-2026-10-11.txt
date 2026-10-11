@@ -24,8 +24,8 @@ session's evidence (see lane L9): that is real outstanding work.
 1. REPO, BRANCH, BUILD RULES
 ----------------------------
 - Repo https://github.com/palaashatri/rust-loom, branch main only. Last known head:
-  3041091 "feat(writer): kerned font-aware measurement via loom-fonts ...". CI for
-  e17f785 / 3041091 was still running when this was written: check Actions first.
+  dee777b "feat(writer): font family picker ..." (on top of 3041091 kerned measurement,
+  41dff4a this handoff). CI was green for e17f785 and 3041091; check Actions for dee777b.
 - Each app is its own cargo workspace: run cargo from inside loom-sheets / loom-writer /
   loom-present / loom-core so .cargo/config.toml applies (Windows needs the 32 MiB stack
   link flag there). Never run `cargo clean`, `git reset`, `git stash`, `git checkout --`
@@ -73,9 +73,9 @@ at most ~3 concurrent cargo jobs.
 Stale WSL clones (safe to delete targets; uncommitted WIP noted):
   ~/rust-loom (old WIP, ignore), ~/font-loom, ~/exp-loom, ~/sv-loom, ~/spa-loom,
   ~/spb-loom, ~/spc-loom, ~/spd-loom, ~/spe-loom, ~/spe2-loom: all merged upstream.
-  ~/wp-loom : UNCOMMITTED partial Writer font-picker work (agent was cut off by a rate
-  limit mid-edit of loom-writer-app/ui/app.slint). Inspect `git diff --stat` there; it
-  is a head start for lane L3, not trusted code.
+  ~/wp-loom / ~/wp2-loom : font picker, MERGED as dee777b (targets can be deleted).
+  ~/g1-loom (Sheets), ~/g2-loom (Writer), ~/g3-loom (Present): round-6 fixes, see
+  section 10: patches ~/g1.patch ~/g2.patch ~/g3.patch may or may not exist yet.
 Linux GUI: WSLg is shared with the Windows clipboard and focus, and keystrokes from
 other tools leak in. Prefer a private Xvfb (no window manager) for scripted input and
 only use WSLg for screenshots. xdotool/AT-SPI usage and a focus guard are in
@@ -161,8 +161,9 @@ L2 Sheets UI/a11y/visual (Luna)    owns: loom-sheets-app/ui/**, src/main_tests/*
    change: coordinate with L8 only if you touch loom-production); grid stays white in
    dark theme (documented policy; decide with the owner); toolbar '...' overflow and '+'
    tab do not scale at text scale 2.0.
-L3 Writer font picker (Luna)       owns: loom-writer/** except export*/pdf* (L4). Start
-   from ~/wp-loom partial WIP if useful. Spec: searchable keyboard-operable dropdown from
+L3 Writer font picker (Luna)       STATUS: base picker MERGED (dee777b). Remaining: live
+   window + AT-SPI/UIA verification of the picker, per-run font SIZE draw/measure, PDF
+   embedding of non-Inter families (with L4), README. Original spec was: searchable keyboard-operable dropdown from
    loom_fonts::FontCatalog (recent first, 'not installed' marker via resolve().substituted),
    applies to selection/caret as ONE undo step, 'Mixed' state, page draws each run in its
    family (Slint font-family per run, Inter fallback), measurement uses the run's
@@ -290,3 +291,65 @@ recorded evidence; keep disk usage low; integrate IDEAS from the external projec
 storytold/wordcraft|gridcraft|deckcraft (Apache-2.0/MIT, young, egui-based) but do not
 copy their code; use upstream crates as dependencies and write original code. Record any
 borrowed third-party crate and its license in the report and assets.toml where relevant.
+
+10. UPDATE (late 2026-10-11): FINAL-REVIEW RESULTS AND IN-FLIGHT ROUND 6
+-----------------------------------------------------------------------
+Merged since section 0 was written: 3041091 kerned Writer measurement + PDF TJ spacing,
+dee777b Writer font picker (headless-verified only), 41dff4a this file.
+
+Windows hostile acceptance review (Opus, nightly 3041091, live windows + Office COM):
+  DATA SAFETY PASS in all three apps: relaunch with same file / other file / no
+  argument, Discard, Save-and-close, killed fresh window (evidence: scratchpad
+  final2-win logs, not in repo). Present: no sev-1/2 found.
+  NEW DEFECTS (all being fixed in round 6, none verified fixed yet):
+   S1 Sheets: XLSX with =LET(...) will not open in Excel: parameter names need the
+      `_xlpm.` prefix (`_xlfn.LET(_xlpm.x,5,_xlpm.x*2)`); same for LAMBDA. Excel error
+      'Unable to get the Open property'. Importer must strip _xlpm. for round trip.
+   S1 Writer: 'Insert Markdown Table (text)' leaves the caret before the first `|`;
+      text typed there is kept in the editor/.loomdoc but dropped from the PDF (empty
+      header, missing row) and DOCX (empty table). Exporters must never drop text:
+      add a property test over random documents (every non-space char appears in PDF
+      text extraction and DOCX document.xml).
+   S2 Sheets: the startup 'Save changes ... before replacing it?' dialog (crash draft +
+      different file argument) cannot be answered by keyboard: focus stays on the grid,
+      Tab moves the cell selection, Escape/Alt+F4 do nothing.
+   S3 Writer recovery notices overwritten by the word-count status; clean sessions are
+      recorded/quarantined as drafts (stale unedited snapshots reappear); Present keeps
+      unedited sessions as '(unsaved ...)' files; Sheets copy of a spill range copies
+      empty cells; Writer table editing (Tab inserts spaces, undo one char per press,
+      stray blank paragraph, DOCX runs Arial, no gap after table in PDF); Present
+      presenter view stays open after Esc, launch focus is on the window not the
+      canvas, canvas Tab stop has no object names, thumbnails unreadable at 1x;
+      Sheets HC active-cell outline barely heavier than gridlines; Sheets inspector
+      becomes a dimming drawer at 1024x720.
+Linux hostile acceptance review (Opus, same nightly) was still running when this was
+written: its report (private-Xvfb + AT-SPI) decides Linux gates. Re-check
+~/final2-linux/evidence in the Ubuntu-E distro if it finished.
+
+Gate table update (Windows evidence; Linux pending):
+  Gate 7 recovery: PASS (Windows) for all three, with the S3 notice/quarantine defects.
+  Gate 6 export: Sheets FAIL (S1 LET), Writer FAIL (S1 table text), Present PASS.
+  Gate 8 keyboard: Sheets FAIL (S2), Writer PASS, Present PARTIAL.
+  Gate 13: Sheets FAIL, Writer FAIL, Present PASS (none found).
+  Gates 2, 9, 10 remain UNVERIFIED/PARTIAL as in section 4.
+
+ROUND 6 PATCHES (produced by Claude coders; apply with git apply --3way, then re-review):
+  ~/g1.patch  Sheets: S1 LET/LAMBDA export prefix, S2 modal focus trap fix, spill copy,
+              HC outline, inspector drawer at 1024.
+  ~/g2.patch  Writer: S1 table text loss at the root + property test, notices sticky,
+              stale snapshots, table Tab/undo/blank-paragraph, DOCX font, PDF spacing.
+  ~/g3.patch  Present: unedited-draft retention, presenter close on Esc, launch focus +
+              canvas names, thumbnail legibility, real pointer drag/resize tests.
+  All three live in the Ubuntu-E distro home. If a patch file is missing the coder had
+  not finished: the clone (~/g1-loom, ~/g2-loom, ~/g3-loom) holds the work in progress
+  (`git diff --stat`); its agent report was never read. Treat as unverified.
+Integrator order: g2 (Writer) and g1 (Sheets) and g3 (Present) touch disjoint apps and
+can apply in any order; each needs its own full suite + audits before commit.
+
+Immediate next steps for Codex (in order):
+  1. Check Actions for dee777b; fix anything red (likely only flaky RTL/DPI timing).
+  2. Collect ~/g1,g2,g3 patches, Sol-review each (mutation-check the new tests), merge.
+  3. Rebuild nightly, run the Windows and Linux acceptance passes again focusing on
+     S1/S2 and the picker; record per-gate evidence.
+  4. L9: write the AGENTS.md current-truth paragraph and ACCEPTED records only for apps
+     whose gates all pass.
