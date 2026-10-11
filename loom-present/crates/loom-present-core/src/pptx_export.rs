@@ -241,8 +241,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 heading_font: false,
             },
         ),
-        // Pictures are written by `picture_shape`.
-        ElementType::Picture => return String::new(),
+        // Pictures and tables are written by their own shape emitters.
+        ElementType::Picture | ElementType::Table => return String::new(),
         ElementType::StatCard => (
             "rect",
             Some(STAT_FILL),
@@ -351,6 +351,12 @@ fn slide_xml(
                 .asset_for(element)
                 .map_or("Picture", |asset| asset.name.as_str());
             shapes.push_str(&picture_shape(next_id, element, rid, alt));
+        } else if element.element_type == ElementType::Table {
+            if let Some(table) = element.table() {
+                shapes.push_str(&crate::tables::table_graphic_frame(
+                    next_id, element, &table,
+                ));
+            }
         } else {
             shapes.push_str(&element_shape(next_id, element, &background, title_ph));
         }

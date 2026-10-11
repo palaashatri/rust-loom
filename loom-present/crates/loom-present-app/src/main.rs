@@ -399,6 +399,7 @@ pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
         ElementType::ShapeCircle => 4,
         ElementType::StatCard => 5,
         ElementType::Picture => 6,
+        ElementType::Table => 7,
     }
 }
 
@@ -583,6 +584,7 @@ fn element_type_name(kind: &ElementType) -> &'static str {
         ElementType::ShapeCircle => "Circle",
         ElementType::StatCard => "Stat card",
         ElementType::Picture => "Picture",
+        ElementType::Table => "Table",
     }
 }
 
@@ -602,6 +604,12 @@ fn placeholder_prompt(element: &SlideElement) -> &'static str {
 fn element_text(document: &PresentationDocument, element: &SlideElement) -> String {
     if element.element_type == ElementType::Picture {
         picture_view::picture_name(document, element)
+    } else if element.element_type == ElementType::Table {
+        if let Some(table) = element.table() {
+            format!("{}x{} Table", table.row_count(), table.col_count())
+        } else {
+            "Table".to_string()
+        }
     } else {
         element.content.clone()
     }
@@ -2127,7 +2135,11 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .active_slide_mut()
                         .and_then(|slide| slide.elements.get_mut(selected))
                     {
-                        element.content = content.as_str().to_string();
+                        if element.element_type == ElementType::Table {
+                            element.update_table_cell_text(0, 0, content.as_str());
+                        } else {
+                            element.content = content.as_str().to_string();
+                        }
                         element.element_type == ElementType::Title
                     } else {
                         false

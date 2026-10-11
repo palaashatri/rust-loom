@@ -11,10 +11,12 @@ mod pptx_export;
 mod pptx_titles;
 mod session_history;
 mod slide_order;
+mod tables;
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use pptx_export::export_pptx;
 pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_pptx};
 use session_history::Snapshot;
+pub use tables::*;
 
 /// Authoring-plane dimensions used by Present's scene and transform APIs.
 pub const SLIDE_WIDTH: f32 = 1000.0;
@@ -30,6 +32,8 @@ pub enum ElementType {
     StatCard,
     /// An embedded raster picture; `content` is the id of an [`ImageAsset`].
     Picture,
+    /// An embedded structured table; `content` is a JSON-serialized [`loom_objects::Table`].
+    Table,
 }
 
 /// Interactive click action trigger for presentation slides and elements.
@@ -2358,6 +2362,7 @@ fn element_type_marker(element_type: &ElementType) -> &'static str {
         ElementType::ShapeCircle => "shape-circle",
         ElementType::StatCard => "stat-card",
         ElementType::Picture => "picture",
+        ElementType::Table => "table",
     }
 }
 

@@ -104,6 +104,11 @@ fn draw_element(
                 }
             }
         }
+        ElementType::Table => {
+            if let Some(table) = elem.table() {
+                draw_table(pdf, page, transform, elem, &table);
+            }
+        }
     }
 }
 
@@ -226,4 +231,98 @@ fn with_ellipsis(line: &str, style: &TextStyle, width: f32) -> String {
         kept.pop();
     }
     format!("{kept}\u{2026}")
+}
+
+fn draw_table(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    transform: [f32; 6],
+    elem: &SlideElement,
+    table: &loom_objects::Table,
+) {
+    let rows = table.row_count();
+    let cols = table.col_count();
+    if rows == 0 || cols == 0 {
+        return;
+    }
+    let total_w: f32 = table.columns.iter().map(|c| c.width_pt).sum();
+    let total_h: f32 = table.rows.iter().map(|r| r.height_pt.unwrap_or(20.0)).sum();
+    let scale_x = if total_w > 0.0 {
+        elem.width / total_w
+    } else {
+        1.0
+    };
+    let scale_y = if total_h > 0.0 {
+        elem.height / total_h
+    } else {
+        1.0
+    };
+
+    let style = loom_objects::styles::TableStyleCatalog::get(&table.style_id)
+        .unwrap_or_else(loom_objects::styles::TableStyleCatalog::default_style);
+    let options = loom_objects::styles::TableStyleOptions {
+        header_row: table.header_row,
+        total_row: table.total_row,
+        first_column: table.first_column,
+        last_column: table.last_column,
+        banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
+    };
+
+    let mut curr_y = 0.0;
+    for (r, row) in table.rows.iter().enumerate() {
+        let row_h = row.height_pt.unwrap_or(20.0) * scale_y;
+        let mut curr_x = 0.0;
+        for (c, cell) in row.cells.iter().enumerate() {
+            let col_w = table.columns.get(c).map(|col| col.width_pt).unwrap_or(80.0) * scale_x;
+            if !cell.is_covered {
+                let resolved = style.resolve_cell(r, c, rows, cols, &options, Some(cell));
+                if let Some(bg) = &resolved.background_color {
+                    if let Some(rgb) = parse_hex_color_rgb(bg) {
+                        pdf.draw_rect_with_transform(
+                            page,
+                            (curr_x, curr_y, col_w, row_h),
+                            PathStyle::filled(rgb),
+                            transform,
+                        );
+                    }
+                }
+                pdf.draw_rect_with_transform(
+                    page,
+                    (curr_x, curr_y, col_w, row_h),
+                    PathStyle::stroked((0.7, 0.7, 0.7), 0.5),
+                    transform,
+                );
+                let text = cell.content.text();
+                if !text.is_empty() {
+                    let text_style = TextStyle {
+                        size_pt: 11.0 * UNITS_PER_EDITOR_PX,
+                        bold: resolved.bold,
+                        ..TextStyle::default()
+                    };
+                    pdf.draw_text_with_transform(
+                        page,
+                        curr_x + 4.0 * UNITS_PER_EDITOR_PX,
+                        curr_y + row_h * 0.7,
+                        &text,
+                        &text_style,
+                        transform,
+                    );
+                }
+            }
+            curr_x += col_w;
+        }
+        curr_y += row_h;
+    }
+}
+
+fn parse_hex_color_rgb(hex: &str) -> Option<(f32, f32, f32)> {
+    let clean = hex.trim().trim_start_matches('#');
+    if clean.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&clean[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
+    Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
 }

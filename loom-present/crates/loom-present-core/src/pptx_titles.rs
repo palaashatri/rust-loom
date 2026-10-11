@@ -139,13 +139,42 @@ pub fn extract_pptx_titles(pptx_bytes: &[u8]) -> Result<Vec<String>, String> {
 /// (N is the 1-based slide position) and layout `imported-pptx`. Error conditions are
 /// inherited from [`extract_pptx_titles`].
 pub fn slides_from_pptx(pptx_bytes: &[u8]) -> Result<Vec<Slide>, String> {
-    Ok(extract_pptx_titles(pptx_bytes)?
-        .into_iter()
-        .enumerate()
-        .map(|(index, title)| {
-            Slide::new(format!("pptx-slide-{}", index + 1), title, "imported-pptx")
-        })
-        .collect())
+    let archive = PackageArchive::from_bytes(pptx_bytes)
+        .map_err(|err| format!("unreadable pptx archive: {err}"))?;
+    let mut slide_parts: Vec<(u64, &str)> = Vec::new();
+    for path in archive.paths() {
+        let Some(number) = path
+            .strip_prefix(PPTX_SLIDE_PART_PREFIX)
+            .and_then(|rest| rest.strip_suffix(".xml"))
+        else {
+            continue;
+        };
+        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        if let Ok(parsed) = number.parse::<u64>() {
+            slide_parts.push((parsed, path));
+        }
+    }
+    if slide_parts.is_empty() {
+        return Err(
+            "pptx archive contains no slide parts (expected ppt/slides/slide<N>.xml)".to_string(),
+        );
+    }
+    slide_parts.sort_unstable_by_key(|(number, _)| *number);
+    let mut slides = Vec::with_capacity(slide_parts.len());
+    for (index, (_, path)) in slide_parts.iter().enumerate() {
+        let data = archive
+            .get(path)
+            .ok_or_else(|| format!("missing slide part {path}"))?;
+        let xml_str = String::from_utf8_lossy(data);
+        let title = pptx_slide_title(&xml_str);
+        let mut slide = Slide::new(format!("pptx-slide-{}", index + 1), title, "imported-pptx");
+        let tables = crate::tables::extract_pptx_slide_tables(&xml_str);
+        slide.elements.extend(tables);
+        slides.push(slide);
+    }
+    Ok(slides)
 }
 
 /// The slide's title: the first paragraph of its title placeholder when it has one,

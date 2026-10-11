@@ -10,6 +10,7 @@ loom-document.workspace = true
 loom-package.workspace = true
 loom-command.workspace = true
 loom-pdf.workspace = true
+loom-objects.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -17,4 +18,5 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 [dev-dependencies]
 # `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.
 loom-pdf = { workspace = true, features = ["test-support"] }
+loom-clipboard = { path = "../../../loom-core/crates/loom-clipboard" }
 roxmltree = "0.21"

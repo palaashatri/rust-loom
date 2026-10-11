@@ -3039,6 +3039,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loom-clipboard"
+version = "0.1.0"
+dependencies = [
+ "loom-objects",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "loom-command"
 version = "0.1.0"
 
@@ -3071,6 +3080,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-objects"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "loom-package"
 version = "0.1.0"
 dependencies = [
@@ -3095,8 +3112,10 @@ dependencies = [
  "i-slint-backend-winit",
  "i-slint-core",
  "image",
+ "loom-clipboard",
  "loom-command",
  "loom-desktop",
+ "loom-objects",
  "loom-package",
  "loom-pdf",
  "loom-present-core",
@@ -3120,8 +3139,10 @@ name = "loom-present-core"
 version = "0.1.0"
 dependencies = [
  "image",
+ "loom-clipboard",
  "loom-command",
  "loom-document",
+ "loom-objects",
  "loom-package",
  "loom-pdf",
  "roxmltree",
