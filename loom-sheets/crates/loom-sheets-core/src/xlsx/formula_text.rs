@@ -191,8 +191,7 @@ fn extract_param_scopes(formula: &str) -> Vec<ParamScope> {
                     let mut depth = 0i32;
                     let mut close_paren = None;
                     let mut quote: Option<char> = None;
-                    for k in j..len {
-                        let (k_byte, k_char) = chars[k];
+                    for &(k_byte, k_char) in &chars[j..len] {
                         match quote {
                             Some(q) => {
                                 if k_char == q {

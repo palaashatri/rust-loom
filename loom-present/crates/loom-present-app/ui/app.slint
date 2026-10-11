@@ -327,6 +327,7 @@ export component PresentApp inherits Window {
     // closing it returns focus to the slide editor. `theme-refocus-tick` hands
     // focus back when a dialog stacked on top of it closes.
     property <int> theme-refocus-tick: 0;
+    property <length> menu-top: (root.custom-chrome || (root.local-menu-visible && !root.is-preview-mode) ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
     changed theme-chooser-open => {
         if (!root.theme-chooser-open) { root.focus-editor(); }
     }
@@ -675,7 +676,7 @@ export component PresentApp inherits Window {
         background: transparent;
         TouchArea { clicked => { root.close-toolbar-overflow(); } }
         VerticalLayout {
-            padding-top: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra + Theme.tokens.space.sm;
+            padding-top: root.menu-top + Theme.tokens.space.sm;
             padding-left: Theme.tokens.space.lg;
             padding-right: Theme.tokens.space.lg;
             cross-axis-alignment: root.rtl ? start : end;
@@ -705,7 +706,7 @@ export component PresentApp inherits Window {
             x: root.rtl
                 ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
                 : max(0px, min(root.menu-x, root.width - self.width - 8px));
-            y: (root.custom-chrome ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
+            y: root.menu-top;
             navigator-visible: root.show-navigator;
             notes-visible: root.show-notes-drawer;
             zoom-index: root.zoom-index;

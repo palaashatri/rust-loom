@@ -460,6 +460,7 @@ fn named_button(app: &PresentApp, label: &str) -> ElementHandle {
 fn toolbar_icons_and_caption_glyphs_scale_with_text() {
     let session = launched();
     let app = &session.app;
+    app.set_custom_chrome(true);
     let mut measured = Vec::new();
     for scale in [1.0f32, 2.0] {
         Theme::get(app).set_text_scale(scale);

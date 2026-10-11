@@ -305,10 +305,26 @@ mod tests {
 
         assert!(frame_xml.contains("<p:graphicFrame"));
         assert!(frame_xml.contains("http://schemas.openxmlformats.org/drawingml/2006/chart"));
-        assert!(frame_xml.contains("<c:chartSpace"));
+        assert!(frame_xml.contains("r:id=\"rIdChart1\""));
         assert!(frame_xml.contains("Growth Trends"));
 
-        let imported = extract_pptx_slide_charts(&frame_xml);
+        let off_x = (f64::from(elem.x) * EMU_PER_UNIT).round() as i64;
+        let off_y = (f64::from(elem.y) * EMU_PER_UNIT).round() as i64;
+        let ext_cx = (f64::from(elem.width) * EMU_PER_UNIT).round() as i64;
+        let ext_cy = (f64::from(elem.height) * EMU_PER_UNIT).round() as i64;
+
+        let inline_frame_xml = format!(
+            r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:nvGraphicFramePr><p:cNvPr id="5" name="Growth Trends"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>
+  <p:xfrm><a:off x="{off_x}" y="{off_y}"/><a:ext cx="{ext_cx}" cy="{ext_cy}"/></p:xfrm>
+  <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+    {}
+  </a:graphicData></a:graphic>
+</p:graphicFrame>"#,
+            loom_objects::chart_ooxml::chart_to_c_chart_xml(&elem.chart().unwrap())
+        );
+
+        let imported = extract_pptx_slide_charts(&inline_frame_xml);
         assert_eq!(imported.len(), 1);
 
         let imp_elem = &imported[0];

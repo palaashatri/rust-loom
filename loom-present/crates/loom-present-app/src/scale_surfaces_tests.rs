@@ -230,7 +230,7 @@ fn toolbar_captions_scale_and_the_row_grows_to_hold_them() {
         let items = rects_without_surface(1280.0, 800.0, scale);
         let view = items
             .iter()
-            .find(|i| i.0 == "View")
+            .find(|i| i.0 == "View" && i.2 > 25.0)
             .expect("View toolbar item");
         // icon 18 + gap 2 + padding 8 + one caption line (about 1.2 em at 10 px * scale)
         let needed = 28.0 + 12.0 * scale;

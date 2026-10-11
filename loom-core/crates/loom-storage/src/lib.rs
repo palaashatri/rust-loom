@@ -9,7 +9,7 @@
 use loom_package::zip::sha256;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,7 +56,14 @@ impl From<std::io::Error> for StorageError {
 
 /// Check if a path is absolute.
 pub fn is_absolute_path(p: &Path) -> bool {
-    p.is_absolute()
+    #[cfg(windows)]
+    {
+        p.is_absolute() || p.has_root()
+    }
+    #[cfg(not(windows))]
+    {
+        p.is_absolute()
+    }
 }
 
 /// Path safety check ensuring relative path does not escape sandbox via `..`.
@@ -267,8 +274,11 @@ impl RecoveryJournal {
 
         let mut file = OpenOptions::new()
             .create(true)
-            .append(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
             .open(&self.path)?;
+        file.seek(SeekFrom::End(0))?;
 
         let original_len = file.metadata()?.len();
         if let Err(error) = check_fail_point(FailPoint::JournalBeforeWrite) {

@@ -45,6 +45,7 @@ impl Default for Tolerance {
 ///
 /// On mismatch (outside tolerance) the actual and diff PNGs are written next
 /// to the baseline and the test fails.
+#[allow(clippy::result_large_err)]
 pub fn assert_matches_baseline(
     actual: &RgbaImage,
     baseline_path: &Path,

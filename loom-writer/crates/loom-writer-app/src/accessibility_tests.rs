@@ -6,11 +6,18 @@ use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 
 fn unnamed_interactive(app: &WriterApp) -> Vec<String> {
-    // The first Rectangle is the window's content root; its descendants are
-    // the whole main-window tree (overlays included).
-    let root = ElementHandle::find_by_element_type_name(app, "Rectangle")
-        .next()
-        .expect("root element");
+    // Find the content root containing the full window tree.
+    let root = [
+        "Rectangle",
+        "WriterApp",
+        "Window",
+        "VerticalLayout",
+        "FocusScope",
+    ]
+    .iter()
+    .flat_map(|name| ElementHandle::find_by_element_type_name(app, name).collect::<Vec<_>>())
+    .max_by_key(|candidate| candidate.query_descendants().find_all().len())
+    .expect("root element");
     let mut bad = Vec::new();
     for role in [
         AccessibleRole::Button,

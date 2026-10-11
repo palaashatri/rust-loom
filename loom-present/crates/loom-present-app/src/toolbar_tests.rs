@@ -58,8 +58,18 @@ fn press(app: &PresentApp, role: AccessibleRole, label: &str) {
     found.invoke_accessible_default_action();
 }
 
+fn toolbar_button(app: &PresentApp, label: &str) -> ElementHandle {
+    let min_height = if label == "More actions" { 20.0 } else { 40.0 };
+    ElementHandle::find_by_accessible_label(app, label)
+        .find(|e| {
+            e.accessible_role() == Some(AccessibleRole::Button) && e.size().height >= min_height
+        })
+        .unwrap_or_else(|| panic!("toolbar button {label:?}"))
+}
+
 fn button(app: &PresentApp, label: &str) {
-    press(app, AccessibleRole::Button, label);
+    render(app);
+    toolbar_button(app, label).invoke_accessible_default_action();
 }
 
 #[test]
@@ -76,7 +86,7 @@ fn every_toolbar_item_is_a_named_button_in_three_groups() {
             })
             .find_all()
             .into_iter()
-            .filter(|e| e.absolute_position().y < 100.0)
+            .filter(|e| e.absolute_position().y < 100.0 && e.size().height >= 40.0)
             .collect::<Vec<_>>();
         assert!(!items.is_empty(), "toolbar button named {label:?}");
         let (p, s) = (items[0].absolute_position(), items[0].size());

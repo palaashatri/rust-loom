@@ -42,8 +42,18 @@ fn press(app: &WriterApp, role: AccessibleRole, label: &str) {
         .invoke_accessible_default_action();
 }
 
+fn toolbar_button(app: &WriterApp, label: &str) -> ElementHandle {
+    let min_height = if label == "More actions" { 20.0 } else { 40.0 };
+    ElementHandle::find_by_accessible_label(app, label)
+        .find(|e| {
+            e.accessible_role() == Some(AccessibleRole::Button) && e.size().height >= min_height
+        })
+        .unwrap_or_else(|| panic!("toolbar button {label:?}"))
+}
+
 fn button(app: &WriterApp, label: &str) {
-    press(app, AccessibleRole::Button, label);
+    render(app);
+    toolbar_button(app, label).invoke_accessible_default_action();
 }
 
 fn row(app: &WriterApp, label: &str) {
@@ -59,13 +69,7 @@ fn key(app: &WriterApp, key: Key) {
 
 fn toolbar_x(app: &WriterApp, label: &str) -> f32 {
     render(app);
-    ElementHandle::find_by_accessible_label(app, label)
-        .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
-        .map(|e| (e.absolute_position(), e.size()))
-        .find(|(p, s)| p.y < 100.0 && s.width > 0.0)
-        .unwrap_or_else(|| panic!("toolbar button {label:?}"))
-        .0
-        .x
+    toolbar_button(app, label).absolute_position().x
 }
 
 fn select_all(app: &WriterApp, state: &GuiState) {

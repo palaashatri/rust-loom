@@ -80,8 +80,8 @@ fn highlight_and_ink_right_edges(document: &WriterDocument) -> (u32, u32) {
     // The highlight is whatever changes between the two frames by more than
     // anti-aliasing does; the ink is what is dark in the unselected frame.
     let (mut highlight, mut ink) = (0u32, 0u32);
-    // Below the toolbar and above the status bar, which spans the window.
-    for y in 60..plain.height.saturating_sub(60) {
+    // Below the menu bar and toolbar and above the status bar.
+    for y in 95..plain.height.saturating_sub(60) {
         for x in left..=right {
             let (a, b) = (selected.at(x, y), plain.at(x, y));
             let changed: i32 = (0..3)
