@@ -28,6 +28,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "format.bold",
     "format.italic",
     "format.underline",
+    "insert.table",
+    "insert.chart",
 ];
 
 loom_desktop::local_menu_bindings!(WriterApp, SUPPORTED_COMMANDS, set_status_right);

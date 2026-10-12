@@ -729,7 +729,7 @@ fn writer_menu_disables_unhandled_controller_commands() {
             Ok(())
         }))
         .expect("register sink");
-    assert!(service.dispatch_action("edit.cut").is_err());
+    assert!(service.dispatch_action("edit.select_all").is_err());
     assert_eq!(sink_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
 

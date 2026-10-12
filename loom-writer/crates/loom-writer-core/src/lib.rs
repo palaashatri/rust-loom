@@ -16,7 +16,7 @@ use unicode_segmentation::UnicodeSegmentation;
 mod charts;
 mod comments;
 pub mod docx;
-pub use docx::import_docx;
+pub use docx::{import_docx, inspect_docx_unsupported};
 mod export;
 mod export_flow;
 mod export_table;

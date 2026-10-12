@@ -12,7 +12,7 @@ pub mod import;
 mod package;
 mod xml;
 
-pub use import::import_docx;
+pub use import::{import_docx, inspect_docx_unsupported};
 
 use loom_package::zip::{ArchiveError, PackageArchive};
 
@@ -36,16 +36,20 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     let plan = CommentPlan::new(doc);
     let has_comments = plan.exported() > 0;
     let body = body::build(doc, &plan);
+    let chart_count = body.charts.len();
     let style = doc.page.page_style();
 
     let mut archive = PackageArchive::new();
     let mut add = |name: &str, content: String| archive.add(name, content.into_bytes());
-    add("[Content_Types].xml", package::content_types(has_comments))?;
+    add(
+        "[Content_Types].xml",
+        package::content_types(has_comments, chart_count),
+    )?;
     add("_rels/.rels", package::package_rels())?;
     add("word/document.xml", body.xml)?;
     add(
         "word/_rels/document.xml.rels",
-        package::document_rels(has_comments),
+        package::document_rels(has_comments, chart_count),
     )?;
     add("word/styles.xml", package::styles(&style))?;
     add(
@@ -56,6 +60,12 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     if has_comments {
         add("word/comments.xml", plan.comments_xml())?;
         add("word/commentsExtended.xml", plan.comments_extended_xml())?;
+    }
+    for (chart_idx, chart_xml) in &body.charts {
+        add(
+            &format!("word/charts/chart{chart_idx}.xml"),
+            chart_xml.clone(),
+        )?;
     }
     add("docProps/core.xml", package::core_properties(&doc.title))?;
     add("docProps/app.xml", package::app_properties())?;

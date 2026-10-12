@@ -7,6 +7,7 @@ import {
 import { Icon } from "icons.slint";
 import { FindBar, FindBarOverlay } from "find_bar.slint";
 import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
+import { DocxImportWarningDialog } from "docx_import_warning.slint";
 import { WriterPaletteHost } from "palette_host.slint";
 import { WriterShortcutScope } from "shortcut_scope.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
@@ -28,8 +29,7 @@ export component WriterApp inherits Window {
     in-out property <string> window-title: "Loom Writer";
     title: root.window-title;
     default-font-family: Theme.ui-font-family;
-    // Windows and Linux draw their own frame so the menu and the title share
-    // one row. macOS keeps the native frame and global menu bar.
+    // Windows/Linux share menu and title row; macOS keeps native frame.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -148,6 +148,8 @@ export component WriterApp inherits Window {
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
     in-out property <bool> save-changes-closing: false;
+    in-out property <bool> docx-import-warning-open: false;
+    in-out property <string> docx-import-warning-message: "";
 
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
@@ -214,6 +216,7 @@ export component WriterApp inherits Window {
     callback select-list-style(int);
     callback insert-table;
     callback insert-table-size(int, int);
+    callback insert-chart;
     callback table-navigate-backwards;
     callback set-table-style(string);
     callback toggle-table-option(string);
@@ -228,6 +231,8 @@ export component WriterApp inherits Window {
     callback save-changes-save;
     callback save-changes-discard;
     callback save-changes-cancel;
+    callback docx-import-continue;
+    callback docx-import-cancel;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -349,6 +354,10 @@ export component WriterApp inherits Window {
         }
     }
 
+    changed docx-import-warning-open => {
+        if (!root.docx-import-warning-open) { root.focus-page(); }
+    }
+
     changed palette-open => {
         if (root.palette-open) {
             palette-host.grab-focus();
@@ -360,7 +369,7 @@ export component WriterApp inherits Window {
     app-focus := WriterShortcutScope {
         palette-open: root.palette-open;
         template-chooser-open: root.template-chooser-open;
-        save-changes-open: root.save-changes-open;
+        save-changes-open: root.save-changes-open || root.docx-import-warning-open;
         toolbar-menu-kind: root.toolbar-menu-kind;
         open-menu-for-key(event) => { return root.open-menu-for-key(event); }
         leave-chrome(backwards) => { root.leave-chrome(backwards); }
@@ -687,6 +696,15 @@ export component WriterApp inherits Window {
         cancel => { root.save-changes-cancel(); }
     }
 
+    if root.docx-import-warning-open : DocxImportWarningDialog {
+        width: root.width;
+        height: root.height;
+        open: root.docx-import-warning-open;
+        warning-message: root.docx-import-warning-message;
+        import-continue => { root.docx-import-continue(); }
+        import-cancel => { root.docx-import-cancel(); }
+    }
+
     LocalMenuPopup {
         x: 0px;
         y: 36px;
@@ -723,9 +741,7 @@ export component WriterApp inherits Window {
         }
     }
 
-    // The find bar sits in the document area: just under the toolbar, at the
-    // reading-end edge of the page viewport (right in LTR, left in RTL), and
-    // never over the inspector or the outline, which own the window's sides.
+    // Find bar sits under the toolbar at the viewport reading edge.
     if FindBar.open : FindBarOverlay {
         width: min(480px * max(1.0, Theme.text-scale), root.width - root.outline-width - root.inspector-width - 32px);
         x: root.rtl ? root.inspector-width + 16px : root.width - root.inspector-width - self.width - 16px;

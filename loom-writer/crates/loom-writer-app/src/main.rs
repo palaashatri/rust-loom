@@ -13,7 +13,10 @@ mod appearance;
 mod caret_scroll;
 mod clipboard_actions;
 mod document_formatting;
+mod docx_actions;
 mod docx_export;
+#[cfg(test)]
+mod docx_tests;
 mod file_title;
 mod find_bar;
 mod font_picker;
@@ -428,8 +431,16 @@ fn sample_document() -> WriterDocument {
 
 fn load_file(path: &Path) -> Result<WriterDocument, String> {
     let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    loom_writer_core::load_document(&bytes)
-        .map_err(|error| format!("load {}: {error}", path.display()))
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+    {
+        loom_writer_core::import_docx(&bytes)
+            .map_err(|error| format!("import docx {}: {error}", path.display()))
+    } else {
+        loom_writer_core::load_document(&bytes)
+            .map_err(|error| format!("load {}: {error}", path.display()))
+    }
 }
 
 fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
@@ -483,6 +494,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "edit.paste" | "writer.paste" => app.invoke_paste(),
         "app.palette" => app.invoke_open_palette(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
+        "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
         id if appearance::dispatch(app, id) => {}
@@ -737,6 +749,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Insert a Markdown table at the caret; its cells are edited as text")
             .with_category("insert")
             .with_order(20),
+        CommandSpec::new("writer.chart.insert", "Insert Chart (from Clipboard)")
+            .with_undo_label("Insert Chart")
+            .with_description("Insert an embedded chart from clipboard payload at the caret")
+            .with_category("insert")
+            .with_order(25),
         // Utility/palette/inspector — always enabled
         CommandSpec::new("app.palette", "Command Palette")
             .with_undo_label("Open Palette")
@@ -1261,11 +1278,15 @@ fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
 }
 
 fn writer_open_request(state: &GuiState) -> OpenFileRequest {
+    let mut filters = vec![state.document_filter.clone()];
+    if let Ok(docx_filter) = FileFilter::new("Word document", ["docx"]) {
+        filters.push(docx_filter);
+    }
     OpenFileRequest {
         title: "Open Loom Writer Document".into(),
         initial_directory: initial_directory(state.save_path.borrow().as_deref()),
         suggested_name: None,
-        filters: vec![state.document_filter.clone()],
+        filters,
     }
 }
 
@@ -1293,7 +1314,7 @@ fn writer_export_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
-fn replace_opened_document(
+pub(crate) fn replace_opened_document(
     app: &WriterApp,
     state: &GuiState,
     path: PathBuf,
@@ -2370,7 +2391,7 @@ fn run_gui(args: &Args) -> Result<(), String> {
     run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
 }
 
-fn sync_writer_menu_if_present(
+pub(crate) fn sync_writer_menu_if_present(
     menu_service: &Option<Arc<NativeMenuBar>>,
     app: &WriterApp,
     state: &GuiState,
@@ -2429,14 +2450,33 @@ fn open_document_from_picker(
     menu_service: &Option<Arc<NativeMenuBar>>,
 ) {
     match state.dialogs.open_file(&writer_open_request(state)) {
-        Ok(Some(path)) => match load_file(&path) {
-            Ok(document) => {
-                replace_opened_document(app, state, path.clone(), document);
-                sync_writer_menu_if_present(menu_service, app, state);
-                app.set_status_left(SharedString::from(format!("Opened {}", path.display())));
+        Ok(Some(path)) => {
+            if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+            {
+                match docx_actions::open_docx_path(app, state, path, menu_service) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {error}")))
+                    }
+                }
+            } else {
+                match load_file(&path) {
+                    Ok(document) => {
+                        replace_opened_document(app, state, path.clone(), document);
+                        sync_writer_menu_if_present(menu_service, app, state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Opened {}",
+                            path.display()
+                        )));
+                    }
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {error}")))
+                    }
+                }
             }
-            Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
-        },
+        }
         Ok(None) => app.set_status_left("Open cancelled".into()),
         Err(error) => {
             app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
@@ -2500,6 +2540,7 @@ fn wire_writer_shared_callbacks(
     view_state::wire(app, state, menu_service.clone());
     table_actions::wire(app, state);
     clipboard_actions::wire(app, state);
+    docx_actions::wire(app, state, &menu_service);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3621,21 +3662,40 @@ fn startup_documents(
         None => template
             .map(template_document)
             .unwrap_or_else(blank_startup_document),
-        Some(path) => match load_file(&path) {
-            Ok(document) => document,
-            // A draft whose file has since disappeared still opens and reads as
-            // unsaved; saving recreates the file.
-            Err(_)
-                if recovered
-                    .as_ref()
-                    .is_some_and(|draft| draft.source.is_some()) =>
+        Some(path) => {
+            if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
             {
-                template
-                    .map(template_document)
-                    .unwrap_or_else(blank_startup_document)
+                let has_warnings = std::fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| loom_writer_core::inspect_docx_unsupported(&bytes).ok())
+                    .is_some_and(|w| !w.is_empty());
+                if has_warnings {
+                    template
+                        .map(template_document)
+                        .unwrap_or_else(blank_startup_document)
+                } else {
+                    load_file(&path)?
+                }
+            } else {
+                match load_file(&path) {
+                    Ok(document) => document,
+                    // A draft whose file has since disappeared still opens and reads as
+                    // unsaved; saving recreates the file.
+                    Err(_)
+                        if recovered
+                            .as_ref()
+                            .is_some_and(|draft| draft.source.is_some()) =>
+                    {
+                        template
+                            .map(template_document)
+                            .unwrap_or_else(blank_startup_document)
+                    }
+                    Err(error) => return Err(error),
+                }
             }
-            Err(error) => return Err(error),
-        },
+        }
     };
     Ok(match recovered {
         Some(draft) => (draft.document, fresh),
@@ -3684,7 +3744,28 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // to it; otherwise the window saves to the requested file, if any.
     let save_path = match &recovered {
         Some(draft) => draft.source.clone(),
-        None => args.open.as_ref().map(PathBuf::from),
+        None => {
+            if let Some(open_str) = args.open.as_ref() {
+                let p = PathBuf::from(open_str);
+                if p.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+                {
+                    let has_warnings = std::fs::read(&p)
+                        .ok()
+                        .and_then(|bytes| loom_writer_core::inspect_docx_unsupported(&bytes).ok())
+                        .is_some_and(|w| !w.is_empty());
+                    if has_warnings {
+                        None
+                    } else {
+                        Some(p)
+                    }
+                } else {
+                    Some(p)
+                }
+            } else {
+                None
+            }
+        }
     };
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
@@ -3728,6 +3809,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
     local_menu::wire_action(&app, menu_service.clone());
     let _ = local_menu::sync(&app, &menu_service);
+    if let Some(open_path) = args.open.as_deref().map(Path::new) {
+        if open_path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+        {
+            let _ = docx_actions::open_docx_path(
+                &app,
+                &state,
+                open_path.to_path_buf(),
+                &Some(menu_service.clone()),
+            );
+        }
+    }
     // A choice from any surface refreshes the menu check marks.
     appearance::on_change(|app| app.invoke_view_state_changed());
     let app_ref = app.as_weak();

@@ -168,6 +168,6 @@ pub(crate) fn update_table_selection_properties(
         }
     } else {
         app.set_is_table_selected(false);
-        app.set_document_accessible_label(SharedString::from("Writer Document Page"));
+        app.set_document_accessible_label(SharedString::from("Document body"));
     }
 }

@@ -66,6 +66,7 @@ pub(crate) enum PaletteAction {
     SetHeading(i32),
     SetAlignment(i32),
     InsertTable,
+    InsertChart,
     SetAppearance(loom_desktop::Appearance),
 }
 
@@ -83,6 +84,7 @@ pub(crate) fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) ->
             true
         }
         PaletteAction::InsertTable => dispatch_command(app, "writer.table.insert"),
+        PaletteAction::InsertChart => dispatch_command(app, "writer.chart.insert"),
         PaletteAction::SetAppearance(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
         // Needs the document state; handled where the palette is wired.
@@ -192,6 +194,12 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::InsertTable,
             id: "writer.table.insert",
             label: "Insert Markdown Table (text)",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertChart,
+            id: "writer.chart.insert",
+            label: "Insert Chart (from Clipboard)",
             shortcut: "",
         },
         PaletteCommand {

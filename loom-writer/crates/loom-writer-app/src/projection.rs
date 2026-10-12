@@ -370,6 +370,7 @@ pub(crate) fn project(
     let mut rows: Vec<WriterRenderBlock> = Vec::new();
     let mut table_cell_rects: Vec<WriterTableCellRect> = Vec::new();
     let mut seen_table_blocks: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut seen_chart_blocks: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut table_block_positions: HashMap<u64, (f32, usize, usize, f32, f32)> = HashMap::new();
     for line in flow.lines_on(pages.clone()) {
         let block = &doc.blocks[line.block_index];
@@ -450,6 +451,61 @@ pub(crate) fn project(
                             }
                         }
                     }
+                }
+            }
+            continue;
+        }
+
+        if block.kind == loom_writer_core::CHART_BLOCK_KIND {
+            if seen_chart_blocks.insert(block.id) {
+                if let Ok(chart) = loom_objects::chart::Chart::from_json(block.text.as_str()) {
+                    let chart_title = chart.title.as_deref().unwrap_or("Chart");
+                    let chart_w = content_width.min(460.0);
+                    let chart_h = 200.0f32;
+                    table_cell_rects.push(WriterTableCellRect {
+                        x: 0.0,
+                        y,
+                        width: chart_w,
+                        height: chart_h,
+                        bg_color: slint::Color::from_argb_encoded(0xFFF8F9FA),
+                        has_bg: true,
+                        border_color: slint::Color::from_argb_encoded(0xFFD9D9D9),
+                        border_width: 1.0,
+                    });
+                    let mut title_block = RichBlock::new(block.id, "heading2", chart_title);
+                    title_block.runs.push(loom_text::StyleRun {
+                        start: 0,
+                        end: chart_title.len(),
+                        style: loom_text::CharacterStyle {
+                            weight: loom_text::FontWeight::Bold,
+                            ..Default::default()
+                        },
+                    });
+                    rows.push(render_row(
+                        &title_block,
+                        12.0,
+                        y + 8.0,
+                        chart_w - 24.0,
+                        24.0,
+                        "",
+                        "",
+                    ));
+                    let summary_text = format!(
+                        "[{:?} chart: {} categories, {} series]",
+                        chart.chart_type,
+                        chart.categories.len(),
+                        chart.series.len()
+                    );
+                    let summary_block = RichBlock::new(block.id, "paragraph", &summary_text);
+                    rows.push(render_row(
+                        &summary_block,
+                        12.0,
+                        y + 36.0,
+                        chart_w - 24.0,
+                        20.0,
+                        "",
+                        "",
+                    ));
                 }
             }
             continue;

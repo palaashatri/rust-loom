@@ -134,6 +134,11 @@ enum LineContent {
         layout: Rc<TableLayout>,
         row: usize,
     },
+    Chart {
+        chart: Rc<loom_objects::chart::Chart>,
+        width: f32,
+        height: f32,
+    },
 }
 
 /// One line of the PDF in document order.
@@ -202,6 +207,24 @@ fn pdf_lines(
                 });
             }
             continue;
+        }
+        if kind == crate::CHART_BLOCK_KIND {
+            if let Ok(chart) = loom_objects::chart::Chart::from_json(text) {
+                let chart = Rc::new(chart);
+                let chart_width = column.clamp(200.0, 460.0);
+                let chart_height = 200.0f32;
+                lines.push(PdfLine {
+                    block: index,
+                    content: LineContent::Chart {
+                        chart,
+                        width: chart_width,
+                        height: chart_height,
+                    },
+                    gap,
+                    height: chart_height,
+                });
+                continue;
+            }
         }
         let marker = match kind {
             "list-bulleted" => {
@@ -304,10 +327,109 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 let origin = (page_style.margin_left_pt + shift, y);
                 export_table::draw_row(&mut pdf, page, layout, *row, origin);
             }
+            LineContent::Chart {
+                chart,
+                width,
+                height,
+            } => {
+                let shift = align_shift(block.style.alignment, column, *width);
+                let origin = (page_style.margin_left_pt + shift, y);
+                draw_chart_card(&mut pdf, page, chart, origin, *width, *height);
+            }
         }
         y -= line.height;
     }
     pdf.serialize()
+}
+
+fn draw_chart_card(
+    pdf: &mut loom_pdf::PdfDocument,
+    page: loom_pdf::PageIndex,
+    chart: &loom_objects::chart::Chart,
+    origin: (f32, f32),
+    width: f32,
+    height: f32,
+) {
+    use loom_pdf::{PathStyle, TextStyle};
+    let (left, top) = origin;
+    let bottom = top - height;
+
+    // Card background & border
+    pdf.draw_rect(
+        page,
+        left,
+        bottom,
+        width,
+        height,
+        PathStyle::filled((0.98, 0.98, 0.98)),
+    );
+    pdf.draw_rect(
+        page,
+        left,
+        bottom,
+        width,
+        height,
+        PathStyle::stroked((0.85, 0.88, 0.90), 1.0),
+    );
+
+    // Title
+    if let Some(title) = &chart.title {
+        let title_style = TextStyle {
+            size_pt: 11.0,
+            bold: true,
+            fill_rgb: (0.15, 0.13, 0.11),
+            ..Default::default()
+        };
+        pdf.draw_text(page, left + 14.0, top - 18.0, title, &title_style);
+    }
+
+    if !chart.series.is_empty() && !chart.categories.is_empty() {
+        let norm_values = chart.normalized_series_values();
+        let cat_count = chart.categories.len();
+        let series_count = chart.series.len();
+        let plot_top = top - 32.0;
+        let plot_bottom = bottom + 24.0;
+        let plot_h = (plot_top - plot_bottom).max(20.0);
+        let plot_left = left + 20.0;
+        let plot_right = left + width - 20.0;
+        let plot_w = (plot_right - plot_left).max(40.0);
+        let cat_w = plot_w / cat_count as f32;
+        let bar_slot = cat_w * 0.75;
+        let bar_w = (bar_slot / series_count as f32).max(2.0);
+
+        let colors: [(f32, f32, f32); 4] = [
+            (0.145, 0.388, 0.922),
+            (0.063, 0.725, 0.506),
+            (0.961, 0.620, 0.043),
+            (0.937, 0.267, 0.267),
+        ];
+
+        let label_style = TextStyle {
+            size_pt: 8.0,
+            fill_rgb: (0.35, 0.35, 0.35),
+            ..Default::default()
+        };
+
+        for (c_idx, cat) in chart.categories.iter().enumerate() {
+            let cat_x = plot_left + c_idx as f32 * cat_w + (cat_w - bar_slot) / 2.0;
+            for (s_idx, s_norm) in norm_values.iter().enumerate() {
+                let norm = s_norm.get(c_idx).copied().unwrap_or(0.0) as f32;
+                let bar_h = (plot_h * norm).max(2.0);
+                let x = cat_x + s_idx as f32 * bar_w;
+                let y = plot_bottom;
+                let color = colors[s_idx % colors.len()];
+                pdf.draw_rect(
+                    page,
+                    x,
+                    y,
+                    (bar_w - 1.0).max(1.0),
+                    bar_h,
+                    PathStyle::filled(color),
+                );
+            }
+            pdf.draw_text(page, cat_x, bottom + 10.0, cat, &label_style);
+        }
+    }
 }
 
 #[cfg(test)]

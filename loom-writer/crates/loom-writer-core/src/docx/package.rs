@@ -26,7 +26,7 @@ pub(super) const DEFAULT_LINE_TWIPS: i32 = 276;
 pub(super) const SANS_FAMILY: &str = "Arial";
 
 /// `[Content_Types].xml`.
-pub(super) fn content_types(has_comments: bool) -> String {
+pub(super) fn content_types(has_comments: bool, chart_count: usize) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
         "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
@@ -47,6 +47,12 @@ pub(super) fn content_types(has_comments: bool) -> String {
         part(
             "/word/commentsExtended.xml",
             &format!("{WML}.commentsExtended+xml"),
+        );
+    }
+    for c in 1..=chart_count {
+        part(
+            &format!("/word/charts/chart{c}.xml"),
+            "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
         );
     }
     part(
@@ -77,7 +83,7 @@ pub(super) fn package_rels() -> String {
 }
 
 /// `word/_rels/document.xml.rels`.
-pub(super) fn document_rels(has_comments: bool) -> String {
+pub(super) fn document_rels(has_comments: bool, chart_count: usize) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
         "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -91,6 +97,11 @@ pub(super) fn document_rels(has_comments: bool) -> String {
         out.push_str(&format!(
             "<Relationship Id=\"rId4\" Type=\"{REL}/comments\" Target=\"comments.xml\"/>\
              <Relationship Id=\"rId5\" Type=\"{REL_COMMENTS_EXTENDED}\" Target=\"commentsExtended.xml\"/>"
+        ));
+    }
+    for c in 1..=chart_count {
+        out.push_str(&format!(
+            "<Relationship Id=\"rIdChart{c}\" Type=\"{REL}/chart\" Target=\"charts/chart{c}.xml\"/>"
         ));
     }
     out.push_str("</Relationships>");

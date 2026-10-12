@@ -53,6 +53,47 @@ pub(crate) fn xml_unescape(value: &str) -> String {
     out
 }
 
+/// Inspects a `.docx` package archive for unsupported constructs.
+pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String> {
+    let archive = PackageArchive::from_bytes(docx_bytes)
+        .map_err(|err| format!("unreadable docx archive: {err}"))?;
+    let mut warnings = Vec::new();
+
+    for path in archive.paths() {
+        if (path.starts_with("word/diagrams/") || path.contains("diagram"))
+            && !warnings.iter().any(|w: &String| w.contains("SmartArt"))
+        {
+            warnings.push("SmartArt diagrams are not supported and will be omitted.".to_string());
+        }
+        if path.starts_with("word/embeddings/")
+            && !warnings.iter().any(|w: &String| w.contains("OLE"))
+        {
+            warnings.push("Embedded OLE objects are not supported.".to_string());
+        }
+        if (path.contains("vbaProject.bin") || path.contains("vbaData.xml"))
+            && !warnings.iter().any(|w: &String| w.contains("VBA"))
+        {
+            warnings.push("Macros and VBA code are not supported.".to_string());
+        }
+        if (path.ends_with("footnotes.xml") || path.ends_with("endnotes.xml"))
+            && !warnings.iter().any(|w: &String| w.contains("Footnotes"))
+        {
+            warnings.push("Footnotes and endnotes are not supported.".to_string());
+        }
+    }
+
+    if let Some(doc_bytes) = archive.get("word/document.xml") {
+        let xml = String::from_utf8_lossy(doc_bytes);
+        if (xml.contains("<m:oMath") || xml.contains("<m:oMathPara"))
+            && !warnings.iter().any(|w: &String| w.contains("Equation"))
+        {
+            warnings.push("Mathematical equations (OMML) are not supported.".to_string());
+        }
+    }
+
+    Ok(warnings)
+}
+
 /// Imports a `.docx` package archive into a complete [`WriterDocument`].
 pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
     let archive = PackageArchive::from_bytes(docx_bytes)
@@ -71,13 +112,21 @@ pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
         .unwrap_or_else(|| "Untitled Document".to_string());
 
     let mut doc = WriterDocument::new("imported-doc", title);
-    doc.blocks = parse_document_body(xml)?;
+    doc.blocks = parse_document_body_with_archive(xml, Some(&archive))?;
 
     Ok(doc)
 }
 
 /// Parses the contents of `<w:body>` into a list of [`RichBlock`]s.
 pub fn parse_document_body(xml: &str) -> Result<Vec<RichBlock>, String> {
+    parse_document_body_with_archive(xml, None)
+}
+
+/// Parses the contents of `<w:body>` with optional archive for embedded media/charts.
+pub fn parse_document_body_with_archive(
+    xml: &str,
+    archive: Option<&PackageArchive>,
+) -> Result<Vec<RichBlock>, String> {
     let body_start_tag = "<w:body";
     let body_start = match xml.find(body_start_tag) {
         Some(pos) => {
@@ -119,7 +168,9 @@ pub fn parse_document_body(xml: &str) -> Result<Vec<RichBlock>, String> {
             (Some(_), Some(_)) | (Some(_), None) => {
                 let p_rel = p_pos.unwrap();
                 let p_abs = cursor + p_rel;
-                if let Some((block_opt, next_cursor)) = parse_paragraph(body_xml, p_abs, next_id) {
+                if let Some((block_opt, next_cursor)) =
+                    parse_paragraph(body_xml, p_abs, next_id, archive)
+                {
                     if let Some(block) = block_opt {
                         blocks.push(block);
                         next_id += 1;
@@ -170,7 +221,12 @@ fn find_tag_start(xml: &str, tag_name: &str) -> Option<usize> {
 }
 
 /// Parses a single `<w:p>...</w:p>` block.
-fn parse_paragraph(xml: &str, start: usize, id: u64) -> Option<(Option<RichBlock>, usize)> {
+fn parse_paragraph(
+    xml: &str,
+    start: usize,
+    id: u64,
+    archive: Option<&PackageArchive>,
+) -> Option<(Option<RichBlock>, usize)> {
     let tag_open_end = xml[start..].find('>')? + start + 1;
     let tag_str = &xml[start..tag_open_end];
     if tag_str.ends_with("/>") {
@@ -181,6 +237,41 @@ fn parse_paragraph(xml: &str, start: usize, id: u64) -> Option<(Option<RichBlock
     let end_rel = xml[start..].find(close_tag)?;
     let p_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
+
+    // Check for DrawingML chart in <w:drawing>
+    if let Some(archive) = archive {
+        if let Some(drawing_pos) = p_xml.find("<w:drawing") {
+            let drawing_xml = &p_xml[drawing_pos..];
+            if drawing_xml.contains("<c:chart") {
+                if let Some(rid) = extract_attribute_value(drawing_xml, "r:id") {
+                    let rels_xml = archive
+                        .get("word/_rels/document.xml.rels")
+                        .map(|b| String::from_utf8_lossy(b).to_string())
+                        .unwrap_or_default();
+                    let rels = parse_rels(&rels_xml);
+                    if let Some(target) = rels.get(&rid) {
+                        let chart_path = if target.starts_with('/') {
+                            target.trim_start_matches('/').to_string()
+                        } else {
+                            format!("word/{target}")
+                        };
+                        if let Some(chart_bytes) = archive.get(&chart_path) {
+                            let chart_xml = String::from_utf8_lossy(chart_bytes);
+                            if let Ok(chart) = loom_objects::chart_ooxml::c_chart_xml_to_chart(
+                                &chart_xml,
+                                format!("chart-{id}"),
+                            ) {
+                                if let Ok(json) = chart.to_json() {
+                                    let block = RichBlock::new(id, crate::CHART_BLOCK_KIND, &json);
+                                    return Some((Some(block), next_cursor));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Style & Kind
     let mut kind = "paragraph".to_string();
@@ -456,7 +547,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
             let mut p_cursor = 0usize;
             while let Some(p_rel) = find_tag_start(&tc_xml[p_cursor..], "w:p") {
                 let p_start = p_cursor + p_rel;
-                if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0) {
+                if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0, None) {
                     if let Some(block) = block_opt {
                         cell_paragraphs.push(block.text.as_str().to_string());
                     }
@@ -514,4 +605,24 @@ fn extract_core_title(xml: &str) -> Option<String> {
     } else {
         Some(title)
     }
+}
+
+fn parse_rels(rels_xml: &str) -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
+    let mut offset = 0;
+    while let Some(rel_pos) = rels_xml[offset..].find("<Relationship") {
+        let abs_start = offset + rel_pos;
+        let tag_end = rels_xml[abs_start..]
+            .find('>')
+            .unwrap_or(rels_xml.len() - abs_start);
+        let tag_str = &rels_xml[abs_start..abs_start + tag_end];
+        if let (Some(id), Some(target)) = (
+            extract_attribute_value(tag_str, "Id"),
+            extract_attribute_value(tag_str, "Target"),
+        ) {
+            map.insert(id, target);
+        }
+        offset = abs_start + tag_end;
+    }
+    map
 }

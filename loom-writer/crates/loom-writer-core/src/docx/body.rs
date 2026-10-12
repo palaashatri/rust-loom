@@ -21,6 +21,8 @@ pub(super) struct Body {
     pub xml: String,
     /// How many separate numbered lists the body contains.
     pub numbered_lists: usize,
+    /// The chart parts embedded in the body.
+    pub charts: Vec<(usize, String)>,
 }
 
 /// Twentieths of a point, the unit WordprocessingML measures in.
@@ -114,6 +116,7 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
         format!("{XML_DECLARATION}<w:document xmlns:w=\"{W_NS}\" xmlns:r=\"{R_NS}\"><w:body>");
     let mut numbered_lists = 0usize;
     let mut previous_numbered = false;
+    let mut charts: Vec<(usize, String)> = Vec::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         if let Some(table) = &tables[index] {
             xml.push_str(&table_xml(table, geometry.text_width()));
@@ -125,6 +128,17 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
             }
             previous_numbered = false;
             continue;
+        }
+        if block.kind == crate::CHART_BLOCK_KIND {
+            if let Some(chart) = crate::chart_from_block(block) {
+                let chart_idx = charts.len() + 1;
+                let rid = format!("rIdChart{chart_idx}");
+                let chart_xml = loom_objects::chart_ooxml::chart_to_c_chart_xml(&chart);
+                charts.push((chart_idx, chart_xml));
+                xml.push_str(&chart_xml_paragraph(&rid, chart_idx));
+                previous_numbered = false;
+                continue;
+            }
         }
         let list = ListKind::of(block.kind.as_str());
         let num_id = match list {
@@ -148,7 +162,20 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
     Body {
         xml,
         numbered_lists,
+        charts,
     }
+}
+
+fn chart_xml_paragraph(rid: &str, chart_id: usize) -> String {
+    format!(
+        "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\
+         <wp:extent cx=\"5486400\" cy=\"3200400\"/>\
+         <wp:docPr id=\"{chart_id}\" name=\"Chart {chart_id}\"/>\
+         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\
+         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">\
+         <c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"{R_NS}\" r:id=\"{rid}\"/>\
+         </a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
