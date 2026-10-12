@@ -3042,6 +3042,8 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "loom-clipboard"
 version = "0.1.0"
 dependencies = [
+ "clipboard-win",
+ "copypasta",
  "loom-objects",
  "serde",
  "serde_json",
@@ -3149,6 +3151,7 @@ version = "0.1.0"
 dependencies = [
  "i-slint-backend-testing",
  "i-slint-backend-winit",
+ "loom-clipboard",
  "loom-command",
  "loom-desktop",
  "loom-objects",

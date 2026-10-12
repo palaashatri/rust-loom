@@ -703,11 +703,11 @@ fn writer_menu_disables_unhandled_controller_commands() {
         "format.bold",
         "format.italic",
         "format.underline",
-    ]);
-    for id in [
         "edit.cut",
         "edit.copy",
         "edit.paste",
+    ]);
+    for id in [
         "edit.select_all",
         "view.zoom_in",
         "view.zoom_out",

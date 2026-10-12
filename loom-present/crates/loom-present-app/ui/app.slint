@@ -21,8 +21,7 @@ export component PresentApp inherits Window {
     in property <string> os-window-title: "Loom Present";
     title: root.os-window-title;
     default-font-family: Theme.ui-font-family;
-    // Windows and Linux draw their own frame so the menu and the title share
-    // one row. macOS keeps the native frame and global menu bar.
+    // Window chrome.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -57,8 +56,7 @@ export component PresentApp inherits Window {
     changed show-inspector => { root.view-state-changed(); }
     changed show-navigator => { root.view-state-changed(); }
     changed show-notes-drawer => { root.view-state-changed(); }
-    /// Toolbar Format/Animate/Document: open that tab, or close the inspector
-    /// when its tab is already showing.
+    // Show inspector tab.
     public function show-inspector-tab(tab: int) {
         if (root.show-inspector && root.inspector-tab == tab) {
             root.show-inspector = false;
@@ -112,11 +110,10 @@ export component PresentApp inherits Window {
     in-out property <int> strip-first: 0;
     in-out property <int> strip-count: 24;
     in property <int> active-slide-index: 0;
-    /// Whether the selected slide has a neighbour to swap with (menu, palette
-    /// and strip buttons share these).
+    // Can move slide.
     in property <bool> can-move-slide-up: false;
     in property <bool> can-move-slide-down: false;
-    /// Spoken after a slide moves ("Moved slide 2 to position 4").
+    // Slide move announcement.
     in-out property <string> slide-announcement: "";
     in property <[string]> element-labels: [];
     in property <[string]> element-placeholders: [];
@@ -246,12 +243,14 @@ export component PresentApp inherits Window {
     callback export-pptx;
     callback undo;
     callback redo;
+    callback copy;
+    callback cut;
+    callback paste;
     callback add-slide;
     callback delete-slide;
-    /// The slide strip tells the controller which slides it currently draws, so
-    /// only those thumbnails are kept up to date.
+    /// The slide strip visible window.
     callback strip-window-changed(int, int);
-    /// A deferred recovery draft is due; the controller writes it.
+    /// A deferred recovery draft is due.
     callback recovery-flush();
     callback duplicate-slide;
     callback move-slide-up;
@@ -380,6 +379,9 @@ export component PresentApp inherits Window {
                     root.export-pdf();
                     return accept;
                 }
+                if (event.text == "c" || event.text == "C") { root.copy(); return accept; }
+                if (event.text == "x" || event.text == "X") { root.cut(); return accept; }
+                if (event.text == "v" || event.text == "V") { root.paste(); return accept; }
                 if (event.text == "z" || event.text == "Z") {
                     if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
                     return accept;

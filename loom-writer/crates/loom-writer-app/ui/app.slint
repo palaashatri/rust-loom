@@ -184,6 +184,9 @@ export component WriterApp inherits Window {
     callback export-markdown;
     callback undo;
     callback redo;
+    callback copy;
+    callback cut;
+    callback paste;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
     callback insert-tab;
@@ -478,6 +481,9 @@ export component WriterApp inherits Window {
                                 if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                                 return accept;
                             }
+                            if ((event.modifiers.control || event.modifiers.meta) && (event.text == "c" || event.text == "C")) { root.copy(); return accept; }
+                            if ((event.modifiers.control || event.modifiers.meta) && (event.text == "x" || event.text == "X")) { root.cut(); return accept; }
+                            if ((event.modifiers.control || event.modifiers.meta) && (event.text == "v" || event.text == "V")) { root.paste(); return accept; }
                             if (root.open-menu-for-key(event)) { return accept; }
                             if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
                             if (event.text == Key.Tab) {

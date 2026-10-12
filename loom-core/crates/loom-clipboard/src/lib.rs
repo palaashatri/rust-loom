@@ -7,12 +7,17 @@
 pub mod cf_html;
 pub mod html;
 pub mod model;
+pub mod os;
 pub mod sheets_interop;
 pub mod tsv;
 
 pub use cf_html::{decode_cf_html, encode_cf_html};
 pub use html::{html_to_table, table_to_html};
 pub use model::{ClipboardData, MIME_HTML, MIME_LOOM_OBJECTS, MIME_PLAIN_TEXT, MIME_TSV};
+pub use os::{
+    read_clipboard, set_mock_clipboard_enabled, set_mock_clipboard_fails, write_clipboard,
+    ClipboardOsError,
+};
 pub use sheets_interop::{sheets_range_to_table, table_to_sheets_range, SheetsCellData};
 pub use tsv::{table_to_tsv, tsv_to_table};
 

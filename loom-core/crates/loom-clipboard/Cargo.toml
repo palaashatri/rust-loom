@@ -10,5 +10,9 @@ description = "Multi-format clipboard architecture for Loom Office suite"
 loom-objects = { path = "../loom-objects" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+copypasta = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4.1"
 
 [dev-dependencies]

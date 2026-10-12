@@ -118,19 +118,38 @@ pub fn table_to_html(table: &Table) -> String {
     out
 }
 
+/// Maximum HTML payload size accepted from clipboard to guard against OOM DOS.
+const MAX_CLIPBOARD_HTML_LEN: usize = 16 * 1024 * 1024;
+/// Maximum table dimensions constructed from untrusted HTML.
+const MAX_TABLE_ROWS: usize = 10_000;
+const MAX_TABLE_COLS: usize = 1_000;
+
 /// Parses an HTML table into a `Table` object.
 pub fn html_to_table(html: &str) -> Option<Table> {
+    if html.len() > MAX_CLIPBOARD_HTML_LEN {
+        return None;
+    }
+
     let table_lower = html.to_lowercase();
     let table_start = table_lower.find("<table")?;
-    let table_end = table_lower[table_start..].find("</table>")? + table_start + 8;
+    let table_end = match table_lower[table_start..].find("</table>") {
+        Some(idx) => table_start + idx + 8,
+        None => html.len(),
+    };
     let table_slice = &html[table_start..table_end];
 
     let mut rows_raw: Vec<Vec<RawCell>> = Vec::new();
     let mut search_pos = 0;
 
-    while let Some(tr_start_rel) = table_slice[search_pos..].to_lowercase().find("<tr") {
+    while search_pos < table_slice.len() && rows_raw.len() < MAX_TABLE_ROWS {
+        let Some(tr_start_rel) = table_slice[search_pos..].to_lowercase().find("<tr") else {
+            break;
+        };
         let tr_start = search_pos + tr_start_rel;
-        let tr_close_tag_end = table_slice[tr_start..].find('>')? + tr_start + 1;
+        let Some(tag_offset) = table_slice[tr_start..].find('>') else {
+            break;
+        };
+        let tr_close_tag_end = tr_start + tag_offset + 1;
         let tr_end = match table_slice[tr_close_tag_end..].to_lowercase().find("</tr>") {
             Some(end_rel) => tr_close_tag_end + end_rel,
             None => table_slice.len(),
@@ -140,7 +159,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
         let mut cells = Vec::new();
         let mut cell_pos = 0;
 
-        while cell_pos < row_content.len() {
+        while cell_pos < row_content.len() && cells.len() < MAX_TABLE_COLS {
             let lower_row = row_content[cell_pos..].to_lowercase();
             let td_idx = lower_row.find("<td");
             let th_idx = lower_row.find("<th");
@@ -181,19 +200,19 @@ pub fn html_to_table(html: &str) -> Option<Table> {
             let text = strip_html_tags(inner_html);
             cells.push(RawCell {
                 text,
-                col_span,
-                row_span,
+                col_span: col_span.min(100),
+                row_span: row_span.min(100),
                 is_th,
                 style_attr,
             });
 
-            cell_pos = next_pos;
+            cell_pos = next_pos.max(cell_pos + 1);
         }
 
         if !cells.is_empty() {
             rows_raw.push(cells);
         }
-        search_pos = tr_end + 5;
+        search_pos = (tr_end + 5).max(search_pos + 1).min(table_slice.len());
     }
 
     if rows_raw.is_empty() {
@@ -201,7 +220,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
     }
 
     // Determine grid bounds considering spans
-    let num_rows = rows_raw.len();
+    let num_rows = rows_raw.len().min(MAX_TABLE_ROWS);
     let mut num_cols = 0;
     for row in &rows_raw {
         let span_sum: usize = row.iter().map(|c| c.col_span).sum();
@@ -285,15 +304,27 @@ fn parse_attr_u32(attrs: &str, name: &str) -> Option<u32> {
     let lower = attrs.to_lowercase();
     let key = format!("{}=\"", name);
     let start = lower.find(&key)? + key.len();
+    if !attrs.is_char_boundary(start) {
+        return None;
+    }
     let end = attrs[start..].find('"')? + start;
-    attrs[start..end].parse().ok()
+    if !attrs.is_char_boundary(end) {
+        return None;
+    }
+    attrs[start..end].parse().ok().map(|v: u32| v.min(100))
 }
 
 fn parse_attr_str(attrs: &str, name: &str) -> Option<String> {
     let lower = attrs.to_lowercase();
     let key = format!("{}=\"", name);
     let start = lower.find(&key)? + key.len();
+    if !attrs.is_char_boundary(start) {
+        return None;
+    }
     let end = attrs[start..].find('"')? + start;
+    if !attrs.is_char_boundary(end) {
+        return None;
+    }
     Some(attrs[start..end].to_string())
 }
 
@@ -361,5 +392,29 @@ mod tests {
             cell_1.style_override.as_ref().unwrap().horizontal_align,
             Some(HorizontalAlign::Right)
         );
+    }
+
+    #[test]
+    fn hostile_input_does_not_hang_or_crash() {
+        // 1. 50 MB input
+        let large_junk = "a".repeat(50 * 1024 * 1024);
+        assert_eq!(html_to_table(&large_junk), None);
+
+        // 2. Deep nesting (1,000 nested divs around a table)
+        let mut nested = String::new();
+        for _ in 0..1000 {
+            nested.push_str("<div><span>");
+        }
+        nested.push_str("<table><tr><td>Deep</td></tr></table>");
+        for _ in 0..1000 {
+            nested.push_str("</span></div>");
+        }
+        let parsed = html_to_table(&nested).expect("parses table inside deep nesting");
+        assert_eq!(parsed.cell_text(0, 0).as_deref(), Some("Deep"));
+
+        // 3. Malformed unclosed tags
+        let malformed = "<table><tr><td>No Close<tr><td>Second";
+        let parsed_malformed = html_to_table(malformed).expect("recovers from malformed table");
+        assert!(parsed_malformed.row_count() >= 1);
     }
 }

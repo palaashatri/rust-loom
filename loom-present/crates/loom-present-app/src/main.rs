@@ -1673,6 +1673,9 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "file.export_pptx" => app.invoke_export_pptx(),
         "edit.undo" => app.invoke_undo(),
         "edit.redo" => app.invoke_redo(),
+        "edit.cut" => app.invoke_cut(),
+        "edit.copy" => app.invoke_copy(),
+        "edit.paste" => app.invoke_paste(),
         "slide.new" => app.invoke_add_slide(),
         "slide.duplicate" => app.invoke_duplicate_slide(),
         "slide.delete" => app.invoke_delete_slide(),
@@ -2007,6 +2010,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
             }
         });
     }
+    clipboard_actions::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3185,6 +3189,7 @@ mod picture_tests;
 mod appearance;
 #[cfg(test)]
 mod appearance_tests;
+mod clipboard_actions;
 mod deck_guard;
 use deck_guard::{deck_is_dirty, request_deck_replacement};
 mod element_names;

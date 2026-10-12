@@ -49,6 +49,36 @@ impl WriterDocument {
         Ok(next_id)
     }
 
+    /// Inserts a table block from a `loom_objects::Table` object, converting it
+    /// into a `WriterTable`.
+    pub fn insert_table_object(
+        &mut self,
+        offset: usize,
+        table: &loom_objects::Table,
+    ) -> Result<u64, String> {
+        if table.rows.is_empty() || table.columns.is_empty() {
+            return Err("table geometry must be non-empty".into());
+        }
+        let mut next_id = self.blocks.iter().map(|block| block.id).max().unwrap_or(0) + 1;
+        while self.blocks.iter().any(|block| block.id == next_id) {
+            next_id += 1;
+        }
+        let writer_table = WriterTable::from_loom_table(table);
+        let text = writer_table.to_markdown();
+        let block = RichBlock::new(next_id, TABLE_BLOCK_KIND, &text);
+        let insert_at = block_insert_index(self, offset);
+        self.blocks.insert(insert_at, block);
+        let caret = self
+            .blocks
+            .iter()
+            .take(insert_at)
+            .map(|block| block.text.len_bytes() + 1)
+            .sum::<usize>()
+            + 2;
+        self.set_selection(crate::TextSelection::caret(caret));
+        Ok(next_id)
+    }
+
     /// Parses the markdown table carried by the given block. Returns `None`
     /// when the block is not a table or its text does not parse.
     pub fn table_from_block(&self, block_id: u64) -> Option<WriterTable> {

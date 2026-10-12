@@ -1,5 +1,9 @@
 use super::*;
-use crate::system_clipboard::{get_text, set_external_text_for_test, set_write_fails_for_test};
+use crate::system_clipboard::{
+    get_clipboard_data, get_text, set_external_clipboard_for_test, set_external_text_for_test,
+    set_write_fails_for_test,
+};
+use loom_sheets_core::style::{CellAlignment, CellStyle, FillColor};
 
 pub(super) fn state_with(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
     set_platform();
@@ -219,4 +223,117 @@ fn copied_text_stays_on_the_system_clipboard_after_the_sheet_changes() {
         Some("changed"),
         "Cut replaces the clipboard with the cell it cleared"
     );
+}
+
+#[test]
+fn sheets_copy_writes_multiformat_payload_including_html_and_loom_objects() {
+    let (app, state) = state_with(&[("A1", "Header"), ("A2", "100"), ("B2", "=A2*2")]);
+    {
+        let mut sheet = state.current.borrow_mut();
+        let a1 = CellRef::parse("A1").unwrap();
+        sheet.set_cell_style(
+            a1,
+            CellStyle {
+                bold: true,
+                fill: FillColor::Blue,
+                ..Default::default()
+            },
+        );
+        sheet.set_cell_alignment(a1, CellAlignment::Center);
+    }
+    select(&app, &state, "A1", "B2");
+    app.invoke_copy_selection();
+
+    let clip = get_clipboard_data().expect("clipboard data must be populated");
+    assert!(
+        clip.loom_objects_json.is_some(),
+        "must write application/x-loom-objects+json"
+    );
+    let table = clip.to_table().expect("must parse back to Table");
+    assert_eq!(table.row_count(), 2);
+    assert_eq!(table.col_count(), 2);
+    assert_eq!(table.cell_text(0, 0).as_deref(), Some("Header"));
+    assert_eq!(table.cell_text(1, 1).as_deref(), Some("200")); // evaluated formula
+
+    let html = clip.html.expect("must write text/html");
+    assert!(html.contains("<table"), "HTML must contain <table>");
+    assert!(html.contains("Header"), "HTML must contain cell text");
+    assert!(
+        html.contains("font-weight: bold") || html.contains("<b>"),
+        "HTML must include bold formatting"
+    );
+
+    assert!(clip.tsv.is_some(), "must write TSV");
+    assert!(clip.plain_text.is_some(), "must write plain text");
+}
+
+#[test]
+fn sheets_paste_prefers_private_over_html_and_html_over_tsv() {
+    let (app, state) = state_with(&[("A1", "original")]);
+
+    // Scenario 1: Private loom objects JSON wins over HTML and TSV
+    let mut table_private = loom_objects::Table::new(1, 1);
+    table_private.set_cell_text(0, 0, "PrivateWinner");
+
+    let mut clip = loom_clipboard::ClipboardData::from_table(&table_private);
+    clip.html = Some("<table><tr><td>HtmlLoser</td></tr></table>".into());
+    clip.tsv = Some("TsvLoser".into());
+    clip.plain_text = Some("TsvLoser".into());
+
+    set_external_clipboard_for_test(Some(clip));
+    select(&app, &state, "A1", "A1");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "A1"), "PrivateWinner");
+
+    // Scenario 2: HTML table wins over TSV when private is absent
+    let clip_html_only = loom_clipboard::ClipboardData {
+        html: Some("<table><tr><td>HtmlWinner</td></tr></table>".into()),
+        tsv: Some("TsvLoser2".into()),
+        plain_text: Some("TsvLoser2".into()),
+        ..Default::default()
+    };
+
+    set_external_clipboard_for_test(Some(clip_html_only));
+    select(&app, &state, "B1", "B1");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "B1"), "HtmlWinner");
+
+    // Scenario 3: TSV used when private and HTML are absent
+    let clip_tsv_only = loom_clipboard::ClipboardData {
+        tsv: Some("TsvWinner".into()),
+        plain_text: Some("TsvWinner".into()),
+        ..Default::default()
+    };
+
+    set_external_clipboard_for_test(Some(clip_tsv_only));
+    select(&app, &state, "C1", "C1");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "C1"), "TsvWinner");
+}
+
+#[test]
+fn sheets_paste_parses_external_html_table() {
+    let (app, state) = state_with(&[]);
+    let external_html = r#"<table border="1">
+        <tr><th>Product</th><th>Price</th></tr>
+        <tr><td>Apples</td><td>1.99</td></tr>
+        <tr><td>Oranges</td><td>2.49</td></tr>
+    </table>"#;
+
+    let clip = loom_clipboard::ClipboardData {
+        html: Some(external_html.to_string()),
+        plain_text: Some("Product\tPrice\nApples\t1.99\nOranges\t2.49".to_string()),
+        ..Default::default()
+    };
+
+    set_external_clipboard_for_test(Some(clip));
+    select(&app, &state, "A1", "A1");
+    app.invoke_paste_selection();
+
+    assert_eq!(raw(&state, "A1"), "Product");
+    assert_eq!(raw(&state, "B1"), "Price");
+    assert_eq!(raw(&state, "A2"), "Apples");
+    assert_eq!(raw(&state, "B2"), "1.99");
+    assert_eq!(raw(&state, "A3"), "Oranges");
+    assert_eq!(raw(&state, "B3"), "2.49");
 }

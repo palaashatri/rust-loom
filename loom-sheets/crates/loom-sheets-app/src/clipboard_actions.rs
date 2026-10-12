@@ -94,14 +94,72 @@ fn external_rows(
         .collect()
 }
 
+fn external_cells_data(
+    sheet: &Sheet,
+    values: &std::collections::HashMap<CellRef, loom_sheets_core::Value>,
+    sel: GridSelection,
+) -> Vec<Vec<loom_clipboard::SheetsCellData>> {
+    let range = sel.range();
+    (range.start.row..=range.end.row)
+        .map(|row| {
+            (range.start.col..=range.end.col)
+                .map(|col| {
+                    let cell = CellRef { row, col };
+                    let raw = sheet.raw(cell).unwrap_or_default().to_string();
+                    let display_val = if raw.starts_with('=') {
+                        values.get(&cell).map(|v| v.display()).unwrap_or_default()
+                    } else {
+                        raw.clone()
+                    };
+                    let style = sheet.cell_style(cell);
+                    let alignment = sheet.cell_alignment(cell);
+                    let width = sheet.col_widths.get(&col).copied().unwrap_or(80.0);
+                    loom_clipboard::SheetsCellData {
+                        value: raw,
+                        formatted_text: display_val,
+                        background_color: if style.fill != loom_sheets_core::style::FillColor::None
+                        {
+                            Some(style.fill.hex().to_string())
+                        } else {
+                            None
+                        },
+                        bold: style.bold,
+                        italic: style.italic,
+                        text_color: None,
+                        alignment: match alignment {
+                            loom_sheets_core::style::CellAlignment::Left => {
+                                Some(loom_objects::table::HorizontalAlign::Left)
+                            }
+                            loom_sheets_core::style::CellAlignment::Center => {
+                                Some(loom_objects::table::HorizontalAlign::Center)
+                            }
+                            loom_sheets_core::style::CellAlignment::Right => {
+                                Some(loom_objects::table::HorizontalAlign::Right)
+                            }
+                            loom_sheets_core::style::CellAlignment::General => None,
+                        },
+                        width_pt: width,
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Copy the selection privately and onto the system clipboard.
 fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     let data = copy_selection(&state.current.borrow(), sel);
     let count = data.iter().map(Vec::len).sum();
     let values = evaluate_current(state);
     let text = encode_tsv(&external_rows(&state.current.borrow(), &values, sel));
+    let cell_data = external_cells_data(&state.current.borrow(), &values, sel);
+    let table = loom_clipboard::sheets_range_to_table(&cell_data);
+    let mut clip_data = loom_clipboard::ClipboardData::from_table(&table);
+    clip_data.tsv = Some(text.clone());
+    clip_data.plain_text = Some(text.clone());
+
     let origin = sel.range().start;
-    let written = crate::system_clipboard::set_text(&text);
+    let written = crate::system_clipboard::set_clipboard_data(&clip_data);
     LAST_COPY.with(|last| {
         *last.borrow_mut() = Some(LastCopy {
             origin,
@@ -117,12 +175,15 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
 /// system clipboard still matches what Copy wrote; otherwise the clipboard's
 /// tab-separated text is read.
 fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef>)> {
-    let system = crate::system_clipboard::get_text();
+    let system_clip = crate::system_clipboard::get_clipboard_data();
+    let system_text = system_clip
+        .as_ref()
+        .and_then(|c| c.tsv.as_deref().or(c.plain_text.as_deref()));
     let internal = state.clipboard.borrow().clone();
     let from_us = LAST_COPY.with(|last| {
         let last = last.borrow();
         last.as_ref()
-            .filter(|last| match (&last.external_text, system.as_deref()) {
+            .filter(|last| match (&last.external_text, system_text) {
                 // Our write failed, so the system clipboard cannot hold this copy.
                 (None, _) => true,
                 // Nothing readable (no clipboard, an empty string, or a failed
@@ -136,7 +197,44 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
     if let (Some(origin), Some(raw)) = (from_us, internal) {
         return Some((raw, Some(origin)));
     }
-    let text = system.filter(|text| !text.is_empty())?;
+
+    let clip = system_clip?;
+
+    // 1. Private loom objects JSON
+    if let Some(json) = &clip.loom_objects_json {
+        if let Ok(table) = loom_objects::Table::from_json(json) {
+            let grid = loom_clipboard::table_to_sheets_range(&table);
+            let rows: Vec<Vec<String>> = grid
+                .into_iter()
+                .map(|row| row.into_iter().map(|c| c.value).collect())
+                .collect();
+            if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
+                return Some((rows, None));
+            }
+        }
+    }
+
+    // 2. HTML table
+    if let Some(html) = &clip.html {
+        if html.contains("<table") || html.contains("<TABLE") {
+            if let Some(table) = loom_clipboard::html_to_table(html) {
+                let grid = loom_clipboard::table_to_sheets_range(&table);
+                let rows: Vec<Vec<String>> = grid
+                    .into_iter()
+                    .map(|row| row.into_iter().map(|c| c.value).collect())
+                    .collect();
+                if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
+                    return Some((rows, None));
+                }
+            }
+        }
+    }
+
+    // 3. TSV / plain text
+    let text = clip
+        .tsv
+        .or(clip.plain_text)
+        .filter(|text| !text.is_empty())?;
     let rows = parse_tsv(&text);
     (!rows.is_empty() && rows.iter().any(|row| !row.is_empty())).then_some((rows, None))
 }

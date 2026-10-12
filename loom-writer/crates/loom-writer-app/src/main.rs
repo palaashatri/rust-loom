@@ -11,6 +11,7 @@
 
 mod appearance;
 mod caret_scroll;
+mod clipboard_actions;
 mod document_formatting;
 mod docx_export;
 mod file_title;
@@ -477,6 +478,9 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "file.export_md" => app.invoke_export_markdown(),
         "edit.undo" | "writer.undo" => app.invoke_undo(),
         "edit.redo" | "writer.redo" => app.invoke_redo(),
+        "edit.cut" | "writer.cut" => app.invoke_cut(),
+        "edit.copy" | "writer.copy" => app.invoke_copy(),
+        "edit.paste" | "writer.paste" => app.invoke_paste(),
         "app.palette" => app.invoke_open_palette(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "view.inspector" => app.invoke_toggle_inspector(),
@@ -2495,6 +2499,7 @@ fn wire_writer_shared_callbacks(
     font_picker::wire(app, state);
     view_state::wire(app, state, menu_service.clone());
     table_actions::wire(app, state);
+    clipboard_actions::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();

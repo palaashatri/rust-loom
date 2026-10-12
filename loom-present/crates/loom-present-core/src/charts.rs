@@ -57,6 +57,29 @@ pub fn chart_element_from_clipboard(chart: Chart, id: impl Into<String>) -> Slid
     SlideElement::new_chart(id, x, y, width, height, chart)
 }
 
+impl crate::PresentationSession {
+    /// Inserts a chart element onto the active slide as an undoable step.
+    pub fn insert_chart(&mut self, chart: Chart) -> Result<String, String> {
+        if self.document.active_slide().is_none() {
+            return Err("there is no slide to insert the chart on".into());
+        }
+        self.checkpoint();
+        let slide = self.document.active_slide_mut().expect("checked above");
+        let mut serial = slide.elements.len() + 1;
+        let element_id = loop {
+            let candidate = format!("{}-chart-{serial}", slide.id);
+            if !slide.elements.iter().any(|item| item.id == candidate) {
+                break candidate;
+            }
+            serial += 1;
+        };
+        let elem = chart_element_from_clipboard(chart, element_id.clone());
+        slide.elements.push(elem);
+        self.selected_elements = vec![element_id.clone()];
+        Ok(element_id)
+    }
+}
+
 /// Generates a PowerPoint `<p:graphicFrame>` enclosing a DrawingML chart reference via relationship ID.
 pub fn chart_graphic_frame_with_rid(
     id: u32,

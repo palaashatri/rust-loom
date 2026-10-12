@@ -470,9 +470,6 @@ fn present_menu_disables_unhandled_controller_commands() {
     set_platform();
     let menu = build_present_menu_bar();
     for id in [
-        "edit.cut",
-        "edit.copy",
-        "edit.paste",
         "edit.select_all",
         "view.zoom_in",
         "view.zoom_out",
@@ -681,9 +678,11 @@ fn present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundar
 
     let before_unsupported = state.session.borrow().document.len();
     let error = menu_service
-        .dispatch_action_from("edit.cut", CommandSource::Menu)
+        .dispatch_action_from("edit.select_all", CommandSource::Menu)
         .expect_err("unsupported menu action must be disabled");
-    assert!(error.to_string().contains("menu item edit.cut is disabled"));
+    assert!(error
+        .to_string()
+        .contains("menu item edit.select_all is disabled"));
     assert_eq!(state.session.borrow().document.len(), before_unsupported);
 
     menu_service
