@@ -5,6 +5,7 @@ import {
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import { FontPicker, WriterFontField, WriterFontList } from "font_picker.slint";
+import { WriterTableInspector } from "table_inspector.slint";
 
 /// One anchored comment thread shown in the format inspector.
 export struct WriterCommentEntry {
@@ -66,6 +67,15 @@ export component WriterInspector inherits LoomPanel {
     callback navigate-comment(string);
     callback close-requested;
     callback f6-pressed(bool);
+
+    in-out property <bool> is-table-selected: false;
+    in-out property <string> table-style-id: "table-style-medium-1";
+    in-out property <bool> table-header-row: true;
+    in-out property <bool> table-banded-rows: true;
+    in-out property <bool> table-first-column: false;
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
 
     public function focus-first-control() {
         tab-control.grab-focus();
@@ -143,6 +153,16 @@ export component WriterInspector inherits LoomPanel {
 
             if root.inspector-tab == 0 : VerticalLayout {
                 spacing: Theme.tokens.space.md;
+
+                if root.is-table-selected : WriterTableInspector {
+                    current-style-id <=> root.table-style-id;
+                    header-row <=> root.table-header-row;
+                    banded-rows <=> root.table-banded-rows;
+                    first-column <=> root.table-first-column;
+                    set-table-style(id) => { root.set-table-style(id); }
+                    toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                    table-action(act) => { root.table-action(act); }
+                }
 
             LoomSectionHeader { title: "Paragraph Style"; }
 

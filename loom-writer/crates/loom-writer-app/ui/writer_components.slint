@@ -47,12 +47,26 @@ export struct WriterCommentRect {
     marker: bool,
 }
 
+/// A table cell rectangle projected with borders and background fills.
+export struct WriterTableCellRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    bg-color: color,
+    has-bg: bool,
+    border-color: color,
+    border-width: length,
+}
+
 /// Writer's selection-aware text editor.
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <[WriterRenderBlock]> render-blocks: [];
     in property <[WriterSelectionRect]> selection-rects: [];
     in property <[WriterCommentRect]> comment-rects: [];
+    in property <[WriterTableCellRect]> table-cell-rects: [];
+    in property <string> document-accessible-label: "Document body";
     in property <float> page-zoom: 1.0;
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
@@ -73,7 +87,7 @@ component WriterDocumentEditor inherits Rectangle {
     min-height: 0px;
     background: transparent;
     accessible-role: AccessibleRole.text-input;
-    accessible-label: "Document body";
+    accessible-label: root.document-accessible-label;
     accessible-enabled: root.enabled;
     accessible-value <=> root.text;
     accessible-placeholder-text: root.placeholder;
@@ -122,6 +136,16 @@ component WriterDocumentEditor inherits Rectangle {
             height: max(1px, found.height * root.page-zoom);
             border-radius: 2px;
             background: Theme.palette().warning.with-alpha(0.35);
+            accessible-role: none;
+        }
+        for cell in root.table-cell-rects : Rectangle {
+            x: cell.x * root.page-zoom;
+            y: cell.y * root.page-zoom;
+            width: max(1px, cell.width * root.page-zoom);
+            height: max(1px, cell.height * root.page-zoom);
+            background: cell.has-bg ? cell.bg-color : transparent;
+            border-color: cell.border-color;
+            border-width: cell.border-width * root.page-zoom;
             accessible-role: none;
         }
         for selection in root.selection-rects : Rectangle {
@@ -245,6 +269,8 @@ export component WriterPageCanvas inherits Rectangle {
     in property <[WriterRenderBlock]> render-blocks: [];
     in property <[WriterSelectionRect]> selection-rects: [];
     in property <[WriterCommentRect]> comment-rects: [];
+    in property <[WriterTableCellRect]> table-cell-rects: [];
+    in property <string> document-accessible-label: "Document body";
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in-out property <float> page-zoom: 1.0;
@@ -350,6 +376,8 @@ export component WriterPageCanvas inherits Rectangle {
                     render-blocks <=> root.render-blocks;
                     selection-rects <=> root.selection-rects;
                     comment-rects: root.comment-rects;
+                    table-cell-rects: root.table-cell-rects;
+                    document-accessible-label: root.document-accessible-label;
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     page-zoom: root.page-zoom;

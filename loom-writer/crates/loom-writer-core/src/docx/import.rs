@@ -483,6 +483,9 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
         id: format!("tbl-{id}"),
         rows,
         header_row,
+        style_id: "table-style-medium-1".to_string(),
+        banded_rows: true,
+        first_column: false,
     };
     let markdown = writer_table.to_markdown();
     let block = RichBlock::new(id, TABLE_BLOCK_KIND, &markdown);

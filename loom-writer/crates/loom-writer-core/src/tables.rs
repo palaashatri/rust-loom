@@ -338,6 +338,88 @@ impl WriterDocument {
             Ok(block_start)
         }
     }
+
+    /// Merges a rectangular block of cells starting at the cell at `offset`.
+    pub fn merge_cells_at_offset(
+        &mut self,
+        offset: usize,
+        row_span: usize,
+        col_span: usize,
+    ) -> Result<(), String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        let mut loom_tbl = table.to_loom_table();
+        loom_tbl
+            .merge_cells(loc.row, loc.col, row_span, col_span)
+            .map_err(|e| e.to_string())?;
+        let updated = WriterTable::from_loom_table(&loom_tbl);
+        self.blocks[block_idx].text = crate::Text::from_str(&updated.to_markdown());
+        Ok(())
+    }
+
+    /// Splits a previously merged cell at `offset`.
+    pub fn split_cell_at_offset(&mut self, offset: usize) -> Result<(), String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        let mut loom_tbl = table.to_loom_table();
+        loom_tbl
+            .split_cell(loc.row, loc.col)
+            .map_err(|e| e.to_string())?;
+        let updated = WriterTable::from_loom_table(&loom_tbl);
+        self.blocks[block_idx].text = crate::Text::from_str(&updated.to_markdown());
+        Ok(())
+    }
+
+    /// Sets the style ID for the table containing `offset`.
+    pub fn set_table_style_at_offset(
+        &mut self,
+        offset: usize,
+        style_id: &str,
+    ) -> Result<(), String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        table.style_id = style_id.to_string();
+        self.blocks[block_idx].text = crate::Text::from_str(&table.to_markdown());
+        Ok(())
+    }
+
+    /// Toggles a table option ("header_row", "banded_rows", "first_column") for the table containing `offset`.
+    pub fn toggle_table_option_at_offset(
+        &mut self,
+        offset: usize,
+        option: &str,
+    ) -> Result<(), String> {
+        let loc = self
+            .table_cell_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        let block_idx = loc.block_index;
+        let mut table = self
+            .table_from_block(loc.block_id)
+            .ok_or_else(|| "Failed to parse table".to_string())?;
+        match option {
+            "header_row" => table.header_row = !table.header_row,
+            "banded_rows" => table.banded_rows = !table.banded_rows,
+            "first_column" => table.first_column = !table.first_column,
+            _ => return Err(format!("Unknown table option '{option}'")),
+        }
+        self.blocks[block_idx].text = crate::Text::from_str(&table.to_markdown());
+        Ok(())
+    }
 }
 
 /// Direction for arrow key navigation within table cells.
@@ -448,8 +530,29 @@ fn split_cells(inner: &str) -> Vec<&str> {
 pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut header_row = false;
+    let mut style_id = "table-style-medium-1".to_string();
+    let mut banded_rows = true;
+    let mut first_column = false;
+
     for line in markdown.lines() {
         let trimmed = line.trim();
+        if trimmed.starts_with("<!-- loom-table:") && trimmed.ends_with("-->") {
+            let inner = trimmed
+                .trim_start_matches("<!-- loom-table:")
+                .trim_end_matches("-->")
+                .trim();
+            for part in inner.split_whitespace() {
+                if let Some((k, v)) = part.split_once('=') {
+                    match k {
+                        "style" => style_id = v.to_string(),
+                        "banded" => banded_rows = v == "1",
+                        "first_col" => first_column = v == "1",
+                        _ => {}
+                    }
+                }
+            }
+            continue;
+        }
         let Some(first_pipe) = trimmed.find('|') else {
             if !trimmed.is_empty() {
                 rows.push(vec![trimmed.to_string()]);
@@ -503,6 +606,9 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
         id: String::new(),
         rows,
         header_row,
+        style_id,
+        banded_rows,
+        first_column,
     }
 }
 
@@ -513,6 +619,9 @@ impl WriterTable {
         let mut table = loom_objects::Table::new(self.rows.len(), cols);
         table.id = self.id.clone();
         table.header_row = self.header_row;
+        table.style_id = self.style_id.clone();
+        table.banded_rows = self.banded_rows;
+        table.first_column = self.first_column;
         for (r, row) in self.rows.iter().enumerate() {
             for (c, cell_text) in row.iter().enumerate() {
                 table.set_cell_text(r, c, cell_text);
@@ -532,6 +641,9 @@ impl WriterTable {
             id: table.id.clone(),
             rows,
             header_row: table.header_row,
+            style_id: table.style_id.clone(),
+            banded_rows: table.banded_rows,
+            first_column: table.first_column,
         }
     }
 }

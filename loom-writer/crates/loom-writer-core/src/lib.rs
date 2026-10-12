@@ -36,6 +36,7 @@ pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
 pub use layout::{DocumentFlow, FlowLine};
+pub use loom_objects;
 pub use page_setup::PageSetup;
 use paragraph_match::{exact_paragraph_matches, metadata_matches};
 use style_json::{
@@ -43,8 +44,8 @@ use style_json::{
     runs_json, selection_json,
 };
 pub use tables::{
-    compute_cell_ranges, parse_table_markdown, TableArrowDirection, INSERT_COLUMNS, INSERT_ROWS,
-    TABLE_BLOCK_KIND,
+    compute_cell_ranges, parse_table_markdown, TableArrowDirection, TableCellLocation,
+    INSERT_COLUMNS, INSERT_ROWS, TABLE_BLOCK_KIND,
 };
 pub use text_metrics::{offset_at_x, text_advance};
 
@@ -3053,6 +3054,12 @@ pub struct WriterTable {
     pub rows: Vec<Vec<String>>,
     /// Whether the first row is a header.
     pub header_row: bool,
+    /// Style id from TableStyleCatalog.
+    pub style_id: String,
+    /// Banded rows.
+    pub banded_rows: bool,
+    /// First column emphasis.
+    pub first_column: bool,
 }
 
 impl WriterTable {
@@ -3062,12 +3069,23 @@ impl WriterTable {
             id: id.into(),
             rows: vec![vec![String::new(); columns]; rows],
             header_row: rows > 0,
+            style_id: "table-style-medium-1".to_string(),
+            banded_rows: true,
+            first_column: false,
         }
     }
 
     /// Column count.
     pub fn columns(&self) -> usize {
         self.rows.iter().map(Vec::len).max().unwrap_or(0)
+    }
+
+    /// Returns the contents of one cell.
+    pub fn get(&self, row: usize, column: usize) -> Option<&str> {
+        self.rows
+            .get(row)
+            .and_then(|r| r.get(column))
+            .map(|s| s.as_str())
     }
 
     /// Updates one cell.
@@ -3109,6 +3127,14 @@ impl WriterTable {
                 }
                 output.push('\n');
             }
+        }
+        if self.style_id != "table-style-medium-1" || !self.banded_rows || self.first_column {
+            output.push_str(&format!(
+                "<!-- loom-table: style={} banded={} first_col={} -->\n",
+                self.style_id,
+                if self.banded_rows { 1 } else { 0 },
+                if self.first_column { 1 } else { 0 },
+            ));
         }
         output
     }

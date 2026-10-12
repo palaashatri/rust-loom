@@ -13,7 +13,7 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
     WriterStatusBar, WriterRenderBlock, WriterSelectionRect,
-    WriterCommentRect, WriterOutlinePane, WriterOutlineEntry
+    WriterCommentRect, WriterTableCellRect, WriterOutlinePane, WriterOutlineEntry
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
@@ -21,6 +21,7 @@ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
+export { WriterTableCellRect } from "writer_components.slint";
 
 export component WriterApp inherits Window {
     // Set from the document's name and unsaved state, as Sheets does.
@@ -122,6 +123,13 @@ export component WriterApp inherits Window {
     in property <[WriterCommentRect]> comment-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
+    in property <[WriterTableCellRect]> table-cell-rects: [];
+    in-out property <string> document-accessible-label: "Document body";
+    in-out property <bool> is-table-selected: false;
+    in-out property <string> table-style-id: "table-style-medium-1";
+    in-out property <bool> table-header-row: true;
+    in-out property <bool> table-banded-rows: true;
+    in-out property <bool> table-first-column: false;
     in property <string> status-left: "";
     in property <string> status-right: "";
     in property <string> selection-announcement: "No text selected";
@@ -202,6 +210,11 @@ export component WriterApp inherits Window {
     callback select-margins(int);
     callback select-list-style(int);
     callback insert-table;
+    callback insert-table-size(int, int);
+    callback table-navigate-backwards;
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
     callback add-comment(string);
     callback set-comment-resolved(string, bool);
     callback delete-comment(string);
@@ -433,6 +446,8 @@ export component WriterApp inherits Window {
                         render-blocks <=> root.render-blocks;
                         selection-rects <=> root.selection-rects;
                         comment-rects: root.comment-rects;
+                        table-cell-rects: root.table-cell-rects;
+                        document-accessible-label: root.document-accessible-label;
                         activate-comment(id) => { root.navigate-comment(id); }
                         selection-anchor <=> root.selection-anchor;
                         selection-focus <=> root.selection-focus;
@@ -466,7 +481,8 @@ export component WriterApp inherits Window {
                             if (root.open-menu-for-key(event)) { return accept; }
                             if (event.text == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
                             if (event.text == Key.Tab) {
-                                if (!event.modifiers.shift) { root.insert-tab(); }
+                                if (event.modifiers.shift) { root.table-navigate-backwards(); }
+                                else { root.insert-tab(); }
                                 return accept;
                             }
                             if (event.text == Key.PageDown) { root.page-move(1, event.modifiers.shift); return accept; }
@@ -527,6 +543,14 @@ export component WriterApp inherits Window {
                     select-orientation(idx) => { root.select-orientation(idx); }
                     select-margins(idx) => { root.select-margins(idx); }
                     select-list-style(idx) => { root.select-list-style(idx); }
+                    is-table-selected <=> root.is-table-selected;
+                    table-style-id <=> root.table-style-id;
+                    table-header-row <=> root.table-header-row;
+                    table-banded-rows <=> root.table-banded-rows;
+                    table-first-column <=> root.table-first-column;
+                    set-table-style(id) => { root.set-table-style(id); }
+                    toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                    table-action(act) => { root.table-action(act); }
                 }
             }
 
@@ -601,6 +625,14 @@ export component WriterApp inherits Window {
             select-orientation(idx) => { root.select-orientation(idx); }
             select-margins(idx) => { root.select-margins(idx); }
             select-list-style(idx) => { root.select-list-style(idx); }
+            is-table-selected <=> root.is-table-selected;
+            table-style-id <=> root.table-style-id;
+            table-header-row <=> root.table-header-row;
+            table-banded-rows <=> root.table-banded-rows;
+            table-first-column <=> root.table-first-column;
+            set-table-style(id) => { root.set-table-style(id); }
+            toggle-table-option(opt) => { root.toggle-table-option(opt); }
+            table-action(act) => { root.table-action(act); }
         }
 
     }

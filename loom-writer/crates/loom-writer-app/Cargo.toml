@@ -19,6 +19,8 @@ loom-storage = { path = "../../../loom-core/crates/loom-storage" }
 loom-text = { path = "../../../loom-core/crates/loom-text" }
 loom-ui = { path = "../../../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
+loom-objects = { path = "../../../loom-core/crates/loom-objects" }
+loom-package = { path = "../../../loom-core/crates/loom-package" }
 slint = "1.17.1"
 i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
@@ -27,6 +29,7 @@ slint-build = "1.17.1"
 
 [dev-dependencies]
 i-slint-backend-testing = "1.17.1"
+loom-pdf = { path = "../../../loom-core/crates/loom-pdf", features = ["test-support"] }
 # The fixture fonts the picker and highlight tests install.
 loom-writer-core = { path = "../loom-writer-core", features = ["test-support"] }
 # A test registers a fixture face with the window's font collection, so the

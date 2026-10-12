@@ -1,0 +1,166 @@
+import { LoomSectionHeader, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component WriterTableInspector inherits VerticalLayout {
+    in-out property <string> current-style-id: "table-style-medium-1";
+    in-out property <bool> header-row: true;
+    in-out property <bool> banded-rows: true;
+    in-out property <bool> first-column: false;
+
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
+
+    spacing: Theme.tokens.space.md;
+    padding-left: Theme.tokens.space.xl;
+    padding-right: Theme.tokens.space.xl;
+
+    LoomSectionHeader { title: "Table Styles"; }
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+
+        // Light styles
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "Light 1";
+                variant: root.current-style-id == "table-style-light-1" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-light-1"); }
+            }
+            LoomButton {
+                label: "Light 2";
+                variant: root.current-style-id == "table-style-light-2" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-light-2"); }
+            }
+            LoomButton {
+                label: "Light 3";
+                variant: root.current-style-id == "table-style-light-3" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-light-3"); }
+            }
+            LoomButton {
+                label: "Light 4";
+                variant: root.current-style-id == "table-style-light-4" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-light-4"); }
+            }
+        }
+
+        // Medium styles
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "Med 1";
+                variant: root.current-style-id == "table-style-medium-1" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-medium-1"); }
+            }
+            LoomButton {
+                label: "Med 2";
+                variant: root.current-style-id == "table-style-medium-2" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-medium-2"); }
+            }
+            LoomButton {
+                label: "Med 3";
+                variant: root.current-style-id == "table-style-medium-3" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-medium-3"); }
+            }
+            LoomButton {
+                label: "Med 4";
+                variant: root.current-style-id == "table-style-medium-4" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-medium-4"); }
+            }
+        }
+
+        // Dark styles
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "Dark 1";
+                variant: root.current-style-id == "table-style-dark-1" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-dark-1"); }
+            }
+            LoomButton {
+                label: "Dark 2";
+                variant: root.current-style-id == "table-style-dark-2" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-dark-2"); }
+            }
+            LoomButton {
+                label: "Dark 3";
+                variant: root.current-style-id == "table-style-dark-3" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-dark-3"); }
+            }
+            LoomButton {
+                label: "Dark 4";
+                variant: root.current-style-id == "table-style-dark-4" ? "primary" : "secondary";
+                clicked => { root.set-table-style("table-style-dark-4"); }
+            }
+        }
+    }
+
+    LoomSectionHeader { title: "Table Options"; }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        LoomButton {
+            label: root.header-row ? "Header On" : "Header Off";
+            variant: root.header-row ? "primary" : "secondary";
+            clicked => { root.toggle-table-option("header_row"); }
+        }
+        LoomButton {
+            label: root.banded-rows ? "Banded On" : "Banded Off";
+            variant: root.banded-rows ? "primary" : "secondary";
+            clicked => { root.toggle-table-option("banded_rows"); }
+        }
+        LoomButton {
+            label: root.first-column ? "1st Col On" : "1st Col Off";
+            variant: root.first-column ? "primary" : "secondary";
+            clicked => { root.toggle-table-option("first_column"); }
+        }
+    }
+
+    LoomSectionHeader { title: "Rows & Columns"; }
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "+ Row Above";
+                clicked => { root.table-action("insert-row-above"); }
+            }
+            LoomButton {
+                label: "+ Row Below";
+                clicked => { root.table-action("insert-row-below"); }
+            }
+            LoomButton {
+                label: "Del Row";
+                clicked => { root.table-action("delete-row"); }
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "+ Col Left";
+                clicked => { root.table-action("insert-col-left"); }
+            }
+            LoomButton {
+                label: "+ Col Right";
+                clicked => { root.table-action("insert-col-right"); }
+            }
+            LoomButton {
+                label: "Del Col";
+                clicked => { root.table-action("delete-col"); }
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                label: "Merge Cells";
+                clicked => { root.table-action("merge-cells"); }
+            }
+            LoomButton {
+                label: "Split Cell";
+                clicked => { root.table-action("split-cell"); }
+            }
+        }
+    }
+}

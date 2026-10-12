@@ -1,0 +1,167 @@
+LOOM - PRODUCT INTEGRATION WAVE 1 (prompt for Gemini / Antigravity, 2026-10-12)
+=================================================================================
+
+ROLE
+You are a senior Rust + Slint engineer working in the repository checkout you were
+opened in (github.com/palaashatri/rust-loom, branch main). You are the coder AND your own
+first reviewer. A separate hostile reviewer will re-run everything you claim.
+
+READ FIRST (in this order, fully): AGENTS.md (constitution + live ledger; the sections
+"Suite integration plan and native frames" and "Orchestrator verification of the
+2026-10-11 Gemini milestones" are the ones that define this task), then
+docs/handoff/CODEX-HANDOFF-2026-10-11.txt for environment traps, then the READMEs of
+loom-sheets, loom-writer, loom-present.
+
+SITUATION (verified 2026-10-12)
+The shared LIBRARY layer exists and is unit-tested: loom-core/crates/loom-objects (Table
+model, 12 table styles, Chart/Image/Shape, OOXML mapping), loom-core/crates/loom-clipboard
+(CF_HTML, HTML/TSV table parsing, Sheets-range converters), loom-core/crates/loom-fonts
+(font catalogue, kerned shaping, bidi, caret/selection layout), Writer core table
+navigation/mutations, chart blocks and DOCX import, Present core table/chart elements and
+PPTX import/export. NONE OF IT IS REACHABLE FROM THE PRODUCT UI:
+  - the Sheets app does not depend on loom-clipboard or loom-objects: Copy still writes
+    plain tab-separated text only;
+  - the Writer app never calls the table navigation/mutation, chart or DOCX-import
+    functions: tables in the editor are still Markdown text (pipes), and there is no
+    File > Open .docx path;
+  - the Present app has no command to insert a table or a chart and does not use
+    loom-clipboard; File > Open does not read .pptx.
+A previous agent declared all three apps ACCEPTED on the strength of library unit tests.
+That was retracted. Your job is to make the capabilities REAL for a user, with evidence.
+
+HARD RULES (violations get the work rejected)
+1. Never edit the status table or any ACCEPTED/ACCEPTANCE_BLOCKED label in AGENTS.md. Never
+   write "production ready", "accepted", "complete" or percentages anywhere. You may append
+   a dated factual paragraph to the end of AGENTS.md describing what you verified, with
+   evidence file paths, and what you could not verify.
+2. Every claim needs evidence you actually produced in this session: command output, a test
+   name that failed first then passed, a screenshot you looked at, a file you opened in a
+   real reader. If you did not run it, write "NOT RUN". No aggregate test counts you did
+   not compute from real output.
+3. Failing regression test FIRST (see it fail for the stated reason), then implement, then
+   pass. Test behaviour (accessibility tree, element bounds, key events, pixels, exported
+   bytes read back by an independent parser or Office COM), never source strings.
+4. Never raise a byte ceiling in loom-bootstrap/contracts/code-quality.toml. Tight files:
+   loom-sheets-app/ui/app.slint (17 bytes of headroom), loom-present-app/ui/app.slint
+   (~178 bytes), loom-sheets-app/src/main.rs, loom-writer-app/src/main.rs (legacy). Extract
+   modules BEFORE adding code. New Rust files < 64 KiB, Slint < 32 KiB.
+5. No placebo controls, no success messages without the real effect, no weakened or
+   deleted tests, no #[ignore] to hide failures, no new allow(...) without a reason comment.
+6. No git reset/stash/clean/checkout -- on work you did not make; commit small coherent
+   milestones to main with clear messages and push; check GitHub Actions after each push
+   (api.github.com/repos/palaashatri/rust-loom/actions/runs) and fix red before moving on.
+7. Windows and Linux are the v1 platforms. macOS is out of scope (do not break its build).
+8. Original code only; third-party crates must be permissive (MIT/Apache/BSD) and listed
+   with their licence in your report; record new assets in loom-bootstrap/contracts/assets.toml.
+9. Environment: do not run more than ~3 concurrent cargo jobs (RAM), keep >25 GB free disk
+   (each app target/ is 6-9 GB; delete targets of apps you are not working on), debug builds
+   only (CARGO_INCREMENTAL=0), use CARGO_PROFILE_TEST_OPT_LEVEL=3 for any timing claim.
+   Run cargo from inside each app folder (cd loom-writer; cargo ...).
+
+WORK ITEMS (in this order; each is done only when its acceptance checks pass)
+
+W1. Writer: real table editing in the app
+  Make table blocks render and edit as TABLES in the page, not as pipes.
+  Suggested design (you may choose another if it satisfies the checks): keep Markdown as the
+  storage/migration format; lay the table out with loom_objects::TableLayout using
+  loom-fonts for wrapped cell text; draw it as a grid element in the page projection; edit
+  the active cell through one editor overlay positioned over the cell.
+  Acceptance:
+   a. Insert Table (menu + command palette + toolbar Insert menu) with a rows x columns
+      choice creates a table with the caret in the first cell.
+   b. Tab / Shift+Tab / arrows move between cells; Tab in the last cell appends a row;
+      typing is one coalesced undo step; Undo/Redo restore structure.
+   c. Insert/delete row and column, merge/split cells from menu + palette; the inspector
+      has a table style gallery (12 styles) plus header-row/banded/first-column toggles,
+      all live and undoable.
+   d. Text typed anywhere around a table never disappears from PDF/DOCX/Markdown export
+      (property test over random documents: every non-space character appears in PDF text
+      extraction and DOCX document.xml).
+   e. DOCX export contains a real w:tbl (grid, shading, merges); open the app-exported file
+      in Microsoft Word through COM (hidden) and assert row/column counts and cell text.
+   f. Keyboard-only: everything above works without a mouse; the table exposes table / row /
+      column-header semantics in the accessibility tree (names like "Table 3 by 4, cell
+      B2: text").
+   g. Typing in a 100x20 table through the APP callback path (not a core function) stays
+      within 16.7 ms p95 at CARGO_PROFILE_TEST_OPT_LEVEL=3.
+   h. Screenshots at 1280x800 light/dark/high-contrast and --rtl that you VIEW and describe.
+
+W2. Clipboard: suite interop in the apps
+  Wire loom-clipboard into Sheets, Writer and Present.
+  Acceptance:
+   a. Sheets Copy/Cut writes: private application/x-loom-objects+json, text/html table with
+      inline styles (values as displayed, fills, bold, alignment, column widths), image/png
+      render (optional), and TSV; Sheets Paste prefers private > HTML table > TSV.
+   b. Writer Paste of a Sheets range inserts an editable TABLE block (values, formats,
+      widths, fills); pasting HTML tables from Excel/Word/browsers works; plain TSV becomes a
+      table when it has tabs on >= 2 rows, otherwise text.
+   c. Present Paste of a Sheets range inserts a table element in the slide; pasting a Sheets
+      chart (private chart payload) inserts a chart element.
+   d. Writer/Present "Copy" of a table writes HTML + TSV + private so it pastes back into
+      Sheets as cells.
+   e. Real OS clipboards: Windows (CF_HTML offsets correct; verify by reading it back with
+      PowerShell [Windows.Forms.Clipboard]::GetData('HTML Format') and by pasting into Word
+      via COM), Linux X11 (verify text/html and text/plain with xclip -t). Platforms or
+      formats you cannot support must return a typed Unsupported and say so in the status
+      line; never fake success.
+   f. Hostile input (50 MB, deep nesting, malformed HTML) does not hang or crash.
+
+W3. Present: tables and charts as first-class slide objects
+  Acceptance:
+   a. Insert > Table (rows x columns) and Insert > Chart (from clipboard payload, or a
+      minimal data editor: category/series grid) exist in menu, palette and toolbar.
+   b. In-slide cell editing with the same keyboard model as W1 (Tab, arrows, add row at
+      end); table style gallery in the inspector; move/resize/delete/undo work on the
+      object like other elements; animations apply to the whole object.
+   c. PPTX export writes a:tbl and c:chart graphic frames; File > Open .pptx works through
+      import_pptx with a warnings dialog listing anything unsupported (SmartArt, media,
+      etc.); round trip: export, re-open, compare model equality for tables/charts/text.
+   d. Open the exported .pptx in Microsoft PowerPoint through COM (hidden): assert slide
+      count, table rows/columns and cell text, chart presence (HasChart) and title.
+   e. PDF export draws tables and charts (verify text extraction with qpdf/Ghostscript or
+      loom_pdf::inspect).
+
+W4. Writer: open DOCX and embed charts
+  Acceptance:
+   a. File > Open accepts .docx (picker + drag/startup path); uses import_docx; unsupported
+      constructs are listed in a warnings dialog before replacing the current document
+      (Cancel leaves document and recovery untouched; follow the XLSX warning dialog's
+      pattern in Sheets).
+   b. Insert > Chart (from clipboard payload) places a chart block that renders in the page
+      and exports to DOCX (c:chart part) and PDF.
+   c. Round trip an Office-authored .docx fixture (create one with Word COM: headings,
+      list, table, bold/italic runs, an image) and assert structure survives.
+
+W5. Known defects still open (fix with tests; details in the handoff file section 10):
+   - Sheets: copying a spill range copies empty cells; startup "Save changes" dialog must
+     be keyboard-operable (focus trapped, Escape=Cancel); HC active-cell outline too thin.
+   - Writer: recovery notices overwritten by the word-count status; clean sessions are
+     recorded/quarantined as drafts; table Tab/undo granularity (covered by W1).
+   - Present: unedited sessions kept as '(unsaved)' files; presenter view stays open after
+     the slideshow ends; launch focus on the window instead of the canvas.
+   Re-verify the M0 claims in a LIVE window (not only unit tests): Sheets =LET(x,5,x*2)
+   exported to .xlsx must open in Microsoft Excel through COM and calculate 10.
+
+VERIFICATION YOU MUST RUN BEFORE REPORTING (per touched app)
+   cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace --locked --no-fail-fast        (Sheets takes ~25 min)
+   python loom-bootstrap/scripts/audit-code-structure.py
+   python loom-bootstrap/scripts/audit-ui-foundation.py
+   python loom-bootstrap/scripts/audit-governance.py
+   python loom-bootstrap/scripts/audit-assets.py
+   python -m unittest discover -s loom-bootstrap/scripts -p test_audit_governance.py
+ (Windows: set PYTHONUTF8=1.) Then drive the real app: build it, launch with an isolated
+ LOOM_CONFIG_DIR and APPDATA, perform the user journey, take screenshots, and read them.
+ For anything you cannot do (no Office, no display), say NOT RUN.
+
+REPORT FORMAT (put it in your final message AND as loom-bootstrap/audit-evidence-gemini-wave1-2026-10-12.txt)
+   1. Per work item: DONE / PARTIAL / NOT DONE, and for each acceptance letter: the test
+      name or command + observed result, or NOT RUN.
+   2. Exact commands run with real pass/fail counts (no totals you did not compute).
+   3. Files changed (path + one line), new dependencies + licences, byte-ceiling headroom.
+   4. Known gaps and risks, honestly, including anything that looked wrong but you did not
+      fix.
+   5. A list of claims you are NOT able to make.
+ Do not summarise unverified work as complete. A shorter honest report beats a long
+ optimistic one: the reviewer will re-run your commands and compare.

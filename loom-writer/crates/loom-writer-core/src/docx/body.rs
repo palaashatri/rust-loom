@@ -444,6 +444,14 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
         out.push_str(&format!("<w:gridCol w:w=\"{width}\"/>"));
     }
     out.push_str("</w:tblGrid>");
+    let catalog_style = loom_objects::TableStyleCatalog::get(&table.style_id)
+        .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
+    let options = loom_objects::TableStyleOptions {
+        header_row: table.header_row,
+        banded_rows: table.banded_rows,
+        first_column: table.first_column,
+        ..Default::default()
+    };
     for (row_index, row) in table.rows.iter().enumerate() {
         let header = table.header_row && row_index == 0;
         out.push_str("<w:tr><w:trPr><w:cantSplit/>");
@@ -452,16 +460,28 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
         }
         out.push_str("</w:trPr>");
         for (column, width) in widths.iter().enumerate() {
-            let shading = if header {
-                "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>"
+            let resolved = catalog_style.resolve_cell(
+                row_index,
+                column,
+                table.rows.len(),
+                columns,
+                &options,
+                None,
+            );
+            let shading = if let Some(bg) = resolved.background_color {
+                let hex = bg.trim_start_matches('#');
+                format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{hex}\"/>")
+            } else if header {
+                "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>".to_string()
             } else {
-                ""
+                String::new()
             };
             out.push_str(&format!(
                 "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr><w:p>"
             ));
             let cell = row.get(column).map_or("", String::as_str);
-            let props = RunProps::of(None, header, CharacterStyle::default().font_size);
+            let is_bold = header || resolved.bold;
+            let props = RunProps::of(None, is_bold, CharacterStyle::default().font_size);
             push_run(&mut out, &props, cell);
             out.push_str("</w:p></w:tc>");
         }

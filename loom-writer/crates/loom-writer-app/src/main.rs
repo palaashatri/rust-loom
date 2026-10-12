@@ -28,6 +28,7 @@ use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 mod reading_time;
 mod recovery;
 mod recovery_draft;
+mod table_actions;
 mod table_rules;
 mod toolbar_commands;
 mod typing_style;
@@ -1014,7 +1015,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HistoryKind {
+pub(crate) enum HistoryKind {
     Typing,
     DocumentAction,
 }
@@ -1185,7 +1186,7 @@ impl EditorHistory {
 /// Mutable state shared between the UI callbacks — now also owns the authoritative
 /// `CommandRegistry` so toolbar / menu / palette / shortcuts / a11y all share one
 /// enablement guard and palette filtering goes through `registry.search`.
-struct GuiState {
+pub(crate) struct GuiState {
     current: RefCell<WriterDocument>,
     /// Last successfully saved document content. Selection changes are not
     /// considered dirty because they do not change user-authored content.
@@ -1370,6 +1371,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_doc_content(SharedString::from(text));
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
+    table_actions::update_table_selection_properties(app, doc, selection.anchor);
     refresh_writer_render_projection(app, doc, viewport);
     outline::publish(app, doc);
     app.set_page_paper_index(match doc.page.paper {
@@ -1491,6 +1493,7 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
     app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
     app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
+    app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
     app.set_page_count(projection.page_count);
     app.set_page_stack_height(projection.stack_height);
     app.set_visible_page_first(projection.pages.start as i32);
@@ -1946,6 +1949,7 @@ fn project_selection_event(
     app.set_is_underline(formatting.underline);
     app.set_heading_level(inspector_heading_level(document, &selection));
     app.set_text_alignment(inspector_alignment(document, &selection));
+    table_actions::update_table_selection_properties(app, document, selection.anchor);
     let announcement = selection_announcement(document, &selection);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_status_right(SharedString::from(announcement));
@@ -2003,7 +2007,7 @@ fn refresh_writer_registry(app: &WriterApp, state: &GuiState) {
     app.set_can_redo(history.can_redo());
 }
 
-fn apply_state(app: &WriterApp, state: &GuiState) {
+pub(crate) fn apply_state(app: &WriterApp, state: &GuiState) {
     apply_state_with(app, state, RecoveryWrite::Now);
 }
 
@@ -2213,7 +2217,12 @@ fn flush_deferred_recovery(app: &WriterApp, state: &GuiState) {
     }
 }
 
-fn apply_with_history(app: &WriterApp, state: &GuiState, next: WriterDocument, kind: HistoryKind) {
+pub(crate) fn apply_with_history(
+    app: &WriterApp,
+    state: &GuiState,
+    next: WriterDocument,
+    kind: HistoryKind,
+) {
     if *state.current.borrow() == next {
         return;
     }
@@ -2298,6 +2307,14 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
             }
             block.text = Text::from_str(&table.to_markdown());
         }
+        let mut offset = 0;
+        for block in &document.blocks {
+            if block.kind == loom_writer_core::TABLE_BLOCK_KIND {
+                document.set_selection(DocumentSelection::caret(offset + 2));
+                break;
+            }
+            offset += block.text.len_bytes() + 1;
+        }
     }
 }
 
@@ -2321,7 +2338,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_document(&app, &doc);
     app.set_template_chooser_open(args.template_chooser);
     toolbar_commands::start_with_inspector_open(&app, args.size.0);
-    if args.inspector || args.document_tab {
+    if args.inspector || args.document_tab || args.table {
         app.set_show_inspector(true);
     }
     if args.document_tab {
@@ -2477,6 +2494,7 @@ fn wire_writer_shared_callbacks(
     outline::wire(app, state);
     font_picker::wire(app, state);
     view_state::wire(app, state, menu_service.clone());
+    table_actions::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2617,6 +2635,29 @@ fn wire_writer_shared_callbacks(
             let end = selection.anchor.max(selection.focus).min(text.len());
             if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
                 return;
+            }
+            let in_table = {
+                let current = state.current.borrow();
+                current.table_cell_at_offset(start).is_some()
+            };
+            if in_table {
+                let mut next = state.current.borrow().clone();
+                if let Ok(new_caret) = next.tab_navigate_table(start, false) {
+                    let rows_changed = {
+                        let current = state.current.borrow();
+                        current.blocks != next.blocks
+                    };
+                    if rows_changed {
+                        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                    } else {
+                        state
+                            .current
+                            .borrow_mut()
+                            .set_selection(TextSelection::caret(new_caret));
+                        apply_state(&app, &state);
+                    }
+                    return;
+                }
             }
             let edited = format!("{}    {}", &text[..start], &text[end..]);
             let caret = (start + 4).min(i32::MAX as usize) as i32;
@@ -4718,6 +4759,8 @@ mod typing_style_tests;
 
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod table_editing_tests;
 #[cfg(test)]
 mod ui_font_tests;
 #[cfg(test)]
