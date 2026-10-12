@@ -2,6 +2,7 @@ import {
     LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { PresentTableInspector } from "table_inspector.slint";
 
 component InspectorPropertyRow inherits Rectangle {
     in property <string> label: "Property";
@@ -56,11 +57,19 @@ export component PresentInspector inherits LoomPanel {
     in property <string> element-width-text: "400";
     in property <string> element-height-text: "100";
     in property <string> element-rotation-text: "0°";
+    in property <bool> is-table: false;
+    in-out property <string> table-style-id: "table-style-medium-1";
+    in-out property <bool> table-header-row: true;
+    in-out property <bool> table-banded-rows: true;
+    in-out property <bool> table-first-column: false;
 
     callback apply-template(int);
     callback update-element-content(string);
     callback set-transition(int);
     callback open-theme-chooser;
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
     /// F6 or Shift+F6 pressed inside the inspector.
     callback region-key(bool);
 
@@ -171,6 +180,16 @@ export component PresentInspector inherits LoomPanel {
                             }
                         }
                     }
+                }
+
+                if root.selection-count > 0 && root.is-table : PresentTableInspector {
+                    current-style-id <=> root.table-style-id;
+                    header-row <=> root.table-header-row;
+                    banded-rows <=> root.table-banded-rows;
+                    first-column <=> root.table-first-column;
+                    set-table-style(s) => { root.set-table-style(s); }
+                    toggle-table-option(o) => { root.toggle-table-option(o); }
+                    table-action(a) => { root.table-action(a); }
                 }
 
                 if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }

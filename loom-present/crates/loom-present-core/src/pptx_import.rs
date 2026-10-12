@@ -91,6 +91,40 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
     Ok(doc)
 }
 
+/// Inspects a `.pptx` package for unsupported constructs (SmartArt, media, macros, etc.).
+pub fn inspect_pptx_unsupported(pptx_bytes: &[u8]) -> Result<Vec<String>, String> {
+    let archive = PackageArchive::from_bytes(pptx_bytes)
+        .map_err(|err| format!("unreadable pptx archive: {err}"))?;
+    let mut warnings = Vec::new();
+
+    for path in archive.paths() {
+        if (path.starts_with("ppt/diagrams/") || path.contains("diagram"))
+            && !warnings.iter().any(|w: &String| w.contains("SmartArt"))
+        {
+            warnings.push("SmartArt diagrams are not supported and will be omitted.".to_string());
+        }
+        if path.starts_with("ppt/media/") {
+            let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+            if ["mp4", "mov", "avi", "wmv", "mp3", "wav", "m4a", "wma"].contains(&ext.as_str())
+                && !warnings.iter().any(|w: &String| w.contains("media"))
+            {
+                warnings
+                    .push("Embedded audio and video media clips are not supported.".to_string());
+            }
+        }
+        if path.starts_with("ppt/embeddings/")
+            && !warnings.iter().any(|w: &String| w.contains("OLE"))
+        {
+            warnings.push("Embedded OLE objects are not supported.".to_string());
+        }
+        if path.contains("vbaProject.bin") && !warnings.iter().any(|w: &String| w.contains("VBA")) {
+            warnings.push("Macros and VBA code are not supported.".to_string());
+        }
+    }
+
+    Ok(warnings)
+}
+
 /// Unescapes standard XML entities.
 fn xml_unescape(value: &str) -> String {
     value

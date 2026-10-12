@@ -1,0 +1,306 @@
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use loom_present_core::{
+    default_slide_chart, default_slide_table, PresentationSession, SlideElement, TableDirection,
+};
+use slint::{ComponentHandle, SharedString};
+
+use crate::{refresh, replace_opened_deck, set_status, GuiState, PresentApp};
+
+#[derive(Debug, Clone)]
+pub struct PendingPptxImport {
+    pub path: PathBuf,
+    pub session: PresentationSession,
+}
+
+thread_local! {
+    static ACTIVE_TABLE_CELL: RefCell<Option<(String, usize, usize)>> = const { RefCell::new(None) };
+    pub static PENDING_PPTX_IMPORT: RefCell<Option<PendingPptxImport>> = const { RefCell::new(None) };
+}
+
+pub fn get_active_table_cell(element_id: &str) -> (usize, usize) {
+    ACTIVE_TABLE_CELL.with(|cell| {
+        if let Some((ref id, r, c)) = *cell.borrow() {
+            if id == element_id {
+                return (r, c);
+            }
+        }
+        (0, 0)
+    })
+}
+
+pub fn set_active_table_cell(element_id: &str, row: usize, col: usize) {
+    ACTIVE_TABLE_CELL.with(|cell| {
+        *cell.borrow_mut() = Some((element_id.to_string(), row, col));
+    });
+}
+
+pub fn format_table_a11y(element: &SlideElement) -> Option<String> {
+    let table = element.table()?;
+    let (r, c) = get_active_table_cell(&element.id);
+    let col_letter = (b'A' + (c as u8).min(25)) as char;
+    let cell_content = table
+        .cell(r, c)
+        .map(|cell| cell.content.text())
+        .unwrap_or_default();
+    Some(format!(
+        "Table {} by {}, cell {}{}: {}",
+        table.row_count(),
+        table.col_count(),
+        col_letter,
+        r + 1,
+        cell_content
+    ))
+}
+
+pub fn handle_table_key(app: &PresentApp, state: &GuiState, key: &str, shift: bool) -> bool {
+    let selected_ids = state.session.borrow().selected_elements.clone();
+    if selected_ids.is_empty() {
+        return false;
+    }
+
+    let tab_key: SharedString = slint::platform::Key::Tab.into();
+    let backtab_key: SharedString = slint::platform::Key::Backtab.into();
+    let left_arrow: SharedString = slint::platform::Key::LeftArrow.into();
+    let right_arrow: SharedString = slint::platform::Key::RightArrow.into();
+    let up_arrow: SharedString = slint::platform::Key::UpArrow.into();
+    let down_arrow: SharedString = slint::platform::Key::DownArrow.into();
+
+    let is_tab = key == tab_key.as_str() || key == backtab_key.as_str();
+    let is_arrow = key == left_arrow.as_str()
+        || key == right_arrow.as_str()
+        || key == up_arrow.as_str()
+        || key == down_arrow.as_str();
+
+    if !is_tab && !is_arrow {
+        return false;
+    }
+
+    let mut session = state.session.borrow_mut();
+    let Some(slide) = session.document.active_slide_mut() else {
+        return false;
+    };
+    let Some(elem) = slide
+        .elements
+        .iter_mut()
+        .find(|e| selected_ids.iter().any(|id| id == &e.id))
+    else {
+        return false;
+    };
+    if elem.element_type != loom_present_core::ElementType::Table {
+        return false;
+    }
+
+    let (curr_r, curr_c) = get_active_table_cell(&elem.id);
+
+    if is_tab {
+        let is_shift = shift || key == backtab_key.as_str();
+        let (new_r, new_c) = elem.tab_navigate_table(curr_r, curr_c, is_shift);
+        set_active_table_cell(&elem.id, new_r, new_c);
+        drop(session);
+        refresh(app, state);
+        return true;
+    }
+
+    let dir = if key == left_arrow.as_str() {
+        TableDirection::Left
+    } else if key == right_arrow.as_str() {
+        TableDirection::Right
+    } else if key == up_arrow.as_str() {
+        TableDirection::Up
+    } else {
+        TableDirection::Down
+    };
+
+    let (new_r, new_c) = elem.arrow_navigate_table(curr_r, curr_c, dir);
+    set_active_table_cell(&elem.id, new_r, new_c);
+    drop(session);
+    refresh(app, state);
+    true
+}
+
+pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_add_table(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let res = state
+                    .session
+                    .borrow_mut()
+                    .insert_table(default_slide_table(3, 3));
+                match res {
+                    Ok(_) => {
+                        refresh(&app, &state);
+                        set_status(&app, "Inserted table");
+                    }
+                    Err(err) => set_status(&app, format!("Failed to insert table: {err}")),
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_add_chart(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let res = state
+                    .session
+                    .borrow_mut()
+                    .insert_chart(default_slide_chart());
+                match res {
+                    Ok(_) => {
+                        refresh(&app, &state);
+                        set_status(&app, "Inserted chart");
+                    }
+                    Err(err) => set_status(&app, format!("Failed to insert chart: {err}")),
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_set_table_style(move |style_id| {
+            if let Some(app) = app_ref.upgrade() {
+                let selected_ids = state.session.borrow().selected_elements.clone();
+                {
+                    let mut session = state.session.borrow_mut();
+                    session.checkpoint();
+                    if let Some(slide) = session.document.active_slide_mut() {
+                        if let Some(elem) = slide
+                            .elements
+                            .iter_mut()
+                            .find(|e| selected_ids.iter().any(|id| id == &e.id))
+                        {
+                            if let Some(mut table) = elem.table() {
+                                table.style_id = style_id.as_str().to_string();
+                                elem.set_table(&table);
+                            }
+                        }
+                    }
+                }
+                refresh(&app, &state);
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_toggle_table_option(move |opt| {
+            if let Some(app) = app_ref.upgrade() {
+                let selected_ids = state.session.borrow().selected_elements.clone();
+                {
+                    let mut session = state.session.borrow_mut();
+                    session.checkpoint();
+                    if let Some(slide) = session.document.active_slide_mut() {
+                        if let Some(elem) = slide
+                            .elements
+                            .iter_mut()
+                            .find(|e| selected_ids.iter().any(|id| id == &e.id))
+                        {
+                            if let Some(mut table) = elem.table() {
+                                match opt.as_str() {
+                                    "header-row" => table.header_row = !table.header_row,
+                                    "banded-rows" => table.banded_rows = !table.banded_rows,
+                                    "first-column" => table.first_column = !table.first_column,
+                                    _ => {}
+                                }
+                                elem.set_table(&table);
+                            }
+                        }
+                    }
+                }
+                refresh(&app, &state);
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_table_action(move |action| {
+            if let Some(app) = app_ref.upgrade() {
+                let selected_ids = state.session.borrow().selected_elements.clone();
+                {
+                    let mut session = state.session.borrow_mut();
+                    session.checkpoint();
+                    if let Some(slide) = session.document.active_slide_mut() {
+                        if let Some(elem) = slide
+                            .elements
+                            .iter_mut()
+                            .find(|e| selected_ids.iter().any(|id| id == &e.id))
+                        {
+                            let (curr_r, curr_c) = get_active_table_cell(&elem.id);
+                            match action.as_str() {
+                                "insert-row-above" => {
+                                    elem.insert_table_row(curr_r, false);
+                                }
+                                "insert-row-below" => {
+                                    elem.insert_table_row(curr_r, true);
+                                    set_active_table_cell(&elem.id, curr_r + 1, curr_c);
+                                }
+                                "delete-row" => {
+                                    elem.delete_table_row(curr_r);
+                                    set_active_table_cell(
+                                        &elem.id,
+                                        curr_r.saturating_sub(1),
+                                        curr_c,
+                                    );
+                                }
+                                "insert-col-left" => {
+                                    elem.insert_table_column(curr_c, false);
+                                }
+                                "insert-col-right" => {
+                                    elem.insert_table_column(curr_c, true);
+                                    set_active_table_cell(&elem.id, curr_r, curr_c + 1);
+                                }
+                                "delete-col" => {
+                                    elem.delete_table_column(curr_c);
+                                    set_active_table_cell(
+                                        &elem.id,
+                                        curr_r,
+                                        curr_c.saturating_sub(1),
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                refresh(&app, &state);
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_pptx_import_continue(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_pptx_import_warning_open(false);
+                let pending = PENDING_PPTX_IMPORT.with(|p| p.borrow_mut().take());
+                if let Some(pending) = pending {
+                    replace_opened_deck(&app, &state, pending.path.clone(), pending.session);
+                    set_status(&app, format!("Opened {}", pending.path.display()));
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_pptx_import_cancel(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_pptx_import_warning_open(false);
+                PENDING_PPTX_IMPORT.with(|p| *p.borrow_mut() = None);
+                set_status(&app, "Open cancelled");
+            }
+        });
+    }
+}

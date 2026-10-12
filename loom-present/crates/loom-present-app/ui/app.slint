@@ -11,24 +11,23 @@ import {
     LoomButton, LoomIconButton, LoomTitleBar, LoomWindowResizeEdges,
     LocalMenu, LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
+import { PptxImportWarningDialog } from "pptx_import_warning.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { PresenterWindow, ThumbRows } from "presenter.slint";
 
 export component PresentApp inherits Window {
-    // The OS window title, set from the deck name and unsaved state.
     in property <string> os-window-title: "Loom Present";
     title: root.os-window-title;
     default-font-family: Theme.ui-font-family;
-    // Window chrome.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
     callback window-close;
     callback window-resize(int);
     in property <bool> local-menu-visible: true;
-    in property <[string]> local-menu-labels: ["File", "Edit", "View", "Slide"];
+    in property <[string]> local-menu-labels: ["File", "Edit", "View", "Insert", "Slide"];
     in property <[LocalMenuEntry]> local-menu-items: [];
     in property <[LocalMenuEntry]> local-menu-popup-items: [];
     in-out property <int> local-menu-open-index: -1;
@@ -56,7 +55,6 @@ export component PresentApp inherits Window {
     changed show-inspector => { root.view-state-changed(); }
     changed show-navigator => { root.view-state-changed(); }
     changed show-notes-drawer => { root.view-state-changed(); }
-    // Show inspector tab.
     public function show-inspector-tab(tab: int) {
         if (root.show-inspector && root.inspector-tab == tab) {
             root.show-inspector = false;
@@ -66,7 +64,6 @@ export component PresentApp inherits Window {
         }
     }
     property <int> focus-view-tick: 0;
-    // Bumped by F6 to move focus into the inspector's tabs or the active thumbnail.
     in-out property <int> inspector-focus-tick: 0;
     in-out property <int> strip-focus-tick: 0;
     property <int> focus-zoom-tick: 0;
@@ -110,10 +107,8 @@ export component PresentApp inherits Window {
     in-out property <int> strip-first: 0;
     in-out property <int> strip-count: 24;
     in property <int> active-slide-index: 0;
-    // Can move slide.
     in property <bool> can-move-slide-up: false;
     in property <bool> can-move-slide-down: false;
-    // Slide move announcement.
     in-out property <string> slide-announcement: "";
     in property <[string]> element-labels: [];
     in property <[string]> element-placeholders: [];
@@ -165,9 +160,6 @@ export component PresentApp inherits Window {
             root.reveal = 1.0;
         }
     }
-    // Keyboard focus belongs to the slide editor (arrows, Delete, Ctrl+Z work
-    // without a click). During a slideshow the window-level scope drives
-    // navigation instead. Window shortcuts bubble up from the editor.
     public function focus-editor() {
         if (root.is-preview-mode) {
             app-focus.focus();
@@ -203,10 +195,6 @@ export component PresentApp inherits Window {
         if (!root.palette-open) { root.focus-editor(); }
     }
 
-    // Slide transition playback. Arriving at a slide whose transition is not
-    // "None" restarts `reveal` at 0; the timer walks it to 1 over ~450 ms.
-    // Dissolve and Morph fade the slide in from black; Push slides it in from
-    // the right edge. Editing never animates.
     in-out property <float> reveal: 1.0;
     out property <float> transition-progress: root.reveal;
     property <float> reveal-eased: 1.0 - (1.0 - root.reveal) * (1.0 - root.reveal);
@@ -263,6 +251,20 @@ export component PresentApp inherits Window {
     callback add-text;
     callback add-shape;
     callback add-picture;
+    callback add-table;
+    callback add-chart;
+    in-out property <bool> pptx-import-warning-open: false;
+    in-out property <string> pptx-import-warning-message: "";
+    callback pptx-import-continue;
+    callback pptx-import-cancel;
+    in property <bool> inspector-is-table: false;
+    in-out property <string> inspector-table-style-id: "table-style-medium-1";
+    in-out property <bool> inspector-table-header-row: true;
+    in-out property <bool> inspector-table-banded-rows: true;
+    in-out property <bool> inspector-table-first-column: false;
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
     callback new-sample-deck;
     callback select-element(int);
     callback transform-element(string, float, float, float, float);
@@ -322,9 +324,6 @@ export component PresentApp inherits Window {
         root.focus-editor();
     }
 
-    // The theme chooser owns its keyboard focus (see `PresentThemeChooser`);
-    // closing it returns focus to the slide editor. `theme-refocus-tick` hands
-    // focus back when a dialog stacked on top of it closes.
     property <int> theme-refocus-tick: 0;
     property <length> menu-top: (root.custom-chrome || (root.local-menu-visible && !root.is-preview-mode) ? 36px : 0px) + Theme.tokens.metrics.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
     changed theme-chooser-open => {
@@ -332,10 +331,7 @@ export component PresentApp inherits Window {
     }
 
     app-focus := FocusScope {
-        // A window-wide shortcut scope, not a control: Tab skips it.
         focus-on-tab-navigation: false;
-        // Alt+letter and F10 open the menu bar even from a text field (notes, the
-        // element text), which would otherwise type the letter.
         capture-key-pressed(event) => {
             if (root.open-menu-for-key(event)) { return accept; }
             return reject;
@@ -352,7 +348,6 @@ export component PresentApp inherits Window {
             if (event.text == Key.Escape) { root.focus-editor(); return accept; }
             if (event.text == Key.F6) { root.cycle-region(1, event.modifiers.shift); return accept; }
             if (event.text == Key.F5) { root.toggle-preview-mode(); return accept; }
-            // Ctrl+Alt+Up and Ctrl+Alt+Down move the selected slide (Alt alone is the menu key).
             if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.alt) {
                 if (event.text == Key.UpArrow) { root.move-slide-up(); return accept; }
                 if (event.text == Key.DownArrow) { root.move-slide-down(); return accept; }
@@ -363,7 +358,6 @@ export component PresentApp inherits Window {
                     return accept;
                 }
                 if (event.text == "n" || event.text == "N") {
-                    // Ctrl+Shift+N is the New Slide shortcut shown in the Slide menu.
                     if (event.modifiers.shift) { root.add-slide(); } else { root.new-deck(); }
                     return accept;
                 }
@@ -391,8 +385,6 @@ export component PresentApp inherits Window {
                     return accept;
                 }
             }
-            // Enter and F2 edit the selected object when the keyboard is on the window;
-            // the object itself takes them when it has focus.
             if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta && slide-canvas.selection-count == 1) {
                 root.focus-editor();
                 if (slide-canvas.start-editing()) { return accept; }
@@ -447,6 +439,8 @@ export component PresentApp inherits Window {
                 add-text => { root.add-text(); }
                 add-shape => { root.add-shape(); }
                 add-picture => { root.add-picture(); }
+                add-table => { root.add-table(); }
+                add-chart => { root.add-chart(); }
                 toggle-preview => { root.toggle-preview-mode(); }
                 show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
                 overflow-requested => {
@@ -458,7 +452,6 @@ export component PresentApp inherits Window {
                 }
             }
 
-            // Main Slide Canvas Area
             HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
@@ -480,6 +473,14 @@ export component PresentApp inherits Window {
                     element-width-text: root.element-width-text;
                     element-height-text: root.element-height-text;
                     element-rotation-text: root.element-rotation-text;
+                    is-table: root.inspector-is-table;
+                    table-style-id <=> root.inspector-table-style-id;
+                    table-header-row <=> root.inspector-table-header-row;
+                    table-banded-rows <=> root.inspector-table-banded-rows;
+                    table-first-column <=> root.inspector-table-first-column;
+                    set-table-style(s) => { root.set-table-style(s); }
+                    toggle-table-option(o) => { root.toggle-table-option(o); }
+                    table-action(a) => { root.table-action(a); }
                     apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
@@ -507,7 +508,6 @@ export component PresentApp inherits Window {
                     focus-active-tick: root.strip-focus-tick;
                 }
 
-                // Center Canvas & Notes
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 0px;
@@ -566,7 +566,6 @@ export component PresentApp inherits Window {
                     }
                     }
 
-                    // Speaker Notes Collapsible Drawer
                     if root.show-notes-drawer && !root.is-preview-mode : Rectangle {
                         height: 110px + 70px * (max(1.0, Theme.text-scale) - 1.0);
                         background: Theme.palette().chrome;
@@ -654,6 +653,14 @@ export component PresentApp inherits Window {
                     element-width-text: root.element-width-text;
                     element-height-text: root.element-height-text;
                     element-rotation-text: root.element-rotation-text;
+                    is-table: root.inspector-is-table;
+                    table-style-id <=> root.inspector-table-style-id;
+                    table-header-row <=> root.inspector-table-header-row;
+                    table-banded-rows <=> root.inspector-table-banded-rows;
+                    table-first-column <=> root.inspector-table-first-column;
+                    set-table-style(s) => { root.set-table-style(s); }
+                    toggle-table-option(o) => { root.toggle-table-option(o); }
+                    table-action(a) => { root.table-action(a); }
                     apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
@@ -663,7 +670,6 @@ export component PresentApp inherits Window {
                 }
             }
 
-            // Standard Status Bar
             if !root.is-preview-mode : PresentStatusBar {
                 leading-text: root.status-left;
                 trailing-text: root.status-right;
@@ -671,7 +677,6 @@ export component PresentApp inherits Window {
         }
     }
 
-    // Compact toolbar overflow menu
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         width: root.width;
         height: root.height;
@@ -695,7 +700,6 @@ export component PresentApp inherits Window {
         }
     }
 
-    // View and Zoom menus under their toolbar items.
     if (root.view-menu-open || root.zoom-menu-open) && !root.is-preview-mode : Rectangle {
         width: root.width;
         height: root.height;
@@ -703,8 +707,6 @@ export component PresentApp inherits Window {
         TouchArea { clicked => { root.close-view-menus(); } }
         PresentToolbarMenu {
             kind: root.zoom-menu-open ? 1 : 0;
-            // Opens at the item's reading-start edge: its left edge in LTR, and
-            // in RTL the menu's right edge lines up with the item's right edge.
             x: root.rtl
                 ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
                 : max(0px, min(root.menu-x, root.width - self.width - 8px));
@@ -731,7 +733,6 @@ export component PresentApp inherits Window {
         create-theme(idx) => { root.create-theme(idx); }
     }
 
-    // A key the open menu does not use closes it and returns the keyboard to the slide.
     menu-keys := FocusScope {
         x: 0px;
         y: 36px;
@@ -788,9 +789,6 @@ export component PresentApp inherits Window {
         }
     }
 
-    // Save Changes is a modal: its FocusScope parents the three buttons so keys
-    // bubble to it, Tab cycles Cancel, Discard, Save without leaving, Escape
-    // cancels, and the primary button is focused when it opens.
     if root.save-changes-open : save-changes-focus := FocusScope {
         width: root.width;
         height: root.height;
@@ -814,7 +812,6 @@ export component PresentApp inherits Window {
             save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
                 Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); font-weight: 700; color: Theme.palette().ink; horizontal-alignment: root.rtl ? right : left; }
                 Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; horizontal-alignment: root.rtl ? right : left; }
-                // The primary button sits at the reading end: right in LTR, left in RTL.
                 Rectangle { height: Theme.tokens.metrics.control-height;
                     save-button := LoomButton { label: root.save-changes-closing ? "Save and close" : "Save"; variant: "primary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? 0px : parent.width - self.width; clicked => { root.save-changes-save(); } }
                     discard-button := LoomButton { label: "Discard"; variant: "danger"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? save-button.width + 8px : save-button.x - 8px - self.width; clicked => { root.save-changes-discard(); } }
@@ -824,13 +821,21 @@ export component PresentApp inherits Window {
         }
       }
     }
+    if root.pptx-import-warning-open : PptxImportWarningDialog {
+        width: root.width;
+        height: root.height;
+        open: root.pptx-import-warning-open;
+        warning-message: root.pptx-import-warning-message;
+        import-cancel => { root.pptx-import-cancel(); }
+        import-continue => { root.pptx-import-continue(); }
+    }
+
     changed save-changes-open => {
         if (!root.save-changes-open) {
             if (root.theme-chooser-open) { root.theme-refocus-tick += 1; } else { root.focus-editor(); }
         }
     }
 
-    // Slideshow: click advances, right-click goes back.
     if root.is-preview-mode : TouchArea {
         x: 0px;
         y: 0px;

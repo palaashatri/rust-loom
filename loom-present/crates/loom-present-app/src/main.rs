@@ -18,9 +18,10 @@ use loom_desktop::{
     OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    calculate_smart_snapping, export_pdf, export_pptx, load_presentation_session, lock_aspect,
-    normalize_angle_degrees, save_presentation_session, ElementType, PresentationDocument,
-    PresentationSession, SlideElement, SnapGuide, TransitionKind,
+    calculate_smart_snapping, export_pdf, export_pptx, import_pptx, inspect_pptx_unsupported,
+    load_presentation_session, lock_aspect, normalize_angle_degrees, save_presentation_session,
+    ElementType, PresentationDocument, PresentationSession, SlideElement, SnapGuide,
+    TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
@@ -224,8 +225,17 @@ fn empty_session() -> PresentationSession {
 fn load_session(path: &Path) -> Result<PresentationSession, String> {
     let bytes = std::fs::read(path)
         .map_err(|error| format!("failed to read presentation '{}': {error}", path.display()))?;
-    let mut session = load_presentation_session(&bytes)
-        .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))?;
+    let is_pptx = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pptx"))
+        .unwrap_or(false);
+    let mut session = if is_pptx {
+        import_pptx(&bytes).map(PresentationSession::new)?
+    } else {
+        load_presentation_session(&bytes)
+            .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))?
+    };
     // A deck opens on its first slide, whichever slide was showing when it was saved,
     // so the editor and the slideshow both start at the beginning.
     session.document.active_index = 0;
@@ -607,7 +617,9 @@ fn element_text(document: &PresentationDocument, element: &SlideElement) -> Stri
     if element.element_type == ElementType::Picture {
         picture_view::picture_name(document, element)
     } else if element.element_type == ElementType::Table {
-        if let Some(table) = element.table() {
+        if let Some(a11y) = table_actions::format_table_a11y(element) {
+            a11y
+        } else if let Some(table) = element.table() {
             format!("{}x{} Table", table.row_count(), table.col_count())
         } else {
             "Table".to_string()
@@ -789,7 +801,19 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_width_text(format!("{:.0} pt", element.width).into());
             app.set_element_height_text(format!("{:.0} pt", element.height).into());
             app.set_element_rotation_text(format!("{:.0}°", element.rotation_deg).into());
+            if element.element_type == ElementType::Table {
+                app.set_inspector_is_table(true);
+                if let Some(table) = element.table() {
+                    app.set_inspector_table_style_id(table.style_id.clone().into());
+                    app.set_inspector_table_header_row(table.header_row);
+                    app.set_inspector_table_banded_rows(table.banded_rows);
+                    app.set_inspector_table_first_column(table.first_column);
+                }
+            } else {
+                app.set_inspector_is_table(false);
+            }
         } else {
+            app.set_inspector_is_table(false);
             app.set_active_element_label("No element selected".into());
             app.set_active_element_content("".into());
             app.set_element_x_text("—".into());
@@ -982,11 +1006,15 @@ fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
 }
 
 fn open_request(state: &GuiState) -> OpenFileRequest {
+    let mut filters = vec![state.deck_filter.clone()];
+    if let Ok(filter) = FileFilter::new("PowerPoint presentation", ["pptx"]) {
+        filters.push(filter);
+    }
     OpenFileRequest {
         title: "Open Loom Present Deck".into(),
         initial_directory: initial_directory(state.save_path.borrow().as_deref()),
         suggested_name: None,
-        filters: vec![state.deck_filter.clone()],
+        filters,
     }
 }
 
@@ -1081,13 +1109,52 @@ fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
 /// Cancelled or invalid opens leave the current deck untouched.
 fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
     match state.dialogs.open_file(&open_request(state)) {
-        Ok(Some(path)) => match load_session(&path) {
-            Ok(session) => {
-                replace_opened_deck(app, state, path.clone(), session);
-                set_status(app, format!("Opened {}", path.display()));
+        Ok(Some(path)) => {
+            let is_pptx = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("pptx"))
+                .unwrap_or(false);
+            if is_pptx {
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let warnings = inspect_pptx_unsupported(&bytes).unwrap_or_default();
+                        match import_pptx(&bytes).map(PresentationSession::new) {
+                            Ok(session) => {
+                                if !warnings.is_empty() {
+                                    let msg = format!(
+                                        "This PowerPoint presentation contains elements that Loom Present cannot fully edit:\n\n• {}\n\nDo you want to continue importing?",
+                                        warnings.join("\n• ")
+                                    );
+                                    app.set_pptx_import_warning_message(msg.into());
+                                    table_actions::PENDING_PPTX_IMPORT.with(|p| {
+                                        *p.borrow_mut() = Some(table_actions::PendingPptxImport {
+                                            path: path.clone(),
+                                            session,
+                                        });
+                                    });
+                                    app.set_pptx_import_warning_open(true);
+                                    set_status(app, "Review the PowerPoint import warning before replacing this deck");
+                                } else {
+                                    replace_opened_deck(app, state, path.clone(), session);
+                                    set_status(app, format!("Opened {}", path.display()));
+                                }
+                            }
+                            Err(error) => set_status(app, format!("Open failed: {error}")),
+                        }
+                    }
+                    Err(error) => set_status(app, format!("Open failed: {error}")),
+                }
+            } else {
+                match load_session(&path) {
+                    Ok(session) => {
+                        replace_opened_deck(app, state, path.clone(), session);
+                        set_status(app, format!("Opened {}", path.display()));
+                    }
+                    Err(error) => set_status(app, format!("Open failed: {error}")),
+                }
             }
-            Err(error) => set_status(app, format!("Open failed: {error}")),
-        },
+        }
         Ok(None) => set_status(app, "Open cancelled"),
         Err(error) => set_status(app, format!("Open dialog failed: {error}")),
     }
@@ -1636,6 +1703,8 @@ fn build_present_menu_bar() -> MenuBar {
                     "New Slide",
                     MenuShortcut::primary_shift("N"),
                 ),
+                MenuItem::action("slide.insert_table", "Insert Table..."),
+                MenuItem::action("slide.insert_chart", "Insert Chart..."),
                 MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
@@ -1665,6 +1734,8 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
     match id {
         "file.new" => app.invoke_new_deck(),
         "file.new_sample" => app.invoke_new_sample_deck(),
+        "slide.insert_table" => app.invoke_add_table(),
+        "slide.insert_chart" => app.invoke_add_chart(),
         "slide.insert_image" => app.invoke_add_picture(),
         "file.open" => app.invoke_open_deck(),
         "file.save" => app.invoke_save_deck(),
@@ -1697,6 +1768,8 @@ fn is_present_menu_command(id: &str) -> bool {
             id,
             "file.new"
                 | "file.new_sample"
+                | "slide.insert_table"
+                | "slide.insert_chart"
                 | "slide.insert_image"
                 | "file.open"
                 | "file.save"
@@ -1806,6 +1879,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     view_state::wire(app, state);
     slide_order::wire(app, state);
     deck_guard::wire(app, state);
+    table_actions::wire(app, state);
     {
         let state = state.clone();
         app.on_recovery_flush(move || {
@@ -2148,7 +2222,8 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .and_then(|slide| slide.elements.get_mut(selected))
                     {
                         if element.element_type == ElementType::Table {
-                            element.update_table_cell_text(0, 0, content.as_str());
+                            let (r, c) = table_actions::get_active_table_cell(&element.id);
+                            element.update_table_cell_text(r, c, content.as_str());
                         } else if element.element_type == ElementType::Chart {
                             if let Some(mut chart) = element.chart() {
                                 chart.title = Some(content.as_str().to_string());
@@ -2592,10 +2667,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let backspace_key: SharedString = slint::platform::Key::Backspace.into();
         let page_up_key: SharedString = slint::platform::Key::PageUp.into();
         let page_down_key: SharedString = slint::platform::Key::PageDown.into();
-        app.on_canvas_key_pressed(move |key, _shift, modified| {
+        app.on_canvas_key_pressed(move |key, shift, modified| {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_is_preview_mode() || modified {
                     return EventResult::Reject;
+                }
+                if table_actions::handle_table_key(&app, &state, key.as_str(), shift) {
+                    return EventResult::Accept;
                 }
                 // Page Up and Page Down move between slides without the pointer.
                 if key == page_down_key {
@@ -2841,6 +2919,8 @@ enum PaletteAction {
     Redo,
     AddText,
     AddPicture,
+    AddTable,
+    AddChart,
     NewSampleDeck,
     NewFromTemplate,
     ExportPdf,
@@ -2939,6 +3019,18 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::AddPicture,
             id: "present.insert-image",
             label: "Insert Image...",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddTable,
+            id: "present.insert-table",
+            label: "Insert Table",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddChart,
+            id: "present.insert-chart",
+            label: "Insert Chart",
             shortcut: "",
         },
         PaletteCommand {
@@ -3155,6 +3247,8 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddText => app.invoke_add_text(),
                         PaletteAction::AddPicture => app.invoke_add_picture(),
+                        PaletteAction::AddTable => app.invoke_add_table(),
+                        PaletteAction::AddChart => app.invoke_add_chart(),
                         PaletteAction::NewSampleDeck => app.invoke_new_sample_deck(),
                         PaletteAction::NewFromTemplate => {
                             app.set_theme_selected(0);
@@ -3220,6 +3314,7 @@ mod slide_order_tests;
 mod startup_recovery;
 #[cfg(test)]
 mod startup_recovery_tests;
+mod table_actions;
 #[cfg(test)]
 mod template_chooser_tests;
 mod view_state;
@@ -3248,5 +3343,7 @@ mod deck_guard_tests;
 mod layout_bounds_tests;
 #[cfg(test)]
 mod miniature_tests;
+#[cfg(test)]
+mod table_tests;
 #[cfg(test)]
 mod visual_defect_tests;

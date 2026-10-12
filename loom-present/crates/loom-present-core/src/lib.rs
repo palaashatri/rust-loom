@@ -15,7 +15,7 @@ mod tables;
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub mod pptx_import;
 pub use pptx_export::export_pptx;
-pub use pptx_import::import_pptx;
+pub use pptx_import::{import_pptx, inspect_pptx_unsupported};
 pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_pptx};
 use session_history::Snapshot;
 pub mod charts;

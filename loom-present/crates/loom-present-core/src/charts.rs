@@ -57,6 +57,28 @@ pub fn chart_element_from_clipboard(chart: Chart, id: impl Into<String>) -> Slid
     SlideElement::new_chart(id, x, y, width, height, chart)
 }
 
+/// Generates a default slide chart with sample bar series.
+pub fn default_slide_chart() -> Chart {
+    Chart::from_data(
+        "chart-1",
+        Some("Sales Overview".into()),
+        loom_objects::chart::ChartType::Bar,
+        vec!["Q1".into(), "Q2".into(), "Q3".into(), "Q4".into()],
+        vec![
+            loom_objects::chart::ChartSeries {
+                name: "2025".into(),
+                values: vec![120.0, 150.0, 180.0, 220.0],
+                color: None,
+            },
+            loom_objects::chart::ChartSeries {
+                name: "2026".into(),
+                values: vec![140.0, 175.0, 210.0, 260.0],
+                color: None,
+            },
+        ],
+    )
+}
+
 impl crate::PresentationSession {
     /// Inserts a chart element onto the active slide as an undoable step.
     pub fn insert_chart(&mut self, chart: Chart) -> Result<String, String> {
