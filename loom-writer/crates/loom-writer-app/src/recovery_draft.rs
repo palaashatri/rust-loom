@@ -53,6 +53,26 @@ impl RecoveredDraft {
     pub(crate) fn name(&self) -> String {
         crate::file_title::display_title(self.source.as_deref(), &self.document.title)
     }
+
+    /// Whether this draft is unchanged from the file on disk, or is an untouched empty document.
+    pub(crate) fn is_clean_against_source(&self) -> bool {
+        match &self.source {
+            Some(path) => {
+                if let Ok(bytes) = std::fs::read(path) {
+                    if let Ok(on_disk) = loom_writer_core::load_document(&bytes) {
+                        return self.document.title == on_disk.title
+                            && self.document.page == on_disk.page
+                            && self.document.comments == on_disk.comments
+                            && self.document.blocks == on_disk.blocks;
+                    }
+                }
+                false
+            }
+            None => {
+                self.document.editor_text().trim().is_empty() && self.document.comments.is_empty()
+            }
+        }
+    }
 }
 
 /// Wrap a package with the file it belongs to. A path that is not valid UTF-8

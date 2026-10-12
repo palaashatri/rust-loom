@@ -92,8 +92,9 @@ pub(crate) fn startup_sessions(
         return Ok(plan);
     };
     let name = file_title::display_title(draft.source.as_deref(), &deck.document.title);
-    match (open, draft.source) {
-        (Some(path), Some(source)) if same_file(&source, path) => {
+    let source = draft.source;
+    match (open, source) {
+        (Some(path), Some(ref source)) if same_file(source, path) => {
             // The draft was edited from the file being opened.
             match load_session(path).ok() {
                 Some(saved) if same_content(&deck, &saved) => {
@@ -107,14 +108,24 @@ pub(crate) fn startup_sessions(
                 )),
             }
         }
-        (Some(path), _) => {
-            // Another file is opened: its draft is kept beside it, never replaced.
+        (Some(path), ref source) => {
+            // Another file is opened: its draft is kept beside it, never replaced,
+            // unless the previous session was clean/unedited.
+            let is_clean = match source {
+                Some(ref source) => match load_session(source).ok() {
+                    Some(saved) => same_content(&deck, &saved),
+                    None => false,
+                },
+                None => same_content(&deck, &empty_session()),
+            };
             let mut plan = StartupPlan::clean(load_session(path)?, Some(path.to_path_buf()));
-            plan.kept = Some(KeptDraft {
-                name,
-                bytes: draft.package,
-                readable: true,
-            });
+            if !is_clean {
+                plan.kept = Some(KeptDraft {
+                    name,
+                    bytes: draft.package,
+                    readable: true,
+                });
+            }
             Ok(plan)
         }
         (None, Some(source)) => match load_session(&source).ok() {

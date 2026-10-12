@@ -799,6 +799,7 @@ fn request_workbook_replacement(
     state.advance_pending_replacement_token();
     app.set_save_changes_document(SharedString::from(workbook_display_name(state)));
     app.set_save_changes_open(true);
+    app.invoke_focus_save_changes();
     let replacement_prompt = "Unsaved changes — choose Save, Discard, or Cancel";
     let status = crate::worker_failure::status_message(state)
         .map(|failure| format!("{failure} · {replacement_prompt}"))

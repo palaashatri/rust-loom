@@ -186,6 +186,7 @@ fn show_dirty_decision(app: &SheetsApp, state: &GuiState) {
     app.set_save_changes_close_mode(true);
     app.set_save_changes_document(SharedString::from(crate::workbook_display_name(state)));
     app.set_save_changes_open(true);
+    app.invoke_focus_save_changes();
     app.set_status_left(DIRTY_CLOSE_STATUS.into());
 }
 
@@ -466,6 +467,7 @@ fn fail_close(app: &SheetsApp, state: &GuiState, close_state: CloseState) {
         set_state(app, state, CloseState::DirtyDecision);
         app.set_save_changes_close_mode(true);
         app.set_save_changes_open(true);
+        app.invoke_focus_save_changes();
     } else {
         app.set_save_changes_close_mode(false);
         set_state(app, state, CloseState::Idle);

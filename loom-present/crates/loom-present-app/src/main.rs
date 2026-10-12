@@ -2747,7 +2747,11 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_toggle_preview_mode(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_is_preview_mode(!app.get_is_preview_mode());
+                let next = !app.get_is_preview_mode();
+                app.set_is_preview_mode(next);
+                if !next {
+                    presenter::close();
+                }
             }
         });
     }

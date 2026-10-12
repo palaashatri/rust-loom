@@ -16,7 +16,7 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::{parse_csv_records, shift_formula_references, CellRef, Sheet};
 use slint::{ComponentHandle, SharedString};
 
-use crate::actions::{copy_selection, paste_selection};
+use crate::actions::{copy_selection_with_values, paste_selection};
 use crate::{
     apply_sheet, clear_selection, evaluate_current, selection_from_app, sync_menu_state,
     GridSelection, GuiState, SheetsApp,
@@ -83,8 +83,13 @@ fn external_rows(
                 .map(|col| {
                     let cell = CellRef { row, col };
                     let raw = sheet.raw(cell).unwrap_or_default().to_string();
-                    if raw.starts_with('=') {
-                        values.get(&cell).map(|v| v.display()).unwrap_or_default()
+                    if raw.starts_with('=') || raw.is_empty() {
+                        let disp = values.get(&cell).map(|v| v.display()).unwrap_or_default();
+                        if !disp.is_empty() {
+                            disp
+                        } else {
+                            raw
+                        }
                     } else {
                         raw
                     }
@@ -106,16 +111,26 @@ fn external_cells_data(
                 .map(|col| {
                     let cell = CellRef { row, col };
                     let raw = sheet.raw(cell).unwrap_or_default().to_string();
-                    let display_val = if raw.starts_with('=') {
-                        values.get(&cell).map(|v| v.display()).unwrap_or_default()
+                    let display_val = if raw.starts_with('=') || raw.is_empty() {
+                        let disp = values.get(&cell).map(|v| v.display()).unwrap_or_default();
+                        if !disp.is_empty() {
+                            disp
+                        } else {
+                            raw.clone()
+                        }
                     } else {
                         raw.clone()
                     };
                     let style = sheet.cell_style(cell);
                     let alignment = sheet.cell_alignment(cell);
                     let width = sheet.col_widths.get(&col).copied().unwrap_or(80.0);
+                    let cell_value = if raw.is_empty() && !display_val.is_empty() {
+                        display_val.clone()
+                    } else {
+                        raw
+                    };
                     loom_clipboard::SheetsCellData {
-                        value: raw,
+                        value: cell_value,
                         formatted_text: display_val,
                         background_color: if style.fill != loom_sheets_core::style::FillColor::None
                         {
@@ -148,9 +163,9 @@ fn external_cells_data(
 
 /// Copy the selection privately and onto the system clipboard.
 fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
-    let data = copy_selection(&state.current.borrow(), sel);
-    let count = data.iter().map(Vec::len).sum();
     let values = evaluate_current(state);
+    let data = copy_selection_with_values(&state.current.borrow(), Some(&values), sel);
+    let count = data.iter().map(Vec::len).sum();
     let text = encode_tsv(&external_rows(&state.current.borrow(), &values, sel));
     let cell_data = external_cells_data(&state.current.borrow(), &values, sel);
     let table = loom_clipboard::sheets_range_to_table(&cell_data);

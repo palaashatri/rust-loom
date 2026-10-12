@@ -25,7 +25,7 @@ export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
     default-font-family: Theme.ui-font-family;
-    // Windows and Linux draw their own frame; macOS keeps its native one.
+    // Native frame per platform.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -318,8 +318,7 @@ export component SheetsApp inherits Window {
             action-toolbar.focus-overflow-trigger();
         }
     }
-    // Tab moves the cell cursor; F6 and Shift+F6 cycle the regions (`region`).
-
+    // Cycle regions with F6.
     property <int> region: 0;
     function cycle-region(backwards: bool) {
         let outside = !grid-surface.grid-has-focus;
@@ -362,7 +361,7 @@ export component SheetsApp inherits Window {
             grid-surface.focus-grid();
         }
     }
-    // The palette hands focus back to the grid unless a command moved it.
+    // Palette focus return.
     changed palette-open => {
         if (!root.palette-open && !root.template-chooser-open && !root.save-changes-open
             && !root.xlsx-import-warning-open && root.object-state == 0) {
@@ -370,9 +369,7 @@ export component SheetsApp inherits Window {
         }
     }
     app-focus := FocusScope {
-        // A shortcut scope, not a control: Tab skips it.
         focus-on-tab-navigation: false;
-        // Alt+letter and F10 open a menu before a text field can type them.
         capture-key-pressed(event) => {
             let target = LocalMenu.target(event);
             if (root.local-menu-visible && target >= 0) { root.local-menu-open-index = target; return accept; }
@@ -380,8 +377,11 @@ export component SheetsApp inherits Window {
         }
         key-pressed(event) => {
             if (root.close-draining && !root.save-changes-open) { return accept; }
-            if (root.xlsx-import-warning-open) { return reject; }
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
+            if (root.save-changes-open) {
+                if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
+                return reject;
+            }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
                 root.cycle-region(event.modifiers.shift);
                 return accept;
@@ -508,6 +508,7 @@ export component SheetsApp inherits Window {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     grid-surface := SheetGridSurface {
+                        keyboard-active: !root.save-changes-open && !root.xlsx-import-warning-open;
                         width: parent.width;
                         height: parent.height;
                         editing: root.is-editing;

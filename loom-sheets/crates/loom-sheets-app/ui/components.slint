@@ -35,26 +35,14 @@ export component SheetSelectionOverlay inherits Rectangle {
     border-width: root.active && Theme.active-theme != "high-contrast" ? 2px : 0px;
     border-color: root.outline-color;
 
-    // High contrast draws a 3px active ring: a paper hairline on the outside,
-    // which contrasts with the black gridline beside the cell, and a 2px ink ring
-    // inside it.
     if root.active && Theme.active-theme == "high-contrast" : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
+        x: -1px;
+        y: -1px;
+        width: parent.width + 2px;
+        height: parent.height + 2px;
         background: transparent;
-        border-width: 1px;
-        border-color: Theme.palette().paper;
-        Rectangle {
-            x: 1px;
-            y: 1px;
-            width: parent.width - 2px;
-            height: parent.height - 2px;
-            background: transparent;
-            border-width: 2px;
-            border-color: Theme.palette().paper-ink;
-        }
+        border-width: 3px;
+        border-color: Theme.palette().paper-ink;
     }
 
     if !root.active && root.in-selection && root.edge-top : Rectangle { y: 0px; width: parent.width; height: 2px; background: root.outline-color; }
@@ -407,6 +395,7 @@ export component SheetTable inherits Rectangle {
 /// Grid canvas wrapper. It owns keyboard navigation focus and keeps the
 /// table's dominant surface separate from the surrounding app chrome.
 export component SheetGridSurface inherits Rectangle {
+    in property <bool> keyboard-active: true;
     in property <string> sheet-name: "Untitled";
     in property <bool> object-navigation-active: false;
     in property <float> zoom-factor: 1.0;
@@ -463,6 +452,7 @@ export component SheetGridSurface inherits Rectangle {
     vertical-stretch: 1;
 
     grid-focus := FocusScope {
+        enabled: root.keyboard-active;
         key-pressed(event) => {
             if (root.object-navigation-active) {
                 root.object-navigation-key-pressed(event.text, event.modifiers.control,

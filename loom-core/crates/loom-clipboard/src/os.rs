@@ -205,9 +205,11 @@ mod tests {
     #[test]
     fn test_mock_clipboard_operations() {
         set_mock_clipboard_enabled(true);
-        let mut data = ClipboardData::default();
-        data.plain_text = Some("hello\tworld".into());
-        data.html = Some("<table><tr><td>hello</td><td>world</td></tr></table>".into());
+        let data = ClipboardData {
+            plain_text: Some("hello\tworld".into()),
+            html: Some("<table><tr><td>hello</td><td>world</td></tr></table>".into()),
+            ..Default::default()
+        };
 
         write_clipboard(&data).expect("write to mock clipboard");
         let read = read_clipboard().expect("read from mock clipboard");
@@ -225,10 +227,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_windows_real_clipboard_round_trip() {
-        let mut data = ClipboardData::default();
-        data.plain_text = Some("Alpha\tBeta".into());
-        data.html = Some("<table><tr><td>Alpha</td><td>Beta</td></tr></table>".into());
-        data.loom_objects_json = Some("{\"type\":\"test\"}".into());
+        let data = ClipboardData {
+            plain_text: Some("Alpha\tBeta".into()),
+            html: Some("<table><tr><td>Alpha</td><td>Beta</td></tr></table>".into()),
+            loom_objects_json: Some("{\"type\":\"test\"}".into()),
+            ..Default::default()
+        };
 
         write_clipboard(&data).expect("real Windows write");
         let read = read_clipboard().expect("real Windows read");

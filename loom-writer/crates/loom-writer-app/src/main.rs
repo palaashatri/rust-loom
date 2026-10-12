@@ -1324,6 +1324,7 @@ pub(crate) fn replace_opened_document(
     *state.current.borrow_mut() = document;
     *state.save_path.borrow_mut() = Some(path);
     *state.history.borrow_mut() = EditorHistory::new();
+    set_recovery_notice(None);
     apply_state(app, state);
 }
 
@@ -1353,6 +1354,7 @@ fn save_current_document(
     *state.save_path.borrow_mut() = Some(path.clone());
     let checkpoint_result = recovery::checkpoint_document(&document, Some(path.as_path()));
     *state.last_saved.borrow_mut() = document;
+    set_recovery_notice(None);
     file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));
     let status = match checkpoint_result {
@@ -1443,11 +1445,12 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
         })
         .collect();
     app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
-    app.set_status_left(SharedString::from(status_left_text(
-        word_count,
-        char_count,
-        block_count,
-    )));
+    let counts = status_left_text(word_count, char_count, block_count);
+    let status_text = match get_recovery_notice() {
+        Some(notice) => format!("{notice} · {counts}"),
+        None => counts,
+    };
+    app.set_status_left(SharedString::from(status_text));
     app.set_status_right(SharedString::from(announcement));
 }
 
@@ -2059,7 +2062,7 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
     apply_document_with_viewport(app, &current, viewport);
-    if recovery_write == RecoveryWrite::Now {
+    if recovery_write == RecoveryWrite::Now && document_is_dirty(state) {
         if let Err(error) = recovery::record_document(&current, state.save_path.borrow().as_deref())
         {
             warn_recovery_failed(app, &error);
@@ -2227,6 +2230,15 @@ fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) {
 
 std::thread_local! {
     static RECOVERY_TIMER: slint::Timer = slint::Timer::default();
+    static RECOVERY_NOTICE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn set_recovery_notice(notice: Option<String>) {
+    RECOVERY_NOTICE.with(|cell| *cell.borrow_mut() = notice);
+}
+
+pub(crate) fn get_recovery_notice() -> Option<String> {
+    RECOVERY_NOTICE.with(|cell| cell.borrow().clone())
 }
 
 /// Write the recovery draft now if typing left it stale.
@@ -3596,15 +3608,16 @@ fn initialize_recovery_for_gui(
     match recovery::initialize_editing_session(open) {
         Ok(startup) => {
             if let Some(notice) = startup.notice.as_deref() {
+                set_recovery_notice(Some(notice.to_string()));
                 app.set_status_left(SharedString::from(notice));
             }
             Some(startup)
         }
         Err(error) => {
             eprintln!("Writer recovery initialization failed: {error}");
-            app.set_status_left(SharedString::from(
-                "Recovery unavailable. Save regularly; crash recovery may be out of date.",
-            ));
+            let msg = "Recovery unavailable. Save regularly; crash recovery may be out of date.";
+            set_recovery_notice(Some(msg.to_string()));
+            app.set_status_left(SharedString::from(msg));
             None
         }
     }
@@ -4125,8 +4138,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     app.show().map_err(|e| e.to_string())?;
     focus_page_at_launch(&app);
-    slint::run_event_loop().map_err(|e| e.to_string())?;
-    Ok(())
+    let res = slint::run_event_loop().map_err(|e| e.to_string());
+    if !document_is_dirty(&state) {
+        end_session_recovery();
+    }
+    res
 }
 
 fn main() -> Result<(), String> {

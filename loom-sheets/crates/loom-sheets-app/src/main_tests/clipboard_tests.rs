@@ -337,3 +337,32 @@ fn sheets_paste_parses_external_html_table() {
     assert_eq!(raw(&state, "A3"), "Oranges");
     assert_eq!(raw(&state, "B3"), "2.49");
 }
+
+#[test]
+fn copying_a_spill_range_copies_spill_values_not_blanks() {
+    let (app, state) = state_with(&[("A1", "=SEQUENCE(3)")]);
+    apply_sheet(&app, &state);
+
+    // Copying the entire spill range includes the formula anchor and spilled values
+    select(&app, &state, "A1", "A3");
+    app.invoke_copy_selection();
+    assert_eq!(
+        get_text().as_deref(),
+        Some("1\r\n2\r\n3"),
+        "clipboard should receive evaluated spill values for whole range"
+    );
+
+    // Copying just the spilled cells without the formula anchor copies values, not blanks
+    select(&app, &state, "A2", "A3");
+    app.invoke_copy_selection();
+    assert_eq!(
+        get_text().as_deref(),
+        Some("2\r\n3"),
+        "clipboard should receive evaluated spill values for spill cells without anchor"
+    );
+
+    select(&app, &state, "C2", "C2");
+    app.invoke_paste_selection();
+    assert_eq!(raw(&state, "C2"), "2");
+    assert_eq!(raw(&state, "C3"), "3");
+}

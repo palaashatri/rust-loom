@@ -77,6 +77,7 @@ fn fixture_workbook() -> Vec<Sheet> {
         ("H6", "=Rates!B2*B2"),
         ("H7", "=SUM(Rates!B2:B4)"),
         ("H8", "=ROUND(D7,1)"),
+        ("H9", "=LET(x,5,x*2)"),
     ] {
         sales.set_str(a1, raw);
     }

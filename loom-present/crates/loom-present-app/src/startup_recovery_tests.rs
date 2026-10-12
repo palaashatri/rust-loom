@@ -215,3 +215,19 @@ fn kept_drafts_sit_beside_the_recovery_store_so_clearing_it_cannot_remove_them()
     );
     assert_eq!(kept.parent(), store.parent());
 }
+
+#[test]
+fn an_unedited_draft_is_not_kept_as_unsaved_when_another_file_opens() {
+    let dir = scratch("unedited-clean");
+    let requested = save_to(&dir, "requested.loomdeck", &sample_session());
+    let other = save_to(&dir, "other.loomdeck", &sample_session());
+    // The other file was in recovery, but was UNEDITED (matches file on disk).
+    let bytes = recovery_draft::payload(&sample_session(), Some(&other)).expect("draft");
+
+    let plan = startup_sessions(Some(&bytes), Some(&requested)).expect("startup");
+    assert!(
+        plan.kept.is_none(),
+        "an unedited draft is not kept as an unsaved file when opening another file"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -57,8 +57,12 @@ fn make_test_state(
     let mut registry = build_writer_registry();
     let history = EditorHistory::new();
     sync_writer_registry_enablement(&mut registry, &document, &history);
+    let last_saved = match &save_path {
+        Some(path) => load_file(path).unwrap_or_else(|_| document.clone()),
+        None => WriterDocument::new("placeholder", "Placeholder"),
+    };
     let state = Rc::new(GuiState {
-        last_saved: RefCell::new(document.clone()),
+        last_saved: RefCell::new(last_saved),
         current: RefCell::new(document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),

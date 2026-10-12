@@ -1298,16 +1298,30 @@ pub(crate) fn register_sheet_actions(
 }
 
 /// Copy values from a worksheet selection into a 2D matrix of raw strings.
+#[allow(dead_code)]
 pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<String>> {
+    copy_selection_with_values(sheet, None, sel)
+}
+
+/// Copy values from a worksheet selection, using calculated values for spill cells.
+pub(crate) fn copy_selection_with_values(
+    sheet: &Sheet,
+    values: Option<&std::collections::HashMap<CellRef, loom_sheets_core::Value>>,
+    sel: GridSelection,
+) -> Vec<Vec<String>> {
     let range = sel.range();
     let mut rows = Vec::new();
     for r in range.start.row..=range.end.row {
         let mut row = Vec::new();
         for c in range.start.col..=range.end.col {
-            let val = sheet
-                .raw(CellRef { row: r, col: c })
-                .unwrap_or_default()
-                .to_string();
+            let cell = CellRef { row: r, col: c };
+            let val = match sheet.raw(cell) {
+                Some(raw) if !raw.is_empty() => raw.to_string(),
+                _ => values
+                    .and_then(|v| v.get(&cell))
+                    .map(|v| v.display())
+                    .unwrap_or_default(),
+            };
             row.push(val);
         }
         rows.push(row);

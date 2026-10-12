@@ -49,10 +49,16 @@ fn start(open: Option<&Path>) -> Result<StartupRecovery, String> {
             }
             found => {
                 // Another file was opened, or the data cannot be read. Keep the
-                // exact bytes before the slot is cleared for this launch.
-                recovery_draft::keep(&kept_root, &payload)?;
+                // exact bytes before the slot is cleared for this launch, unless
+                // the draft is clean against its source.
+                if !found
+                    .as_ref()
+                    .is_some_and(RecoveredDraft::is_clean_against_source)
+                {
+                    recovery_draft::keep(&kept_root, &payload)?;
+                    notice = Some(kept_notice(found.as_ref()));
+                }
                 reset_live_slot()?;
-                notice = Some(kept_notice(found.as_ref()));
             }
         }
     }

@@ -112,6 +112,7 @@ try {
         'H2' = '=IF(D2>5,"big","small")'; 'H3' = '=VLOOKUP("Pears",A2:C5,3,FALSE)'
         'H4' = '=UPPER(A2)&"-"&LEN(A3)'; 'H5' = '=LEFT(A4,4)&"|"&TRIM("  a  b  ")'
         'H6' = '=Rates!B2*B2'; 'H7' = '=SUM(Rates!B2:B4)'; 'H8' = '=ROUND(D7,1)'
+        'H9' = '=LET(x,5,x*2)'
     }
     foreach ($key in $formulas.Keys) {
         $actual = [string]$ws.Range($key).Formula

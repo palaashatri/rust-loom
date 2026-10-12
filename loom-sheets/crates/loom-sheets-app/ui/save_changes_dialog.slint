@@ -12,6 +12,12 @@ export component SaveChangesDialog inherits Rectangle {
 
     visible: root.open;
 
+    changed open => {
+        if (root.open) {
+            save-button.grab-focus();
+        }
+    }
+
     // The primary button takes focus when the dialog opens, so Enter saves.
     public function focus-dialog() {
         save-button.grab-focus();
