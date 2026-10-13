@@ -119,10 +119,42 @@ pub fn table_to_html(table: &Table) -> String {
 }
 
 /// Maximum HTML payload size accepted from clipboard to guard against OOM DOS.
-const MAX_CLIPBOARD_HTML_LEN: usize = 16 * 1024 * 1024;
+const MAX_CLIPBOARD_HTML_LEN: usize = 64 * 1024 * 1024;
 /// Maximum table dimensions constructed from untrusted HTML.
 const MAX_TABLE_ROWS: usize = 10_000;
 const MAX_TABLE_COLS: usize = 1_000;
+/// Maximum time in milliseconds to spend parsing untrusted HTML before bailing/truncating.
+const MAX_PARSE_DURATION_MS: u128 = 1800;
+/// Maximum text length extracted per cell to guard against gigantic string allocations.
+const MAX_CELL_TEXT_LEN: usize = 64 * 1024;
+
+/// Performs zero-allocation case-insensitive ASCII search.
+fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let needle_bytes = needle.as_bytes();
+    let haystack_bytes = haystack.as_bytes();
+    let n_len = needle_bytes.len();
+    if n_len > haystack_bytes.len() {
+        return None;
+    }
+    let first_lower = needle_bytes[0].to_ascii_lowercase();
+    let first_upper = needle_bytes[0].to_ascii_uppercase();
+
+    let max_start = haystack_bytes.len() - n_len;
+    let mut i = 0;
+    while i <= max_start {
+        let b = haystack_bytes[i];
+        if (b == first_lower || b == first_upper)
+            && haystack_bytes[i..i + n_len].eq_ignore_ascii_case(needle_bytes)
+        {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
 
 /// Parses an HTML table into a `Table` object.
 pub fn html_to_table(html: &str) -> Option<Table> {
@@ -130,9 +162,10 @@ pub fn html_to_table(html: &str) -> Option<Table> {
         return None;
     }
 
-    let table_lower = html.to_lowercase();
-    let table_start = table_lower.find("<table")?;
-    let table_end = match table_lower[table_start..].find("</table>") {
+    let start_time = std::time::Instant::now();
+
+    let table_start = find_case_insensitive(html, "<table")?;
+    let table_end = match find_case_insensitive(&html[table_start..], "</table>") {
         Some(idx) => table_start + idx + 8,
         None => html.len(),
     };
@@ -142,7 +175,11 @@ pub fn html_to_table(html: &str) -> Option<Table> {
     let mut search_pos = 0;
 
     while search_pos < table_slice.len() && rows_raw.len() < MAX_TABLE_ROWS {
-        let Some(tr_start_rel) = table_slice[search_pos..].to_lowercase().find("<tr") else {
+        if start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+            break;
+        }
+
+        let Some(tr_start_rel) = find_case_insensitive(&table_slice[search_pos..], "<tr") else {
             break;
         };
         let tr_start = search_pos + tr_start_rel;
@@ -150,7 +187,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
             break;
         };
         let tr_close_tag_end = tr_start + tag_offset + 1;
-        let tr_end = match table_slice[tr_close_tag_end..].to_lowercase().find("</tr>") {
+        let tr_end = match find_case_insensitive(&table_slice[tr_close_tag_end..], "</tr>") {
             Some(end_rel) => tr_close_tag_end + end_rel,
             None => table_slice.len(),
         };
@@ -160,9 +197,12 @@ pub fn html_to_table(html: &str) -> Option<Table> {
         let mut cell_pos = 0;
 
         while cell_pos < row_content.len() && cells.len() < MAX_TABLE_COLS {
-            let lower_row = row_content[cell_pos..].to_lowercase();
-            let td_idx = lower_row.find("<td");
-            let th_idx = lower_row.find("<th");
+            if start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+                break;
+            }
+
+            let td_idx = find_case_insensitive(&row_content[cell_pos..], "<td");
+            let th_idx = find_case_insensitive(&row_content[cell_pos..], "<th");
 
             let (tag_start_rel, is_th) = match (td_idx, th_idx) {
                 (Some(d), Some(h)) if d < h => (d, false),
@@ -179,16 +219,14 @@ pub fn html_to_table(html: &str) -> Option<Table> {
             };
 
             let close_tag_name = if is_th { "</th>" } else { "</td>" };
-            let (cell_end, next_pos) = match row_content[tag_close_end..]
-                .to_lowercase()
-                .find(close_tag_name)
-            {
-                Some(idx) => (
-                    tag_close_end + idx,
-                    tag_close_end + idx + close_tag_name.len(),
-                ),
-                None => (row_content.len(), row_content.len()),
-            };
+            let (cell_end, next_pos) =
+                match find_case_insensitive(&row_content[tag_close_end..], close_tag_name) {
+                    Some(idx) => (
+                        tag_close_end + idx,
+                        tag_close_end + idx + close_tag_name.len(),
+                    ),
+                    None => (row_content.len(), row_content.len()),
+                };
 
             let attrs = &row_content[tag_start..tag_close_end];
             let inner_html = &row_content[tag_close_end..cell_end];
@@ -301,9 +339,8 @@ struct RawCell {
 }
 
 fn parse_attr_u32(attrs: &str, name: &str) -> Option<u32> {
-    let lower = attrs.to_lowercase();
     let key = format!("{}=\"", name);
-    let start = lower.find(&key)? + key.len();
+    let start = find_case_insensitive(attrs, &key)? + key.len();
     if !attrs.is_char_boundary(start) {
         return None;
     }
@@ -315,9 +352,8 @@ fn parse_attr_u32(attrs: &str, name: &str) -> Option<u32> {
 }
 
 fn parse_attr_str(attrs: &str, name: &str) -> Option<String> {
-    let lower = attrs.to_lowercase();
     let key = format!("{}=\"", name);
-    let start = lower.find(&key)? + key.len();
+    let start = find_case_insensitive(attrs, &key)? + key.len();
     if !attrs.is_char_boundary(start) {
         return None;
     }
@@ -325,13 +361,21 @@ fn parse_attr_str(attrs: &str, name: &str) -> Option<String> {
     if !attrs.is_char_boundary(end) {
         return None;
     }
-    Some(attrs[start..end].to_string())
+    let val = &attrs[start..end];
+    if val.len() > 1024 {
+        Some(val[..1024].to_string())
+    } else {
+        Some(val.to_string())
+    }
 }
 
 fn strip_html_tags(html: &str) -> String {
     let mut text = String::new();
     let mut in_tag = false;
     for ch in html.chars() {
+        if text.len() >= MAX_CELL_TEXT_LEN {
+            break;
+        }
         if ch == '<' {
             in_tag = true;
         } else if ch == '>' {
@@ -416,5 +460,72 @@ mod tests {
         let malformed = "<table><tr><td>No Close<tr><td>Second";
         let parsed_malformed = html_to_table(malformed).expect("recovers from malformed table");
         assert!(parsed_malformed.row_count() >= 1);
+    }
+
+    #[test]
+    fn test_hostile_paste_50mb_10k_rows_and_deep_nested_tables() {
+        // 1. 10,000 rows HTML table
+        let mut ten_k_rows = String::from("<table>");
+        for r in 0..10_000 {
+            use std::fmt::Write;
+            let _ = write!(ten_k_rows, "<tr><td>Row{r}</td><td>Val{r}</td></tr>");
+        }
+        ten_k_rows.push_str("</table>");
+
+        let start = std::time::Instant::now();
+        let parsed = html_to_table(&ten_k_rows);
+        let elapsed = start.elapsed();
+        println!("10k rows parsed in {:?}", elapsed);
+        assert!(
+            elapsed.as_secs_f64() < 2.0,
+            "Must parse 10k rows in < 2.0 s, took {:?}",
+            elapsed
+        );
+        assert!(parsed.is_some(), "Must parse 10k rows table");
+        let tbl = parsed.unwrap();
+        assert_eq!(tbl.row_count(), 10_000);
+
+        // 2. 50 MB HTML with padding and table
+        let mut large_html = String::with_capacity(50 * 1024 * 1024 + 1000);
+        large_html.push_str("<!-- ");
+        large_html.push_str(&"x".repeat(25 * 1024 * 1024));
+        large_html.push_str(" --><table><tr><td>Middle</td></tr></table><!-- ");
+        large_html.push_str(&"y".repeat(25 * 1024 * 1024));
+        large_html.push_str(" -->");
+
+        let start_large = std::time::Instant::now();
+        let parsed_large = html_to_table(&large_html);
+        let elapsed_large = start_large.elapsed();
+        println!("50MB HTML handled in {:?}", elapsed_large);
+        assert!(
+            elapsed_large.as_secs_f64() < 2.0,
+            "Must handle 50MB HTML in < 2.0 s, took {:?}",
+            elapsed_large
+        );
+        assert!(parsed_large.is_some());
+        assert_eq!(
+            parsed_large.unwrap().cell_text(0, 0).as_deref(),
+            Some("Middle")
+        );
+
+        // 3. Deeply nested tables (500 levels)
+        let mut deeply_nested = String::new();
+        for _ in 0..500 {
+            deeply_nested.push_str("<table><tr><td>");
+        }
+        deeply_nested.push_str("Innermost");
+        for _ in 0..500 {
+            deeply_nested.push_str("</td></tr></table>");
+        }
+        let start_deep = std::time::Instant::now();
+        let parsed_deep = html_to_table(&deeply_nested);
+        let elapsed_deep = start_deep.elapsed();
+        println!("500 nested tables handled in {:?}", elapsed_deep);
+        assert!(
+            elapsed_deep.as_secs_f64() < 2.0,
+            "Must handle 500 nested tables in < 2.0 s, took {:?}",
+            elapsed_deep
+        );
+        assert!(parsed_deep.is_some());
     }
 }
