@@ -442,6 +442,10 @@ fn test_pdf_export_with_table_and_chart() {
 
     let pdf_bytes = export_pdf(&doc);
     assert!(!pdf_bytes.is_empty());
+    let session = PresentationSession::new(doc.clone());
+    if let Ok(pptx) = export_pptx(&session) {
+        let _ = std::fs::write("/tmp/present_table.pptx", pptx);
+    }
 
     // Inspect PDF text content
     let pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("inspect pdf");

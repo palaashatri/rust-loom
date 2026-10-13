@@ -1,0 +1,70 @@
+=== AT-SPI Accessibility Tree for loom-present ===
+Command: /home/patri/wave2-loom/loom-present/target/debug/loom-present --open /tmp/present_table.pptx
+Total elements: 63
+Unnamed elements: 0
+
+[application] "loom-present"
+  [frame] "present_table - Loom Present"
+    [button] "File" (desc: "File")
+      [label] "File"
+    [button] "Edit" (desc: "Edit")
+      [label] "Edit"
+    [button] "View" (desc: "View")
+      [label] "View"
+    [button] "Slide" (desc: "Slide")
+      [label] "Slide"
+    [button] "View"
+      [label] "View"
+    [button] "Zoom"
+      [label] "Zoom"
+    [button] "Add Slide"
+      [label] "Add Slide"
+    [button] "Insert"
+      [label] "Insert"
+    [button] "Text"
+      [label] "Text"
+    [button] "Shape"
+      [label] "Shape"
+    [button] "Play"
+      [label] "Play"
+    [button] "Format"
+      [label] "Format"
+    [button] "Animate"
+      [label] "Animate"
+    [button] "Document"
+      [label] "Document"
+    [button] "More actions" (desc: "More presentation commands")
+    [list box] "Slides"
+      [button] "Slide 1 of 1, Title Slide"
+        [label] "1"
+        [image] "Title Slide"
+      [button] "Add Slide" (desc: "Add a new slide")
+      [button] "Delete Slide" (desc: "Delete selected slide")
+      [button] "Move Slide Up" (desc: "Move the selected slide earlier (Ctrl+Alt+Up)")
+      [button] "Move Slide Down" (desc: "Move the selected slide later (Ctrl+Alt+Down)")
+    [button] "Title: Title Slide"
+    [button] "Table: Table 3 by 3, cell A1: Header 1"
+    [button] "Chart: Sales Overview"
+    [panel] "Slide inspector"
+      [panel] "Inspector Tabs" (desc: "Inspector Tabs")
+        [button] "Format" (desc: "Format")
+          [label] "Format"
+        [button] "Animate" (desc: "Animate")
+          [label] "Animate"
+        [button] "Document" (desc: "Document")
+          [label] "Document"
+      [label] "Slide Layout"
+      [panel] "Layout Template" (desc: "Layout Template")
+        [button] "Title" (desc: "Title")
+          [label] "Title"
+        [button] "Content" (desc: "Content")
+          [label] "Content"
+        [button] "2 Col" (desc: "2 Col")
+          [label] "2 Col"
+        [button] "Image" (desc: "Image")
+          [label] "Image"
+      [label] "Select an object to edit its position and style."
+    [label] "Unsaved changes to present were kept in /home/patri/.local/state/loom/org.loom.present-unsaved/present (unsaved 1791908343).loomdeck"
+    [label] "Saved"
+
+=== Unnamed Elements Summary ===

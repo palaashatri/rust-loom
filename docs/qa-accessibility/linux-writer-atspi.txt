@@ -1,0 +1,126 @@
+=== AT-SPI Accessibility Tree for loom-writer ===
+Command: /home/patri/wave2-loom/loom-writer/target/debug/loom-writer --table
+Total elements: 118
+Unnamed elements: 1
+
+[application] "loom-writer"
+  [frame] "Loom Writer — Quick Start * - Loom Writer"
+    [button] "File" (desc: "File")
+      [label] "File"
+    [button] "Edit" (desc: "Edit")
+      [label] "Edit"
+    [button] "View" (desc: "View")
+      [label] "View"
+    [button] "Format" (desc: "Format")
+      [label] "Format"
+    [button] "View"
+      [label] "View"
+    [button] "Zoom"
+      [label] "Zoom"
+    [button] "Insert"
+      [label] "Insert"
+    [button] "Text"
+      [label] "Text"
+    [button] "Style"
+      [label] "Style"
+    [button] "List"
+      [label] "List"
+    [button] "Export"
+      [label] "Export"
+    [button] "Format"
+      [label] "Format"
+    [button] "Document"
+      [label] "Document"
+    [button] "More actions" (desc: "More actions: undo, redo, new, open, save and find")
+    [entry] "Table 3 by 3, cell A1: "
+    [panel] "Inspector tab" (desc: "Inspector tab")
+      [button] "Format" (desc: "Format")
+        [label] "Format"
+      [button] "Document" (desc: "Document")
+        [label] "Document"
+    [button] "Close inspector" (desc: "Close inspector")
+    [label] "Table Styles"
+    [button] "Light 1" (desc: "Light 1")
+      [label] "Light 1"
+    [button] "Light 2" (desc: "Light 2")
+      [label] "Light 2"
+    [button] "Light 3" (desc: "Light 3")
+      [label] "Light 3"
+    [button] "Light 4" (desc: "Light 4")
+      [label] "Light 4"
+    [button] "Med 1" (desc: "Med 1")
+      [label] "Med 1"
+    [button] "Med 2" (desc: "Med 2")
+      [label] "Med 2"
+    [button] "Med 3" (desc: "Med 3")
+      [label] "Med 3"
+    [button] "Med 4" (desc: "Med 4")
+      [label] "Med 4"
+    [button] "Dark 1" (desc: "Dark 1")
+      [label] "Dark 1"
+    [button] "Dark 2" (desc: "Dark 2")
+      [label] "Dark 2"
+    [button] "Dark 3" (desc: "Dark 3")
+      [label] "Dark 3"
+    [button] "Dark 4" (desc: "Dark 4")
+      [label] "Dark 4"
+    [label] "Table Options"
+    [button] "Header On" (desc: "Header On")
+      [label] "Header On"
+    [button] "Banded On" (desc: "Banded On")
+      [label] "Banded On"
+    [button] "1st Col Off" (desc: "1st Col Off")
+      [label] "1st Col Off"
+    [label] "Rows & Columns"
+    [button] "+ Row Above" (desc: "+ Row Above")
+      [label] "+ Row Above"
+    [button] "+ Row Below" (desc: "+ Row Below")
+      [label] "+ Row Below"
+    [button] "Del Row" (desc: "Del Row")
+      [label] "Del Row"
+    [button] "+ Col Left" (desc: "+ Col Left")
+      [label] "+ Col Left"
+    [button] "+ Col Right" (desc: "+ Col Right")
+      [label] "+ Col Right"
+    [button] "Del Col" (desc: "Del Col")
+      [label] "Del Col"
+    [button] "Merge Cells" (desc: "Merge Cells")
+      [label] "Merge Cells"
+    [button] "Split Cell" (desc: "Split Cell")
+      [label] "Split Cell"
+    [label] "Paragraph Style"
+    [panel] "Heading Style" (desc: "Heading Style")
+      [button] "Body" (desc: "Body")
+        [label] "Body"
+      [button] "H1" (desc: "H1")
+        [label] "H1"
+      [button] "H2" (desc: "H2")
+        [label] "H2"
+      [button] "H3" (desc: "H3")
+        [label] "H3"
+    [label] "Font & Size"
+    [unknown] <unnamed>
+      [combo box] "Font family"
+    [button] "Smaller" (desc: "Decrease font size")
+    [label] "12 pt"
+    [button] "Larger" (desc: "Increase font size")
+    [button] "Bold" (desc: "Bold (Ctrl+B)")
+    [button] "Italic" (desc: "Italic (Ctrl+I)")
+    [button] "Underline" (desc: "Underline (Ctrl+U)")
+    [button] "Strikethrough" (desc: "Strikethrough")
+    [label] "Alignment & Spacing"
+    [panel] "Text Alignment" (desc: "Text Alignment")
+      [button] "Left" (desc: "Left")
+        [label] "Left"
+      [button] "Center" (desc: "Center")
+        [label] "Center"
+      [button] "Right" (desc: "Right")
+        [label] "Right"
+    [button] "Outdent" (desc: "Decrease Indent")
+    [button] "Indent" (desc: "Increase Indent")
+    [label] "Line Spacing"
+    [label] "Restored unsaved changes to Loom Writer — Quick Start · 71 words · 431 chars · 7 paragraphs · ~1 min read"
+    [label] "Caret at character 339"
+
+=== Unnamed Elements Summary ===
+Role: unknown (depth 2)

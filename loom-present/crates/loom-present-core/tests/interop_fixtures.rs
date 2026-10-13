@@ -9,8 +9,8 @@
 //! conversion check read these files; the expected text is fixed there.
 
 use loom_present_core::{
-    export_pdf, export_pptx, ElementType, ImageAsset, PresentationDocument, PresentationSession,
-    Slide, SlideElement, TransitionKind,
+    default_slide_chart, default_slide_table, export_pdf, export_pptx, ElementType, ImageAsset,
+    PresentationDocument, PresentationSession, Slide, SlideElement, TransitionKind,
 };
 use std::path::PathBuf;
 
@@ -120,8 +120,24 @@ fn fixture_session() -> PresentationSession {
         "t4",
         ElementType::Title,
         "Thank you",
-        (100.0, 220.0, 800.0, 100.0),
+        (100.0, 50.0, 800.0, 80.0),
         0.0,
+    ));
+    four.add_element(SlideElement::new_table(
+        "tab4",
+        60.0,
+        150.0,
+        400.0,
+        200.0,
+        default_slide_table(2, 2),
+    ));
+    four.add_element(SlideElement::new_chart(
+        "ch4",
+        500.0,
+        150.0,
+        440.0,
+        250.0,
+        default_slide_chart(),
     ));
 
     document.slides = vec![one, two, three, four];

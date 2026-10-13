@@ -38,6 +38,9 @@ if [ -s out/present.odp ]; then
   check "subtitle accents and typographic text" "$(has 'Café “review”')" ""
   check "speaker notes survive" "$(has 'Open warmly. Mention the budget.')" ""
   check "picture is a draw:image" "$([ "$(printf '%s' "$content" | grep -o '<draw:image ' | wc -l)" -ge 1 ]; echo $?)" ""
+  check "ODP keeps a table" "$(printf '%s' "$content" | grep -q '<table:table'; echo $?)" ""
+  check "ODP keeps table cells" "$(printf '%s' "$content" | grep -q 'Header 1'; echo $?)" ""
+  check "ODP carries the chart object" "$([ "$(unzip -l out/present.odp | grep -c 'Object [0-9]*/content.xml')" -ge 1 ]; echo $?)" ""
 fi
 timeout 180 "$soffice" "$profile" --headless --convert-to pdf --outdir out present.pptx >/dev/null 2>&1
 check "pptx converts to PDF" "$([ -s out/present.pdf ]; echo $?)" "no PDF written"

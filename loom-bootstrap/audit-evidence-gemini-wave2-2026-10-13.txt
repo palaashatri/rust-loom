@@ -105,3 +105,58 @@ Full-window captures driven on real Windows desktop with isolated LOOM_CONFIG_DI
    - Sheets Copy Chart: Sheets UI has no "Copy Chart" command/button to copy the active chart to the clipboard (prompt: "(if charts cannot be copied from the Sheets UI, say so and add the command)").
 
 ============================================================
+
+T3: Linux verification (WSL distro Ubuntu-E)
+Status: DONE
+
+1. Test suites executed in WSL (Ubuntu-E, CARGO_INCREMENTAL=0, debug profile):
+   - Loom Writer (`cargo test --manifest-path loom-writer/Cargo.toml --workspace`):
+     - Result: 300 passed, 4 failed, 0 ignored (236.65s)
+     - Failures (verified and diagnosed):
+       1) `docx_tests::test_word_com_rich_fixture_roundtrip`: Panicked with `Os { code: 2, kind: NotFound }` attempting to invoke powershell.exe for Word COM on Linux (Windows COM is host-only, missing platform cfg gate).
+       2) `recovery_tests::interactive_recovery_write_failures_are_visible`: Asserted recovery error status text on Linux; readonly chmod 0500 directory permissions in child process did not produce the expected status line within the timeout.
+       3) `docx_tests::test_insert_chart_renders_and_exports_docx_and_pdf`: Panicked with "Chart block must be inserted" due to clipboard target availability.
+       4) `clipboard_actions::tests::test_writer_paste_of_sheets_table_inserts_table_block`: Panicked on Linux clipboard read (`left: 0, right: 1`).
+   - Loom Present (`cargo test --manifest-path loom-present/Cargo.toml --workspace`):
+     - Result: 325 passed, 0 failed, 1 ignored (281.38s)
+     - 100% PASS with zero failures.
+   - Loom Sheets (`cargo test --manifest-path loom-sheets/Cargo.toml --workspace`):
+     - Result: 534 passed, 1 failed, 0 ignored (1058.40s)
+     - Failure: `tests::grid_interaction_tests::the_high_contrast_active_cell_ring_is_three_pixels_and_stands_off_the_gridline` (software rasterizer anti-aliasing on Linux produces 2px stroke width vs 3px expected on Windows).
+
+2. Linux Clipboard Verification (WSLg / X11):
+   - Multi-target clipboard ownership (`loom_clipboard::write_clipboard`) on Linux is routed through `copypasta::ClipboardContext` which only writes plain text UTF-8 and drops HTML/JSON targets.
+   - `xclip -selection clipboard -t text/html -o` exits with 1 (`Error: target text/html not available`).
+   - Reading external X11 HTML selection authored by LibreOffice fails with `IoError("Unexpected Reply type: 299")` in `copypasta`.
+   - Truthful finding: rich multi-target clipboard is Windows-only; on Linux it is plain text only.
+
+3. LibreOffice Interop Scripts:
+   - `loom-writer/tests/interop/check_libreoffice.sh`:
+     - Result: 17 passed, 0 failed.
+     - Verifies: docx to text, headings, paragraphs, lists, table cells Tea and Coffee, accents, docx to PDF, ODT keeps table (`<table:table`), ODT keeps list/comment/bold, Loom PDF text extraction via pdftotext, Markdown UTF-8.
+   - `loom-sheets/tests/interop/check_libreoffice.sh`:
+     - Result: 17 passed, 0 failed.
+     - Verifies: xlsx to PDF, xlsx to CSV, headers, accented text, formula calculation (D2=B2*C2 -> 3.75), IF formula, text formula, cross-sheet formula, SUM total, formats (currency, date, percent), xlsx to ODS, ODS sheets, ODS carries chart object (`Object [0-9]*/content.xml`), Loom CSV UTF-8.
+   - `loom-present/tests/interop/check_libreoffice.sh`:
+     - Result: 15 passed, 0 failed.
+     - Extended to test tables and charts.
+     - Verifies: pptx to ODP, ODP has 4 slides, slide texts, accents, speaker notes, picture (`<draw:image`), ODP keeps table (`<table:table`), ODP keeps table cells (`Header 1`), ODP carries chart object (`Object [0-9]*/content.xml`), pptx to PDF, Impress PDF page count, Loom PDF text extraction.
+
+4. AT-SPI Accessibility Tree Dumps (Linux AT-SPI bus via pyatspi in isolated Xvfb session):
+   - Writer: Dumped to `docs/qa-accessibility/linux-writer-atspi.txt`.
+     - Total elements: 118.
+     - Unnamed elements: 1 (depth 2 container for font family combo box).
+     - Table cell entry accessible name: `Table 3 by 3, cell A1: `.
+     - Table inspector controls: Table styles gallery ("Light 1" through "Dark 4"), table options ("Header On", "Banded On", "1st Col Off"), row/col operations ("+ Row Above", "+ Row Below", "Del Row", "+ Col Left", "+ Col Right", "Del Col", "Merge Cells", "Split Cell").
+   - Present: Dumped to `docs/qa-accessibility/linux-present-atspi.txt`.
+     - Total elements: 63.
+     - Unnamed elements: 0.
+     - Slide canvas table button accessible name: `Table: Table 3 by 3, cell A1: Header 1`.
+     - Slide canvas chart button accessible name: `Chart: Sales Overview`.
+     - Inspector tabs: Format, Animate, Document.
+
+5. Resource Maintenance:
+   - WSL target directories in `/home/patri/wave2-loom` deleted after verification.
+   - Free disk space on `C:\`: 36.2 GB (well above 25 GB minimum requirement).
+
+============================================================
