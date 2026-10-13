@@ -274,7 +274,7 @@ fn test_deep_audit_macos_global_menu_bar_command_projection() {
 
     // Disabled guard check: dispatching unhandled command fails
     let err = menu
-        .dispatch_action_from("edit.paste", CommandSource::Menu)
+        .dispatch_action_from("edit.select_all", CommandSource::Menu)
         .expect_err("disabled");
     assert!(err.to_string().contains("disabled"));
 }
