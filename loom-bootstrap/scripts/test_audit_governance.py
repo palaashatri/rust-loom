@@ -23,7 +23,7 @@ class GovernanceTests(unittest.TestCase):
 
     def truth_text(self):
         path = self.root / "AGENTS.md"
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         match = re.search(
             r"<!-- CURRENT TRUTH START -->\s*(.*?)\s*<!-- CURRENT TRUTH END -->",
             text,
@@ -34,7 +34,7 @@ class GovernanceTests(unittest.TestCase):
 
     def write_truth(self, truth):
         path = self.root / "AGENTS.md"
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         updated, count = re.subn(
             r"(<!-- CURRENT TRUTH START -->\s*).*?(\s*<!-- CURRENT TRUTH END -->)",
             lambda match: match.group(1) + truth + match.group(2),
@@ -43,7 +43,7 @@ class GovernanceTests(unittest.TestCase):
             flags=re.DOTALL,
         )
         self.assertEqual(count, 1)
-        path.write_text(updated)
+        path.write_text(updated, encoding="utf-8")
 
     def replace(self, name, old, new):
         if name == "current_truth":
@@ -52,14 +52,14 @@ class GovernanceTests(unittest.TestCase):
             self.write_truth(text.replace(old, new, 1))
             return
         path = self.root / name
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1))
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
     def use_shared_repair_fixture(self):
         """Use the historical shared-recovery fixture for lock-regression tests."""
         workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
-        workflow = workflow_path.read_text()
+        workflow = workflow_path.read_text(encoding="utf-8")
         workflow = re.sub(r'^phase = "[^"]+"$', 'phase = "audit-repair"', workflow, count=1, flags=re.MULTILINE)
         workflow = re.sub(r'^application_development_locked = (true|false)$',
                           'application_development_locked = true', workflow, count=1, flags=re.MULTILINE)
@@ -87,7 +87,7 @@ class GovernanceTests(unittest.TestCase):
             workflow, count=1, flags=re.DOTALL,
         )
         workflow = workflow.replace('sheets = "IN_PROGRESS"', 'sheets = "LOCKED"', 1)
-        workflow_path.write_text(workflow)
+        workflow_path.write_text(workflow, encoding="utf-8")
 
         truth = self.truth_text()
         truth = re.sub(
@@ -120,7 +120,7 @@ class GovernanceTests(unittest.TestCase):
 
     def test_older_supported_phases_remain_valid(self):
         workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
-        original_workflow = workflow_path.read_text()
+        original_workflow = workflow_path.read_text(encoding="utf-8")
         apps = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
         for phase in ("ui-foundation", "sheets", "writer", "present", "photo", "motion"):
             with self.subTest(phase=phase):
@@ -164,7 +164,7 @@ class GovernanceTests(unittest.TestCase):
                 truth += "\n| Order | Application | Status |\n|---:|---|---|\n"
                 truth += "".join(f"| {index} | {app.title()} | {statuses[app]} |\n"
                                  for index, app in enumerate(apps, 1))
-                workflow_path.write_text(workflow)
+                workflow_path.write_text(workflow, encoding="utf-8")
                 self.write_truth(truth)
                 result = self.run_audit()
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -302,7 +302,7 @@ class GovernanceTests(unittest.TestCase):
 
     def test_marked_current_truth_section_is_required(self):
         path = self.root / "AGENTS.md"
-        path.write_text(path.read_text().replace("<!-- CURRENT TRUTH START -->", "", 1))
+        path.write_text(path.read_text(encoding="utf-8").replace("<!-- CURRENT TRUTH START -->", "", 1), encoding="utf-8")
         self.rejects("AGENTS.md must contain exactly one marked current truth section")
 
     def test_missing_workflow_reports_an_error_without_a_traceback(self):
