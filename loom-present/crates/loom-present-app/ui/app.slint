@@ -531,25 +531,12 @@ export component PresentApp inherits Window {
                         zoom: root.zoom-factor;
                         background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
                         aspect-ratio-wide: root.aspect-ratio-wide;
-                        element-labels: root.element-labels;
-                        element-placeholders: root.element-placeholders;
-                        element-contents: root.element-contents;
-                        element-xs: root.element-xs;
-                        element-ys: root.element-ys;
-                        element-widths: root.element-widths;
-                        element-heights: root.element-heights;
-                        element-rotations: root.element-rotations;
-                        element-types: root.element-types;
-                        element-images: root.element-images;
-                        element-selected: root.element-selected;
-                        selection-count: root.selection-count;
-                        snap-guides-x: root.snap-guides-x;
-                        snap-guides-y: root.snap-guides-y;
-                        marquee-x: root.marquee-x;
-                        marquee-y: root.marquee-y;
-                        marquee-width: root.marquee-width;
-                        marquee-height: root.marquee-height;
-                        marquee-visible: root.marquee-visible;
+                        element-labels: root.element-labels; element-placeholders: root.element-placeholders; element-contents: root.element-contents;
+                        element-xs: root.element-xs; element-ys: root.element-ys; element-widths: root.element-widths; element-heights: root.element-heights;
+                        element-rotations: root.element-rotations; element-types: root.element-types; element-images: root.element-images;
+                        element-selected: root.element-selected; selection-count: root.selection-count;
+                        snap-guides-x: root.snap-guides-x; snap-guides-y: root.snap-guides-y;
+                        marquee-x: root.marquee-x; marquee-y: root.marquee-y; marquee-width: root.marquee-width; marquee-height: root.marquee-height; marquee-visible: root.marquee-visible;
                         active-element-index: root.active-element-index;
                         select-element(idx) => { root.select-element(idx); }
                         canvas-pressed(x, y, shift) => { root.canvas-pressed(x, y, shift); }
@@ -658,14 +645,10 @@ export component PresentApp inherits Window {
                     element-height-text: root.element-height-text;
                     element-rotation-text: root.element-rotation-text;
                     is-table: root.inspector-is-table;
-                    table-style-id <=> root.inspector-table-style-id;
-                    table-header-row <=> root.inspector-table-header-row;
-                    table-banded-rows <=> root.inspector-table-banded-rows;
-                    table-first-column <=> root.inspector-table-first-column;
-                    set-table-style(s) => { root.set-table-style(s); }
-                    toggle-table-option(o) => { root.toggle-table-option(o); }
-                    table-action(a) => { root.table-action(a); }
-                    apply-template(idx) => { root.apply-template(idx); }
+                    table-style-id <=> root.inspector-table-style-id; table-header-row <=> root.inspector-table-header-row;
+                    table-banded-rows <=> root.inspector-table-banded-rows; table-first-column <=> root.inspector-table-first-column;
+                    set-table-style(s) => { root.set-table-style(s); } toggle-table-option(o) => { root.toggle-table-option(o); }
+                    table-action(a) => { root.table-action(a); } apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }
                     open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
@@ -835,20 +818,12 @@ export component PresentApp inherits Window {
     }
 
     InsertTableDialog {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
+        x: 0px; y: 0px; width: root.width; height: root.height;
         open: root.insert-table-dialog-open;
         rows <=> root.insert-table-dialog-rows;
         cols <=> root.insert-table-dialog-cols;
-        insert(r, c) => {
-            root.insert-table-dialog-open = false;
-            root.insert-table-size(r, c);
-        }
-        cancel => {
-            root.insert-table-dialog-open = false;
-        }
+        insert(r, c) => { root.insert-table-dialog-open = false; root.insert-table-size(r, c); }
+        cancel => { root.insert-table-dialog-open = false; }
     }
 
     changed save-changes-open => {
