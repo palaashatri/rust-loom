@@ -63,3 +63,45 @@ test frame_bench_tests::present_frame_bench_20x10_table ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 0.13s
 
 ============================================================
+
+T2: Live-window verification on Windows
+Status: DONE
+
+Full-window captures driven on real Windows desktop with isolated LOOM_CONFIG_DIR, APPDATA, and LOCALAPPDATA. Every capture was visually verified and described.
+
+1. Writer Live Window Journey:
+   - docs/qa-live-windows/t2-writer-01-blank.png: Blank document on initial launch. Dark theme, format inspector on right.
+   - docs/qa-live-windows/t2-writer-02-table-3x3.png: Inserted 3x3 table via toolbar menu ("Insert" -> "Table"). Table rendered with header row and banded rows.
+   - docs/qa-live-windows/t2-writer-03-table-4x3.png: Clicked "+ Row Below" in Table Inspector; table updated to 4 rows x 3 columns ("Table updated: insert-row-below").
+   - docs/qa-live-windows/t2-writer-04-table-style-dark1.png: Applied "Dark 1" style from Table Styles gallery. Shading and borders updated immediately.
+   - docs/qa-live-windows/t2-writer-05-cells-merged.png: Merged two cells in row 3 via "Merge Cells" button. Status: "Cells merged".
+   - docs/qa-live-windows/t2-writer-06-undo.png: Clicked "Undo" in Edit menu. Table reverted merged cells. Status: "Undo".
+   - docs/qa-live-windows/t2-writer-07-redo.png: Clicked "Redo" in Edit menu. Reapplied merge. Status: "Redo".
+   - docs/qa-live-windows/t2-writer-08-export-menu.png: Clicked "File" -> "Export to Word...".
+   - docs/qa-live-windows/t2-writer-09-export-dialog.png: Real native Windows 11 #32770 "Export Loom Writer Word Document" Save As dialog captured live.
+   - docs/qa-live-windows/t2-writer-10-after-dialog.png: Cancelled native dialog via Win32 WM_COMMAND (IDCANCEL). App responded with "Export cancelled".
+   - docs/qa-live-windows/t2-writer-11-docx-unsupported-warning.png: Opened fixture with SmartArt (unsupported_smartart.docx); modal "Word Document Import Notice" appeared ("SmartArt diagrams are not supported...").
+   - docs/qa-live-windows/t2-writer-12-after-warning-cancel.png: Clicked "Cancel", dialog dismissed, document untouched, status: "Word import cancelled".
+
+2. Sheets Live Window Journey:
+   - docs/qa-live-windows/t2-sheets-01-initial.png: Initial Sheets live window launch with isolated environment.
+   - docs/qa-live-windows/t2-sheets-02-example-chart.png: Launched with `--example --chart`. Displayed "Example Budget" table and floating Bar chart with interactive keyboard reading panel.
+   - docs/qa-live-windows/t2-sheets-04-selected-range.png: "Select All" selected A1:C6 (18 cells, SUM: 4200.00).
+   - docs/qa-live-windows/t2-sheets-05-copied-all.png: "Copy" wrote all 18 cells to multi-format clipboard ("Copied A1:C6 (18 cells)").
+   - docs/qa-live-windows/t2-sheets-06-pasted-writer-table.png: Pasted Writer table into Sheets at A1:C6 ("Pasted 18 cells at A1", "18 cells · 0 formulas").
+
+3. Present Live Window Journey:
+   - docs/qa-live-windows/t2-present-01-initial.png: Launched Present live window with isolated environment.
+   - docs/qa-live-windows/t2-present-02-table.png: Inserted Table 3x3 via "Slide" -> "Insert Table...". Selected element: "Table", Format inspector shows style gallery and geometry.
+   - docs/qa-live-windows/t2-present-03-chart.png: Inserted Chart via "Slide" -> "Insert Chart...". Selected element: "Chart", "Sales Overview", 500 pt x 300 pt. Status: "Inserted chart".
+   - docs/qa-live-windows/t2-present-04-undo.png: Clicked "Edit" -> "Undo". Chart insertion reverted, table restored.
+   - docs/qa-live-windows/t2-present-05-slideshow.png: Started slideshow via "Play" button. Full-window presentation of table slide rendered.
+   - docs/qa-live-windows/t2-present-06-after-slideshow.png: Exited slideshow via Escape back to editor.
+   - docs/qa-live-windows/t2-present-07-opened-com-pptx.png: Opened COM PowerPoint authored fixture .work/fixtures/com_powerpoint_table.pptx. Title bar shows "com_powerpoint_table - Loom Present", slide thumbnail displays "Header 1".
+
+4. Defects Found in T2 (to be closed in T4):
+   - Writer Edit Menu Paste: `Edit -> Paste` via menu returned `DesktopError::InvalidRequest("command 'edit.paste' is currently disabled")` because `edit.paste` was missing from `writer_command_catalog()` and `sync_writer_registry_enablement()`.
+   - Present Edit Menu Cut/Copy/Paste: `local_menu::SUPPORTED_COMMANDS` omitted `"edit.cut"`, `"edit.copy"`, `"edit.paste"`, disabling them in the native menu bar.
+   - Sheets Copy Chart: Sheets UI has no "Copy Chart" command/button to copy the active chart to the clipboard (prompt: "(if charts cannot be copied from the Sheets UI, say so and add the command)").
+
+============================================================
