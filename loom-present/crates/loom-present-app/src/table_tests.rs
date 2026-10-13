@@ -542,3 +542,111 @@ try {{
         stderr
     );
 }
+
+#[test]
+fn test_t4a_present_table_gaps() {
+    let (app, state) = make_test_fixture();
+    app.invoke_add_table();
+
+    // 1. Inspector toggles with Slint names (underscore): header_row, banded_rows, first_column
+    app.invoke_toggle_table_option("header_row".into());
+    {
+        let session = state.session.borrow();
+        let table = session.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap();
+        assert!(!table.header_row, "header_row should toggle to false");
+    }
+    app.invoke_toggle_table_option("banded_rows".into());
+    {
+        let session = state.session.borrow();
+        let table = session.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap();
+        assert!(!table.banded_rows, "banded_rows should toggle to false");
+    }
+    app.invoke_toggle_table_option("first_column".into());
+    {
+        let session = state.session.borrow();
+        let table = session.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap();
+        assert!(table.first_column, "first_column should toggle to true");
+    }
+
+    // 2. Table action with Slint names: del_row, del_col
+    app.invoke_table_action("del_row".into());
+    {
+        let session = state.session.borrow();
+        let table = session.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap();
+        assert_eq!(
+            table.row_count(),
+            2,
+            "del_row should decrease rows from 3 to 2"
+        );
+    }
+    app.invoke_table_action("del_col".into());
+    {
+        let session = state.session.borrow();
+        let table = session.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap();
+        assert_eq!(
+            table.col_count(),
+            2,
+            "del_col should decrease cols from 3 to 2"
+        );
+    }
+
+    // 3. Insert table with custom dimensions
+    app.invoke_insert_table_size(4, 5);
+    {
+        let session = state.session.borrow();
+        let slide = session.document.active_slide().unwrap();
+        let last_elem = slide.elements.last().unwrap();
+        let table = last_elem.table().unwrap();
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(table.col_count(), 5);
+    }
+
+    // 3b. Insert Table dialog open/close and properties
+    app.set_insert_table_dialog_open(true);
+    assert!(app.get_insert_table_dialog_open());
+    app.set_insert_table_dialog_rows(5);
+    app.set_insert_table_dialog_cols(4);
+    assert_eq!(app.get_insert_table_dialog_rows(), 5);
+    assert_eq!(app.get_insert_table_dialog_cols(), 4);
+    app.set_insert_table_dialog_open(false);
+    assert!(!app.get_insert_table_dialog_open());
+
+    // 4. Delete row and column from command dispatch and palette
+    assert!(dispatch_command(&app, "table.delete_row"));
+    assert!(dispatch_command(&app, "table.delete_column"));
+    let palette = master_palette(&app);
+    assert!(palette
+        .iter()
+        .any(|cmd| matches!(cmd.action, PaletteAction::DeleteTableRow)));
+    assert!(palette
+        .iter()
+        .any(|cmd| matches!(cmd.action, PaletteAction::DeleteTableColumn)));
+
+    // 5. Table keyboard operation: Enter to edit cell, Escape
+    let enter_key: SharedString = slint::platform::Key::Return.into();
+    let esc_key: SharedString = slint::platform::Key::Escape.into();
+    assert!(table_actions::handle_table_key(
+        &app,
+        &state,
+        enter_key.as_str(),
+        false
+    ));
+    assert!(table_actions::is_table_editing_cell());
+    assert!(table_actions::handle_table_key(
+        &app,
+        &state,
+        esc_key.as_str(),
+        false
+    ));
+    assert!(!table_actions::is_table_editing_cell());
+}

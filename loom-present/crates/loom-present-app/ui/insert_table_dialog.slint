@@ -1,0 +1,150 @@
+import { LoomButton, LoomSectionHeader } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component InsertTableDialog inherits Rectangle {
+    in-out property <bool> open: false;
+    in-out property <int> rows: 3;
+    in-out property <int> cols: 3;
+
+    callback insert(int, int);
+    callback cancel();
+
+    visible: root.open;
+
+    dialog-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.open;
+        visible: root.open;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.insert(root.rows, root.cols);
+                return accept;
+            }
+            return reject;
+        }
+
+        TouchArea {
+            clicked => { }
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            background: Theme.palette().scrim;
+        }
+
+        dialog-panel := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 320px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().paper;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                padding: Theme.tokens.space.lg;
+                spacing: Theme.tokens.space.md;
+
+                LoomSectionHeader {
+                    title: "Insert Table";
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "Rows:";
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "-";
+                            variant: "secondary";
+                            clicked => { root.rows = max(1, root.rows - 1); }
+                        }
+                        Rectangle {
+                            width: 36px;
+                            Text {
+                                text: "\{root.rows}";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                font-size: Theme.tokens.typography.body;
+                                color: Theme.palette().ink;
+                            }
+                        }
+                        LoomButton {
+                            label: "+";
+                            variant: "secondary";
+                            clicked => { root.rows = min(20, root.rows + 1); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "Columns:";
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "-";
+                            variant: "secondary";
+                            clicked => { root.cols = max(1, root.cols - 1); }
+                        }
+                        Rectangle {
+                            width: 36px;
+                            Text {
+                                text: "\{root.cols}";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                font-size: Theme.tokens.typography.body;
+                                color: Theme.palette().ink;
+                            }
+                        }
+                        LoomButton {
+                            label: "+";
+                            variant: "secondary";
+                            clicked => { root.cols = min(20, root.cols + 1); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.tokens.space.sm;
+
+                    LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        clicked => { root.cancel(); }
+                    }
+
+                    LoomButton {
+                        label: "Insert";
+                        variant: "primary";
+                        clicked => { root.insert(root.rows, root.cols); }
+                    }
+                }
+            }
+        }
+    }
+}

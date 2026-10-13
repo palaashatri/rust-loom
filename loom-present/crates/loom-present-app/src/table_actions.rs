@@ -17,7 +17,16 @@ pub struct PendingPptxImport {
 
 thread_local! {
     static ACTIVE_TABLE_CELL: RefCell<Option<(String, usize, usize)>> = const { RefCell::new(None) };
+    static TABLE_EDITING_CELL: RefCell<bool> = const { RefCell::new(false) };
     pub static PENDING_PPTX_IMPORT: RefCell<Option<PendingPptxImport>> = const { RefCell::new(None) };
+}
+
+pub fn is_table_editing_cell() -> bool {
+    TABLE_EDITING_CELL.with(|c| *c.borrow())
+}
+
+pub fn set_table_editing_cell(editing: bool) {
+    TABLE_EDITING_CELL.with(|c| *c.borrow_mut() = editing);
 }
 
 pub fn get_active_table_cell(element_id: &str) -> (usize, usize) {
@@ -67,14 +76,18 @@ pub fn handle_table_key(app: &PresentApp, state: &GuiState, key: &str, shift: bo
     let right_arrow: SharedString = slint::platform::Key::RightArrow.into();
     let up_arrow: SharedString = slint::platform::Key::UpArrow.into();
     let down_arrow: SharedString = slint::platform::Key::DownArrow.into();
+    let enter_key: SharedString = slint::platform::Key::Return.into();
+    let esc_key: SharedString = slint::platform::Key::Escape.into();
 
     let is_tab = key == tab_key.as_str() || key == backtab_key.as_str();
     let is_arrow = key == left_arrow.as_str()
         || key == right_arrow.as_str()
         || key == up_arrow.as_str()
         || key == down_arrow.as_str();
+    let is_enter = key == enter_key.as_str();
+    let is_esc = key == esc_key.as_str();
 
-    if !is_tab && !is_arrow {
+    if !is_tab && !is_arrow && !is_enter && !is_esc {
         return false;
     }
 
@@ -91,6 +104,27 @@ pub fn handle_table_key(app: &PresentApp, state: &GuiState, key: &str, shift: bo
     };
     if elem.element_type != loom_present_core::ElementType::Table {
         return false;
+    }
+
+    if is_enter {
+        set_table_editing_cell(true);
+        drop(session);
+        refresh(app, state);
+        return true;
+    }
+
+    if is_esc {
+        if is_table_editing_cell() {
+            set_table_editing_cell(false);
+            drop(session);
+            refresh(app, state);
+            return true;
+        } else {
+            session.selected_elements.clear();
+            drop(session);
+            refresh(app, state);
+            return true;
+        }
     }
 
     let (curr_r, curr_c) = get_active_table_cell(&elem.id);
@@ -135,6 +169,28 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                     Ok(_) => {
                         refresh(&app, &state);
                         set_status(&app, "Inserted table");
+                    }
+                    Err(err) => set_status(&app, format!("Failed to insert table: {err}")),
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_insert_table_size(move |rows, cols| {
+            if let Some(app) = app_ref.upgrade() {
+                let r = (rows as usize).clamp(1, 50);
+                let c = (cols as usize).clamp(1, 20);
+                let res = state
+                    .session
+                    .borrow_mut()
+                    .insert_table(default_slide_table(r, c));
+                match res {
+                    Ok(_) => {
+                        refresh(&app, &state);
+                        set_status(&app, format!("Inserted {r}x{c} table"));
                     }
                     Err(err) => set_status(&app, format!("Failed to insert table: {err}")),
                 }
@@ -206,9 +262,15 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                         {
                             if let Some(mut table) = elem.table() {
                                 match opt.as_str() {
-                                    "header-row" => table.header_row = !table.header_row,
-                                    "banded-rows" => table.banded_rows = !table.banded_rows,
-                                    "first-column" => table.first_column = !table.first_column,
+                                    "header-row" | "header_row" => {
+                                        table.header_row = !table.header_row
+                                    }
+                                    "banded-rows" | "banded_rows" => {
+                                        table.banded_rows = !table.banded_rows
+                                    }
+                                    "first-column" | "first_column" => {
+                                        table.first_column = !table.first_column
+                                    }
                                     _ => {}
                                 }
                                 elem.set_table(&table);
@@ -238,14 +300,14 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                         {
                             let (curr_r, curr_c) = get_active_table_cell(&elem.id);
                             match action.as_str() {
-                                "insert-row-above" => {
+                                "insert-row-above" | "add_row_above" => {
                                     elem.insert_table_row(curr_r, false);
                                 }
-                                "insert-row-below" => {
+                                "insert-row-below" | "add_row_below" => {
                                     elem.insert_table_row(curr_r, true);
                                     set_active_table_cell(&elem.id, curr_r + 1, curr_c);
                                 }
-                                "delete-row" => {
+                                "delete-row" | "del_row" => {
                                     elem.delete_table_row(curr_r);
                                     set_active_table_cell(
                                         &elem.id,
@@ -253,14 +315,14 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                                         curr_c,
                                     );
                                 }
-                                "insert-col-left" => {
+                                "insert-col-left" | "add_col_left" => {
                                     elem.insert_table_column(curr_c, false);
                                 }
-                                "insert-col-right" => {
+                                "insert-col-right" | "add_col_right" => {
                                     elem.insert_table_column(curr_c, true);
                                     set_active_table_cell(&elem.id, curr_r, curr_c + 1);
                                 }
-                                "delete-col" => {
+                                "delete-col" | "del_col" => {
                                     elem.delete_table_column(curr_c);
                                     set_active_table_cell(
                                         &elem.id,

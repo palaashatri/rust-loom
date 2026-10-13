@@ -1737,6 +1737,12 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "slide.insert_table" => app.invoke_add_table(),
         "slide.insert_chart" => app.invoke_add_chart(),
         "slide.insert_image" => app.invoke_add_picture(),
+        "table.delete_row" | "slide.delete_table_row" => {
+            app.invoke_table_action("delete-row".into())
+        }
+        "table.delete_column" | "slide.delete_table_column" => {
+            app.invoke_table_action("delete-col".into())
+        }
         "file.open" => app.invoke_open_deck(),
         "file.save" => app.invoke_save_deck(),
         "file.save_as" => app.invoke_save_as_deck(),
@@ -1771,6 +1777,10 @@ fn is_present_menu_command(id: &str) -> bool {
                 | "slide.insert_table"
                 | "slide.insert_chart"
                 | "slide.insert_image"
+                | "table.delete_row"
+                | "table.delete_column"
+                | "slide.delete_table_row"
+                | "slide.delete_table_column"
                 | "file.open"
                 | "file.save"
                 | "file.save_as"
@@ -1778,6 +1788,9 @@ fn is_present_menu_command(id: &str) -> bool {
                 | "file.export_pptx"
                 | "edit.undo"
                 | "edit.redo"
+                | "edit.cut"
+                | "edit.copy"
+                | "edit.paste"
                 | "slide.new"
                 | "slide.duplicate"
                 | "slide.delete"
@@ -2924,6 +2937,8 @@ enum PaletteAction {
     AddText,
     AddPicture,
     AddTable,
+    DeleteTableRow,
+    DeleteTableColumn,
     AddChart,
     NewSampleDeck,
     NewFromTemplate,
@@ -3029,6 +3044,18 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::AddTable,
             id: "present.insert-table",
             label: "Insert Table",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::DeleteTableRow,
+            id: "table.delete_row",
+            label: "Delete Table Row",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::DeleteTableColumn,
+            id: "table.delete_column",
+            label: "Delete Table Column",
             shortcut: "",
         },
         PaletteCommand {
@@ -3252,6 +3279,12 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::AddText => app.invoke_add_text(),
                         PaletteAction::AddPicture => app.invoke_add_picture(),
                         PaletteAction::AddTable => app.invoke_add_table(),
+                        PaletteAction::DeleteTableRow => {
+                            app.invoke_table_action("delete-row".into())
+                        }
+                        PaletteAction::DeleteTableColumn => {
+                            app.invoke_table_action("delete-col".into())
+                        }
                         PaletteAction::AddChart => app.invoke_add_chart(),
                         PaletteAction::NewSampleDeck => app.invoke_new_sample_deck(),
                         PaletteAction::NewFromTemplate => {

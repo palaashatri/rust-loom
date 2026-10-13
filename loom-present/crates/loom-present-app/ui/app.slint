@@ -12,6 +12,7 @@ import {
     LocalMenu, LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { PptxImportWarningDialog } from "pptx_import_warning.slint";
+import { InsertTableDialog } from "insert_table_dialog.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
@@ -251,6 +252,10 @@ export component PresentApp inherits Window {
     callback add-shape;
     callback add-picture;
     callback add-table;
+    callback insert-table-size(int, int);
+    in-out property <bool> insert-table-dialog-open: false;
+    in-out property <int> insert-table-dialog-rows: 3;
+    in-out property <int> insert-table-dialog-cols: 3;
     callback add-chart;
     in-out property <bool> pptx-import-warning-open: false;
     in-out property <string> pptx-import-warning-message: "";
@@ -827,6 +832,23 @@ export component PresentApp inherits Window {
         warning-message: root.pptx-import-warning-message;
         import-cancel => { root.pptx-import-cancel(); }
         import-continue => { root.pptx-import-continue(); }
+    }
+
+    InsertTableDialog {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        open: root.insert-table-dialog-open;
+        rows <=> root.insert-table-dialog-rows;
+        cols <=> root.insert-table-dialog-cols;
+        insert(r, c) => {
+            root.insert-table-dialog-open = false;
+            root.insert-table-size(r, c);
+        }
+        cancel => {
+            root.insert-table-dialog-open = false;
+        }
     }
 
     changed save-changes-open => {
