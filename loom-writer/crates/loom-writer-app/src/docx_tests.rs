@@ -12,6 +12,7 @@ use loom_writer_core::{
     export_document_as_docx, export_pdf, import_docx, WriterDocument, CHART_BLOCK_KIND,
     TABLE_BLOCK_KIND,
 };
+use std::path::PathBuf;
 use std::rc::Rc;
 
 fn make_test_app() -> (WriterApp, Rc<GuiState>) {
@@ -324,4 +325,65 @@ try {{
     );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_committed_word_roundtrip_fixture() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture_path = manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("tests")
+        .join("fixtures")
+        .join("word_roundtrip_fixture.docx");
+
+    assert!(
+        fixture_path.exists(),
+        "Committed Word fixture must exist at {}",
+        fixture_path.display()
+    );
+
+    let docx_bytes = std::fs::read(&fixture_path).expect("read committed word fixture");
+
+    // 1. Unsupported warnings check
+    let warnings = loom_writer_core::inspect_docx_unsupported(&docx_bytes)
+        .expect("inspect committed word fixture");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.to_lowercase().contains("footnote")),
+        "Committed Word fixture with footnotes must produce footnote warning: {warnings:?}"
+    );
+
+    // 2. Import check
+    let imported = import_docx(&docx_bytes).expect("import committed word fixture");
+
+    // Heading survived
+    assert!(
+        imported.blocks.iter().any(|b| b
+            .text
+            .as_str()
+            .contains("Loom Writer Interoperability Report")),
+        "Heading 1 must survive import"
+    );
+
+    // Table survived
+    let table_block = imported
+        .blocks
+        .iter()
+        .find(|b| b.kind == TABLE_BLOCK_KIND)
+        .expect("Table block must survive import");
+    let table_text = table_block.text.as_str();
+    assert!(
+        table_text.contains("Item")
+            && table_text.contains("Category")
+            && table_text.contains("Status"),
+        "Table header must survive: {table_text}"
+    );
+    assert!(
+        table_text.contains("DocxParser") && table_text.contains("Verified"),
+        "Table content must survive: {table_text}"
+    );
 }

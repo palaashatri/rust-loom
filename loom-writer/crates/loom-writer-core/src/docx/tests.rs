@@ -807,3 +807,80 @@ fn test_import_docx_rich_document_fidelity() {
         "table must contain cell Tea"
     );
 }
+
+#[test]
+fn test_docx_import_warns_on_images_lists_headings_footnotes() {
+    let mut archive = PackageArchive::new();
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#;
+    archive
+        .add("[Content_Types].xml", content_types.as_bytes().to_vec())
+        .unwrap();
+
+    let doc_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>Header Text</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>List Item</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Footnote ref</w:t><w:footnoteReference w:id="2"/></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:drawing><w:pict/></w:drawing></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    archive
+        .add("word/document.xml", doc_xml.as_bytes().to_vec())
+        .unwrap();
+    archive
+        .add(
+            "word/media/image1.png",
+            vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        )
+        .unwrap();
+    archive
+        .add("word/footnotes.xml", b"<w:footnotes/>".to_vec())
+        .unwrap();
+
+    let docx_bytes = archive.to_bytes().expect("pack test archive");
+    let warnings = super::inspect_docx_unsupported(&docx_bytes).expect("inspect succeeds");
+
+    let has_image = warnings
+        .iter()
+        .any(|w| w.to_lowercase().contains("image") || w.to_lowercase().contains("picture"));
+    let has_list = warnings
+        .iter()
+        .any(|w| w.to_lowercase().contains("list") || w.to_lowercase().contains("numbering"));
+    let has_heading = warnings
+        .iter()
+        .any(|w| w.to_lowercase().contains("heading"));
+    let has_footnote = warnings
+        .iter()
+        .any(|w| w.to_lowercase().contains("footnote"));
+
+    assert!(
+        has_image,
+        "Warnings must contain image warning: {warnings:?}"
+    );
+    assert!(has_list, "Warnings must contain list warning: {warnings:?}");
+    assert!(
+        has_heading,
+        "Warnings must contain heading warning: {warnings:?}"
+    );
+    assert!(
+        has_footnote,
+        "Warnings must contain footnote warning: {warnings:?}"
+    );
+}

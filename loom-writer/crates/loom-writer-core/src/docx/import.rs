@@ -80,6 +80,20 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         {
             warnings.push("Footnotes and endnotes are not supported.".to_string());
         }
+        if (path.starts_with("word/media/") || path.starts_with("media/"))
+            && !warnings.iter().any(|w: &String| w.contains("Images"))
+        {
+            warnings.push(
+                "Images and embedded pictures are not supported and will be omitted.".to_string(),
+            );
+        }
+        if path.ends_with("numbering.xml") && !warnings.iter().any(|w: &String| w.contains("Lists"))
+        {
+            warnings.push(
+                "Lists and custom numbering definitions are simplified or not fully supported."
+                    .to_string(),
+            );
+        }
     }
 
     if let Some(doc_bytes) = archive.get("word/document.xml") {
@@ -88,6 +102,32 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
             && !warnings.iter().any(|w: &String| w.contains("Equation"))
         {
             warnings.push("Mathematical equations (OMML) are not supported.".to_string());
+        }
+        if (xml.contains("<w:footnoteReference") || xml.contains("<w:endnoteReference"))
+            && !warnings.iter().any(|w: &String| w.contains("Footnotes"))
+        {
+            warnings.push("Footnotes and endnotes are not supported.".to_string());
+        }
+        if (xml.contains("<a:blip")
+            || xml.contains("<w:pict")
+            || xml.contains("<v:imagedata")
+            || (xml.contains("<w:drawing") && !xml.contains("<c:chart")))
+            && !warnings.iter().any(|w: &String| w.contains("Images"))
+        {
+            warnings.push(
+                "Images and embedded pictures are not supported and will be omitted.".to_string(),
+            );
+        }
+        if xml.contains("<w:numPr") && !warnings.iter().any(|w: &String| w.contains("Lists")) {
+            warnings.push(
+                "Lists and custom numbering definitions are simplified or not fully supported."
+                    .to_string(),
+            );
+        }
+        if (xml.contains("<w:pStyle w:val=\"Heading") || xml.contains("<w:pStyle w:val=\"heading"))
+            && !warnings.iter().any(|w: &String| w.contains("Headings"))
+        {
+            warnings.push("Headings and outline hierarchies may be simplified.".to_string());
         }
     }
 
