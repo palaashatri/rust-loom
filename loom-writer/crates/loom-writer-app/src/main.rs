@@ -495,6 +495,30 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "app.palette" => app.invoke_open_palette(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
+        "table.insert_row_above" | "writer.table.insert_row_above" => {
+            app.invoke_table_action("insert-row-above".into())
+        }
+        "table.insert_row_below" | "writer.table.insert_row_below" => {
+            app.invoke_table_action("insert-row-below".into())
+        }
+        "table.insert_col_left" | "writer.table.insert_col_left" => {
+            app.invoke_table_action("insert-col-left".into())
+        }
+        "table.insert_col_right" | "writer.table.insert_col_right" => {
+            app.invoke_table_action("insert-col-right".into())
+        }
+        "table.delete_row" | "writer.table.delete_row" => {
+            app.invoke_table_action("delete-row".into())
+        }
+        "table.delete_column" | "table.delete_col" | "writer.table.delete_col" => {
+            app.invoke_table_action("delete-col".into())
+        }
+        "table.merge_cells" | "writer.table.merge_cells" => {
+            app.invoke_table_action("merge-cells".into())
+        }
+        "table.split_cell" | "writer.table.split_cell" => {
+            app.invoke_table_action("split-cell".into())
+        }
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
         id if appearance::dispatch(app, id) => {}
@@ -603,6 +627,27 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_order(20)
             .with_shortcut("Ctrl+Shift+Z")
             .with_enabled(false),
+        CommandSpec::new("edit.cut", "Cut")
+            .with_undo_label("Cut")
+            .with_description("Cut the selection to clipboard")
+            .with_category("edit")
+            .with_order(30)
+            .with_shortcut("Ctrl+X")
+            .with_enabled(false),
+        CommandSpec::new("edit.copy", "Copy")
+            .with_undo_label("Copy")
+            .with_description("Copy the selection to clipboard")
+            .with_category("edit")
+            .with_order(31)
+            .with_shortcut("Ctrl+C")
+            .with_enabled(false),
+        CommandSpec::new("edit.paste", "Paste")
+            .with_undo_label("Paste")
+            .with_description("Paste from clipboard")
+            .with_category("edit")
+            .with_order(32)
+            .with_shortcut("Ctrl+V")
+            .with_enabled(true),
         // Format — character styles (honest enablement: only when a non-collapsed
         // range is selected; caret-only formatting has no stable range to style)
         CommandSpec::new("writer.style.bold", "Bold")
@@ -823,6 +868,7 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_enabled(false),
     ];
     catalog.extend(appearance::command_specs());
+    catalog.extend(table_actions::table_command_specs());
     catalog
 }
 
@@ -870,6 +916,7 @@ fn sync_writer_registry_enablement(
     let selection = doc.selection();
     let has_selection = !selection.is_collapsed();
     let has_blocks = !doc.is_empty();
+    let is_in_table = doc.table_cell_at_offset(selection.anchor).is_some();
 
     for id in ["edit.undo", "writer.undo"] {
         registry.set_enabled(&CommandId::new(id), can_undo);
@@ -877,6 +924,13 @@ fn sync_writer_registry_enablement(
     for id in ["edit.redo", "writer.redo"] {
         registry.set_enabled(&CommandId::new(id), can_redo);
     }
+    for id in ["edit.cut", "writer.cut", "edit.copy", "writer.copy"] {
+        registry.set_enabled(&CommandId::new(id), has_selection || is_in_table);
+    }
+    for id in ["edit.paste", "writer.paste"] {
+        registry.set_enabled(&CommandId::new(id), true);
+    }
+    table_actions::sync_table_registry_enablement(registry, is_in_table);
     for id in [
         "writer.style.bold",
         "writer.style.italic",

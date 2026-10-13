@@ -396,4 +396,198 @@ mod tests {
             "Typing latency in debug build must stay responsive: got {p95} ms"
         );
     }
+
+    #[test]
+    fn test_t4b_writer_table_shortcuts_menu_cell_selection_copy() {
+        let (app, state) = make_test_app();
+        app.invoke_insert_table_size(3, 3);
+
+        // 1. Menu & Palette commands for row/col insert/delete & merge/split
+        assert!(
+            dispatch_command(&app, "table.insert_row_above"),
+            "dispatch table.insert_row_above"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.rows.len(), 4, "Insert row above increased rows to 4");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.insert_row_below"),
+            "dispatch table.insert_row_below"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.rows.len(), 5, "Insert row below increased rows to 5");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.delete_row"),
+            "dispatch table.delete_row"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.rows.len(), 4, "Delete row decreased rows to 4");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.insert_col_left"),
+            "dispatch table.insert_col_left"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.columns(), 4, "Insert col left increased cols to 4");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.insert_col_right"),
+            "dispatch table.insert_col_right"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.columns(), 5, "Insert col right increased cols to 5");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.delete_column"),
+            "dispatch table.delete_column"
+        );
+        {
+            let current = state.current.borrow();
+            let table = current.table_from_block(current.blocks[1].id).unwrap();
+            assert_eq!(table.columns(), 4, "Delete col decreased cols to 4");
+        }
+
+        assert!(
+            dispatch_command(&app, "table.merge_cells"),
+            "dispatch table.merge_cells"
+        );
+        assert!(
+            dispatch_command(&app, "table.split_cell"),
+            "dispatch table.split_cell"
+        );
+
+        // Supported menu commands
+        for cmd in [
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "table.insert_row_above",
+            "table.insert_row_below",
+            "table.insert_col_left",
+            "table.insert_col_right",
+            "table.delete_row",
+            "table.delete_column",
+            "table.merge_cells",
+            "table.split_cell",
+        ] {
+            assert!(
+                local_menu::SUPPORTED_COMMANDS.contains(&cmd),
+                "local_menu::SUPPORTED_COMMANDS must contain {cmd}"
+            );
+        }
+
+        // Palette commands
+        let palette = master_palette(&app);
+        assert!(palette
+            .iter()
+            .any(|c| c.id == "table.insert_row_above" || c.id == "writer.table.insert_row_above"));
+        assert!(palette
+            .iter()
+            .any(|c| c.id == "table.delete_row" || c.id == "writer.table.delete_row"));
+        assert!(palette
+            .iter()
+            .any(|c| c.id == "table.merge_cells" || c.id == "writer.table.merge_cells"));
+
+        // 2. Keyboard shortcuts handling
+        let up_key: slint::SharedString = slint::platform::Key::UpArrow.into();
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            up_key.as_str(),
+            false,
+            true,
+            true
+        )); // Ctrl+Alt+Up
+
+        // 3. Populate a 3x3 table with known values for cell range selection & copy
+        let mut doc = WriterDocument::new("test-range", "Test Range");
+        doc.replace_paragraphs("Intro");
+        doc.insert_table_block(usize::MAX, 3, 3).unwrap();
+        let tbl_id = doc
+            .blocks
+            .iter()
+            .find(|b| b.kind == TABLE_BLOCK_KIND)
+            .unwrap()
+            .id;
+        let mut tbl = doc.table_from_block(tbl_id).unwrap();
+        for r in 0..3 {
+            for c in 0..3 {
+                tbl.set(r, c, format!("R{r}C{c}"));
+            }
+        }
+        if let Some(b) = doc.blocks.iter_mut().find(|b| b.id == tbl_id) {
+            b.text = loom_writer_core::Text::from_str(&tbl.to_markdown());
+        }
+        let first_cell_start = doc
+            .table_cell_at_offset(doc.blocks[0].text.len_bytes() + 3)
+            .unwrap()
+            .cell_start;
+        doc.set_selection(loom_writer_core::TextSelection::caret(first_cell_start));
+        *state.current.borrow_mut() = doc;
+        apply_state(&app, &state);
+
+        // 4. Shift+Right to select R0C0:R0C1, then Shift+Down to select R0C0:R1C1 (2x2 sub-table)
+        let right_key: slint::SharedString = slint::platform::Key::RightArrow.into();
+        let down_key: slint::SharedString = slint::platform::Key::DownArrow.into();
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            right_key.as_str(),
+            true,
+            false,
+            false
+        ));
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            down_key.as_str(),
+            true,
+            false,
+            false
+        ));
+
+        let sel_range = table_actions::get_table_cell_selection_range()
+            .expect("Must have active table cell selection range");
+        assert_eq!((sel_range.start_row, sel_range.start_col), (0, 0));
+        assert_eq!((sel_range.end_row, sel_range.end_col), (1, 1));
+
+        // 5. Copy selected cells only
+        clipboard_actions::copy_action(&app, &state);
+        let clip = loom_clipboard::read_clipboard().expect("Must read clipboard");
+        let sub_tbl = clip.to_table().expect("Clipboard must contain table");
+        assert_eq!(
+            sub_tbl.row_count(),
+            2,
+            "Copied table must have exactly 2 rows"
+        );
+        assert_eq!(
+            sub_tbl.col_count(),
+            2,
+            "Copied table must have exactly 2 columns"
+        );
+        assert_eq!(sub_tbl.cell_text(0, 0).as_deref(), Some("R0C0"));
+        assert_eq!(sub_tbl.cell_text(0, 1).as_deref(), Some("R0C1"));
+        assert_eq!(sub_tbl.cell_text(1, 0).as_deref(), Some("R1C0"));
+        assert_eq!(sub_tbl.cell_text(1, 1).as_deref(), Some("R1C1"));
+        assert!(
+            !clip.tsv.as_ref().unwrap().contains("R2C2"),
+            "Must NOT contain unselected cells like R2C2"
+        );
+    }
 }

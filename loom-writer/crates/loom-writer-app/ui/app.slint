@@ -221,6 +221,7 @@ export component WriterApp inherits Window {
     callback set-table-style(string);
     callback toggle-table-option(string);
     callback table-action(string);
+    callback handle-table-key(string, bool, bool, bool) -> bool;
     callback add-comment(string);
     callback set-comment-resolved(string, bool);
     callback delete-comment(string);
@@ -484,8 +485,7 @@ export component WriterApp inherits Window {
                         pointer-released(x, y) => { root.pointer-released(x, y); }
                         pointer-cancelled => { root.pointer-cancelled(); }
                         key-pressed(event) => {
-                            // The text box has an undo of its own that knows nothing of formatting,
-                            // replace or table edits; the document history is the only one.
+                            if (root.handle-table-key(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.alt)) { return accept; }
                             if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
                                 if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                                 return accept;

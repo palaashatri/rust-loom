@@ -42,6 +42,32 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
     let selection = doc.selection();
     let caret = selection.focus;
 
+    // 0. If a table cell selection range is active:
+    if let Some(range) = crate::table_actions::get_table_cell_selection_range() {
+        if let Some(writer_table) = doc.table_from_block(range.block_id) {
+            let min_r = range.start_row.min(range.end_row);
+            let max_r = range.start_row.max(range.end_row);
+            let min_c = range.start_col.min(range.end_col);
+            let max_c = range.start_col.max(range.end_col);
+            let num_rows = max_r - min_r + 1;
+            let num_cols = max_c - min_c + 1;
+            let mut sub_table = Table::new(num_rows, num_cols);
+            for r in 0..num_rows {
+                for c in 0..num_cols {
+                    let text = writer_table.get(min_r + r, min_c + c).unwrap_or("");
+                    sub_table.set_cell_text(r, c, text);
+                }
+            }
+            let clip = ClipboardData::from_table(&sub_table);
+            if write_clipboard(&clip).is_ok() {
+                app.set_status_left(slint::SharedString::from(format!(
+                    "Copied table cells ({num_rows}x{num_cols})"
+                )));
+                return;
+            }
+        }
+    }
+
     // 1. If inside a table cell, or table block is focused:
     if let Some(loc) = doc.table_cell_at_offset(caret) {
         if let Some(writer_table) = doc.table_from_block(loc.block_id) {
