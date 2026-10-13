@@ -2738,6 +2738,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     register_sheet_actions(&app, &state, &menu_service);
+    chart_actions::register_chart_actions(&app, &state);
     object_actions::register_object_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);

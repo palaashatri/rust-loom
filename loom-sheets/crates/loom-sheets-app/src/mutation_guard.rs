@@ -103,6 +103,7 @@ pub(crate) const ALLOWED: &[&str] = &[
     // Reads the workbook; it never changes it.
     "copy_selection",
     "close_chart",
+    "copy_chart",
     // Saving, exporting, retrying recovery, and closing are how the user keeps
     // work safe, so they must stay available while recovery is paused.
     "export_csv",

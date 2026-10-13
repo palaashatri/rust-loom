@@ -12,6 +12,7 @@ fn wire_everything(session: &Session) {
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     let (app, state) = (&session.app, &session.state);
     register_sheet_actions(app, state, &menu_service);
+    crate::chart_actions::register_chart_actions(app, state);
     register_history_actions(app, state, &menu_service);
     object_actions::register_object_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);

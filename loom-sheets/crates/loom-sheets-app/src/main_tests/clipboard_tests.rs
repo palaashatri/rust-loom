@@ -24,6 +24,7 @@ pub(super) fn state_with(cells: &[(&str, &str)]) -> (SheetsApp, Rc<GuiState>) {
     ));
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     register_sheet_actions(&app, &state, &menu_service);
+    crate::chart_actions::register_chart_actions(&app, &state);
     register_history_actions(&app, &state, &menu_service);
     (app, state)
 }
@@ -365,4 +366,30 @@ fn copying_a_spill_range_copies_spill_values_not_blanks() {
     app.invoke_paste_selection();
     assert_eq!(raw(&state, "C2"), "2");
     assert_eq!(raw(&state, "C3"), "3");
+}
+
+#[test]
+fn copy_chart_command_puts_chart_on_clipboard_for_interop() {
+    let (app, state) = state_with(&[
+        ("A1", "Item"),
+        ("B1", "Cost"),
+        ("A2", "Rent"),
+        ("B2", "1200"),
+        ("A3", "Food"),
+        ("B3", "400"),
+    ]);
+    select(&app, &state, "A1", "B3");
+    app.invoke_insert_chart();
+    assert!(state.current.borrow().chart.is_some());
+
+    // Dispatch canonical command ID for copying chart
+    assert!(dispatch_command(&app, "sheets.copy_chart"));
+
+    let clip = get_clipboard_data().expect("clipboard data");
+    let chart = clip.to_chart().expect("valid chart on clipboard");
+    assert_eq!(chart.title.as_deref(), Some("Data Chart"));
+    assert_eq!(chart.categories, vec!["Rent", "Food"]);
+    assert_eq!(chart.series.len(), 1);
+    assert_eq!(chart.series[0].name, "Cost");
+    assert_eq!(chart.series[0].values, vec![1200.0, 400.0]);
 }

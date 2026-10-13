@@ -2,13 +2,14 @@
 
 use std::rc::Rc;
 
+use loom_objects::chart::{Chart, ChartSeries as ObjSeries, ChartType};
 use loom_sheets_core::{CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, Sheet};
-use slint::{SharedString, VecModel};
+use slint::{ComponentHandle, SharedString, VecModel};
 
 use crate::analysis::{
     bar_plot_geometry, chart_points, line_path_commands, normalize_plot_values, pie_wedge_commands,
 };
-use crate::SheetsApp;
+use crate::{GuiState, SheetsApp};
 
 fn clear_chart_points(app: &SheetsApp) {
     app.set_chart_categories(Rc::new(VecModel::<SharedString>::from(Vec::new())).into());
@@ -197,4 +198,90 @@ pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
         .map(|i| 1.0 - (i % 5) as f32 * 0.15)
         .collect();
     app.set_chart_pie_opacities(Rc::new(VecModel::from(opacities)).into());
+}
+
+/// Register chart callbacks on the Slint window.
+pub(crate) fn register_chart_actions(app: &SheetsApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_copy_chart(move || {
+        if let Some(app) = app_ref.upgrade() {
+            copy_active_chart_to_clipboard(&app, &state);
+        }
+    });
+}
+
+/// Copies the active chart from the worksheet to the system clipboard in multi-format form.
+pub(crate) fn copy_active_chart_to_clipboard(app: &SheetsApp, state: &GuiState) -> bool {
+    let sheet = state.current.borrow();
+    let Some(chart) = sheet.chart.as_ref() else {
+        app.set_status_left("No chart in active worksheet to copy.".into());
+        return false;
+    };
+
+    let points = chart_points(&sheet, chart);
+    if points.is_empty() {
+        app.set_status_left("Cannot copy chart: source range has no plottable data.".into());
+        return false;
+    }
+
+    let end_row = chart
+        .end_row
+        .unwrap_or(sheet.dimensions().rows.saturating_sub(1));
+    let source_range = CellRange::new(
+        CellRef {
+            row: chart.start_row.saturating_sub(1),
+            col: chart.cat_col,
+        },
+        CellRef {
+            row: end_row,
+            col: chart.val_col,
+        },
+    )
+    .to_a1();
+
+    let header = sheet.cells.get(&CellRef {
+        row: chart.start_row.saturating_sub(1),
+        col: chart.val_col,
+    });
+    let series_name = header
+        .map(|cell| cell.raw.as_str())
+        .filter(|label| !label.is_empty())
+        .unwrap_or("Values");
+
+    let categories: Vec<String> = points.iter().map(|(cat, _, _)| cat.clone()).collect();
+    let values: Vec<f64> = points.iter().map(|(_, val, _)| *val).collect();
+
+    let chart_type = match chart.kind {
+        ChartKind::Bar => ChartType::Bar,
+        ChartKind::Line => ChartType::Line,
+        ChartKind::Pie => ChartType::Pie,
+        ChartKind::Scatter => ChartType::Scatter,
+    };
+
+    let series = vec![ObjSeries {
+        name: series_name.to_string(),
+        values,
+        color: None,
+    }];
+
+    let mut obj_chart = Chart::from_data(
+        format!("chart_{}_{}", chart.cat_col, chart.val_col),
+        Some(chart.title.clone()),
+        chart_type,
+        categories,
+        series,
+    );
+    obj_chart.range_reference = Some(source_range);
+    obj_chart.sync_snapshot_from_data(Some(sheet.name.clone()));
+
+    let clip_data = loom_clipboard::ClipboardData::from_chart(&obj_chart);
+    let ok = crate::system_clipboard::set_clipboard_data(&clip_data);
+    if ok {
+        app.set_status_left(SharedString::from(format!("Copied chart: {}", chart.title)));
+        true
+    } else {
+        app.set_status_left("Failed to copy chart to clipboard.".into());
+        false
+    }
 }

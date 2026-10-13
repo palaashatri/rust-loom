@@ -89,6 +89,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
             app.invoke_focus_objects();
         }
         "sheets.cycle_chart_kind" => app.invoke_cycle_chart_kind(),
+        "sheets.copy_chart" => app.invoke_copy_chart(),
         "table.pivot_sum" => app.invoke_pivot_summary(0),
         "table.pivot_count" => app.invoke_pivot_summary(1),
         "table.pivot_average" => app.invoke_pivot_summary(2),
