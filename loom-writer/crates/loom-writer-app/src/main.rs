@@ -1512,6 +1512,10 @@ fn compute_render_projection(
     }
 }
 
+thread_local! {
+    static LAST_TABLE_CELL_RECTS: RefCell<Vec<WriterTableCellRect>> = const { RefCell::new(Vec::new()) };
+}
+
 fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     let ComputedProjection {
         projection,
@@ -1521,8 +1525,20 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
     app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
     app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
-    app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
+    let table_rects_changed = LAST_TABLE_CELL_RECTS.with(|cell| {
+        let mut prev = cell.borrow_mut();
+        if *prev != projection.table_cell_rects {
+            *prev = projection.table_cell_rects.clone();
+            true
+        } else {
+            false
+        }
+    });
+    if table_rects_changed {
+        app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
+    }
     app.set_page_count(projection.page_count);
+
     app.set_page_stack_height(projection.stack_height);
     app.set_visible_page_first(projection.pages.start as i32);
     app.set_visible_page_count(projection.pages.len().max(1) as i32);

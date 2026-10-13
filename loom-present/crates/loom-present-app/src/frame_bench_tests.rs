@@ -291,6 +291,78 @@ fn present_frame_bench_300_slides() {
     }
 }
 
+#[test]
+fn present_frame_bench_20x10_table() {
+    let mode = match std::env::var("LOOM_FRAME_BENCH") {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let mut document = PresentationDocument::new("bench-deck", "Bench deck");
+    let slide = document.active_slide_mut().expect("active slide");
+    slide.elements.clear();
+    let table = loom_present_core::default_slide_table(20, 10);
+    slide.add_element(SlideElement::new_table(
+        "table-1", 40.0, 40.0, 900.0, 450.0, table,
+    ));
+    let session = PresentationSession::new(document);
+    let (app, _state) = setup(session);
+    let _ = try_render(&app);
+
+    app.invoke_select_element(0);
+    table_actions::set_active_table_cell("table-1", 0, 0);
+
+    // Enter in-place editing on the selected element
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Return.into(),
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+            text: slint::platform::Key::Return.into(),
+        });
+    let _ = try_render(&app);
+
+    // 10 warm-up keystrokes through Window::dispatch_event
+    for i in 0..10 {
+        let ch = (b'0' + (i % 10) as u8) as char;
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: ch.to_string().into(),
+            });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: ch.to_string().into(),
+            });
+    }
+
+    // 100 timed samples through Window::dispatch_event
+    let mut latencies = Vec::with_capacity(100);
+    for i in 0..100 {
+        let ch = (b'a' + (i % 26) as u8) as char;
+        let t = Instant::now();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: ch.to_string().into(),
+            });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: ch.to_string().into(),
+            });
+        latencies.push(ms(t));
+    }
+    let (p50, p95, max) = stats(latencies);
+    eprintln!(
+        "PRESENT_TABLE_BENCH rows=20 cols=10 keystroke_ms p50={p50:.2} p95={p95:.2} max={max:.2}"
+    );
+
+    if mode == "enforce" || mode == "1" {
+        assert!(
+            p95 < CALLBACK_BUDGET_MS,
+            "20x10 table keystroke p95 {p95:.2} ms > {CALLBACK_BUDGET_MS} ms"
+        );
+    }
+}
+
 /// Times the pieces of one refresh (what every slide switch and edit runs) so a
 /// failed budget can be pinned to a stage. Printed with `LOOM_FRAME_BENCH=1`;
 /// asserts nothing.

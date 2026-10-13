@@ -1,0 +1,65 @@
+LOOM WAVE 2 EVIDENCE AUDIT REPORT (2026-10-13)
+============================================================
+
+T0: Correct the record
+Status: DONE
+Evidence & Verification:
+- Rewrote loom-bootstrap/audit-evidence-gemini-wave1-2026-10-12.txt with verified test names from `cargo test -- --list`.
+- Created loom-writer/tests/interop/check_word_table.ps1:
+  Verified with real Microsoft Word 16.0 COM (8 passed, 0 failed) using file exported by Writer app export path.
+- Created loom-core/crates/loom-clipboard/tests/check_clipboard_win.ps1:
+  Verified CF_HTML byte offsets and real Word COM paste (7 passed, 0 failed).
+- Updated AGENTS.md Wave 1-5 section headings to "IMPLEMENTED; evidence in loom-bootstrap/audit-evidence-gemini-wave1-2026-10-12.txt; NOT RUN: Linux/X11 live window, speech". Status table kept untouched.
+- Committed in commit 3807be7 ("fix(audit): correct wave 1 audit record and add COM table verification scripts").
+
+============================================================
+
+T1: Make the latency gate real (Writer 100x20 and Present table)
+Status: DONE
+
+1. Writer 100x20 table typing benchmark:
+   - Benchmark test: `frame_bench_tests::writer_frame_bench_100x20_table`
+   - Verified via `cargo test --manifest-path loom-writer/Cargo.toml -p loom-writer-app -- --list`:
+     `frame_bench_tests::writer_frame_bench_100x20_table: test`
+   - Test harness: 100x20 table (2,000 cells), 10 warm-up keystrokes through `app.window().dispatch_event(WindowEvent::KeyPressed/KeyReleased)` followed by 100 timed samples through `Window::dispatch_event`.
+   - Environment / Profile: `LOOM_FRAME_BENCH=1`, `CARGO_PROFILE_TEST_OPT_LEVEL=3`, software renderer.
+   - Initial run reproduced budget overrun:
+     `WRITER_TABLE_BENCH rows=100 cols=20 keystroke_ms p50=16.09 p95=17.61 max=20.15`
+     (panicked at p95 17.61 ms > 16.7 ms budget).
+   - Profiling & Optimizations implemented:
+     a) Per-cell layout cache in `projection.rs`: cached table cell layout geometry/styles across key edits so 2,000 cells are not re-resolved via `catalog_style.resolve_cell` per keystroke.
+     b) Model update gate in `publish_render_projection`: avoid rebuilding and replacing 2,000 Slint `Rectangle` items when `table_cell_rects` geometry/color is unchanged.
+     c) Avoided dead table parsing in `table_cell_at_offset` and eliminated redundant `to_loom_table()` allocation in `projection.rs`.
+   - Command executed:
+     `$env:LOOM_FRAME_BENCH="1"; $env:CARGO_PROFILE_TEST_OPT_LEVEL="3"; cargo test --manifest-path loom-writer/Cargo.toml -p loom-writer-app writer_frame_bench_100x20_table -- --nocapture`
+   - Raw output:
+running 1 test
+SAMPLE 0 elapsed: 13.36 ms
+WRITER_TABLE_BENCH rows=100 cols=20 keystroke_ms p50=13.64 p95=15.51 max=18.99
+STAGE 100x20 document clone: 0.00 ms
+STAGE 100x20 replace_editor_text_at: 0.04 ms
+STAGE 100x20 layout (full flow): 0.02 ms
+STAGE 100x20 projection::project (window): 0.27 ms
+STAGE 100x20 table_actions::update_table_selection_properties: 0.19 ms
+STAGE 100x20 apply_document_with_viewport: 0.56 ms
+STAGE 100x20 apply_state_with deferred: 0.46 ms
+test frame_bench_tests::writer_frame_bench_100x20_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 302 filtered out; finished in 1.60s
+
+2. Present 20x10 table typing benchmark:
+   - Benchmark test: `frame_bench_tests::present_frame_bench_20x10_table`
+   - Verified via `cargo test --manifest-path loom-present/Cargo.toml -p loom-present-app -- --list`:
+     `frame_bench_tests::present_frame_bench_20x10_table: test`
+   - Test harness: 20x10 table (200 cells), cell editing activated, 10 warm-up keystrokes through `Window::dispatch_event` followed by 100 timed samples through `Window::dispatch_event`.
+   - Environment / Profile: `LOOM_FRAME_BENCH=1`, `CARGO_PROFILE_TEST_OPT_LEVEL=3`, software renderer.
+   - Command executed:
+     `$env:LOOM_FRAME_BENCH="1"; $env:CARGO_PROFILE_TEST_OPT_LEVEL="3"; cargo test --manifest-path loom-present/Cargo.toml -p loom-present-app present_frame_bench_20x10_table -- --nocapture`
+   - Raw output:
+running 1 test
+PRESENT_TABLE_BENCH rows=20 cols=10 keystroke_ms p50=0.80 p95=1.41 max=1.72
+test frame_bench_tests::present_frame_bench_20x10_table ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 0.13s
+
+============================================================

@@ -278,6 +278,70 @@ fn writer_frame_bench_400_pages() {
     }
 }
 
+#[test]
+fn writer_frame_bench_100x20_table() {
+    let mode = match std::env::var("LOOM_FRAME_BENCH") {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let mut doc = blank_document();
+    doc.insert_table_block(0, 100, 20)
+        .expect("insert 100x20 table");
+    let (app, state) = setup(doc);
+    let _ = try_render(&app);
+    focus_page_at_launch(&app);
+    let _ = try_render(&app);
+
+    let text_before = state.current.borrow().editor_text();
+
+    // 10 warm-up keystrokes through Window::dispatch_event
+    for i in 0..10 {
+        let ch = (b'0' + (i % 10) as u8) as char;
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: ch.to_string().into(),
+            });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: ch.to_string().into(),
+            });
+    }
+
+    let text_after_warmup = state.current.borrow().editor_text();
+    assert_ne!(
+        text_before, text_after_warmup,
+        "keystrokes through Window::dispatch_event must update document"
+    );
+
+    // 100 timed samples through Window::dispatch_event
+    let mut latencies = Vec::with_capacity(100);
+    for i in 0..100 {
+        let ch = (b'a' + (i % 26) as u8) as char;
+        let t = Instant::now();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: ch.to_string().into(),
+            });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: ch.to_string().into(),
+            });
+        latencies.push(ms(t));
+    }
+    let (p50, p95, max) = stats(latencies);
+
+    eprintln!(
+        "WRITER_TABLE_BENCH rows=100 cols=20 keystroke_ms p50={p50:.2} p95={p95:.2} max={max:.2}"
+    );
+
+    if mode == "enforce" || mode == "1" {
+        assert!(
+            p95 < KEYSTROKE_BUDGET_100_MS,
+            "100x20 table keystroke p95 {p95:.2} ms > {KEYSTROKE_BUDGET_100_MS} ms"
+        );
+    }
+}
+
 /// Times the pieces of one keystroke on the UI thread so a failed budget can be
 /// pinned to a stage. Printed with `LOOM_FRAME_BENCH=1`; asserts nothing.
 #[test]

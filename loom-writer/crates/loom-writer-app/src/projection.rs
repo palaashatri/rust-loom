@@ -380,16 +380,34 @@ pub(crate) fn project(
         let y = ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
         let height = (line.bounds.height / zoom).max(font_size * style.line_height);
 
+        #[derive(Clone, PartialEq, Eq)]
+        struct TableLayoutKey {
+            block_id: u64,
+            style_id: String,
+            header_row: bool,
+            banded_rows: bool,
+            first_column: bool,
+            num_rows: usize,
+            cols: usize,
+            col_width_bits: u32,
+            row_height_bits: u32,
+            table_y_bits: u32,
+        }
+
+        thread_local! {
+            static TABLE_CELL_LAYOUT_CACHE: std::cell::RefCell<Option<(TableLayoutKey, Vec<WriterTableCellRect>)>> =
+                const { std::cell::RefCell::new(None) };
+        }
+
         if block.kind == loom_writer_core::TABLE_BLOCK_KIND {
             if seen_table_blocks.insert(block.id) {
                 if let Some(table) = doc.table_from_block(block.id) {
-                    let loom_table = table.to_loom_table();
-                    let catalog_style = loom_objects::TableStyleCatalog::get(&loom_table.style_id)
+                    let catalog_style = loom_objects::TableStyleCatalog::get(&table.style_id)
                         .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
                     let options = loom_objects::TableStyleOptions {
-                        header_row: loom_table.header_row,
-                        banded_rows: loom_table.banded_rows,
-                        first_column: loom_table.first_column,
+                        header_row: table.header_row,
+                        banded_rows: table.banded_rows,
+                        first_column: table.first_column,
                         ..Default::default()
                     };
                     let cols = table.columns().max(1);
@@ -400,54 +418,93 @@ pub(crate) fn project(
                     let table_y = y;
                     table_block_positions
                         .insert(block.id, (table_y, cols, num_rows, col_width, row_height));
-                    for r in 0..num_rows {
+
+                    let cache_key = TableLayoutKey {
+                        block_id: block.id,
+                        style_id: table.style_id.clone(),
+                        header_row: table.header_row,
+                        banded_rows: table.banded_rows,
+                        first_column: table.first_column,
+                        num_rows,
+                        cols,
+                        col_width_bits: col_width.to_bits(),
+                        row_height_bits: row_height.to_bits(),
+                        table_y_bits: table_y.to_bits(),
+                    };
+
+                    let hit = TABLE_CELL_LAYOUT_CACHE.with(|cache| {
+                        if let Some((k, rects)) = cache.borrow().as_ref() {
+                            if *k == cache_key {
+                                return Some(rects.clone());
+                            }
+                        }
+                        None
+                    });
+
+                    if let Some(cached_rects) = hit {
+                        table_cell_rects.extend(cached_rects);
+                    } else {
+                        let mut new_rects = Vec::with_capacity(num_rows * cols);
+                        for r in 0..num_rows {
+                            let cur_y = table_y + r as f32 * row_height;
+                            for c in 0..cols {
+                                let cur_x = table_x + c as f32 * col_width;
+                                let resolved = catalog_style
+                                    .resolve_cell(r, c, num_rows, cols, &options, None);
+                                let has_bg = resolved.background_color.is_some();
+                                let bg_color = if let Some(hex) = &resolved.background_color {
+                                    slint::Color::from_argb_encoded(parse_hex_color(hex))
+                                } else {
+                                    slint::Color::from_argb_encoded(0)
+                                };
+                                let border_color = slint::Color::from_argb_encoded(0xFFD0D0D0);
+                                new_rects.push(WriterTableCellRect {
+                                    x: cur_x,
+                                    y: cur_y,
+                                    width: col_width,
+                                    height: row_height,
+                                    bg_color,
+                                    has_bg,
+                                    border_color,
+                                    border_width: 1.0,
+                                });
+                            }
+                        }
+                        table_cell_rects.extend(new_rects.iter().cloned());
+                        TABLE_CELL_LAYOUT_CACHE.with(|cache| {
+                            *cache.borrow_mut() = Some((cache_key, new_rects));
+                        });
+                    }
+
+                    for (r, row) in table.rows.iter().enumerate() {
                         let cur_y = table_y + r as f32 * row_height;
-                        for c in 0..cols {
-                            let cur_x = table_x + c as f32 * col_width;
-                            let resolved =
-                                catalog_style.resolve_cell(r, c, num_rows, cols, &options, None);
-                            let has_bg = resolved.background_color.is_some();
-                            let bg_color = if let Some(hex) = &resolved.background_color {
-                                slint::Color::from_argb_encoded(parse_hex_color(hex))
-                            } else {
-                                slint::Color::from_argb_encoded(0)
-                            };
-                            let border_color = slint::Color::from_argb_encoded(0xFFD0D0D0);
-                            table_cell_rects.push(WriterTableCellRect {
-                                x: cur_x,
-                                y: cur_y,
-                                width: col_width,
-                                height: row_height,
-                                bg_color,
-                                has_bg,
-                                border_color,
-                                border_width: 1.0,
-                            });
-                            if let Some(cell_text) = table.get(r, c) {
-                                let text_trimmed = cell_text.trim();
-                                if !text_trimmed.is_empty() {
-                                    let mut cell_block =
-                                        RichBlock::new(block.id, "paragraph", text_trimmed);
-                                    if resolved.bold {
-                                        cell_block.runs.push(loom_text::StyleRun {
-                                            start: 0,
-                                            end: text_trimmed.len(),
-                                            style: loom_text::CharacterStyle {
-                                                weight: loom_text::FontWeight::Bold,
-                                                ..Default::default()
-                                            },
-                                        });
-                                    }
-                                    rows.push(render_row(
-                                        &cell_block,
-                                        cur_x + 6.0,
-                                        cur_y + 4.0,
-                                        col_width - 12.0,
-                                        row_height - 8.0,
-                                        "",
-                                        "",
-                                    ));
+                        for (c, cell_text) in row.iter().enumerate() {
+                            let text_trimmed = cell_text.trim();
+                            if !text_trimmed.is_empty() {
+                                let cur_x = table_x + c as f32 * col_width;
+                                let resolved = catalog_style
+                                    .resolve_cell(r, c, num_rows, cols, &options, None);
+                                let mut cell_block =
+                                    RichBlock::new(block.id, "paragraph", text_trimmed);
+                                if resolved.bold {
+                                    cell_block.runs.push(loom_text::StyleRun {
+                                        start: 0,
+                                        end: text_trimmed.len(),
+                                        style: loom_text::CharacterStyle {
+                                            weight: loom_text::FontWeight::Bold,
+                                            ..Default::default()
+                                        },
+                                    });
                                 }
+                                rows.push(render_row(
+                                    &cell_block,
+                                    cur_x + 6.0,
+                                    cur_y + 4.0,
+                                    col_width - 12.0,
+                                    row_height - 8.0,
+                                    "",
+                                    "",
+                                ));
                             }
                         }
                     }

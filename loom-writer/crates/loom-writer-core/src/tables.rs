@@ -99,7 +99,6 @@ impl WriterDocument {
                 && offset <= block_start + block_len
             {
                 let offset_in_block = offset - block_start;
-                let _table = parse_table_markdown(block.text.as_str());
                 let grid = compute_cell_ranges(block.text.as_str());
                 for (r, row_ranges) in grid.iter().enumerate() {
                     for (c, &(start, end)) in row_ranges.iter().enumerate() {
