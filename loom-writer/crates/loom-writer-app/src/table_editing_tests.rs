@@ -4,7 +4,7 @@
 mod tests {
     use crate::actions_tests::test_state;
     use crate::*;
-    use loom_writer_core::TABLE_BLOCK_KIND;
+    use loom_writer_core::{WriterTable, TABLE_BLOCK_KIND};
     use std::rc::Rc;
 
     fn make_test_app() -> (WriterApp, Rc<GuiState>) {
@@ -217,8 +217,38 @@ mod tests {
         app.invoke_insert_table_size(3, 3);
         app.invoke_set_table_style("table-style-medium-1".into());
 
-        let current = state.current.borrow();
-        let export = loom_writer_core::export_docx(&current).expect("Must export docx");
+        // Populate cell text and merge cells (2, 0) and (2, 1)
+        let tbl_id = state.current.borrow().blocks[1].id;
+        let mut tbl = state.current.borrow().table_from_block(tbl_id).unwrap();
+        tbl.set(0, 0, "Product");
+        tbl.set(0, 1, "Qty");
+        tbl.set(0, 2, "Price");
+        tbl.set(1, 0, "Apples");
+        tbl.set(1, 1, "50");
+        tbl.set(1, 2, "$1.50");
+        tbl.set(2, 0, "SpecialOffer");
+        tbl.set(2, 2, "$0.99");
+        let mut loom_tbl = tbl.to_loom_table();
+        loom_tbl.merge_cells(2, 0, 1, 2).unwrap();
+        let updated = WriterTable::from_loom_table(&loom_tbl);
+        if let Some(b) = state
+            .current
+            .borrow_mut()
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == tbl_id)
+        {
+            b.text = loom_writer_core::Text::from_str(&updated.to_markdown());
+        }
+
+        // Save to target for external COM verification using the APP's export path
+        let out_dir = std::path::Path::new("target");
+        std::fs::create_dir_all(out_dir).ok();
+        let out_path = out_dir.join("w1-table-verification.docx");
+        let (_path, export) =
+            crate::docx_export::export_docx_file(&out_path, &state.current.borrow())
+                .expect("Must export docx through app export path");
+
         let archive = loom_package::zip::PackageArchive::from_bytes(&export.bytes)
             .expect("Must parse docx zip");
         let doc_xml = String::from_utf8(
@@ -243,12 +273,10 @@ mod tests {
             doc_xml.contains("<w:tblHeader/>"),
             "DOCX must contain header row marker"
         );
-
-        // Save to target for external COM verification
-        let out_dir = std::path::Path::new("target");
-        std::fs::create_dir_all(out_dir).ok();
-        let out_path = out_dir.join("w1-table-verification.docx");
-        std::fs::write(&out_path, &export.bytes).ok();
+        assert!(
+            doc_xml.contains("<w:gridSpan w:val=\"2\"/>"),
+            "DOCX must contain horizontal merge gridSpan=2"
+        );
     }
 
     #[test]

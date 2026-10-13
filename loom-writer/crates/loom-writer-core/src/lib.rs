@@ -3060,6 +3060,8 @@ pub struct WriterTable {
     pub banded_rows: bool,
     /// First column emphasis.
     pub first_column: bool,
+    /// Merged cell ranges (start_row, start_col, row_span, col_span).
+    pub merges: Vec<(usize, usize, usize, usize)>,
 }
 
 impl WriterTable {
@@ -3072,6 +3074,7 @@ impl WriterTable {
             style_id: "table-style-medium-1".to_string(),
             banded_rows: true,
             first_column: false,
+            merges: Vec::new(),
         }
     }
 
@@ -3128,13 +3131,27 @@ impl WriterTable {
                 output.push('\n');
             }
         }
-        if self.style_id != "table-style-medium-1" || !self.banded_rows || self.first_column {
-            output.push_str(&format!(
-                "<!-- loom-table: style={} banded={} first_col={} -->\n",
-                self.style_id,
-                if self.banded_rows { 1 } else { 0 },
-                if self.first_column { 1 } else { 0 },
-            ));
+        let mut opts = Vec::new();
+        if self.style_id != "table-style-medium-1" {
+            opts.push(format!("style={}", self.style_id));
+        }
+        if !self.banded_rows {
+            opts.push("banded=0".to_string());
+        }
+        if self.first_column {
+            opts.push("first_col=1".to_string());
+        }
+        if !self.merges.is_empty() {
+            let m_str = self
+                .merges
+                .iter()
+                .map(|(r, c, rs, cs)| format!("{r},{c},{rs},{cs}"))
+                .collect::<Vec<_>>()
+                .join(";");
+            opts.push(format!("merges={m_str}"));
+        }
+        if !opts.is_empty() {
+            output.push_str(&format!("<!-- loom-table: {} -->\n", opts.join(" ")));
         }
         output
     }

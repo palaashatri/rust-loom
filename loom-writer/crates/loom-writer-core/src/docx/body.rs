@@ -487,6 +487,56 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
         }
         out.push_str("</w:trPr>");
         for (column, width) in widths.iter().enumerate() {
+            if let Some(&(mr, mc, mrs, mcs)) = table.merges.iter().find(|(r, c, rs, cs)| {
+                row_index >= *r && row_index < *r + *rs && column >= *c && column < *c + *cs
+            }) {
+                if column > mc {
+                    continue;
+                }
+                let span_width: i32 = widths[mc..mc + mcs].iter().sum();
+                let resolved = catalog_style.resolve_cell(
+                    row_index,
+                    column,
+                    table.rows.len(),
+                    columns,
+                    &options,
+                    None,
+                );
+                let shading = if let Some(bg) = resolved.background_color {
+                    let hex = bg.trim_start_matches('#');
+                    format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{hex}\"/>")
+                } else if header {
+                    "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>".to_string()
+                } else {
+                    String::new()
+                };
+                let grid_span = if mcs > 1 {
+                    format!("<w:gridSpan w:val=\"{mcs}\"/>")
+                } else {
+                    String::new()
+                };
+                let v_merge = if mrs > 1 {
+                    if row_index == mr {
+                        "<w:vMerge w:val=\"restart\"/>"
+                    } else {
+                        "<w:vMerge/>"
+                    }
+                } else {
+                    ""
+                };
+                out.push_str(&format!(
+                    "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr><w:p>"
+                ));
+                if row_index == mr {
+                    let cell = row.get(column).map_or("", String::as_str);
+                    let is_bold = header || resolved.bold;
+                    let props = RunProps::of(None, is_bold, CharacterStyle::default().font_size);
+                    push_run(&mut out, &props, cell);
+                }
+                out.push_str("</w:p></w:tc>");
+                continue;
+            }
+
             let resolved = catalog_style.resolve_cell(
                 row_index,
                 column,

@@ -563,6 +563,7 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     let mut style_id = "table-style-medium-1".to_string();
     let mut banded_rows = true;
     let mut first_column = false;
+    let mut merges = Vec::new();
 
     for line in markdown.lines() {
         let trimmed = line.trim();
@@ -577,6 +578,15 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
                         "style" => style_id = v.to_string(),
                         "banded" => banded_rows = v == "1",
                         "first_col" => first_column = v == "1",
+                        "merges" => {
+                            for m in v.split(';') {
+                                let nums: Vec<usize> =
+                                    m.split(',').filter_map(|s| s.parse().ok()).collect();
+                                if nums.len() == 4 {
+                                    merges.push((nums[0], nums[1], nums[2], nums[3]));
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -639,6 +649,7 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
         style_id,
         banded_rows,
         first_column,
+        merges,
     }
 }
 
@@ -657,6 +668,9 @@ impl WriterTable {
                 table.set_cell_text(r, c, cell_text);
             }
         }
+        for &(r, c, rs, cs) in &self.merges {
+            let _ = table.merge_cells(r, c, rs, cs);
+        }
         table
     }
 
@@ -667,6 +681,14 @@ impl WriterTable {
             let cells = row.cells.iter().map(|c| c.content.text()).collect();
             rows.push(cells);
         }
+        let mut merges = Vec::new();
+        for (r, row) in table.rows.iter().enumerate() {
+            for (c, cell) in row.cells.iter().enumerate() {
+                if !cell.is_covered && (cell.row_span > 1 || cell.col_span > 1) {
+                    merges.push((r, c, cell.row_span, cell.col_span));
+                }
+            }
+        }
         Self {
             id: table.id.clone(),
             rows,
@@ -674,6 +696,7 @@ impl WriterTable {
             style_id: table.style_id.clone(),
             banded_rows: table.banded_rows,
             first_column: table.first_column,
+            merges,
         }
     }
 }

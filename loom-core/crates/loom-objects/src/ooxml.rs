@@ -69,6 +69,13 @@ pub fn table_to_docx_wtbl(table: &Table) -> String {
         }
 
         for (c, cell) in row.cells.iter().enumerate() {
+            if let Some((_, orig_c, orig_cell)) = table.effective_cell(r, c) {
+                if (orig_cell.col_span > 1 || orig_cell.row_span > 1) && c > orig_c {
+                    // Horizontally covered cell: skip emitting w:tc
+                    continue;
+                }
+            }
+
             let resolved = style.resolve_cell(
                 r,
                 c,
@@ -78,7 +85,19 @@ pub fn table_to_docx_wtbl(table: &Table) -> String {
                 Some(cell),
             );
 
-            let col_width = table.columns.get(c).map(|col| col.width_pt).unwrap_or(80.0);
+            let span_cols = if let Some((_, orig_c, orig_cell)) = table.effective_cell(r, c) {
+                if orig_cell.col_span > 1 && c == orig_c {
+                    orig_cell.col_span
+                } else {
+                    cell.col_span
+                }
+            } else {
+                cell.col_span
+            };
+            let col_width: f32 = (c..c + span_cols)
+                .filter_map(|col_idx| table.columns.get(col_idx))
+                .map(|col| col.width_pt)
+                .sum();
             let cell_dxa = pt_to_dxa(col_width);
 
             out.push_str("    <w:tc>\n");
@@ -88,17 +107,32 @@ pub fn table_to_docx_wtbl(table: &Table) -> String {
                 cell_dxa
             ));
 
-            if cell.col_span > 1 {
-                out.push_str(&format!(
-                    "        <w:gridSpan w:val=\"{}\"/>\n",
-                    cell.col_span
-                ));
-            }
-
-            if cell.row_span > 1 {
-                out.push_str("        <w:vMerge w:val=\"restart\"/>\n");
-            } else if cell.is_covered {
-                out.push_str("        <w:vMerge/>\n");
+            if let Some((orig_r, orig_c, orig_cell)) = table.effective_cell(r, c) {
+                if orig_cell.col_span > 1 && c == orig_c {
+                    out.push_str(&format!(
+                        "        <w:gridSpan w:val=\"{}\"/>\n",
+                        orig_cell.col_span
+                    ));
+                }
+                if orig_cell.row_span > 1 && c == orig_c {
+                    if r == orig_r {
+                        out.push_str("        <w:vMerge w:val=\"restart\"/>\n");
+                    } else {
+                        out.push_str("        <w:vMerge/>\n");
+                    }
+                }
+            } else {
+                if cell.col_span > 1 {
+                    out.push_str(&format!(
+                        "        <w:gridSpan w:val=\"{}\"/>\n",
+                        cell.col_span
+                    ));
+                }
+                if cell.row_span > 1 {
+                    out.push_str("        <w:vMerge w:val=\"restart\"/>\n");
+                } else if cell.is_covered {
+                    out.push_str("        <w:vMerge/>\n");
+                }
             }
 
             if let Some(bg) = &resolved.background_color {

@@ -1,0 +1,119 @@
+LOOM - WAVE 2: EVIDENCE REPAIR, LIVE VERIFICATION, LINUX (prompt for Gemini / Antigravity, 2026-10-13)
+====================================================================================================
+
+ROLE
+Same as wave 1: senior Rust + Slint engineer in this checkout (main). You are coder and first
+reviewer; a hostile reviewer re-runs every command you cite. Read AGENTS.md (constitution,
+"Suite integration plan", "Orchestrator verification ... 2026-10-11 Gemini milestones", and the
+Wave 1-5 paragraphs at the end), docs/handoff/GEMINI-INTEGRATION-PROMPT-2026-10-12.txt (the hard
+rules there still apply in full) and docs/handoff/CODEX-HANDOFF-2026-10-11.txt (environment traps).
+
+WHAT THE ORCHESTRATOR FOUND IN YOUR WAVE 1-5 REPORT (verified 2026-10-13, HEAD f6013d5)
+Real and good: the three apps now depend on loom-objects / loom-clipboard and have table,
+clipboard, DOCX/PPTX open paths, tests and a Word/PowerPoint/Excel COM script each.
+Not acceptable as evidence:
+  1. Test names in loom-bootstrap/audit-evidence-gemini-wave1-2026-10-12.txt mostly do not exist.
+     E.g. table_editing_tests::test_insert_table_places_caret_inside_first_cell,
+     test_writer_app_100x20_typing_latency, clipboard_tests::test_sheets_copy_writes_multiformat_and_paste_priorities,
+     docx_open_tests::* (no such file), test_table_accessibility_tree_semantics,
+     test_present_paste_sheets_range_and_chart, hostile_input in loom-clipboard as a command filter.
+     The real tests have other names (e.g. test_typing_latency_in_100x20_table,
+     sheets_copy_writes_multiformat_payload_including_html_and_loom_objects,
+     test_open_docx_with_unsupported_warning_dialog_flow in docx_tests.rs). Per-test
+     "1 passed" lines were therefore not produced by the commands printed.
+  2. Scripts cited do not exist: loom-writer/tests/interop/check_word_table.ps1 and
+     loom-core/crates/loom-clipboard/tests/check_clipboard_win.ps1. The only Writer COM script is
+     check_word.ps1 (it asserts a 3x2 table from an older fixture, not the "3x3 w1-table-verification.docx").
+  3. The 100x20 latency claim "p95 = 11.87 ms against a 16.7 ms budget" is not what the test measures:
+     test_typing_latency_in_100x20_table takes 20 samples, in a DEBUG build, asserts p95 < 250 ms, and
+     calls invoke_document_edited with a synthetic text; it does not enforce 16.7 ms.
+  4. "Wave 5 (c) ... appearance_tests PASS" names no test about the 3 px outline. Several "PASS (1 passed)"
+     lines are unsupported. The full Sheets workspace suite was not run.
+  5. AGENTS.md headings say "FIXED & VERIFIED" for waves whose Linux/X11, speech, full-suite and
+     live-window parts were NOT RUN. The status table is correctly untouched; keep it so.
+  6. No live-window evidence: every screenshot is a headless --screenshot render; no real window was
+     driven (Insert Table, Tab navigation, paste, Open .docx/.pptx, drag).
+
+RULES (unchanged, restated because they were bent)
+  - Do not edit the status table or any ACCEPTED/ACCEPTANCE_BLOCKED label. No "production ready".
+  - Every cited command must be copy-pasteable and must run a test that exists. Before writing a
+    test name into any report, run `cargo test ... -- --list | grep <name>` and paste the line.
+  - Paste raw output (last 15 lines of each run) into the evidence file; no paraphrased counts.
+  - A failing test first, then the fix. No weakened assertions to make a number pass.
+  - If you cannot do something, write NOT RUN with the reason. That is an acceptable outcome.
+  - Byte ceilings are not raised. Windows + Linux only. <=3 concurrent cargo jobs, >25 GB free.
+
+TASKS (do in order; each ends with a commit + push + CI check)
+
+T0. Correct the record (do this first, it is small)
+  a. Rewrite loom-bootstrap/audit-evidence-gemini-wave1-2026-10-12.txt: replace every test name with
+     the real one, produced by `--list`; delete or mark NOT RUN every line you cannot reproduce now;
+     restate the latency result truthfully (sample count, profile, threshold actually asserted).
+  b. Create the two missing scripts or delete references to them. If you keep the Word-table
+     verification, extend check_word.ps1 so it opens a file exported by the APP's export path
+     (not core), asserts Tables.Count/Rows/Columns/cell text/shading and merged cells, and prints
+     the Word version. Commit the script output as evidence.
+  c. Edit the AGENTS.md Wave 1-5 headings from "FIXED & VERIFIED" to "IMPLEMENTED; evidence in
+     <file>; NOT RUN: <list>". Do not touch the status table.
+
+T1. Make the latency gate real (Writer 100x20 and Present table)
+  Add a bench behind LOOM_FRAME_BENCH=1 (pattern: frame_bench_tests.rs) measuring a keystroke
+  through the real key-event path of the app window (Window::dispatch_event), 100 samples after
+  10 warm-up, 100x20 table, CARGO_PROFILE_TEST_OPT_LEVEL=3, software renderer; report p50/p95/max.
+  Budget 16.7 ms p95. If it fails, profile and fix (per-cell layout cache; do not re-layout the
+  table per keystroke). Same for a Present 20x10 slide table cell edit. Raw output in evidence.
+
+T2. Live-window verification on Windows (the biggest gap)
+  Build release builds of the three apps, launch each with an isolated LOOM_CONFIG_DIR and
+  APPDATA, verify the foreground window before every input (a past reviewer leaked keystrokes
+  into another app). Drive and screenshot (full-window captures that you VIEW and describe):
+  Writer: Insert Table 4x3 from toolbar menu; type in cells; Tab to last cell appends row;
+    arrows; merge two cells; change style from the gallery; Undo/Redo; Save As .docx via the real
+    dialog; reopen it with File > Open (warnings dialog appears for a doc with an unsupported
+    part; Cancel keeps the current doc); Ctrl+C a table, paste into Sheets.
+  Sheets: select a styled range, Ctrl+C, paste into Writer and Present (cells arrive as a styled
+    table); copy a chart and paste into Writer/Present (if charts cannot be copied from the
+    Sheets UI, say so and add the command).
+  Present: Insert > Table, Insert > Chart (data editor or clipboard), edit cell in place, Tab,
+    drag, resize, undo; File > Open .pptx that PowerPoint authored (create a fixture through
+    COM); slideshow with a table slide; Esc closes presenter view.
+  Report which steps worked, which did not, with screenshot paths. Fix real defects found with
+  regression tests (element bounds / accessibility tree / key events, not source strings).
+
+T3. Linux verification (WSL distro Ubuntu-E; see handoff for traps)
+  a. Build the three apps in WSL (separate clone, debug, CARGO_INCREMENTAL=0; delete target dirs
+     after). Run the same test suites. Report real counts per app.
+  b. Clipboard: with Xvfb or WSLg, write HTML + TSV from the app/test hook and read it back with
+     `xclip -selection clipboard -t text/html -o` and `-t text/plain`; paste HTML authored by
+     LibreOffice (soffice --headless convert is acceptable for generating the HTML) into the
+     parsing path. If real X11 selection ownership is not implemented in loom-clipboard, return
+     a typed Unsupported and show it in the status line (already required) and say so.
+  c. Interop: run loom-writer/tests/interop/check_libreoffice.sh, loom-present/..., and
+     loom-sheets/... against files exported by the apps including tables and charts; paste the
+     outputs. Add a table and a chart fixture to each script.
+  d. AT-SPI: dump the accessibility tree (pyatspi, isolated state) for Writer with a table and
+     Present with a table; confirm table/row/cell names; record unnamed controls.
+
+T4. Close known product gaps found in review (each with a failing test first)
+  a. Present: table style gallery and header/banded toggles in the inspector, Insert Table row x
+     column picker dialog, table object keyboard operation (Enter to edit cell, Escape), delete
+     row/column from menu+palette, accessibility name "Table 3 by 4, cell B2: ...".
+  b. Writer: row/column insert/delete and merge/split reachable by keyboard shortcuts and menu;
+     table cell selection range (Shift+arrows) with copy of the selected cells only.
+  c. Both: hostile paste (50 MB HTML, 10k rows, deeply nested tables) completes in < 2 s on the UI
+     thread or runs off-thread with a visible "Pasting..." state; never freezes.
+  d. Writer DOCX import: images (embedded pictures), lists, headings, footnotes -> warning list;
+     keep a round-trip fixture authored by Word through COM committed under tests/fixtures with
+     the generating script.
+
+T5. Full verification (end)
+  For each app: cargo fmt --check, clippy -D warnings, cargo test --workspace --locked
+  --no-fail-fast (Sheets ~25 min; run it, in the background, and paste the summary lines), the four
+  audits, test_audit_governance. Update the evidence file. Push; check GitHub Actions; fix red.
+
+REPORT FORMAT
+  loom-bootstrap/audit-evidence-gemini-wave2-2026-10-13.txt and the final message:
+  per task DONE / PARTIAL / NOT DONE; per item the exact command and the last lines of its raw
+  output; screenshot paths with a one-line description of what you SAW; list of defects found and
+  fixed (with test name); list of defects found and not fixed; NOT RUN list; claims you cannot make.
+  A short honest report is better than a long optimistic one.
