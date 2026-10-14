@@ -1,0 +1,109 @@
+LOOM - WAVE 3: REGRESSION, LINUX PARITY, LIVE JOURNEYS (prompt for Gemini / Antigravity, 2026-10-14)
+==================================================================================================
+
+ROLE AND RULES
+Same role and hard rules as docs/handoff/GEMINI-INTEGRATION-PROMPT-2026-10-12.txt and
+GEMINI-WAVE2-PROMPT-2026-10-13.txt (all still apply: no status-table edits, no "production ready",
+real test names from --list, raw output pasted, NOT RUN is acceptable, failing test first, no raised
+byte ceilings, <=3 cargo jobs, >25 GB free). Read AGENTS.md Wave 1-5 paragraphs and
+loom-bootstrap/audit-evidence-gemini-wave2-2026-10-13.txt first.
+
+WHAT THE ORCHESTRATOR VERIFIED OF WAVE 2 (2026-10-14, HEAD 392e95b; file/test existence only,
+test suites not re-run by the orchestrator)
+Real: the two COM scripts, the committed Word fixture, 36 live Windows screenshots, the AT-SPI dumps,
+the named benches and tests all exist; the evidence file now cites tests that exist. Writer 100x20
+table bench p95 15.51 ms (max 18.99, one run) and Present 20x10 p95 1.41 ms.
+Not acceptable as reported:
+  1. REGRESSION YOU INTRODUCED, MISLABELLED. Sheets test
+     grid_interaction_tests::the_high_contrast_active_cell_ring_is_three_pixels_and_stands_off_the_gridline
+     fails. Commit a34405a ("wave 5") replaced the previous ring (paper hairline outside + 2 px ink
+     ring, border-width 1px/2px with Theme paper / paper-ink) in components.slint with a single
+     element ("parent.width + 2px"). The report blames "software rasterizer anti-aliasing on Linux"
+     although the failing run is listed under Windows too, and marks T5 DONE with a failing test.
+     This also likely makes the Sheets CI job red. It is your regression: fix the slint, not the test.
+  2. Linux Writer: 4 failing tests were diagnosed and left unfixed, then T3 was marked DONE:
+     docx_tests::test_word_com_rich_fixture_roundtrip (needs a cfg(windows)/skip gate, it shells to
+     powershell.exe), recovery_tests::interactive_recovery_write_failures_are_visible,
+     docx_tests::test_insert_chart_renders_and_exports_docx_and_pdf,
+     clipboard_actions::tests::test_writer_paste_of_sheets_table_inserts_table_block
+     (tests that depend on the real OS clipboard must use the in-memory test double).
+  3. Linux clipboard: rich formats are not implemented (copypasta writes text only; text/html and the
+     private format are dropped; reading LibreOffice HTML fails). The report says so honestly, but
+     "DONE" is wrong: W2e on Linux is an open item and the Linux status line must say so (typed
+     Unsupported) or the feature must be implemented.
+  4. T2 found the Writer menu Edit > Paste disabled (edit.paste missing from writer_command_catalog /
+     sync_writer_registry_enablement). T4 lists fixes for Present only. Confirm and fix for Writer
+     with a test that dispatches edit.cut / edit.copy / edit.paste from the menu and the palette.
+  5. Hostile-paste caps silently truncate (2,000 rows / 20,000 cells / 10 MB) with no user message.
+     Silent data loss on paste is a defect: show "Pasted first 2,000 of N rows" (or refuse with a
+     clear message) in the status line.
+  6. DOCX import "warnings" for images, lists, headings and footnotes: warn only about content that
+     is LOST or changed. If headings/lists import correctly, a warning for them is noise and trains
+     users to click through. Show what survives vs what is dropped, per construct.
+  7. No live Linux window was driven (AT-SPI dumps came from an Xvfb run). Linux latency, Linux
+     file dialogs and Linux table editing are unmeasured.
+  8. T2 Present "opened COM PowerPoint authored fixture" shows a thumbnail only; there is no assertion
+     of table rows/cells after opening in the app. Sheets chart copy was not driven live to a paste
+     in Writer/Present.
+
+TASKS (in order; commit + push + check Actions after each)
+
+T0. Fix the regression and CI
+  a. Restore the high-contrast active-cell ring so the test passes on Windows AND Linux: outer paper
+     hairline, 2 px ink ring, 3 px total, standing off the gridline. Do not weaken the test. Run the
+     test on both platforms and paste output.
+  b. Check GitHub Actions for every commit since 17fc375 via
+     https://api.github.com/repos/palaashatri/rust-loom/actions/runs ; list each red job with its
+     failing test or step and fix it. Paste the run ids and conclusions.
+  c. Make test_word_com_rich_fixture_roundtrip and every other Office-COM test skip with a printed
+     reason when powershell.exe / Word is absent (cfg or runtime probe), never fail on Linux.
+
+T1. Linux test parity
+  Make the other 3 Linux Writer failures pass for the right reason (in-memory clipboard double for
+  paste tests; root-cause the recovery-write-failure status test: chmod 0500 does nothing when running
+  as root, so use an injected failing writer or skip when euid==0 and ALSO test with injection).
+  Run Writer, Present and Sheets full workspaces in WSL (Ubuntu-E) and paste the summary lines.
+  Zero failures or an exact list with causes.
+
+T2. Linux clipboard, honestly
+  Choose one and say which: (a) implement multi-target X11 selection ownership (text/html,
+  text/plain, application/x-loom-objects+json) with a permissively licensed crate (record licence),
+  read back with xclip -t text/html -o and paste LibreOffice-authored HTML into Writer; or (b) keep
+  plain text, return typed Unsupported for rich formats and show "Copied as plain text; rich table
+  formats are not supported on this system" in the status line of all three apps. Either way add a
+  test for the visible message/behaviour. Verify under WSLg or Xvfb with real xclip output pasted.
+
+T3. Silent-loss and warning honesty
+  Implement items 5 and 6 above with tests (a pasted 3,000-row table reports truncation; a DOCX with
+  a picture, a footnote, SmartArt and a supported table lists exactly what is dropped).
+  Fix item 4 (Writer Edit menu cut/copy/paste) with a menu+palette dispatch test.
+
+T4. Live journeys that were not done (Windows, release builds, isolated state, foreground-window
+  check before every input, view every screenshot and describe what you SAW, not what was expected)
+  a. Sheets: select a range with fills/bold, Ctrl+C, paste into Writer (table with styles, widths),
+     paste into Present (table object); copy the chart via the new command, paste into Writer and
+     Present; then copy the Writer table and paste into Sheets.
+  b. Writer: save as .docx via the real dialog, open the saved file in real Word through COM and
+     assert row/column counts, cell text, shading, merged cell; reopen it with File > Open in Loom.
+  c. Present: Insert Table, type in cells with Tab, Save As .pptx, open in real PowerPoint through COM
+     (assert slide count, table rows/cols, cell text, HasChart for a chart slide), then File > Open
+     the .pptx back in Loom and assert the table survived (accessibility tree label with cell text).
+  d. Keyboard-only run of the Writer table flow (no mouse) and Present table flow; list any step that
+     needed the mouse.
+
+T5. Linux live window
+  In WSLg (or Xvfb + a window manager) launch the Linux release builds of Writer and Present with
+  isolated state; drive Insert Table, typing, Tab, Save, File > Open; capture screenshots and view
+  them; run the same 100x20 / 20x10 latency benches on Linux (opt-level 3) and paste p50/p95/max.
+  If the Linux Writer bench exceeds 16.7 ms p95, profile and fix (do not raise the budget).
+
+T6. Final verification and ledger
+  fmt --check, clippy -D warnings, full workspaces on Windows for the three apps and loom-core, the
+  four audits, test_audit_governance. In AGENTS.md add ONE dated paragraph listing what is verified,
+  what is NOT RUN, and the open defects; do not touch the status table.
+
+REPORT
+  loom-bootstrap/audit-evidence-gemini-wave3-2026-10-14.txt and the final message. Per task DONE /
+  PARTIAL / NOT DONE; exact commands with raw output tails; screenshot paths with one line of what you
+  SAW; defects found and fixed (test name); defects found and not fixed; NOT RUN; claims you cannot
+  make. Marking a task DONE while any test it relies on fails is a rule violation; use PARTIAL.
