@@ -160,10 +160,13 @@ fn interactive_recovery_write_failures_are_visible() {
             permissions.set_mode(0o500);
             std::fs::set_permissions(&directory, permissions).unwrap();
 
-            let mut document = WriterDocument::new("write-failure", "Write failure");
-            document.replace_paragraphs("An edit whose recovery write fails.");
+            let document = WriterDocument::new("write-failure", "Write failure");
             let save_path = PathBuf::from(std::env::var_os(SAVE_PATH).expect("save path"));
             let (app, state) = make_test_state(document, Some(save_path));
+            state
+                .current
+                .borrow_mut()
+                .replace_paragraphs("An edit whose recovery write fails.");
             apply_state(&app, &state);
             assert_eq!(
                 app.get_status_left(),

@@ -399,6 +399,7 @@ mod tests {
 
     #[test]
     fn test_t4b_writer_table_shortcuts_menu_cell_selection_copy() {
+        loom_clipboard::set_mock_clipboard_enabled(true);
         let (app, state) = make_test_app();
         app.invoke_insert_table_size(3, 3);
 
@@ -589,5 +590,6 @@ mod tests {
             !clip.tsv.as_ref().unwrap().contains("R2C2"),
             "Must NOT contain unselected cells like R2C2"
         );
+        loom_clipboard::set_mock_clipboard_enabled(false);
     }
 }
