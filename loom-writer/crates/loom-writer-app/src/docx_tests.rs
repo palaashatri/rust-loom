@@ -5,7 +5,7 @@
 use crate::actions_tests::test_state;
 use crate::docx_actions::{open_docx_path, PENDING_DOCX_IMPORT};
 use crate::{wire_writer_shared_callbacks, GuiState, WriterApp};
-use loom_clipboard::{write_clipboard, ClipboardData};
+use loom_clipboard::{set_mock_clipboard_enabled, write_clipboard, ClipboardData};
 use loom_objects::chart::{Chart, ChartSeries, ChartType};
 use loom_package::zip::PackageArchive;
 use loom_writer_core::{
@@ -158,6 +158,7 @@ fn test_open_docx_with_unsupported_warning_dialog_flow() {
 
 #[test]
 fn test_insert_chart_renders_and_exports_docx_and_pdf() {
+    set_mock_clipboard_enabled(true);
     let (app, state) = make_test_app();
     let chart = sample_chart();
     let clip = ClipboardData::from_chart(&chart);
@@ -215,10 +216,29 @@ fn test_insert_chart_renders_and_exports_docx_and_pdf() {
         readable_pdf.contains("Quarterly Performance"),
         "PDF export must contain chart title: {readable_pdf}"
     );
+    set_mock_clipboard_enabled(false);
+}
+
+fn is_word_com_available() -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let status = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "try { $w = New-Object -ComObject Word.Application; $w.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($w) | Out-Null; exit 0 } catch { exit 1 }",
+        ])
+        .status();
+    matches!(status, Ok(s) if s.success())
 }
 
 #[test]
 fn test_word_com_rich_fixture_roundtrip() {
+    if !is_word_com_available() {
+        println!("Skipping: Microsoft Word COM (or powershell.exe) not available on this platform/environment");
+        return;
+    }
     let temp_dir = std::env::temp_dir().join(format!("loom-word-com-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();

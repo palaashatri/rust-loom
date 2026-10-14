@@ -193,6 +193,18 @@ fn interactive_recovery_write_failures_are_visible() {
         None => {}
     }
 
+    let is_root = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim() == "0")
+        .unwrap_or(false);
+    if is_root {
+        println!("Skipping chmod 0500 test when running as root (euid == 0); root ignores directory mode 0500");
+        return;
+    }
+
     let root = isolated_root();
     std::fs::create_dir_all(&root).expect("create isolated test root");
     let open_path = root.join("opened.loomdoc");
@@ -221,6 +233,35 @@ fn interactive_recovery_write_failures_are_visible() {
         inspected_screenshot.display()
     );
     std::fs::remove_dir_all(root).expect("remove isolated test data");
+}
+
+#[test]
+fn interactive_recovery_write_failures_are_visible_via_injection() {
+    recovery::INJECT_FAILURE.with(|f| f.set(true));
+
+    let mut document = WriterDocument::new("write-failure-injected", "Write failure injected");
+    document.replace_paragraphs("An edit whose recovery write fails.");
+    let temp_save =
+        std::env::temp_dir().join(format!("loom-writer-save-{}.loomdoc", std::process::id()));
+    let (app, state) = make_test_state(document, Some(temp_save.clone()));
+    state
+        .current
+        .borrow_mut()
+        .replace_paragraphs("A dirty edit whose recovery write fails.");
+    apply_state(&app, &state);
+    assert_eq!(
+        app.get_status_left(),
+        "Recovery failed. Save a copy now; autosave may be out of date."
+    );
+
+    assert!(save_current_document(&app, &state, false).expect("save document"));
+    assert_eq!(
+        app.get_status_left(),
+        "Saved. Recovery checkpoint failed; keep another copy."
+    );
+
+    recovery::INJECT_FAILURE.with(|f| f.set(false));
+    let _ = std::fs::remove_file(temp_save);
 }
 
 const INITIALIZATION_FAILURE_TEST: &str =

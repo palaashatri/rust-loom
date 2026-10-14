@@ -128,12 +128,21 @@ fn kept_notice(draft: Option<&RecoveredDraft>) -> String {
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    pub(super) static INJECT_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Record the current complete document after a user edit. `source` is the
 /// file the document is saved to, if any, so the draft can return to it.
 pub(super) fn record_document(
     document: &WriterDocument,
     source: Option<&Path>,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    if INJECT_FAILURE.with(std::cell::Cell::get) {
+        return Err("injected recovery failure".into());
+    }
     DEFERRED.with(DeferredWrite::settled);
     #[cfg(test)]
     WRITES.with(|writes| writes.set(writes.get() + 1));
@@ -183,6 +192,10 @@ pub(super) fn checkpoint_document(
     document: &WriterDocument,
     source: Option<&Path>,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    if INJECT_FAILURE.with(std::cell::Cell::get) {
+        return Err("injected recovery failure".into());
+    }
     DEFERRED.with(DeferredWrite::settled);
     let package = loom_writer_core::save_document(document)
         .map_err(|error| format!("could not prepare recovery checkpoint: {error}"))?;

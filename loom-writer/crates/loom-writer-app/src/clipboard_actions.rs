@@ -233,6 +233,7 @@ mod tests {
     #[test]
     fn test_writer_paste_of_sheets_table_inserts_table_block() {
         use loom_clipboard::set_mock_clipboard_enabled;
+        set_mock_clipboard_enabled(true);
         loom_test_support::capture::set_platform();
         let dialogs = std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
         let mut doc = loom_writer_core::WriterDocument::new("test", "Test");

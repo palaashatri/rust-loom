@@ -461,9 +461,26 @@ fn test_pdf_export_with_table_and_chart() {
     );
 }
 
+fn is_powerpoint_com_available() -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let status = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "try { $p = New-Object -ComObject PowerPoint.Application; $p.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($p) | Out-Null; exit 0 } catch { exit 1 }",
+        ])
+        .status();
+    matches!(status, Ok(s) if s.success())
+}
+
 #[test]
-#[cfg(windows)]
 fn test_powerpoint_com_live_verification() {
+    if !is_powerpoint_com_available() {
+        println!("Skipping: Microsoft PowerPoint COM (or powershell.exe) not available on this platform/environment");
+        return;
+    }
     let mut doc = PresentationDocument::new("doc-1", "PowerPoint COM Live Verification");
     let slide = doc.active_slide_mut().unwrap();
     slide.elements.clear();
