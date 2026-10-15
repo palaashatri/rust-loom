@@ -240,6 +240,8 @@ pub(crate) fn ui_selection_rects(
             width: (selection.rect.width / zoom).max(1.0),
             height: (selection.rect.height / zoom).max(1.0),
             caret: selection.start == selection.end,
+            has_color: false,
+            color: slint::Color::from_argb_encoded(0),
         })
         .collect()
 }
@@ -342,6 +344,8 @@ pub(crate) fn project(
                 width: 1.0,
                 height: style.body_font_size_pt * style.line_height,
                 caret: true,
+                has_color: false,
+                color: slint::Color::from_argb_encoded(0),
             });
         }
         return Projection {
@@ -649,8 +653,48 @@ pub(crate) fn project(
                 table_block_positions.get(&loc.block_id)
             {
                 if loc.row < num_rows && loc.col < cols {
-                    let caret_x = loc.col as f32 * col_width + 8.0;
+                    // The caret sits after the text typed so far in the cell (text
+                    // starts 6 units in, as drawn), not at the cell's left edge.
+                    let editor = doc.editor_text();
+                    let raw = editor.get(loc.cell_start..loc.cell_end).unwrap_or("");
+                    let upto = doc
+                        .selection()
+                        .focus
+                        .saturating_sub(loc.cell_start)
+                        .min(raw.len());
+                    let before = raw.get(..upto).unwrap_or("").trim_start();
+                    let resolved = doc.table_from_block(loc.block_id).map(|t| {
+                        let style_def = loom_objects::TableStyleCatalog::get(&t.style_id)
+                            .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
+                        let options = loom_objects::TableStyleOptions {
+                            header_row: t.header_row,
+                            banded_rows: t.banded_rows,
+                            first_column: t.first_column,
+                            ..Default::default()
+                        };
+                        style_def.resolve_cell(loc.row, loc.col, num_rows, cols, &options, None)
+                    });
+                    let bold_runs = if resolved.as_ref().is_some_and(|r| r.bold) {
+                        vec![loom_text::StyleRun {
+                            start: 0,
+                            end: before.len(),
+                            style: loom_text::CharacterStyle {
+                                weight: loom_text::FontWeight::Bold,
+                                ..Default::default()
+                            },
+                        }]
+                    } else {
+                        Vec::new()
+                    };
+                    let advance = loom_writer_core::text_advance(
+                        before,
+                        0,
+                        &bold_runs,
+                        style.body_font_size_pt,
+                    );
+                    let caret_x = loc.col as f32 * col_width + 6.0 + advance;
                     let caret_y = table_y + loc.row as f32 * row_height + 4.0;
+                    let caret_color = resolved.and_then(|r| r.text_color);
                     selection_rects = vec![WriterSelectionRect {
                         page_index: 0,
                         x: caret_x,
@@ -658,6 +702,10 @@ pub(crate) fn project(
                         width: 1.0,
                         height: row_height - 8.0,
                         caret: true,
+                        has_color: caret_color.is_some(),
+                        color: slint::Color::from_argb_encoded(
+                            caret_color.as_deref().map_or(0, parse_hex_color),
+                        ),
                     }];
                 }
             }
@@ -671,6 +719,8 @@ pub(crate) fn project(
             width: 1.0,
             height: style.body_font_size_pt * style.line_height,
             caret: true,
+            has_color: false,
+            color: slint::Color::from_argb_encoded(0),
         });
     }
     let comment_rects = comment_rects(doc, &style, &flow, base_page, &pages);

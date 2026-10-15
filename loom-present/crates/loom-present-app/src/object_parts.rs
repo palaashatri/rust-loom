@@ -46,7 +46,7 @@ pub(crate) fn parts_for(element: &SlideElement) -> Vec<ObjectPart> {
     match element.element_type {
         ElementType::Table => element
             .table()
-            .map(|table| table_parts(&table))
+            .map(|table| table_parts(&table, element.height))
             .unwrap_or_default(),
         ElementType::Chart => element
             .chart()
@@ -92,7 +92,7 @@ pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
     cell
 }
 
-fn table_parts(table: &Table) -> Vec<ObjectPart> {
+fn table_parts(table: &Table, element_height: f32) -> Vec<ObjectPart> {
     let (rows, cols) = (table.row_count(), table.col_count());
     if rows == 0 || cols == 0 {
         return Vec::new();
@@ -142,8 +142,9 @@ fn table_parts(table: &Table) -> Vec<ObjectPart> {
                 HorizontalAlign::Right => 2,
                 _ => 0,
             };
-            // A taller row reads larger, within limits.
-            p.fs = (row_h * 0.42).clamp(9.0, 30.0);
+            // A taller row reads larger, within limits. The row's share of the
+            // element is what is drawn, not its authored points.
+            p.fs = (row_h / total_h * element_height * 0.42).clamp(9.0, 30.0);
             p.has_border = true;
             out.push(p);
             x0 += col_w;

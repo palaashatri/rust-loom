@@ -37,6 +37,9 @@ export struct WriterSelectionRect {
     width: length,
     height: length,
     caret: bool,
+    /// A caret drawn over a filled table cell takes that cell's text colour.
+    has-color: bool,
+    color: color,
 }
 
 /// A comment range projected from the same page layout as text selection.
@@ -211,7 +214,7 @@ component WriterDocumentEditor inherits Rectangle {
             y: selection.y * root.page-zoom;
             width: max(1px, selection.width * root.page-zoom);
             height: max(1px, selection.height * root.page-zoom);
-            background: Theme.palette().paper-ink;
+            background: selection.has-color ? selection.color : Theme.palette().paper-ink;
             visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
             accessible-role: none;
         }

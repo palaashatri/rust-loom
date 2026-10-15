@@ -189,19 +189,24 @@ export component SheetChart inherits Rectangle {
                 overflow: elide;
             }
 
-            LoomButton {
-                variant: "ghost";
-                label: root.kind-label();
-                clicked => {
-                    root.cycle-kind();
-                }
-            }
+            Rectangle {
+                background: Theme.palette().surface;
+                HorizontalLayout {
+                    LoomButton {
+                        variant: "ghost";
+                        label: root.kind-label();
+                        clicked => {
+                            root.cycle-kind();
+                        }
+                    }
 
-            LoomIconButton {
-                icon: "close";
-                label: "Hide chart panel";
-                tooltip: "Hide the chart preview and keep the chart in the worksheet.";
-                clicked => { root.close-chart(); }
+                    LoomIconButton {
+                        icon: "close";
+                        label: "Hide chart panel";
+                        tooltip: "Hide the chart preview and keep the chart in the worksheet.";
+                        clicked => { root.close-chart(); }
+                    }
+                }
             }
         }
 
@@ -239,7 +244,7 @@ export component SheetChart inherits Rectangle {
                 width: max(1px, parent.width - 2 * Theme.tokens.space.lg);
                 text: "No chart data points are available for this source.";
                 wrap: word-wrap;
-                color: Theme.palette().paper-muted;
+                color: Doc.muted;
                 font-size: Theme.tokens.typography.body * root.text-scale;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -471,7 +476,7 @@ export component SheetChart inherits Rectangle {
                         y: parent.height - self.height;
                         text: root.categories[idx];
                         font-size: Theme.tokens.typography.micro * root.text-scale;
-                        color: Theme.palette().paper-muted;
+                        color: Doc.muted;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                         overflow: elide;
@@ -621,7 +626,7 @@ export component SheetChart inherits Rectangle {
                     point-help-text := Text {
                         text: "Left/Right: points · Home/End: jump · Tab then PgUp/PgDn: scroll details · Escape: grid";
                         font-size: Theme.tokens.typography.caption * root.text-scale;
-                        color: Theme.palette().paper-muted;
+                        color: Doc.muted;
                         wrap: word-wrap;
                     }
                 }

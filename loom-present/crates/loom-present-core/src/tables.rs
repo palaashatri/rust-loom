@@ -414,6 +414,7 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
 
     // 2. Rows
     let mut rows_raw = Vec::new();
+    let mut row_heights_pt: Vec<Option<f32>> = Vec::new();
     cursor = 0usize;
     while let Some(rel) = tbl_xml[cursor..].find("<a:tr") {
         let row_start = cursor + rel;
@@ -422,6 +423,9 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
         };
         let row_end = row_start + row_rel_end + "</a:tr>".len();
         let row_xml = &tbl_xml[row_start..row_end];
+        let tr_tag_end = row_xml.find('>').unwrap_or(0);
+        row_heights_pt
+            .push(parse_attr_i64(&row_xml[..tr_tag_end], "h").map(|emu| (emu as f32) / 12700.0));
 
         let mut cells_raw = Vec::new();
         let mut cell_cursor = 0usize;
@@ -467,6 +471,11 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
     for (c, &w) in col_widths_pt.iter().enumerate() {
         if c < table.columns.len() {
             table.columns[c].width_pt = w;
+        }
+    }
+    for (r, height) in row_heights_pt.iter().enumerate() {
+        if let (Some(h), Some(row)) = (height, table.rows.get_mut(r)) {
+            row.height_pt = Some(h.max(1.0));
         }
     }
 

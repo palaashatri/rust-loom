@@ -44,6 +44,36 @@ mod tests {
     }
 
     #[test]
+    fn the_caret_follows_typed_text_inside_a_table_cell_and_takes_the_cells_colour() {
+        let (app, state) = make_test_app();
+        app.invoke_insert_table_size(2, 2);
+        let caret_x = |app: &WriterApp| {
+            app.get_selection_rects()
+                .iter()
+                .find(|r| r.caret)
+                .map(|r| (r.x, r.has_color))
+                .expect("a caret")
+        };
+        let (empty_x, header_coloured) = caret_x(&app);
+        assert!(
+            header_coloured,
+            "a header cell's caret uses the cell's light text colour"
+        );
+
+        let text = state.current.borrow().editor_text();
+        let at = state.current.borrow().selection().anchor;
+        let mut typed = text.clone();
+        typed.insert_str(at, "Region");
+        let caret = (at + 6) as i32;
+        app.invoke_document_edited(typed.into(), caret, caret);
+        let (after_x, _) = caret_x(&app);
+        assert!(
+            after_x > empty_x + 20.0,
+            "caret must move right with six typed letters: {empty_x} -> {after_x}"
+        );
+    }
+
+    #[test]
     fn header_cell_text_uses_the_table_styles_light_colour_on_its_dark_fill() {
         let (app, state) = make_test_app();
         app.invoke_insert_table_size(2, 2);

@@ -179,7 +179,7 @@ export component SheetObjectLayer inherits Rectangle {
         width: max(80px, root.objects[idx].width * 1px);
         height: max(48px, root.objects[idx].height * 1px);
         visible: root.objects[idx].visible;
-        border-width: is-selected ? 2px : 1px;
+        border-width: is-selected ? (Theme.active-theme == "high-contrast" ? 4px : 2px) : 1px;
         border-color: Theme.active-theme == "high-contrast"
             ? Theme.palette().paper-ink
             : is-selected ? Theme.palette().accent : Theme.palette().border-strong;

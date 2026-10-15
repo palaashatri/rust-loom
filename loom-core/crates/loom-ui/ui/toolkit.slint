@@ -94,13 +94,13 @@ export component ToolbarGroup inherits Rectangle {
 
 export component ToolbarSpacer inherits Rectangle { horizontal-stretch: 1; background: transparent; }
 
-/// Canonical Loom toolbar item: icon on top, label below. `AppleToolbarItem`
-/// below is a compatibility alias only.
+/// Canonical toolbar item (icon over label); `AppleToolbarItem` is its alias.
 export component IconOverLabelToolbarItem inherits Rectangle {
     in property <string> icon: "generic";
     in property <string> label: "";
     in property <bool> enabled: true;
     in property <bool> checked: false;
+    property <color> on-tint: Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent;
     callback clicked;
     public function focus-item() { focus.focus(); }
 
@@ -127,14 +127,14 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         Icon {
             size: 18px * max(1.0, Theme.text-scale); icon: root.icon;
             tint: !root.enabled ? Theme.palette().ink-disabled
-                : root.checked ? Theme.palette().accent : Theme.palette().ink;
+                : root.checked ? root.on-tint : Theme.palette().ink;
         }
         label-text := Text {
             text: root.label;
             font-size: 10px * max(1.0, Theme.text-scale);
             font-weight: root.checked ? 600 : 500;
             color: !root.enabled ? Theme.palette().ink-disabled
-                : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
+                : root.checked ? root.on-tint : Theme.palette().ink-secondary;
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;

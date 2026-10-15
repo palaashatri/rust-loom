@@ -681,7 +681,8 @@ fn the_border_switch_keeps_a_visible_knob_and_track_in_each_theme() {
                 let (want_track, want_knob, want_edge) = if checked {
                     (palette.accent, palette.accent_ink, palette.accent)
                 } else {
-                    (palette.border, palette.paper, palette.border_strong)
+                    // The off track is the secondary ink: 3:1 and more against the panel.
+                    (palette.ink_secondary, palette.paper, palette.ink_secondary)
                 };
                 assert_eq!(track, rgba_of(want_track), "{state}: track keeps its token");
                 assert_eq!(knob, rgba_of(want_knob), "{state}: knob keeps its token");

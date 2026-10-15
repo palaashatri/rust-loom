@@ -139,7 +139,7 @@ export component LoomIconButton inherits Rectangle {
         icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled
             : root.destructive ? Theme.palette().danger
-            : root.selected ? Theme.palette().accent
+            : root.selected ? (Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent)
             : Theme.palette().ink;
     }
 
@@ -382,13 +382,13 @@ export component LoomToggle inherits Rectangle {
             border-width: focus.has-focus ? 2px : 1px;
             border-color: focus.has-focus ? Theme.palette().focus
                 : root.checked ? Theme.palette().accent
-                : Theme.palette().border-strong;
+                : Theme.palette().ink-secondary;
             // High contrast's off track is the black surface: the white knob would
             // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
                 : root.checked ? Theme.palette().accent
                 : Theme.active-theme == "high-contrast" ? Theme.palette().surface
-                : Theme.palette().border;
+                : Theme.palette().ink-secondary;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;
                 y: 2px;
