@@ -1,6 +1,8 @@
 //! Multi-format clipboard actions for Writer (W2 interop).
 
-use loom_clipboard::{html_to_table, read_clipboard, tsv_to_table, write_clipboard, ClipboardData};
+use loom_clipboard::{
+    html_to_table_with_report, read_clipboard, tsv_to_table, write_clipboard, ClipboardData,
+};
 use loom_objects::Table;
 use slint::ComponentHandle;
 use std::rc::Rc;
@@ -123,18 +125,19 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
     let caret = next.selection().focus;
 
     // Check if clipboard contains a table
-    let table_opt = resolve_table_from_clipboard(&clip);
+    let table_opt = resolve_table_with_note(&clip);
 
-    if let Some(table) = table_opt {
+    if let Some((table, note)) = table_opt {
         // Insert table block
         match next.insert_table_object(caret, &table) {
             Ok(_) => {
                 apply_with_history(app, state, next, HistoryKind::DocumentAction);
-                app.set_status_left(slint::SharedString::from(format!(
-                    "Pasted table ({}x{})",
-                    table.row_count(),
-                    table.col_count()
-                )));
+                let mut status =
+                    format!("Pasted table ({}x{})", table.row_count(), table.col_count());
+                if let Some(note) = note {
+                    status.push_str(&format!(" - {note}"));
+                }
+                app.set_status_left(slint::SharedString::from(status));
             }
             Err(e) => {
                 app.set_status_left(slint::SharedString::from(format!("Paste failed: {e}")));
@@ -157,18 +160,24 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
 /// - HTML with `<table>`
 /// - TSV / plain text only if it has tabs on >= 2 rows!
 pub(crate) fn resolve_table_from_clipboard(clip: &ClipboardData) -> Option<Table> {
+    resolve_table_with_note(clip).map(|(table, _)| table)
+}
+
+/// Like [`resolve_table_from_clipboard`], plus a sentence for the status line
+/// when the safety limits dropped part of an HTML table.
+pub(crate) fn resolve_table_with_note(clip: &ClipboardData) -> Option<(Table, Option<String>)> {
     // 1. Private loom objects JSON
     if let Some(json) = &clip.loom_objects_json {
         if let Ok(table) = Table::from_json(json) {
-            return Some(table);
+            return Some((table, None));
         }
     }
 
     // 2. HTML table
     if let Some(html) = &clip.html {
         if html.contains("<table") || html.contains("<TABLE") {
-            if let Some(table) = html_to_table(html) {
-                return Some(table);
+            if let Some((table, report)) = html_to_table_with_report(html) {
+                return Some((table, report.message()));
             }
         }
     }
@@ -180,7 +189,7 @@ pub(crate) fn resolve_table_from_clipboard(clip: &ClipboardData) -> Option<Table
             .filter(|line| line.contains('\t'))
             .count();
         if tabbed_rows >= 2 {
-            return Some(tsv_to_table(tsv_or_text));
+            return Some((tsv_to_table(tsv_or_text), None));
         }
     }
 
@@ -216,6 +225,23 @@ mod tests {
             resolve_table_from_clipboard(&clip).is_none(),
             "1 tab row must NOT become table"
         );
+    }
+
+    #[test]
+    fn test_html_table_over_the_row_limit_says_rows_were_dropped() {
+        let mut html = String::from("<table>");
+        for r in 0..10_030 {
+            html.push_str(&format!("<tr><td>R{r}</td></tr>"));
+        }
+        html.push_str("</table>");
+        let clip = ClipboardData {
+            html: Some(html),
+            ..Default::default()
+        };
+        let (table, note) = resolve_table_with_note(&clip).expect("table");
+        assert_eq!(table.row_count(), 10_000);
+        let note = note.expect("a capped paste must explain itself");
+        assert!(note.contains("first 10000 rows"), "{note}");
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub mod sheets_interop;
 pub mod tsv;
 
 pub use cf_html::{decode_cf_html, encode_cf_html};
-pub use html::{html_to_table, table_to_html};
+pub use html::{html_to_table, html_to_table_with_report, table_to_html, HtmlParseReport};
 pub use model::{ClipboardData, MIME_HTML, MIME_LOOM_OBJECTS, MIME_PLAIN_TEXT, MIME_TSV};
 pub use os::{
     read_clipboard, set_mock_clipboard_enabled, set_mock_clipboard_fails, write_clipboard,

@@ -378,15 +378,21 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     app.set_status_left("Nothing to paste".into());
                     return;
                 };
+                let from_us = origin.is_some();
                 let pasted = paste_cells(&state, sel, cells, origin);
                 if pasted > 0 {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left(SharedString::from(format!(
-                        "Pasted {} at {}",
-                        cells_label(pasted),
-                        sel.focus.to_a1()
-                    )));
+                    let mut status =
+                        format!("Pasted {} at {}", cells_label(pasted), sel.focus.to_a1());
+                    if !from_us {
+                        if let Some(note) = crate::system_clipboard::get_clipboard_data()
+                            .and_then(|clip| clip.truncation_note())
+                        {
+                            status.push_str(&format!(" - {note}"));
+                        }
+                    }
+                    app.set_status_left(SharedString::from(status));
                 }
             }
         });

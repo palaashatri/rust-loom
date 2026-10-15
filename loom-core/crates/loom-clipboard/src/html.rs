@@ -156,11 +156,57 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
     None
 }
 
+/// What an untrusted-HTML parse had to leave out. All false means every row
+/// and column of the first table was kept.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HtmlParseReport {
+    /// More rows existed than the row limit allows.
+    pub rows_truncated: bool,
+    /// At least one row had more cells than the column limit allows.
+    pub columns_truncated: bool,
+    /// Parsing stopped early because it ran past its time budget.
+    pub timed_out: bool,
+    /// Rows kept in the returned table.
+    pub rows_kept: usize,
+}
+
+impl HtmlParseReport {
+    /// True when any part of the pasted table was dropped.
+    pub fn is_lossy(&self) -> bool {
+        self.rows_truncated || self.columns_truncated || self.timed_out
+    }
+
+    /// User-facing sentence for a status line, or `None` when nothing was lost.
+    pub fn message(&self) -> Option<String> {
+        if !self.is_lossy() {
+            return None;
+        }
+        let what = if self.rows_truncated || self.timed_out {
+            format!(
+                "only the first {} rows were pasted; the rest was too large to import",
+                self.rows_kept
+            )
+        } else {
+            format!(
+                "some columns were cut off at {MAX_TABLE_COLS} columns; the rest was too large to import"
+            )
+        };
+        Some(what)
+    }
+}
+
 /// Parses an HTML table into a `Table` object.
 pub fn html_to_table(html: &str) -> Option<Table> {
+    html_to_table_with_report(html).map(|(table, _)| table)
+}
+
+/// Like [`html_to_table`], and also reports anything the safety limits dropped
+/// so the caller can tell the user instead of losing data silently.
+pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)> {
     if html.len() > MAX_CLIPBOARD_HTML_LEN {
         return None;
     }
+    let mut report = HtmlParseReport::default();
 
     let start_time = std::time::Instant::now();
 
@@ -176,6 +222,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
 
     while search_pos < table_slice.len() && rows_raw.len() < MAX_TABLE_ROWS {
         if start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+            report.timed_out = true;
             break;
         }
 
@@ -198,6 +245,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
 
         while cell_pos < row_content.len() && cells.len() < MAX_TABLE_COLS {
             if start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+                report.timed_out = true;
                 break;
             }
 
@@ -247,11 +295,25 @@ pub fn html_to_table(html: &str) -> Option<Table> {
             cell_pos = next_pos.max(cell_pos + 1);
         }
 
+        if cells.len() >= MAX_TABLE_COLS
+            && cell_pos < row_content.len()
+            && (find_case_insensitive(&row_content[cell_pos..], "<td").is_some()
+                || find_case_insensitive(&row_content[cell_pos..], "<th").is_some())
+        {
+            report.columns_truncated = true;
+        }
         if !cells.is_empty() {
             rows_raw.push(cells);
         }
         search_pos = (tr_end + 5).max(search_pos + 1).min(table_slice.len());
     }
+    if rows_raw.len() >= MAX_TABLE_ROWS
+        && search_pos < table_slice.len()
+        && find_case_insensitive(&table_slice[search_pos..], "<tr").is_some()
+    {
+        report.rows_truncated = true;
+    }
+    report.rows_kept = rows_raw.len();
 
     if rows_raw.is_empty() {
         return None;
@@ -327,7 +389,7 @@ pub fn html_to_table(html: &str) -> Option<Table> {
         }
     }
 
-    Some(table)
+    Some((table, report))
 }
 
 struct RawCell {
@@ -460,6 +522,38 @@ mod tests {
         let malformed = "<table><tr><td>No Close<tr><td>Second";
         let parsed_malformed = html_to_table(malformed).expect("recovers from malformed table");
         assert!(parsed_malformed.row_count() >= 1);
+    }
+
+    #[test]
+    fn a_table_over_the_row_limit_reports_what_was_dropped() {
+        let mut html = String::from("<table>");
+        for r in 0..(MAX_TABLE_ROWS + 25) {
+            use std::fmt::Write;
+            let _ = write!(html, "<tr><td>R{r}</td></tr>");
+        }
+        html.push_str("</table>");
+        let (table, report) = html_to_table_with_report(&html).expect("table");
+        assert_eq!(table.row_count(), MAX_TABLE_ROWS);
+        assert!(report.rows_truncated && report.is_lossy());
+        let message = report.message().expect("message");
+        assert!(message.contains("10000"), "{message}");
+
+        let (_, whole) =
+            html_to_table_with_report("<table><tr><td>a</td></tr></table>").expect("small");
+        assert!(!whole.is_lossy() && whole.message().is_none());
+    }
+
+    #[test]
+    fn a_row_over_the_column_limit_reports_columns_truncated() {
+        let mut html = String::from("<table><tr>");
+        for c in 0..(MAX_TABLE_COLS + 5) {
+            use std::fmt::Write;
+            let _ = write!(html, "<td>{c}</td>");
+        }
+        html.push_str("</tr></table>");
+        let (_, report) = html_to_table_with_report(&html).expect("table");
+        assert!(report.columns_truncated && !report.rows_truncated);
+        assert!(report.message().expect("message").contains("columns"));
     }
 
     #[test]

@@ -129,7 +129,11 @@ pub(crate) fn paste_action(app: &PresentApp, state: &GuiState) {
         match res {
             Ok(_) => {
                 crate::refresh(app, state);
-                crate::set_status(app, "Pasted table");
+                let status = match clip.truncation_note() {
+                    Some(note) => format!("Pasted table - {note}"),
+                    None => "Pasted table".to_string(),
+                };
+                crate::set_status(app, status);
                 return;
             }
             Err(e) => {

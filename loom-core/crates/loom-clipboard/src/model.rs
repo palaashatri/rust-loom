@@ -97,6 +97,17 @@ impl ClipboardData {
         None
     }
 
+    /// A sentence for the status line when the table this payload resolves to
+    /// was cut by the HTML safety limits; `None` when nothing was dropped (or
+    /// the table came from the private format or plain text).
+    pub fn truncation_note(&self) -> Option<String> {
+        if self.loom_objects_json.is_some() {
+            return None;
+        }
+        let html = self.html.as_deref()?;
+        crate::html::html_to_table_with_report(html)?.1.message()
+    }
+
     /// Resolves a `Table` from clipboard data in priority order:
     /// 1. Private `application/x-loom-objects+json`
     /// 2. `text/html` table
