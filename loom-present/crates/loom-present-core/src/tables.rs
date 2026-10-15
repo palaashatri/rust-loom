@@ -356,7 +356,13 @@ fn parse_single_graphic_frame_table(frame_xml: &str, counter: usize) -> Option<S
     ))
 }
 
-fn parse_frame_xfrm(frame_xml: &str) -> Option<(f32, f32, f32, f32)> {
+pub(crate) fn parse_frame_xfrm(frame_xml: &str) -> Option<(f32, f32, f32, f32)> {
+    // Office writes `<a:extLst><a:ext uri=..>` inside the frame's name before its
+    // position, so look only inside `<p:xfrm>`, and match `<a:ext ` exactly.
+    let frame_xml = match (frame_xml.find("<p:xfrm"), frame_xml.find("</p:xfrm>")) {
+        (Some(start), Some(end)) if end > start => &frame_xml[start..end],
+        _ => frame_xml,
+    };
     let off_tag = frame_xml.find("<a:off")?;
     let off_end = frame_xml[off_tag..].find('>')? + off_tag;
     let off_snippet = &frame_xml[off_tag..off_end];
@@ -364,7 +370,7 @@ fn parse_frame_xfrm(frame_xml: &str) -> Option<(f32, f32, f32, f32)> {
     let x_emu = parse_attr_i64(off_snippet, "x")?;
     let y_emu = parse_attr_i64(off_snippet, "y")?;
 
-    let ext_tag = frame_xml.find("<a:ext")?;
+    let ext_tag = frame_xml.find("<a:ext ")?;
     let ext_end = frame_xml[ext_tag..].find('>')? + ext_tag;
     let ext_snippet = &frame_xml[ext_tag..ext_end];
 
