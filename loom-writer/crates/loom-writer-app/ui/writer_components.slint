@@ -22,6 +22,10 @@ export struct WriterRenderBlock {
     marker: string,
     unsupported: bool,
     unsupported-label: string,
+    /// A colour from the block's own style (table cell text); when false the
+    /// page ink is used.
+    has-color: bool,
+    color: color,
 }
 
 /// A selection highlight or collapsed caret rectangle projected from the
@@ -181,7 +185,7 @@ component WriterDocumentEditor inherits Rectangle {
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             default-font-size: block.font-size * root.page-zoom;
-            default-color: Theme.palette().paper-ink;
+            default-color: block.has-color ? block.color : Theme.palette().paper-ink;
             horizontal-alignment: block.alignment == 1
                 ? TextHorizontalAlignment.center
                 : block.alignment == 2

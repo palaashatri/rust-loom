@@ -44,6 +44,33 @@ mod tests {
     }
 
     #[test]
+    fn header_cell_text_uses_the_table_styles_light_colour_on_its_dark_fill() {
+        let (app, state) = make_test_app();
+        app.invoke_insert_table_size(2, 2);
+        let text = state.current.borrow().editor_text();
+        let caret = state.current.borrow().selection().anchor;
+        let mut typed = text.clone();
+        typed.insert_str(caret, "Item");
+        let caret = (caret + 4) as i32;
+        app.invoke_document_edited(typed.into(), caret, caret);
+
+        let blocks: Vec<_> = app.get_render_blocks().iter().collect();
+        let first = blocks
+            .iter()
+            .filter(|b| b.has_color)
+            .min_by(|a, b| a.y.partial_cmp(&b.y).unwrap())
+            .expect("a header cell with its own text colour");
+        let c = first.color;
+        let luminance = 0.2126 * f32::from(c.red()) / 255.0
+            + 0.7152 * f32::from(c.green()) / 255.0
+            + 0.0722 * f32::from(c.blue()) / 255.0;
+        assert!(
+            luminance > 0.8,
+            "header text must be light on the dark header fill, got {c:?}"
+        );
+    }
+
+    #[test]
     fn test_table_cell_tab_and_arrow_navigation_in_app() {
         let (app, state) = make_test_app();
         app.invoke_insert_table_size(2, 3);

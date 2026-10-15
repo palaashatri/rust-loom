@@ -218,6 +218,8 @@ fn render_row(
         } else {
             SharedString::default()
         },
+        has_color: false,
+        color: slint::Color::from_argb_encoded(0),
     }
 }
 
@@ -496,7 +498,7 @@ pub(crate) fn project(
                                         },
                                     });
                                 }
-                                rows.push(render_row(
+                                let mut row = render_row(
                                     &cell_block,
                                     cur_x + 6.0,
                                     cur_y + 4.0,
@@ -504,7 +506,15 @@ pub(crate) fn project(
                                     row_height - 8.0,
                                     "",
                                     "",
-                                ));
+                                );
+                                // The style's own text colour (white on a dark
+                                // header fill), not the page ink.
+                                if let Some(hex) = &resolved.text_color {
+                                    row.has_color = true;
+                                    row.color =
+                                        slint::Color::from_argb_encoded(parse_hex_color(hex));
+                                }
+                                rows.push(row);
                             }
                         }
                     }
