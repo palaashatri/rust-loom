@@ -56,6 +56,42 @@ pub(crate) fn parts_for(element: &SlideElement) -> Vec<ObjectPart> {
     }
 }
 
+/// The cell the keyboard is in for a table element (box and text); the whole
+/// element, with no text, for anything else.
+pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
+    let whole = part(0.0, 0.0, 1.0, 1.0);
+    let Some(table) = element.table() else {
+        return whole;
+    };
+    let (rows, cols) = (table.row_count(), table.col_count());
+    if rows == 0 || cols == 0 {
+        return whole;
+    }
+    let (r, c) = crate::table_actions::get_active_table_cell(&element.id);
+    let (r, c) = (r.min(rows - 1), c.min(cols - 1));
+    let (r0, c0) = table
+        .effective_cell(r, c)
+        .map_or((r, c), |(r0, c0, _)| (r0, c0));
+    let widths: Vec<f32> = table.columns.iter().map(|c| c.width_pt.max(1.0)).collect();
+    let heights: Vec<f32> = table
+        .rows
+        .iter()
+        .map(|r| r.height_pt.unwrap_or(24.0).max(1.0))
+        .collect();
+    let (total_w, total_h): (f32, f32) = (widths.iter().sum(), heights.iter().sum());
+    let (rs, cs) = table
+        .cell(r0, c0)
+        .map_or((1, 1), |cell| (cell.row_span.max(1), cell.col_span.max(1)));
+    let x: f32 = widths.iter().take(c0).sum();
+    let y: f32 = heights.iter().take(r0).sum();
+    let w: f32 = widths.iter().skip(c0).take(cs).sum();
+    let h: f32 = heights.iter().skip(r0).take(rs).sum();
+    let mut cell = part(x / total_w, y / total_h, w / total_w, h / total_h);
+    cell.text = SharedString::from(table.cell_text(r0, c0).unwrap_or_default());
+    cell.fs = (heights[r0] * 0.42).clamp(9.0, 30.0);
+    cell
+}
+
 fn table_parts(table: &Table) -> Vec<ObjectPart> {
     let (rows, cols) = (table.row_count(), table.col_count());
     if rows == 0 || cols == 0 {
@@ -206,5 +242,32 @@ mod tests {
         assert!((right_edge - 1.0).abs() < 1e-4 && (bottom - 1.0).abs() < 1e-4);
         assert_eq!(parts[0].text.as_str(), "Item");
         assert!(parts[0].has_bg, "the header row has its style fill");
+    }
+
+    #[test]
+    fn the_edit_target_is_the_active_cell_with_that_cells_own_text() {
+        let mut table = Table::new(2, 3);
+        table.set_cell_text(1, 2, "Pears");
+        let element = SlideElement::new_table("tbl-edit", 0.0, 0.0, 300.0, 100.0, table);
+        crate::table_actions::set_active_table_cell("tbl-edit", 1, 2);
+        let cell = active_cell_for(&element);
+        assert_eq!(cell.text.as_str(), "Pears", "not the accessibility label");
+        assert!(
+            (cell.fx - 2.0 / 3.0).abs() < 0.02,
+            "third column: {}",
+            cell.fx
+        );
+        assert!(cell.fy > 0.4, "second row: {}", cell.fy);
+        // Anything that is not a table edits as a whole.
+        let plain = SlideElement::new_chart(
+            "c",
+            0.0,
+            0.0,
+            100.0,
+            100.0,
+            Chart::new("c", ChartType::Column),
+        );
+        let whole = active_cell_for(&plain);
+        assert!(whole.fx == 0.0 && whole.fw == 1.0 && whole.text.is_empty());
     }
 }

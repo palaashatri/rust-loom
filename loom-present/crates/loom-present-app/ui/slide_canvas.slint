@@ -22,6 +22,9 @@ export struct ObjectPart {
 /// Thumbnails and the presenter view carry theirs in `ThumbRows`.
 export global ObjectParts {
     in-out property <[[ObjectPart]]> main: [];
+    /// Per element: the table cell being edited (box and text); the whole
+    /// element for everything else.
+    in-out property <[ObjectPart]> active-cells: [];
 }
 
 /// The scene-model canvas keeps element coordinates in slide space.
@@ -308,6 +311,17 @@ export component PresentSlideCanvas inherits Rectangle {
                     }
                 }
 
+                // The cell the keyboard is in, outlined on a selected table.
+                if root.editing-enabled && root.element-types[idx] == 7 && root.element-selected.length > idx && root.element-selected[idx] && ObjectParts.active-cells.length > idx : Rectangle {
+                    x: ObjectParts.active-cells[idx].fx * parent.width;
+                    y: ObjectParts.active-cells[idx].fy * parent.height;
+                    width: ObjectParts.active-cells[idx].fw * parent.width;
+                    height: ObjectParts.active-cells[idx].fh * parent.height;
+                    border-width: 2px;
+                    border-color: Theme.palette().accent;
+                    accessible-role: none;
+                }
+
                 if root.element-types[idx] == 6 : Image {
                     width: 100%;
                     height: 100%;
@@ -348,14 +362,36 @@ export component PresentSlideCanvas inherits Rectangle {
 
                 // Double-click edits the text where it stands. The editor sits
                 // over the text with the same type, so nothing jumps.
+                // The edited cell is covered so its drawn text does not show through.
+                if root.editing-enabled && root.editing-idx == idx && root.element-types[idx] == 7 && ObjectParts.active-cells.length > idx : Rectangle {
+                    x: ObjectParts.active-cells[idx].fx * parent.width;
+                    y: ObjectParts.active-cells[idx].fy * parent.height;
+                    width: ObjectParts.active-cells[idx].fw * parent.width;
+                    height: ObjectParts.active-cells[idx].fh * parent.height;
+                    background: Theme.palette().paper;
+                    accessible-role: none;
+                }
+
                 if root.editing-enabled && root.editing-idx == idx : TextInput {
                     font-family: Theme.document-font-family;
-                    x: Theme.tokens.space.sm * slide.text-scale;
-                    y: Theme.tokens.space.xs * slide.text-scale;
-                    width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
-                    height: max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
-                    text: root.element-contents[idx];
-                    font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
+                    // A table edits one cell, in place, with that cell's own text.
+                    property <bool> in-cell: root.element-types[idx] == 7 && ObjectParts.active-cells.length > idx;
+                    x: self.in-cell ? ObjectParts.active-cells[idx].fx * parent.width + 4px
+                        : Theme.tokens.space.sm * slide.text-scale;
+                    y: self.in-cell ? ObjectParts.active-cells[idx].fy * parent.height
+                        : Theme.tokens.space.xs * slide.text-scale;
+                    width: self.in-cell ? max(1px, ObjectParts.active-cells[idx].fw * parent.width - 8px)
+                        : max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
+                    height: self.in-cell ? max(1px, ObjectParts.active-cells[idx].fh * parent.height)
+                        : max(1px, parent.height - Theme.tokens.space.sm * 2 * slide.text-scale);
+                    property <string> seed: self.in-cell ? ObjectParts.active-cells[idx].text : root.element-contents[idx];
+                    // Tab moves the edit to the next cell: it shows that cell's own text,
+                    // not what was typed in the last one (typing broke the binding).
+                    property <string> cell-key: self.in-cell ? "" + ObjectParts.active-cells[idx].fx + "," + ObjectParts.active-cells[idx].fy : "";
+                    text: self.seed;
+                    changed cell-key => { self.text = self.seed; self.select-all(); }
+                    font-size: self.in-cell ? ObjectParts.active-cells[idx].fs * slide.height / 562.5
+                        : (root.element-types[idx] == 0 ? Theme.tokens.typography.display
                         : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     color: Theme.palette().paper-ink;

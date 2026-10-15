@@ -174,6 +174,16 @@ pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
         images_for(document, document.active_slide()),
     ));
     app.global::<crate::ObjectParts>()
+        .set_active_cells(ModelRc::new(VecModel::from(
+            document
+                .active_slide()
+                .map(|slide| slide.elements.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .map(crate::object_parts::active_cell_for)
+                .collect::<Vec<_>>(),
+        )));
+    app.global::<crate::ObjectParts>()
         .set_main(ModelRc::new(VecModel::from(
             document
                 .active_slide()
