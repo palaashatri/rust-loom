@@ -659,13 +659,33 @@ pub fn formatting_state_for_selection(
         })
         .unwrap_or(0);
 
+    // A run with no size of its own is drawn at its block kind's size (a heading
+    // is larger than body), so that is the size the field must show.
+    let drawn_size = |kind: &str, run_size: f32| -> i32 {
+        if (run_size - CharacterStyle::default().font_size).abs() < f32::EPSILON {
+            loom_writer_core::PageStyle::default()
+                .font_size_for_kind(kind)
+                .round() as i32
+        } else {
+            run_size as i32
+        }
+    };
     let font_size_pt = if spans.is_empty() {
-        caret_style(document, selection.clone())
-            .map(|s| s.font_size as i32)
-            .unwrap_or(11)
+        let (start, _) = normalized_selection(document, selection.clone());
+        match (
+            caret_style(document, selection.clone()),
+            block_at_offset(document, start),
+        ) {
+            (Some(style), Some(index)) => {
+                drawn_size(document.blocks[index].kind.as_str(), style.font_size)
+            }
+            (Some(style), None) => style.font_size as i32,
+            _ => 11,
+        }
     } else {
         let (first_block, first_start, _) = spans[0];
-        (style_at(&document.blocks[first_block], first_start).font_size as i32).max(6)
+        let block = &document.blocks[first_block];
+        drawn_size(block.kind.as_str(), style_at(block, first_start).font_size).max(6)
     };
 
     let line_spacing_index = selected_blocks
@@ -785,6 +805,26 @@ mod tests {
         document.push(RichBlock::new(1, "paragraph", "First paragraph"));
         document.push(RichBlock::new(2, "paragraph", "Second paragraph"));
         document
+    }
+
+    #[test]
+    fn the_size_field_shows_the_size_a_heading_is_drawn_at() {
+        let mut document = WriterDocument::new("sizes", "Sizes");
+        document.push(RichBlock::new(1, "heading1", "Title"));
+        document.push(RichBlock::new(2, "paragraph", "Body text"));
+        let caret_in_heading =
+            formatting_state_for_selection(&document, DocumentSelection::caret(2));
+        assert_eq!(
+            caret_in_heading.font_size_pt, 24,
+            "H1 draws at 24 pt, not the 12 pt default"
+        );
+        let body_start = "Title
+"
+        .len()
+            + 2;
+        let caret_in_body =
+            formatting_state_for_selection(&document, DocumentSelection::caret(body_start));
+        assert_eq!(caret_in_body.font_size_pt, 11, "body draws at 11 pt");
     }
 
     #[test]

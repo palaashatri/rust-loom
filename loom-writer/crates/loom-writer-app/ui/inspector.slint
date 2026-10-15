@@ -140,8 +140,11 @@ export component WriterInspector inherits LoomPanel {
                 }
             }
 
-            Flickable {
+            Rectangle {
                 vertical-stretch: 1;
+            inspector-scroll := Flickable {
+                width: parent.width;
+                height: parent.height;
                 viewport-width: self.width;
                 viewport-height: max(self.height, content.preferred-height);
 
@@ -636,6 +639,18 @@ export component WriterInspector inherits LoomPanel {
             }
         }
         }
+                // The panel scrolls; this thin thumb shows that there is more below
+                // and where the view sits (no other scrollbar exists here).
+                if inspector-scroll.viewport-height > inspector-scroll.height : Rectangle {
+                    x: parent.width - 4px;
+                    width: 3px;
+                    y: (parent.height - self.height) * (-inspector-scroll.viewport-y / max(1px, inspector-scroll.viewport-height - inspector-scroll.height));
+                    height: max(24px, parent.height * inspector-scroll.height / inspector-scroll.viewport-height);
+                    border-radius: 1.5px;
+                    background: Theme.palette().border-strong;
+                    accessible-role: none;
+                }
+            }
 
         }
     }

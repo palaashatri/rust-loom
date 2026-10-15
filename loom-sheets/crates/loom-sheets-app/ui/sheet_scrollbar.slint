@@ -55,6 +55,9 @@ export component SheetScrollBar inherits Rectangle {
                 : 0px;
         width: root.horizontal ? root.handle-length : parent.width;
         height: root.horizontal ? parent.height : root.handle-length;
+        // With nothing to scroll the handle would fill the whole track, which in
+        // high contrast is a solid white lane that reads as a scroll position.
+        visible: root.maximum > 0px;
         border-radius: Theme.tokens.metrics.radius-small;
         background: scroll-track.pressed || scroll-track.has-hover
             ? Theme.palette().accent
