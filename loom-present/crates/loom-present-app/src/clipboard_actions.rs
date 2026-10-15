@@ -52,11 +52,11 @@ pub(crate) fn copy_action(app: &PresentApp, state: &GuiState) {
                         if write_clipboard(&clip).is_ok() {
                             crate::set_status(
                                 app,
-                                format!(
+                                with_rich_note(format!(
                                     "Copied table ({}x{})",
                                     table.row_count(),
                                     table.col_count()
-                                ),
+                                )),
                             );
                         }
                     }
@@ -65,7 +65,7 @@ pub(crate) fn copy_action(app: &PresentApp, state: &GuiState) {
                     if let Some(chart) = elem.chart() {
                         let clip = ClipboardData::from_chart(&chart);
                         if write_clipboard(&clip).is_ok() {
-                            crate::set_status(app, "Copied chart");
+                            crate::set_status(app, with_rich_note("Copied chart".to_string()));
                         }
                     }
                 }
@@ -82,6 +82,14 @@ pub(crate) fn copy_action(app: &PresentApp, state: &GuiState) {
                 }
             }
         }
+    }
+}
+
+/// Appends the plain-text-only warning on systems without rich clipboard formats.
+fn with_rich_note(status: String) -> String {
+    match loom_clipboard::rich_format_note() {
+        Some(note) => format!("{status} - {note}"),
+        None => status,
     }
 }
 

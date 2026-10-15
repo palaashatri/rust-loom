@@ -159,6 +159,17 @@ pub fn set_mock_clipboard_fails(fails: bool) {
     MOCK_FAILS.with(|f| f.set(fails));
 }
 
+/// Words for a status line when this system can only carry plain text, so a
+/// copied table or chart will paste as text. `None` where rich formats work
+/// (and while the in-memory test clipboard is active).
+pub fn rich_format_note() -> Option<&'static str> {
+    if MOCK_ENABLED.with(std::cell::Cell::get) || cfg!(windows) {
+        None
+    } else {
+        Some("copied as plain text; rich table formats are not supported on this system")
+    }
+}
+
 /// Writes multi-format data to the clipboard.
 pub fn write_clipboard(data: &ClipboardData) -> Result<(), ClipboardOsError> {
     if MOCK_ENABLED.with(std::cell::Cell::get) {
@@ -244,5 +255,18 @@ mod tests {
             read.loom_objects_json.as_deref(),
             Some("{\"type\":\"test\"}")
         );
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn the_plain_text_note_is_absent_for_the_test_clipboard_and_windows() {
+        set_mock_clipboard_enabled(true);
+        assert!(rich_format_note().is_none());
+        set_mock_clipboard_enabled(false);
+        assert_eq!(rich_format_note().is_some(), !cfg!(windows));
     }
 }

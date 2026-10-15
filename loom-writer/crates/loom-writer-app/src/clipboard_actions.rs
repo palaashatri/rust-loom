@@ -62,9 +62,9 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
             }
             let clip = ClipboardData::from_table(&sub_table);
             if write_clipboard(&clip).is_ok() {
-                app.set_status_left(slint::SharedString::from(format!(
+                app.set_status_left(slint::SharedString::from(with_rich_note(format!(
                     "Copied table cells ({num_rows}x{num_cols})"
-                )));
+                ))));
                 return;
             }
         }
@@ -76,11 +76,11 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
             let loom_tbl = writer_table.to_loom_table();
             let clip = ClipboardData::from_table(&loom_tbl);
             if write_clipboard(&clip).is_ok() {
-                app.set_status_left(slint::SharedString::from(format!(
+                app.set_status_left(slint::SharedString::from(with_rich_note(format!(
                     "Copied table ({}x{})",
                     loom_tbl.row_count(),
                     loom_tbl.col_count()
-                )));
+                ))));
                 return;
             }
         }
@@ -101,6 +101,14 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
         if write_clipboard(&clip).is_ok() {
             app.set_status_left("Copied text".into());
         }
+    }
+}
+
+/// Appends the plain-text-only warning on systems without rich clipboard formats.
+fn with_rich_note(status: String) -> String {
+    match loom_clipboard::rich_format_note() {
+        Some(note) => format!("{status} - {note}"),
+        None => status,
     }
 }
 
@@ -159,12 +167,9 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
 /// - Private `loom_objects_json` with Table
 /// - HTML with `<table>`
 /// - TSV / plain text only if it has tabs on >= 2 rows!
-pub(crate) fn resolve_table_from_clipboard(clip: &ClipboardData) -> Option<Table> {
-    resolve_table_with_note(clip).map(|(table, _)| table)
-}
-
-/// Like [`resolve_table_from_clipboard`], plus a sentence for the status line
-/// when the safety limits dropped part of an HTML table.
+///
+/// Also returns a sentence for the status line when the safety limits dropped
+/// part of an HTML table.
 pub(crate) fn resolve_table_with_note(clip: &ClipboardData) -> Option<(Table, Option<String>)> {
     // 1. Private loom objects JSON
     if let Some(json) = &clip.loom_objects_json {
@@ -208,7 +213,9 @@ mod tests {
             tsv: Some(tsv_two_rows.into()),
             ..Default::default()
         };
-        let table = resolve_table_from_clipboard(&clip).expect("2 tab rows must become table");
+        let table = resolve_table_with_note(&clip)
+            .map(|(table, _)| table)
+            .expect("2 tab rows must become table");
         assert_eq!(table.row_count(), 2);
         assert_eq!(table.col_count(), 2);
     }
@@ -222,7 +229,9 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            resolve_table_from_clipboard(&clip).is_none(),
+            resolve_table_with_note(&clip)
+                .map(|(table, _)| table)
+                .is_none(),
             "1 tab row must NOT become table"
         );
     }
@@ -252,7 +261,9 @@ mod tests {
             plain_text: Some("Header\nValue".into()),
             ..Default::default()
         };
-        let table = resolve_table_from_clipboard(&clip).expect("HTML table must resolve");
+        let table = resolve_table_with_note(&clip)
+            .map(|(table, _)| table)
+            .expect("HTML table must resolve");
         assert_eq!(table.row_count(), 2);
     }
 

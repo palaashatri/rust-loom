@@ -278,7 +278,11 @@ pub(crate) fn copy_active_chart_to_clipboard(app: &SheetsApp, state: &GuiState) 
     let clip_data = loom_clipboard::ClipboardData::from_chart(&obj_chart);
     let ok = crate::system_clipboard::set_clipboard_data(&clip_data);
     if ok {
-        app.set_status_left(SharedString::from(format!("Copied chart: {}", chart.title)));
+        let mut status = format!("Copied chart: {}", chart.title);
+        if let Some(note) = loom_clipboard::rich_format_note() {
+            status.push_str(&format!(" - {note}"));
+        }
+        app.set_status_left(SharedString::from(status));
         true
     } else {
         app.set_status_left("Failed to copy chart to clipboard.".into());

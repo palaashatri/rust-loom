@@ -53,6 +53,19 @@ pub(crate) fn xml_unescape(value: &str) -> String {
     out
 }
 
+/// True when a list paragraph sits below the first numbering level.
+fn has_nested_list_level(xml: &str) -> bool {
+    let mut rest = xml;
+    while let Some(pos) = rest.find("<w:ilvl w:val=\"") {
+        rest = &rest[pos + "<w:ilvl w:val=\"".len()..];
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if digits.parse::<u32>().is_ok_and(|level| level > 0) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Inspects a `.docx` package archive for unsupported constructs.
 pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String> {
     let archive = PackageArchive::from_bytes(docx_bytes)
@@ -87,13 +100,6 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
                 "Images and embedded pictures are not supported and will be omitted.".to_string(),
             );
         }
-        if path.ends_with("numbering.xml") && !warnings.iter().any(|w: &String| w.contains("Lists"))
-        {
-            warnings.push(
-                "Lists and custom numbering definitions are simplified or not fully supported."
-                    .to_string(),
-            );
-        }
     }
 
     if let Some(doc_bytes) = archive.get("word/document.xml") {
@@ -118,16 +124,9 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
                 "Images and embedded pictures are not supported and will be omitted.".to_string(),
             );
         }
-        if xml.contains("<w:numPr") && !warnings.iter().any(|w: &String| w.contains("Lists")) {
-            warnings.push(
-                "Lists and custom numbering definitions are simplified or not fully supported."
-                    .to_string(),
-            );
-        }
-        if (xml.contains("<w:pStyle w:val=\"Heading") || xml.contains("<w:pStyle w:val=\"heading"))
-            && !warnings.iter().any(|w: &String| w.contains("Headings"))
-        {
-            warnings.push("Headings and outline hierarchies may be simplified.".to_string());
+        // Bullets and numbering import; only nested levels are flattened.
+        if has_nested_list_level(&xml) {
+            warnings.push("Nested list levels are flattened to a single level.".to_string());
         }
     }
 

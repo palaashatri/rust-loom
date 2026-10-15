@@ -809,7 +809,7 @@ fn test_import_docx_rich_document_fidelity() {
 }
 
 #[test]
-fn test_docx_import_warns_on_images_lists_headings_footnotes() {
+fn docx_warnings_name_only_what_is_lost() {
     let mut archive = PackageArchive::new();
     let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -857,30 +857,28 @@ fn test_docx_import_warns_on_images_lists_headings_footnotes() {
     let docx_bytes = archive.to_bytes().expect("pack test archive");
     let warnings = super::inspect_docx_unsupported(&docx_bytes).expect("inspect succeeds");
 
-    let has_image = warnings
-        .iter()
-        .any(|w| w.to_lowercase().contains("image") || w.to_lowercase().contains("picture"));
-    let has_list = warnings
-        .iter()
-        .any(|w| w.to_lowercase().contains("list") || w.to_lowercase().contains("numbering"));
-    let has_heading = warnings
-        .iter()
-        .any(|w| w.to_lowercase().contains("heading"));
-    let has_footnote = warnings
-        .iter()
-        .any(|w| w.to_lowercase().contains("footnote"));
+    let all = warnings.join(" | ").to_lowercase();
+    assert!(all.contains("image"), "pictures are dropped: {warnings:?}");
+    assert!(
+        all.contains("footnote"),
+        "footnotes are dropped: {warnings:?}"
+    );
+    // Headings and flat lists import correctly, so warning about them is noise.
+    assert!(!all.contains("heading"), "no heading warning: {warnings:?}");
+    assert!(!all.contains("list"), "no flat-list warning: {warnings:?}");
 
+    let nested = doc_xml.replace(r#"<w:ilvl w:val="0"/>"#, r#"<w:ilvl w:val="1"/>"#);
+    let mut archive = PackageArchive::new();
+    archive
+        .add("[Content_Types].xml", content_types.as_bytes().to_vec())
+        .unwrap();
+    archive
+        .add("word/document.xml", nested.into_bytes())
+        .unwrap();
+    let bytes = archive.to_bytes().expect("pack nested");
+    let nested_warnings = super::inspect_docx_unsupported(&bytes).expect("inspect");
     assert!(
-        has_image,
-        "Warnings must contain image warning: {warnings:?}"
-    );
-    assert!(has_list, "Warnings must contain list warning: {warnings:?}");
-    assert!(
-        has_heading,
-        "Warnings must contain heading warning: {warnings:?}"
-    );
-    assert!(
-        has_footnote,
-        "Warnings must contain footnote warning: {warnings:?}"
+        nested_warnings.iter().any(|w| w.contains("Nested list")),
+        "{nested_warnings:?}"
     );
 }
