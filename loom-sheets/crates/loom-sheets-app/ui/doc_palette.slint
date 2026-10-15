@@ -1,0 +1,12 @@
+import { Theme } from "theme.slint";
+
+/// Colours of document artwork (a chart). They stay on the paper palette in
+/// every UI theme: dark chrome around white cells must not turn a chart dark.
+export global Doc {
+    out property <bool> hc: Theme.active-theme == "high-contrast";
+    out property <color> line: hc ? #000000 : #b8b8c0;
+    out property <color> well: hc ? #ffffff : #f2f2f4;
+    out property <color> accent: hc ? #003cff : #0071e3;
+    out property <color> ring: hc ? #000000 : #0071e3;
+    out property <color> select-soft: hc ? #e8e8ff : #e6f0fc;
+}

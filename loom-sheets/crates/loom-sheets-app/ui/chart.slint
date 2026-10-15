@@ -1,15 +1,8 @@
 import { LoomIconButton, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { Doc } from "doc_palette.slint";
 
 export component SheetChart inherits Rectangle {
-    // A chart is part of the document, so it keeps the paper palette in every
-    // UI theme (dark chrome around white cells must not turn the chart dark).
-    property <color> doc-line: Theme.active-theme == "high-contrast" ? #000000 : #b8b8c0;
-    property <color> doc-well: Theme.active-theme == "high-contrast" ? #ffffff : #f2f2f4;
-    property <color> doc-accent: Theme.active-theme == "high-contrast" ? #003cff : #0071e3;
-    property <color> doc-ring: Theme.active-theme == "high-contrast" ? #000000 : #0071e3;
-    property <color> doc-select-soft: Theme.active-theme == "high-contrast" ? #e8e8ff : #e6f0fc;
-
     in property <string> title: "Chart";
     in property <string> source-range: "";
     in property <string> series-label: "Values";
@@ -172,7 +165,7 @@ export component SheetChart inherits Rectangle {
     height: min(400px * max(1.0, root.text-scale), max(1px, root.available-height - 24px));
     background: Theme.palette().paper;
     border-width: 1px;
-    border-color: root.doc-line;
+    border-color: Doc.line;
     border-radius: Theme.tokens.space.sm;
     drop-shadow-blur: 8px;
     drop-shadow-color: Theme.palette().shadow;
@@ -230,9 +223,9 @@ export component SheetChart inherits Rectangle {
         // Plot Area
         Rectangle {
             vertical-stretch: 1;
-            background: root.doc-well;
+            background: Doc.well;
             border-width: 1px;
-            border-color: root.doc-line;
+            border-color: Doc.line;
             border-radius: Theme.tokens.space.xs;
             clip: true;
             // Reserve enough height for the labels and a scaled bar area before
@@ -257,21 +250,21 @@ export component SheetChart inherits Rectangle {
                 y: parent.height * 0.25;
                 width: parent.width;
                 height: 1px;
-                background: root.doc-line;
+                background: Doc.line;
             }
             Rectangle {
                 x: 0px;
                 y: parent.height * 0.50;
                 width: parent.width;
                 height: 1px;
-                background: root.doc-line;
+                background: Doc.line;
             }
             Rectangle {
                 x: 0px;
                 y: parent.height * 0.75;
                 width: parent.width;
                 height: 1px;
-                background: root.doc-line;
+                background: Doc.line;
             }
 
             // Series Data: bars, line, or pie depending on the live kind.
@@ -287,7 +280,7 @@ export component SheetChart inherits Rectangle {
                     y: 6px;
                     width: parent.width - 12px;
                     height: parent.height - 12px;
-                    stroke: root.doc-accent;
+                    stroke: Doc.accent;
                     stroke-width: 2px;
                     viewbox-x: 0;
                     viewbox-y: 0;
@@ -308,7 +301,7 @@ export component SheetChart inherits Rectangle {
                     width: 11px;
                     height: 11px;
                     border-radius: 6px;
-                    background: idx == root.selected-point ? root.doc-accent : transparent;
+                    background: idx == root.selected-point ? Doc.accent : transparent;
                     border-width: idx == root.selected-point ? 2px : 0px;
                     border-color: Theme.palette().paper-ink;
                     x: 6px + (parent.width - 12px) * self.nx - self.width / 2;
@@ -320,7 +313,7 @@ export component SheetChart inherits Rectangle {
                         width: 7px;
                         height: 7px;
                         border-radius: 4px;
-                        background: root.doc-accent;
+                        background: Doc.accent;
                     }
                 }
             }
@@ -349,7 +342,7 @@ export component SheetChart inherits Rectangle {
                             viewbox-width: 100;
                             viewbox-height: 100;
                             fit: fill;
-                            fill: root.doc-accent;
+                            fill: Doc.accent;
                             opacity: idx < root.pie-opacities.length ? root.pie-opacities[idx] : 1.0;
                             stroke: Theme.palette().paper;
                             stroke-width: 1px;
@@ -387,7 +380,7 @@ export component SheetChart inherits Rectangle {
                                 width: 8px;
                                 height: 8px;
                                 border-radius: 2px;
-                                background: root.doc-accent;
+                                background: Doc.accent;
                                 opacity: idx < root.pie-opacities.length ? root.pie-opacities[idx] : 1.0;
                             }
                             Text {
@@ -441,7 +434,7 @@ export component SheetChart inherits Rectangle {
                         y: bar-column.zero-axis-y;
                         width: parent.width;
                         height: 1px;
-                        background: root.doc-line;
+                        background: Doc.line;
                     }
 
                     bar-shape := Rectangle {
@@ -449,7 +442,7 @@ export component SheetChart inherits Rectangle {
                         width: parent.width * 0.64;
                         y: bar-column.bar-shape-y;
                         height: bar-column.bar-shape-height;
-                        background: root.doc-accent;
+                        background: Doc.accent;
                         border-width: idx == root.selected-point ? 2px : 0px;
                         border-color: Theme.palette().paper-ink;
                         border-radius: 3px;
@@ -492,9 +485,9 @@ export component SheetChart inherits Rectangle {
             min-height: 16px + (10px + 1.25 * (Theme.tokens.typography.body-large + 3 * Theme.tokens.typography.caption)) * max(1.0, root.text-scale);
             preferred-height: min(140px * max(1.0, root.text-scale), root.height * 0.45);
             vertical-stretch: 0;
-            background: root.doc-well;
+            background: Doc.well;
             border-width: 1px;
-            border-color: root.doc-line;
+            border-color: Doc.line;
             border-radius: Theme.tokens.space.xs;
             accessible-role: list;
             accessible-label: root.title + " chart data";
@@ -517,9 +510,9 @@ export component SheetChart inherits Rectangle {
                 y: 8px;
                 width: parent.width - 16px;
                 height: parent.height - 16px;
-                background: root.doc-select-soft;
+                background: Doc.select-soft;
                 border-width: 1px;
-                border-color: root.doc-line;
+                border-color: Doc.line;
                 border-radius: Theme.tokens.space.xs;
                 accessible-role: list-item;
                 accessible-label: root.point-label();
@@ -621,7 +614,7 @@ export component SheetChart inherits Rectangle {
                             height: parent.height - 8px;
                             background: transparent;
                             border-width: 2px;
-                            border-color: root.doc-ring;
+                            border-color: Doc.ring;
                             border-radius: Theme.tokens.space.xs;
                         }
                     }
@@ -661,7 +654,7 @@ export component SheetChart inherits Rectangle {
                 height: parent.height - 8px;
                 background: transparent;
                 border-width: 2px;
-                border-color: root.doc-ring;
+                border-color: Doc.ring;
                 border-radius: Theme.tokens.space.xs;
             }
 
