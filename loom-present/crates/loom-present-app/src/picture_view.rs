@@ -156,6 +156,12 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
                 .collect::<Vec<_>>(),
         )),
         images: ModelRc::new(VecModel::from(images_for(document, slide))),
+        parts: ModelRc::new(VecModel::from(
+            elements
+                .iter()
+                .map(|e| ModelRc::new(VecModel::from(crate::object_parts::parts_for(e))))
+                .collect::<Vec<_>>(),
+        )),
     }
 }
 
@@ -167,6 +173,16 @@ pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
         app.get_element_images(),
         images_for(document, document.active_slide()),
     ));
+    app.global::<crate::ObjectParts>()
+        .set_main(ModelRc::new(VecModel::from(
+            document
+                .active_slide()
+                .map(|slide| slide.elements.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .map(|e| ModelRc::new(VecModel::from(crate::object_parts::parts_for(e))))
+                .collect::<Vec<_>>(),
+        )));
     sync_thumbnails(app, document);
 }
 

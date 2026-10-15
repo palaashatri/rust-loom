@@ -2953,6 +2953,7 @@ mod keyboard_flow_tests;
 mod local_menu;
 mod menu_models;
 mod model_sync;
+mod object_parts;
 mod palette_rank;
 mod picture_view;
 mod presenter;

@@ -1,6 +1,6 @@
 import { LoomIconButton } from "foundation.slint";
 import { Theme } from "theme.slint";
-import { PresentSlideCanvas } from "slide_canvas.slint";
+import { PresentSlideCanvas, ObjectPart } from "slide_canvas.slint";
 
 /// Per-element rows of one slide, in the form the slide canvas draws.
 /// `key` fingerprints the slide so unchanged thumbnails are not rewritten.
@@ -15,6 +15,7 @@ export struct ThumbRows {
     rotations: [float],
     types: [int],
     images: [image],
+    parts: [[ObjectPart]],
 }
 
 /// A miniature slide: the editor's own slide canvas at thumbnail size, drawn
@@ -41,6 +42,7 @@ export component MiniSlide inherits Rectangle {
         element-rotations: root.rows.rotations;
         element-types: root.rows.types;
         element-images: root.rows.images;
+        element-parts: root.rows.parts;
     }
 }
 
