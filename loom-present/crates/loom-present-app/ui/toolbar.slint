@@ -65,6 +65,18 @@ export component PresentActionToolbar inherits LabeledToolbar {
             label: "Insert";
             clicked => { root.add-picture(); }
         }
+        // Wide windows only: narrow ones reach it from the Slide menu and palette.
+        if !root.overflow : LoomToolbarItem {
+            icon: "table";
+            label: "Table";
+            clicked => { root.add-table(); }
+        }
+        // Wide windows only: narrow ones reach it from the Slide menu and palette.
+        if !root.overflow : LoomToolbarItem {
+            icon: "chart";
+            label: "Chart";
+            clicked => { root.add-chart(); }
+        }
         LoomToolbarItem {
             icon: "text";
             label: "Text";
@@ -150,6 +162,18 @@ export component PresentActionToolbar inherits LabeledToolbar {
             icon: "text";
             label: "Text";
             clicked => { root.add-text(); }
+        }
+        // Wide windows only: narrow ones reach it from the Slide menu and palette.
+        if !root.overflow : LoomToolbarItem {
+            icon: "chart";
+            label: "Chart";
+            clicked => { root.add-chart(); }
+        }
+        // Wide windows only: narrow ones reach it from the Slide menu and palette.
+        if !root.overflow : LoomToolbarItem {
+            icon: "table";
+            label: "Table";
+            clicked => { root.add-table(); }
         }
         LoomToolbarItem {
             icon: "image";

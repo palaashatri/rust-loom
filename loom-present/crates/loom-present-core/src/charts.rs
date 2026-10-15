@@ -95,7 +95,8 @@ impl crate::PresentationSession {
             }
             serial += 1;
         };
-        let elem = chart_element_from_clipboard(chart, element_id.clone());
+        let mut elem = chart_element_from_clipboard(chart, element_id.clone());
+        crate::tables::cascade_new_object(&slide.elements, &mut elem);
         slide.elements.push(elem);
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)

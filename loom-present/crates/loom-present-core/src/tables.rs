@@ -491,6 +491,25 @@ pub fn table_element_from_clipboard(table: Table, id: impl Into<String>) -> Slid
     SlideElement::new_table(id, x, y, width, height, table)
 }
 
+/// Moves a newly inserted object down and right in 24-unit steps until no
+/// existing object on the slide starts at the same corner, so inserting a
+/// second table or chart does not hide the first exactly behind itself.
+pub(crate) fn cascade_new_object(existing: &[SlideElement], element: &mut SlideElement) {
+    const STEP: f32 = 24.0;
+    for _ in 0..16 {
+        let taken = existing
+            .iter()
+            .any(|e| (e.x - element.x).abs() < 1.0 && (e.y - element.y).abs() < 1.0);
+        let fits = element.x + STEP + element.width <= SLIDE_WIDTH
+            && element.y + STEP + element.height <= SLIDE_HEIGHT;
+        if !taken || !fits {
+            break;
+        }
+        element.x += STEP;
+        element.y += STEP;
+    }
+}
+
 impl crate::PresentationSession {
     /// Inserts a table element onto the active slide as an undoable step.
     pub fn insert_table(&mut self, table: Table) -> Result<String, String> {
@@ -507,7 +526,8 @@ impl crate::PresentationSession {
             }
             serial += 1;
         };
-        let elem = table_element_from_clipboard(table, element_id.clone());
+        let mut elem = table_element_from_clipboard(table, element_id.clone());
+        cascade_new_object(&slide.elements, &mut elem);
         slide.elements.push(elem);
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)
@@ -517,6 +537,23 @@ impl crate::PresentationSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_inserted_table_does_not_sit_exactly_on_the_first() {
+        let mut session =
+            crate::PresentationSession::new(crate::PresentationDocument::new("d", "Deck"));
+        let first = session.insert_table(Table::new(3, 3)).expect("first");
+        let second = session.insert_table(Table::new(3, 3)).expect("second");
+        let slide = session.document.active_slide().expect("slide");
+        let a = slide.elements.iter().find(|e| e.id == first).unwrap();
+        let b = slide.elements.iter().find(|e| e.id == second).unwrap();
+        assert!(
+            (a.x - b.x).abs() >= 1.0 || (a.y - b.y).abs() >= 1.0,
+            "second table starts at ({}, {}) like the first",
+            b.x,
+            b.y
+        );
+    }
 
     #[test]
     fn test_sheets_clipboard_range_pastes_as_present_table() {

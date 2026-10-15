@@ -237,3 +237,40 @@ fn escape_closes_an_open_toolbar_menu() {
     });
     assert!(!app.get_view_menu_open());
 }
+
+#[test]
+fn wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_the_menu() {
+    let (app, state) = launched(None);
+    let count = |app: &PresentApp, label: &str| {
+        render(app);
+        ElementHandle::find_by_accessible_label(app, label)
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .count()
+    };
+    // 1280 wide is under the labelled-slot threshold: both live in the Slide menu.
+    assert_eq!(count(&app, "Table"), 0);
+
+    app.window().set_size(slint::PhysicalSize::new(1600, 900));
+    configure_responsive_width(&app, 1600);
+    assert_eq!(count(&app, "Table"), 1, "wide windows show Table");
+    assert_eq!(count(&app, "Chart"), 1, "wide windows show Chart");
+
+    let before = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .map_or(0, |s| s.elements.len());
+    press(&app, AccessibleRole::Button, "Table");
+    app.invoke_insert_table_size(3, 3);
+    let after = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .map_or(0, |s| s.elements.len());
+    assert!(
+        after > before,
+        "the toolbar Table button leads to an inserted table"
+    );
+}
