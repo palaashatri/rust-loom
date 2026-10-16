@@ -301,7 +301,8 @@ fn draw_table(
                 let text = cell.content.text();
                 if !text.is_empty() {
                     let text_style = TextStyle {
-                        size_pt: 11.0 * UNITS_PER_EDITOR_PX,
+                        size_pt: crate::table_text_size(table)
+                            .map_or(11.0 * UNITS_PER_EDITOR_PX, |pt| pt.clamp(6.0, 72.0)),
                         bold: resolved.bold,
                         ..TextStyle::default()
                     };

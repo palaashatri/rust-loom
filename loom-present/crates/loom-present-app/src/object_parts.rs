@@ -88,7 +88,10 @@ pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
     let h: f32 = heights.iter().skip(r0).take(rs).sum();
     let mut cell = part(x / total_w, y / total_h, w / total_w, h / total_h);
     cell.text = SharedString::from(table.cell_text(r0, c0).unwrap_or_default());
-    cell.fs = (heights[r0] * 0.42).clamp(9.0, 30.0);
+    cell.fs = loom_present_core::table_text_size(&table).map_or_else(
+        || (heights[r0] * 0.42).clamp(9.0, 30.0),
+        |pt| pt.clamp(6.0, 72.0),
+    );
     cell
 }
 
@@ -144,7 +147,10 @@ fn table_parts(table: &Table, element_height: f32) -> Vec<ObjectPart> {
             };
             // A taller row reads larger, within limits. The row's share of the
             // element is what is drawn, not its authored points.
-            p.fs = (row_h / total_h * element_height * 0.42).clamp(9.0, 30.0);
+            p.fs = loom_present_core::table_text_size(table).map_or_else(
+                || (row_h / total_h * element_height * 0.42).clamp(9.0, 30.0),
+                |pt| pt.clamp(6.0, 72.0),
+            );
             p.has_border = true;
             out.push(p);
             x0 += col_w;

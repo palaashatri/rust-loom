@@ -455,7 +455,15 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
                 }
             }
 
-            cells_raw.push((text, row_span, col_span, is_covered));
+            // PowerPoint draws table text at 18 pt unless a run says otherwise.
+            let size_pt = cell_xml
+                .find("<a:rPr")
+                .and_then(|i| {
+                    let end = cell_xml[i..].find('>')? + i;
+                    parse_attr_i64(&cell_xml[i..end], "sz")
+                })
+                .map_or(18.0, |sz| sz as f32 / 100.0);
+            cells_raw.push((text, row_span, col_span, is_covered, size_pt));
             cell_cursor = cell_end;
         }
 
@@ -480,10 +488,15 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
     }
 
     for (r, row_cells) in rows_raw.into_iter().enumerate() {
-        for (c, (text, row_span, col_span, is_covered)) in row_cells.into_iter().enumerate() {
+        for (c, (text, row_span, col_span, is_covered, size_pt)) in
+            row_cells.into_iter().enumerate()
+        {
             if c < cols_count {
                 if let Some(cell) = table.cell_mut(r, c) {
                     cell.content = CellContent::plain(&text);
+                    for run in &mut cell.content.runs {
+                        run.font_size_pt = Some(size_pt);
+                    }
                     cell.row_span = row_span;
                     cell.col_span = col_span;
                     cell.is_covered = is_covered;
@@ -493,6 +506,18 @@ fn parse_pptx_atbl_content(tbl_xml: &str) -> Option<Table> {
     }
 
     Some(table)
+}
+
+/// The text size, in slide units (points), that a table's file specified, if
+/// any run carries one. The canvas, thumbnails and PDF export all use this so
+/// they draw imported table text at the same size.
+pub fn table_text_size(table: &Table) -> Option<f32> {
+    table
+        .rows
+        .iter()
+        .flat_map(|r| r.cells.iter())
+        .flat_map(|c| c.content.runs.iter())
+        .find_map(|r| r.font_size_pt)
 }
 
 /// Creates a new slide table element from a table model, centered or sized appropriately on the slide.

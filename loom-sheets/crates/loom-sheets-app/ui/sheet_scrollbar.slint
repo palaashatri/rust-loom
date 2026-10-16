@@ -59,9 +59,14 @@ export component SheetScrollBar inherits Rectangle {
         // high contrast is a solid white lane that reads as a scroll position.
         visible: root.maximum > 0px;
         border-radius: Theme.tokens.metrics.radius-small;
+        // The handle must read against both the track and the cells beside it:
+        // ink-secondary clears 3:1 on both; high contrast adds a dark edge.
+        border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
+        border-color: #000000;
         background: scroll-track.pressed || scroll-track.has-hover
             ? Theme.palette().accent
-            : Theme.palette().border-strong;
+            : Theme.active-theme == "high-contrast" ? Theme.palette().accent
+            : Theme.palette().ink-secondary;
     }
 
     function set-pos(pos: length) {

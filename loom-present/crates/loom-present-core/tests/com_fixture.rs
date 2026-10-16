@@ -30,3 +30,18 @@ fn a_powerpoint_authored_table_imports_with_its_cells() {
         "first cell text survives"
     );
 }
+
+#[test]
+fn imported_table_text_keeps_the_size_the_file_gives_it() {
+    let deck = import_pptx(include_bytes!("fixtures/com_powerpoint_table.pptx")).expect("import");
+    let table = deck
+        .slides
+        .iter()
+        .flat_map(|s| s.elements.iter())
+        .find(|e| e.element_type == ElementType::Table)
+        .and_then(|e| e.table())
+        .expect("table");
+    // PowerPoint's default is 18 pt when a run names no size; the canvas and
+    // the PDF both read this value.
+    assert_eq!(loom_present_core::table_text_size(&table), Some(18.0));
+}
