@@ -61,9 +61,12 @@ pub(crate) fn start_with_inspector_open(app: &WriterApp, width: u32) {
         app.set_show_inspector(true);
         // The inspector's focus grab is for user-opened panels; at launch the page keeps focus.
         app.set_inspector_quiet_open(true);
-        app.invoke_focus_page();
         AUTO_OPENED_INSPECTORS.with(|windows| windows.borrow_mut().push(app.as_weak()));
     }
+    // A narrow window keeps the inspector closed, and typing must still land in
+    // the page rather than on the Format toolbar button that would otherwise
+    // hold the first focus.
+    app.invoke_focus_page();
 }
 
 std::thread_local! {
@@ -129,5 +132,14 @@ pub(crate) fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     app.set_compact_inspector_layout(compact);
     if compact && clear_auto_opened_inspector(app) {
         app.set_show_inspector(false);
+        // Closing the inspector hands focus to its toolbar button after this
+        // function returns; nobody asked for that here, so refocus the page on
+        // the next turn of the event loop and typing keeps landing in it.
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(30), move || {
+            if let Some(app) = weak.upgrade() {
+                app.invoke_focus_page();
+            }
+        });
     }
 }
