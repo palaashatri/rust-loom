@@ -1,0 +1,17 @@
+Slint: Build config: release; Backend: FemtoVG renderer with OpenGL backend
+average frames per second: 81 details from last frame: [0 layers created]
+average frames per second: 120 details from last frame: [0 layers created]
+average frames per second: 133 details from last frame: [0 layers created]
+average frames per second: 61 details from last frame: [0 layers created]
+average frames per second: 25 details from last frame: [0 layers created]
+average frames per second: 25 details from last frame: [0 layers created]
+average frames per second: 26 details from last frame: [0 layers created]
+average frames per second: 26 details from last frame: [0 layers created]
+average frames per second: 26 details from last frame: [0 layers created]
+average frames per second: 25 details from last frame: [0 layers created]
+average frames per second: 25 details from last frame: [0 layers created]
+average frames per second: 26 details from last frame: [0 layers created]
+
+thread 'main' (8512) panicked at C:\Users\palaa\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\std\src\thread\lifecycle.rs:226:14:
+threads should not terminate unexpectedly
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
