@@ -75,6 +75,7 @@ pub(crate) enum PaletteAction {
     MergeTableCells,
     SplitTableCell,
     InsertChart,
+    InsertPicture,
     SetAppearance(loom_desktop::Appearance),
 }
 
@@ -101,6 +102,7 @@ pub(crate) fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) ->
         PaletteAction::MergeTableCells => dispatch_command(app, "table.merge_cells"),
         PaletteAction::SplitTableCell => dispatch_command(app, "table.split_cell"),
         PaletteAction::InsertChart => dispatch_command(app, "writer.chart.insert"),
+        PaletteAction::InsertPicture => dispatch_command(app, "writer.image.insert"),
         PaletteAction::SetAppearance(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
         // Needs the document state; handled where the palette is wired.
@@ -259,6 +261,12 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "table.split_cell",
             label: "Table: Split Cell",
             shortcut: "Ctrl+Alt+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertPicture,
+            id: "writer.image.insert",
+            label: "Insert Picture...",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::InsertChart,

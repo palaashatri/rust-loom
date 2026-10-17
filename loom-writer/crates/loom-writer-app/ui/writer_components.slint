@@ -66,6 +66,21 @@ export struct WriterTableCellRect {
     border-width: length,
 }
 
+/// An inline picture placed on the page stack.
+export struct WriterPageImage {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    source: image,
+    label: string,
+}
+
+/// The pictures the page shows; set from Rust with the rest of the projection.
+export global PageImages {
+    in-out property <[WriterPageImage]> items: [];
+}
+
 /// Writer's selection-aware text editor.
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
@@ -154,6 +169,16 @@ component WriterDocumentEditor inherits Rectangle {
             border-color: cell.border-color;
             border-width: cell.border-width * root.page-zoom;
             accessible-role: none;
+        }
+        for pic in PageImages.items : Image {
+            x: pic.x * root.page-zoom;
+            y: pic.y * root.page-zoom;
+            width: max(1px, pic.width * root.page-zoom);
+            height: max(1px, pic.height * root.page-zoom);
+            source: pic.source;
+            image-fit: fill;
+            accessible-role: image;
+            accessible-label: pic.label;
         }
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;

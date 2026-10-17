@@ -22,7 +22,7 @@ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
-export { WriterTableCellRect } from "writer_components.slint";
+export { WriterTableCellRect, WriterPageImage, PageImages } from "writer_components.slint";
 
 export component WriterApp inherits Window {
     // Set from the document's name and unsaved state, as Sheets does.
@@ -217,6 +217,7 @@ export component WriterApp inherits Window {
     callback insert-table;
     callback insert-table-size(int, int);
     callback insert-chart;
+    callback insert-image;
     callback table-navigate-backwards;
     callback set-table-style(string);
     callback toggle-table-option(string);

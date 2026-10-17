@@ -200,6 +200,12 @@ impl WriterDocument {
     }
 }
 
+/// The text of a picture block whose marker is number `n`.
+pub(crate) fn picture_text(n: u32) -> String {
+    let marker = char::from_u32(MARKER_BASE + n % MARKER_COUNT).unwrap_or('\u{E000}');
+    format!("{OBJECT_CHAR}{marker}")
+}
+
 /// `{"name":..,"wpt":..,"hpt":..,"data":"<base64>"}`: how a picture is saved.
 pub(crate) fn image_json(image: &InlineImage) -> String {
     format!(

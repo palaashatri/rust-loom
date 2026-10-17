@@ -1,0 +1,19 @@
+Writer inline pictures - evidence, 2026-10-17 (Windows 11, WSL Ubuntu-E)
+
+Microsoft Word 16 (COM, check_word_picture.ps1) opened the DOCX Writer exported
+for a 300 x 150 px PNG between two paragraphs:
+  InlineShapes: 1
+  Type: 3  Width pt: 225  Height pt: 112.5
+  Paragraphs: 3  ["before", picture, "after"]
+
+LibreOffice 26.2.6.3 headless on Linux converted the same file to PDF; pdfimages
+lists one 300 x 150 rgb image at 96 ppi plus its soft mask; pdftotext reads
+"before" and "after".
+
+Headless render at 1280x800 (loom-writer --open pictures.loomdoc --screenshot):
+a wide and a tall picture sit between paragraphs at their aspect, text wraps
+around neither, the second picture follows the last paragraph.
+
+Limits: the render is a headless render, not a live window; no screen-reader
+pass; PNG and JPEG only; no clipboard or drag-in; DOCX floating pictures are
+placed inline.

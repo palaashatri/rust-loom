@@ -858,7 +858,11 @@ fn docx_warnings_name_only_what_is_lost() {
     let warnings = super::inspect_docx_unsupported(&docx_bytes).expect("inspect succeeds");
 
     let all = warnings.join(" | ").to_lowercase();
-    assert!(all.contains("image"), "pictures are dropped: {warnings:?}");
+    // The PNG in the package is read now; the old-format `w:pict` still is not.
+    assert!(
+        all.contains("pictures in the older"),
+        "old-format pictures are dropped: {warnings:?}"
+    );
     assert!(
         all.contains("footnote"),
         "footnotes are dropped: {warnings:?}"

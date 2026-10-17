@@ -241,3 +241,46 @@ fn a_picture_is_not_a_word_and_reads_as_its_name_in_text_exports() {
         "only `before` and `after` count"
     );
 }
+
+#[test]
+fn pictures_survive_a_docx_round_trip_with_their_bytes_and_size() {
+    let mut doc = document_with_text();
+    let first = picture(120, 60, 11);
+    let second = picture(80, 80, 222);
+    doc.insert_image_block(6, first.clone()).unwrap();
+    let end = doc.editor_text().len();
+    doc.insert_image_block(end, second.clone()).unwrap();
+    let bytes = crate::export_docx(&doc).unwrap().bytes;
+    assert_eq!(
+        crate::inspect_docx_unsupported(&bytes).unwrap(),
+        Vec::<String>::new(),
+        "an exported picture needs no warning"
+    );
+    let back = crate::import_docx(&bytes).unwrap();
+    let pictures: Vec<&InlineImage> = back
+        .blocks
+        .iter()
+        .filter_map(|b| b.image.as_ref())
+        .collect();
+    assert_eq!(pictures.len(), 2);
+    assert_eq!(pictures[0].bytes, first.bytes);
+    assert_eq!(pictures[1].bytes, second.bytes);
+    assert_eq!((pictures[0].width_pt, pictures[0].height_pt), (90.0, 45.0));
+    assert!(back.blocks.iter().filter(|b| b.is_image()).count() == 2);
+    // Text order is kept: before, picture, after, picture.
+    let kinds: Vec<bool> = back.blocks.iter().map(|b| b.is_image()).collect();
+    assert_eq!(&kinds[..4], &[false, true, false, true]);
+}
+
+/// Writes a picture document for a real Word to open: set `LOOM_PICTURE_DOCX`
+/// and run with `--ignored`.
+#[test]
+#[ignore]
+fn write_a_picture_docx_for_word() {
+    let Ok(out) = std::env::var("LOOM_PICTURE_DOCX") else {
+        return;
+    };
+    let mut doc = document_with_text();
+    doc.insert_image_block(6, picture(300, 150, 20)).unwrap();
+    std::fs::write(out, crate::export_docx(&doc).unwrap().bytes).unwrap();
+}

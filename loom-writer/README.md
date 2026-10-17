@@ -30,6 +30,7 @@ Evidence tags used below:
 - Comments: add on a selection (or on the whole paragraph from a caret), resolve, reopen, delete, jump to the commented text with a highlight on the page, persisted in the file. Anchors move with edits and are restored by undo and redo; deleting the commented text marks the thread "Text removed". A paste over a selection falls back to a text comparison to re-anchor. [tests] [live-W for adding a comment on a selection]
 - Table: Insert > Table adds a Markdown-text table block at the caret; it is undoable and saved. Cells edit as text. [tests]
 - Outline navigator (View menu): lists headings, a click moves the caret, follows edits. [tests]
+- Pictures: Insert > Picture (toolbar Insert menu, Table menu, command palette) chooses a PNG or JPEG and places it as its own block at the caret, scaled down to the text width and never distorted. A picture is one character in the text: select and delete it, undo and redo it, and it is saved inside the document, so the saved file does not depend on the source file. It moves to the next page instead of being cut, is not counted as a word or a paragraph, and reads as `[Image: name]` in Markdown and HTML. [tests] Word `.docx` export writes a real inline picture (original bytes, size in points) and import reads one back; real Microsoft Word 16 opened a generated file with one inline picture of the expected 225 x 112.5 pt, and LibreOffice 26.2 on Linux placed it at 300 x 150 px. PDF export draws the picture. [tests] [live-W for the on-screen render only through a headless render]
 
 ### Export
 - PDF: every page, headings and bold/italic/underline runs in their own base-14 faces, accented and typographic characters written as WinAnsi. [tests] A rendered check in an independent PDF viewer is not recorded; the checks read the file structure and bytes.
@@ -70,7 +71,7 @@ Evidence tags used below:
 ## Known limitations
 
 - Tables are Markdown text, not a cell grid; there is no visual table editor. The Word export converts them to real tables.
-- No inline images, headers or footers, footnotes, spell check, track changes or columns.
+- Pictures cannot be resized, moved or wrapped by text on the page (they sit on their own line; Center and Right alignment apply), have no caption or alt-text field (the file name is the alternative text), and only PNG and JPEG are read; a picture pasted from the clipboard, dragged in, or in a `.docx` as a floating or older-format picture is not imported (floating ones are placed inline). Headers or footers, footnotes, spell check, track changes and columns are not there.
 - Open reads `.loomdoc` only; there is no Word or Markdown import.
 - There is no justified alignment: the page editor cannot place words to justify a line, so the control was removed rather than left inert. The model and the file formats can carry Justify (it is written to `.loomdoc` and as `w:jc both` in Word exports), and a file that already carries it is shown as unavailable rather than as Left.
 - Page text is left-to-right only: there is no right-to-left shaping, caret movement or bidirectional selection. `--rtl` mirrors the window chrome.

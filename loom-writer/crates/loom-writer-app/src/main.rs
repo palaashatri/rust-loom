@@ -27,6 +27,8 @@ mod multi_click;
 mod outline;
 mod palette_catalog;
 mod palette_wiring;
+mod picture_actions;
+mod picture_view;
 mod projection;
 use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 mod reading_time;
@@ -495,6 +497,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "app.palette" => app.invoke_open_palette(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
+        "insert.image" | "writer.image.insert" => app.invoke_insert_image(),
         "table.insert_row_above" | "writer.table.insert_row_above" => {
             app.invoke_table_action("insert-row-above".into())
         }
@@ -1433,7 +1436,8 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
 fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
     let text = doc.editor_text();
     let (word_count, char_count) = doc.text_counts();
-    let block_count = doc.len();
+    // A picture is not a paragraph.
+    let block_count = doc.blocks.iter().filter(|block| !block.is_image()).count();
     let selection = doc.selection();
     let formatting = formatting_state_for_selection(
         doc,
@@ -1591,6 +1595,7 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     if table_rects_changed {
         app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
     }
+    picture_view::publish(app, &projection.images);
     app.set_page_count(projection.page_count);
 
     app.set_page_stack_height(projection.stack_height);
@@ -2623,6 +2628,7 @@ fn wire_writer_shared_callbacks(
     table_actions::wire(app, state);
     clipboard_actions::wire(app, state);
     docx_actions::wire(app, state, &menu_service);
+    picture_actions::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -4944,6 +4950,8 @@ mod typing_style_tests;
 
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod picture_tests;
 #[cfg(test)]
 mod table_editing_tests;
 #[cfg(test)]

@@ -93,11 +93,16 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         {
             warnings.push("Footnotes and endnotes are not supported.".to_string());
         }
+        let lower = path.to_ascii_lowercase();
         if (path.starts_with("word/media/") || path.starts_with("media/"))
-            && !warnings.iter().any(|w: &String| w.contains("Images"))
+            && ![".png", ".jpg", ".jpeg"]
+                .iter()
+                .any(|ext| lower.ends_with(ext))
+            && !warnings.iter().any(|w: &String| w.contains("PNG and JPEG"))
         {
             warnings.push(
-                "Images and embedded pictures are not supported and will be omitted.".to_string(),
+                "Pictures other than PNG and JPEG are not supported and will be omitted."
+                    .to_string(),
             );
         }
     }
@@ -114,15 +119,16 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         {
             warnings.push("Footnotes and endnotes are not supported.".to_string());
         }
-        if (xml.contains("<a:blip")
-            || xml.contains("<w:pict")
-            || xml.contains("<v:imagedata")
-            || (xml.contains("<w:drawing") && !xml.contains("<c:chart")))
-            && !warnings.iter().any(|w: &String| w.contains("Images"))
+        if (xml.contains("<w:pict") || xml.contains("<v:imagedata"))
+            && !warnings.iter().any(|w: &String| w.contains("older"))
         {
             warnings.push(
-                "Images and embedded pictures are not supported and will be omitted.".to_string(),
+                "Pictures in the older Word format are not supported and will be omitted."
+                    .to_string(),
             );
+        }
+        if xml.contains("<wp:anchor") && !warnings.iter().any(|w: &String| w.contains("Floating")) {
+            warnings.push("Floating pictures are placed in the text, one to a line.".to_string());
         }
         // Bullets and numbering import; only nested levels are flattened.
         if has_nested_list_level(&xml) {
@@ -259,6 +265,54 @@ fn find_tag_start(xml: &str, tag_name: &str) -> Option<usize> {
     None
 }
 
+/// A paragraph holding one inline picture as a picture block. `None` when
+/// the paragraph has no picture, or its picture is not a PNG or JPEG the
+/// package carries (the paragraph then imports as text, as before).
+fn parse_picture(p_xml: &str, id: u64, archive: &PackageArchive) -> Option<RichBlock> {
+    let drawing = &p_xml[p_xml.find("<w:drawing")?..];
+    if drawing.contains("<c:chart") {
+        return None;
+    }
+    let blip = &drawing[drawing.find("<a:blip")?..];
+    let rid = extract_attribute_value(blip, "r:embed")?;
+    let rels_xml = archive
+        .get("word/_rels/document.xml.rels")
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .unwrap_or_default();
+    let target = parse_rels(&rels_xml).get(&rid)?.clone();
+    let path = match target.strip_prefix('/') {
+        Some(absolute) => absolute.to_string(),
+        None => format!("word/{target}"),
+    };
+    let name = extract_attribute_value(drawing, "descr")
+        .filter(|descr| !descr.trim().is_empty())
+        .or_else(|| path.rsplit('/').next().map(str::to_string))
+        .unwrap_or_else(|| "picture".to_string());
+    let mut image = crate::InlineImage::from_bytes(&name, archive.get(&path)?.to_vec()).ok()?;
+    // The size Word shows it at, in English Metric Units.
+    if let Some(extent) = drawing.find("<wp:extent") {
+        let extent = &drawing[extent..];
+        let emu = |attr: &str| {
+            extract_attribute_value(extent, attr)
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| *v > 0.0)
+        };
+        if let (Some(cx), Some(cy)) = (emu("cx"), emu("cy")) {
+            image.width_pt = cx / 12_700.0;
+            image.height_pt = cy / 12_700.0;
+        }
+    }
+    let text = crate::images::picture_text(id as u32);
+    let mut block = RichBlock::new(id, crate::IMAGE_BLOCK_KIND, &text);
+    block.image = Some(image);
+    if p_xml.contains("<w:jc w:val=\"center\"") {
+        block.style.alignment = loom_text::Alignment::Center;
+    } else if p_xml.contains("<w:jc w:val=\"right\"") {
+        block.style.alignment = loom_text::Alignment::Right;
+    }
+    Some(block)
+}
+
 /// Parses a single `<w:p>...</w:p>` block.
 fn parse_paragraph(
     xml: &str,
@@ -276,6 +330,13 @@ fn parse_paragraph(
     let end_rel = xml[start..].find(close_tag)?;
     let p_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
+
+    // A picture: `<a:blip r:embed>` in a drawing, bytes from the package.
+    if let Some(archive) = archive {
+        if let Some(block) = parse_picture(p_xml, id, archive) {
+            return Some((Some(block), next_cursor));
+        }
+    }
 
     // Check for DrawingML chart in <w:drawing>
     if let Some(archive) = archive {

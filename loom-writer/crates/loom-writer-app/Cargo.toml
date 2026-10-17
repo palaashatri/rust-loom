@@ -30,6 +30,8 @@ slint-build = "1.17.1"
 
 [dev-dependencies]
 i-slint-backend-testing = "1.17.1"
+# Pictures for the Insert Picture tests.
+image = { version = "0.25", default-features = false, features = ["png"] }
 loom-pdf = { path = "../../../loom-core/crates/loom-pdf", features = ["test-support"] }
 # The fixture fonts the picker and highlight tests install.
 loom-writer-core = { path = "../loom-writer-core", features = ["test-support"] }

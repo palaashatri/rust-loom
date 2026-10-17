@@ -31,10 +31,23 @@ pub(crate) struct Projection {
     pub selection_rects: Vec<WriterSelectionRect>,
     pub comment_rects: Vec<WriterCommentRect>,
     pub table_cell_rects: Vec<WriterTableCellRect>,
+    /// Pictures on the pages shown, in page-stack coordinates.
+    pub images: Vec<PageImagePart>,
     pub page_count: i32,
     pub stack_height: f32,
     /// Pages the rows, selection and comment rectangles cover.
     pub pages: Range<usize>,
+}
+
+/// One picture to draw: where it sits and what it shows.
+#[derive(Clone)]
+pub(crate) struct PageImagePart {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub label: String,
+    pub image: loom_writer_core::InlineImage,
 }
 
 /// Layout viewport in page points: width and height stay the page's so the
@@ -353,6 +366,7 @@ pub(crate) fn project(
             selection_rects,
             comment_rects: Vec::new(),
             table_cell_rects: Vec::new(),
+            images: Vec::new(),
             page_count: 1,
             stack_height: style.height_pt,
             pages: 0..1,
@@ -375,6 +389,7 @@ pub(crate) fn project(
     let mut families: HashMap<String, String> = HashMap::new();
     let mut rows: Vec<WriterRenderBlock> = Vec::new();
     let mut table_cell_rects: Vec<WriterTableCellRect> = Vec::new();
+    let mut images: Vec<PageImagePart> = Vec::new();
     let mut seen_table_blocks: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut seen_chart_blocks: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut table_block_positions: HashMap<u64, (f32, usize, usize, f32, f32)> = HashMap::new();
@@ -385,6 +400,24 @@ pub(crate) fn project(
         let x = ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
         let y = ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
         let height = (line.bounds.height / zoom).max(font_size * style.line_height);
+
+        if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
+            let width = line.bounds.width / zoom;
+            let shift = match block.style.alignment {
+                loom_text::Alignment::Center => (content_width - width) / 2.0,
+                loom_text::Alignment::Right => content_width - width,
+                _ => 0.0,
+            };
+            images.push(PageImagePart {
+                x: x + shift.max(0.0),
+                y,
+                width,
+                height: line.bounds.height / zoom,
+                label: format!("Picture: {}", picture.name),
+                image: picture.clone(),
+            });
+            continue;
+        }
 
         #[derive(Clone, PartialEq, Eq)]
         struct TableLayoutKey {
@@ -729,6 +762,7 @@ pub(crate) fn project(
         selection_rects,
         comment_rects,
         table_cell_rects,
+        images,
         page_count: flow.page_count().max(1).min(i32::MAX as usize) as i32,
         stack_height,
         pages,

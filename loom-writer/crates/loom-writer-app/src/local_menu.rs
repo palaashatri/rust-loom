@@ -30,6 +30,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "format.underline",
     "insert.table",
     "insert.chart",
+    "insert.image",
     "table.insert_row_above",
     "table.insert_row_below",
     "table.insert_col_left",
@@ -90,6 +91,7 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                 "Table",
                 vec![
                     MenuItem::action("insert.table", "Insert Table..."),
+                    MenuItem::action("insert.image", "Insert Picture..."),
                     MenuItem::Separator,
                     MenuItem::action_with_shortcut(
                         "table.insert_row_above",
