@@ -1118,3 +1118,63 @@ fn alt_letters_open_menus_from_the_find_field_without_typing_into_it() {
     );
     press(&s.app, Key::Escape);
 }
+
+#[test]
+fn table_insertion_cell_navigation_and_docx_import_warning_work_from_the_keyboard() {
+    let s = launched("Hello");
+    let page = focus_weak(&s.app);
+
+    // Insert a table from the Ctrl+K command palette.
+    ctrl(&s.app, "k");
+    type_text(&s.app, "markdown table");
+    press(&s.app, Key::Return);
+    assert!(!s.app.get_palette_open());
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "focus returns to the page after inserting a table"
+    );
+
+    let cell_coords = |s: &Session| {
+        let current = s.state.current.borrow();
+        let loc = current
+            .table_cell_at_offset(current.selection().anchor)
+            .expect("caret must sit inside a table cell");
+        (loc.row, loc.col)
+    };
+    assert_eq!(cell_coords(&s), (0, 0));
+
+    // Real Tab and Shift+Tab key events step across table cells instead of typing tabs.
+    tab(&s.app);
+    assert_eq!(cell_coords(&s), (0, 1));
+    tab(&s.app);
+    assert_eq!(cell_coords(&s), (0, 2));
+    tab(&s.app);
+    assert_eq!(cell_coords(&s), (1, 0));
+    shift_tab(&s.app);
+    assert_eq!(cell_coords(&s), (0, 2));
+
+    // DOCX import warning dialog traps Tab, defaults to Cancel import, and Escape cancels.
+    let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+    let (weak, seen) = (s.app.as_weak(), log.clone());
+    s.app.on_docx_import_cancel(move || {
+        seen.borrow_mut().push("cancel");
+        weak.upgrade().unwrap().set_docx_import_warning_open(false);
+    });
+    let (weak, seen) = (s.app.as_weak(), log.clone());
+    s.app.on_docx_import_continue(move || {
+        seen.borrow_mut().push("continue");
+        weak.upgrade().unwrap().set_docx_import_warning_open(false);
+    });
+    s.app
+        .set_docx_import_warning_message("Tracked changes will be accepted.".into());
+    s.app.set_docx_import_warning_open(true);
+    render(&s.app);
+    assert_eq!(focus_name(&s.app), "Cancel");
+    tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Continue Import");
+    tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Cancel");
+    press(&s.app, Key::Escape);
+    assert_eq!(*log.borrow(), ["cancel"]);
+    assert!(same_focus(&focus_weak(&s.app), &page));
+}

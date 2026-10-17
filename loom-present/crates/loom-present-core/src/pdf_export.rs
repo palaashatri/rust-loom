@@ -328,7 +328,7 @@ fn draw_table(
             if !cell.is_covered {
                 let resolved = style.resolve_cell(r, c, rows, cols, &options, Some(cell));
                 if let Some(bg) = &resolved.background_color {
-                    if let Some(rgb) = parse_hex_color_rgb(bg) {
+                    if let Some(rgb) = parse_rgb(bg) {
                         pdf.draw_rect_with_transform(
                             page,
                             (curr_x, curr_y, col_w, row_h),
@@ -367,15 +367,86 @@ fn draw_table(
     }
 }
 
-fn parse_hex_color_rgb(hex: &str) -> Option<(f32, f32, f32)> {
-    let clean = hex.trim().trim_start_matches('#');
-    if clean.len() != 6 {
-        return None;
+const CHART_COLORS: [(f32, f32, f32); 6] = [
+    (0.169, 0.341, 0.604),
+    (0.929, 0.490, 0.192),
+    (0.439, 0.678, 0.278),
+    (1.000, 0.753, 0.000),
+    (0.357, 0.608, 0.835),
+    (0.647, 0.647, 0.647),
+];
+
+fn draw_pie_chart(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    transform: [f32; 6],
+    elem: &SlideElement,
+    chart: &loom_objects::Chart,
+) {
+    let series = &chart.series[0];
+    let cat_count = chart.categories.len().max(series.values.len());
+    let values: Vec<f64> = (0..cat_count)
+        .map(|ci| series.values.get(ci).copied().unwrap_or(0.0).max(0.0))
+        .collect();
+    let total: f64 = values.iter().sum();
+    if total <= 0.0 {
+        return;
     }
-    let r = u8::from_str_radix(&clean[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
-    Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
+    let cx = elem.width * 0.31;
+    let cy = elem.height * 0.55;
+    let r = (elem.width * 0.22).min(elem.height * 0.32).max(12.0);
+    let d = (r / 3.8).max(3.0);
+    for ring in 1..=5usize {
+        let rad = (ring as f32 - 0.3) / 5.0 * r;
+        let steps = (ring * 12).max(16);
+        for step in 0..steps {
+            let turn = (step as f64 + 0.5) / steps as f64;
+            let mut acc = 0.0;
+            let mut idx = cat_count.saturating_sub(1);
+            for (ci, v) in values.iter().copied().enumerate() {
+                acc += v;
+                if turn * total <= acc {
+                    idx = ci;
+                    break;
+                }
+            }
+            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
+            let x = cx + rad * theta.cos() - d / 2.0;
+            let y = cy + rad * theta.sin() - d / 2.0;
+            let color = CHART_COLORS[idx % CHART_COLORS.len()];
+            pdf.draw_rect_with_transform(page, (x, y, d, d), PathStyle::filled(color), transform);
+        }
+    }
+    let label_style = TextStyle {
+        size_pt: 9.5 * UNITS_PER_EDITOR_PX,
+        ..TextStyle::default()
+    };
+    let row_step = (elem.height * 0.62 / cat_count.max(1) as f32).min(24.0 * UNITS_PER_EDITOR_PX);
+    for (ci, v) in values.iter().copied().enumerate() {
+        let ry = elem.height * 0.24 + ci as f32 * row_step;
+        let color = CHART_COLORS[ci % CHART_COLORS.len()];
+        pdf.draw_rect_with_transform(
+            page,
+            (
+                elem.width * 0.58,
+                ry - 7.0 * UNITS_PER_EDITOR_PX,
+                8.0 * UNITS_PER_EDITOR_PX,
+                8.0 * UNITS_PER_EDITOR_PX,
+            ),
+            PathStyle::filled(color),
+            transform,
+        );
+        let cat = chart.categories.get(ci).map(String::as_str).unwrap_or("");
+        let pct = (v / total * 100.0).round() as i64;
+        pdf.draw_text_with_transform(
+            page,
+            elem.width * 0.63,
+            ry,
+            &format!("{cat} ({pct}%)"),
+            &label_style,
+            transform,
+        );
+    }
 }
 
 fn draw_chart(
@@ -385,7 +456,6 @@ fn draw_chart(
     elem: &SlideElement,
     chart: &loom_objects::Chart,
 ) {
-    // Card background
     pdf.draw_rect_with_transform(
         page,
         (0.0, 0.0, elem.width, elem.height),
@@ -398,8 +468,6 @@ fn draw_chart(
         PathStyle::stroked((0.85, 0.88, 0.90), 1.0),
         transform,
     );
-
-    // Title
     if let Some(title) = &chart.title {
         let title_style = TextStyle {
             size_pt: 12.0 * UNITS_PER_EDITOR_PX,
@@ -415,36 +483,79 @@ fn draw_chart(
             transform,
         );
     }
-
-    if !chart.series.is_empty() && !chart.categories.is_empty() {
-        let norm_values = chart.normalized_series_values();
-        let cat_count = chart.categories.len();
-        let series_count = chart.series.len();
-        let plot_top = 28.0 * UNITS_PER_EDITOR_PX;
-        let plot_bottom = elem.height - 20.0 * UNITS_PER_EDITOR_PX;
-        let plot_h = (plot_bottom - plot_top).max(20.0);
-        let plot_left = 24.0 * UNITS_PER_EDITOR_PX;
-        let plot_right = elem.width - 24.0 * UNITS_PER_EDITOR_PX;
-        let plot_w = (plot_right - plot_left).max(40.0);
-        let cat_w = plot_w / cat_count as f32;
-        let bar_slot = cat_w * 0.8;
-        let bar_w = (bar_slot / series_count as f32).max(2.0);
-
-        let colors: [(f32, f32, f32); 4] = [
-            (0.145, 0.388, 0.922),
-            (0.063, 0.725, 0.506),
-            (0.961, 0.620, 0.043),
-            (0.937, 0.267, 0.267),
-        ];
-
-        for (c_idx, _cat) in chart.categories.iter().enumerate() {
-            let cat_x = plot_left + c_idx as f32 * cat_w + (cat_w - bar_slot) / 2.0;
-            for (s_idx, s_norm) in norm_values.iter().enumerate() {
-                let norm = s_norm.get(c_idx).copied().unwrap_or(0.0) as f32;
-                let bar_h = (plot_h * norm).max(2.0);
+    if chart.series.is_empty() || chart.categories.is_empty() {
+        return;
+    }
+    if chart.chart_type == loom_objects::ChartType::Pie {
+        draw_pie_chart(pdf, page, transform, elem, chart);
+        return;
+    }
+    let norm_values = chart.normalized_series_values();
+    let cat_count = chart.categories.len();
+    let series_count = chart.series.len();
+    let plot_top = 28.0 * UNITS_PER_EDITOR_PX;
+    let plot_bottom = elem.height - 22.0 * UNITS_PER_EDITOR_PX;
+    let plot_h = (plot_bottom - plot_top).max(20.0);
+    let plot_left = 24.0 * UNITS_PER_EDITOR_PX;
+    let plot_w = (elem.width - 48.0 * UNITS_PER_EDITOR_PX).max(40.0);
+    let cat_w = plot_w / cat_count as f32;
+    let bar_slot = cat_w * 0.8;
+    let bar_w = (bar_slot / series_count as f32).max(2.0);
+    let is_point_chart = matches!(
+        chart.chart_type,
+        loom_objects::ChartType::Line
+            | loom_objects::ChartType::Area
+            | loom_objects::ChartType::Scatter
+    );
+    for (s_idx, s_norm) in norm_values.iter().enumerate() {
+        let color = CHART_COLORS[s_idx % CHART_COLORS.len()];
+        let pts: Vec<(f32, f32)> = s_norm
+            .iter()
+            .copied()
+            .enumerate()
+            .take(cat_count)
+            .map(|(c_idx, norm)| {
+                (
+                    plot_left + (c_idx as f32 + 0.5) * cat_w,
+                    plot_bottom - plot_h * (norm as f32),
+                )
+            })
+            .collect();
+        if is_point_chart {
+            if chart.chart_type != loom_objects::ChartType::Scatter {
+                for pair in pts.windows(2) {
+                    for k in 0..=20usize {
+                        let t = k as f32 / 20.0;
+                        let x = pair[0].0 + (pair[1].0 - pair[0].0) * t;
+                        let y = pair[0].1 + (pair[1].1 - pair[0].1) * t;
+                        let h = if chart.chart_type == loom_objects::ChartType::Area {
+                            (plot_bottom - y).max(2.0)
+                        } else {
+                            2.5
+                        };
+                        pdf.draw_rect_with_transform(
+                            page,
+                            (x - 1.25, y - 1.25, 2.5, h),
+                            PathStyle::filled(color),
+                            transform,
+                        );
+                    }
+                }
+            }
+            for (cx, cy) in pts {
+                pdf.draw_rect_with_transform(
+                    page,
+                    (cx - 3.0, cy - 3.0, 6.0, 6.0),
+                    PathStyle::filled(color),
+                    transform,
+                );
+            }
+        } else {
+            for (c_idx, norm) in s_norm.iter().copied().enumerate().take(cat_count) {
+                let bar_h = (plot_h * norm as f32).max(2.0);
+                let cat_x = plot_left + c_idx as f32 * cat_w + (cat_w - bar_slot) / 2.0;
                 let x = cat_x + s_idx as f32 * bar_w;
                 let y = plot_bottom - bar_h;
-                let color = colors[s_idx % colors.len()];
                 pdf.draw_rect_with_transform(
                     page,
                     (x, y, bar_w - 1.0, bar_h),
@@ -453,5 +564,62 @@ fn draw_chart(
                 );
             }
         }
+    }
+    let label_style = TextStyle {
+        size_pt: 8.5 * UNITS_PER_EDITOR_PX,
+        ..TextStyle::default()
+    };
+    for (c_idx, cat) in chart.categories.iter().enumerate() {
+        let lx = plot_left + c_idx as f32 * cat_w + cat_w * 0.25;
+        pdf.draw_text_with_transform(
+            page,
+            lx,
+            elem.height - 6.0 * UNITS_PER_EDITOR_PX,
+            cat,
+            &label_style,
+            transform,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Slide;
+    use loom_objects::{Chart, ChartType};
+
+    #[test]
+    fn pdf_export_draws_pie_slice_percentages_and_distinct_line_chart_geometry() {
+        let mut doc = PresentationDocument::new("c-deck", "Charts");
+        doc.slides.clear();
+        let mut slide = Slide::new("s1", "Charts", "blank");
+
+        let mut pie = Chart::new("pie-1", ChartType::Pie);
+        pie.title = Some("Spend".into());
+        pie.categories = vec!["Alpha".into(), "Beta".into()];
+        pie.add_series("Share", vec![75.0, 25.0], None);
+        slide.add_element(SlideElement::new_chart(
+            "el-pie", 40.0, 80.0, 400.0, 260.0, pie,
+        ));
+
+        let mut line = Chart::new("line-1", ChartType::Line);
+        line.title = Some("Trend".into());
+        line.categories = vec!["Q1".into(), "Q2".into(), "Q3".into()];
+        line.add_series("Rev", vec![10.0, 30.0, 20.0], None);
+        slide.add_element(SlideElement::new_chart(
+            "el-line", 480.0, 80.0, 400.0, 260.0, line,
+        ));
+
+        doc.slides.push(slide);
+        let pdf_bytes = export_pdf(&doc);
+        let content = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
+        assert!(
+            content.contains(r"Alpha \(75%\)") && content.contains(r"Beta \(25%\)"),
+            "pie chart PDF export must include slice percentage labels, got:\n{content}"
+        );
+        assert!(
+            content.contains("(Q1)") && content.contains("(Q2)") && content.contains("(Q3)"),
+            "line chart PDF export must include category labels, got:\n{content}"
+        );
     }
 }

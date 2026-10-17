@@ -763,17 +763,11 @@ export component PresentApp inherits Window {
         query: root.palette-query;
         selected: root.palette-selected;
         command-invoked(idx) => { root.palette-invoked(idx); }
-        query-changed(q) => {
-            root.palette-query = q;
-            root.palette-query-changed(q);
-        }
+        query-changed(q) => { root.palette-query = q; root.palette-query-changed(q); }
         move-selection(delta) => { root.palette-move(delta); }
         key-text(text) => { root.palette-key-text(text); }
         backspace => { root.palette-backspace(); }
-        close-requested => {
-            root.palette-open = false;
-            root.palette-close();
-        }
+        close-requested => { root.palette-open = false; root.palette-close(); }
     }
 
     if root.save-changes-open : save-changes-focus := FocusScope {
@@ -808,7 +802,7 @@ export component PresentApp inherits Window {
         }
       }
     }
-    if root.pptx-import-warning-open : PptxImportWarningDialog {
+    PptxImportWarningDialog {
         width: root.width;
         height: root.height;
         open: root.pptx-import-warning-open;
@@ -826,6 +820,7 @@ export component PresentApp inherits Window {
         cancel => { root.insert-table-dialog-open = false; }
     }
 
+    changed pptx-import-warning-open => { if (!root.pptx-import-warning-open) { root.focus-editor(); } }
     changed save-changes-open => {
         if (!root.save-changes-open) {
             if (root.theme-chooser-open) { root.theme-refocus-tick += 1; } else { root.focus-editor(); }

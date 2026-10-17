@@ -14,6 +14,12 @@ export component DocxImportWarningDialog inherits Rectangle {
         cancel-button.grab-focus();
     }
 
+    init => {
+        if (root.open) {
+            cancel-button.grab-focus();
+        }
+    }
+
     changed open => {
         if (root.open) {
             cancel-button.grab-focus();

@@ -499,3 +499,54 @@ fn toolbar_icons_and_caption_glyphs_scale_with_text() {
         "window-control glyph did not grow with text scale: {glyph1} -> {glyph2}"
     );
 }
+
+#[test]
+fn slide_navigator_sits_at_reading_start_and_empty_inspector_hides_geometry_rows() {
+    let session = launched();
+    let app = &session.app;
+    app.set_show_inspector(true);
+
+    configure_direction(app, false);
+    snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    let strip_ltr = element(app, "PresentSlideStrip");
+    assert!(
+        strip_ltr.absolute_position().x.abs() < 1.0,
+        "LTR slide navigator must sit on the left edge, got x={}",
+        strip_ltr.absolute_position().x
+    );
+
+    configure_direction(app, true);
+    snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    let strip_rtl = element(app, "PresentSlideStrip");
+    let right_edge = strip_rtl.absolute_position().x + strip_rtl.size().width;
+    assert!(
+        (right_edge - 1280.0).abs() < 1.5,
+        "RTL slide navigator must sit on the right edge, got right={right_edge}"
+    );
+
+    configure_direction(app, false);
+    app.set_selection_count(0);
+    snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    let inspector = element(app, "PresentInspector");
+    assert!(
+        inspector
+            .query_descendants()
+            .match_predicate(|e| {
+                e.accessible_label().as_deref()
+                    == Some("Select an object to edit its position and style.")
+            })
+            .find_first()
+            .is_some(),
+        "empty selection must show the single empty-state inspector message"
+    );
+    for geo_label in ["X position", "Y position", "Width", "Height", "Rotation"] {
+        assert!(
+            inspector
+                .query_descendants()
+                .match_predicate(move |e| e.accessible_label().as_deref() == Some(geo_label))
+                .find_first()
+                .is_none(),
+            "geometry field {geo_label} must be hidden when selection_count == 0"
+        );
+    }
+}

@@ -1161,3 +1161,80 @@ fn alt_letters_open_menus_while_editing_slide_text_without_typing_into_it() {
         "no letter was typed: {content}"
     );
 }
+
+#[test]
+fn slide_reorder_table_and_chart_insertion_and_pptx_warning_work_from_the_keyboard() {
+    let s = launched();
+    let editor = focus_weak(&s.app);
+    let first_id = s.state.session.borrow().document.slides[0].id.clone();
+    assert_eq!(s.state.session.borrow().document.active_index, 0);
+
+    // Move Slide Down and Move Slide Up via the Ctrl+K command palette.
+    ctrl(&s.app, "k");
+    type_text(&s.app, "move slide down");
+    press(&s.app, Key::Return);
+    assert_eq!(s.state.session.borrow().document.active_index, 1);
+    assert_eq!(s.state.session.borrow().document.slides[1].id, first_id);
+
+    ctrl(&s.app, "k");
+    type_text(&s.app, "move slide up");
+    press(&s.app, Key::Return);
+    assert_eq!(s.state.session.borrow().document.active_index, 0);
+    assert_eq!(s.state.session.borrow().document.slides[0].id, first_id);
+
+    // Insert a table and a chart via the Ctrl+K command palette.
+    let before_count = s.state.session.borrow().document.slides[0].elements.len();
+    ctrl(&s.app, "k");
+    type_text(&s.app, "insert table");
+    press(&s.app, Key::Return);
+    assert!(!s.app.get_palette_open());
+    assert_eq!(
+        s.state.session.borrow().document.slides[0].elements.len(),
+        before_count + 1
+    );
+    assert_eq!(
+        s.state.session.borrow().document.slides[0]
+            .elements
+            .last()
+            .unwrap()
+            .element_type,
+        ElementType::Table
+    );
+
+    ctrl(&s.app, "k");
+    type_text(&s.app, "insert chart");
+    press(&s.app, Key::Return);
+    assert_eq!(
+        s.state.session.borrow().document.slides[0]
+            .elements
+            .last()
+            .unwrap()
+            .element_type,
+        ElementType::Chart
+    );
+
+    // PPTX import warning dialog traps Tab, defaults to Cancel import, and Escape cancels.
+    let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+    let (weak, seen) = (s.app.as_weak(), log.clone());
+    s.app.on_pptx_import_cancel(move || {
+        seen.borrow_mut().push("cancel");
+        weak.upgrade().unwrap().set_pptx_import_warning_open(false);
+    });
+    let (weak, seen) = (s.app.as_weak(), log.clone());
+    s.app.on_pptx_import_continue(move || {
+        seen.borrow_mut().push("continue");
+        weak.upgrade().unwrap().set_pptx_import_warning_open(false);
+    });
+    s.app
+        .set_pptx_import_warning_message("SmartArt diagrams will be skipped.".into());
+    s.app.set_pptx_import_warning_open(true);
+    render(&s.app);
+    assert_eq!(focus_name(&s.app), "Cancel");
+    tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Continue Import");
+    tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Cancel");
+    press(&s.app, Key::Escape);
+    assert_eq!(*log.borrow(), ["cancel"]);
+    assert!(same_focus(&focus_weak(&s.app), &editor));
+}

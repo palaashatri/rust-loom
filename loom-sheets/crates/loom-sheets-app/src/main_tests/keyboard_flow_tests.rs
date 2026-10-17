@@ -1019,3 +1019,43 @@ fn f6_leaves_the_grid_for_the_toolbar_and_the_inspector_and_comes_back() {
     shift_key(&s.app, Key::F6);
     assert!(same_focus(&focus_weak(&s.app), &grid));
 }
+
+#[test]
+fn toolbar_text_menu_formatting_and_chart_insertion_work_from_the_keyboard() {
+    let s = launched(&[("A1", "10"), ("B1", "20")]);
+    let grid = focus_weak(&s.app);
+    let bolds = Rc::new(Cell::new(0));
+    let seen_bold = bolds.clone();
+    s.app
+        .on_toggle_bold(move || seen_bold.set(seen_bold.get() + 1));
+    let charts = Rc::new(Cell::new(0));
+    let seen_chart = charts.clone();
+    s.app
+        .on_insert_chart(move || seen_chart.set(seen_chart.get() + 1));
+    let rows = Rc::new(Cell::new(0));
+    let seen_row = rows.clone();
+    s.app.on_add_row(move || seen_row.set(seen_row.get() + 1));
+
+    // Text menu -> Bold via keyboard.
+    focus_toolbar_item(&s, "Text");
+    press(&s.app, Key::Return);
+    assert_eq!(s.app.get_toolbar_menu(), 4);
+    press(&s.app, Key::Return);
+    assert_eq!(s.app.get_toolbar_menu(), 0);
+    assert_eq!(bolds.get(), 1);
+    assert!(same_focus(&focus_weak(&s.app), &grid));
+
+    // Table menu -> Add Row via keyboard.
+    focus_toolbar_item(&s, "Table");
+    press(&s.app, Key::Return);
+    assert_eq!(s.app.get_toolbar_menu(), 3);
+    press(&s.app, Key::Return);
+    assert_eq!(s.app.get_toolbar_menu(), 0);
+    assert_eq!(rows.get(), 1);
+    assert!(same_focus(&focus_weak(&s.app), &grid));
+
+    // Chart toolbar button via keyboard.
+    focus_toolbar_item(&s, "Chart");
+    press(&s.app, Key::Return);
+    assert_eq!(charts.get(), 1);
+}

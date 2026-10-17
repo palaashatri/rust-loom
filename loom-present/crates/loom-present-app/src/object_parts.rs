@@ -262,6 +262,79 @@ fn table_parts(table: &Table, element_height: f32) -> Vec<ObjectPart> {
     out
 }
 
+fn dot_part(x: f32, y: f32, d: f32, w: f32, h: f32, fill: Color) -> ObjectPart {
+    let mut p = part(x - d / w / 2.0, y - d / h / 2.0, d / w, d / h);
+    p.has_bg = true;
+    p.bg = fill;
+    p.round = true;
+    p
+}
+
+fn pie_chart_parts(
+    chart: &Chart,
+    categories: usize,
+    width: f32,
+    height: f32,
+    out: &mut Vec<ObjectPart>,
+) {
+    let series = &chart.series[0];
+    let values: Vec<f64> = (0..categories)
+        .map(|ci| series.values.get(ci).copied().unwrap_or(0.0).max(0.0))
+        .collect();
+    let total: f64 = values.iter().sum();
+    if total <= 0.0 {
+        return;
+    }
+    let slice_fill = |ci: usize| {
+        if ci == 0 {
+            if let Some(hex) = series.color.as_deref() {
+                return color(hex);
+            }
+        }
+        Color::from_argb_encoded(SERIES[ci % SERIES.len()])
+    };
+    let (w, h) = (width.max(1.0), height.max(1.0));
+    let (cx, cy) = (0.31f32, 0.55f32);
+    let r_px = (w * 0.23).min(h * 0.34).max(12.0);
+    let dot_d = (r_px / 3.8).max(4.0);
+    out.push(dot_part(cx, cy, dot_d, w, h, slice_fill(0)));
+    for ring in 1..=6usize {
+        let rad = (ring as f32 - 0.3) / 6.0 * r_px;
+        let steps = (ring * 12).max(16);
+        for step in 0..steps {
+            let turn = (step as f64 + 0.5) / steps as f64;
+            let target = turn * total;
+            let mut acc = 0.0;
+            let mut slice_idx = categories.saturating_sub(1);
+            for (ci, v) in values.iter().copied().enumerate() {
+                acc += v;
+                if target <= acc {
+                    slice_idx = ci;
+                    break;
+                }
+            }
+            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
+            let x = cx + rad * theta.cos() / w;
+            let y = cy + rad * theta.sin() / h;
+            out.push(dot_part(x, y, dot_d, w, h, slice_fill(slice_idx)));
+        }
+    }
+    let row_step = (0.66 / categories.max(1) as f32).min(0.13);
+    for (ci, v) in values.iter().copied().enumerate() {
+        let ry = 0.22 + ci as f32 * row_step;
+        let mut swatch = part(0.58, ry + 0.015, 0.04, 0.055);
+        swatch.has_bg = true;
+        swatch.bg = slice_fill(ci);
+        out.push(swatch);
+        let cat = chart.categories.get(ci).map(String::as_str).unwrap_or("");
+        let pct = (v / total * 100.0).round() as i64;
+        let mut label = part(0.64, ry, 0.32, 0.09);
+        label.text = SharedString::from(format!("{cat} ({pct}%)"));
+        label.fs = 11.0;
+        out.push(label);
+    }
+}
+
 fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
     let mut out = Vec::new();
     let mut frame = part(0.0, 0.0, 1.0, 1.0);
@@ -287,6 +360,10 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
     if categories == 0 || chart.series.is_empty() {
         return out;
     }
+    if chart.chart_type == ChartType::Pie {
+        pie_chart_parts(chart, categories, width, height, &mut out);
+        return out;
+    }
     let max = chart
         .series
         .iter()
@@ -306,19 +383,11 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
         let frac = (value.max(0.0) / max) as f32;
         (px + (ci as f32 + 0.5) * group_w, py + ph - ph * frac)
     };
-    let lines = matches!(
+    if matches!(
         chart.chart_type,
         ChartType::Line | ChartType::Area | ChartType::Scatter
-    );
-    if lines {
+    ) {
         let (w, h) = (width.max(1.0), height.max(1.0));
-        let dot = |x: f32, y: f32, d: f32, fill: Color| {
-            let mut p = part(x - d / w / 2.0, y - d / h / 2.0, d / w, d / h);
-            p.has_bg = true;
-            p.bg = fill;
-            p.round = true;
-            p
-        };
         for (si, series) in chart.series.iter().enumerate() {
             let fill = colour(si, series);
             let points: Vec<(f32, f32)> = series
@@ -329,7 +398,6 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
                 .map(|(ci, v)| at(ci, *v))
                 .collect();
             if chart.chart_type == ChartType::Area {
-                // A column of the series colour under every sample of the line.
                 let steps = 60usize;
                 for pair in points.windows(2) {
                     for k in 0..steps {
@@ -356,17 +424,19 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
                     let n = ((dx.hypot(dy) / 2.5).ceil() as usize).clamp(1, 120);
                     for k in 0..=n {
                         let t = k as f32 / n as f32;
-                        out.push(dot(
+                        out.push(dot_part(
                             pair[0].0 + (pair[1].0 - pair[0].0) * t,
                             pair[0].1 + (pair[1].1 - pair[0].1) * t,
                             3.0,
+                            w,
+                            h,
                             fill,
                         ));
                     }
                 }
             }
             for (x, y) in points {
-                out.push(dot(x, y, 8.0, fill));
+                out.push(dot_part(x, y, 8.0, w, h, fill));
             }
         }
     } else {
@@ -394,13 +464,6 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
         label.align = 1;
         label.fs = 11.0;
         out.push(label);
-    }
-    if matches!(chart.chart_type, ChartType::Pie) {
-        let mut note = part(0.04, 0.92, 0.92, 0.07);
-        note.text = SharedString::from(format!("{:?} chart, drawn as columns", chart.chart_type));
-        note.fs = 10.0;
-        note.fg = Color::from_argb_encoded(0xFF70_7070);
-        out.push(note);
     }
     out
 }
@@ -477,5 +540,36 @@ mod tests {
         );
         assert!(area.len() > line.len(), "the area adds a fill");
         assert!(!line.iter().any(|p| p.text.contains("drawn as columns")));
+    }
+
+    #[test]
+    fn pie_charts_draw_a_circular_disc_and_slice_legend_not_columns() {
+        let mut chart = Chart::new("c", ChartType::Pie);
+        chart.categories = vec!["R&D".into(), "Sales".into(), "Ops".into()];
+        chart.add_series("Budget", vec![50.0, 30.0, 20.0], None);
+        let element = SlideElement::new_chart("c", 0.0, 0.0, 400.0, 300.0, chart);
+        let parts = parts_for(&element);
+        assert!(
+            !parts.iter().any(|p| p.text.contains("drawn as columns")),
+            "pie charts must not fall back to columns"
+        );
+        assert!(
+            parts.iter().filter(|p| p.round).count() > 20,
+            "pie chart disc should be drawn with round sector dots"
+        );
+        assert!(parts.iter().any(|p| p.text.contains("R&D (50%)")));
+        assert!(parts.iter().any(|p| p.text.contains("Sales (30%)")));
+        assert!(parts.iter().any(|p| p.text.contains("Ops (20%)")));
+        let mut slice_colors: Vec<u32> = parts
+            .iter()
+            .filter(|p| p.round && p.has_bg)
+            .map(|p| p.bg.as_argb_encoded())
+            .collect();
+        slice_colors.sort_unstable();
+        slice_colors.dedup();
+        assert!(
+            slice_colors.len() >= 3,
+            "each slice must get its own colour, got {slice_colors:?}"
+        );
     }
 }
