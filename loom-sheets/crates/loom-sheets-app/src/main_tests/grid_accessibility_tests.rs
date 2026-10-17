@@ -81,14 +81,23 @@ fn select_all_over_a_screenful_bounds_cell_accessibility_nodes_to_the_active_cro
     s.app.invoke_select_all();
     let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render after select all");
     let names = accessible_names(&s.app);
-    // Active cell A1 and its row/column neighbours stay exposed.
-    assert!(
-        names.iter().any(|name| name == "A1, value 10"),
-        "active cell A1 must remain exposed after Select All"
+    // Select All makes the last cell (H15) the active one; it and its row and
+    // column neighbours stay exposed.
+    assert_eq!(
+        (s.app.get_selected_row(), s.app.get_selected_col()),
+        (14, 7)
     );
     assert!(
-        names.iter().any(|name| name == "A10, value 100"),
-        "active column cell A10 must remain exposed after Select All"
+        names.iter().any(|name| name == "H15, value 150"),
+        "active cell H15 must remain exposed after Select All"
+    );
+    assert!(
+        names.iter().any(|name| name == "H10, value 100"),
+        "active column cell H10 must remain exposed after Select All"
+    );
+    assert!(
+        names.iter().any(|name| name == "A15, value 150"),
+        "active row cell A15 must remain exposed after Select All"
     );
     // Off-axis interior cells in a 120-cell Select All must not all become
     // individual accessibility nodes.

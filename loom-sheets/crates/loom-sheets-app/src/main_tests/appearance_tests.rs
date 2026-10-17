@@ -433,13 +433,18 @@ fn a_settings_directory_that_cannot_be_written_keeps_the_switch_and_says_so() {
 }
 
 #[test]
-fn appearance_listener_does_not_retain_gui_state_after_window_drops() {
+fn appearance_listener_does_not_hold_a_strong_reference_to_gui_state() {
+    // The listener lives in thread-local storage until the thread ends; a strong
+    // reference there keeps the state, and its worker thread, alive past the
+    // window and panics the worker's join at process exit.
     let h = launched("weak-state", Some("light"));
+    // Drop the listener the harness installed, so the count is the state's own.
+    appearance::on_change(|_| {});
+    let before = Rc::strong_count(&h.session.state);
     wire_appearance_menu_sync(&h.session.menu, &h.session.state);
-    let weak_state = Rc::downgrade(&h.session.state);
-    drop(h);
-    assert!(
-        weak_state.upgrade().is_none(),
-        "appearance::on_change must not retain GuiState (and WorkbookWorker) in thread-local storage after exit"
+    assert_eq!(
+        Rc::strong_count(&h.session.state),
+        before,
+        "the appearance listener must capture GuiState weakly"
     );
 }
