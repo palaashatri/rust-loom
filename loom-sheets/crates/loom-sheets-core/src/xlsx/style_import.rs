@@ -1,7 +1,7 @@
 //! Read `xl/styles.xml` into the cell formats the Loom model keeps.
 //!
 //! Every format Excel can store that the model cannot show exactly (a font
-//! colour, wrapped text, a fill that is not one of Loom's seven swatches, a
+//! colour that comes from the workbook theme, a fill that is not one of Loom's seven swatches, a
 //! time format, ...) is mapped to the closest thing Loom has and recorded on
 //! the format, so the import can say so instead of looking faithful.
 
@@ -45,6 +45,7 @@ struct FontFacts {
     italic: bool,
     underline: bool,
     size: Option<u8>,
+    color: Option<u32>,
     approximated: bool,
 }
 
@@ -69,15 +70,33 @@ fn font_facts(body: &str) -> FontFacts {
                 Some((points * 4.0 / 3.0).round().clamp(1.0, 255.0) as u8)
             }
         });
-    let plain_color = elements(body, "color").next().map_or(true, |color| {
-        let rgb = attr(color.attrs, "rgb");
-        let theme = attr(color.attrs, "theme");
-        let indexed = attr(color.attrs, "indexed");
-        rgb.as_deref().is_some_and(|rgb| rgb.ends_with("000000"))
-            || theme.as_deref() == Some("1")
-            || matches!(indexed.as_deref(), Some("8") | Some("64"))
-            || attr(color.attrs, "auto").is_some()
-    });
+    // An explicit RGB colour is kept; black and the automatic colour mean the
+    // paper's ink. Theme and indexed colours need the workbook theme, which is
+    // not read, so those stay approximated.
+    let (color, color_unresolved) = elements(body, "color")
+        .next()
+        .map_or((None, false), |color| {
+            let rgb = attr(color.attrs, "rgb");
+            let theme = attr(color.attrs, "theme");
+            let indexed = attr(color.attrs, "indexed");
+            if let Some(rgb) = rgb.as_deref() {
+                let digits = rgb.trim().trim_start_matches('#');
+                let digits = if digits.len() == 8 {
+                    &digits[2..]
+                } else {
+                    digits
+                };
+                return match u32::from_str_radix(digits, 16) {
+                    Ok(0) => (None, false),
+                    Ok(value) if digits.len() == 6 => (Some(value), false),
+                    _ => (None, true),
+                };
+            }
+            let default_ink = theme.as_deref() == Some("1")
+                || matches!(indexed.as_deref(), Some("8") | Some("64"))
+                || attr(color.attrs, "auto").is_some();
+            (None, !default_ink)
+        });
     FontFacts {
         bold: truthy_flag(body, "b"),
         italic: truthy_flag(body, "i"),
@@ -85,7 +104,8 @@ fn font_facts(body: &str) -> FontFacts {
             && attr(elements(body, "u").next().map_or("", |u| u.attrs), "val").as_deref()
                 != Some("none"),
         size,
-        approximated: !plain_color
+        color,
+        approximated: color_unresolved
             || contains_element(body, "strike")
             || contains_element(body, "vertAlign"),
     }
@@ -176,6 +196,7 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 italic: false,
                 underline: false,
                 size: None,
+                color: None,
                 approximated: false,
             });
         let (fill, fill_approximated) = fills
@@ -203,12 +224,13 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
             Some("right") => CellAlignment::Right,
             _ => CellAlignment::General,
         };
+        let wrap = matches!(
+            alignment_attr("wrapText").as_deref(),
+            Some("1") | Some("true")
+        );
         let alignment_approximated = matches!(
             horizontal.as_deref(),
             Some("fill") | Some("justify") | Some("distributed")
-        ) || matches!(
-            alignment_attr("wrapText").as_deref(),
-            Some("1") | Some("true")
         ) || alignment_attr("indent")
             .is_some_and(|value| value != "0")
             || alignment_attr("textRotation").is_some_and(|value| value != "0");
@@ -222,6 +244,8 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 border,
                 fill,
                 font_size: font.size,
+                text_color: font.color,
+                wrap,
             },
             alignment,
             number_lossy: number.lossy,

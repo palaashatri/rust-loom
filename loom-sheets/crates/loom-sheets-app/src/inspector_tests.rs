@@ -304,10 +304,12 @@ fn cell_inspector_rows_are_evenly_spaced_and_reachable_at_every_size() {
 fn the_number_format_choices_are_named_by_what_they_do() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
-    app.window().set_size(PhysicalSize::new(1280, 800));
+    // The Cell tab is long enough that its last groups sit below the fold of a
+    // 800 px window (the panel scrolls), so these alignment checks use a taller one.
+    app.window().set_size(PhysicalSize::new(1280, 1100));
     app.set_show_inspector(true);
     app.set_inspector_tab(1);
-    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+    let _ = snapshot_component(&app, 1280.0, 1100.0, 1.0).expect("render the Cell inspector");
     // Only buttons count: a button's visible caption is also exposed as a text node.
     let buttons = |label: &str| -> Vec<ElementHandle> {
         ElementHandle::find_by_accessible_label(&app, label)
@@ -512,10 +514,12 @@ fn the_inspector_has_one_heading_row_naming_the_selection() {
 fn section_headings_start_where_the_controls_below_them_start() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
-    app.window().set_size(PhysicalSize::new(1280, 800));
+    // The Cell tab is long enough that its last groups sit below the fold of a
+    // 800 px window (the panel scrolls), so these alignment checks use a taller one.
+    app.window().set_size(PhysicalSize::new(1280, 1100));
     app.set_show_inspector(true);
     app.set_inspector_tab(1);
-    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+    let _ = snapshot_component(&app, 1280.0, 1100.0, 1.0).expect("render the Cell inspector");
     // `role` narrows the match when a caption is also exposed as another node.
     let x_of = |label: &str, role: Option<AccessibleRole>| -> f32 {
         let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label)

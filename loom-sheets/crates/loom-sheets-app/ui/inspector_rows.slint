@@ -3,6 +3,7 @@
 // then field, then the buttons; or buttons, field, label.
 import { LoomTextField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { CellInk } from "grid_pointer.slint";
 
 component SheetRowLabel inherits Text {
     min-width: 84px;
@@ -192,13 +193,16 @@ component FillSwatch inherits Rectangle {
     in property <bool> selected: false;
     in property <string> swatch-label: "";
     in property <int> swatch-index: -1;
+    // The ring drawn round the chosen swatch; dark text colours need a ring
+    // that does not blend into them.
+    in property <color> ring: Theme.palette().accent;
     callback pick(int);
     width: 24px;
     height: 24px;
     border-radius: 4px;
     background: root.swatch-color;
     border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+    border-color: root.selected ? root.ring : Theme.palette().border;
     accessible-role: button;
     accessible-label: root.swatch-label;
     TouchArea { clicked => { root.pick(root.swatch-index); } }
@@ -219,6 +223,24 @@ export component SheetFillRow inherits HorizontalLayout {
         swatch-label: ["Fill red", "Fill orange", "Fill yellow", "Fill green", "Fill blue", "Fill purple", "Fill gray", "No fill"][self.k];
         swatch-index: self.fill;
         pick(idx) => { root.set-fill(idx); }
+    }
+}
+
+/// The text colour choices: seven colours and "Automatic" (the paper's ink).
+/// The palette comes from the app so the swatches and the colours applied are
+/// one list; right-to-left starts from the right edge.
+export component SheetTextColorRow inherits HorizontalLayout {
+    spacing: Theme.tokens.space.xs;
+    alignment: Theme.rtl ? end : start;
+    for slot in 8 : FillSwatch {
+        property <int> k: Theme.rtl ? 7 - slot : slot;
+        property <int> choice: k == 7 ? -1 : k;
+        swatch-color: k == 7 ? transparent : (k < CellInk.palette.length ? CellInk.palette[k] : transparent);
+        selected: CellInk.selected-slot == self.choice;
+        ring: Theme.palette().ink;
+        swatch-label: ["Text red", "Text orange", "Text green", "Text blue", "Text purple", "Text gray", "Text black", "Automatic text colour"][self.k];
+        swatch-index: self.choice;
+        pick(idx) => { CellInk.color-requested(idx); }
     }
 }
 

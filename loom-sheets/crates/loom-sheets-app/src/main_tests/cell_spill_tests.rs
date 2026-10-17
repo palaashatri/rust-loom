@@ -17,6 +17,8 @@ fn face<'a>(
         bolds: flags,
         italics: flags,
         sizes,
+        inks: &[],
+        wraps: &[],
     }
 }
 

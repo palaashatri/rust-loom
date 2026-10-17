@@ -16,6 +16,7 @@ fn wire_everything(session: &Session) {
     register_history_actions(app, state, &menu_service);
     object_actions::register_object_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);
+    crate::ink_actions::wire(app, state, &menu_service);
 }
 
 fn fingerprint(state: &GuiState) -> String {
@@ -45,6 +46,9 @@ fn table() -> Vec<(&'static str, Action)> {
         a("adjust_row_height", |app| app.invoke_adjust_row_height(5)),
         a("clear_selected_cells", |app| {
             app.invoke_clear_selected_cells()
+        }),
+        a("color_requested", |app| {
+            app.global::<CellInk>().invoke_color_requested(1)
         }),
         a("commit_selected_cell", |app| {
             app.invoke_commit_selected_cell("zzz".into())
@@ -102,6 +106,9 @@ fn table() -> Vec<(&'static str, Action)> {
         a("toggle_underline", |app| app.invoke_toggle_underline()),
         a("undo", |app| app.invoke_undo()),
         a("unfreeze_panes", |app| app.invoke_unfreeze_panes()),
+        a("wrap_toggled", |app| {
+            app.global::<CellInk>().invoke_wrap_toggled()
+        }),
     ]
 }
 

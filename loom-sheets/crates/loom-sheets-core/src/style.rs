@@ -127,6 +127,11 @@ pub struct CellStyle {
     pub fill: FillColor,
     /// Explicit font size in px (`None` follows the theme body size).
     pub font_size: Option<u8>,
+    /// Text colour as `0xRRGGBB` (`None` follows the paper's ink).
+    pub text_color: Option<u32>,
+    /// Wrap long text onto further lines inside the cell instead of cutting it
+    /// off or spilling it into empty neighbours.
+    pub wrap: bool,
 }
 
 impl StoredValue for CellStyle {
@@ -148,6 +153,8 @@ impl CellStyle {
             border: false,
             fill: FillColor::None,
             font_size: None,
+            text_color: None,
+            wrap: false,
         }
     }
 
@@ -161,6 +168,8 @@ impl CellStyle {
             && !self.border
             && self.fill == FillColor::None
             && self.font_size.is_none()
+            && self.text_color.is_none()
+            && !self.wrap
     }
 
     /// Formats a raw or evaluated string value for display in the grid.

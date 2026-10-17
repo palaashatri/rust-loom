@@ -28,13 +28,19 @@ impl XfKey {
 }
 
 pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
-    let mut fonts = Vec::<(bool, bool, bool, Option<u8>)>::new();
+    let mut fonts = Vec::<(bool, bool, bool, Option<u8>, Option<u32>)>::new();
     let mut fills = Vec::<FillColor>::new();
     let mut borders = Vec::<bool>::new();
     let mut formats = BTreeMap::<String, u32>::new();
     for key in keys {
         let style = key.style;
-        let font = (style.bold, style.italic, style.underline, style.font_size);
+        let font = (
+            style.bold,
+            style.italic,
+            style.underline,
+            style.font_size,
+            style.text_color,
+        );
         if !fonts.contains(&font) {
             fonts.push(font);
         }
@@ -54,7 +60,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
     }
     let font_xml = fonts
         .iter()
-        .map(|(bold, italic, underline, size)| {
+        .map(|(bold, italic, underline, size, color)| {
             let mut flags = String::new();
             if *bold {
                 flags.push_str("<b/>");
@@ -66,8 +72,12 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                 flags.push_str("<u/>");
             }
             let points = size.map(|px| (px as f32 * 0.75).max(1.0)).unwrap_or(11.0);
+            let color = match color {
+                Some(rgb) => format!("<color rgb=\"FF{:06X}\"/>", rgb & 0x00FF_FFFF),
+                None => "<color theme=\"1\"/>".to_string(),
+            };
             format!(
-                "<font>{flags}<sz val=\"{points:.2}\"/><color theme=\"1\"/><name val=\"Calibri\"/><family val=\"2\"/></font>"
+                "<font>{flags}<sz val=\"{points:.2}\"/>{color}<name val=\"Calibri\"/><family val=\"2\"/></font>"
             )
         })
         .collect::<String>();
@@ -117,6 +127,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                             key.style.italic,
                             key.style.underline,
                             key.style.font_size,
+                            key.style.text_color,
                         )
                 })
                 .unwrap_or(0);
@@ -136,11 +147,17 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
             } else {
                 *formats.get(&code).unwrap_or(&0)
             };
-            let alignment = match key.alignment {
-                CellAlignment::Left => "<alignment horizontal=\"left\"/>",
-                CellAlignment::Center => "<alignment horizontal=\"center\"/>",
-                CellAlignment::Right => "<alignment horizontal=\"right\"/>",
+            let horizontal = match key.alignment {
+                CellAlignment::Left => " horizontal=\"left\"",
+                CellAlignment::Center => " horizontal=\"center\"",
+                CellAlignment::Right => " horizontal=\"right\"",
                 CellAlignment::General => "",
+            };
+            let wrap = if key.style.wrap { " wrapText=\"1\"" } else { "" };
+            let alignment = if horizontal.is_empty() && wrap.is_empty() {
+                String::new()
+            } else {
+                format!("<alignment{horizontal}{wrap}/>")
             };
             let mut apply = String::new();
             for (flag, used) in [

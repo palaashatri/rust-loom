@@ -5,7 +5,7 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { GridPointer, CellSpill } from "grid_pointer.slint";
+import { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
 import { CellOverflowLayer } from "cell_overflow.slint";
 import { SheetHeaders } from "sheet_headers.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
@@ -236,6 +236,8 @@ export component SheetTable inherits Rectangle {
                             property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
                             property <int> spill-kind: cell-idx < CellSpill.kinds.length ? CellSpill.kinds[cell-idx] : 0;
                             property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
+                            property <int> ink: cell-idx < CellInk.colors.length ? CellInk.colors[cell-idx] : -1;
+                            property <bool> wraps: cell-idx < CellInk.wraps.length && CellInk.wraps[cell-idx];
 
                             // High-contrast paper-line is black, so using it
                             // behind black paper text makes header and
@@ -278,13 +280,14 @@ export component SheetTable inherits Rectangle {
                                 font-size: font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
                                 font-weight: is-bold ? 700 : 400;
                                 font-italic: is-italic;
-                                color: Theme.palette().paper-ink;
+                                color: CellInk.paint(ink, Theme.palette().paper-ink);
+                                wrap: wraps ? TextWrap.word-wrap : TextWrap.no-wrap;
                                 horizontal-alignment: (r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 1
                                     ? TextHorizontalAlignment.center
                                     : ((r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 2
                                         ? TextHorizontalAlignment.right
                                         : TextHorizontalAlignment.left);
-                                vertical-alignment: center;
+                                vertical-alignment: wraps ? TextVerticalAlignment.top : TextVerticalAlignment.center;
                                 overflow: spill-kind == 2 ? TextOverflow.clip : TextOverflow.elide;
                             }
 

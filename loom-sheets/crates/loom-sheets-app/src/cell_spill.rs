@@ -23,6 +23,10 @@ pub(crate) struct CellFace<'a> {
     pub bolds: &'a [bool],
     pub italics: &'a [bool],
     pub sizes: &'a [i32],
+    /// `0xRRGGBB` per cell, `-1` for the paper's ink.
+    pub inks: &'a [i32],
+    /// Wrapped cells stay inside their own box and never run into neighbours.
+    pub wraps: &'a [bool],
 }
 
 fn is_number(text: &str) -> bool {
@@ -69,6 +73,9 @@ pub(crate) fn compute(
             }
             if is_number(text) {
                 kinds[idx] = 2;
+                continue;
+            }
+            if face.wraps.get(idx).copied().unwrap_or(false) {
                 continue;
             }
             let size = face.sizes.get(idx).copied().unwrap_or(14) as f32 * zoom;
@@ -119,6 +126,7 @@ pub(crate) fn compute(
                 size,
                 bold,
                 italic: face.italics.get(idx).copied().unwrap_or(false),
+                ink: face.inks.get(idx).copied().unwrap_or(-1),
             });
         }
         y += height;

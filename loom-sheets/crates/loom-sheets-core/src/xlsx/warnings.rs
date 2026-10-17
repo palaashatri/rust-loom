@@ -180,7 +180,7 @@ impl XlsxImportWarning {
                 "time, fraction or non-dollar currency number formats (shown as plain numbers or dates)"
             }
             Self::ApproximatedFormatting => {
-                "fonts, text colours, wrapped text, exact fill colours and border styles"
+                "font families, theme text colours, exact fill colours and border styles"
             }
             Self::RichTextRuns => "formatting inside part of a cell's text",
             Self::NotesAndLinks => "cell comments, notes and hyperlinks",

@@ -49,6 +49,7 @@ mod analysis;
 mod grid_gestures;
 mod grid_navigation;
 mod grid_pointer;
+mod ink_actions;
 mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
 
@@ -184,6 +185,9 @@ struct ProjectedSheetGrid {
     cell_borders: Vec<bool>,
     cell_fills: Vec<i32>,
     cell_font_sizes: Vec<i32>,
+    /// `0xRRGGBB` per cell, `-1` for the paper's ink.
+    cell_text_colors: Vec<i32>,
+    cell_wraps: Vec<bool>,
 }
 
 /// What a screen reader announces for a worksheet cell: its address, then its
@@ -230,6 +234,8 @@ fn project_sheet_grid_with_values(
     let mut cell_borders = Vec::with_capacity(cap);
     let mut cell_fills = Vec::with_capacity(cap);
     let mut cell_font_sizes = Vec::with_capacity(cap);
+    let mut cell_text_colors = Vec::with_capacity(cap);
+    let mut cell_wraps = Vec::with_capacity(cap);
     for local_row in 0..viewport.visible_rows {
         for local_col in 0..viewport.visible_cols {
             let Some(row) = viewport.row_at(local_row) else {
@@ -265,6 +271,12 @@ fn project_sheet_grid_with_values(
             cell_borders.push(style.border);
             cell_fills.push(style.fill.swatch_index());
             cell_font_sizes.push(formatting::effective_font_size(style) as i32);
+            cell_text_colors.push(
+                style
+                    .text_color
+                    .map_or(-1, |rgb| (rgb & 0x00FF_FFFF) as i32),
+            );
+            cell_wraps.push(style.wrap);
         }
     }
 
@@ -282,6 +294,8 @@ fn project_sheet_grid_with_values(
         cell_borders,
         cell_fills,
         cell_font_sizes,
+        cell_text_colors,
+        cell_wraps,
     }
 }
 
@@ -1214,6 +1228,7 @@ pub(crate) fn update_selection_range(
     app.set_cell_decimals_label(SharedString::from(decimals.to_string()));
     app.set_cell_border(style.border);
     app.set_cell_fill(style.fill.swatch_index());
+    ink_actions::publish_selected(app, style);
     let font_size = formatting::effective_font_size(style);
     app.set_cell_font_size(font_size as i32);
     app.set_cell_font_label(SharedString::from(font_size.to_string()));

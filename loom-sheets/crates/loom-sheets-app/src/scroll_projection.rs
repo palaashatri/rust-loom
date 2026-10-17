@@ -320,7 +320,16 @@ fn publish_spill(app: &SheetsApp, grid: &ProjectedSheetGrid, geometry: &GridGeom
         bolds: &grid.cell_bolds,
         italics: &grid.cell_italics,
         sizes: &grid.cell_font_sizes,
+        inks: &grid.cell_text_colors,
+        wraps: &grid.cell_wraps,
     };
+    let ink = app.global::<CellInk>();
+    if let Some(model) = refresh_model(ink.get_colors(), grid.cell_text_colors.clone()) {
+        ink.set_colors(model);
+    }
+    if let Some(model) = refresh_model(ink.get_wraps(), grid.cell_wraps.clone()) {
+        ink.set_wraps(model);
+    }
     let spill = cell_spill::compute(
         &face,
         grid.cols.len(),

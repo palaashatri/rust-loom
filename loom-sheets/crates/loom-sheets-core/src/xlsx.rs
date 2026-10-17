@@ -88,6 +88,49 @@ mod tests {
     }
 
     #[test]
+    fn text_colour_and_wrapped_text_survive_an_xlsx_round_trip_without_a_warning() {
+        let mut sheet = Sheet::new("Ink");
+        sheet.set_str("A1", "a long sentence that needs several lines");
+        let cell = CellRef { row: 0, col: 0 };
+        let mut style = sheet.cell_style(cell);
+        style.text_color = Some(0x00C0_3A2B);
+        style.wrap = true;
+        style.bold = true;
+        sheet.set_cell_style(cell, style);
+        sheet.set_cell_alignment(cell, CellAlignment::Center);
+
+        let bytes = export_xlsx_sheets(&[sheet]).expect("export");
+        let archive = PackageArchive::from_bytes(&bytes).expect("zip");
+        let styles = String::from_utf8_lossy(archive.get("xl/styles.xml").expect("styles"));
+        assert!(
+            styles.contains("rgb=\"FFC03A2B\""),
+            "the font colour is written: {styles}"
+        );
+        assert!(
+            styles.contains("wrapText=\"1\""),
+            "wrap is written: {styles}"
+        );
+        assert!(
+            styles.contains("horizontal=\"center\""),
+            "alignment is kept next to it"
+        );
+
+        let imported = import_xlsx_sheets(&bytes).expect("import");
+        let back = imported.sheets[0].cell_style(cell);
+        assert_eq!(back.text_color, Some(0x00C0_3A2B));
+        assert!(back.wrap && back.bold);
+        assert_eq!(
+            imported.sheets[0].cell_alignment(cell),
+            CellAlignment::Center
+        );
+        assert!(
+            imported.warnings.is_empty(),
+            "colour and wrap are kept now, so nothing is approximated: {:?}",
+            imported.warnings
+        );
+    }
+
+    #[test]
     fn xlsx_export_links_the_styles_part_from_the_workbook() {
         let mut sheet = Sheet::new("Styled");
         sheet.set_str("A1", "total");

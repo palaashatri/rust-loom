@@ -23,6 +23,7 @@ pub(crate) const MUTATING: &[&str] = &[
     "adjust_font",
     "adjust_row_height",
     "clear_selected_cells",
+    "color_requested",
     "commit_selected_cell",
     "create_template",
     "cut_selection",
@@ -60,6 +61,7 @@ pub(crate) const MUTATING: &[&str] = &[
     "toggle_underline",
     "undo",
     "unfreeze_panes",
+    "wrap_toggled",
 ];
 
 /// Callbacks that never change the workbook, or that are separately protected.

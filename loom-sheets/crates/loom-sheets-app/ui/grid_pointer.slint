@@ -36,6 +36,27 @@ export struct SpillItem {
     size: length,
     bold: bool,
     italic: bool,
+    // 0xRRGGBB text colour, or -1 for the paper's ink.
+    ink: int,
+}
+
+/// Per-cell text colour and wrapping, and the selected cell's values for the
+/// inspector. Kept in a global so the byte-limited app window needs no new
+/// property or callback for them.
+export global CellInk {
+    // Per visible cell: -1 follows the paper's ink, otherwise 0xRRGGBB.
+    in property <[int]> colors;
+    in property <[bool]> wraps;
+    // The seven choosable text colours (the eighth swatch is "Automatic").
+    in property <[color]> palette;
+    // The selected cell: its text colour as a palette slot (-1 automatic) and wrap.
+    in property <int> selected-slot: -1;
+    in-out property <bool> selected-wrap: false;
+    callback color-requested(int);
+    callback wrap-toggled();
+    pure function paint(value: int, fallback: color) -> color {
+        value < 0 ? fallback : rgb(Math.floor(value / 65536), Math.mod(Math.floor(value / 256), 256), Math.mod(value, 256))
+    }
 }
 
 export global CellSpill {

@@ -52,6 +52,11 @@ struct PersistedStyle {
     fill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font: Option<u8>,
+    /// Text colour as `#RRGGBB`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    wrap: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -173,6 +178,10 @@ impl From<&Sheet> for PersistedSheet {
                     fill: (style.fill != crate::style::FillColor::None)
                         .then(|| style.fill.as_str().to_string()),
                     font: style.font_size,
+                    color: style
+                        .text_color
+                        .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
+                    wrap: style.wrap,
                 })
                 .collect(),
             col_widths: sheet
@@ -240,6 +249,19 @@ fn parse_number_format(raw: Option<&str>) -> Result<NumberFormat, String> {
         "plain-text" => Ok(NumberFormat::PlainText),
         other => Err(format!("unknown number format {other:?}")),
     }
+}
+
+/// Reads a saved `#RRGGBB` text colour; a malformed value is an error rather
+/// than silently dropping the colour.
+fn parse_text_color(raw: Option<&str>) -> Result<Option<u32>, String> {
+    let Some(raw) = raw else { return Ok(None) };
+    let hex = raw.strip_prefix('#').unwrap_or(raw);
+    if hex.len() != 6 {
+        return Err(format!("invalid text color {raw:?}"));
+    }
+    u32::from_str_radix(hex, 16)
+        .map(Some)
+        .map_err(|_| format!("invalid text color {raw:?}"))
 }
 
 fn parse_fill(raw: Option<&str>) -> Result<crate::style::FillColor, String> {
@@ -320,6 +342,8 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             border: style.border,
             fill: parse_fill(style.fill.as_deref())?,
             font_size: style.font,
+            text_color: parse_text_color(style.color.as_deref())?,
+            wrap: style.wrap,
         };
         if sheet.styles.insert(reference, value).is_some() {
             return Err(format!("duplicate style reference {:?}", style.reference));
@@ -472,6 +496,13 @@ mod tests {
     use crate::evaluate;
 
     #[test]
+    fn a_malformed_text_colour_is_an_error_not_a_dropped_colour() {
+        let json = r##"{"name":"s","cells":[],"styles":[{"ref":"A1","color":"#12"}]}"##;
+        let error = sheet_from_json(json).unwrap_err();
+        assert!(error.contains("text color"), "{error}");
+    }
+
+    #[test]
     fn json_roundtrip_preserves_alignments_and_styles() {
         let mut sheet = Sheet::new("styled");
         sheet.set_str("A1", "1234.5");
@@ -490,6 +521,8 @@ mod tests {
                 border: false,
                 fill: crate::style::FillColor::None,
                 font_size: None,
+                text_color: None,
+                wrap: false,
             },
         );
         sheet.set_cell_style(
@@ -503,6 +536,8 @@ mod tests {
                 border: true,
                 fill: crate::style::FillColor::Blue,
                 font_size: Some(18),
+                text_color: Some(0x00C0_3A2B),
+                wrap: true,
             },
         );
         let json = sheet_to_json(&sheet);
@@ -521,6 +556,14 @@ mod tests {
         assert!(back_b1.border);
         assert_eq!(back_b1.fill, crate::style::FillColor::Blue);
         assert_eq!(back_b1.font_size, Some(18));
+        assert_eq!(back_b1.text_color, Some(0x00C0_3A2B));
+        assert!(back_b1.wrap);
+        assert_eq!(back_a1.text_color, None);
+        assert!(!back_a1.wrap);
+        assert!(
+            json.contains("#C03A2B"),
+            "the colour is saved as readable hex"
+        );
         let legacy = r#"{"name":"old","cells":[],"col_widths":{},"row_heights":{}}"#;
         let legacy_sheet = sheet_from_json(legacy).unwrap();
         assert_eq!(

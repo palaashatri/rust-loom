@@ -140,7 +140,9 @@ fn external_cells_data(
                         },
                         bold: style.bold,
                         italic: style.italic,
-                        text_color: None,
+                        text_color: style
+                            .text_color
+                            .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
                         alignment: match alignment {
                             loom_sheets_core::style::CellAlignment::Left => {
                                 Some(loom_objects::table::HorizontalAlign::Left)

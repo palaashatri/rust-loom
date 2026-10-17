@@ -17,6 +17,9 @@ mod keyboard_flow_tests;
 #[path = "main_tests/grid_accessibility_tests.rs"]
 mod grid_accessibility_tests;
 
+#[path = "main_tests/ink_tests.rs"]
+mod ink_tests;
+
 #[path = "main_tests/grid_scale_tests.rs"]
 mod grid_scale_tests;
 

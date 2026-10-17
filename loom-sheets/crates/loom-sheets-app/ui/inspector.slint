@@ -3,7 +3,8 @@ import {
     LoomPanel, LoomToggle, LoomButton, LoomIconButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
-import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
+import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetTextColorRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
+import { CellInk } from "grid_pointer.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
 
 export component SheetInspector inherits LoomPanel {
@@ -257,6 +258,25 @@ export component SheetInspector inherits LoomPanel {
                         increase-tip: "Increase the font size of selected cells by one step.";
                         decrease => { root.adjust-font(-1); }
                         increase => { root.adjust-font(1); }
+                    }
+                    Text {
+                        text: "Text colour";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        accessible-role: text;
+                        accessible-label: "Text colour";
+                    }
+                    SheetTextColorRow { }
+                    HorizontalLayout {
+                        alignment: Theme.rtl ? end : start;
+                        LoomToggle {
+                            label: "Wrap text";
+                            checked <=> CellInk.selected-wrap;
+                            accessible-checkable: true;
+                            accessible-checked: CellInk.selected-wrap;
+                            toggled => { CellInk.wrap-toggled(); }
+                        }
                     }
                     SheetHeading { title: "Borders & Fill"; }
                     HorizontalLayout {
