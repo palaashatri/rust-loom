@@ -193,7 +193,7 @@ fn write_sheets_interop_fixtures() {
 
     let values = loom_sheets_core::workbook::evaluate_workbook(&sheets);
     for (index, sheet) in sheets.iter().enumerate() {
-        let csv = to_csv_with_values(sheet, &values[index]);
+        let csv = format!("\u{FEFF}{}", to_csv_with_values(sheet, &values[index]));
         std::fs::write(
             dir.join(format!("sheets-{}.csv", index + 1)),
             csv.as_bytes(),
@@ -201,4 +201,50 @@ fn write_sheets_interop_fixtures() {
         .unwrap();
     }
     std::fs::write(dir.join("sheets-expected.json"), json_for(&sheets)).unwrap();
+}
+
+#[test]
+#[ignore = "reads calc-authored.xlsx from LOOM_INTEROP_OUT and verifies Loom imports LibreOffice-authored XLSX"]
+fn import_libreoffice_authored_xlsx() {
+    let dir = PathBuf::from(std::env::var("LOOM_INTEROP_OUT").expect("set LOOM_INTEROP_OUT"));
+    let path = dir.join("calc-authored.xlsx");
+    if !path.exists() {
+        println!(
+            "SKIP import_libreoffice_authored_xlsx: {} not present yet",
+            path.display()
+        );
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("read calc-authored.xlsx");
+    let imported = import_xlsx_sheets(&bytes).expect("import LibreOffice-authored XLSX");
+    assert_eq!(imported.sheets.len(), 2);
+    assert_eq!(imported.sheets[0].name, "Q1 Sales");
+    assert_eq!(imported.sheets[1].name, "Rates");
+
+    let values = loom_sheets_core::workbook::evaluate_workbook(&imported.sheets);
+    let sales_vals = &values[0];
+    assert_eq!(
+        sales_vals.get(&at("A4")).map(Value::display).as_deref(),
+        Some("Caf\u{e9} Zo\u{eb}")
+    );
+    assert_eq!(sales_vals.get(&at("D2")), Some(&Value::Number(3.75)));
+    assert_eq!(sales_vals.get(&at("D7")), Some(&Value::Number(67.25)));
+    assert_eq!(
+        sales_vals.get(&at("H2")).map(Value::display).as_deref(),
+        Some("small")
+    );
+    assert_eq!(
+        sales_vals.get(&at("H4")).map(Value::display).as_deref(),
+        Some("APPLES-5")
+    );
+    assert_eq!(sales_vals.get(&at("H6")), Some(&Value::Number(4.5)));
+    println!(
+        "PASS import_libreoffice_authored_xlsx: sheets={:?}, D2={:?}, D7={:?}, H4={:?}, H6={:?}, warnings={:?}",
+        imported.sheets.iter().map(|s| &s.name).collect::<Vec<_>>(),
+        sales_vals.get(&at("D2")),
+        sales_vals.get(&at("D7")),
+        sales_vals.get(&at("H4")),
+        sales_vals.get(&at("H6")),
+        imported.warnings
+    );
 }

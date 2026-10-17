@@ -83,13 +83,22 @@ fn fixture_session() -> PresentationSession {
         (60.0, 140.0, 500.0, 300.0),
         0.0,
     ));
-    two.add_element(element(
+    let mut rect2 = element(
         "rect2",
         ElementType::ShapeRectangle,
         "Box label",
         (600.0, 140.0, 300.0, 120.0),
         15.0,
-    ));
+    );
+    rect2.style = loom_present_core::ElementStyle {
+        font_size_pt: Some(24.0),
+        bold: Some(true),
+        italic: true,
+        color: Some("#1565C0".to_string()),
+        fill: Some("#E65100".to_string()),
+        align: Some(loom_present_core::TextAlign::Right),
+    };
+    two.add_element(rect2);
     two.add_element(element(
         "circle2",
         ElementType::ShapeCircle,
@@ -164,4 +173,64 @@ fn write_present_interop_fixtures() {
     )
     .unwrap();
     std::fs::write(dir.join("present.pdf"), export_pdf(&session.document)).unwrap();
+}
+
+#[test]
+#[ignore = "reads impress-authored.pptx from LOOM_INTEROP_OUT and verifies Loom imports LibreOffice-authored PPTX"]
+fn import_libreoffice_authored_pptx() {
+    let dir = PathBuf::from(std::env::var("LOOM_INTEROP_OUT").expect("set LOOM_INTEROP_OUT"));
+    let path = dir.join("impress-authored.pptx");
+    if !path.exists() {
+        println!(
+            "SKIP import_libreoffice_authored_pptx: {} not present yet",
+            path.display()
+        );
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("read impress-authored.pptx");
+    let doc = loom_present_core::import_pptx(&bytes).expect("import LibreOffice-authored PPTX");
+    assert_eq!(doc.slides.len(), 4);
+    let all_text: Vec<String> = doc
+        .slides
+        .iter()
+        .flat_map(|s| s.elements.iter().map(|e| e.content.clone()))
+        .collect();
+    assert!(
+        all_text.iter().any(|t| t.contains("Q3 & Q4 Plan")),
+        "slide 1 title preserved: {all_text:?}"
+    );
+    assert!(
+        all_text.iter().any(|t| t.contains("Caf\u{e9}")),
+        "slide 1 accented subtitle preserved: {all_text:?}"
+    );
+    assert!(
+        all_text.iter().any(|t| t.contains("Box label")),
+        "slide 2 shape text preserved: {all_text:?}"
+    );
+    assert!(
+        doc.slides[2]
+            .elements
+            .iter()
+            .any(|e| e.element_type == ElementType::Picture),
+        "slide 3 picture preserved: {:?}",
+        doc.slides[2].elements
+    );
+    assert!(
+        doc.slides[3]
+            .elements
+            .iter()
+            .any(|e| e.element_type == ElementType::Table),
+        "slide 4 table preserved: {:?}",
+        doc.slides[3].elements
+    );
+    println!(
+        "PASS import_libreoffice_authored_pptx: slides={}, assets={}, slide4_types={:?}",
+        doc.slides.len(),
+        doc.assets.len(),
+        doc.slides[3]
+            .elements
+            .iter()
+            .map(|e| &e.element_type)
+            .collect::<Vec<_>>()
+    );
 }

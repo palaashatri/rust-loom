@@ -406,10 +406,8 @@ fn parse_paragraph(
         let num_snippet = &p_xml[num_start..num_start + num_end];
         if let Some(num_id_pos) = num_snippet.find("<w:numId") {
             if let Some(num_id_val) = extract_attribute_value(&num_snippet[num_id_pos..], "w:val") {
-                if num_id_val == "1" {
-                    kind = "list-bulleted".to_string();
-                } else {
-                    kind = "list-numbered".to_string();
+                if let Some(list_kind) = resolve_num_id_list_kind(archive, &num_id_val) {
+                    kind = list_kind.to_string();
                 }
             } else {
                 kind = "list-bulleted".to_string();
@@ -726,4 +724,47 @@ fn parse_rels(rels_xml: &str) -> std::collections::BTreeMap<String, String> {
         offset = abs_start + tag_end;
     }
     map
+}
+
+fn resolve_num_id_list_kind(
+    archive: Option<&PackageArchive>,
+    num_id: &str,
+) -> Option<&'static str> {
+    if let Some(num_xml) = archive
+        .and_then(|a| a.get("word/numbering.xml"))
+        .and_then(|b| std::str::from_utf8(b).ok())
+    {
+        let num_tag = format!("<w:num w:numId=\"{num_id}\"");
+        if let Some(num_pos) = num_xml.find(&num_tag) {
+            let num_rest = &num_xml[num_pos..];
+            let num_end = num_rest.find("</w:num>").unwrap_or(num_rest.len());
+            let num_block = &num_rest[..num_end];
+            if let Some(abs_pos) = num_block.find("<w:abstractNumId") {
+                if let Some(abs_id) = extract_attribute_value(&num_block[abs_pos..], "w:val") {
+                    let abs_tag = format!("<w:abstractNum w:abstractNumId=\"{abs_id}\"");
+                    if let Some(abs_start) = num_xml.find(&abs_tag) {
+                        let abs_rest = &num_xml[abs_start..];
+                        let abs_end = abs_rest.find("</w:abstractNum>").unwrap_or(abs_rest.len());
+                        let abs_block = &abs_rest[..abs_end];
+                        if let Some(fmt_pos) = abs_block.find("<w:numFmt") {
+                            if let Some(fmt_val) =
+                                extract_attribute_value(&abs_block[fmt_pos..], "w:val")
+                            {
+                                return match fmt_val.to_ascii_lowercase().as_str() {
+                                    "none" => None,
+                                    "bullet" => Some("list-bulleted"),
+                                    _ => Some("list-numbered"),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if num_id == "1" {
+        Some("list-bulleted")
+    } else {
+        Some("list-numbered")
+    }
 }

@@ -137,3 +137,58 @@ fn a_chart_block_exports_as_a_chart_part_and_never_as_json_text() {
         std::fs::write(PathBuf::from(dir).join("writer-chart.docx"), &export.bytes).unwrap();
     }
 }
+
+#[test]
+#[ignore = "reads writer-lo-authored.docx from LOOM_INTEROP_OUT and verifies Loom imports LibreOffice-authored DOCX"]
+fn import_libreoffice_authored_docx() {
+    let dir = PathBuf::from(std::env::var("LOOM_INTEROP_OUT").expect("set LOOM_INTEROP_OUT"));
+    let path = dir.join("writer-lo-authored.docx");
+    if !path.exists() {
+        println!(
+            "SKIP import_libreoffice_authored_docx: {} not present yet",
+            path.display()
+        );
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("read writer-lo-authored.docx");
+    let doc =
+        loom_writer_core::docx::import_docx(&bytes).expect("import LibreOffice-authored DOCX");
+    let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.as_str()).collect();
+    assert!(
+        doc.blocks
+            .iter()
+            .any(|b| b.kind == "heading1" && b.text.as_str() == "Quarterly Overview"),
+        "Heading 1 preserved: {:?}",
+        doc.blocks
+    );
+    assert!(
+        doc.blocks
+            .iter()
+            .any(|b| b.kind == "heading2" && b.text.as_str() == "Details"),
+        "Heading 2 preserved: {:?}",
+        doc.blocks
+    );
+    assert!(
+        doc.blocks
+            .iter()
+            .any(|b| b.kind == "list-bulleted" && b.text.as_str() == "Apples"),
+        "Bulleted list preserved: {:?}",
+        doc.blocks
+    );
+    assert!(
+        doc.blocks.iter().any(|b| b.kind == TABLE_BLOCK_KIND
+            && b.text.as_str().contains("Tea")
+            && b.text.as_str().contains("Coffee")),
+        "Table preserved: {:?}",
+        doc.blocks
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("Caf\u{e9} Zo\u{eb}")),
+        "Accented text preserved: {texts:?}"
+    );
+    println!(
+        "PASS import_libreoffice_authored_docx: blocks={}, kinds={:?}",
+        doc.blocks.len(),
+        doc.blocks.iter().map(|b| &b.kind).collect::<Vec<_>>()
+    );
+}

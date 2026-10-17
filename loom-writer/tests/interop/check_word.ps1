@@ -44,24 +44,55 @@ Check 'markdown: bold and italic runs keep inline markup' (($md -match '\*\*bold
 Check 'markdown: a blank line separates a list from the following table' ($md -match "(?s)Third step\r?\n\r?\n\| Name") 'the table follows "3. Third step" directly, so Markdown readers treat it as part of the list item'
 
 function Read-PdfText([byte[]]$bytes) {
-    # Minimal reader for the uncompressed PDFs Loom writes: text runs in drawing order with the
-    # font in force, and the page count. Latin-1 decoding keeps bytes 1:1; WinAnsi text is then
-    # re-decoded as Windows-1252.
     $raw = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
-    $fonts = @{}
-    foreach ($m in [regex]::Matches($raw, '(?s)(\d+) 0 obj\s*<<[^>]*?/Type /Font[^>]*?/BaseFont /([A-Za-z-]+)')) { $fonts[$m.Groups[1].Value] = $m.Groups[2].Value }
-    $names = @{}
-    foreach ($m in [regex]::Matches($raw, '/(F\d+) (\d+) 0 R')) { $names[$m.Groups[1].Value] = $fonts[$m.Groups[2].Value] }
+    function Get-PdfStream([int]$objId) {
+        $m = [regex]::Match($raw, "(?s)(?:^|\n)$objId 0 obj\n(<<.*?>>)\nstream\n")
+        if (-not $m.Success) { return '' }
+        $dict = $m.Groups[1].Value
+        $len = [int]([regex]::Match($dict, '/Length (\d+)').Groups[1].Value)
+        $start = $m.Index + $m.Length
+        if ($dict -match '/FlateDecode') {
+            $ms = New-Object System.IO.MemoryStream($bytes, ($start + 2), ($len - 6))
+            $ds = New-Object System.IO.Compression.DeflateStream($ms, [System.IO.Compression.CompressionMode]::Decompress)
+            return (New-Object System.IO.StreamReader($ds, [System.Text.Encoding]::GetEncoding(28591))).ReadToEnd()
+        }
+        return $raw.Substring($start, $len)
+    }
+    function Decode-Utf16Hex([string]$hex) {
+        $b = New-Object byte[] ($hex.Length / 2)
+        for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+        return [System.Text.Encoding]::BigEndianUnicode.GetString($b)
+    }
+    $fonts = @{}; $cmaps = @{}
+    foreach ($m in [regex]::Matches($raw, '(?s)(\d+) 0 obj\s*<<[^>]*?/Type /Font /Subtype /Type0 /BaseFont /(?:[A-Z]{6}\+)?([A-Za-z-]+)[^>]*?/ToUnicode (\d+) 0 R')) {
+        $objId = $m.Groups[1].Value; $fonts[$objId] = $m.Groups[2].Value
+        $cmapStream = Get-PdfStream ([int]$m.Groups[3].Value)
+        $map = @{}
+        foreach ($cm in [regex]::Matches($cmapStream, '<([0-9A-Fa-f]{4})>\s*<([0-9A-Fa-f]+)>')) {
+            $map[$cm.Groups[1].Value.ToUpperInvariant()] = Decode-Utf16Hex $cm.Groups[2].Value
+        }
+        $cmaps[$objId] = $map
+    }
+    $names = @{}; $resMaps = @{}
+    foreach ($m in [regex]::Matches($raw, '/(F\d+) (\d+) 0 R')) {
+        $names[$m.Groups[1].Value] = $fonts[$m.Groups[2].Value]
+        $resMaps[$m.Groups[1].Value] = $cmaps[$m.Groups[2].Value]
+    }
     $runs = @()
-    $win = [System.Text.Encoding]::GetEncoding(1252)
-    foreach ($m in [regex]::Matches($raw, '/(F\d+) [\d.]+ Tf BT ([\d.\-]+) ([\d.\-]+) Td \(((?:\\.|[^\\)])*)\) Tj')) {
-        $text = [regex]::Replace($m.Groups[4].Value, '\\([0-7]{1,3}|.)', {
-            param($e)
-            $v = $e.Groups[1].Value
-            if ($v -match '^[0-7]{1,3}$') { [string][char][Convert]::ToInt32($v, 8) } else { $v }
-        })
-        $text = $win.GetString([System.Text.Encoding]::GetEncoding(28591).GetBytes($text))
-        $runs += [pscustomobject]@{ Font = $names[$m.Groups[1].Value]; X = [double]$m.Groups[2].Value; Y = [double]$m.Groups[3].Value; Text = $text }
+    foreach ($pm in [regex]::Matches($raw, '<< /Type /Page\b[^\r\n]*?/Contents (\d+) 0 R')) {
+        $content = Get-PdfStream ([int]$pm.Groups[1].Value)
+        foreach ($m in [regex]::Matches($content, '/(F\d+) [\d.]+ Tf BT ([\d.\-]+) ([\d.\-]+) Td (.*?) ET')) {
+            $fName = $m.Groups[1].Value; $x = [double]$m.Groups[2].Value; $y = [double]$m.Groups[3].Value; $body = $m.Groups[4].Value
+            $map = $resMaps[$fName]; $sb = New-Object System.Text.StringBuilder
+            foreach ($hm in [regex]::Matches($body, '<([0-9A-Fa-f]+)>')) {
+                $hex = $hm.Groups[1].Value.ToUpperInvariant()
+                for ($i = 0; $i + 4 -le $hex.Length; $i += 4) {
+                    $gid = $hex.Substring($i, 4)
+                    if ($map -and $map.ContainsKey($gid)) { [void]$sb.Append($map[$gid]) }
+                }
+            }
+            $runs += [pscustomobject]@{ Font = $names[$fName]; X = $x; Y = $y; Text = $sb.ToString() }
+        }
     }
     [pscustomobject]@{ Raw = $raw; Header = $raw.Substring(0, 8); Pages = ([regex]::Matches($raw, '/Type /Page[^s]')).Count; Runs = $runs }
 }
@@ -178,13 +209,13 @@ try {
     $pdfBytes = [System.IO.File]::ReadAllBytes($pdfPath)
     $pdf = Read-PdfText $pdfBytes
     Check 'writer.pdf is a PDF with one Letter-landscape page (792 x 612)' ($pdf.Header.StartsWith('%PDF-') -and ($pdf.Pages -eq 1) -and $pdf.Raw.Contains('/MediaBox [0 0 792.00 612.00]')) "header '$($pdf.Header)' pages $($pdf.Pages)"
-    Check 'writer.pdf fonts are base-14 Helvetica faces with WinAnsi encoding' (($pdf.Raw.Contains('/BaseFont /Helvetica-Bold')) -and ($pdf.Raw.Contains('/BaseFont /Helvetica-Oblique')) -and ($pdf.Raw.Contains('/Encoding /WinAnsiEncoding'))) ''
+    Check 'writer.pdf embeds subset Inter Type0 fonts with Identity-H and ToUnicode' (($pdf.Raw -match '/BaseFont /[A-Z]{6}\+Inter-Bold') -and ($pdf.Raw -match '/BaseFont /[A-Z]{6}\+Inter-Italic') -and ($pdf.Raw.Contains('/Encoding /Identity-H')) -and ($pdf.Raw.Contains('/ToUnicode '))) ''
     $lines = @($pdf.Runs | ForEach-Object { $_.Text })
     Check 'writer.pdf text: heading, paragraph, list markers' (($lines -contains 'Quarterly Overview') -and ($lines -contains 'Apples') -and ($lines -contains 'First step') -and ($lines -contains 'Third step') -and ($lines -contains 'Details')) ''
-    Check 'writer.pdf accented and typographic text decodes (WinAnsi)' ($lines -contains $cafe) ''
+    Check 'writer.pdf accented and typographic text decodes (ToUnicode)' ($lines -contains $cafe) ''
     $bold = $pdf.Runs | Where-Object { $_.Text -eq 'bold' } | Select-Object -First 1
     $ital = $pdf.Runs | Where-Object { $_.Text -eq 'italic' } | Select-Object -First 1
-    Check 'writer.pdf draws "bold" in Helvetica-Bold and "italic" in Helvetica-Oblique' (($bold.Font -eq 'Helvetica-Bold') -and ($ital.Font -eq 'Helvetica-Oblique')) "bold font '$($bold.Font)', italic font '$($ital.Font)'"
+    Check 'writer.pdf draws "bold" in Inter-Bold and "italic" in Inter-Italic' (($bold.Font -eq 'Inter-Bold') -and ($ital.Font -eq 'Inter-Italic')) "bold font '$($bold.Font)', italic font '$($ital.Font)'"
     $centerRun = $pdf.Runs | Where-Object { $_.Text -eq 'Centered closing line' } | Select-Object -First 1
     Check 'writer.pdf centers the centered paragraph (x well right of the 54 pt margin)' ($centerRun.X -gt 150) "x = $($centerRun.X)"
     $pipes = @($lines | Where-Object { $_ -like '*| --- |*' -or $_ -like '| Name |*' })

@@ -32,20 +32,50 @@ function Info([string]$text) { Write-Output "INFO  $text" }
 function Try-Get([scriptblock]$Block) { try { & $Block } catch { $null } }
 
 function Read-PdfText([byte[]]$bytes) {
-    # Minimal reader for the uncompressed PDFs Loom writes: page count, media box,
-    # embedded image count and the text strings in drawing order (WinAnsi bytes
-    # re-decoded as Windows-1252; PDF string escapes resolved).
     $raw = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
-    $win = [System.Text.Encoding]::GetEncoding(1252)
+    function Get-PdfStream([int]$objId) {
+        $m = [regex]::Match($raw, "(?s)(?:^|\n)$objId 0 obj\n(<<.*?>>)\nstream\n")
+        if (-not $m.Success) { return '' }
+        $dict = $m.Groups[1].Value
+        $len = [int]([regex]::Match($dict, '/Length (\d+)').Groups[1].Value)
+        $start = $m.Index + $m.Length
+        if ($dict -match '/FlateDecode') {
+            $ms = New-Object System.IO.MemoryStream($bytes, ($start + 2), ($len - 6))
+            $ds = New-Object System.IO.Compression.DeflateStream($ms, [System.IO.Compression.CompressionMode]::Decompress)
+            return (New-Object System.IO.StreamReader($ds, [System.Text.Encoding]::GetEncoding(28591))).ReadToEnd()
+        }
+        return $raw.Substring($start, $len)
+    }
+    function Decode-Utf16Hex([string]$hex) {
+        $b = New-Object byte[] ($hex.Length / 2)
+        for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+        return [System.Text.Encoding]::BigEndianUnicode.GetString($b)
+    }
+    $cmaps = @{}
+    foreach ($m in [regex]::Matches($raw, '(?s)(\d+) 0 obj\s*<<[^>]*?/Type /Font /Subtype /Type0[^>]*?/ToUnicode (\d+) 0 R')) {
+        $cmapStream = Get-PdfStream ([int]$m.Groups[2].Value)
+        $map = @{}
+        foreach ($cm in [regex]::Matches($cmapStream, '<([0-9A-Fa-f]{4})>\s*<([0-9A-Fa-f]+)>')) {
+            $map[$cm.Groups[1].Value.ToUpperInvariant()] = Decode-Utf16Hex $cm.Groups[2].Value
+        }
+        $cmaps[$m.Groups[1].Value] = $map
+    }
+    $resMaps = @{}
+    foreach ($m in [regex]::Matches($raw, '/(F\d+) (\d+) 0 R')) { $resMaps[$m.Groups[1].Value] = $cmaps[$m.Groups[2].Value] }
     $strings = @()
-    foreach ($m in [regex]::Matches($raw, '\(((?:\\.|[^\\)])*)\) Tj')) {
-        $text = [regex]::Replace($m.Groups[1].Value, '\\([0-7]{1,3}|.)', {
-            param($e)
-            $v = $e.Groups[1].Value
-            if ($v -match '^[0-7]{1,3}$') { [string][char][Convert]::ToInt32($v, 8) }
-            elseif ($v -eq 'n') { "`n" } else { $v }
-        })
-        $strings += $win.GetString([System.Text.Encoding]::GetEncoding(28591).GetBytes($text))
+    foreach ($pm in [regex]::Matches($raw, '<< /Type /Page\b[^\r\n]*?/Contents (\d+) 0 R')) {
+        $content = Get-PdfStream ([int]$pm.Groups[1].Value)
+        foreach ($m in [regex]::Matches($content, '/(F\d+) [\d.]+ Tf BT (.*?) ET')) {
+            $map = $resMaps[$m.Groups[1].Value]; $body = $m.Groups[2].Value; $sb = New-Object System.Text.StringBuilder
+            foreach ($hm in [regex]::Matches($body, '<([0-9A-Fa-f]+)>')) {
+                $hex = $hm.Groups[1].Value.ToUpperInvariant()
+                for ($i = 0; $i + 4 -le $hex.Length; $i += 4) {
+                    $gid = $hex.Substring($i, 4)
+                    if ($map -and $map.ContainsKey($gid)) { [void]$sb.Append($map[$gid]) }
+                }
+            }
+            $strings += $sb.ToString()
+        }
     }
     [pscustomobject]@{
         Raw = $raw; Header = $raw.Substring(0, 8)
@@ -61,7 +91,7 @@ $pptxPath = [string](Join-Path $Dir 'present.pptx')
 
 # ---- present.pdf: structure and text, decoded directly (no application needed)
 $pdf = Read-PdfText ([System.IO.File]::ReadAllBytes($pdfPath))
-Check 'present.pdf is a PDF with 4 landscape pages (842 x 595)' ($pdf.Header.StartsWith('%PDF-') -and ($pdf.Pages -eq 4) -and $pdf.Raw.Contains('/MediaBox [0 0 842.00 595.00]')) "header '$($pdf.Header)' pages $($pdf.Pages)"
+Check 'present.pdf is a PDF with 4 landscape 16:9 pages (960 x 540)' ($pdf.Header.StartsWith('%PDF-') -and ($pdf.Pages -eq 4) -and $pdf.Raw.Contains('/MediaBox [0 0 960.00 540.00]')) "header '$($pdf.Header)' pages $($pdf.Pages)"
 foreach ($t in 'Q3 & Q4 Plan', 'Results', 'Box label', 'Circle label', '42%', 'Logo', 'Thank you') {
     Check "present.pdf text: $t" ($pdf.Strings -contains $t) ''
 }
@@ -102,6 +132,12 @@ try {
     Check 'circle shape is an oval' (($null -ne $ellipse) -and ($ellipse.AutoShapeType -eq 9)) "auto $($ellipse.AutoShapeType)"
     # authoring plane 1000 x 562.5 -> 960 x 540 pt: rect2 is at (600, 140) size 300 x 120
     Check 'rectangle geometry (576, 134.4, 288 x 115.2 pt)' (($null -ne $rect) -and ([math]::Abs($rect.Left - 576) -lt 1) -and ([math]::Abs($rect.Top - 134.4) -lt 1) -and ([math]::Abs($rect.Width - 288) -lt 1) -and ([math]::Abs($rect.Height - 115.2) -lt 1)) "$($rect.Left),$($rect.Top) $($rect.Width)x$($rect.Height)"
+    if ($null -ne $rect) {
+        $tr = $rect.TextFrame.TextRange
+        Check 'rectangle ElementStyle size (24 pt), bold, italic, and right alignment' (([math]::Abs($tr.Font.Size - 24) -lt 0.5) -and ($tr.Font.Bold -eq -1) -and ($tr.Font.Italic -eq -1) -and ($tr.ParagraphFormat.Alignment -eq 3)) "size $($tr.Font.Size) bold $($tr.Font.Bold) italic $($tr.Font.Italic) align $($tr.ParagraphFormat.Alignment)"
+        # OLE COLORREF is 0x00BBGGRR: #1565C0 -> 0x00C06515 (12608789); #E65100 -> 0x000051E6 (20966)
+        Check 'rectangle ElementStyle text colour (#1565C0) and shape fill (#E65100)' (($tr.Font.Color.RGB -eq 0x00C06515) -and ($rect.Fill.ForeColor.RGB -eq 0x000051E6)) "text RGB $($tr.Font.Color.RGB) fill RGB $($rect.Fill.ForeColor.RGB)"
+    }
 
     # ---- picture
     $pictures = @(); foreach ($sh in $pres.Slides.Item(3).Shapes) { if ($sh.Type -eq 13) { $pictures += $sh } }

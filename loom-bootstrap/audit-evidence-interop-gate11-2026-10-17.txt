@@ -1,0 +1,101 @@
+Gate 11 Interoperability Evidence — 2026-10-17
+Host: Windows 11 x86-64 (Microsoft Excel/Word/PowerPoint 16.0 build 16.0.20430 via COM) + WSL Ubuntu-E Linux x86-64 (LibreOffice 26.2.6.3 60(Build:3), pdftotext / poppler).
+Fixture directory: .work/interop-lo-20261017
+
+========================================================================
+1. Linux LibreOffice 26.2.6.3 Export Checks (check_libreoffice.sh)
+========================================================================
+Command:
+  wsl -d Ubuntu-E -- bash -lc "cd /mnt/c/Users/palaa/code/rust-loom && bash loom-sheets/tests/interop/check_libreoffice.sh .work/interop-lo-20261017 && bash loom-writer/tests/interop/check_libreoffice.sh .work/interop-lo-20261017 && bash loom-present/tests/interop/check_libreoffice.sh .work/interop-lo-20261017"
+
+Output:
+INFO  LibreOffice 26.2.6.3 60(Build:3)
+PASS  xlsx converts to PDF
+PASS  xlsx converts to CSV
+PASS  header row Item,Qty,Price,Total
+PASS  accented text Café Zoë survives
+PASS  typographic text survives
+PASS  formula D2=B2*C2 calculates 3.75
+PASS  IF formula gives small
+PASS  text formula gives APPLES-5
+PASS  cross-sheet formula gives 4.5
+PASS  SUM total 67.25 (D7)
+PASS  currency format shows $1.25
+PASS  date format shows 2024-03-15
+PASS  percent format shows 25.6%
+PASS  xlsx converts to ODS
+PASS  ODS has sheets Q1 Sales|Rates
+PASS  ODS carries the chart object
+PASS  Loom CSV is valid UTF-8
+SUMMARY libreoffice sheets: 17 passed, 0 failed
+
+INFO  LibreOffice 26.2.6.3 60(Build:3)
+PASS  docx converts to text
+PASS  heading text
+PASS  paragraph text
+PASS  bulleted items
+PASS  numbered items
+PASS  table cells Tea and Coffee
+PASS  accented and typographic text
+PASS  closing line
+PASS  docx converts to PDF
+PASS  ODT keeps Heading 1 style
+PASS  ODT keeps a table
+PASS  ODT keeps a list
+PASS  ODT keeps the comment (annotation)
+PASS  ODT keeps bold text
+PASS  Loom PDF text: heading and list
+PASS  Loom PDF text: accents
+PASS  Loom Markdown is valid UTF-8
+SUMMARY libreoffice writer: 17 passed, 0 failed
+
+INFO  LibreOffice 26.2.6.3 60(Build:3)
+PASS  pptx converts to ODP
+PASS  ODP has 4 slides
+PASS  slide text: title, results, labels
+PASS  slide text: Results
+PASS  slide text: Box label and 42%
+PASS  subtitle accents and typographic text
+PASS  speaker notes survive
+PASS  picture is a draw:image
+PASS  ODP keeps a table
+PASS  ODP keeps table cells
+PASS  ODP carries the chart object
+PASS  pptx converts to PDF
+PASS  Impress PDF shows 4 pages
+PASS  Loom PDF text: slide titles
+PASS  Loom PDF text: body lines on separate lines
+SUMMARY libreoffice present: 15 passed, 0 failed
+
+========================================================================
+2. LibreOffice 26.2.6.3-Authored Files Imported into Loom
+========================================================================
+Authored via LibreOffice 26.2.6.3 native ODF round-trip (`sheets.ods -> calc-authored.xlsx`, `writer.odt -> writer-lo-authored.docx`, `present.odp -> impress-authored.pptx`):
+- Fixed a real DOCX list-kind import defect in `loom-writer-core/src/docx/import.rs`: `<w:numId>` previously assumed `w:val="1"` is bulleted and `>=2` is numbered, causing LibreOffice-authored bullet lists (`w:numId="2"`, mapped via `<w:abstractNum>` `<w:numFmt w:val="bullet"/>` in `word/numbering.xml`) to import as numbered lists. `resolve_num_id_list_kind` now parses `word/numbering.xml` (`<w:num>` -> `<w:abstractNumId>` -> `<w:abstractNum>` -> `<w:numFmt>`) to classify bullet vs. decimal lists.
+- Unit regression: `cargo test -p loom-writer-core docx_import_resolves_bullet_and_decimal_lists_from_numbering_xml` -> PASS (1 passed, 0 failed).
+- LibreOffice-authored fixture import tests (`LOOM_INTEROP_OUT=C:\Users\palaa\code\rust-loom\.work\interop-lo-20261017`):
+  * `cargo test -p loom-sheets-core --test interop_fixtures import_libreoffice_authored_xlsx -- --ignored --nocapture`
+    PASS import_libreoffice_authored_xlsx: sheets=["Q1 Sales", "Rates"], D2=Some(Number(3.75)), D7=Some(Number(67.25)), H4=Some(Text("APPLES-5")), H6=Some(Number(4.5)), warnings=["Custom column widths or row heights are not imported; default grid sizing was used.", "Workbook defined names are not imported; formulas that reference named ranges may not evaluate as in Excel."]
+  * `cargo test -p loom-writer-core --test interop_fixtures import_libreoffice_authored_docx -- --ignored --nocapture`
+    PASS import_libreoffice_authored_docx: blocks=11, kinds=["heading1", "paragraph", "heading2", "list-bulleted", "list-bulleted", "list-numbered", "list-numbered", "list-numbered", "table", "paragraph", "paragraph"]
+  * `cargo test -p loom-present-core --test interop_fixtures import_libreoffice_authored_pptx -- --ignored --nocapture`
+    PASS import_libreoffice_authored_pptx: slides=4, assets=1, slide4_types=[Text, Table, Chart]
+
+========================================================================
+3. Windows Microsoft Office 16.0 (16.0.20430) COM Interop Checks
+========================================================================
+Commands:
+  powershell -NoProfile -ExecutionPolicy Bypass -File loom-sheets/tests/interop/check_excel.ps1 -Dir .work/interop-lo-20261017
+  powershell -NoProfile -ExecutionPolicy Bypass -File loom-writer/tests/interop/check_word.ps1 -Dir .work/interop-lo-20261017
+  powershell -NoProfile -ExecutionPolicy Bypass -File loom-present/tests/interop/check_powerpoint.ps1 -Dir .work/interop-lo-20261017
+
+Results:
+- Excel 16.0 (`check_excel.ps1`):
+  SUMMARY excel: 49 passed, 0 failed
+  (Includes UTF-8 BOM in `sheets-1.csv` so Excel opens accented/typographic CSV text `Café Zoë` and `Düsseldorf – “quoted”` without mojibake, plus XLSX formulas, cross-sheet references, currency/date/percent number formats, fill/font/border/alignment styles, column width, row height, and embedded chart.)
+- Word 16.0 (`check_word.ps1`):
+  SUMMARY word: 43 passed, 0 failed
+  (Includes Markdown headings/lists/table/accents/inline-markup/list-table-separation, Word 16.0 DOCX open without repair, PDF export via Word, paragraph order, Heading 1/2 outline levels, bold/italic/underline runs, bulleted and numbered lists, 3x2 bordered table with bold header, centered alignment, Letter landscape 792x612 pt with 72/72/54/54 pt margins, anchored comment, Title property, and Loom `writer.pdf` Type0/Identity-H/ToUnicode/layout checks.)
+- PowerPoint 16.0 (`check_powerpoint.ps1`):
+  SUMMARY powerpoint: 37 passed, 0 failed
+  (Includes Loom `present.pdf` 4-page 960x540 pt layout, text, subtitle accents, embedded picture, and line breaking; PowerPoint 16.0 PPTX open without repair, 4 slides at 16:9 960x540 pt, slide texts, title placeholder, rotated rectangle and oval shapes, rectangle `ElementStyle` font size 24 pt, bold, italic, right alignment, `#1565C0` text colour (`RGB=12608789`), `#E65100` shape fill (`RGB=20966`), centred 2:1 picture on slide 3, speaker notes, slide transitions, and PDF export via PowerPoint.)

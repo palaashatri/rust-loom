@@ -886,3 +886,45 @@ fn docx_warnings_name_only_what_is_lost() {
         "{nested_warnings:?}"
     );
 }
+
+#[test]
+fn docx_import_resolves_bullet_and_decimal_lists_from_numbering_xml() {
+    let mut archive = PackageArchive::new();
+    let doc_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Outline Heading</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr>
+      <w:r><w:t>Bullet Item</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr>
+      <w:r><w:t>Decimal Item</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let num_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="none"/></w:lvl></w:abstractNum>
+  <w:abstractNum w:abstractNumId="2"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>
+  <w:abstractNum w:abstractNumId="3"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+  <w:num w:numId="3"><w:abstractNumId w:val="3"/></w:num>
+</w:numbering>"#;
+    archive
+        .add("word/document.xml", doc_xml.as_bytes().to_vec())
+        .unwrap();
+    archive
+        .add("word/numbering.xml", num_xml.as_bytes().to_vec())
+        .unwrap();
+    let imported = super::import_docx(&archive.to_bytes().unwrap()).expect("import succeeds");
+    assert_eq!(imported.blocks.len(), 3);
+    assert_eq!(imported.blocks[0].kind, "heading1");
+    assert_eq!(imported.blocks[1].kind, "list-bulleted");
+    assert_eq!(imported.blocks[2].kind, "list-numbered");
+}
