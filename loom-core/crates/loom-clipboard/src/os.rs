@@ -165,10 +165,13 @@ mod unix {
             .or(data.tsv.as_deref())
             .unwrap_or("")
             .to_string();
-        let html = data.html.as_deref().map(|html| match &data.loom_objects_json {
-            Some(json) => embed_loom_json(html, json),
-            None => html.to_string(),
-        });
+        let html = data
+            .html
+            .as_deref()
+            .map(|html| match &data.loom_objects_json {
+                Some(json) => embed_loom_json(html, json),
+                None => html.to_string(),
+            });
         with_clipboard(|clipboard| match html {
             Some(html) => clipboard.set().html(html, Some(text)),
             None => clipboard.set_text(text),
@@ -275,7 +278,10 @@ mod tests {
         let html = embed_loom_json("<table><tr><td>x</td></tr></table>", json);
         assert!(html.ends_with("<table><tr><td>x</td></tr></table>"));
         let inside = &html[LOOM_COMMENT_OPEN.len()..html.find("-->").unwrap()];
-        assert!(!inside.contains('-'), "a dash would let the text end the comment");
+        assert!(
+            !inside.contains('-'),
+            "a dash would let the text end the comment"
+        );
         assert_eq!(extract_loom_json(&html).as_deref(), Some(json));
         assert_eq!(extract_loom_json("<table></table>"), None);
     }
