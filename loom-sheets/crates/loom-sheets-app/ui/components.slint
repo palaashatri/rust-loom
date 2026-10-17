@@ -292,12 +292,12 @@ export component SheetTable inherits Rectangle {
                             }
 
                             // A cell is exposed on its own when it is the active cell, is in
-                            // the selection, or holds a value in the active cell's row or
-                            // column. Naming every visible cell made each scroll rebind
-                            // hundreds of accessibility nodes (about 40 ms a frame over a
-                            // screenful of values); moving the selection names the cells it
-                            // reaches, blank ones as empty.
-                            if is-active || in-selection || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
+                            // a small selection (up to 64 cells), or holds a value in the
+                            // active cell's row or column. Naming every visible cell made each
+                            // scroll rebind hundreds of accessibility nodes (about 40 ms a frame
+                            // over a screenful of values); moving the selection names the cells
+                            // it reaches, blank ones as empty, while Select All stays bounded.
+                            if is-active || (in-selection && root.selection-end-row - root.selection-start-row < 64 && root.selection-end-col - root.selection-start-col < 64 && (root.selection-end-row - root.selection-start-row + 1) * (root.selection-end-col - root.selection-start-col + 1) <= 64) || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
                                 width: parent.width;
                                 height: parent.height;
                                 accessible-role: text;

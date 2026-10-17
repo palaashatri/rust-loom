@@ -65,6 +65,51 @@ fn blank_cells_are_exposed_only_while_selected() {
     );
 }
 
+#[test]
+fn select_all_over_a_screenful_bounds_cell_accessibility_nodes_to_the_active_cross() {
+    let mut cells = Vec::new();
+    for row in 1..=15 {
+        for col in b'A'..=b'H' {
+            cells.push((format!("{}{row}", col as char), format!("{}", row * 10)));
+        }
+    }
+    let refs: Vec<(&str, &str)> = cells
+        .iter()
+        .map(|(addr, val)| (addr.as_str(), val.as_str()))
+        .collect();
+    let s = launched(&refs);
+    s.app.invoke_select_all();
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render after select all");
+    let names = accessible_names(&s.app);
+    // Active cell A1 and its row/column neighbours stay exposed.
+    assert!(
+        names.iter().any(|name| name == "A1, value 10"),
+        "active cell A1 must remain exposed after Select All"
+    );
+    assert!(
+        names.iter().any(|name| name == "A10, value 100"),
+        "active column cell A10 must remain exposed after Select All"
+    );
+    // Off-axis interior cells in a 120-cell Select All must not all become
+    // individual accessibility nodes.
+    assert!(
+        !names.iter().any(|name| name == "D7, value 70"),
+        "Select All over 120 cells still exposed off-axis cell D7 as an individual node"
+    );
+    // A small range selection (A1:B2, 4 cells) still exposes every selected cell.
+    s.app.set_selection_start_row(0);
+    s.app.set_selection_start_col(0);
+    s.app.set_selection_end_row(1);
+    s.app.set_selection_end_col(1);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render small selection");
+    assert!(
+        accessible_names(&s.app)
+            .iter()
+            .any(|name| name == "B2, value 20"),
+        "a small 2x2 selection should expose off-axis cell B2"
+    );
+}
+
 /// WCAG relative luminance of an sRGB pixel.
 fn luminance(pixel: &image::Rgba<u8>) -> f64 {
     let channel = |value: u8| {

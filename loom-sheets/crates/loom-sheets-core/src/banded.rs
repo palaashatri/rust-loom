@@ -12,7 +12,7 @@ use std::collections::btree_map;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::CellRef;
 
@@ -121,14 +121,25 @@ impl Digest {
     }
 }
 
-/// Two 64-bit fingerprints of one entry, from a single pass over its bytes.
-fn fingerprint<V: Hash>(at: CellRef, value: &V) -> (u64, u64) {
+/// Two 64-bit fingerprints of one entry at `col`, from a single pass over its bytes.
+fn cell_fingerprint<V: Hash>(col: u32, value: &V) -> (u64, u64) {
     let mut hasher = DefaultHasher::new();
-    at.hash(&mut hasher);
+    col.hash(&mut hasher);
     value.hash(&mut hasher);
     let first = hasher.finish();
     hasher.write_u8(0x5a);
     (first, hasher.finish())
+}
+
+/// Odd 64-bit bijective mixer for a row index. Because multiplication distributes
+/// over addition modulo 2^64, multiplying a row's summed cell fingerprints by its
+/// row mixer gives an order-independent digest without rehashing cells when a
+/// whole row moves to a new row index.
+fn row_mixer(row: u32, seed: u64) -> u64 {
+    let mut x = (row as u64).wrapping_add(seed);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (x ^ (x >> 31)) | 1
 }
 
 fn entry_bytes<V: StoredValue>(value: &V) -> usize {
@@ -138,58 +149,230 @@ fn entry_bytes<V: StoredValue>(value: &V) -> usize {
         + value.heap_bytes()
 }
 
-/// The entries of one row band with their summaries.
+/// One populated row inside a [`Band`]. Coordinates and values live in parallel
+/// column-sorted `Arc<Vec<_>>` slices so moving a whole row to another row index
+/// shares `values` without cloning cells.
 #[derive(Debug, Clone)]
-struct Band<V> {
-    entries: BTreeMap<CellRef, V>,
-    extent: Option<Extent>,
+struct Row<V> {
+    coords: Arc<Vec<CellRef>>,
+    values: Arc<Vec<V>>,
     formulas: usize,
-    formula_rows: BTreeMap<u32, usize>,
     bytes: usize,
-    digest: OnceLock<Digest>,
+    persisted_count: usize,
+    sum_h1: u64,
+    sum_h2: u64,
 }
 
-impl<V: StoredValue> Band<V> {
+impl<V: StoredValue> Row<V> {
     fn new() -> Self {
         Self {
-            entries: BTreeMap::new(),
-            extent: None,
+            coords: Arc::new(Vec::new()),
+            values: Arc::new(Vec::new()),
             formulas: 0,
-            formula_rows: BTreeMap::new(),
             bytes: 0,
-            digest: OnceLock::new(),
+            persisted_count: 0,
+            sum_h1: 0,
+            sum_h2: 0,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.coords.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.coords.is_empty()
+    }
+
+    fn extent(&self) -> Option<Extent> {
+        let first = *self.coords.first()?;
+        let last = *self.coords.last()?;
+        Some(Extent {
+            min_row: first.row,
+            max_row: last.row,
+            min_col: first.col,
+            max_col: last.col,
+        })
+    }
+
+    fn all_cols_within(&self, first_col: u32, last_col: u32) -> bool {
+        match (self.coords.first(), self.coords.last()) {
+            (Some(first), Some(last)) => first.col >= first_col && last.col <= last_col,
+            _ => true,
+        }
+    }
+
+    fn with_row_index(&self, row: u32) -> Self {
+        if self.coords.first().map_or(true, |c| c.row == row) {
+            return self.clone();
+        }
+        Self {
+            coords: Arc::new(
+                self.coords
+                    .iter()
+                    .map(|c| CellRef { row, col: c.col })
+                    .collect(),
+            ),
+            values: Arc::clone(&self.values),
+            formulas: self.formulas,
+            bytes: self.bytes,
+            persisted_count: self.persisted_count,
+            sum_h1: self.sum_h1,
+            sum_h2: self.sum_h2,
+        }
+    }
+
+    fn get(&self, col: u32) -> Option<&V> {
+        let idx = self.coords.binary_search_by_key(&col, |c| c.col).ok()?;
+        self.values.get(idx)
+    }
+
+    fn add_entry_stats(&mut self, col: u32, value: &V) {
+        self.bytes += entry_bytes(value);
+        if value.is_formula() {
+            self.formulas += 1;
+        }
+        if value.is_persisted() {
+            let (h1, h2) = cell_fingerprint(col, value);
+            self.persisted_count += 1;
+            self.sum_h1 = self.sum_h1.wrapping_add(h1);
+            self.sum_h2 = self.sum_h2.wrapping_add(h2);
+        }
+    }
+
+    fn remove_entry_stats(&mut self, col: u32, value: &V) {
+        self.bytes -= entry_bytes(value);
+        if value.is_formula() {
+            self.formulas -= 1;
+        }
+        if value.is_persisted() {
+            let (h1, h2) = cell_fingerprint(col, value);
+            self.persisted_count -= 1;
+            self.sum_h1 = self.sum_h1.wrapping_sub(h1);
+            self.sum_h2 = self.sum_h2.wrapping_sub(h2);
         }
     }
 
     fn insert(&mut self, at: CellRef, value: V) -> Option<V> {
-        self.digest.take();
-        let formula = value.is_formula();
-        self.bytes += entry_bytes(&value);
-        let previous = self.entries.insert(at, value);
-        match &previous {
-            Some(old) => {
-                self.bytes -= entry_bytes(old);
-                if old.is_formula() {
-                    self.drop_formula(at.row);
-                }
+        self.add_entry_stats(at.col, &value);
+        match self.coords.binary_search_by_key(&at.col, |c| c.col) {
+            Ok(idx) => {
+                let previous = std::mem::replace(&mut Arc::make_mut(&mut self.values)[idx], value);
+                self.remove_entry_stats(at.col, &previous);
+                Some(previous)
             }
-            None => {
-                self.extent = Some(self.extent.map_or(Extent::point(at), |e| e.include(at)));
+            Err(idx) => {
+                Arc::make_mut(&mut self.coords).insert(idx, at);
+                Arc::make_mut(&mut self.values).insert(idx, value);
+                None
             }
         }
-        if formula {
-            self.add_formula(at.row);
+    }
+
+    fn remove(&mut self, col: u32) -> Option<V> {
+        let idx = self.coords.binary_search_by_key(&col, |c| c.col).ok()?;
+        Arc::make_mut(&mut self.coords).remove(idx);
+        let removed = Arc::make_mut(&mut self.values).remove(idx);
+        self.remove_entry_stats(col, &removed);
+        Some(removed)
+    }
+
+    fn recount(&mut self) {
+        self.formulas = 0;
+        self.bytes = 0;
+        self.persisted_count = 0;
+        self.sum_h1 = 0;
+        self.sum_h2 = 0;
+        for (at, value) in self.coords.iter().zip(self.values.iter()) {
+            self.bytes += entry_bytes(value);
+            if value.is_formula() {
+                self.formulas += 1;
+            }
+            if value.is_persisted() {
+                let (h1, h2) = cell_fingerprint(at.col, value);
+                self.persisted_count += 1;
+                self.sum_h1 = self.sum_h1.wrapping_add(h1);
+                self.sum_h2 = self.sum_h2.wrapping_add(h2);
+            }
         }
+    }
+
+    fn digest(&self, row: u32) -> Digest {
+        if self.persisted_count == 0 {
+            return Digest::default();
+        }
+        Digest {
+            count: self.persisted_count,
+            first: self
+                .sum_h1
+                .wrapping_mul(row_mixer(row, 0x9e37_79b9_7f4a_7c15)),
+            second: self
+                .sum_h2
+                .wrapping_mul(row_mixer(row, 0x6a09_e667_f3bc_c908)),
+        }
+    }
+}
+
+/// The entries of one row band with their summaries.
+#[derive(Debug, Clone)]
+struct Band<V> {
+    base_row: u32,
+    rows: [Option<Row<V>>; BAND_ROWS as usize],
+    extent: Option<Extent>,
+    formulas: usize,
+    bytes: usize,
+    digest: Digest,
+}
+
+impl<V: StoredValue> Band<V> {
+    fn new(base_row: u32) -> Self {
+        Self {
+            base_row,
+            rows: std::array::from_fn(|_| None),
+            extent: None,
+            formulas: 0,
+            bytes: 0,
+            digest: Digest::default(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows.iter().all(Option::is_none)
+    }
+
+    fn refresh_totals(&mut self) {
+        self.formulas = 0;
+        self.bytes = 0;
+        self.digest = Digest::default();
+        for (offset, slot) in self.rows.iter().enumerate() {
+            if let Some(row) = slot {
+                let row_idx = self.base_row + offset as u32;
+                self.formulas += row.formulas;
+                self.bytes += row.bytes;
+                self.digest = self.digest.combine(row.digest(row_idx));
+            }
+        }
+    }
+
+    fn insert(&mut self, at: CellRef, value: V) -> Option<V> {
+        let slot = (at.row - self.base_row) as usize;
+        let row = self.rows[slot].get_or_insert_with(Row::new);
+        let previous = row.insert(at, value);
+        if previous.is_none() {
+            self.extent = Some(self.extent.map_or(Extent::point(at), |e| e.include(at)));
+        }
+        self.refresh_totals();
         previous
     }
 
     fn remove(&mut self, at: &CellRef) -> Option<V> {
-        let removed = self.entries.remove(at)?;
-        self.digest.take();
-        self.bytes -= entry_bytes(&removed);
-        if removed.is_formula() {
-            self.drop_formula(at.row);
+        let slot = (at.row - self.base_row) as usize;
+        let row = self.rows[slot].as_mut()?;
+        let removed = row.remove(at.col)?;
+        if row.is_empty() {
+            self.rows[slot] = None;
         }
+        self.refresh_totals();
         if let Some(extent) = self.extent {
             let on_edge = at.row == extent.min_row
                 || at.row == extent.max_row
@@ -202,62 +385,68 @@ impl<V: StoredValue> Band<V> {
         Some(removed)
     }
 
-    fn add_formula(&mut self, row: u32) {
-        self.formulas += 1;
-        *self.formula_rows.entry(row).or_insert(0) += 1;
-    }
-
-    fn drop_formula(&mut self, row: u32) {
-        self.formulas -= 1;
-        if let Some(count) = self.formula_rows.get_mut(&row) {
-            *count -= 1;
-            if *count == 0 {
-                self.formula_rows.remove(&row);
-            }
-        }
-    }
-
-    /// Rebuild the extent from the entries. Only needed when an edge entry leaves.
+    /// Rebuild the extent from the rows. Only needed when an edge entry leaves.
     fn rescan_extent(&self) -> Option<Extent> {
         #[cfg(test)]
         BAND_SCANS.with(|scans| scans.set(scans.get() + 1));
-        self.entries.keys().copied().fold(None, |acc, at| {
-            Some(acc.map_or(Extent::point(at), |e| e.include(at)))
-        })
+        self.rows
+            .iter()
+            .filter_map(|slot| slot.as_ref()?.extent())
+            .reduce(Extent::union)
     }
 
     /// Rebuild every summary after values changed in place.
     fn recount(&mut self) {
         #[cfg(test)]
         BAND_SCANS.with(|scans| scans.set(scans.get() + 1));
-        self.formulas = 0;
-        self.formula_rows.clear();
-        self.bytes = 0;
-        for (at, value) in &self.entries {
-            self.bytes += entry_bytes(value);
-            if value.is_formula() {
-                self.formulas += 1;
-                *self.formula_rows.entry(at.row).or_insert(0) += 1;
-            }
+        for row in self.rows.iter_mut().flatten() {
+            row.recount();
         }
+        self.refresh_totals();
     }
 
     fn digest(&self) -> Digest {
-        *self.digest.get_or_init(|| {
-            let mut digest = Digest::default();
-            for (at, value) in &self.entries {
-                if value.is_persisted() {
-                    let (first, second) = fingerprint(*at, value);
-                    digest = digest.combine(Digest {
-                        count: 1,
-                        first,
-                        second,
-                    });
-                }
-            }
-            digest
-        })
+        self.digest
     }
+}
+
+/// Merge cells outside `first_col..=last_col` from `outside_row` with cells
+/// inside `first_col..=last_col` from `inside_row`, all placed at `dest_row`.
+fn merge_partial_row<V: StoredValue>(
+    dest_row: u32,
+    first_col: u32,
+    last_col: u32,
+    outside_row: Option<&Row<V>>,
+    inside_row: Option<&Row<V>>,
+) -> Option<Row<V>> {
+    let mut merged = Row::new();
+    if let Some(outside) = outside_row {
+        for (at, value) in outside.coords.iter().zip(outside.values.iter()) {
+            if at.col < first_col || at.col > last_col {
+                merged.insert(
+                    CellRef {
+                        row: dest_row,
+                        col: at.col,
+                    },
+                    value.clone(),
+                );
+            }
+        }
+    }
+    if let Some(inside) = inside_row {
+        for (at, value) in inside.coords.iter().zip(inside.values.iter()) {
+            if at.col >= first_col && at.col <= last_col {
+                merged.insert(
+                    CellRef {
+                        row: dest_row,
+                        col: at.col,
+                    },
+                    value.clone(),
+                );
+            }
+        }
+    }
+    (!merged.is_empty()).then_some(merged)
 }
 
 /// Row-banded sparse map from cell coordinates to values.
@@ -301,7 +490,9 @@ impl<V: StoredValue> BandedMap<V> {
 
     /// The value stored at a coordinate.
     pub fn get(&self, at: &CellRef) -> Option<&V> {
-        self.bands.get(&band_key(*at))?.entries.get(at)
+        let band = self.bands.get(&band_key(*at))?;
+        let slot = (at.row - band.base_row) as usize;
+        band.rows[slot].as_ref()?.get(at.col)
     }
 
     /// Whether a value is stored at a coordinate.
@@ -311,10 +502,11 @@ impl<V: StoredValue> BandedMap<V> {
 
     /// Store a value, returning the one it replaced.
     pub fn insert(&mut self, at: CellRef, value: V) -> Option<V> {
+        let key = band_key(at);
         let band = self
             .bands
-            .entry(band_key(at))
-            .or_insert_with(|| Arc::new(Band::new()));
+            .entry(key)
+            .or_insert_with(|| Arc::new(Band::new(key * BAND_ROWS)));
         let previous = writable(band).insert(at, value);
         if previous.is_none() {
             self.len += 1;
@@ -326,11 +518,10 @@ impl<V: StoredValue> BandedMap<V> {
     pub fn remove(&mut self, at: &CellRef) -> Option<V> {
         let key = band_key(*at);
         let band = self.bands.get_mut(&key)?;
-        if !band.entries.contains_key(at) {
-            return None;
-        }
+        let slot = (at.row - band.base_row) as usize;
+        band.rows[slot].as_ref().and_then(|row| row.get(at.col))?;
         let removed = writable(band).remove(at);
-        let emptied = band.entries.is_empty();
+        let emptied = band.is_empty();
         if emptied {
             self.bands.remove(&key);
         }
@@ -348,7 +539,9 @@ impl<V: StoredValue> BandedMap<V> {
     pub fn iter(&self) -> Iter<'_, V> {
         Iter {
             bands: self.bands.values(),
-            current: None,
+            rows: [].iter(),
+            coords: [].iter(),
+            values: [].iter(),
         }
     }
 
@@ -367,12 +560,88 @@ impl<V: StoredValue> BandedMap<V> {
     pub fn for_each_value_mut(&mut self, mut change: impl FnMut(&mut V)) {
         for band in self.bands.values_mut() {
             let band = writable(band);
-            band.digest.take();
-            for value in band.entries.values_mut() {
-                change(value);
+            for row in band.rows.iter_mut().flatten() {
+                for value in Arc::make_mut(&mut row.values).iter_mut() {
+                    change(value);
+                }
             }
             band.recount();
         }
+    }
+
+    /// Reorder the rows in `start_row .. start_row + source_offsets.len()` across
+    /// columns `first_col..=last_col`, where destination row `start_row + d`
+    /// receives the cells from `start_row + source_offsets[d]`.
+    pub(crate) fn permute_rows(
+        &mut self,
+        start_row: u32,
+        first_col: u32,
+        last_col: u32,
+        source_offsets: &[u32],
+    ) {
+        if source_offsets.is_empty() || self.is_empty() {
+            return;
+        }
+        let end_row = start_row + source_offsets.len() as u32 - 1;
+        let first_band = start_row / BAND_ROWS;
+        let last_band = end_row / BAND_ROWS;
+        let old_bands = self.bands.clone();
+        let row_at = |row: u32| -> Option<&Row<V>> {
+            let band = old_bands.get(&(row / BAND_ROWS))?;
+            band.rows[(row % BAND_ROWS) as usize].as_ref()
+        };
+
+        let mut new_len = self.len;
+        for band_idx in first_band..=last_band {
+            let base_row = band_idx * BAND_ROWS;
+            if let Some(existing) = old_bands.get(&band_idx) {
+                let old_band_entries: usize = existing.rows.iter().flatten().map(Row::len).sum();
+                new_len -= old_band_entries;
+            }
+            let mut band = Band::new(base_row);
+            let mut band_entries = 0usize;
+            for slot in 0..BAND_ROWS as usize {
+                let dest_row = base_row + slot as u32;
+                let next_row = if dest_row < start_row || dest_row > end_row {
+                    row_at(dest_row).cloned()
+                } else {
+                    let src_row = start_row + source_offsets[(dest_row - start_row) as usize];
+                    let dest_existing = row_at(dest_row);
+                    let src_existing = row_at(src_row);
+                    let whole_row = dest_existing
+                        .map_or(true, |r| r.all_cols_within(first_col, last_col))
+                        && src_existing.map_or(true, |r| r.all_cols_within(first_col, last_col));
+                    if whole_row {
+                        src_existing.map(|r| r.with_row_index(dest_row))
+                    } else {
+                        merge_partial_row(
+                            dest_row,
+                            first_col,
+                            last_col,
+                            dest_existing,
+                            src_existing,
+                        )
+                    }
+                };
+                if let Some(row) = &next_row {
+                    band_entries += row.len();
+                }
+                band.rows[slot] = next_row;
+            }
+            new_len += band_entries;
+            if band.is_empty() {
+                self.bands.remove(&band_idx);
+            } else {
+                band.extent = band
+                    .rows
+                    .iter()
+                    .filter_map(|slot| slot.as_ref()?.extent())
+                    .reduce(Extent::union);
+                band.refresh_totals();
+                self.bands.insert(band_idx, Arc::new(band));
+            }
+        }
+        self.len = new_len;
     }
 
     /// Bounding box of every stored coordinate, in O(bands).
@@ -390,15 +659,23 @@ impl<V: StoredValue> BandedMap<V> {
 
     /// The first row at or after `row` that holds a formula, in O(bands).
     pub fn first_formula_row_from(&self, row: u32) -> Option<u32> {
-        self.bands
-            .values()
-            .filter_map(|band| {
-                band.formula_rows
-                    .range(row..)
-                    .next()
-                    .map(|(found, _)| *found)
-            })
-            .min()
+        let start_band = row / BAND_ROWS;
+        for (&band_idx, band) in self.bands.range(start_band..) {
+            if band.formulas == 0 {
+                continue;
+            }
+            let first_slot = if band_idx == start_band {
+                (row % BAND_ROWS) as usize
+            } else {
+                0
+            };
+            for (offset, slot) in band.rows[first_slot..].iter().enumerate() {
+                if slot.as_ref().is_some_and(|r| r.formulas > 0) {
+                    return Some(band_idx * BAND_ROWS + (first_slot + offset) as u32);
+                }
+            }
+        }
+        None
     }
 
     /// Fingerprint of the persisted entries. Equal digests mean equal persisted
@@ -432,13 +709,25 @@ impl<V: StoredValue> BandedMap<V> {
         let mut entries = Vec::with_capacity(self.len);
         for band in self.bands.into_values() {
             match Arc::try_unwrap(band) {
-                Ok(band) => entries.extend(band.entries),
-                Err(shared) => entries.extend(
-                    shared
-                        .entries
-                        .iter()
-                        .map(|(at, value)| (*at, value.clone())),
-                ),
+                Ok(band) => {
+                    for row in band.rows.into_iter().flatten() {
+                        match (Arc::try_unwrap(row.coords), Arc::try_unwrap(row.values)) {
+                            (Ok(coords), Ok(values)) => {
+                                entries.extend(coords.into_iter().zip(values));
+                            }
+                            (coords, values) => {
+                                let coords = coords.unwrap_or_else(|shared| (*shared).clone());
+                                let values = values.unwrap_or_else(|shared| (*shared).clone());
+                                entries.extend(coords.into_iter().zip(values));
+                            }
+                        }
+                    }
+                }
+                Err(shared) => {
+                    for row in shared.rows.iter().flatten() {
+                        entries.extend(row.coords.iter().copied().zip(row.values.iter().cloned()));
+                    }
+                }
             }
         }
         entries
@@ -458,7 +747,9 @@ fn writable<V: StoredValue>(band: &mut Arc<Band<V>>) -> &mut Band<V> {
 /// Entries of a [`BandedMap`] in coordinate order.
 pub struct Iter<'a, V> {
     bands: btree_map::Values<'a, u32, Arc<Band<V>>>,
-    current: Option<btree_map::Iter<'a, CellRef, V>>,
+    rows: std::slice::Iter<'a, Option<Row<V>>>,
+    coords: std::slice::Iter<'a, CellRef>,
+    values: std::slice::Iter<'a, V>,
 }
 
 impl<'a, V> Iterator for Iter<'a, V> {
@@ -466,13 +757,20 @@ impl<'a, V> Iterator for Iter<'a, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(current) = self.current.as_mut() {
-                if let Some(item) = current.next() {
-                    return Some(item);
+            if let (Some(at), Some(val)) = (self.coords.next(), self.values.next()) {
+                return Some((at, val));
+            }
+            for row in self.rows.by_ref() {
+                if let Some(row) = row.as_ref() {
+                    self.coords = row.coords.iter();
+                    self.values = row.values.iter();
+                    if let (Some(at), Some(val)) = (self.coords.next(), self.values.next()) {
+                        return Some((at, val));
+                    }
                 }
             }
             let band = self.bands.next()?;
-            self.current = Some(band.entries.iter());
+            self.rows = band.rows.iter();
         }
     }
 }

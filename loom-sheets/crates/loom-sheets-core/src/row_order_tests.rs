@@ -86,3 +86,24 @@ fn an_entry_costs_a_few_bytes_per_row_not_per_cell() {
     let order = RowOrder::sorted(range(), 0, true, &values).expect("sort");
     assert!(order.memory_bytes() < 256);
 }
+
+#[test]
+fn sorting_a_shared_sheet_reuses_cell_allocations_and_restores_digest_on_revert() {
+    let (mut sheet, values) = sample();
+    let baseline = sheet.clone();
+    let full_range = CellRange::new(at(1, 0), at(4, 2));
+    let order = RowOrder::sorted(full_range, 0, true, &values).expect("sort");
+    order.apply(&mut sheet);
+    assert_ne!(sheet.cells.digest(), baseline.cells.digest());
+    // Row 2 moved to row 1 without cloning its underlying Cell strings.
+    assert_eq!(
+        sheet.raw(at(1, 1)).map(str::as_ptr),
+        baseline.raw(at(2, 1)).map(str::as_ptr)
+    );
+    order.revert(&mut sheet);
+    assert_eq!(sheet.cells.digest(), baseline.cells.digest());
+    assert_eq!(
+        sheet.raw(at(2, 1)).map(str::as_ptr),
+        baseline.raw(at(2, 1)).map(str::as_ptr)
+    );
+}

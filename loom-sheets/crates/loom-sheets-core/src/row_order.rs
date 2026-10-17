@@ -67,44 +67,28 @@ impl RowOrder {
     /// Move the cells of the range's rows into the sorted order. Cells outside
     /// the range's columns, and everything else in the sheet, stay where they are.
     pub fn apply(&self, sheet: &mut Sheet) {
-        let mut destination = vec![0u32; self.order.len()];
-        for (new_offset, old_offset) in self.order.iter().enumerate() {
-            destination[*old_offset as usize] = new_offset as u32;
-        }
-        self.move_cells(sheet, &destination);
+        sheet
+            .cells
+            .permute_rows(self.start_row, self.first_col, self.last_col, &self.order);
     }
 
     /// Restore the order that was in place before [`Self::apply`].
     pub fn revert(&self, sheet: &mut Sheet) {
-        self.move_cells(sheet, &self.order);
+        let mut source_offsets = vec![0u32; self.order.len()];
+        for (new_offset, old_offset) in self.order.iter().enumerate() {
+            source_offsets[*old_offset as usize] = new_offset as u32;
+        }
+        sheet.cells.permute_rows(
+            self.start_row,
+            self.first_col,
+            self.last_col,
+            &source_offsets,
+        );
     }
 
     /// Bytes this entry keeps alive.
     pub fn memory_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + self.order.capacity() * std::mem::size_of::<u32>()
-    }
-
-    /// Rebuild the cell map with each cell in the range moved to the row given
-    /// by `target[offset]`, where `offset` is its current row offset.
-    fn move_cells(&self, sheet: &mut Sheet, target: &[u32]) {
-        let len = self.order.len() as u32;
-        let cells = std::mem::take(&mut sheet.cells);
-        sheet.cells = cells
-            .into_entries()
-            .into_iter()
-            .map(|(at, cell)| {
-                let inside = at.row >= self.start_row
-                    && at.row - self.start_row < len
-                    && (self.first_col..=self.last_col).contains(&at.col);
-                if inside {
-                    let offset = (at.row - self.start_row) as usize;
-                    let row = self.start_row + target[offset];
-                    (CellRef { row, col: at.col }, cell)
-                } else {
-                    (at, cell)
-                }
-            })
-            .collect();
     }
 }
 

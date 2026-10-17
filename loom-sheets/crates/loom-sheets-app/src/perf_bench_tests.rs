@@ -138,6 +138,7 @@ impl Session {
             sheet, None, dialogs, workbook, csv, csv_import, xlsx,
         ));
         let menu = Arc::new(NativeMenuBar::new());
+        crate::cell_actions::register_cell_edit_action(&app, &state, &menu);
         register_sheet_actions(&app, &state, &menu);
         register_history_actions(&app, &state, &menu);
         wire_export_callbacks(&app, &state);
@@ -580,4 +581,80 @@ fn attribution_of_ui_thread_steps_on_one_million_cells() {
             "PERF_ATTRIBUTION step={step} cells=1000000 n={reps} p50_ms={p50:.2} p95_ms={p95:.2} max_ms={max:.2}"
         );
     }
+}
+
+/// One million cells including 10,000 chained formulas (500 rows x 20 columns
+/// of `=prev+1` in rows 2049..=2548 below 2,048 sortable data rows holding
+/// 989,500 numeric cells), measuring evaluation, cell commit on a formula chain
+/// head, and whole-workbook sort/undo-sort.
+#[test]
+fn million_cells_with_ten_thousand_chained_formulas() {
+    if std::env::var_os("LOOM_PERF_FORMULAS_1M").is_none() {
+        return;
+    }
+    const COLUMNS: [&str; 21] = [
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R",
+        "S", "T", "U",
+    ];
+    let mut sheet = Sheet::new("Formula 1M");
+    for offset in 0..500u32 {
+        let row = SIDE + 1 + offset;
+        sheet.set_str(&format!("A{row}"), &(offset + 1).to_string());
+        for column in 1..=20usize {
+            sheet.set_str(
+                &format!("{}{row}", COLUMNS[column]),
+                &format!("={}{row}+1", COLUMNS[column - 1]),
+            );
+        }
+    }
+    let mut index = 0u32;
+    while sheet.cells.len() < UNIQUE_CELLS as usize {
+        let address = pseudorandom_address(index);
+        index += 1;
+        let cell = CellRef {
+            row: address / SIDE,
+            col: address % SIDE,
+        };
+        sheet.set_raw(cell, (index % 1_000).to_string());
+    }
+    assert_eq!(sheet.cells.len(), UNIQUE_CELLS as usize);
+    assert_eq!(sheet.cells.formula_count(), 10_000);
+    assert_eq!(crate::actions::sortable_last_row(&sheet), SIDE - 1);
+
+    let session = Session::open(sheet, "formulas1m", Vec::new());
+    let head_a1 = format!("A{}", SIDE + 1);
+    let tail_u1 = CellRef::parse(&format!("U{}", SIDE + 1)).expect("U2049");
+    assert_eq!(
+        values_for_projection(&session.state).get(&tail_u1),
+        Some(&loom_sheets_core::Value::Number(21.0))
+    );
+
+    let reps = env_reps(5);
+    let (mut commit_series, mut sort_series, mut undo_sort_series) =
+        (Series::default(), Series::default(), Series::default());
+    for rep in 0..reps {
+        session.select(&head_a1, &head_a1);
+        let next_val = (100 + rep).to_string();
+        let callback = timed(|| {
+            session
+                .app
+                .invoke_commit_selected_cell(next_val.clone().into());
+        });
+        let settled = settle(&session);
+        commit_series.record(callback, &settled);
+        assert_eq!(
+            values_for_projection(&session.state).get(&tail_u1),
+            Some(&loom_sheets_core::Value::Number((100 + rep + 20) as f64))
+        );
+
+        session.select("A1", "A1");
+        let callback = timed(|| session.app.invoke_sort_ascending());
+        sort_series.record(callback, &settle(&session));
+        let callback = timed(|| session.app.invoke_undo());
+        undo_sort_series.record(callback, &settle(&session));
+    }
+    let cells = session.state.current.borrow().cells.len();
+    commit_series.print("formula_head_commit_1m_10k_formulas", cells);
+    sort_series.print("sort_ascending_1m_10k_formulas", cells);
+    undo_sort_series.print("undo_sort_1m_10k_formulas", cells);
 }

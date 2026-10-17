@@ -1,0 +1,25 @@
+== environment
+OS: Windows 11 x86_64
+CPU: 12th Gen Intel(R) Core(TM) i5-12400F
+Command: LOOM_PERF_UI=1 LOOM_PERF_FORMULAS_1M=1 LOOM_PERF_REPS=10 cargo test -p loom-sheets-app --bin loom-sheets --release perf_bench_tests:: -- --nocapture --test-threads=1
+== bench lines
+running 8 tests
+test perf_tests::perf_bench_tests::attribution_of_ui_thread_steps_on_one_million_cells ... ok
+test perf_tests::perf_bench_tests::export_cost_on_one_million_cells ... ok
+test perf_tests::perf_bench_tests::frame_cost_on_one_million_cells ... ok
+test perf_tests::perf_bench_tests::full_workbook_step_costs_on_one_million_cells ... ok
+PERF_UI step=formula_head_commit_1m_10k_formulas cells=1000000 n=10 callback_ms p50=0.31 p95=0.56 max=0.56 ui_apply_result_ms p50=15.09 max=16.40 worker_ms eval_p50=227.3 package_p50=0.0 write_p50=2.5
+PERF_UI step=sort_ascending_1m_10k_formulas cells=1000000 n=10 callback_ms p50=3.28 p95=3.81 max=3.81 ui_apply_result_ms p50=14.90 max=21.96 worker_ms eval_p50=226.5 package_p50=497.3 write_p50=118.0
+PERF_UI step=undo_sort_1m_10k_formulas cells=1000000 n=10 callback_ms p50=2.37 p95=3.54 max=3.54 ui_apply_result_ms p50=15.05 max=17.02 worker_ms eval_p50=230.8 package_p50=498.3 write_p50=118.6
+test perf_tests::perf_bench_tests::million_cells_with_ten_thousand_chained_formulas ... ok
+PERF_UI step=format_bold cells=1000011 n=10 callback_ms p50=0.22 p95=0.89 max=0.89 ui_apply_result_ms p50=14.91 max=18.26 worker_ms eval_p50=208.7 package_p50=486.7 write_p50=114.5
+PERF_UI step=undo_format cells=1000011 n=10 callback_ms p50=0.20 p95=0.45 max=0.45 ui_apply_result_ms p50=14.06 max=17.19 worker_ms eval_p50=215.1 package_p50=484.8 write_p50=115.0
+PERF_UI step=redo_format cells=1000011 n=10 callback_ms p50=0.25 p95=0.60 max=0.60 ui_apply_result_ms p50=14.56 max=16.13 worker_ms eval_p50=208.4 package_p50=487.9 write_p50=112.1
+PERF_UI step=row_insert_add_row cells=1000011 n=10 callback_ms p50=0.27 p95=0.40 max=0.40 ui_apply_result_ms p50=14.92 max=17.08 worker_ms eval_p50=210.7 package_p50=488.4 write_p50=113.5
+PERF_UI step=sort_ascending cells=1000011 n=10 callback_ms p50=3.50 p95=3.91 max=3.91 ui_apply_result_ms p50=15.09 max=16.35 worker_ms eval_p50=212.2 package_p50=489.9 write_p50=110.6
+PERF_UI step=undo_sort cells=1000011 n=10 callback_ms p50=3.17 p95=4.08 max=4.08 ui_apply_result_ms p50=14.59 max=18.11 worker_ms eval_p50=208.1 package_p50=490.2 write_p50=114.2
+PERF_UI step=paste_one_cell cells=1000011 n=10 callback_ms p50=1.36 p95=3.14 max=3.14 ui_apply_result_ms p50=14.83 max=17.03 worker_ms eval_p50=211.6 package_p50=488.1 write_p50=112.8
+test perf_tests::perf_bench_tests::ui_thread_cost_of_whole_workbook_edits_on_one_million_cells ... ok
+test perf_tests::perf_bench_tests::undo_history_memory_after_repeated_sorts ... ok
+test perf_tests::perf_bench_tests::write_native_fixtures_for_rss_runs ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 538 filtered out; finished in 85.53s
