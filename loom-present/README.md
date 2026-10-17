@@ -28,7 +28,8 @@ Evidence tags used below:
 - Insert Text, Shape (a rectangle) and Image from the toolbar. Insert Image is also in the Slide menu and the palette and uses a native picker for PNG and JPEG; the picture is centred and at most 60 % of the slide. Image bytes are stored inside the `.loomdeck` (deduplicated), so the deck reopens with its pictures after the source file is deleted. Missing, corrupt or cancelled files change nothing and say why. [tests] [live-W]
 - Selection and direct manipulation: click to select, Shift-click and a marquee for multi-select, drag to move with alignment snapping guides, corner handles to resize (pictures keep their aspect ratio), a rotate handle, arrow keys nudge, Delete removes. A cancelled gesture restores geometry, selection and history; one gesture is one undo step. [tests] [live-W]
 - Text edits in place: double-click an object (or Enter or F2 on a selected one); Enter adds a line, Escape or clicking away finishes. The edit goes through the same undoable command as the inspector. [tests] [live-W]
-- Inspector: Format (slide layout, selected element's text content, position, size and rotation shown as read-only values), Animate (transition), Document (theme button, aspect ratio and slide count). [tests]
+- Text style for text objects, shapes and stat cards, from the Format inspector, the keyboard or the palette: size (a step of 2 pt up to 24 pt, 4 pt above, 6 to 200 pt), bold, italic, left/centre/right alignment, seven text colours plus automatic, seven fills plus none. Each choice is one undo step and applies to every selected object; a style that changes one thing keeps the rest (a bold-off title stays 27 pt and centred). It is drawn on the slide, in the thumbnails, in the slideshow and the presenter view, in PDF, and in `.pptx` (`sz`, `b`, `i`, `algn`, colour and fill); a PowerPoint file's own run sizes, weights, colours, alignment and fills import as styles, and a deck we exported imports unstyled. [tests] [live-W]
+- Inspector: Format (slide layout, selected element's text content, the text style above, and position, size and rotation shown as read-only values), Animate (transition), Document (theme button, aspect ratio and slide count). [tests]
 - Speaker notes: a notes drawer per slide (View menu, "Speaker Notes"), edited text is part of the undo state. [tests]
 - Undo and redo (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y) for every edit above. [tests] [live-W]
 
@@ -64,6 +65,8 @@ Evidence tags used below:
 | Ctrl+N | New deck |
 | Ctrl+Shift+N | New slide |
 | Ctrl+Alt+Up / Ctrl+Alt+Down | Move slide up / down |
+| Ctrl+B / Ctrl+I | Bold / italic for the selected text objects |
+| Ctrl+] / Ctrl+[ | Larger / smaller text for the selected objects |
 | Ctrl+O | Open |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+E | Export PDF |

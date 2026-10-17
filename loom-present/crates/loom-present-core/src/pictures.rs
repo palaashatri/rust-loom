@@ -177,6 +177,8 @@ impl PresentationSession {
             height,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)

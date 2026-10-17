@@ -1,22 +1,7 @@
 import { Theme } from "theme.slint";
 
-/// One drawable piece of a table or chart, in fractions of its element's box.
-export struct ObjectPart {
-    fx: float,
-    fy: float,
-    fw: float,
-    fh: float,
-    text: string,
-    has-bg: bool,
-    bg: color,
-    fg: color,
-    bold: bool,
-    /// 0 left, 1 centre, 2 right.
-    align: int,
-    /// Font size in slide units (the slide is 1000 x 562.5).
-    fs: float,
-    has-border: bool,
-}
+import { ObjectPart, ObjectPartView, ElementInk } from "object_part.slint";
+export { ObjectPart, ElementInk }
 
 /// The editor canvas's table and chart parts, one list per element.
 /// Thumbnails and the presenter view carry theirs in `ThumbRows`.
@@ -250,7 +235,8 @@ export component PresentSlideCanvas inherits Rectangle {
                 Text {
                     // The object's button above carries its name; its text is not a second label.
                     accessible-role: none;
-                    visible: root.editing-idx != idx && root.element-types[idx] != 6 && root.element-types[idx] != 7 && root.element-types[idx] != 8 && !too-small;
+                    visible: root.editing-idx != idx && root.element-types[idx] != 6 && root.element-types[idx] != 7 && root.element-types[idx] != 8 && !too-small
+                        && !(root.element-parts.length > idx && root.element-parts[idx].length > 0);
                     x: Theme.tokens.space.sm * slide.text-scale;
                     y: Theme.tokens.space.xs * slide.text-scale;
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2 * slide.text-scale);
@@ -285,30 +271,14 @@ export component PresentSlideCanvas inherits Rectangle {
                 }
 
                 // Tables and charts: cells, bars and labels laid out by the element.
-                for part in root.element-parts[idx] : Rectangle {
+                for part in root.element-parts[idx] : ObjectPartView {
                     x: part.fx * parent.width;
                     y: part.fy * parent.height;
                     width: part.fw * parent.width;
                     height: part.fh * parent.height;
-                    background: part.has-bg ? part.bg : transparent;
-                    border-width: part.has-border ? 1px : 0px;
-                    border-color: #d0d0d0;
-                    clip: true;
-                    accessible-role: none;
-                    Text {
-                        x: 4px;
-                        width: max(1px, parent.width - 8px);
-                        height: parent.height;
-                        text: part.text;
-                        font-family: Theme.document-font-family;
-                        font-size: part.fs * slide.height / 562.5;
-                        font-weight: part.bold ? 700 : 400;
-                        color: part.fg;
-                        horizontal-alignment: part.align == 1 ? center : part.align == 2 ? right : left;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        accessible-role: none;
-                    }
+                    part: part;
+                    slide-height: slide.height;
+                    text-scale: slide.text-scale;
                 }
 
                 // The cell the keyboard is in, outlined on a selected table.
@@ -376,6 +346,8 @@ export component PresentSlideCanvas inherits Rectangle {
                     font-family: Theme.document-font-family;
                     // A table edits one cell, in place, with that cell's own text.
                     property <bool> in-cell: root.element-types[idx] == 7 && ObjectParts.active-cells.length > idx;
+                    // A text object with its own style edits in that style.
+                    property <bool> styled: root.element-types[idx] <= 5 && root.element-parts.length > idx && root.element-parts[idx].length > 0 && ObjectParts.active-cells.length > idx;
                     x: self.in-cell ? ObjectParts.active-cells[idx].fx * parent.width + 4px
                         : Theme.tokens.space.sm * slide.text-scale;
                     y: self.in-cell ? ObjectParts.active-cells[idx].fy * parent.height
@@ -390,12 +362,13 @@ export component PresentSlideCanvas inherits Rectangle {
                     property <string> cell-key: self.in-cell ? "" + ObjectParts.active-cells[idx].fx + "," + ObjectParts.active-cells[idx].fy : "";
                     text: self.seed;
                     changed cell-key => { self.text = self.seed; self.select-all(); }
-                    font-size: self.in-cell ? ObjectParts.active-cells[idx].fs * slide.height / 562.5
+                    font-size: self.in-cell || self.styled ? ObjectParts.active-cells[idx].fs * slide.height / 562.5
                         : (root.element-types[idx] == 0 ? Theme.tokens.typography.display
                         : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
-                    font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
-                    color: Theme.palette().paper-ink;
-                    horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
+                    font-weight: self.styled ? (ObjectParts.active-cells[idx].bold ? 700 : 400) : root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
+                    font-italic: self.styled && ObjectParts.active-cells[idx].italic;
+                    color: self.styled ? (ObjectParts.active-cells[idx].ink == 1 ? Theme.palette().paper-ink : ObjectParts.active-cells[idx].ink == 2 ? Theme.palette().paper-muted : ObjectParts.active-cells[idx].ink == 3 ? Theme.palette().ink : ObjectParts.active-cells[idx].fg) : Theme.palette().paper-ink;
+                    horizontal-alignment: self.styled ? (ObjectParts.active-cells[idx].align == 1 ? center : ObjectParts.active-cells[idx].align == 2 ? right : left) : root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
                     vertical-alignment: center;
                     wrap: word-wrap;
                     single-line: false;

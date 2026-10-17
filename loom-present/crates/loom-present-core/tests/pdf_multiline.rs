@@ -15,6 +15,7 @@ fn body(content: &str) -> SlideElement {
         height: 300.0,
         rotation_deg: 0.0,
         action: None,
+        style: Default::default(),
     }
 }
 

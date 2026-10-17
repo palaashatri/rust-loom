@@ -142,6 +142,8 @@ pub(crate) fn apply_layout(slide: &mut Slide, layout: &str) {
                     height: spot.height,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
         }

@@ -20,6 +20,8 @@ fn titled_slide(id: &str, title: &str) -> Slide {
         height: 80.0,
         rotation_deg: 0.0,
         action: None,
+
+        style: Default::default(),
     });
     slide.speaker_notes = format!("notes for {title}");
     slide

@@ -8,7 +8,7 @@ use loom_package::zip::PackageArchive;
 use std::collections::BTreeMap;
 
 use crate::pictures::ImageAsset;
-use crate::{ElementType, PresentationDocument, Slide, SlideElement};
+use crate::{ElementStyle, ElementType, PresentationDocument, Slide, SlideElement, TextAlign};
 
 const EMU_PER_UNIT: f32 = 12_192.0;
 const PPTX_SLIDE_PART_PREFIX: &str = "ppt/slides/slide";
@@ -293,6 +293,7 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
 
         let id = extract_attr(sp_xml, "name").unwrap_or_else(|| format!("shape-{elem_counter}"));
         elem_counter += 1;
+        let style = parse_shape_style(sp_xml, &element_type);
 
         elements.push(SlideElement {
             id,
@@ -304,9 +305,117 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
             height,
             rotation_deg,
             action: None,
+            style,
         });
     }
     elements
+}
+
+/// What the exporter draws for each element type when nothing overrides it:
+/// `(size pt, bold, centred, fill, text colours)`. A value read from a file that
+/// matches this is not a style, so a deck we exported imports unstyled.
+fn type_defaults(
+    kind: &ElementType,
+) -> (
+    f32,
+    bool,
+    bool,
+    Option<&'static str>,
+    &'static [&'static str],
+) {
+    match kind {
+        ElementType::Title => (27.43, true, true, None, &["1D1D1F", "F5F5F7"]),
+        ElementType::Subtitle => (16.0, false, false, None, &["6E6E73", "F5F5F7"]),
+        ElementType::StatCard => (22.86, true, true, Some("0071E3"), &["FFFFFF"]),
+        ElementType::ShapeRectangle => (16.0, false, false, Some("E6F0FC"), &["1D1D1F"]),
+        ElementType::ShapeCircle => (16.0, false, false, Some("E3F6EF"), &["1D1D1F"]),
+        _ => (16.0, false, false, None, &["1D1D1F", "F5F5F7"]),
+    }
+}
+
+/// The first `<a:srgbClr val=...>` inside `xml`, as `#RRGGBB`.
+fn first_srgb(xml: &str) -> Option<String> {
+    let pos = xml.find("<a:srgbClr")?;
+    let tag = &xml[pos..pos + xml[pos..].find('>')?];
+    let value = extract_attr(tag, "val")?;
+    (value.len() == 6 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| format!("#{}", value.to_ascii_uppercase()))
+}
+
+/// Size, weight, italics, colours and alignment a shape sets itself, beyond
+/// what its type already draws.
+fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
+    let (default_pt, default_bold, default_centred, default_fill, default_inks) =
+        type_defaults(kind);
+    let mut style = ElementStyle::default();
+    if let Some(pos) = find_tag_start(sp_xml, "a:rPr") {
+        let end = sp_xml[pos..]
+            .find("</a:rPr>")
+            .map_or(sp_xml.len(), |e| pos + e);
+        let tag_end = sp_xml[pos..].find('>').map_or(end, |e| pos + e);
+        let tag = &sp_xml[pos..tag_end];
+        if let Some(size) = extract_attr(tag, "sz").and_then(|v| v.parse::<f32>().ok()) {
+            let pt = size / 100.0;
+            if (pt - default_pt).abs() > 0.5 && (6.0..=200.0).contains(&pt) {
+                style.font_size_pt = Some(pt);
+            }
+        }
+        if let Some(bold) = extract_attr(tag, "b") {
+            let on = bold == "1" || bold == "true";
+            if on != default_bold {
+                style.bold = Some(on);
+            }
+        }
+        style.italic = matches!(extract_attr(tag, "i").as_deref(), Some("1" | "true"));
+        if let Some(color) = first_srgb(&sp_xml[pos..end]) {
+            if !default_inks
+                .iter()
+                .any(|ink| color.trim_start_matches('#').eq_ignore_ascii_case(ink))
+            {
+                style.color = Some(color);
+            }
+        }
+    }
+    if let Some(pos) = find_tag_start(sp_xml, "a:pPr") {
+        let tag_end = sp_xml[pos..].find('>').map_or(sp_xml.len(), |e| pos + e);
+        let align = match extract_attr(&sp_xml[pos..tag_end], "algn").as_deref() {
+            Some("l") => Some(TextAlign::Left),
+            Some("ctr") => Some(TextAlign::Center),
+            Some("r") => Some(TextAlign::Right),
+            _ => None,
+        };
+        if let Some(align) = align {
+            if (align == TextAlign::Center) != default_centred
+                || (default_centred && align == TextAlign::Right)
+                || (!default_centred && align == TextAlign::Right)
+            {
+                style.align = Some(align);
+            }
+        }
+    }
+    // The shape's own fill is the solid fill in its shape properties, before any outline.
+    if let Some(start) = sp_xml.find("<p:spPr>") {
+        let end = sp_xml[start..]
+            .find("</p:spPr>")
+            .map_or(sp_xml.len(), |e| start + e);
+        let props = &sp_xml[start..end];
+        let before_outline = props.find("<a:ln").map_or(props, |ln| &props[..ln]);
+        if let Some(pos) = before_outline.find("<a:solidFill>") {
+            if let Some(fill) = first_srgb(&before_outline[pos..]) {
+                let is_default = default_fill
+                    .is_some_and(|d| fill.trim_start_matches('#').eq_ignore_ascii_case(d));
+                if !is_default {
+                    style.fill = Some(fill);
+                }
+            }
+        }
+    }
+    style
+}
+
+#[cfg(test)]
+pub(crate) fn parse_shape_style_for_tests(sp_xml: &str, kind: &ElementType) -> ElementStyle {
+    parse_shape_style(sp_xml, kind)
 }
 
 /// Parses `.rels` XML mapping Relationship ID (`rId...`) to target archive path.
@@ -393,6 +502,8 @@ fn parse_slide_pictures(
                 height,
                 rotation_deg,
                 action: None,
+
+                style: Default::default(),
             });
         }
     }
@@ -439,6 +550,8 @@ mod tests {
             height: 60.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         s1.add_element(SlideElement {
             id: "body-1".to_string(),
@@ -450,6 +563,8 @@ mod tests {
             height: 200.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides.push(s1);
 
@@ -548,6 +663,8 @@ mod tests {
             height: 200.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides.push(s);
 

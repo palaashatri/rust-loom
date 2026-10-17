@@ -22,6 +22,8 @@ fn test_audit_doc() -> PresentationDocument {
         height: 80.0,
         rotation_deg: 0.0,
         action: None,
+
+        style: Default::default(),
     });
     slide1.elements.push(SlideElement {
         id: "subtitle-1".into(),
@@ -33,6 +35,8 @@ fn test_audit_doc() -> PresentationDocument {
         height: 50.0,
         rotation_deg: 0.0,
         action: None,
+
+        style: Default::default(),
     });
 
     // Slide 2: Diagram slide with shapes
@@ -49,6 +53,8 @@ fn test_audit_doc() -> PresentationDocument {
         height: 120.0,
         rotation_deg: 0.0,
         action: None,
+
+        style: Default::default(),
     });
     slide2.elements.push(SlideElement {
         id: "rect-2".into(),
@@ -60,6 +66,8 @@ fn test_audit_doc() -> PresentationDocument {
         height: 120.0,
         rotation_deg: 0.0,
         action: None,
+
+        style: Default::default(),
     });
 
     // Ensure slide 0 is the active slide for session tests

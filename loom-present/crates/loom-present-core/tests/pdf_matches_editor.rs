@@ -70,6 +70,7 @@ fn element(
         height,
         rotation_deg: 0.0,
         action: None,
+        style: Default::default(),
     }
 }
 

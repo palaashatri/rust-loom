@@ -158,6 +158,8 @@ fn picture_state() -> Rc<GuiState> {
             height: 400.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
     Rc::new(GuiState {
         last_saved: RefCell::new(session.document.clone()),

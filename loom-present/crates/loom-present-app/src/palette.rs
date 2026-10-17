@@ -23,6 +23,10 @@ pub enum PaletteAction {
     Undo,
     Redo,
     AddText,
+    StyleBold,
+    StyleItalic,
+    TextLarger,
+    TextSmaller,
     AddPicture,
     AddTable,
     DeleteTableRow,
@@ -121,6 +125,30 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.add-text",
             label: "Add Text",
             shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::StyleBold,
+            id: "present.text-bold",
+            label: "Bold",
+            shortcut: "Ctrl+B",
+        },
+        PaletteCommand {
+            action: PaletteAction::StyleItalic,
+            id: "present.text-italic",
+            label: "Italic",
+            shortcut: "Ctrl+I",
+        },
+        PaletteCommand {
+            action: PaletteAction::TextLarger,
+            id: "present.text-larger",
+            label: "Increase Text Size",
+            shortcut: "Ctrl+]",
+        },
+        PaletteCommand {
+            action: PaletteAction::TextSmaller,
+            id: "present.text-smaller",
+            label: "Decrease Text Size",
+            shortcut: "Ctrl+[",
         },
         PaletteCommand {
             action: PaletteAction::AddPicture,
@@ -364,6 +392,18 @@ pub fn wire_palette(app: &PresentApp) {
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddText => app.invoke_add_text(),
+                        PaletteAction::StyleBold => {
+                            crate::element_style_ui::request(&app, "bold", 0)
+                        }
+                        PaletteAction::StyleItalic => {
+                            crate::element_style_ui::request(&app, "italic", 0)
+                        }
+                        PaletteAction::TextLarger => {
+                            crate::element_style_ui::request(&app, "size", 1)
+                        }
+                        PaletteAction::TextSmaller => {
+                            crate::element_style_ui::request(&app, "size", -1)
+                        }
                         PaletteAction::AddPicture => app.invoke_add_picture(),
                         PaletteAction::AddTable => app.invoke_add_table(),
                         PaletteAction::DeleteTableRow => {

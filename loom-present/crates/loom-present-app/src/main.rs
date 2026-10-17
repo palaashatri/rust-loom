@@ -151,6 +151,7 @@ fn text_element(
         height,
         rotation_deg: 0.0,
         action: None,
+        style: Default::default(),
     }
 }
 
@@ -801,6 +802,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_width_text(format!("{:.0} pt", element.width).into());
             app.set_element_height_text(format!("{:.0} pt", element.height).into());
             app.set_element_rotation_text(format!("{:.0}°", element.rotation_deg).into());
+            element_style_ui::publish(app, element);
             if element.element_type == ElementType::Table {
                 app.set_inspector_is_table(true);
                 if let Some(table) = element.table() {
@@ -814,6 +816,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             }
         } else {
             app.set_inspector_is_table(false);
+            element_style_ui::clear(app);
             app.set_active_element_label("No element selected".into());
             app.set_active_element_content("".into());
             app.set_element_x_text("—".into());
@@ -1893,6 +1896,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     slide_order::wire(app, state);
     deck_guard::wire(app, state);
     table_actions::wire(app, state);
+    element_style_ui::wire(app, state);
     {
         let state = state.clone();
         app.on_recovery_flush(move || {
@@ -2682,7 +2686,27 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let page_down_key: SharedString = slint::platform::Key::PageDown.into();
         app.on_canvas_key_pressed(move |key, shift, modified| {
             if let Some(app) = app_ref.upgrade() {
-                if app.get_is_preview_mode() || modified {
+                if app.get_is_preview_mode() {
+                    return EventResult::Reject;
+                }
+                // Ctrl+B, Ctrl+I and Ctrl+] / Ctrl+[ style the selected text objects.
+                if modified && !shift {
+                    let request = match key.as_str() {
+                        "b" | "B" => Some(("bold", 0)),
+                        "i" | "I" => Some(("italic", 0)),
+                        "]" => Some(("size", 1)),
+                        "[" => Some(("size", -1)),
+                        _ => None,
+                    };
+                    if let Some((kind, value)) = request {
+                        if state.session.borrow().selected_elements.is_empty() {
+                            return EventResult::Reject;
+                        }
+                        element_style_ui::request(&app, kind, value);
+                        return EventResult::Accept;
+                    }
+                }
+                if modified {
                     return EventResult::Reject;
                 }
                 if table_actions::handle_table_key(&app, &state, key.as_str(), shift) {
@@ -2944,6 +2968,9 @@ mod clipboard_actions;
 mod deck_guard;
 use deck_guard::{deck_is_dirty, request_deck_replacement};
 mod element_names;
+#[cfg(test)]
+mod element_style_tests;
+mod element_style_ui;
 mod file_menu;
 mod file_title;
 #[cfg(test)]

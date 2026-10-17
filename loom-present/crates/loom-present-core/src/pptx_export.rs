@@ -107,22 +107,25 @@ const GROUP_PROPS: &str = "<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSp
 struct TextSpec {
     size: i64,
     bold: bool,
+    italic: bool,
     color: String,
-    center: bool,
+    /// The paragraph's `algn`: `l`, `ctr` or `r`.
+    algn: &'static str,
     heading_font: bool,
 }
 
 fn text_body(content: &str, spec: &TextSpec) -> String {
-    let algn = if spec.center { "ctr" } else { "l" };
+    let algn = spec.algn;
     let font = if spec.heading_font {
         "<a:latin typeface=\"+mj-lt\"/>"
     } else {
         ""
     };
     let rpr = format!(
-        "sz=\"{}\" b=\"{}\" dirty=\"0\"",
+        "sz=\"{}\" b=\"{}\"{} dirty=\"0\"",
         spec.size,
-        u8::from(spec.bold)
+        u8::from(spec.bold),
+        if spec.italic { " i=\"1\"" } else { "" }
     );
     let mut xml = String::from(
         "<p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr><a:lstStyle/>",
@@ -193,7 +196,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: heading,
                 bold: true,
                 color: slide_ink(background, INK),
-                center: true,
+                algn: "ctr",
+                italic: false,
                 heading_font: true,
             },
         ),
@@ -204,7 +208,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: size_hundredths(14.0),
                 bold: false,
                 color: slide_ink(background, MUTED),
-                center: false,
+                algn: "l",
+                italic: false,
                 heading_font: false,
             },
         ),
@@ -215,7 +220,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: size_hundredths(14.0),
                 bold: false,
                 color: slide_ink(background, INK),
-                center: false,
+                algn: "l",
+                italic: false,
                 heading_font: false,
             },
         ),
@@ -226,7 +232,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: size_hundredths(14.0),
                 bold: false,
                 color: INK.to_string(),
-                center: false,
+                algn: "l",
+                italic: false,
                 heading_font: false,
             },
         ),
@@ -237,7 +244,8 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: size_hundredths(14.0),
                 bold: false,
                 color: INK.to_string(),
-                center: false,
+                algn: "l",
+                italic: false,
                 heading_font: false,
             },
         ),
@@ -250,12 +258,38 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 size: size_hundredths(20.0),
                 bold: true,
                 color: "FFFFFF".to_string(),
-                center: true,
+                algn: "ctr",
+                italic: false,
                 heading_font: false,
             },
         ),
     };
-    let fill_xml = match fill {
+    // The element's own style sits over its type's look.
+    let style = &element.style;
+    let mut text = text;
+    if let Some(pt) = style.font_size_pt {
+        text.size = (f64::from(pt) * 100.0).round() as i64;
+    }
+    if let Some(bold) = style.bold {
+        text.bold = bold;
+    }
+    text.italic = style.italic;
+    if let Some(color) = &style.color {
+        text.color = hex_color(color, &text.color);
+    }
+    if let Some(align) = style.align {
+        text.algn = match align {
+            crate::TextAlign::Left => "l",
+            crate::TextAlign::Center => "ctr",
+            crate::TextAlign::Right => "r",
+        };
+    }
+    let fill = style
+        .fill
+        .as_deref()
+        .map(|color| hex_color(color, fill.unwrap_or(RECT_FILL)))
+        .or(fill.map(str::to_string));
+    let fill_xml = match &fill {
         Some(color) => format!("<a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill>"),
         None => "<a:noFill/>".to_string(),
     };
@@ -298,7 +332,8 @@ fn fallback_title_shape(id: u32, slide: &Slide, background: &str) -> String {
         size: size_hundredths(20.0),
         bold: true,
         color: slide_ink(background, INK),
-        center: false,
+        algn: "l",
+        italic: false,
         heading_font: true,
     };
     format!(
@@ -384,7 +419,8 @@ fn notes_slide_xml(notes: &str) -> String {
         size: 1200,
         bold: false,
         color: INK.to_string(),
-        center: false,
+        algn: "l",
+        italic: false,
         heading_font: false,
     };
     let body = text_body(notes, &spec).replace(

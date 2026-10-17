@@ -76,16 +76,25 @@ fn draw_element(
     let transform = element_transform(elem);
     match elem.element_type {
         ElementType::ShapeRectangle | ElementType::ShapeCircle | ElementType::StatCard => {
-            let rgb = if elem.element_type == ElementType::StatCard {
+            let rgb = element_fill(elem).unwrap_or(if elem.element_type == ElementType::StatCard {
                 STAT_RGB
             } else {
                 SHAPE_RGB
-            };
+            });
             let (w, h) = (elem.width, elem.height);
             pdf.draw_rect_with_transform(page, (0.0, 0.0, w, h), PathStyle::filled(rgb), transform);
             draw_text_box(pdf, page, transform, elem);
         }
         ElementType::Title | ElementType::Subtitle | ElementType::BodyText => {
+            if let Some(rgb) = element_fill(elem) {
+                let (w, h) = (elem.width, elem.height);
+                pdf.draw_rect_with_transform(
+                    page,
+                    (0.0, 0.0, w, h),
+                    PathStyle::filled(rgb),
+                    transform,
+                );
+            }
             draw_text_box(pdf, page, transform, elem);
         }
         ElementType::Picture => {
@@ -136,20 +145,56 @@ fn element_transform(elem: &SlideElement) -> [f32; 6] {
     [a, b, c, d, e, f]
 }
 
+/// `#RRGGBB` as RGB in 0..=1.
+fn parse_rgb(hex: &str) -> Option<(f32, f32, f32)> {
+    let hex = hex.trim().trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let channel = |range: std::ops::Range<usize>| {
+        u8::from_str_radix(&hex[range], 16)
+            .ok()
+            .map(|v| f32::from(v) / 255.0)
+    };
+    Some((channel(0..2)?, channel(2..4)?, channel(4..6)?))
+}
+
+/// The background fill an element's own style gives it, if any.
+fn element_fill(elem: &SlideElement) -> Option<(f32, f32, f32)> {
+    elem.style.fill.as_deref().and_then(parse_rgb)
+}
+
 /// The text of an element as the editor sets it: its type's size and weight, and
-/// titles and stat cards centred across the box.
-fn text_style(element_type: &ElementType) -> (TextStyle, bool) {
-    let (px, bold, centred) = match element_type {
+/// titles and stat cards centred across the box, with the element's own style
+/// (size in points, weight, italics, colour, alignment) laid over that. Alignment
+/// is 0 left, 1 centre, 2 right.
+fn text_style(elem: &SlideElement) -> (TextStyle, u8) {
+    let (px, bold, centred) = match elem.element_type {
         ElementType::Title => (DISPLAY_PX, true, true),
         ElementType::StatCard => (HEADING_PX, true, true),
         _ => (BODY_PX, false, false),
     };
-    let style = TextStyle {
-        size_pt: px * UNITS_PER_EDITOR_PX,
-        bold,
+    let own = &elem.style;
+    let mut style = TextStyle {
+        // The page transform scales scene units to points, so a size in points is
+        // divided back into scene units here.
+        size_pt: own
+            .font_size_pt
+            .map_or(px * UNITS_PER_EDITOR_PX, |pt| pt / POINTS_PER_UNIT),
+        bold: own.bold.unwrap_or(bold),
+        italic: own.italic,
         ..TextStyle::default()
     };
-    (style, centred)
+    if let Some(rgb) = own.color.as_deref().and_then(parse_rgb) {
+        style.fill_rgb = rgb;
+    }
+    let align = match own.align {
+        Some(crate::TextAlign::Left) => 0,
+        Some(crate::TextAlign::Center) => 1,
+        Some(crate::TextAlign::Right) => 2,
+        None => u8::from(centred),
+    };
+    (style, align)
 }
 
 /// Draws an element's text inside the editor's text box: wrapped to its width,
@@ -159,7 +204,7 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
     if elem.content.trim().is_empty() {
         return;
     }
-    let (style, centred) = text_style(&elem.element_type);
+    let (style, align) = text_style(elem);
     let left = SPACE_SM_PX * UNITS_PER_EDITOR_PX;
     let top = SPACE_XS_PX * UNITS_PER_EDITOR_PX;
     let width = (elem.width - 2.0 * SPACE_LG_PX * UNITS_PER_EDITOR_PX).max(1.0);
@@ -180,10 +225,10 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
         if line.is_empty() {
             continue;
         }
-        let x = if centred {
-            left + (width - text_width_pt(line, &style)) / 2.0
-        } else {
-            left
+        let x = match align {
+            1 => left + (width - text_width_pt(line, &style)) / 2.0,
+            2 => left + width - text_width_pt(line, &style),
+            _ => left,
         };
         let baseline = first_top + index as f32 * line_height + ASCENT_EM * style.size_pt;
         pdf.draw_text_with_transform(page, x, baseline, line, &style, transform);

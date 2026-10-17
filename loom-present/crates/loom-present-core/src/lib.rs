@@ -5,6 +5,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+mod element_style;
 mod pdf_export;
 mod pictures;
 mod pptx_export;
@@ -20,6 +21,7 @@ pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_
 use session_history::Snapshot;
 pub mod charts;
 pub use charts::*;
+pub use element_style::{ElementStyle, TextAlign, FONT_SIZE_RANGE, PALETTE};
 pub use tables::*;
 
 /// Authoring-plane dimensions used by Present's scene and transform APIs.
@@ -66,6 +68,9 @@ pub struct SlideElement {
     pub rotation_deg: f32,
     #[serde(default)]
     pub action: Option<SlideActionTrigger>,
+    /// Text and fill overrides; empty for an element that was never styled.
+    #[serde(default, skip_serializing_if = "ElementStyle::is_default")]
+    pub style: ElementStyle,
 }
 
 impl SlideElement {
@@ -332,6 +337,8 @@ impl Slide {
                     height: 120.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
                 self.add_element(SlideElement {
                     id: "sub-1".into(),
@@ -343,6 +350,8 @@ impl Slide {
                     height: 80.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
             SlideLayoutPreset::TitleAndContent => {
@@ -357,6 +366,8 @@ impl Slide {
                     height: 100.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
                 self.add_element(SlideElement {
                     id: "body-1".into(),
@@ -368,6 +379,8 @@ impl Slide {
                     height: 780.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
             SlideLayoutPreset::TwoColumn => {
@@ -382,6 +395,8 @@ impl Slide {
                     height: 100.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
                 self.add_element(SlideElement {
                     id: "col-1".into(),
@@ -393,6 +408,8 @@ impl Slide {
                     height: 780.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
                 self.add_element(SlideElement {
                     id: "col-2".into(),
@@ -404,6 +421,8 @@ impl Slide {
                     height: 780.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
             SlideLayoutPreset::Quote => {
@@ -418,6 +437,8 @@ impl Slide {
                     height: 200.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
             SlideLayoutPreset::BigStat => {
@@ -432,6 +453,8 @@ impl Slide {
                     height: 250.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
                 self.add_element(SlideElement {
                     id: "label-1".into(),
@@ -443,6 +466,8 @@ impl Slide {
                     height: 100.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
         }
@@ -1117,6 +1142,8 @@ impl PresentationDocument {
             height: 100.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides.push(cover);
         doc
@@ -1355,6 +1382,8 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                     height: 780.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
         } else {
@@ -1371,6 +1400,8 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                 height: 100.0,
                 rotation_deg: 0.0,
                 action: None,
+
+                style: Default::default(),
             });
             slides.push(slide);
         }
@@ -2523,6 +2554,8 @@ mod tests {
             height: 60.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         }));
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
         assert!(session.undo());
@@ -2544,6 +2577,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2555,6 +2590,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         let session = PresentationSession::new(doc);
@@ -2578,6 +2615,8 @@ mod tests {
             height: 40.0,
             rotation_deg: 90.0,
             action: None,
+
+            style: Default::default(),
         };
         let mut session = PresentationSession::new(doc);
         assert_eq!(session.hit_test(210.0, 205.0), None);
@@ -2599,6 +2638,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2610,6 +2651,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2673,6 +2716,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2780,6 +2825,8 @@ mod tests {
             height: 100.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2844,6 +2891,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -2855,6 +2904,8 @@ mod tests {
             height: 50.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         assert_eq!(slide.elements.len(), 2);
@@ -2891,6 +2942,8 @@ mod tests {
                 height,
                 rotation_deg: 0.0,
                 action: None,
+
+                style: Default::default(),
             }
         };
         // Centers: e1=(50,50) e2=(525,425) e3=(950,750) e4=(1850,1850)
@@ -3002,6 +3055,8 @@ mod tests {
             height: 100.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -3013,6 +3068,8 @@ mod tests {
             height: 100.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
 
         let bbox = slide.elements_bounding_box(&["e1", "e2"]).unwrap();
@@ -3483,6 +3540,8 @@ Hiring Plan
             height: 150.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         };
         fit_element_to_box(&mut elem, 0.0, 0.0, 600.0, 600.0).expect("fit failed");
         assert_eq!(elem.x, 0.0);
@@ -3503,6 +3562,8 @@ Hiring Plan
             height: 10.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         };
         let mut slide = Slide::new("slide-grid", "Grid", "blank");
         for name in ["a", "b", "c", "d"] {
@@ -3656,6 +3717,8 @@ Hiring Plan
             height: 40.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         };
         let shape = |id: &str, ty: ElementType, content: &str| SlideElement {
             id: id.into(),
@@ -3667,6 +3730,8 @@ Hiring Plan
             height: 100.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         };
 
         let mut deck = Vec::new();
@@ -3742,6 +3807,8 @@ Hiring Plan
             height: 80.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-body".into(),
@@ -3753,6 +3820,8 @@ Hiring Plan
             height: 120.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-stat".into(),
@@ -3764,6 +3833,8 @@ Hiring Plan
             height: 90.0,
             rotation_deg: 0.0,
             action: None,
+
+            style: Default::default(),
         });
         doc.slides[1].speaker_notes = "Walk through the chart slowly.".into();
 

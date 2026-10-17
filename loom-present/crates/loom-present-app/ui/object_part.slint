@@ -1,0 +1,88 @@
+import { Theme } from "theme.slint";
+
+/// One drawable piece of an element, in fractions of the element's box: a table
+/// cell, a chart bar or label, or the fill and text of a styled text object.
+export struct ObjectPart {
+    fx: float,
+    fy: float,
+    fw: float,
+    fh: float,
+    text: string,
+    has-bg: bool,
+    bg: color,
+    fg: color,
+    bold: bool,
+    /// 0 left, 1 centre, 2 right.
+    align: int,
+    /// Font size in slide units (the slide is 1000 x 562.5).
+    fs: float,
+    has-border: bool,
+    /// Wrap the text onto several lines (text objects) instead of eliding it.
+    wrap: bool,
+    /// Inset the text like an unstyled text object does, so styling it moves nothing.
+    pad: bool,
+    italic: bool,
+    /// Text colour: 0 is `fg`, 1 the paper's ink, 2 its muted ink, 3 the interface ink.
+    ink: int,
+    /// Draw the background as an ellipse (a circle shape).
+    round: bool,
+}
+
+/// The selected object's text style, shown by the inspector, and the one callback
+/// the style controls use. A global, so the byte-limited app window needs no new
+/// property or callback for them.
+export global ElementInk {
+    /// A text object or shape is selected, so its style can be changed.
+    in-out property <bool> available: false;
+    in-out property <string> size-label: "";
+    in-out property <bool> bold: false;
+    in-out property <bool> italic: false;
+    /// 0 left, 1 centre, 2 right.
+    in-out property <int> align: 0;
+    /// Palette slot of the text colour, or -1 for the type's own.
+    in-out property <int> color-slot: -1;
+    in-out property <int> fill-slot: -1;
+    /// The seven colours the swatches offer (the eighth swatch resets).
+    in property <[color]> palette: [];
+    /// `kind` is size, bold, italic, align, color or fill; `value` is the step,
+    /// the alignment or the palette slot (7 resets).
+    callback requested(string, int);
+}
+
+/// A part drawn at the box its caller gives it. `text-scale` is the slide's
+/// width over 840 px, the scale the unstyled text objects use for their insets.
+export component ObjectPartView inherits Rectangle {
+    in property <ObjectPart> part;
+    in property <length> slide-height;
+    in property <float> text-scale: 1.0;
+
+    background: root.part.has-bg ? root.part.bg : transparent;
+    border-radius: root.part.round ? self.width / 2 : 0px;
+    border-width: root.part.has-border ? 1px : 0px;
+    border-color: #d0d0d0;
+    clip: true;
+    accessible-role: none;
+
+    Text {
+        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
+        y: root.part.pad ? Theme.tokens.space.xs * root.text-scale : 0px;
+        width: root.part.pad ? max(1px, parent.width - Theme.tokens.space.lg * 2 * root.text-scale)
+            : max(1px, parent.width - 8px);
+        height: root.part.pad ? max(1px, parent.height - Theme.tokens.space.sm * 2 * root.text-scale)
+            : parent.height;
+        text: root.part.text;
+        font-family: Theme.document-font-family;
+        font-size: root.part.fs * root.slide-height / 562.5;
+        font-weight: root.part.bold ? 700 : 400;
+        font-italic: root.part.italic;
+        color: root.part.ink == 1 ? Theme.palette().paper-ink
+            : root.part.ink == 2 ? Theme.palette().paper-muted
+            : root.part.ink == 3 ? Theme.palette().ink
+            : root.part.fg;
+        horizontal-alignment: root.part.align == 1 ? center : root.part.align == 2 ? right : left;
+        vertical-alignment: center;
+        wrap: root.part.wrap ? word-wrap : no-wrap;
+        overflow: elide;
+        accessible-role: none;
+    }
+}

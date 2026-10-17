@@ -99,6 +99,8 @@ pub(super) fn build_session(slides: usize) -> PresentationSession {
                 height: 96.0,
                 rotation_deg: 0.0,
                 action: None,
+
+                style: Default::default(),
             });
         }
     }

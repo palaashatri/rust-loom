@@ -5,7 +5,7 @@ use crate::ObjectPart;
 use loom_objects::{
     Chart, ChartType, HorizontalAlign, Table, TableStyleCatalog, TableStyleOptions,
 };
-use loom_present_core::{ElementType, SlideElement};
+use loom_present_core::{ElementType, SlideElement, TextAlign};
 use slint::{Color, SharedString};
 
 /// Series colours used when a series carries none.
@@ -18,7 +18,7 @@ const SERIES: [u32; 6] = [
     0xFFA5_A5A5,
 ];
 
-fn color(hex: &str) -> Color {
+pub(crate) fn color(hex: &str) -> Color {
     let clean = hex.trim_start_matches('#');
     let rgb = u32::from_str_radix(clean.get(..6).unwrap_or(clean), 16).unwrap_or(0);
     Color::from_argb_encoded(0xFF00_0000 | rgb)
@@ -38,7 +38,105 @@ fn part(fx: f32, fy: f32, fw: f32, fh: f32) -> ObjectPart {
         align: 0,
         fs: 12.0,
         has_border: false,
+        wrap: false,
+        pad: false,
+        italic: false,
+        ink: 0,
+        round: false,
     }
+}
+
+/// Points a slide unit is worth: a 1000-unit slide is PowerPoint's 960 pt wide.
+pub(crate) const POINTS_PER_UNIT: f32 = 0.96;
+
+/// What an unstyled text object looks like, so a style that changes one thing
+/// (bold, say) keeps the rest: `(size in pt, bold, ink, centred)`. The sizes
+/// are the canvas's 24, 14 and 20 px tokens on an 840 px slide.
+fn type_defaults(kind: &ElementType) -> Option<(f32, bool, i32, bool)> {
+    match kind {
+        ElementType::Title => Some((27.43, true, 1, true)),
+        ElementType::Subtitle => Some((16.0, false, 2, false)),
+        ElementType::BodyText => Some((16.0, false, 1, false)),
+        ElementType::StatCard => Some((22.86, true, 1, true)),
+        ElementType::ShapeRectangle | ElementType::ShapeCircle => Some((16.0, false, 3, false)),
+        _ => None,
+    }
+}
+
+/// How a text object or shape is drawn now, as the inspector shows it.
+pub(crate) struct TextLook {
+    pub size_pt: f32,
+    pub bold: bool,
+    pub italic: bool,
+    /// 0 left, 1 centre, 2 right.
+    pub align: i32,
+}
+
+/// The look of a text object or shape, its own style over its type's; `None`
+/// for a picture, table or chart.
+pub(crate) fn look(element: &SlideElement) -> Option<TextLook> {
+    let (size_pt, bold, _, centred) = type_defaults(&element.element_type)?;
+    let style = &element.style;
+    Some(TextLook {
+        size_pt: style.size_or(size_pt),
+        bold: style.bold.unwrap_or(bold),
+        italic: style.italic,
+        align: match style.align {
+            Some(TextAlign::Left) => 0,
+            Some(TextAlign::Center) => 1,
+            Some(TextAlign::Right) => 2,
+            None => i32::from(centred),
+        },
+    })
+}
+
+/// The text of a text object or shape, as one part over its whole box.
+fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
+    let (size_pt, bold, ink, centred) = type_defaults(&element.element_type)?;
+    let style = &element.style;
+    let mut text = part(0.0, 0.0, 1.0, 1.0);
+    text.text = SharedString::from(element.content.clone());
+    text.fs = style.size_or(size_pt) / POINTS_PER_UNIT;
+    text.bold = style.bold.unwrap_or(bold);
+    text.italic = style.italic;
+    text.wrap = true;
+    text.pad = true;
+    text.align = match style.align {
+        Some(TextAlign::Left) => 0,
+        Some(TextAlign::Center) => 1,
+        Some(TextAlign::Right) => 2,
+        None => i32::from(centred),
+    };
+    match style.color.as_deref() {
+        Some(hex) => {
+            text.fg = color(hex);
+            text.ink = 0;
+        }
+        None => text.ink = ink,
+    }
+    Some(text)
+}
+
+/// Fill and text of a text object or shape whose style overrides its type's
+/// look; nothing for an element that was never styled, which the canvas draws
+/// itself.
+fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
+    if element.style.is_default() {
+        return Vec::new();
+    }
+    let Some(text) = styled_text_part(element) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(hex) = element.style.fill.as_deref() {
+        let mut fill = part(0.0, 0.0, 1.0, 1.0);
+        fill.has_bg = true;
+        fill.bg = color(hex);
+        fill.round = element.element_type == ElementType::ShapeCircle;
+        out.push(fill);
+    }
+    out.push(text);
+    out
 }
 
 /// Parts for a table or chart element; empty for every other element.
@@ -52,7 +150,7 @@ pub(crate) fn parts_for(element: &SlideElement) -> Vec<ObjectPart> {
             .chart()
             .map(|chart| chart_parts(&chart))
             .unwrap_or_default(),
-        _ => Vec::new(),
+        _ => styled_parts(element),
     }
 }
 
@@ -61,7 +159,11 @@ pub(crate) fn parts_for(element: &SlideElement) -> Vec<ObjectPart> {
 pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
     let whole = part(0.0, 0.0, 1.0, 1.0);
     let Some(table) = element.table() else {
-        return whole;
+        return if element.style.is_default() {
+            whole
+        } else {
+            styled_text_part(element).unwrap_or(whole)
+        };
     };
     let (rows, cols) = (table.row_count(), table.col_count());
     if rows == 0 || cols == 0 {

@@ -19,6 +19,7 @@ fn element(
         height: rect.3,
         rotation_deg: rotation,
         action: None,
+        style: Default::default(),
     }
 }
 

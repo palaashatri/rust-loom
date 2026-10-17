@@ -174,6 +174,8 @@ fn shift_marquee_adds_to_existing_domain_selection() {
                 height: 50.0,
                 rotation_deg: 0.0,
                 action: None,
+
+                style: Default::default(),
             });
         session.select_element("elem-1", false);
     }
@@ -1311,6 +1313,8 @@ fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
                     height: 120.0,
                     rotation_deg: 0.0,
                     action: None,
+
+                    style: Default::default(),
                 });
             }
             for element in slide.elements.iter_mut() {

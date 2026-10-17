@@ -104,6 +104,10 @@ fn fingerprint(document: &PresentationDocument, slide: &Slide) -> String {
         element.id.hash(&mut hasher);
         element_type_index(&element.element_type).hash(&mut hasher);
         element.content.hash(&mut hasher);
+        if !element.style.is_default() {
+            // Size, weight, colours and alignment change what the thumbnail shows.
+            format!("{:?}", element.style).hash(&mut hasher);
+        }
         for value in [
             element.x,
             element.y,
