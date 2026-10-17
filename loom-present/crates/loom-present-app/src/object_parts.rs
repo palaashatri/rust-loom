@@ -148,7 +148,7 @@ pub(crate) fn parts_for(element: &SlideElement) -> Vec<ObjectPart> {
             .unwrap_or_default(),
         ElementType::Chart => element
             .chart()
-            .map(|chart| chart_parts(&chart))
+            .map(|chart| chart_parts(&chart, element.width, element.height))
             .unwrap_or_default(),
         _ => styled_parts(element),
     }
@@ -262,7 +262,7 @@ fn table_parts(table: &Table, element_height: f32) -> Vec<ObjectPart> {
     out
 }
 
-fn chart_parts(chart: &Chart) -> Vec<ObjectPart> {
+fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
     let mut out = Vec::new();
     let mut frame = part(0.0, 0.0, 1.0, 1.0);
     frame.has_bg = true;
@@ -295,25 +295,97 @@ fn chart_parts(chart: &Chart) -> Vec<ObjectPart> {
         .max(f64::MIN_POSITIVE);
     let (px, py, pw, ph) = (0.08f32, 0.18f32, 0.88f32, 0.62f32);
     let group_w = pw / categories as f32;
-    let bar_w = group_w * 0.8 / chart.series.len() as f32;
-    for (si, series) in chart.series.iter().enumerate() {
-        let fill = series
+    let colour = |si: usize, series: &loom_objects::ChartSeries| {
+        series
             .color
             .as_deref()
             .map(color)
-            .unwrap_or_else(|| Color::from_argb_encoded(SERIES[si % SERIES.len()]));
-        for (ci, value) in series.values.iter().enumerate().take(categories) {
-            let frac = (value.max(0.0) / max) as f32;
-            let h = (ph * frac).max(0.004);
-            let mut bar = part(
-                px + ci as f32 * group_w + group_w * 0.1 + si as f32 * bar_w,
-                py + ph - h,
-                bar_w * 0.94,
-                h,
-            );
-            bar.has_bg = true;
-            bar.bg = fill;
-            out.push(bar);
+            .unwrap_or_else(|| Color::from_argb_encoded(SERIES[si % SERIES.len()]))
+    };
+    let at = |ci: usize, value: f64| {
+        let frac = (value.max(0.0) / max) as f32;
+        (px + (ci as f32 + 0.5) * group_w, py + ph - ph * frac)
+    };
+    let lines = matches!(
+        chart.chart_type,
+        ChartType::Line | ChartType::Area | ChartType::Scatter
+    );
+    if lines {
+        let (w, h) = (width.max(1.0), height.max(1.0));
+        let dot = |x: f32, y: f32, d: f32, fill: Color| {
+            let mut p = part(x - d / w / 2.0, y - d / h / 2.0, d / w, d / h);
+            p.has_bg = true;
+            p.bg = fill;
+            p.round = true;
+            p
+        };
+        for (si, series) in chart.series.iter().enumerate() {
+            let fill = colour(si, series);
+            let points: Vec<(f32, f32)> = series
+                .values
+                .iter()
+                .enumerate()
+                .take(categories)
+                .map(|(ci, v)| at(ci, *v))
+                .collect();
+            if chart.chart_type == ChartType::Area {
+                // A column of the series colour under every sample of the line.
+                let steps = 60usize;
+                for pair in points.windows(2) {
+                    for k in 0..steps {
+                        let t = k as f32 / steps as f32;
+                        let x = pair[0].0 + (pair[1].0 - pair[0].0) * t;
+                        let y = pair[0].1 + (pair[1].1 - pair[0].1) * t;
+                        let mut col = part(
+                            x,
+                            y,
+                            (pair[1].0 - pair[0].0) / steps as f32 + 0.0006,
+                            py + ph - y,
+                        );
+                        col.has_bg = true;
+                        col.bg = Color::from_argb_encoded(
+                            (fill.as_argb_encoded() & 0x00FF_FFFF) | 0x8000_0000,
+                        );
+                        out.push(col);
+                    }
+                }
+            }
+            if chart.chart_type != ChartType::Scatter {
+                for pair in points.windows(2) {
+                    let (dx, dy) = ((pair[1].0 - pair[0].0) * w, (pair[1].1 - pair[0].1) * h);
+                    let n = ((dx.hypot(dy) / 2.5).ceil() as usize).clamp(1, 120);
+                    for k in 0..=n {
+                        let t = k as f32 / n as f32;
+                        out.push(dot(
+                            pair[0].0 + (pair[1].0 - pair[0].0) * t,
+                            pair[0].1 + (pair[1].1 - pair[0].1) * t,
+                            3.0,
+                            fill,
+                        ));
+                    }
+                }
+            }
+            for (x, y) in points {
+                out.push(dot(x, y, 8.0, fill));
+            }
+        }
+    } else {
+        let bar_w = group_w * 0.8 / chart.series.len() as f32;
+        for (si, series) in chart.series.iter().enumerate() {
+            let fill = colour(si, series);
+            for (ci, value) in series.values.iter().enumerate().take(categories) {
+                let frac = (value.max(0.0) / max) as f32;
+                let h = (ph * frac).max(0.004);
+                let mut bar = part(
+                    px + ci as f32 * group_w + group_w * 0.1 + si as f32 * bar_w,
+                    py + ph - h,
+                    bar_w * 0.94,
+                    h,
+                );
+                bar.has_bg = true;
+                bar.bg = fill;
+                out.push(bar);
+            }
         }
     }
     for ci in 0..categories {
@@ -323,7 +395,7 @@ fn chart_parts(chart: &Chart) -> Vec<ObjectPart> {
         label.fs = 11.0;
         out.push(label);
     }
-    if !matches!(chart.chart_type, ChartType::Bar | ChartType::Column) {
+    if matches!(chart.chart_type, ChartType::Pie) {
         let mut note = part(0.04, 0.92, 0.92, 0.07);
         note.text = SharedString::from(format!("{:?} chart, drawn as columns", chart.chart_type));
         note.fs = 10.0;
@@ -378,5 +450,32 @@ mod tests {
         );
         let whole = active_cell_for(&plain);
         assert!(whole.fx == 0.0 && whole.fw == 1.0 && whole.text.is_empty());
+    }
+
+    #[test]
+    fn line_area_and_scatter_charts_draw_points_not_columns() {
+        let make = |kind: ChartType| {
+            let mut chart = Chart::new("c", kind);
+            chart.categories = vec!["a".into(), "b".into(), "c".into()];
+            chart.add_series("s", vec![1.0, 3.0, 2.0], None);
+            let element = SlideElement::new_chart("c", 0.0, 0.0, 400.0, 300.0, chart);
+            parts_for(&element)
+        };
+        let columns = make(ChartType::Column);
+        let line = make(ChartType::Line);
+        let scatter = make(ChartType::Scatter);
+        let area = make(ChartType::Area);
+        assert!(
+            line.iter().filter(|p| p.round).count() > 3,
+            "the line is dots"
+        );
+        assert!(line.len() > columns.len());
+        assert_eq!(
+            scatter.iter().filter(|p| p.round).count(),
+            3,
+            "markers only"
+        );
+        assert!(area.len() > line.len(), "the area adds a fill");
+        assert!(!line.iter().any(|p| p.text.contains("drawn as columns")));
     }
 }

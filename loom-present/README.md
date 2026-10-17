@@ -86,7 +86,7 @@ Present has no F6 region key; Tab and the toolbar order cover the toolbar, inspe
 ## Known limitations
 
 - On keyboard layouts where AltGr counts as Ctrl+Alt, Ctrl+Alt+Up/Down may not fire; use the Slide menu, the strip buttons or Ctrl+Up/Down on a focused thumbnail. Repeating the same slide move twice in a row may not be re-announced by a screen reader.
-- No tables, charts, audio or video, master slides or slide-number fields. Rich text runs are not supported: one style per text box. Shape inserts a rectangle only.
+- Tables and charts exist (Slide menu, palette, paste from Sheets; PPTX and PDF carry them) but there is no toolbar item for either. Column, bar, line, area and scatter charts draw as such; pie charts still draw as columns and say so. No audio or video, master slides or slide-number fields. Rich text runs are not supported: one style per text box. Shape inserts a rectangle only.
 - Typed numeric entry for position, size and rotation is not available (UI-18); geometry is shown read-only.
 - Present Zoom offers Fit, 75% and 50% only, no zoom in. The Document tab shows the aspect ratio read-only (16:9 Wide); there is no 4:3 option.
 - "New from Template..." creates a new deck from a named layout set (Blank, Title and Content, Two Columns, Image and Text) after the usual Save / Discard / Cancel prompt. Templates are layouts only: there is no stored or applied visual deck theme (colours, background) and no stored per-deck appearance. [tests]
