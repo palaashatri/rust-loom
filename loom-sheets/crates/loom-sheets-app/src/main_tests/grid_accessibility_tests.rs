@@ -21,17 +21,23 @@ fn every_visible_cell_and_header_has_an_accessible_name() {
     let s = launched(&[("A1", "5"), ("A2", "7"), ("B3", "12"), ("B4", "=A1+A2")]);
     let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render the grid");
     let names = accessible_names(&s.app);
-    for expected in [
-        "A1, value 5",
-        "A2, value 7",
-        "B3, value 12",
-        "B4, value 12, formula =A1+A2",
-        "Column B",
-        "Row 3",
-    ] {
+    // The active cell A1 and the filled cells in its row and column are named,
+    // along with every header.
+    for expected in ["A1, value 5", "A2, value 7", "Column B", "Row 3"] {
         assert!(
             names.iter().any(|name| name == expected),
             "no grid element is named {expected:?}"
+        );
+    }
+    // Moving the selection to B3 names it and the filled cell below it, formula included.
+    s.app.set_selected_row(2);
+    s.app.set_selected_col(1);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render the grid");
+    let names = accessible_names(&s.app);
+    for expected in ["B3, value 12", "B4, value 12, formula =A1+A2"] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "no grid element is named {expected:?} once B3 is selected"
         );
     }
 }

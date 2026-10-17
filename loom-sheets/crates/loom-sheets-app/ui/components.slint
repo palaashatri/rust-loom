@@ -288,12 +288,13 @@ export component SheetTable inherits Rectangle {
                                 overflow: spill-kind == 2 ? TextOverflow.clip : TextOverflow.elide;
                             }
 
-                            // Only a cell that holds something, or the active cell, is
-                            // exposed on its own. Naming every blank cell made each scroll
-                            // rebind hundreds of accessibility nodes (about 28 ms a frame
-                            // on a 1060x1000 window); moving the selection onto a blank cell
-                            // still announces it as empty.
-                            if is-active || root.cells[cell-idx] != "" || spill-kind != 0 : Rectangle {
+                            // A cell is exposed on its own when it is the active cell, is in
+                            // the selection, or holds a value in the active cell's row or
+                            // column. Naming every visible cell made each scroll rebind
+                            // hundreds of accessibility nodes (about 40 ms a frame over a
+                            // screenful of values); moving the selection names the cells it
+                            // reaches, blank ones as empty.
+                            if is-active || in-selection || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
                                 width: parent.width;
                                 height: parent.height;
                                 accessible-role: text;
