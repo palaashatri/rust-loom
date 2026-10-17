@@ -771,14 +771,20 @@ fn a_pointer_click_on_a_cell_reports_that_cell() {
         let clicked = clicked.clone();
         app.on_cell_clicked(move |row, col| clicked.set(Some((row, col))));
     }
-    // A cell is named by its address, value and formula: "C3, empty", "C3, value 1, ...".
-    let cell = i_slint_backend_testing::ElementQuery::from_root(&app)
-        .match_descendants()
-        .match_predicate(|e| e.accessible_label().is_some_and(|l| l.starts_with("C3, ")))
-        .find_first()
-        .expect("cell C3 is in the accessibility tree");
-    let position = cell.absolute_position();
-    let size = cell.size();
+    // Blank cells are not exposed one by one, so C3 is found from its headers:
+    // the "Column C" header gives its x range and the "Row 3" header its y range.
+    let find = |label: &str| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, label)
+            .next()
+            .unwrap_or_else(|| panic!("{label} is in the accessibility tree"))
+    };
+    let (column, row) = (find("Column C"), find("Row 3"));
+    let (cx, cy) = (column.absolute_position(), row.absolute_position());
+    let (cs, rs) = (column.size(), row.size());
+    let (position, size) = (
+        slint::LogicalPosition::new(cx.x, cy.y),
+        slint::LogicalSize::new(cs.width, rs.height),
+    );
     let point = slint::LogicalPosition::new(
         position.x + size.width / 2.0,
         position.y + size.height / 2.0,

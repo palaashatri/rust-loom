@@ -267,8 +267,6 @@ export component SheetTable inherits Rectangle {
                                 border-width: is-bordered ? 2px : 1px;
                                 border-color: is-bordered ? Theme.palette().ink : Theme.palette().paper-line;
                             }
-                            accessible-role: text;
-                            accessible-label: root.cell-labels[cell-idx];
 
                             Text {
                                 x: 8px;
@@ -288,6 +286,18 @@ export component SheetTable inherits Rectangle {
                                         : TextHorizontalAlignment.left);
                                 vertical-alignment: center;
                                 overflow: spill-kind == 2 ? TextOverflow.clip : TextOverflow.elide;
+                            }
+
+                            // Only a cell that holds something, or the active cell, is
+                            // exposed on its own. Naming every blank cell made each scroll
+                            // rebind hundreds of accessibility nodes (about 28 ms a frame
+                            // on a 1060x1000 window); moving the selection onto a blank cell
+                            // still announces it as empty.
+                            if is-active || root.cells[cell-idx] != "" || spill-kind != 0 : Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                accessible-role: text;
+                                accessible-label: root.cell-labels[cell-idx];
                             }
 
                             if is-underline : Rectangle {

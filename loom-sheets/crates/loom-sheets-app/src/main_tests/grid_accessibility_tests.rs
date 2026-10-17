@@ -26,7 +26,6 @@ fn every_visible_cell_and_header_has_an_accessible_name() {
         "A2, value 7",
         "B3, value 12",
         "B4, value 12, formula =A1+A2",
-        "C5, empty",
         "Column B",
         "Row 3",
     ] {
@@ -35,6 +34,29 @@ fn every_visible_cell_and_header_has_an_accessible_name() {
             "no grid element is named {expected:?}"
         );
     }
+}
+
+#[test]
+fn blank_cells_are_exposed_only_while_selected() {
+    // Naming every blank cell made each scroll rebind hundreds of accessibility
+    // nodes, so a blank cell is a node only when it is the active cell.
+    let s = launched(&[("A1", "5")]);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render the grid");
+    assert!(
+        !accessible_names(&s.app)
+            .iter()
+            .any(|name| name == "C5, empty"),
+        "an unselected blank cell is still a node of its own"
+    );
+    s.app.set_selected_row(4);
+    s.app.set_selected_col(2);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render the grid");
+    assert!(
+        accessible_names(&s.app)
+            .iter()
+            .any(|name| name == "C5, empty"),
+        "the selected blank cell is not announced as empty"
+    );
 }
 
 /// WCAG relative luminance of an sRGB pixel.
