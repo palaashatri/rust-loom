@@ -17,6 +17,7 @@ use loom_sheets_core::{parse_csv_records, shift_formula_references, CellRef, She
 use slint::{ComponentHandle, SharedString};
 
 use crate::actions::{copy_selection_with_values, paste_selection};
+use crate::paste_formats::{self, CellFormat};
 use crate::{
     apply_sheet, clear_selection, evaluate_current, selection_from_app, sync_menu_state,
     GridSelection, GuiState, SheetsApp,
@@ -26,8 +27,19 @@ use crate::{
 /// that came from elsewhere.
 struct LastCopy {
     origin: CellRef,
+    /// Each copied cell's style and alignment, pasted along with its value.
+    formats: Vec<Vec<CellFormat>>,
     /// The text Copy wrote to the system clipboard; `None` when that write failed.
     external_text: Option<String>,
+}
+
+/// What a Paste will write: the cells, where they were copied from when that
+/// was Sheets itself (so formulas follow), and their formats when the source
+/// carried any (plain text does not).
+struct Pasteable {
+    cells: Vec<Vec<String>>,
+    origin: Option<CellRef>,
+    formats: Option<Vec<Vec<CellFormat>>>,
 }
 
 /// "1 cell" or "N cells".
@@ -176,10 +188,12 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     clip_data.plain_text = Some(text.clone());
 
     let origin = sel.range().start;
+    let formats = paste_formats::capture(&state.current.borrow(), sel);
     let written = crate::system_clipboard::set_clipboard_data(&clip_data);
     LAST_COPY.with(|last| {
         *last.borrow_mut() = Some(LastCopy {
             origin,
+            formats,
             external_text: written.then_some(text),
         });
     });
@@ -191,7 +205,7 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
 /// copied from (so formulas can follow). That private copy is used when the
 /// system clipboard still matches what Copy wrote; otherwise the clipboard's
 /// tab-separated text is read.
-fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef>)> {
+fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
     let system_clip = crate::system_clipboard::get_clipboard_data();
     let system_text = system_clip
         .as_ref()
@@ -209,10 +223,14 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
                 // Another program has not replaced what Copy wrote.
                 (Some(written), Some(text)) => text == written,
             })
-            .map(|last| last.origin)
+            .map(|last| (last.origin, last.formats.clone()))
     });
-    if let (Some(origin), Some(raw)) = (from_us, internal) {
-        return Some((raw, Some(origin)));
+    if let (Some((origin, formats)), Some(raw)) = (from_us, internal) {
+        return Some(Pasteable {
+            cells: raw,
+            origin: Some(origin),
+            formats: Some(formats),
+        });
     }
 
     let clip = system_clip?;
@@ -221,12 +239,17 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
     if let Some(json) = &clip.loom_objects_json {
         if let Ok(table) = loom_objects::Table::from_json(json) {
             let grid = loom_clipboard::table_to_sheets_range(&table);
+            let formats = paste_formats::from_grid(&grid);
             let rows: Vec<Vec<String>> = grid
                 .into_iter()
                 .map(|row| row.into_iter().map(|c| c.value).collect())
                 .collect();
             if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
-                return Some((rows, None));
+                return Some(Pasteable {
+                    cells: rows,
+                    origin: None,
+                    formats: Some(formats),
+                });
             }
         }
     }
@@ -236,12 +259,17 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
         if html.contains("<table") || html.contains("<TABLE") {
             if let Some(table) = loom_clipboard::html_to_table(html) {
                 let grid = loom_clipboard::table_to_sheets_range(&table);
+                let formats = paste_formats::from_grid(&grid);
                 let rows: Vec<Vec<String>> = grid
                     .into_iter()
                     .map(|row| row.into_iter().map(|c| c.value).collect())
                     .collect();
                 if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
-                    return Some((rows, None));
+                    return Some(Pasteable {
+                        cells: rows,
+                        origin: None,
+                        formats: Some(formats),
+                    });
                 }
             }
         }
@@ -253,7 +281,11 @@ fn clipboard_cells(state: &GuiState) -> Option<(Vec<Vec<String>>, Option<CellRef
         .or(clip.plain_text)
         .filter(|text| !text.is_empty())?;
     let rows = parse_tsv(&text);
-    (!rows.is_empty() && rows.iter().any(|row| !row.is_empty())).then_some((rows, None))
+    (!rows.is_empty() && rows.iter().any(|row| !row.is_empty())).then_some(Pasteable {
+        cells: rows,
+        origin: None,
+        formats: None,
+    })
 }
 
 /// Move the relative references of every formula by a whole-grid offset.
@@ -278,6 +310,7 @@ fn paste_cells(
     sel: GridSelection,
     cells: Vec<Vec<String>>,
     origin: Option<CellRef>,
+    formats: Option<Vec<Vec<CellFormat>>>,
 ) -> usize {
     let range = sel.range();
     let single = cells.len() == 1 && cells[0].len() == 1;
@@ -312,13 +345,31 @@ fn paste_cells(
     } else {
         (sel, cells)
     };
-    paste_selection(
+    let before = formats
+        .is_some()
+        .then(|| Box::new(state.current.borrow().clone()));
+    let pasted = paste_selection(
         &mut state.current.borrow_mut(),
         &mut state.undo_stack.borrow_mut(),
         &mut state.redo_stack.borrow_mut(),
         target,
         &data,
-    )
+    );
+    if let (Some(formats), Some(before), true) = (formats, before, pasted > 0) {
+        // The formats join the values in one undo step: the paste's own step is
+        // replaced by a snapshot of the sheet before and after both.
+        let fill_over = fill.then_some((range.start, range.end));
+        let mut sheet = state.current.borrow_mut();
+        paste_formats::apply(&mut sheet, anchor, &formats, fill_over);
+        let after = Box::new(sheet.clone());
+        let mut undo = state.undo_stack.borrow_mut();
+        undo.pop();
+        crate::push_history(
+            &mut undo,
+            crate::SheetTransaction::Snapshot { before, after },
+        );
+    }
+    pasted
 }
 
 pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
@@ -376,12 +427,17 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     return;
                 }
                 let sel = selection_from_app(&app);
-                let Some((cells, origin)) = clipboard_cells(&state) else {
+                let Some(Pasteable {
+                    cells,
+                    origin,
+                    formats,
+                }) = clipboard_cells(&state)
+                else {
                     app.set_status_left("Nothing to paste".into());
                     return;
                 };
                 let from_us = origin.is_some();
-                let pasted = paste_cells(&state, sel, cells, origin);
+                let pasted = paste_cells(&state, sel, cells, origin, formats);
                 if pasted > 0 {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);

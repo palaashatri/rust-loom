@@ -50,6 +50,7 @@ mod grid_gestures;
 mod grid_navigation;
 mod grid_pointer;
 mod ink_actions;
+mod paste_formats;
 mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
 
