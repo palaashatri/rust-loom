@@ -107,36 +107,87 @@ mod windows {
     }
 }
 
+/// Marker that carries the Loom-private JSON inside the HTML flavour, for
+/// systems whose clipboard API only serves standard formats. Other programs
+/// ignore an HTML comment; a Loom application reads it back, so a copied table
+/// or chart keeps everything Loom knows about it.
+const LOOM_COMMENT_OPEN: &str = "<!--LOOM-OBJECTS:";
+
+/// Escapes `-` and `%` so the JSON can never contain the `-->` that would end
+/// the comment early. Only the non-Windows clipboard calls it (Windows has a
+/// registered private format), so it is unused in a Windows build.
+#[cfg_attr(windows, allow(dead_code))]
+fn embed_loom_json(html: &str, json: &str) -> String {
+    let escaped = json.replace('%', "%25").replace('-', "%2D");
+    format!("{LOOM_COMMENT_OPEN}{escaped}-->{html}")
+}
+
+/// Pulls the private JSON back out of HTML written by [`embed_loom_json`].
+#[cfg_attr(windows, allow(dead_code))]
+fn extract_loom_json(html: &str) -> Option<String> {
+    let start = html.find(LOOM_COMMENT_OPEN)? + LOOM_COMMENT_OPEN.len();
+    let end = start + html[start..].find("-->")?;
+    let json = html[start..end].replace("%2D", "-").replace("%25", "%");
+    (!json.is_empty()).then_some(json)
+}
+
 #[cfg(not(windows))]
 mod unix {
     use super::*;
-    use copypasta::ClipboardProvider;
+    use std::cell::RefCell;
+
+    thread_local! {
+        // On X11 the program that last copied owns the selection and answers
+        // other programs' requests, so the owner must outlive the copy call.
+        static OWNER: RefCell<Option<arboard::Clipboard>> = const { RefCell::new(None) };
+    }
+
+    fn with_clipboard<R>(
+        f: impl FnOnce(&mut arboard::Clipboard) -> Result<R, arboard::Error>,
+    ) -> Result<R, ClipboardOsError> {
+        OWNER.with(|owner| {
+            let mut owner = owner.borrow_mut();
+            if owner.is_none() {
+                *owner = Some(
+                    arboard::Clipboard::new()
+                        .map_err(|e| ClipboardOsError::IoError(e.to_string()))?,
+                );
+            }
+            let clipboard = owner.as_mut().ok_or(ClipboardOsError::Unavailable)?;
+            f(clipboard).map_err(|e| ClipboardOsError::IoError(e.to_string()))
+        })
+    }
 
     pub fn write(data: &ClipboardData) -> Result<(), ClipboardOsError> {
-        let mut ctx = copypasta::ClipboardContext::new()
-            .map_err(|e| ClipboardOsError::IoError(e.to_string()))?;
         let text = data
             .plain_text
             .as_deref()
             .or(data.tsv.as_deref())
-            .unwrap_or("");
-        ctx.set_contents(text.to_string())
-            .map_err(|e| ClipboardOsError::IoError(e.to_string()))?;
-        Ok(())
+            .unwrap_or("")
+            .to_string();
+        let html = data.html.as_deref().map(|html| match &data.loom_objects_json {
+            Some(json) => embed_loom_json(html, json),
+            None => html.to_string(),
+        });
+        with_clipboard(|clipboard| match html {
+            Some(html) => clipboard.set().html(html, Some(text)),
+            None => clipboard.set_text(text),
+        })
     }
 
     pub fn read() -> Result<ClipboardData, ClipboardOsError> {
-        let mut ctx = copypasta::ClipboardContext::new()
-            .map_err(|e| ClipboardOsError::IoError(e.to_string()))?;
-        let text = ctx
-            .get_contents()
-            .map_err(|e| ClipboardOsError::IoError(e.to_string()))?;
         let mut data = ClipboardData::default();
-        if !text.is_empty() {
-            data.plain_text = Some(text.clone());
+        let html = with_clipboard(|clipboard| Ok(clipboard.get().html().ok()))?;
+        if let Some(html) = html.filter(|html| !html.trim().is_empty()) {
+            data.loom_objects_json = extract_loom_json(&html);
+            data.html = Some(html);
+        }
+        let text = with_clipboard(|clipboard| Ok(clipboard.get_text().ok()))?;
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
             if text.contains('\t') {
-                data.tsv = Some(text);
+                data.tsv = Some(text.clone());
             }
+            data.plain_text = Some(text);
         }
         Ok(data)
     }
@@ -163,10 +214,13 @@ pub fn set_mock_clipboard_fails(fails: bool) {
 /// copied table or chart will paste as text. `None` where rich formats work
 /// (and while the in-memory test clipboard is active).
 pub fn rich_format_note() -> Option<&'static str> {
-    if MOCK_ENABLED.with(std::cell::Cell::get) || cfg!(windows) {
+    let has_display = cfg!(windows)
+        || std::env::var_os("DISPLAY").is_some()
+        || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    if MOCK_ENABLED.with(std::cell::Cell::get) || has_display {
         None
     } else {
-        Some("copied as plain text; rich table formats are not supported on this system")
+        Some("copied as plain text; there is no display to share rich table formats with")
     }
 }
 
@@ -214,6 +268,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn private_json_survives_the_html_comment_round_trip() {
+        // Text that would end the comment early, a percent sign that must not be
+        // read as an escape, and negative numbers outside any string.
+        let json = r#"{"title":"a --> b -- 100%2D","values":[-1.5,-2,3],"n":"%25"}"#;
+        let html = embed_loom_json("<table><tr><td>x</td></tr></table>", json);
+        assert!(html.ends_with("<table><tr><td>x</td></tr></table>"));
+        let inside = &html[LOOM_COMMENT_OPEN.len()..html.find("-->").unwrap()];
+        assert!(!inside.contains('-'), "a dash would let the text end the comment");
+        assert_eq!(extract_loom_json(&html).as_deref(), Some(json));
+        assert_eq!(extract_loom_json("<table></table>"), None);
+    }
+
+    #[test]
     fn test_mock_clipboard_operations() {
         set_mock_clipboard_enabled(true);
         let data = ClipboardData {
@@ -254,6 +321,35 @@ mod tests {
         assert_eq!(
             read.loom_objects_json.as_deref(),
             Some("{\"type\":\"test\"}")
+        );
+    }
+
+    /// Needs a running X server (WSLg works): `cargo test -p loom-clipboard --
+    /// --ignored real_x11`. Another program can read the HTML flavour while this
+    /// process owns the selection: `xclip -selection clipboard -o -t text/html`.
+    #[cfg(not(windows))]
+    #[test]
+    #[ignore = "needs a display server"]
+    fn real_x11_clipboard_round_trip() {
+        let data = ClipboardData {
+            plain_text: Some("Alpha	Beta".into()),
+            html: Some("<table><tr><td>Alpha</td><td>Beta</td></tr></table>".into()),
+            loom_objects_json: Some("{\"type\":\"test\",\"v\":-1}".into()),
+            ..Default::default()
+        };
+        write_clipboard(&data).expect("real X11 write");
+        if let Ok(path) = std::env::var("LOOM_X11_HOLD_FILE") {
+            // Lets a script read the clipboard from another process, then release us.
+            while !std::path::Path::new(&path).exists() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        let read = read_clipboard().expect("real X11 read");
+        assert_eq!(read.plain_text.as_deref(), Some("Alpha	Beta"));
+        assert!(read.html.as_deref().is_some_and(|h| h.contains("Alpha")));
+        assert_eq!(
+            read.loom_objects_json.as_deref(),
+            Some("{\"type\":\"test\",\"v\":-1}")
         );
     }
 }

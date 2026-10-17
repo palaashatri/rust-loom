@@ -10,7 +10,10 @@ description = "Multi-format clipboard architecture for Loom Office suite"
 loom-objects = { path = "../loom-objects" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-copypasta = "0.10"
+
+[target.'cfg(not(windows))'.dependencies]
+# X11 and Wayland owner-served clipboard with an HTML flavour next to plain text.
+arboard = { version = "3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.4.1"
