@@ -69,7 +69,7 @@ Evidence tags used below:
 | Ctrl+N / Ctrl+O | New / Open |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+E | Export CSV |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / Redo (there is no Ctrl+Y) |
+| Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / Redo |
 | Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A | Cut / Copy / Paste / Select all |
 | Ctrl+B / Ctrl+I / Ctrl+U | Bold / Italic / Underline |
 | Ctrl+= or Ctrl++ / Ctrl+- / Ctrl+0 | Zoom in / out / actual size |

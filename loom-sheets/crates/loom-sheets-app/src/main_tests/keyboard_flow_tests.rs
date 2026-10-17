@@ -710,6 +710,10 @@ fn type_values_and_formulas_navigate_undo_and_save_without_a_pointer() {
     assert_eq!(cell(&s, "A3"), "");
     ctrl(&s.app, "z");
     assert_eq!(cell(&s, "A1"), "10", "Ctrl+Z restored the cleared cells");
+    ctrl(&s.app, "y");
+    assert_eq!(cell(&s, "A1"), "", "Ctrl+Y redid the clear");
+    ctrl(&s.app, "z");
+    assert_eq!(cell(&s, "A1"), "10", "and Ctrl+Z undid it again");
 
     // Ctrl+S asks to save; the grid still has focus afterwards.
     ctrl(&s.app, "s");

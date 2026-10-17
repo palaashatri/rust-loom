@@ -396,8 +396,8 @@ export component SheetsApp inherits Window {
                     return accept;
                 }
                 if (event.text == "e" || event.text == "E") { root.export-csv(); return accept; }
-                if (event.text == "z" || event.text == "Z") {
-                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                if (event.text == "z" || event.text == "Z" || event.text == "y") {
+                    if (event.modifiers.shift || event.text == "y") { root.redo(); } else { root.undo(); }
                     return accept;
                 }
                 if (event.text == "c" || event.text == "C") { root.copy-selection(); return accept; }
