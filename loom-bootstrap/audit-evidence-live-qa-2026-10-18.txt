@@ -1,0 +1,144 @@
+LOOM LIVE-WINDOW QA, RENDER MATRIX, AND 14-GATE VERIFICATION EVIDENCE
+Date: 2026-10-18
+Commit: e4b8ce2 (and subsequent QA evidence commit)
+Platforms:
+  - Windows 11 Pro x86-64 (Host: vertical monitor 1080x1920 DISPLAY1, GPU acceleration)
+  - Linux Ubuntu-E x86-64 via WSL2 / WSLg (XWayland / Weston display :0, 1080x1920)
+
+================================================================================
+1. LIVE WINDOW INTERACTIVE QA (WINDOWS)
+================================================================================
+Test Script: .work/qa-live-20261018/run_live_qa_windows.ps1
+Target Screen: Vertical monitor 1080x1920 (no intersection with 3440x1440)
+Window Placement: X=3450, Y=-200, W=1060, H=1000
+
+Journeys Walked:
+  - Sheets:
+    * Launched with --example --chart in isolated throwaway environment.
+    * Verified chart and cell grid rendering. Captured sheets-01-example-chart.png.
+    * Audited UI Automation tree: Total elements = 197, Unnamed interactive = 0.
+    * Range selection copied to clipboard via Edit -> Copy. Captured sheets-02-copied.png.
+    * Process terminated cleanly.
+  - Writer:
+    * Launched blank document in isolated environment. Captured writer-01-blank.png.
+    * Audited UI Automation tree: Total elements = 32, Unnamed interactive = 0.
+    * Inserted table via Insert -> Table. Captured writer-02-table.png.
+    * Extended table via "+ Row Below". Captured writer-03-table-row-added.png.
+    * Applied table style "Dark 1". Captured writer-04-table-style-dark1.png.
+    * Tested undo via Edit -> Undo. Captured writer-05-undo.png.
+    * Tested redo via Edit -> Redo. Captured writer-06-redo.png.
+    * Process terminated cleanly.
+  - Present:
+    * Launched blank deck in isolated environment. Captured present-01-blank.png.
+    * Audited UI Automation tree: Total elements = 40, Unnamed interactive = 0.
+    * Inserted table via Slide -> Insert Table... Captured present-02-table.png.
+    * Inserted chart via Slide -> Insert Chart... Captured present-03-chart.png.
+    * Tested undo via Edit -> Undo. Captured present-04-undo.png.
+    * Entered full-screen slideshow via Play button. Sized to 1080x1920. Captured present-05-slideshow.png.
+    * Exited slideshow via PostMessage VK_ESCAPE (0x1B). Returned to 1060x1000 editor. Captured present-06-exit-slideshow.png.
+    * Process terminated cleanly.
+
+Result: PASS (0 crashes, 0 hangs, 0 unnamed interactive controls, 14 live PNGs saved in .work/qa-live-20261018/windows/).
+
+================================================================================
+2. LIVE WINDOW INTERACTIVE QA (LINUX WSLG)
+================================================================================
+Test Scripts:
+  - .work/qa-live-20261018/run_linux_xdotool_qa.sh
+  - Native Linux debug builds compiled in /home/patri/rust-loom/
+
+Interactive Execution (WSLg DISPLAY=:0):
+  - Sheets:
+    * Process started, window discovered by xdotool (ID 6291460, Name "Untitled").
+    * Synthetically typed "Hello from Linux" into active cell via xdotool key/type.
+    * Zero crashes or focus deadlocks.
+  - Writer:
+    * Process started, window discovered by xdotool (class "loom-writer", Name "Untitled - Loom Writer").
+    * Synthetically typed "Linux Live Writer test" via xdotool type.
+    * Zero crashes or focus deadlocks.
+  - Present:
+    * Process started, window discovered by xdotool (ID 6291460, Name "Untitled Presentation - Loom Present").
+    * Dispatched F5 key to enter slideshow; dispatched Escape key to exit slideshow.
+    * Zero crashes or focus deadlocks.
+
+Software-Rendered Parity Captures:
+  - linux-sheets.png (93 KB)
+  - linux-writer.png (69 KB)
+  - linux-present.png (72 KB)
+Saved in .work/qa-live-20261018/linux/.
+
+Result: PASS.
+
+================================================================================
+3. HEADLESS RENDER MATRIX (42/42 PASSED)
+================================================================================
+Script: .work/qa-live-20261018/run_render_matrix.py
+Output Directory: .work/qa-live-20261018/matrix/
+
+Parameters Matrix across Sheets, Writer, Present:
+  - Viewports (4): 1024x720, 1280x800, 1440x900, 1920x1200
+  - Themes (3): light, dark, high-contrast
+  - Text scales (3): 1.0, 1.5, 2.0
+  - Scale factors (3): 1.0, 1.5, 2.0
+  - RTL mode (1): --rtl
+
+Matrix Summary:
+  - Total runs: 42
+  - Passed: 42
+  - Failed: 0
+Visual Inspection:
+  - Responsive layouts: At 1024 px, compact drawers and toolbars collapse without label clipping or button overlap.
+  - High-contrast & Dark themes: Palette tokens maintain sharp readable contrast; focus rings remain distinct.
+  - Text scales up to 2.0: Typography metrics scale with container bounds without line wrapping clipping.
+  - RTL: Directional layout mirrors navigation panels and toolbars cleanly.
+
+================================================================================
+4. GATE 10 FRAME BENCHMARKS
+================================================================================
+Environment Variable: LOOM_FRAME_BENCH=enforce
+
+Writer frame_bench_tests (5/5 passed):
+  - test_100x20_table_keystroke_budget: p95 = 15.59 ms (budget < 16.7 ms)
+  - test_100_pages_keystroke_budget: p95 = 4.96 ms (budget < 16.7 ms)
+  - test_typing_steady_state_budget: passed
+  - test_cursor_blink_cost: passed
+  - test_selection_extension_budget: passed
+
+Present frame_bench_tests (5/5 passed):
+  - test_20x10_table_keystroke_budget: p95 = 4.70 ms (budget < 16.7 ms)
+  - test_100_slides_edit_budget: p95 = 0.63 ms (budget < 16.7 ms)
+  - test_100_slides_render_budget: p95 = 21.33 ms (budget < 45.0 ms)
+  - test_transition_steady_state: passed
+  - test_navigator_scroll_budget: passed
+
+Sheets PERF-01 Performance:
+  - 10,000 chained formulas evaluation: 14.28 ms
+  - 1,000,000 unique cell writes: 173.34 ms
+  - Single-row COW sort on 10,000 rows: 0.83 ms (budget < 16.7 ms)
+  - Select-all bounded accessibility projection: < 50 ms
+
+================================================================================
+5. GATE 11 INTEROPERABILITY
+================================================================================
+Evidence Log: loom-bootstrap/audit-evidence-interop-gate11-2026-10-17.txt
+  - Linux LibreOffice 26.2.6.3 roundtrips:
+    * Sheets XLSX export: 17/17 checks passed
+    * Writer DOCX export: 17/17 checks passed
+    * Present PPTX export: 15/15 checks passed
+  - LibreOffice-authored imports:
+    * Sheets: import_libreoffice_authored_xlsx passed
+    * Writer: import_libreoffice_authored_docx passed (resolved list kind bullet vs decimal via word/numbering.xml)
+    * Present: import_libreoffice_authored_pptx passed
+  - Windows Microsoft Office 16.0 COM verification:
+    * Excel: check_excel.ps1 passed 49/49 checks
+    * Word: check_word.ps1 passed 43/43 checks
+    * PowerPoint: check_powerpoint.ps1 passed 37/37 checks (verifying ElementStyle sz/b/i/algn)
+
+================================================================================
+6. REPOSITORY AUDITS
+================================================================================
+  - Governance: python loom-bootstrap/scripts/audit-governance.py -> PASS
+  - Assets: python loom-bootstrap/scripts/audit-assets.py -> PASS
+  - Code Structure: python loom-bootstrap/scripts/audit-code-structure.py -> PASS (25 legacy ceilings enforced)
+  - UI Foundation: python loom-bootstrap/scripts/audit-ui-foundation.py -> PASS
+  - Cargo Formatting: cargo fmt across sheets, writer, present, core -> PASS
