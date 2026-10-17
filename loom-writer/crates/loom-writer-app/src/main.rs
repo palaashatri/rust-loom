@@ -791,17 +791,7 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Align selected paragraphs to the right")
             .with_category("format")
             .with_order(101),
-        // Insert — a real document edit; enabled for any open document.
-        CommandSpec::new("writer.table.insert", "Insert Markdown Table (text)")
-            .with_undo_label("Insert Markdown Table")
-            .with_description("Insert a Markdown table at the caret; its cells are edited as text")
-            .with_category("insert")
-            .with_order(20),
-        CommandSpec::new("writer.chart.insert", "Insert Chart (from Clipboard)")
-            .with_undo_label("Insert Chart")
-            .with_description("Insert an embedded chart from clipboard payload at the caret")
-            .with_category("insert")
-            .with_order(25),
+        // Insert commands are defined in table_actions::table_command_specs().
         // Utility/palette/inspector — always enabled
         CommandSpec::new("app.palette", "Command Palette")
             .with_undo_label("Open Palette")

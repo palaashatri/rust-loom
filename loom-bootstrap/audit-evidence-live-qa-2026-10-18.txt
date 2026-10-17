@@ -22,11 +22,11 @@ Journeys Walked:
   - Writer:
     * Launched blank document in isolated environment. Captured writer-01-blank.png.
     * Audited UI Automation tree: Total elements = 32, Unnamed interactive = 0.
-    * Inserted table via Insert -> Table. Captured writer-02-table.png.
-    * Extended table via "+ Row Below". Captured writer-03-table-row-added.png.
+    * Inserted 3x3 table via Table -> Insert Table... Captured writer-02-table.png. (DEFECT-01 resolved: added insert.table to CommandRegistry catalog and enabled in sync_table_registry_enablement; UIA automation queries ListItem "Insert Table...").
+    * Opened Table Inspector, extended table via "+ Row Below" (producing 4x3 table). Captured writer-03-table-row-added.png.
     * Applied table style "Dark 1". Captured writer-04-table-style-dark1.png.
-    * Tested undo via Edit -> Undo. Captured writer-05-undo.png.
-    * Tested redo via Edit -> Redo. Captured writer-06-redo.png.
+    * Tested undo via Edit -> Undo (reverted style). Captured writer-05-undo.png.
+    * Tested redo via Edit -> Redo (reapplied style). Captured writer-06-redo.png.
     * Process terminated cleanly.
   - Present:
     * Launched blank deck in isolated environment. Captured present-01-blank.png.

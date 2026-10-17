@@ -259,6 +259,36 @@ pub(crate) fn clear_table_cell_selection_range() {
 pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
     use loom_command::CommandSpec;
     vec![
+        CommandSpec::new("insert.table", "Insert Table...")
+            .with_undo_label("Insert Table")
+            .with_description("Insert a table at the caret; its cells are edited as text")
+            .with_category("insert")
+            .with_order(20),
+        CommandSpec::new("writer.table.insert", "Insert Markdown Table (text)")
+            .with_undo_label("Insert Markdown Table")
+            .with_description("Insert a Markdown table at the caret; its cells are edited as text")
+            .with_category("insert")
+            .with_order(21),
+        CommandSpec::new("insert.chart", "Insert Chart from Clipboard")
+            .with_undo_label("Insert Chart")
+            .with_description("Insert an embedded chart from clipboard payload at the caret")
+            .with_category("insert")
+            .with_order(25),
+        CommandSpec::new("writer.chart.insert", "Insert Chart (from Clipboard)")
+            .with_undo_label("Insert Chart")
+            .with_description("Insert an embedded chart from clipboard payload at the caret")
+            .with_category("insert")
+            .with_order(26),
+        CommandSpec::new("insert.image", "Insert Picture...")
+            .with_undo_label("Insert Picture")
+            .with_description("Insert an image from a file at the caret")
+            .with_category("insert")
+            .with_order(27),
+        CommandSpec::new("writer.image.insert", "Insert Picture...")
+            .with_undo_label("Insert Picture")
+            .with_description("Insert an image from a file at the caret")
+            .with_category("insert")
+            .with_order(28),
         CommandSpec::new("table.insert_row_above", "Insert Row Above")
             .with_undo_label("Insert Row Above")
             .with_description("Insert a new table row above current row")
@@ -300,6 +330,12 @@ pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
             .with_category("table")
             .with_order(35)
             .with_enabled(false),
+        CommandSpec::new("table.delete_col", "Delete Column")
+            .with_undo_label("Delete Column")
+            .with_description("Delete current table column")
+            .with_category("table")
+            .with_order(35)
+            .with_enabled(false),
         CommandSpec::new("table.merge_cells", "Merge Cells")
             .with_undo_label("Merge Cells")
             .with_description("Merge selected table cells")
@@ -323,6 +359,16 @@ pub(crate) fn sync_table_registry_enablement(
     enabled: bool,
 ) {
     use loom_command::CommandId;
+    for id in [
+        "insert.table",
+        "writer.table.insert",
+        "insert.chart",
+        "writer.chart.insert",
+        "insert.image",
+        "writer.image.insert",
+    ] {
+        registry.set_enabled(&CommandId::new(id), true);
+    }
     for id in [
         "table.insert_row_above",
         "table.insert_row_below",
