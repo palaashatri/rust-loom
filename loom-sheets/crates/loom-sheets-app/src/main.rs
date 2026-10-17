@@ -2746,12 +2746,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     local_menu::wire_action(&app, menu_service.clone());
-    {
-        // A choice from any surface refreshes the menu check marks.
-        let menu_service = menu_service.clone();
-        let state = state.clone();
-        appearance::on_change(move |app| sync_menu_state(&menu_service, app, &state));
-    }
+    wire_appearance_menu_sync(&menu_service, &state);
 
     register_sheet_actions(&app, &state, &menu_service);
     chart_actions::register_chart_actions(&app, &state);
@@ -2837,8 +2832,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         })
         .map_err(|error| error.to_string())?;
     }
-    slint::run_event_loop().map_err(|e| e.to_string())?;
-    Ok(())
+    let result = slint::run_event_loop().map_err(|e| e.to_string());
+    state.workbook_worker.borrow_mut().take();
+    result
+}
+
+fn wire_appearance_menu_sync(menu_service: &Arc<NativeMenuBar>, state: &Rc<GuiState>) {
+    let menu_service = menu_service.clone();
+    let state = Rc::downgrade(state);
+    appearance::on_change(move |app| {
+        if let Some(state) = state.upgrade() {
+            sync_menu_state(&menu_service, app, &state);
+        }
+    });
 }
 
 fn main() -> Result<(), String> {

@@ -391,7 +391,7 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
                 let bar = app.global::<FindBar>();
                 bar.set_open(false);
                 bar.set_match_rects(Rc::new(slint::VecModel::from(Vec::new())).into());
-                bar.set_page_focus_tick(bar.get_page_focus_tick() + 1);
+                app.invoke_focus_page();
             }
         });
     }

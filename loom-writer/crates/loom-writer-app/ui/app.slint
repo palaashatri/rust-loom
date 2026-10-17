@@ -258,8 +258,7 @@ export component WriterApp inherits Window {
     // Hand keyboard focus to the page editor (and the window-level shortcut
     // scope above it), so typing and shortcuts work without a prior click.
     public function focus-page() {
-        app-focus.focus();
-        FindBar.page-focus-tick += 1;
+        page-canvas.focus();
     }
 
     /// F6 cycles the keyboard through the page, the toolbar and the open
@@ -588,7 +587,6 @@ export component WriterApp inherits Window {
         Rectangle {
             width: parent.width;
             height: parent.height;
-            background: Theme.palette().scrim;
             TouchArea { clicked => { root.toggle-inspector(); } }
         }
 

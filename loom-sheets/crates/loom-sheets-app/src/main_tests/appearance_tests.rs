@@ -60,11 +60,7 @@ fn launched_in(directory: PathBuf, flag: Option<&str>) -> Harness {
             crate::command_dispatch::dispatch_command(&app, id.as_str());
         }
     });
-    {
-        let menu = session.menu.clone();
-        let state = session.state.clone();
-        appearance::on_change(move |app| sync_menu_state(&menu, app, &state));
-    }
+    wire_appearance_menu_sync(&session.menu, &session.state);
     appearance::start_with_store(
         app,
         AppearanceStore::at(directory.join("settings.toml")),
@@ -433,5 +429,17 @@ fn a_settings_directory_that_cannot_be_written_keeps_the_switch_and_says_so() {
             .contains("could not be remembered"),
         "{}",
         h.app().get_status_left()
+    );
+}
+
+#[test]
+fn appearance_listener_does_not_retain_gui_state_after_window_drops() {
+    let h = launched("weak-state", Some("light"));
+    wire_appearance_menu_sync(&h.session.menu, &h.session.state);
+    let weak_state = Rc::downgrade(&h.session.state);
+    drop(h);
+    assert!(
+        weak_state.upgrade().is_none(),
+        "appearance::on_change must not retain GuiState (and WorkbookWorker) in thread-local storage after exit"
     );
 }

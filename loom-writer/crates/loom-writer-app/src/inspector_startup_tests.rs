@@ -96,3 +96,69 @@ fn startup_does_not_put_keyboard_focus_on_the_inspector_tabs() {
         "the inspector tab strip drew focus at startup"
     );
 }
+
+#[test]
+fn compact_inspector_drawer_does_not_dim_the_page_outside_the_panel() {
+    let (app, _state) = launched(1024);
+    assert!(app.get_compact_inspector_layout());
+    assert!(!app.get_show_inspector());
+    let closed_frame = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render closed");
+    let closed_pixel = closed_frame.get_pixel(250, 300).0;
+
+    app.invoke_toggle_inspector();
+    assert!(app.get_show_inspector());
+    let open_frame = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render open");
+    let open_pixel = open_frame.get_pixel(250, 300).0;
+    assert_eq!(
+        open_pixel, closed_pixel,
+        "opening the compact inspector drawer must not dim the page outside the panel"
+    );
+
+    let pos = slint::LogicalPosition::new(250.0, 300.0);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: pos,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: pos,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    assert!(
+        !app.get_show_inspector(),
+        "clicking outside the compact inspector drawer still closes it"
+    );
+}
+
+#[test]
+fn focus_page_at_launch_focuses_editor_synchronously_without_mutating_focus_during_tree_instantiation(
+) {
+    use slint::private_unstable_api::re_exports::WindowInner;
+    let (app, _state) = launched(1280);
+    // Simulate X11 app.show() initial draw instantiating the tree before focus_page_at_launch.
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("initial show draw");
+
+    focus_page_at_launch(&app);
+    let window_inner = WindowInner::from_pub(app.window());
+    let before = window_inner
+        .focus_item
+        .borrow()
+        .upgrade()
+        .expect("focused item immediately after focus_page_at_launch");
+
+    // AccessKitAdapter::build_new_tree calls ensure_tree_instantiated() while holding
+    // accesskit_adapter.borrow_mut(). If ensure_tree_instantiated() changes focus_item,
+    // WinitWindowAdapter::handle_focus_change re-borrows accesskit_adapter mutably and panics.
+    window_inner.ensure_tree_instantiated();
+    let after = window_inner
+        .focus_item
+        .borrow()
+        .upgrade()
+        .expect("focused item after ensure_tree_instantiated");
+
+    assert_eq!(
+        before, after,
+        "ensure_tree_instantiated must not mutate focus_item after focus_page_at_launch"
+    );
+}

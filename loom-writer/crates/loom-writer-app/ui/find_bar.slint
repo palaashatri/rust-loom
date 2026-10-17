@@ -25,8 +25,6 @@ export global FindBar {
     in-out property <[FindRect]> match-rects: [];
     /// Raised each time the bar is asked for, so an open bar takes focus again.
     in-out property <int> focus-tick: 0;
-    /// Raised when the bar closes, so the page takes focus back.
-    in-out property <int> page-focus-tick: 0;
     /// Ctrl+F (false) or Ctrl+H (true) was pressed.
     callback open-requested(bool);
     callback query-changed(string);

@@ -695,3 +695,42 @@ fn the_border_switch_keeps_a_visible_knob_and_track_in_each_theme() {
         }
     }
 }
+
+#[test]
+fn compact_inspector_drawer_does_not_dim_the_worksheet_outside_the_panel() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    apply_layout_breakpoints(&app, 1024);
+    let weak = app.as_weak();
+    app.on_toggle_inspector(move || {
+        let app = weak.upgrade().expect("live window");
+        app.set_show_inspector(!app.get_show_inspector());
+    });
+    app.set_show_inspector(false);
+    let closed_frame = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render closed");
+    let closed_pixel = closed_frame.get_pixel(200, 300).0;
+
+    app.set_show_inspector(true);
+    let open_frame = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render open");
+    let open_pixel = open_frame.get_pixel(200, 300).0;
+    assert_eq!(
+        open_pixel, closed_pixel,
+        "opening the compact inspector drawer must not dim the worksheet outside the panel"
+    );
+
+    let pos = slint::LogicalPosition::new(200.0, 300.0);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: pos,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: pos,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    assert!(
+        !app.get_show_inspector(),
+        "clicking outside the compact inspector drawer still closes it"
+    );
+}

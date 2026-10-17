@@ -115,9 +115,6 @@ component WriterDocumentEditor inherits Rectangle {
     accessible-placeholder-text: root.placeholder;
     accessible-action-default => { editor.focus(); }
     forward-focus: editor;
-    // Closing the find bar hands focus back to the page.
-    in property <int> find-focus-tick: FindBar.page-focus-tick;
-    changed find-focus-tick => { editor.focus(); }
 
     focus-touch := TouchArea { clicked => { editor.focus(); } }
 
@@ -339,6 +336,7 @@ export component WriterPageCanvas inherits Rectangle {
     background: Theme.palette().canvas;
     horizontal-stretch: 1;
     vertical-stretch: 1;
+    forward-focus: document-editor;
 
     init => { root.view-height = page-scroll.height; }
     changed measured-height => { root.view-height = root.measured-height; }

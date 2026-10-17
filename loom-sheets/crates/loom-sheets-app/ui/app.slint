@@ -624,7 +624,6 @@ export component SheetsApp inherits Window {
                 if root.compact-inspector-visible : Rectangle {
                     width: parent.width;
                     height: parent.height;
-                    background: Theme.palette().scrim;
                     TouchArea { clicked => { root.toggle-inspector(); } }
                 }
                 inspector-panel := SheetInspector {
