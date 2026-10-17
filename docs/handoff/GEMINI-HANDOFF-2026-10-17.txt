@@ -1,0 +1,244 @@
+LOOM HANDOFF TO GEMINI - 2026-10-17
+===================================
+
+Read this whole file, then the top of AGENTS.md (the constitution) and the
+current-truth section. If anything here conflicts with AGENTS.md, AGENTS.md wins,
+except for the owner grants in section 2, which are recorded there too.
+
+
+1. WHAT LOOM IS AND WHAT "DONE" MEANS
+-------------------------------------
+Loom is a local-first Rust + Slint creative suite. v1 scope is three apps on
+Windows x86-64 and Linux x86-64 only: Sheets (loom-sheets/), Writer
+(loom-writer/) and Present (loom-present/). Shared code is in loom-core/.
+macOS and the five other apps (Photo, Motion, Video, Studio, Encode) are out of
+scope and locked. Do not touch them except for refactor-only size extraction.
+
+Goal: make Sheets, Writer and Present production ready, with honest evidence.
+All three are ACCEPTANCE_BLOCKED today. Nothing is ACCEPTED. A status of
+ACCEPTED needs all 14 gates in AGENTS.md section 13 to pass with recorded
+evidence. The README of each app must list every working feature first.
+
+
+2. OWNER GRANTS FOR THIS HANDOFF (from the owner, 2026-10-17)
+-------------------------------------------------------------
+a) You may do your own visual and functional QA with the computer-use skill:
+   drive real windows (Windows 11 here; Linux through WSL/WSLg, distro
+   Ubuntu-E), take screenshots, type, click, open menus, save and reopen.
+
+b) You may mark an app's acceptance gate (and the app ACCEPTED) as the owner
+   expects, but ONLY after an "Argon" hostile reviewer has approved it, and only
+   with passing evidence recorded for every gate in section 13.
+   Argon is a separate reviewer you launch for adversarial review: it must be a
+   different agent/session from the one that wrote the code, it must open the
+   screenshots and run the app itself, and its verdict must be quoted in the
+   ledger (reviewer name, date, what it opened, PASS/FAIL per gate, defects).
+   Your own opinion is not an Argon approval. A reviewer that could not view
+   images or run the app cannot approve visual or functional gates.
+
+c) The earlier owner permission still stands: gate 2 (visual) may be passed on
+   a hostile Opus-class reviewer's approval of renders. Screen-reader work
+   (gate 9 speech) is deferred by the owner: gate 9 may be judged on the
+   Windows UI Automation tree and Linux AT-SPI tree plus keyboard-flow tests,
+   labelled "tree-verified, not speech-verified".
+
+What these grants do NOT allow:
+ - Do not claim a gate you did not verify. On 2026-10-11 a previous Gemini run
+   wrote "ACCEPTED" and invented an "Owner Human Verification Override"; the
+   orchestrator retracted it (see the 2026-10-12 verification entry in
+   AGENTS.md). Do not repeat that. Never write that the owner waived anything.
+ - Do not weaken, delete or skip tests, raise a byte ceiling in
+   loom-bootstrap/contracts/code-quality.toml, refresh visual baselines to hide
+   a defect, or add a placebo control.
+ - Do not report numbers you did not measure. Do not invent test counts.
+ - Do not mark ACCEPTED while any severity-1 or severity-2 defect is known.
+
+
+3. STATE OF THE REPOSITORY (main, 2026-10-17)
+---------------------------------------------
+Recent work, all pushed:
+ - Writer inline pictures (core + app + DOCX/PDF), commit 822cfdc. Evidence:
+   loom-bootstrap/audit-evidence-writer-pictures-2026-10-17.txt.
+   The full Writer app suite (`cargo test --workspace` in loom-writer) was NOT
+   confirmed after this change: run it first.
+ - Present: typed position/size/rotation fields; text and shape styling
+   (size, bold, italic, align, colour, fill) with PPTX/PDF; line, area and
+   scatter charts draw as themselves (pie still draws as columns).
+ - Sheets: text colour, wrap text, paste keeps formats, Ctrl+Y redo, scroll
+   speed work (sparse sheet about 90 fps, dense about 50 fps on one RTX 3080
+   machine), memory budget 512 MiB decided and met at 1,000,000 cells.
+ - Linux: rich clipboard (HTML + private JSON) verified between Loom windows
+   in WSLg; LibreOffice 26.2 interop re-checked for tables and charts.
+ - Gate 2 renders were approved by Opus hostile reviewers (renders only).
+Read the dated entries at the end of the current-truth section of AGENTS.md for
+the evidence and the stated limits of each.
+
+
+4. GATE PICTURE (what is still unproven; this is your work list)
+----------------------------------------------------------------
+ Gate 2  visual: renders approved by Opus; NEEDS a live-window pass at sizes
+         above 1018 px on Windows and Linux (the vertical monitor is 1080x1920)
+         and a fresh Argon review of everything changed since.
+ Gate 7  Sheets: REC-02 closed for v1; real full-volume disk-full untested.
+ Gate 8  keyboard-only: PASS in tested flows; Present full walkthrough and the
+         new Writer picture / Present styling controls not walked.
+ Gate 9  tree-verified only (owner deferred speech).
+ Gate 10 Sheets dense-sheet scroll about 50 fps (budget 60); sort/undo-sort
+         126/158 ms on the UI thread at 1M cells; Writer 100+ page software
+         render panics (harness limit); Linux GPU frame times unmeasured.
+ Gate 11 partial: Excel/Word/PowerPoint on Windows and LibreOffice on Linux
+         checked for fixtures; importing LibreOffice-authored files into Loom
+         is untested; Present styling in PowerPoint beyond the ledger's list
+         is unchecked.
+ Gate 13 no known sev-1/2 except what you find. Known sev-3: Sheets exit panic
+         in WorkbookWorker::drop; intermittent Linux Writer RefCell panic at
+         startup under scripted focus; the drawer dims the document when the
+         inspector is open below the dock width.
+ Gate 14 explicit ACCEPTED record: only per section 2b.
+
+Open cards: UI-01 (menu popup/keyboard live check), UI-10 (caption truncation
+rule), UI-15, UI-18 (numeric entry: Present done for one object; others not),
+CODE-23/27/28/29 (XLSX warnings, native checks), PERF-01, GOV-02/03/04. Full
+card text is in docs/archive/AGENTS-ARCHIVE.md.
+
+Known functional gaps (good candidates, in rough value order):
+ - Writer: pictures cannot be resized, dragged, pasted or given alt text; no
+   headers/footers, footnotes, spell check; tables are Markdown-backed so
+   pasted bold/alignment/widths are lost.
+ - Present: pie charts, per-run text formatting, more shape types, theme-aware
+   default colours, multi-object geometry, aspect lock.
+ - Sheets: merged cells, conditional formatting, filters, data validation,
+   more chart types, column widths/row heights in copy, Select All over a
+   screenful exposes every cell to accessibility.
+ - Linux: Wayland clipboard, a native (non-WSLg) desktop, file dialogs need
+   zenity or a portal.
+
+
+5. HOW TO WORK (commands, rules, traps)
+---------------------------------------
+Build and test per app, from inside the app folder so .cargo/config.toml
+applies (Windows needs its 32 MiB stack flag):
+
+  cd loom-sheets && cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+
+(same for loom-writer, loom-present). Debug builds only unless measuring
+performance. Full suites take 4-15 minutes; run them in the background.
+
+Audits, from the repo root, must stay green:
+  python loom-bootstrap/scripts/audit-code-structure.py
+  python loom-bootstrap/scripts/audit-ui-foundation.py
+  python loom-bootstrap/scripts/audit-governance.py
+  python loom-bootstrap/scripts/audit-assets.py
+
+Byte ceilings (loom-bootstrap/contracts/code-quality.toml) are LF bytes and may
+not be raised. Sheets app.slint had 19 bytes of headroom (39,713 of 39,732);
+Writer app.slint about 780; Present app.slint 42,874 of 42,883. Put new Slint
+in a new file or a Slint global exported from an existing file, and new Rust in
+new modules, not main.rs.
+
+Method for each feature: write a behaviour test, see it fail, implement, see it
+pass, drive the real app, record the evidence. For UI work render with
+  loom-<app> --screenshot out.png --size 1280x800 [--theme dark|high-contrast]
+  [--rtl] [--text-scale 2.0] [--scale-factor 1.5] [--open file]
+and LOOK at the image. The RTL, text-scale and keyboard tab-order tests fail if
+a new control overflows a 280 px inspector: fix the layout, not the test.
+
+Traps seen on this project:
+ - Slint accessible-role must be a constant: use conditional child elements.
+ - Python edit scripts mangled backslash escapes; use the Edit tool for Rust
+   string literals.
+ - A published number must be measured: say machine, build profile, workload.
+ - "Callback exists" or "status string changed" is not proof of a feature.
+ - Stale Loom processes hold the recovery lock: use a throwaway HOME /
+   LOOM_CONFIG_DIR for live runs, and close windows when done.
+ - Do not capture or type into the user's primary monitor (3440x1440). Use the
+   vertical monitor (1080x1920 at X=3440, Y=-232 in Windows coordinates).
+   Check the foreground window before EVERY synthetic input and abort if it is
+   not the Loom window. A reviewer's keystrokes once leaked into another app.
+ - The host C: drive filled up once: do not run more than two cargo builds at
+   once, never `--release` into a new target dir, never `cargo clean`.
+ - GitHub API rate limits intermittently block CI checks; retry later.
+
+
+6. QA WITH THE COMPUTER-USE SKILL
+---------------------------------
+Windows: launch the debug or release exe from loom-<app>/target, place the
+window on the vertical monitor, drive it with the computer-use tools (or the
+PowerShell drivers under .work/w3live/), screenshot only that monitor.
+Linux: run the Linux binary inside WSL (distro Ubuntu-E) under WSLg, drive it
+with xdotool following .agents/skills/linux-desktop-input/SKILL.md (guarded
+X11; Weston ignores windowfocus: launch the target window last or click it).
+
+Walk these journeys and keep the screenshots under .work/<run>/:
+ Sheets : new sheet, type values and formulas, drag-select a range, format
+          (bold, fill, text colour, wrap), insert chart, sort, copy and paste
+          into Writer and Present, save, close with unsaved changes (all three
+          buttons), reopen, undo/redo (Ctrl+Z, Ctrl+Y), export CSV and XLSX and
+          open the XLSX in Excel (COM) or LibreOffice.
+ Writer : type, headings, lists, bold/italic, find/replace, insert table and
+          picture (PNG and JPEG), save, reopen, export PDF and DOCX and open
+          the DOCX in Word (COM) and LibreOffice, page-break behaviour, undo of
+          a picture, window resize across the 1180 px inspector breakpoint.
+ Present: new deck, add slides, type in placeholders, style text, change shape
+          fill, type geometry, insert table and chart, reorder slides, F5
+          slideshow with a transition, presenter view, save, reopen, export
+          PDF and PPTX and open the PPTX in PowerPoint (COM).
+
+Also check renders at 1024x720, 1280x800, 1440x900 and 1920x1200, light, dark
+and high contrast, text scale 1.0/1.5/2.0, scale factor 1.0/1.5/2.0, and one
+RTL pass. Look for clipped labels, overlap, unreadable contrast, lost focus
+rings, and controls that do nothing. File every defect with a severity:
+  sev1  data loss, crash, freeze, corrupt export, unrecoverable state
+  sev2  a primary workflow blocked or wrong
+  sev3  cosmetic or secondary
+Fix sev1 and sev2 before asking for acceptance.
+
+
+7. THE ARGON REVIEW (required before any ACCEPTED)
+--------------------------------------------------
+When you believe one app passes every gate, launch Argon as an independent
+hostile reviewer. Give it: the app name, the commit hash, the build commands,
+the list of the 14 gates, where your evidence is, and this instruction:
+
+  "Try to make it fail. Open every screenshot yourself. Run the app. Report
+   each gate as PASS or FAIL with the evidence you saw, list every defect with
+   a severity, and do not accept our evidence without looking at it."
+
+Do not show Argon your conclusion first. If Argon reports any FAIL or any
+sev1/sev2 defect, fix and re-review; do not argue the review away.
+
+The ACCEPTED record (in the status table and as a dated paragraph in the
+current-truth section) must contain: commit hash, per-gate result with evidence
+paths, Argon's name, date and quoted verdict, every disclosed limitation. Update
+the app README feature list first. If Argon could not be run, the app stays
+ACCEPTANCE_BLOCKED and you say so.
+
+Also update the cards you change in docs/archive/AGENTS-ARCHIVE.md, and update
+loom-bootstrap/contracts/workflow.toml and audit-governance.py together if you
+change the phase (the governance unit tests fail when the status table and the
+contract disagree; a Gemini edit broke them once).
+
+
+8. COMMIT AND REPORT
+--------------------
+Commit small, working milestones to main and push (the owner authorised main
+for this run). End commit messages with the attribution line the harness
+specifies. After each milestone append one dated, factual paragraph to the
+current-truth section of AGENTS.md: what changed, exact commands, results,
+evidence paths, and what you did NOT verify. A reader must be able to tell
+tested from assumed. Do not create new Markdown files (the only Markdown is
+AGENTS.md, the READMEs and the archive); put evidence in .txt/.log files under
+loom-bootstrap/ or .work/.
+
+
+9. FIRST STEPS
+--------------
+ 1. git pull; read AGENTS.md (long: skim the dated entries from 2026-10-09
+    onward and the tail).
+ 2. cd loom-writer && cargo test --workspace (the unconfirmed run); fix any
+    failure caused by the picture work.
+ 3. Run the four audits.
+ 4. Pick the highest-value gap from section 4, work it test-first, QA it live,
+    commit, record, repeat. Prefer closing the sev-3 known defects and the
+    gate-10 shortfalls before adding features.
+ 5. When an app is ready, run the Argon review (section 7).
