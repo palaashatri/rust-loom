@@ -94,3 +94,46 @@ fn write_writer_interop_fixtures() {
     std::fs::write(dir.join("writer.pdf"), export_pdf(&doc)).unwrap();
     std::fs::write(dir.join("writer.md"), doc.to_markdown().as_bytes()).unwrap();
 }
+
+fn chart_document() -> WriterDocument {
+    use loom_objects::chart::{Chart, ChartSeries, ChartType};
+    let mut doc = WriterDocument::new("doc-chart", "Chart interop");
+    doc.push(RichBlock::new(1, "paragraph", "Before the chart"));
+    let chart = Chart::from_data(
+        "chart-1",
+        Some("Quarterly Growth".to_string()),
+        ChartType::Column,
+        vec!["Q1".to_string(), "Q2".to_string(), "Q3".to_string()],
+        vec![ChartSeries {
+            name: "Revenue".to_string(),
+            values: vec![50.0, 75.0, 120.0],
+            color: None,
+        }],
+    );
+    doc.insert_chart_block(100, chart).expect("insert chart");
+    doc
+}
+
+/// A chart block leaves Writer as a real DOCX chart part, not as its JSON text.
+#[test]
+fn a_chart_block_exports_as_a_chart_part_and_never_as_json_text() {
+    let export = export_docx(&chart_document()).expect("export");
+    let archive = loom_package::zip::PackageArchive::from_bytes(&export.bytes).expect("zip");
+    let names: Vec<&str> = archive.paths();
+    assert!(
+        names.iter().any(|n| n.starts_with("word/charts/chart")),
+        "no chart part in {names:?}"
+    );
+    let body = String::from_utf8(archive.get("word/document.xml").expect("body").to_vec()).unwrap();
+    assert!(
+        body.contains("c:chart"),
+        "the body does not reference the chart"
+    );
+    assert!(
+        !body.contains("chartType"),
+        "the chart's JSON leaked into the text"
+    );
+    if let Ok(dir) = std::env::var("LOOM_INTEROP_OUT") {
+        std::fs::write(PathBuf::from(dir).join("writer-chart.docx"), &export.bytes).unwrap();
+    }
+}
