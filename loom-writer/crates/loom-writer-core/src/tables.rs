@@ -708,6 +708,8 @@ pub(crate) fn for_each_counted_text(kind: &str, text: &str, mut visit: impl FnMu
         for cell in parse_table_markdown(text).rows.iter().flatten() {
             visit(cell.as_str());
         }
+    } else if kind == crate::IMAGE_BLOCK_KIND {
+        // A picture is one object, not words.
     } else {
         visit(text);
     }

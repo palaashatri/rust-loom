@@ -23,6 +23,16 @@ pub(super) struct Body {
     pub numbered_lists: usize,
     /// The chart parts embedded in the body.
     pub charts: Vec<(usize, String)>,
+    /// The pictures embedded in the body, in order.
+    pub images: Vec<BodyImage>,
+}
+
+/// A picture part of the package.
+pub(super) struct BodyImage {
+    pub index: usize,
+    pub extension: &'static str,
+    pub mime: &'static str,
+    pub bytes: std::sync::Arc<Vec<u8>>,
 }
 
 /// Twentieths of a point, the unit WordprocessingML measures in.
@@ -117,6 +127,7 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
     let mut numbered_lists = 0usize;
     let mut previous_numbered = false;
     let mut charts: Vec<(usize, String)> = Vec::new();
+    let mut images: Vec<BodyImage> = Vec::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         if let Some(table) = &tables[index] {
             xml.push_str(&table_xml(table, geometry.text_width()));
@@ -126,6 +137,22 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
             if index + 1 == doc.blocks.len() || followed_by_table {
                 xml.push_str("<w:p/>");
             }
+            previous_numbered = false;
+            continue;
+        }
+        if let Some(image) = block.image.as_ref().filter(|_| block.is_image()) {
+            let index = images.len() + 1;
+            let (w, h) = image.fitted_size(
+                geometry.text_width() as f32 / 20.0,
+                (geometry.height - geometry.top - geometry.bottom).max(720) as f32 / 20.0,
+            );
+            xml.push_str(&picture_paragraph(block, image, index, w, h));
+            images.push(BodyImage {
+                index,
+                extension: image.format.extension(),
+                mime: image.format.mime(),
+                bytes: image.bytes.clone(),
+            });
             previous_numbered = false;
             continue;
         }
@@ -163,7 +190,29 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
         xml,
         numbered_lists,
         charts,
+        images,
     }
+}
+
+/// A paragraph holding one inline picture of `w` by `h` points.
+fn picture_paragraph(
+    block: &RichBlock,
+    image: &crate::InlineImage,
+    index: usize,
+    w: f32,
+    h: f32,
+) -> String {
+    let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
+    let name = xml::attr(&image.name);
+    let alignment = match block.style.alignment {
+        loom_text::Alignment::Center => "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        loom_text::Alignment::Right => "<w:pPr><w:jc w:val=\"right\"/></w:pPr>",
+        _ => "",
+    };
+    format!(
+        "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
+        id = 1000 + index
+    )
 }
 
 fn chart_xml_paragraph(rid: &str, chart_id: usize) -> String {

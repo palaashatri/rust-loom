@@ -43,13 +43,13 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     let mut add = |name: &str, content: String| archive.add(name, content.into_bytes());
     add(
         "[Content_Types].xml",
-        package::content_types(has_comments, chart_count),
+        package::content_types(has_comments, chart_count, &body.images),
     )?;
     add("_rels/.rels", package::package_rels())?;
     add("word/document.xml", body.xml)?;
     add(
         "word/_rels/document.xml.rels",
-        package::document_rels(has_comments, chart_count),
+        package::document_rels(has_comments, chart_count, &body.images),
     )?;
     add("word/styles.xml", package::styles(&style))?;
     add(
@@ -69,6 +69,12 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     }
     add("docProps/core.xml", package::core_properties(&doc.title))?;
     add("docProps/app.xml", package::app_properties())?;
+    for image in &body.images {
+        archive.add(
+            &format!("word/media/image{}.{}", image.index, image.extension),
+            image.bytes.to_vec(),
+        )?;
+    }
 
     Ok(DocxExport {
         bytes: archive.to_bytes()?,

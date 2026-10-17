@@ -253,7 +253,8 @@ impl WriterDocument {
             // Pagination must use the same block metrics as the geometry: a
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let line_height = font_size * style.line_height;
+            let picture = block.image_display_size(usable_width, usable_height);
+            let line_height = picture.map_or(font_size * style.line_height, |(_, h)| h);
             let info = wrapped(block, font_size, usable_width);
             for line in info.lines.iter() {
                 if lines.len() > page_first_line
@@ -273,7 +274,7 @@ impl WriterDocument {
                     bounds: PageRect {
                         x: 0.0,
                         y: 0.0,
-                        width: line.advance_pt,
+                        width: picture.map_or(line.advance_pt, |(w, _)| w),
                         height: 0.0,
                     },
                 });
@@ -344,6 +345,8 @@ impl WriterDocument {
         let page_height = style.height_pt * zoom;
         let page_gap = PAGE_GAP_PT * zoom;
         let body_line_height = style.body_font_size_pt * style.line_height * zoom;
+        let usable_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
 
         let mut page_bounds = Vec::with_capacity(page_lines.len());
         for (index, range) in page_lines.iter().enumerate() {
@@ -359,8 +362,13 @@ impl WriterDocument {
             let mut line_y = page_y + style.margin_top_pt * zoom;
             for at in range.clone() {
                 let block = &self.blocks[lines[at].block_index];
-                let line_height =
-                    style.font_size_for_kind(block.kind.as_str()) * style.line_height * zoom;
+                let line_height = block
+                    .image_display_size(usable_width, usable_height)
+                    .map_or(
+                        style.font_size_for_kind(block.kind.as_str()) * style.line_height,
+                        |(_, h)| h,
+                    )
+                    * zoom;
                 let width = lines[at].bounds.width * zoom;
                 lines[at].bounds = PageRect {
                     x: content_x,

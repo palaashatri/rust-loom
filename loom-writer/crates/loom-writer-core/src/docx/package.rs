@@ -26,13 +26,27 @@ pub(super) const DEFAULT_LINE_TWIPS: i32 = 276;
 pub(super) const SANS_FAMILY: &str = "Arial";
 
 /// `[Content_Types].xml`.
-pub(super) fn content_types(has_comments: bool, chart_count: usize) -> String {
+pub(super) fn content_types(
+    has_comments: bool,
+    chart_count: usize,
+    images: &[super::body::BodyImage],
+) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
         "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
          <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
          <Default Extension=\"xml\" ContentType=\"application/xml\"/>",
     );
+    let mut seen: Vec<&str> = Vec::new();
+    for image in images {
+        if !seen.contains(&image.extension) {
+            seen.push(image.extension);
+            out.push_str(&format!(
+                "<Default Extension=\"{}\" ContentType=\"{}\"/>",
+                image.extension, image.mime
+            ));
+        }
+    }
     let mut part = |name: &str, content_type: &str| {
         out.push_str(&format!(
             "<Override PartName=\"{name}\" ContentType=\"{content_type}\"/>"
@@ -83,7 +97,11 @@ pub(super) fn package_rels() -> String {
 }
 
 /// `word/_rels/document.xml.rels`.
-pub(super) fn document_rels(has_comments: bool, chart_count: usize) -> String {
+pub(super) fn document_rels(
+    has_comments: bool,
+    chart_count: usize,
+    images: &[super::body::BodyImage],
+) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
         "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -102,6 +120,13 @@ pub(super) fn document_rels(has_comments: bool, chart_count: usize) -> String {
     for c in 1..=chart_count {
         out.push_str(&format!(
             "<Relationship Id=\"rIdChart{c}\" Type=\"{REL}/chart\" Target=\"charts/chart{c}.xml\"/>"
+        ));
+    }
+    for image in images {
+        out.push_str(&format!(
+            "<Relationship Id=\"rIdImg{i}\" Type=\"{REL}/image\" Target=\"media/image{i}.{ext}\"/>",
+            i = image.index,
+            ext = image.extension
         ));
     }
     out.push_str("</Relationships>");

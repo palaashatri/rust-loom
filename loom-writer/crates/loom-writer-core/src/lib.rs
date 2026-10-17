@@ -21,6 +21,7 @@ mod export;
 mod export_flow;
 mod export_table;
 pub mod fonts;
+mod images;
 mod layout;
 mod markdown;
 mod page_setup;
@@ -35,6 +36,7 @@ mod text_metrics;
 pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
+pub use images::*;
 pub use layout::{DocumentFlow, FlowLine};
 pub use loom_objects;
 pub use page_setup::PageSetup;
@@ -65,6 +67,8 @@ pub struct RichBlock {
     pub style: loom_text::ParagraphStyle,
     /// Character style runs (byte ranges into text).
     pub runs: Vec<loom_text::StyleRun>,
+    /// The picture of an [`IMAGE_BLOCK_KIND`] block.
+    pub image: Option<InlineImage>,
 }
 
 impl RichBlock {
@@ -76,6 +80,7 @@ impl RichBlock {
             text: Text::from_str(text),
             style: ParagraphStyle::default(),
             runs: Vec::new(),
+            image: None,
         }
     }
 }
@@ -543,6 +548,10 @@ impl WriterDocument {
             s.push_str(&paragraph_style_json(&b.style));
             s.push_str(",\"runs\":");
             s.push_str(&runs_json(&b.runs));
+            if let Some(image) = &b.image {
+                s.push_str(",\"image\":");
+                s.push_str(&images::image_json(image));
+            }
             s.push('}');
         }
         s.push(']');
@@ -637,7 +646,10 @@ impl WriterDocument {
                 _ => "p",
             };
             out.push_str(&format!("<{tag}>"));
-            out.push_str(b.text.as_str());
+            match b.image_placeholder() {
+                Some(placeholder) => out.push_str(&placeholder),
+                None => out.push_str(b.text.as_str()),
+            }
             out.push_str(&format!("</{tag}>\n"));
         }
         out.push_str("</body>\n</html>\n");
@@ -1672,6 +1684,7 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
         let mut legacy_alignment = None;
         let mut style_raw = None;
         let mut runs_raw = None;
+        let mut image_raw = None;
         for (k, v) in &fields {
             match k.as_str() {
                 "id" => {
@@ -1692,6 +1705,11 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
                         runs_raw = Some(raw.clone());
                     }
                 }
+                "image" => {
+                    if let JsonValue::Raw(raw) = v {
+                        image_raw = Some(raw.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -1705,9 +1723,28 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
         if let Some(raw) = runs_raw {
             b.runs = parse_runs(&raw)?;
         }
+        if let Some(raw) = image_raw {
+            b.image = parse_image(&raw)?;
+        }
         out.push(b);
     }
     Ok(out)
+}
+
+fn parse_image(raw: &str) -> Result<Option<InlineImage>, WriterError> {
+    let fields = ContentParser::new(raw).parse()?;
+    let (mut name, mut data) = (String::new(), String::new());
+    let (mut width, mut height) = (None, None);
+    for (key, value) in &fields {
+        match key.as_str() {
+            "name" => name = json_value_text(value),
+            "data" => data = json_value_text(value),
+            "wpt" => width = json_value_text(value).parse().ok(),
+            "hpt" => height = json_value_text(value).parse().ok(),
+            _ => {}
+        }
+    }
+    Ok(images::image_from_fields(&name, width, height, &data))
 }
 
 fn parse_paragraph_style(

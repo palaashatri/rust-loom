@@ -47,6 +47,11 @@ pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
                 numbered_index += 1;
                 out.push_str(&format!("{}. {}\n", numbered_index, inline(block)));
             }
+            _ if block.is_image() => {
+                numbered_index = 0;
+                let placeholder = block.image_placeholder().unwrap_or_default();
+                out.push_str(&format!("{placeholder}\n\n"));
+            }
             _ => {
                 numbered_index = 0;
                 out.push_str(&format!("{}\n\n", inline(block)));

@@ -30,6 +30,7 @@ loom-objects = { workspace = true }
 # already embeds and no document measures with.
 loom-fonts = { workspace = true }
 unicode-segmentation = "1.13"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [dev-dependencies]
 # `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.

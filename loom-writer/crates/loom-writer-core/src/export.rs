@@ -139,6 +139,10 @@ enum LineContent {
         width: f32,
         height: f32,
     },
+    Picture {
+        width: f32,
+        height: f32,
+    },
 }
 
 /// One line of the PDF in document order.
@@ -206,6 +210,18 @@ fn pdf_lines(
                     height: layout.row_height(row),
                 });
             }
+            continue;
+        }
+        let usable_height =
+            (page_style.height_pt - page_style.margin_top_pt - page_style.margin_bottom_pt)
+                .max(1.0);
+        if let Some((width, height)) = block.image_display_size(column, usable_height) {
+            lines.push(PdfLine {
+                block: index,
+                content: LineContent::Picture { width, height },
+                gap,
+                height,
+            });
             continue;
         }
         if kind == crate::CHART_BLOCK_KIND {
@@ -336,10 +352,38 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 let origin = (page_style.margin_left_pt + shift, y);
                 draw_chart_card(&mut pdf, page, chart, origin, *width, *height);
             }
+            LineContent::Picture { width, height } => {
+                let shift = align_shift(block.style.alignment, column, *width);
+                if let Some(image) = block.image.as_ref().and_then(|i| pdf_image(i).ok()) {
+                    let id = pdf.add_image(image);
+                    let x = page_style.margin_left_pt + shift;
+                    pdf.draw_image_with_transform(
+                        page,
+                        id,
+                        (*width, *height),
+                        [1.0, 0.0, 0.0, -1.0, x, y],
+                    );
+                }
+            }
         }
         y -= line.height;
     }
     pdf.serialize()
+}
+
+/// A picture as a PDF image: decoded, shrunk to at most 1,600 pixels on a
+/// side (the samples are stored uncompressed) and split into colour and alpha.
+fn pdf_image(image: &crate::InlineImage) -> Result<loom_pdf::PdfImage, String> {
+    let (width, height, rgba) = image.preview_rgba(1600)?;
+    let pixels = width as usize * height as usize;
+    let mut rgb = Vec::with_capacity(pixels * 3);
+    let mut alpha = Vec::with_capacity(pixels);
+    for pixel in rgba.chunks_exact(4) {
+        rgb.extend_from_slice(&pixel[..3]);
+        alpha.push(pixel[3]);
+    }
+    let alpha = alpha.iter().any(|a| *a != 255).then_some(alpha);
+    loom_pdf::PdfImage::rgb(width, height, rgb, alpha)
 }
 
 fn draw_chart_card(
