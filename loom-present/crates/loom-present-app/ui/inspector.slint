@@ -1,5 +1,5 @@
 import {
-    LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomButton,
+    LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomButton, LoomTextField,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { PresentTableInspector } from "table_inspector.slint";
@@ -83,6 +83,40 @@ component TextStyleRow inherits HorizontalLayout {
     }
 }
 
+/// Two narrow number fields side by side; right-to-left lists them in the opposite
+/// order so the first field stays at the reading-start edge.
+component GeometryPair inherits HorizontalLayout {
+    in property <string> first-label;
+    in property <string> second-label;
+    in-out property <string> first-value;
+    in-out property <string> second-value;
+    callback accepted(int, string);
+    callback cancelled(int);
+    /// A field took keyboard focus; the window position and height of the field.
+    callback focus-moved(length, length);
+    spacing: Theme.tokens.space.xs;
+    for slot in 2 : VerticalLayout {
+        property <int> k: Theme.rtl ? 1 - slot : slot;
+        horizontal-stretch: 1;
+        if k == 0 : LoomTextField {
+            label: root.first-label;
+            field-min-width: 96px;
+            value <=> root.first-value;
+            accepted(text) => { root.accepted(0, text); }
+            cancelled => { root.cancelled(0); }
+            changed focused => { if (self.focused) { root.focus-moved(self.absolute-position.y, self.height); } }
+        }
+        if k == 1 : LoomTextField {
+            label: root.second-label;
+            field-min-width: 96px;
+            value <=> root.second-value;
+            accepted(text) => { root.accepted(1, text); }
+            cancelled => { root.cancelled(1); }
+            changed focused => { if (self.focused) { root.focus-moved(self.absolute-position.y, self.height); } }
+        }
+    }
+}
+
 component InspectorPropertyRow inherits Rectangle {
     in property <string> label: "Property";
     min-height: Theme.scaled-control-height;
@@ -151,6 +185,17 @@ export component PresentInspector inherits LoomPanel {
     callback table-action(string);
     /// F6 or Shift+F6 pressed inside the inspector.
     callback region-key(bool);
+
+    /// Scroll the tab's content so a control at window height `y` is fully visible;
+    /// called when a control below the fold takes keyboard focus.
+    function reveal(y: length, h: length) {
+        let top = y - scroller.absolute-position.y;
+        if (top < 0px) {
+            scroller.viewport-y = min(0px, scroller.viewport-y - top);
+        } else if (top + h > scroller.height) {
+            scroller.viewport-y = max(scroller.height - scroller.viewport-height, scroller.viewport-y - (top + h - scroller.height));
+        }
+    }
 
     /// Bumped by F6 to move keyboard focus to the Format / Animate / Document tabs.
     in property <int> focus-request: 0;
@@ -304,36 +349,38 @@ export component PresentInspector inherits LoomPanel {
 
                     if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
                     if root.selection-count > 0 : InspectorPropertyRow {
-                        label: "Position";
-                        Text {
-                            text: root.element-x-text + " × " + root.element-y-text;
-                            font-size: Theme.type.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        label: "Position (X, Y)";
+                        GeometryPair {
+                            first-label: "X position";
+                            second-label: "Y position";
+                            first-value <=> ElementInk.x-text;
+                            second-value <=> ElementInk.y-text;
+                            accepted(which, text) => { ElementInk.geometry-requested(which == 0 ? "x" : "y", text); }
+                            cancelled(which) => { ElementInk.geometry-requested(which == 0 ? "x" : "y", ""); }
+                            focus-moved(y, h) => { root.reveal(y, h); }
                         }
                     }
                     if root.selection-count > 0 : InspectorPropertyRow {
-                        label: "Size";
-                        Text {
-                            text: root.element-width-text + " × " + root.element-height-text;
-                            font-size: Theme.type.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        label: "Size (width, height)";
+                        GeometryPair {
+                            first-label: "Width";
+                            second-label: "Height";
+                            first-value <=> ElementInk.w-text;
+                            second-value <=> ElementInk.h-text;
+                            accepted(which, text) => { ElementInk.geometry-requested(which == 0 ? "w" : "h", text); }
+                            cancelled(which) => { ElementInk.geometry-requested(which == 0 ? "w" : "h", ""); }
+                            focus-moved(y, h) => { root.reveal(y, h); }
                         }
                     }
                     if root.selection-count > 0 : InspectorPropertyRow {
-                        label: "Rotation";
-                        Text {
-                            text: root.element-rotation-text;
-                            font-size: Theme.type.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        label: "Rotation (degrees)";
+                        LoomTextField {
+                            label: "Rotation";
+                            field-min-width: 96px;
+                            value <=> ElementInk.rot-text;
+                            accepted(text) => { ElementInk.geometry-requested("rot", text); }
+                            cancelled => { ElementInk.geometry-requested("rot", ""); }
+                            changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                         }
                     }
                 }

@@ -803,6 +803,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_height_text(format!("{:.0} pt", element.height).into());
             app.set_element_rotation_text(format!("{:.0}°", element.rotation_deg).into());
             element_style_ui::publish(app, element);
+            element_style_ui::publish_geometry(app, element);
             if element.element_type == ElementType::Table {
                 app.set_inspector_is_table(true);
                 if let Some(table) = element.table() {

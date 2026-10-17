@@ -313,3 +313,101 @@ fn the_keyboard_and_the_palette_reach_the_same_style_controls() {
         );
     }
 }
+
+fn geometry_of(state: &GuiState, index: usize) -> (f32, f32, f32, f32, f32) {
+    let session = state.session.borrow();
+    let e = &session.document.active_slide().unwrap().elements[index];
+    (e.x, e.y, e.width, e.height, e.rotation_deg)
+}
+
+#[test]
+fn typed_position_size_and_rotation_move_the_selected_object_as_undoable_steps() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Typed",
+        100.0,
+        120.0,
+        400.0,
+        80.0,
+    )]);
+    select(&app, &state, "t");
+    let ink = app.global::<ElementInk>();
+    assert_eq!(
+        (
+            ink.get_x_text().as_str(),
+            ink.get_y_text().as_str(),
+            ink.get_w_text().as_str(),
+            ink.get_h_text().as_str()
+        ),
+        ("100", "120", "400", "80"),
+        "the fields start with the object's real values"
+    );
+
+    ink.invoke_geometry_requested("x".into(), "250".into());
+    ink.invoke_geometry_requested("h".into(), " 150 pt ".into());
+    ink.invoke_geometry_requested("rot".into(), "30°".into());
+    let (x, y, w, h, rot) = geometry_of(&state, 0);
+    assert_eq!(
+        (x, y, w, h),
+        (250.0, 120.0, 400.0, 150.0),
+        "units and spaces are accepted"
+    );
+    assert!((rot - 30.0).abs() < 0.01);
+    assert_eq!(
+        ink.get_x_text().as_str(),
+        "250",
+        "the fields follow the object"
+    );
+    assert_eq!(ink.get_rot_text().as_str(), "30");
+
+    app.invoke_undo();
+    assert!(
+        (geometry_of(&state, 0).4).abs() < 0.01,
+        "one undo takes back the rotation only"
+    );
+    app.invoke_undo();
+    assert_eq!(geometry_of(&state, 0).3, 80.0, "and one more the height");
+}
+
+#[test]
+fn an_impossible_or_unreadable_entry_changes_nothing_and_the_field_shows_the_real_value() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Typed",
+        100.0,
+        120.0,
+        400.0,
+        80.0,
+    )]);
+    select(&app, &state, "t");
+    let ink = app.global::<ElementInk>();
+
+    ink.invoke_geometry_requested("x".into(), "abc".into());
+    assert_eq!(
+        geometry_of(&state, 0).0,
+        100.0,
+        "text that is not a number does nothing"
+    );
+    assert!(
+        app.get_status_left().contains("not a number"),
+        "{}",
+        app.get_status_left()
+    );
+
+    // A position past the right edge is held on the slide, and the field says where it landed.
+    ink.invoke_geometry_requested("x".into(), "5000".into());
+    assert_eq!(
+        geometry_of(&state, 0).0,
+        600.0,
+        "1000 wide slide minus the 400 wide object"
+    );
+    assert_eq!(ink.get_x_text().as_str(), "600");
+
+    // Escape (an empty entry) only restores the field.
+    ink.set_y_text("999".into());
+    ink.invoke_geometry_requested("y".into(), "".into());
+    assert_eq!(ink.get_y_text().as_str(), "120");
+    assert_eq!(geometry_of(&state, 0).1, 120.0);
+}

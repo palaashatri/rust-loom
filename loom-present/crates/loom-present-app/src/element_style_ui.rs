@@ -35,6 +35,71 @@ pub(crate) fn clear(app: &PresentApp) {
     app.global::<ElementInk>().set_available(false);
 }
 
+/// A number as the geometry fields show it: whole when it is whole, else one decimal.
+fn shown(value: f32) -> String {
+    if (value - value.round()).abs() < 0.05 {
+        format!("{:.0}", value)
+    } else {
+        format!("{value:.1}")
+    }
+}
+
+/// Fill the position, size and rotation fields from the active object.
+pub(crate) fn publish_geometry(app: &PresentApp, element: &loom_present_core::SlideElement) {
+    let ink = app.global::<ElementInk>();
+    ink.set_x_text(shown(element.x).into());
+    ink.set_y_text(shown(element.y).into());
+    ink.set_w_text(shown(element.width).into());
+    ink.set_h_text(shown(element.height).into());
+    ink.set_rot_text(shown(element.rotation_deg).into());
+}
+
+/// Parse what was typed into a geometry field; units and spaces are allowed.
+fn parse_number(text: &str) -> Option<f32> {
+    let cleaned = text
+        .trim()
+        .trim_end_matches(|c: char| c == '°' || c.is_alphabetic())
+        .trim();
+    cleaned
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+/// Apply a typed position, size or rotation to the active object as one undo
+/// step. The result is clamped to the slide, and the fields then show what the
+/// object really has. `Err` carries a reason to show when the text was not a number.
+pub(crate) fn apply_geometry(state: &GuiState, field: &str, text: &str) -> Result<bool, String> {
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+    let value = parse_number(text).ok_or_else(|| format!("'{}' is not a number", text.trim()))?;
+    let mut session = state.session.borrow_mut();
+    let Some(element) = session.document.active_slide().and_then(|slide| {
+        slide
+            .elements
+            .iter()
+            .find(|element| session.selected_elements.contains(&element.id))
+    }) else {
+        return Ok(false);
+    };
+    let (id, x, y, width, height) = (
+        element.id.clone(),
+        element.x,
+        element.y,
+        element.width,
+        element.height,
+    );
+    Ok(match field {
+        "x" => session.transform_element(&id, value, y, width, height),
+        "y" => session.transform_element(&id, x, value, width, height),
+        "w" => session.transform_element(&id, x, y, value, height),
+        "h" => session.transform_element(&id, x, y, width, value),
+        "rot" => session.set_element_rotation(&id, value),
+        _ => false,
+    })
+}
+
 /// Apply one control's choice to the selected text objects and shapes.
 /// Returns the status words for a change, or `None` when nothing changed.
 pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> {
@@ -120,6 +185,18 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
     ink.set_palette(ModelRc::new(VecModel::from(
         PALETTE.iter().map(|hex| color(hex)).collect::<Vec<_>>(),
     )));
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_geometry_requested(move |field, text| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let message = apply_geometry(&state, field.as_str(), text.as_str()).err();
+            // Whatever happened, the fields show the object's real values again.
+            refresh(&app, &state);
+            if let Some(message) = message {
+                set_status(&app, &message);
+            }
+        });
+    }
     let (state, app_ref) = (state.clone(), app.as_weak());
     ink.on_requested(move |kind, value| {
         let Some(app) = app_ref.upgrade() else { return };

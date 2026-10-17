@@ -47,6 +47,17 @@ export global ElementInk {
     /// `kind` is size, bold, italic, align, color or fill; `value` is the step,
     /// the alignment or the palette slot (7 resets).
     callback requested(string, int);
+
+    /// The selected object's position, size and rotation as the fields show them
+    /// (plain numbers in slide units and degrees).
+    in-out property <string> x-text: "";
+    in-out property <string> y-text: "";
+    in-out property <string> w-text: "";
+    in-out property <string> h-text: "";
+    in-out property <string> rot-text: "";
+    /// A field was accepted: `field` is x, y, w, h or rot and `text` what was typed;
+    /// empty text means the edit was cancelled and the field should show the real value.
+    callback geometry-requested(string, string);
 }
 
 /// A part drawn at the box its caller gives it. `text-scale` is the slide's

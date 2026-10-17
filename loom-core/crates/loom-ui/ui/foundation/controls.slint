@@ -168,6 +168,10 @@ export component LoomTextField inherits VerticalLayout {
     in property <string> value-font-family: "";
     in property <bool> enabled: true;
     in property <bool> invalid: false;
+    /// The least width the field takes; narrow numeric fields may pair up in a row.
+    in property <length> field-min-width: 140px;
+    /// Whether the text field has keyboard focus, so a host can scroll it into view.
+    out property <bool> focused: input.has-focus;
     callback edited(string);
     callback accepted(string);
     callback cancelled;
@@ -206,7 +210,7 @@ export component LoomTextField inherits VerticalLayout {
     }
     box := Rectangle {
         height: Theme.scaled-control-height;
-        min-width: 140px;
+        min-width: root.field-min-width;
         horizontal-stretch: 1;
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: input.has-focus ? 2px : 1px;
