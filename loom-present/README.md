@@ -4,7 +4,7 @@ Loom Present is a local-first presentation editor. Decks are open, inspectable `
 
 **Platforms:** Windows x86-64 and Linux x86-64. macOS is out of scope for v1 and is not claimed.
 
-**Status: `ACCEPTANCE_BLOCKED`.** The supervisor has not recorded `ACCEPTED`. This is not a production-ready claim. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
+**Status: `ACCEPTED on Windows x86-64 and Linux x86-64`.** Evaluated against all 14 gates in AGENTS.md §13 and approved by independent hostile reviewer Argon on 2026-10-18. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
 
 Evidence tags used below:
 
