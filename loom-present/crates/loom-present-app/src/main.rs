@@ -1026,8 +1026,17 @@ fn save_request(state: &GuiState) -> SaveFileRequest {
     let path = state.save_path.borrow().clone();
     let suggested_name = path
         .as_deref()
-        .and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
+        .map(|path| {
+            if is_loom_deck_path(path) {
+                path.to_path_buf()
+            } else {
+                path.with_extension("loomdeck")
+            }
+        })
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| SAVE_FILENAME.to_string());
     SaveFileRequest {
         title: "Save Loom Present Deck".into(),
@@ -1164,14 +1173,23 @@ fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
     }
 }
 
+/// Whether `path` names a Loom Present deck (the format Save writes).
+fn is_loom_deck_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("loomdeck"))
+}
+
 fn save_current_deck(
     app: &PresentApp,
     state: &GuiState,
     force_picker: bool,
 ) -> Result<bool, String> {
+    // A deck opened from a PowerPoint file saves as a Loom deck: writing a Loom
+    // deck over the `.pptx` would destroy it.
     let current_path = (!force_picker)
         .then(|| state.save_path.borrow().clone())
-        .flatten();
+        .flatten()
+        .filter(|path| is_loom_deck_path(path));
     let path = match current_path {
         Some(path) => Some(path),
         None => state
@@ -2321,6 +2339,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 }
                 drop(session);
                 drop(drag);
+                table_actions::select_table_cell_under_press(&app, &state, index as usize);
                 refresh(&app, &state);
             }
         });
@@ -2961,6 +2980,8 @@ mod desktop_tests;
 mod export_pptx_tests;
 #[cfg(test)]
 mod picture_tests;
+#[cfg(test)]
+mod pptx_save_tests;
 
 mod appearance;
 #[cfg(test)]

@@ -2393,11 +2393,13 @@ pub(crate) fn register_history_actions(
                             edit.revert(&mut sheet);
                         }
                         apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
                     }
                     state.recompute_dirty_from_saved();
                     sync_window_title(&app, &state);
+                    // The entry joins the redo stack before the menu and the
+                    // Redo button read it, or Redo stays disabled.
                     push_history(&mut state.redo_stack.borrow_mut(), edit);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -2422,11 +2424,11 @@ pub(crate) fn register_history_actions(
                             edit.apply(&mut sheet);
                         }
                         apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
                     }
                     state.recompute_dirty_from_saved();
                     sync_window_title(&app, &state);
                     push_history(&mut state.undo_stack.borrow_mut(), edit);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });

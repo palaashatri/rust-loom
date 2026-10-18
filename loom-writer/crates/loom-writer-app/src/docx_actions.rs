@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use loom_writer_core::{
-    import_docx, inspect_docx_unsupported, RichBlock, WriterDocument, CHART_BLOCK_KIND,
-};
+use loom_writer_core::{import_docx, inspect_docx_unsupported, WriterDocument};
 use slint::{ComponentHandle, SharedString};
 
 use crate::{
@@ -101,48 +99,29 @@ pub fn insert_chart_from_clipboard(app: &WriterApp, state: &GuiState) -> bool {
         app.set_status_left("Clipboard does not contain a chart".into());
         return false;
     };
-    let chart_json: String = match chart.to_json() {
-        Ok(json) => json,
-        Err(_) => {
-            app.set_status_left("Failed to serialize chart".into());
-            return false;
-        }
-    };
     let mut next = state.current.borrow().clone();
-    let mut next_id = next.blocks.iter().map(|block| block.id).max().unwrap_or(0) + 1;
-    while next.blocks.iter().any(|block| block.id == next_id) {
-        next_id += 1;
-    }
-    let block = RichBlock::new(next_id, CHART_BLOCK_KIND, &chart_json);
     let caret = next.selection().anchor;
-    let insert_pos = block_insert_index(&next, caret);
-    next.blocks.insert(insert_pos, block);
-    let new_caret = next
-        .blocks
-        .iter()
-        .take(insert_pos + 1)
-        .map(|b| b.text.len_bytes() + 1)
-        .sum::<usize>()
-        .saturating_sub(1);
-    next.set_selection(loom_writer_core::TextSelection::caret(new_caret));
+    let Some(id) = next.insert_chart_block(caret, chart.clone()) else {
+        app.set_status_left("Failed to insert chart".into());
+        return false;
+    };
+    // The caret goes to the start of the paragraph after the chart.
+    let mut after = 0usize;
+    for block in &next.blocks {
+        after += block.text.len_bytes() + 1;
+        if block.id == id {
+            break;
+        }
+    }
+    next.set_selection(loom_writer_core::TextSelection::caret(
+        after.min(next.editor_text().len()),
+    ));
     apply_with_history(app, state, next, HistoryKind::DocumentAction);
     let title_display = chart.title.as_deref().unwrap_or("Untitled Chart");
     app.set_status_left(SharedString::from(format!(
         "Inserted chart: {title_display}"
     )));
     true
-}
-
-fn block_insert_index(doc: &WriterDocument, offset: usize) -> usize {
-    let mut cursor = 0usize;
-    for (idx, block) in doc.blocks.iter().enumerate() {
-        let len = block.text.len_bytes();
-        if offset <= cursor + len {
-            return idx + 1;
-        }
-        cursor += len + 1;
-    }
-    doc.blocks.len()
 }
 
 /// Wires docx import and chart insertion callbacks.

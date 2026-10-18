@@ -562,7 +562,7 @@ pub(crate) fn project(
 
         if block.kind == loom_writer_core::CHART_BLOCK_KIND {
             if seen_chart_blocks.insert(block.id) {
-                if let Ok(chart) = loom_objects::chart::Chart::from_json(block.text.as_str()) {
+                if let Some(chart) = loom_writer_core::chart_from_block(block) {
                     let chart_title = chart.title.as_deref().unwrap_or("Chart");
                     let chart_w = content_width.min(460.0);
                     let chart_h = 200.0f32;

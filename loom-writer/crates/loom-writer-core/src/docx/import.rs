@@ -362,7 +362,8 @@ fn parse_paragraph(
                                 format!("chart-{id}"),
                             ) {
                                 if let Ok(json) = chart.to_json() {
-                                    let block = RichBlock::new(id, crate::CHART_BLOCK_KIND, &json);
+                                    let text = crate::images::picture_text(id as u32);
+                                    let block = RichBlock::chart_block(id, &text, json);
                                     return Some((Some(block), next_cursor));
                                 }
                             }

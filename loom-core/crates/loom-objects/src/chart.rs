@@ -265,6 +265,62 @@ impl Chart {
         }
     }
 
+    /// Builds a column chart from a table whose first row names the series and
+    /// whose first column names the categories: every other column that holds
+    /// numbers becomes a series. `None` when the table has no such column or no
+    /// data row, so nothing is invented.
+    pub fn from_table(id: impl Into<String>, table: &crate::Table) -> Option<Self> {
+        let (rows, cols) = (table.row_count(), table.col_count());
+        if rows < 2 || cols < 2 {
+            return None;
+        }
+        let categories: Vec<String> = (1..rows)
+            .map(|r| table.cell_text(r, 0).unwrap_or_default().trim().to_string())
+            .collect();
+        let mut series = Vec::new();
+        for c in 1..cols {
+            let values: Vec<Option<f64>> = (1..rows)
+                .map(|r| parse_chart_number(&table.cell_text(r, c).unwrap_or_default()))
+                .collect();
+            if values.iter().all(Option::is_none) {
+                continue;
+            }
+            series.push(ChartSeries {
+                name: table.cell_text(0, c).unwrap_or_default().trim().to_string(),
+                values: values.into_iter().map(|v| v.unwrap_or(0.0)).collect(),
+                color: None,
+            });
+        }
+        if series.is_empty() {
+            return None;
+        }
+        Some(Self::from_data(
+            id,
+            None,
+            ChartType::Column,
+            categories,
+            series,
+        ))
+    }
+
+    /// Series values mapped into [0.0, 1.0] on an axis that includes zero, so
+    /// a bar's height is in proportion to its value (a value half the largest
+    /// is half as tall) rather than relative to the smallest value.
+    pub fn normalized_series_values_from_zero(&self) -> Vec<Vec<f64>> {
+        let (min, max) = self.value_range();
+        let (low, high) = (min.min(0.0), max.max(0.0));
+        let span = high - low;
+        self.series
+            .iter()
+            .map(|s| {
+                s.values
+                    .iter()
+                    .map(|&v| if span > 0.0 { (v - low) / span } else { 0.0 })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// Returns normalized series values mapped into [0.0, 1.0].
     pub fn normalized_series_values(&self) -> Vec<Vec<f64>> {
         let (min, max) = self.value_range();
@@ -291,8 +347,51 @@ impl Chart {
     }
 }
 
+/// A number as typed in a spreadsheet cell: thousands separators, a currency
+/// sign and a percent sign are ignored.
+fn parse_chart_number(text: &str) -> Option<f64> {
+    let cleaned: String = text
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ',' | '$' | '€' | '£' | '%' | ' '))
+        .collect();
+    cleaned.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_table_becomes_a_chart_from_its_numeric_columns_and_nothing_is_invented() {
+        use super::*;
+        let mut table = crate::Table::new(3, 4);
+        for (c, h) in ["Region", "Q1", "Notes", "Q2"].iter().enumerate() {
+            table.set_cell_text(0, c, *h);
+        }
+        let data = [
+            ("North", "$1,200", "ok", "1,500"),
+            ("South", "800", "late", "950"),
+        ];
+        for (r, (name, q1, note, q2)) in data.iter().enumerate() {
+            table.set_cell_text(r + 1, 0, *name);
+            table.set_cell_text(r + 1, 1, *q1);
+            table.set_cell_text(r + 1, 2, *note);
+            table.set_cell_text(r + 1, 3, *q2);
+        }
+        let chart = Chart::from_table("t", &table).expect("a chart");
+        assert_eq!(chart.categories, vec!["North", "South"]);
+        assert_eq!(chart.series.len(), 2, "the text column is not a series");
+        assert_eq!(chart.series[0].name, "Q1");
+        assert_eq!(chart.series[0].values, vec![1200.0, 800.0]);
+        assert_eq!(chart.series[1].values, vec![1500.0, 950.0]);
+        let mut words = crate::Table::new(2, 2);
+        words.set_cell_text(1, 1, "none");
+        assert!(
+            Chart::from_table("w", &words).is_none(),
+            "no numbers, no chart"
+        );
+        assert!(Chart::from_table("one", &crate::Table::new(1, 3)).is_none());
+    }
+
     use super::*;
 
     #[test]
@@ -339,6 +438,24 @@ mod tests {
         assert_eq!(norm.len(), 1);
         assert!((norm[0][0] - 0.0).abs() < 1e-6);
         assert!((norm[0][3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bars_are_proportional_to_their_values_from_a_zero_baseline() {
+        let chart = Chart::from_data(
+            "z",
+            None,
+            ChartType::Bar,
+            vec!["a".into(), "b".into()],
+            vec![ChartSeries {
+                name: "s".into(),
+                values: vec![120.0, 260.0],
+                color: None,
+            }],
+        );
+        let norm = chart.normalized_series_values_from_zero();
+        assert!((norm[0][1] - 1.0).abs() < 1e-9);
+        assert!((norm[0][0] - 120.0 / 260.0).abs() < 1e-9, "{}", norm[0][0]);
     }
 
     #[test]

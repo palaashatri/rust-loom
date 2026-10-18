@@ -1201,9 +1201,15 @@ fn slide_reorder_table_and_chart_insertion_and_pptx_warning_work_from_the_keyboa
         ElementType::Table
     );
 
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData::from_chart(
+        &loom_present_core::default_slide_chart(),
+    ))
+    .expect("write the chart to the mock clipboard");
     ctrl(&s.app, "k");
     type_text(&s.app, "insert chart");
     press(&s.app, Key::Return);
+    loom_clipboard::set_mock_clipboard_enabled(false);
     assert_eq!(
         s.state.session.borrow().document.slides[0]
             .elements

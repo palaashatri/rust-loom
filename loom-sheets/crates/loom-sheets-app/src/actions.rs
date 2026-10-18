@@ -1529,7 +1529,7 @@ pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
 /// and leaves that row and everything below it where it is.
 pub(crate) fn sortable_last_row(sheet: &Sheet) -> u32 {
     let last_used = sheet.dimensions().rows.saturating_sub(1);
-    let first_formula_row = sheet.cells.first_formula_row_from(1);
+    let first_formula_row = sheet.first_cross_row_formula_row(1);
     match first_formula_row {
         Some(row) => row.saturating_sub(1).min(last_used),
         None => last_used,

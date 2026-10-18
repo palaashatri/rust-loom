@@ -130,3 +130,48 @@ fn chart_insert_requires_range_and_can_replace_source() {
     assert_eq!(app.get_chart_source_range().as_str(), "A1:B5");
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn undoing_a_chart_insert_leaves_redo_available_and_redo_brings_the_chart_back() {
+    set_platform();
+    let app = SheetsApp::new().unwrap();
+    let state = Rc::new(GuiState::new(
+        starter_workbook(),
+        None,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+        FileFilter::new("Workbook", ["loomtable"]).unwrap(),
+        FileFilter::new("CSV", ["csv"]).unwrap(),
+        FileFilter::new("CSV", ["csv"]).unwrap(),
+        FileFilter::new("Excel", ["xlsx"]).unwrap(),
+    ));
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_sheet_actions(&app, &state, &menu_service);
+    register_cell_edit_action(&app, &state, &menu_service);
+    register_history_actions(&app, &state, &menu_service);
+    {
+        let sheet = state.current.borrow();
+        let values = evaluate(&sheet);
+        update_selection_range(
+            &app,
+            &sheet,
+            &values,
+            GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("B4").unwrap()),
+        );
+    }
+    app.invoke_insert_chart();
+    assert!(state.current.borrow().chart.is_some());
+    app.invoke_undo();
+    assert!(
+        state.current.borrow().chart.is_none(),
+        "undo removes the chart"
+    );
+    assert!(
+        app.get_can_redo(),
+        "redo is offered after undoing the insert"
+    );
+    app.invoke_redo();
+    assert!(
+        state.current.borrow().chart.is_some(),
+        "redo brings it back"
+    );
+}

@@ -204,6 +204,16 @@ impl FlowLine {
     }
 }
 
+/// The height of one text line of `block`. A table's rows are drawn taller than
+/// a line of body text (cell padding), so its lines reserve the row height the
+/// page draws and whatever follows the table starts below it.
+pub(crate) fn text_line_height(style: &PageStyle, block: &RichBlock) -> f32 {
+    if block.kind == crate::TABLE_BLOCK_KIND {
+        return (style.body_font_size_pt * style.line_height + 8.0).max(24.0);
+    }
+    style.font_size_for_kind(block.kind.as_str()) * style.line_height
+}
+
 struct Pagination {
     lines: Vec<FlowLine>,
     page_lines: Vec<Range<usize>>,
@@ -253,8 +263,8 @@ impl WriterDocument {
             // Pagination must use the same block metrics as the geometry: a
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let picture = block.image_display_size(usable_width, usable_height);
-            let line_height = picture.map_or(font_size * style.line_height, |(_, h)| h);
+            let picture = block.object_display_size(usable_width, usable_height);
+            let line_height = picture.map_or(text_line_height(style, block), |(_, h)| h);
             let info = wrapped(block, font_size, usable_width);
             for line in info.lines.iter() {
                 if lines.len() > page_first_line
@@ -363,11 +373,8 @@ impl WriterDocument {
             for at in range.clone() {
                 let block = &self.blocks[lines[at].block_index];
                 let line_height = block
-                    .image_display_size(usable_width, usable_height)
-                    .map_or(
-                        style.font_size_for_kind(block.kind.as_str()) * style.line_height,
-                        |(_, h)| h,
-                    )
+                    .object_display_size(usable_width, usable_height)
+                    .map_or(text_line_height(style, block), |(_, h)| h)
                     * zoom;
                 let width = lines[at].bounds.width * zoom;
                 lines[at].bounds = PageRect {

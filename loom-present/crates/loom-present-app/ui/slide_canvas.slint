@@ -10,6 +10,10 @@ export global ObjectParts {
     /// Per element: the table cell being edited (box and text); the whole
     /// element for everything else.
     in-out property <[ObjectPart]> active-cells: [];
+    /// Where the last press landed on its element, as fractions of its box, so a
+    /// click on a table picks the cell under the pointer.
+    in-out property <float> press-fx: 0;
+    in-out property <float> press-fy: 0;
 }
 
 /// The scene-model canvas keeps element coordinates in slide space.
@@ -314,6 +318,7 @@ export component PresentSlideCanvas inherits Rectangle {
                         if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                             // The press selects first (a shift-press extends the selection), then the
                             // object takes focus, unless the press just took it out of the selection.
+                            ObjectParts.press-fx = self.mouse-x / self.width; ObjectParts.press-fy = self.mouse-y / self.height;
                             root.element-pressed(idx, event.modifiers.shift);
                             if (root.element-selected.length > idx && root.element-selected[idx]) { element-focus.focus(); }
                             self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y;

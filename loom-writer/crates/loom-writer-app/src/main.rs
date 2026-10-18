@@ -1341,8 +1341,17 @@ fn writer_save_request(state: &GuiState) -> SaveFileRequest {
     let path = state.save_path.borrow();
     let suggested_name = path
         .as_deref()
-        .and_then(Path::file_name)
-        .map(|name| name.to_string_lossy().into_owned())
+        .map(|path| {
+            if is_loom_document_path(path) {
+                path.to_path_buf()
+            } else {
+                path.with_extension("loomdoc")
+            }
+        })
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| SAVE_FILENAME.to_string());
     SaveFileRequest {
         title: "Save Loom Writer Document".into(),
@@ -1375,13 +1384,25 @@ pub(crate) fn replace_opened_document(
     apply_state(app, state);
 }
 
+/// Whether `path` names a Loom Writer document (the format Save writes).
+fn is_loom_document_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("loomdoc"))
+}
+
 fn save_current_document(
     app: &WriterApp,
     state: &GuiState,
     force_picker: bool,
 ) -> Result<bool, String> {
+    // A document opened from a Word file saves as a Loom file: writing a Loom
+    // package over the `.docx` would destroy it.
     let path = if !force_picker {
-        state.save_path.borrow().clone()
+        state
+            .save_path
+            .borrow()
+            .clone()
+            .filter(|path| is_loom_document_path(path))
     } else {
         None
     };
@@ -2833,6 +2854,22 @@ fn wire_writer_shared_callbacks(
                         (SharedString::from(edited), anchor, caret)
                     }
                     None => (text, anchor, focus),
+                };
+                // Typed pipes and line breaks must not split a table cell; the
+                // caret follows the text the document keeps.
+                let (text, anchor, focus) = {
+                    let (safe, caret) = state
+                        .current
+                        .borrow()
+                        .table_safe_edit(text.as_str(), usize::try_from(focus).ok());
+                    match caret {
+                        Some(caret) if safe != text.as_str() => {
+                            let caret = caret.min(i32::MAX as usize) as i32;
+                            let anchor = if anchor == focus { caret } else { anchor };
+                            (SharedString::from(safe), anchor, caret)
+                        }
+                        _ => (text, anchor, focus),
+                    }
                 };
                 let before = state.current.borrow().selection();
                 let mut next = state.current.borrow().clone();
@@ -4938,6 +4975,10 @@ mod table_rules_tests;
 #[cfg(test)]
 mod typing_style_tests;
 
+#[cfg(test)]
+mod clipboard_text_tests;
+#[cfg(test)]
+mod docx_save_tests;
 #[cfg(test)]
 mod inspector_startup_tests;
 #[cfg(test)]

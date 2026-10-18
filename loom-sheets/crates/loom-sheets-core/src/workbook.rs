@@ -266,7 +266,7 @@ fn eval_workbook_node(
             }
             value
         };
-        let value = eval_expr(root, &lookup);
+        let value = formula_result(eval_expr(root, &lookup));
         return (value, seen.map(RefCell::into_inner));
     }
     // Resolve every foreign cell up front.
@@ -336,8 +336,18 @@ fn eval_workbook_node(
         }
         value
     };
-    let value = eval_expr(&rewritten, &lookup);
+    let value = formula_result(eval_expr(&rewritten, &lookup));
     (value, seen.map(RefCell::into_inner))
+}
+
+/// What a formula cell shows: a formula that only points at a blank cell
+/// (`=C7`) is 0, as in Excel, not a blank that falls back to its own text.
+fn formula_result(value: Value) -> Value {
+    if matches!(value, Value::Empty) {
+        Value::Number(0.0)
+    } else {
+        value
+    }
 }
 
 /// Check whether a formula tree contains an operation that can return a

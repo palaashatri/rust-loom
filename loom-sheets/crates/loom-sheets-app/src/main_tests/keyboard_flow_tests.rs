@@ -1059,3 +1059,27 @@ fn toolbar_text_menu_formatting_and_chart_insertion_work_from_the_keyboard() {
     press(&s.app, Key::Return);
     assert_eq!(charts.get(), 1);
 }
+
+#[test]
+fn narrowing_the_window_does_not_move_keyboard_focus_off_the_grid() {
+    let s = launched(&[("A1", "x")]);
+    assert!(
+        stop(&s.app).is_some_and(|f| f.name.contains("grid")),
+        "the grid starts focused: {:?}",
+        stop(&s.app)
+    );
+    s.app.window().set_size(PhysicalSize::new(1060, 1000));
+    apply_layout_breakpoints(&s.app, 1060);
+    render(&s.app);
+    let after = stop(&s.app);
+    assert!(
+        after.as_ref().is_some_and(|f| f.name.contains("grid")),
+        "narrowing must leave focus on the grid, got {after:?}"
+    );
+    // The next typed value lands in the sheet.
+    type_text(&s.app, "hello");
+    assert!(
+        s.app.get_is_editing() || s.app.get_formula_edit_buffer().contains("hello"),
+        "typing after a resize reaches the cell editor"
+    );
+}

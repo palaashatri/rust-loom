@@ -174,7 +174,13 @@ fn test_insert_chart_renders_and_exports_docx_and_pdf() {
         .iter()
         .find(|b| b.kind == CHART_BLOCK_KIND)
         .expect("Chart block must be inserted");
-    let parsed_chart = Chart::from_json(chart_block.text.as_str()).expect("Chart json must parse");
+    assert!(
+        !chart_block.text.as_str().contains("categories"),
+        "the chart JSON must not be in the editable text: {:?}",
+        chart_block.text.as_str()
+    );
+    let parsed_chart =
+        loom_writer_core::chart_from_block(chart_block).expect("chart payload parses");
     assert_eq!(parsed_chart.title.as_deref(), Some("Quarterly Performance"));
     assert_eq!(parsed_chart.categories.len(), 4);
     assert_eq!(parsed_chart.series.len(), 2);
@@ -200,8 +206,8 @@ fn test_insert_chart_renders_and_exports_docx_and_pdf() {
         .iter()
         .find(|b| b.kind == CHART_BLOCK_KIND)
         .expect("Reimported document must contain chart block");
-    let reimported_chart = Chart::from_json(reimported_chart_block.text.as_str())
-        .expect("Reimported chart json must parse");
+    let reimported_chart = loom_writer_core::chart_from_block(reimported_chart_block)
+        .expect("Reimported chart payload must parse");
     assert_eq!(
         reimported_chart.title.as_deref(),
         Some("Quarterly Performance")

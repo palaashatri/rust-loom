@@ -116,11 +116,39 @@ pub(crate) fn cut_action(app: &WriterApp, state: &GuiState) {
     copy_action(app, state);
     let mut next = state.current.borrow().clone();
     let selection = next.selection();
-    let start_offset = selection.anchor.min(selection.focus);
-    if !selection.is_collapsed() && next.replace_editor_text_at("", Some(start_offset)).is_ok() {
+    if !selection.is_collapsed() && replace_selection(&mut next, "") {
         apply_with_history(app, state, next, HistoryKind::DocumentAction);
         app.set_status_left("Cut".into());
     }
+}
+
+/// Replaces the selected range (or inserts at the caret) with `insert` and puts
+/// the caret after it, leaving the rest of the document alone. `false` when the
+/// edit did not apply.
+fn replace_selection(doc: &mut loom_writer_core::WriterDocument, insert: &str) -> bool {
+    let selection = doc.selection();
+    let old = doc.editor_text();
+    let start = selection.anchor.min(selection.focus).min(old.len());
+    let end = selection.anchor.max(selection.focus).min(old.len());
+    if !old.is_char_boundary(start) || !old.is_char_boundary(end) {
+        return false;
+    }
+    // Line endings become paragraph breaks and tabs become spaces, so the
+    // caret offset below is the one the document will have.
+    let insert = insert
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\t', "    ");
+    let mut new_text = String::with_capacity(old.len() - (end - start) + insert.len());
+    new_text.push_str(&old[..start]);
+    new_text.push_str(&insert);
+    new_text.push_str(&old[end..]);
+    let caret = start + insert.len();
+    if doc.replace_editor_text_at(&new_text, Some(caret)).is_err() {
+        return false;
+    }
+    doc.set_selection(loom_writer_core::TextSelection::caret(caret));
+    true
 }
 
 pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
@@ -156,7 +184,7 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
 
     // Otherwise paste as plain text
     if let Some(text) = clip.plain_text.or(clip.tsv) {
-        if !text.is_empty() && next.replace_editor_text_at(&text, Some(caret)).is_ok() {
+        if !text.is_empty() && replace_selection(&mut next, &text) {
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
             app.set_status_left("Pasted text".into());
         }

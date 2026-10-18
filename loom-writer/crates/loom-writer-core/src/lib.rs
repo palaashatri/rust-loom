@@ -36,6 +36,7 @@ mod text_metrics;
 pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
+pub(crate) use images::OBJECT_CHAR;
 pub use images::*;
 pub use layout::{DocumentFlow, FlowLine};
 pub use loom_objects;
@@ -69,6 +70,9 @@ pub struct RichBlock {
     pub runs: Vec<loom_text::StyleRun>,
     /// The picture of an [`IMAGE_BLOCK_KIND`] block.
     pub image: Option<InlineImage>,
+    /// The chart of a [`CHART_BLOCK_KIND`] block, as JSON. It is kept out of
+    /// the block's text so the editor never shows or edits it.
+    pub chart: Option<std::sync::Arc<String>>,
 }
 
 impl RichBlock {
@@ -81,6 +85,7 @@ impl RichBlock {
             style: ParagraphStyle::default(),
             runs: Vec::new(),
             image: None,
+            chart: None,
         }
     }
 }
@@ -552,6 +557,10 @@ impl WriterDocument {
                 s.push_str(",\"image\":");
                 s.push_str(&images::image_json(image));
             }
+            if let Some(chart) = &b.chart {
+                s.push_str(",\"chart\":");
+                s.push_str(&pkg_json::escape(chart));
+            }
             s.push('}');
         }
         s.push(']');
@@ -646,7 +655,7 @@ impl WriterDocument {
                 _ => "p",
             };
             out.push_str(&format!("<{tag}>"));
-            match b.image_placeholder() {
+            match b.object_placeholder() {
                 Some(placeholder) => out.push_str(&placeholder),
                 None => out.push_str(b.text.as_str()),
             }
@@ -1685,6 +1694,7 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
         let mut style_raw = None;
         let mut runs_raw = None;
         let mut image_raw = None;
+        let mut chart_json = None;
         for (k, v) in &fields {
             match k.as_str() {
                 "id" => {
@@ -1710,6 +1720,7 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
                         image_raw = Some(raw.clone());
                     }
                 }
+                "chart" => chart_json = Some(json_value_text(v)),
                 _ => {}
             }
         }
@@ -1726,6 +1737,7 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
         if let Some(raw) = image_raw {
             b.image = parse_image(&raw)?;
         }
+        charts::attach_chart(&mut b, chart_json);
         out.push(b);
     }
     Ok(out)
@@ -3455,11 +3467,13 @@ impl WriterDocument {
         let mut replacements = 0;
         for block in &mut self.blocks {
             let before = block.text.as_str().to_string();
-            let after = if case_sensitive {
-                replacements += before.matches(query).count();
-                before.replace(query, replacement)
+            let spans: Vec<(usize, usize)> = if case_sensitive {
+                before
+                    .match_indices(query)
+                    .map(|(start, found)| (start, start + found.len()))
+                    .collect()
             } else {
-                let hits: Vec<SearchMatch> = WriterDocument {
+                WriterDocument {
                     id: String::new(),
                     title: String::new(),
                     page: PageSetup::default(),
@@ -3467,20 +3481,30 @@ impl WriterDocument {
                     blocks: vec![block.clone()],
                     selection: TextSelection::caret(0),
                 }
-                .find_all(query, false);
-                if hits.is_empty() {
-                    continue;
-                }
-                replacements += hits.len();
-                let mut output = before.clone();
-                for hit in hits.iter().rev() {
-                    output.replace_range(hit.start..hit.end, replacement);
-                }
-                output
+                .find_all(query, false)
+                .into_iter()
+                .map(|hit| (hit.start, hit.end))
+                .collect()
             };
-            if after != before {
-                block.runs = remap_style_runs(&before, &after, &block.runs);
-                block.text = Text::from_str(&after);
+            if spans.is_empty() {
+                continue;
+            }
+            replacements += spans.len();
+            // One replacement at a time, last first: the style runs are
+            // remapped around that one change, so a run between two matches is
+            // never swallowed by a single before/after comparison that spans
+            // them (which dropped the italic of a neighbouring word).
+            let mut current = before.clone();
+            let mut runs = block.runs.clone();
+            for (start, end) in spans.into_iter().rev() {
+                let mut next = current.clone();
+                next.replace_range(start..end, replacement);
+                runs = remap_style_runs(&current, &next, &runs);
+                current = next;
+            }
+            if current != before {
+                block.runs = runs;
+                block.text = Text::from_str(&current);
             }
         }
         self.selection = self.clamp_selection(self.selection.clone());

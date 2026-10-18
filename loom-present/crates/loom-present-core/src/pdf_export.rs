@@ -490,7 +490,7 @@ fn draw_chart(
         draw_pie_chart(pdf, page, transform, elem, chart);
         return;
     }
-    let norm_values = chart.normalized_series_values();
+    let norm_values = chart.normalized_series_values_from_zero();
     let cat_count = chart.categories.len();
     let series_count = chart.series.len();
     let plot_top = 28.0 * UNITS_PER_EDITOR_PX;

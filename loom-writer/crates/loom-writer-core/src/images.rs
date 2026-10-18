@@ -20,7 +20,7 @@ pub const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 /// Largest accepted image, in pixels (a decoded copy is 4 bytes per pixel).
 pub const MAX_IMAGE_PIXELS: u64 = 36_000_000;
 
-const OBJECT_CHAR: char = '\u{FFFC}';
+pub(crate) const OBJECT_CHAR: char = '\u{FFFC}';
 const MARKER_BASE: u32 = 0xE000;
 const MARKER_COUNT: u32 = 0x1800;
 /// A picture is shown at 96 pixels to the inch unless the page is narrower.
@@ -188,13 +188,21 @@ impl WriterDocument {
         Some(next_id)
     }
 
-    /// The smallest private-use marker no other picture uses.
+    /// The text of a new object block (picture or chart): the object character
+    /// and a marker no other object block uses.
+    pub(crate) fn new_object_text(&self) -> Option<String> {
+        let marker = self.free_marker()?;
+        Some(format!("{OBJECT_CHAR}{marker}"))
+    }
+
+    /// The smallest private-use marker no other picture or chart uses.
     fn free_marker(&self) -> Option<char> {
         (0..MARKER_COUNT)
             .filter_map(|n| char::from_u32(MARKER_BASE + n))
             .find(|marker| {
                 !self.blocks.iter().any(|block| {
-                    block.kind == IMAGE_BLOCK_KIND && block.text.as_str().contains(*marker)
+                    (block.kind == IMAGE_BLOCK_KIND || block.kind == crate::CHART_BLOCK_KIND)
+                        && block.text.as_str().contains(*marker)
                 })
             })
     }

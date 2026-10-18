@@ -271,6 +271,11 @@ impl WriterDocument {
             self.set_selection(self.selection.clone());
             return Ok(false);
         }
+        let (new_text, caret) = self.keep_table_rows_intact(&old_text, new_text, caret);
+        if old_text == new_text {
+            self.set_selection(self.selection.clone());
+            return Ok(false);
+        }
         let edit = caret
             .and_then(|caret| TextEdit::from_caret(&old_text, &new_text, caret))
             .unwrap_or_else(|| TextEdit::diff(&old_text, &new_text));
@@ -279,6 +284,68 @@ impl WriterDocument {
         apply_global_character_style(self, edit.new_start, edit.new_end, inherited);
         self.set_selection(self.selection.clone());
         Ok(true)
+    }
+
+    /// A table is stored as Markdown rows, so a typed `|` would start a new
+    /// column and a line break would split a row. Text typed or pasted into a
+    /// table block therefore keeps its pipes (written `\\|`) and loses its line
+    /// breaks (Enter does nothing, pasted lines are joined with a space).
+    /// The edited text and caret after this rule, for a caller (the editor) that
+    /// must show the caret where the document will put it.
+    pub fn table_safe_edit(&self, new_text: &str, caret: Option<usize>) -> (String, Option<usize>) {
+        let new_text = normalize_editor_text(new_text);
+        self.keep_table_rows_intact(&self.editor_text(), new_text, caret)
+    }
+
+    fn keep_table_rows_intact(
+        &self,
+        old_text: &str,
+        new_text: String,
+        caret: Option<usize>,
+    ) -> (String, Option<usize>) {
+        let edit = caret
+            .and_then(|caret| TextEdit::from_caret(old_text, &new_text, caret))
+            .unwrap_or_else(|| TextEdit::diff(old_text, &new_text));
+        if edit.new_start >= edit.new_end || edit.new_end > new_text.len() {
+            return (new_text, caret);
+        }
+        let in_table = block_at_offset(&self.blocks, edit.old_start).is_some_and(|(block, at)| {
+            // After the last row's closing pipe is outside every cell:
+            // text typed there starts a paragraph of its own.
+            block.kind == crate::TABLE_BLOCK_KIND && at < block.text.len_bytes()
+        });
+        if !in_table {
+            return (new_text, caret);
+        }
+        let inserted = &new_text[edit.new_start..edit.new_end];
+        let mut clean = String::with_capacity(inserted.len() + 2);
+        // A pipe that is already escaped stays as it is, so applying the rule
+        // to its own output changes nothing.
+        let mut escaped = new_text[..edit.new_start].ends_with('\\');
+        for c in inserted.chars() {
+            match c {
+                '\n' if inserted == "\n" => {}
+                '\n' => clean.push(' '),
+                '|' if !escaped => clean.push_str("\\|"),
+                other => clean.push(other),
+            }
+            escaped = c == '\\' && !escaped;
+        }
+        if clean == inserted {
+            return (new_text, caret);
+        }
+        let mut fixed = String::with_capacity(new_text.len() + clean.len());
+        fixed.push_str(&new_text[..edit.new_start]);
+        fixed.push_str(&clean);
+        fixed.push_str(&new_text[edit.new_end..]);
+        let caret = caret.map(|c| {
+            if c >= edit.new_end {
+                c + clean.len() - inserted.len()
+            } else {
+                c
+            }
+        });
+        (fixed, caret)
     }
 
     /// Replace the editor's canonical text with only the old/new diff to go on.
@@ -699,5 +766,145 @@ mod tests {
         let json = "{\"id\":\"d\",\"title\":\"T\",\"blocks\":[],\"selection\":{\"anchor\":0,\"focus\":0,\"affinity\":\"upstream\"}}";
         let reopened = WriterDocument::from_content_json(json).expect("parse");
         assert!(reopened.comments.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod table_input_tests {
+    use crate::{RichBlock, WriterDocument, TABLE_BLOCK_KIND};
+
+    fn table_doc() -> (WriterDocument, u64, usize) {
+        let mut doc = WriterDocument::new("d", "D");
+        doc.blocks.push(RichBlock::new(1, "paragraph", "above"));
+        let id = doc.insert_table_block(5, 2, 2).expect("a table");
+        let caret = doc.selection().anchor;
+        (doc, id, caret)
+    }
+
+    fn splice(doc: &WriterDocument, at: usize, insert: &str) -> String {
+        let mut text = doc.editor_text();
+        text.insert_str(at, insert);
+        text
+    }
+
+    #[test]
+    fn a_pipe_typed_into_a_cell_stays_in_the_cell() {
+        let (mut doc, id, caret) = table_doc();
+        let before = doc.table_from_block(id).unwrap();
+        let (rows, cols) = (before.rows.len(), before.columns());
+        let edited = splice(&doc, caret, "a|b");
+        let (safe, new_caret) = doc.table_safe_edit(&edited, Some(caret + 3));
+        assert_eq!(new_caret, Some(caret + 4), "the caret follows the escape");
+        doc.replace_editor_text_at(&safe, new_caret).unwrap();
+        let after = doc.table_from_block(id).expect("still a table");
+        assert_eq!(
+            (after.rows.len(), after.columns()),
+            (rows, cols),
+            "no new column"
+        );
+        assert!(after.rows[0][0].contains('b'), "{:?}", after.rows[0][0]);
+    }
+
+    #[test]
+    fn enter_in_a_cell_does_not_split_the_row() {
+        let (mut doc, id, caret) = table_doc();
+        let before = doc.editor_text();
+        let edited = splice(
+            &doc, caret, "
+",
+        );
+        let changed = doc
+            .replace_editor_text_at(&edited, Some(caret + 1))
+            .unwrap();
+        assert!(!changed, "Enter in a table cell is ignored");
+        assert_eq!(doc.editor_text(), before);
+        assert!(doc
+            .blocks
+            .iter()
+            .any(|b| b.id == id && b.kind == TABLE_BLOCK_KIND));
+    }
+
+    #[test]
+    fn pasting_lines_into_a_cell_joins_them_into_that_cell() {
+        let (mut doc, id, caret) = table_doc();
+        let edited = splice(
+            &doc, caret, "one
+two",
+        );
+        doc.replace_editor_text_at(&edited, Some(caret + 7))
+            .unwrap();
+        let table = doc.table_from_block(id).unwrap();
+        assert_eq!(table.rows.len(), 2, "no new row");
+        assert!(
+            table.rows[0][0].contains("one two"),
+            "{:?}",
+            table.rows[0][0]
+        );
+    }
+
+    #[test]
+    fn typing_pipes_outside_a_table_is_left_alone() {
+        let mut doc = WriterDocument::new("d", "D");
+        doc.blocks.push(RichBlock::new(1, "paragraph", "plain"));
+        let edited = splice(&doc, 5, " a|b");
+        doc.replace_editor_text_at(&edited, Some(9)).unwrap();
+        assert_eq!(doc.editor_text(), "plain a|b");
+    }
+}
+
+#[cfg(test)]
+mod table_layout_tests {
+    use crate::{PageStyle, PageViewport, RichBlock, WriterDocument};
+
+    #[test]
+    fn what_follows_a_table_starts_below_the_rows_the_page_draws() {
+        let mut doc = WriterDocument::new("d", "D");
+        doc.blocks.push(RichBlock::new(1, "paragraph", "above"));
+        let id = doc.insert_table_block(5, 3, 2).expect("a table");
+        let end = doc.editor_text().len();
+        let after = doc.insert_image_block(
+            end,
+            crate::InlineImage::from_bytes("p.png", tiny_png()).unwrap(),
+        );
+        assert!(after.is_some());
+        let style = PageStyle::default();
+        let viewport = PageViewport {
+            width: 900.0,
+            height: 700.0,
+            zoom: 1.0,
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        };
+        let flow = doc.flow(&style, viewport).unwrap();
+        let table_index = doc.blocks.iter().position(|b| b.id == id).unwrap();
+        let first = flow
+            .lines()
+            .iter()
+            .find(|l| l.block_index == table_index)
+            .unwrap();
+        let picture = flow
+            .lines()
+            .iter()
+            .find(|l| doc.blocks[l.block_index].is_image())
+            .unwrap();
+        // The page draws 3 rows of at least 24 pt each from the table's first line.
+        let drawn_bottom =
+            first.bounds.y + 3.0 * (style.body_font_size_pt * style.line_height + 8.0).max(24.0);
+        assert!(
+            picture.bounds.y >= drawn_bottom - 0.01,
+            "the picture starts at {} but the table is drawn down to {drawn_bottom}",
+            picture.bounds.y
+        );
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        bytes
     }
 }

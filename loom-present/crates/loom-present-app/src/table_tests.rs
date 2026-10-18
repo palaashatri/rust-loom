@@ -66,8 +66,14 @@ fn test_insert_table_and_chart_via_callbacks() {
     }
     assert!(app.get_inspector_is_table());
 
-    // 2. Insert Chart
+    // 2. Insert Chart takes the chart the user copied.
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData::from_chart(
+        &default_slide_chart(),
+    ))
+    .expect("write the chart to the mock clipboard");
     app.invoke_add_chart();
+    loom_clipboard::set_mock_clipboard_enabled(false);
     {
         let session = state.session.borrow();
         let slide = session.document.active_slide().expect("slide");
@@ -99,7 +105,14 @@ fn test_insert_table_and_chart_via_dispatch_and_palette() {
         1
     );
 
+    let _guard = MOCK_CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData::from_chart(
+        &default_slide_chart(),
+    ))
+    .expect("write the chart to the mock clipboard");
     assert!(dispatch_command(&app, "slide.insert_chart"));
+    loom_clipboard::set_mock_clipboard_enabled(false);
     assert_eq!(
         state
             .session
@@ -667,3 +680,116 @@ fn test_t4a_present_table_gaps() {
     ));
     assert!(!table_actions::is_table_editing_cell());
 }
+
+#[test]
+fn pressing_a_table_cell_makes_that_cell_the_active_one() {
+    let (app, state) = make_test_fixture();
+    app.invoke_add_table();
+    let (id, rows, cols) = {
+        let session = state.session.borrow();
+        let element = session
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .iter()
+            .find(|e| e.element_type == loom_present_core::ElementType::Table)
+            .expect("a table was inserted")
+            .clone();
+        let table = element.table().unwrap();
+        (element.id.clone(), table.rows.len(), table.columns.len())
+    };
+    assert!(rows >= 2 && cols >= 2);
+    let index = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .unwrap()
+        .elements
+        .iter()
+        .position(|e| e.id == id)
+        .unwrap() as i32;
+    // The pointer lands in the middle of the last row and the last column.
+    use slint::ComponentHandle as _;
+    let parts = app.global::<crate::ObjectParts>();
+    parts.set_press_fx(1.0 - 0.5 / cols as f32);
+    parts.set_press_fy(1.0 - 0.5 / rows as f32);
+    app.invoke_element_pressed(index, false);
+    assert_eq!(
+        table_actions::get_active_table_cell(&id),
+        (rows - 1, cols - 1),
+        "the cell under the pointer is the active cell"
+    );
+    // And a press on the first cell moves it back.
+    parts.set_press_fx(0.5 / cols as f32);
+    parts.set_press_fy(0.5 / rows as f32);
+    app.invoke_element_pressed(index, false);
+    assert_eq!(table_actions::get_active_table_cell(&id), (0, 0));
+}
+
+#[test]
+fn insert_chart_builds_the_chart_from_a_copied_range_and_never_invents_data() {
+    let _guard = MOCK_CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    let (app, state) = make_test_fixture();
+    let charts = |state: &Rc<GuiState>| {
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .iter()
+            .filter(|e| e.element_type == ElementType::Chart)
+            .count()
+    };
+
+    // Nothing useful on the clipboard: no chart, and the status says what to do.
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+        plain_text: Some("just some words".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    app.invoke_add_chart();
+    assert_eq!(charts(&state), 0, "no data, no chart");
+    assert!(
+        app.get_status_left().contains("Copy a chart"),
+        "{}",
+        app.get_status_left()
+    );
+
+    // A copied range with a header row and a label column becomes the chart.
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+        plain_text: Some(
+            "Region	Q1	Q2
+North	10	20
+South	30	40"
+                .into(),
+        ),
+        ..Default::default()
+    })
+    .unwrap();
+    app.invoke_add_chart();
+    assert_eq!(charts(&state), 1);
+    let session = state.session.borrow();
+    let chart = session
+        .document
+        .active_slide()
+        .unwrap()
+        .elements
+        .iter()
+        .find(|e| e.element_type == ElementType::Chart)
+        .unwrap()
+        .chart()
+        .unwrap();
+    assert_eq!(chart.categories, vec!["North", "South"]);
+    assert_eq!(chart.series.len(), 2);
+    assert_eq!(chart.series[0].name, "Q1");
+    assert_eq!(chart.series[1].values, vec![20.0, 40.0]);
+    drop(session);
+    loom_clipboard::set_mock_clipboard_enabled(false);
+}
+
+static MOCK_CLIPBOARD: std::sync::Mutex<()> = std::sync::Mutex::new(());

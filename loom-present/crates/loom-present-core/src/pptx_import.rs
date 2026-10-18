@@ -147,6 +147,15 @@ fn emu_to_units(emu: i64) -> f32 {
     emu as f32 / EMU_PER_UNIT
 }
 
+/// Where a placeholder with no geometry of its own goes, in slide units.
+fn placeholder_box(kind: &ElementType) -> (f32, f32, f32, f32) {
+    match kind {
+        ElementType::Title => (60.0, 40.0, 880.0, 110.0),
+        ElementType::Subtitle => (60.0, 170.0, 880.0, 80.0),
+        _ => (60.0, 170.0, 880.0, 330.0),
+    }
+}
+
 fn parse_xfrm(xml: &str) -> (f32, f32, f32, f32, f32) {
     let mut x = 40.0;
     let mut y = 40.0;
@@ -291,6 +300,15 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
                 ElementType::BodyText
             };
 
+        // A placeholder that takes its position from the slide layout carries
+        // no geometry of its own. The layout is not read, so it gets the place
+        // the same kind of object has on a new Loom slide instead of the
+        // collapsed default box.
+        let (x, y, width, height) = if sp_xml.contains("<a:off") {
+            (x, y, width, height)
+        } else {
+            placeholder_box(&element_type)
+        };
         let id = extract_attr(sp_xml, "name").unwrap_or_else(|| format!("shape-{elem_counter}"));
         elem_counter += 1;
         let style = parse_shape_style(sp_xml, &element_type);
@@ -679,5 +697,25 @@ mod tests {
             .find(|e| e.element_type == ElementType::Picture)
             .expect("picture element must be present");
         assert!(imported.assets.contains_key(&pic_elem.content));
+    }
+
+    #[test]
+    fn placeholders_without_geometry_do_not_collapse_into_one_box() {
+        let slide = concat!(
+            "<p:sld><p:cSld><p:spTree>",
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Title 1\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"ctrTitle\"/></p:nvPr></p:nvSpPr>",
+            "<p:spPr/><p:txBody><a:p><a:r><a:t>Quarterly review</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Subtitle 2\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"subTitle\" idx=\"1\"/></p:nvPr></p:nvSpPr>",
+            "<p:spPr/><p:txBody><a:p><a:r><a:t>Prepared by the team</a:t></a:r></a:p></p:txBody></p:sp>",
+            "</p:spTree></p:cSld></p:sld>"
+        );
+        let elements = parse_slide_shapes(slide);
+        assert_eq!(elements.len(), 2);
+        let (title, subtitle) = (&elements[0], &elements[1]);
+        assert!(title.width > 600.0 && title.height > 60.0, "{title:?}");
+        assert!(
+            subtitle.y >= title.y + title.height,
+            "the subtitle sits below the title, not on it"
+        );
     }
 }

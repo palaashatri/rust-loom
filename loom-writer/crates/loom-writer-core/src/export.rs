@@ -225,7 +225,7 @@ fn pdf_lines(
             continue;
         }
         if kind == crate::CHART_BLOCK_KIND {
-            if let Ok(chart) = loom_objects::chart::Chart::from_json(text) {
+            if let Some(chart) = crate::chart_from_block(block) {
                 let chart = Rc::new(chart);
                 let chart_width = column.clamp(200.0, 460.0);
                 let chart_height = 200.0f32;
@@ -507,7 +507,7 @@ fn draw_chart_card(
         return;
     }
 
-    let norm_values = chart.normalized_series_values();
+    let norm_values = chart.normalized_series_values_from_zero();
     let cat_count = chart.categories.len();
     let series_count = chart.series.len();
     let plot_top = top - 32.0;

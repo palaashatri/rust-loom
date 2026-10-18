@@ -284,3 +284,57 @@ fn write_a_picture_docx_for_word() {
     doc.insert_image_block(6, picture(300, 150, 20)).unwrap();
     std::fs::write(out, crate::export_docx(&doc).unwrap().bytes).unwrap();
 }
+
+#[test]
+fn replace_all_keeps_the_style_of_text_between_the_matches() {
+    use loom_text::{CharacterStyle, FontWeight, StyleRun};
+    let mut doc = WriterDocument::new("d", "D");
+    let text = "some bold words and some italic words.";
+    let mut block = RichBlock::new(1, "paragraph", text);
+    let at = |needle: &str| {
+        let start = text.find(needle).unwrap();
+        (start, start + needle.len())
+    };
+    let (bs, be) = at("bold");
+    let (is, ie) = at("italic");
+    block.runs = vec![
+        StyleRun {
+            start: bs,
+            end: be,
+            style: CharacterStyle {
+                weight: FontWeight::Bold,
+                ..Default::default()
+            },
+        },
+        StyleRun {
+            start: is,
+            end: ie,
+            style: CharacterStyle {
+                italic: true,
+                ..Default::default()
+            },
+        },
+    ];
+    doc.blocks.push(block);
+    assert_eq!(doc.replace_all("words", "terms", false), 2);
+    let block = &doc.blocks[0];
+    assert_eq!(
+        block.text.as_str(),
+        "some bold terms and some italic terms."
+    );
+    let styled = |run: &StyleRun| block.text.as_str()[run.start..run.end].to_string();
+    let italic: Vec<String> = block
+        .runs
+        .iter()
+        .filter(|r| r.style.italic)
+        .map(styled)
+        .collect();
+    let bold: Vec<String> = block
+        .runs
+        .iter()
+        .filter(|r| r.style.weight == FontWeight::Bold)
+        .map(styled)
+        .collect();
+    assert_eq!(italic, vec!["italic"], "the italic word keeps its style");
+    assert_eq!(bold, vec!["bold"]);
+}

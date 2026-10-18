@@ -2,9 +2,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use loom_present_core::{
-    default_slide_chart, default_slide_table, PresentationSession, SlideElement, TableDirection,
-};
+use loom_present_core::{default_slide_table, PresentationSession, SlideElement, TableDirection};
 use slint::{ComponentHandle, SharedString};
 
 use crate::{refresh, replace_opened_deck, set_status, GuiState, PresentApp};
@@ -38,6 +36,43 @@ pub fn get_active_table_cell(element_id: &str) -> (usize, usize) {
         }
         (0, 0)
     })
+}
+
+/// A press on a table object makes the cell under the pointer the active one,
+/// so a double-click edits the cell that was clicked.
+pub(crate) fn select_table_cell_under_press(app: &PresentApp, state: &GuiState, index: usize) {
+    let parts = app.global::<crate::ObjectParts>();
+    let (fx, fy) = (parts.get_press_fx(), parts.get_press_fy());
+    let session = state.session.borrow();
+    let Some(element) = session
+        .document
+        .active_slide()
+        .and_then(|slide| slide.elements.get(index))
+    else {
+        return;
+    };
+    if element.element_type != loom_present_core::ElementType::Table {
+        return;
+    }
+    if let Some((row, col)) =
+        element.table_cell_at_local_coords(fx * element.width, fy * element.height)
+    {
+        set_active_table_cell(&element.id, row, col);
+    }
+}
+
+/// The chart the clipboard holds, or one made from a copied range of numbers.
+fn chart_from_clipboard() -> Option<loom_objects::Chart> {
+    let clip = loom_clipboard::read_clipboard().ok()?;
+    if let Some(chart) = clip.to_chart() {
+        return Some(chart);
+    }
+    let table = clip.to_table().or_else(|| {
+        let text = clip.tsv.as_deref().or(clip.plain_text.as_deref())?;
+        (text.lines().filter(|l| l.contains('\t')).count() >= 2)
+            .then(|| loom_clipboard::tsv_to_table(text))
+    })?;
+    loom_objects::Chart::from_table("clipboard-chart", &table)
 }
 
 pub fn set_active_table_cell(element_id: &str, row: usize, col: usize) {
@@ -203,10 +238,17 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         let state = state.clone();
         app.on_add_chart(move || {
             if let Some(app) = app_ref.upgrade() {
-                let res = state
-                    .session
-                    .borrow_mut()
-                    .insert_chart(default_slide_chart());
+                // The chart comes from what the user copied (a chart, or a range
+                // of numbers with a header row and a label column); nothing is
+                // invented.
+                let Some(chart) = chart_from_clipboard() else {
+                    set_status(
+                        &app,
+                        "Copy a chart, or a range of numbers with a header row and a label column, from Sheets first",
+                    );
+                    return;
+                };
+                let res = state.session.borrow_mut().insert_chart(chart);
                 match res {
                     Ok(_) => {
                         refresh(&app, &state);
