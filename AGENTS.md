@@ -430,23 +430,23 @@ This is the live product ledger and repair queue. `AGENTS.md` defines the rules;
 ## Active gate — read this before choosing a card
 
 ```text
-ACTIVE PHASE: SHEETS
+ACTIVE PHASE: OFFICE-V1
 FOUNDATION STATUS: ACCEPTED
 SUITE STATUS: ACCEPTANCE_BLOCKED
 APPLICATION DEVELOPMENT: UNLOCKED
-ACTIVE APPLICATION: SHEETS
-NEXT APPLICATION: WRITER
+ACTIVE APPLICATIONS: SHEETS, WRITER, PRESENT
+NEXT APPLICATION: PHOTO
 ```
 
-The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this audit. Existing consumer imports remain compatible; the active application phase is now Sheets. The current visual audit does not recertify the gallery or supply human acceptance. Recheck gallery evidence and human sign-off before advancing application design. Do not delete or refresh existing baselines to hide findings.
+The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this run. Existing consumer imports remain compatible. The `office-v1` scheduling phase records the 2026-10-02 and 2026-10-06 owner grants for Sheets, Writer, and Present; it does not grant application acceptance or recertify the gallery. Do not delete or refresh existing baselines to hide findings.
 
-**Machine gate:** the workflow is now in the serial Sheets phase. **Owner override (2026-09-18):** the owner authorized completing Sheets to its binary acceptance gate, then advancing to Writer. The earlier P0/P1 repairs remain recorded below; this phase does not grant application acceptance. Keep native, visual, accessibility, and persistence evidence open until each gate is actually proven.
+**Machine gate:** Sheets, Writer, and Present are `IN_PROGRESS` under the dated owner overrides. Photo, Motion, Video, Studio, and Encode remain `LOCKED` for product changes. All eight applications remain `ACCEPTANCE_BLOCKED`; the earlier retracted acceptance records do not satisfy any gate. Keep native, visual, accessibility, interoperability, performance, and persistence evidence open until each applicable gate is proven.
 
-The contract's allowed prefixes are an outer file boundary for the active Sheets phase, not permission to edit later applications. A newly supported repair stage needs a reviewed update to `loom-bootstrap/scripts/audit-governance.py` and its focused tests; the validator now covers the recorded Sheets phase and its serial predecessors.
+The contract's allowed prefixes are an outer file boundary for the three authorized applications and their necessary shared infrastructure. They do not unlock later applications. The `office-v1` validator requires the group declaration, matching work and product statuses, accepted foundation, and exact bounded prefixes. Existing serial phases remain supported.
 
-**Repair order:** finish the remaining Sheets findings and acceptance evidence, mark Sheets `ACCEPTED`, then advance the workflow to Writer. Within each app, data loss and broken output come before visual polish. No later app starts until the current app passes its full gate.
+**Repair order:** address the current supervisor pending list below in bounded milestones across Sheets, Writer, and Present; data loss and broken output come before visual polish. Review each app independently against all section 13 gates. Photo is next after the authorized group and remains locked until a separate reviewed workflow transition with passing acceptance evidence.
 
-**How to use a card:** follow the numbered steps in `AGENTS.md` under “Start here.” Normally select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. The owner overrides authorize this dated P0/P1 run and the active Sheets completion run. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
+**How to use a card:** follow the numbered steps in `AGENTS.md` under “Start here.” Select one coherent defect, reproduce it, make a small repair, run its concrete check, and record evidence. The owner overrides authorize the three-application continuation, not weaker acceptance requirements. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
 
 ## Current product state
 
@@ -769,6 +769,22 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **PERF-01** Keep large workbook work from freezing the window — NEEDS_REVIEW
 - **REC-02** Keep unsaved recovery safe and bounded — FIXED for v1 on Windows and Linux (2026-10-07; real full-volume disk-full untested, injected write errors only)
 
+### Current supervisor pending list — 2026-10-18
+
+All three office applications remain `ACCEPTANCE_BLOCKED`. The earlier 2026-10-18 acceptance claims were retracted; the later independent Argon reports each returned REJECT. Their detailed historical findings and the prior repair batch are retained below this marked ledger.
+
+1. **Independent acceptance review:** after repairs, fresh reviewers must open the live app and renders and record evidence against the actual section 13 gates. No review or acceptance has been completed by this continuation.
+2. **Sheets:** focus handling when the grid narrows (Argon D1, not yet reproduced by this continuation), circular-reference message, window ballooning or hang on rapid resize after open, blank strip after fast scroll, doubled gridline under a wrapped row, Slint private `paint` warning, dense-sheet scroll below the 60 fps budget. Recheck the review's empty-reference display and chart-redo findings too; they are not covered by the prior sort repair.
+3. **Writer:** Markdown-backed tables lose pasted formatting/alignment/widths; per-character table undo; Table actions enabled outside tables; inspector Del Row overflow; caret/placeholder overlap; PDF heading/table styling; imported underline; duplicate accessibility names; toolbar arrow navigation; Ctrl+Home margin; app-local font picker; chart summary instead of a drawn chart; picture resize, clipboard paste and alt text; table typing and page-render performance.
+4. **Present:** horizontal bar export, rotated chart text smear, per-character table undo, stacked new objects, pie/multi-series chart fidelity, text-scale chrome glyph, theme colours, startup PPTX warning bypass, per-run text formatting.
+5. **Cross-platform evidence:** live Linux interactions including picture chooser, typing and graceful close; complete inspected viewport/theme/text-scale/device-scale matrix; speech evidence remains owner-deferred, not a passing claim; Linux performance; recorded independent per-gate sign-off. macOS remains deferred pending a host.
+
+### Continuation governance milestone — 2026-10-18
+
+The `office-v1` workflow now represents the already-authorized three-app scope; it preserves blocked product statuses and locks all later applications. Seven new phase tests were seen failing against the old validator; `python loom-bootstrap/scripts/test_audit_governance.py` then passed 29 tests, independently re-run by the orchestrator. `python loom-bootstrap/scripts/audit-governance.py`, `audit-assets.py`, and `audit-ui-foundation.py` passed. `audit-code-structure.py` failed on Writer `main.rs` at 195,165 bytes against its 194,401-byte ceiling; that remains a required extraction in the active Writer task. No application acceptance is implied. Evidence: `.work/production-20261018/governance-red.log` and `governance.log`.
+
+The old Argon Writer Markdown export fixtures were renamed from `.work/argon-writer/{s1,s2-table,s6-chart}.md` to the corresponding `.md.txt` paths to obey the Markdown layout rule; SHA-256 comparison confirmed each file's bytes were preserved. Generated incremental caches were identified but were not deleted: automatic approval review rejected the guarded recursive cache-removal command with "blocked by policy". Builds use existing targets with `CARGO_INCREMENTAL=0`; no new release build or target directory is authorized for workers.
+
 <!-- CURRENT TRUTH END -->
 
 
@@ -926,9 +942,4 @@ All three v1 applications are formally recorded as **ACCEPTED**.
 
 **Argon hostile reviews, defect-fix batch, and work left for production (2026-10-18, supervisor).** Three independent Argon reviewer subagents (Opus-class, one per app, reports in `.work/argon-sheets|writer|present/REPORT.txt`, ignored by git) ran against the apps and each returned **REJECT**; Sheets, Writer and Present remain `ACCEPTANCE_BLOCKED`. A batch fixing the reproducible severity-1/2 findings was made with regression tests (Writer: cut/paste splice through `replace_selection`, `.loomdoc` save filter and DOCX save paths, table-row integrity `table_safe_edit`, table row heights in layout, chart blocks, DOCX chart import; Present: table cell selection on press, chart insert only from clipboard data with `Chart::from_table`, PPTX save path, placeholder boxes on import; Sheets: formulas that refer only to their own row follow their row in a sort, which stops at the first cross-row formula; READMEs corrected). Suites after the batch (Windows, debug): Writer 324 app + 229 core + 4 suite-gates, Present 246 app + 79 core + integration suites, Sheets 549 app + 290 core + integration suites, all passing, with fmt and `clippy --workspace --all-targets -D warnings` clean in all three; the four repository audits were not re-run after the batch. Nothing here is an acceptance.
 
-*Work left before any app can be marked ACCEPTED (the supervisor's list, in order):*
-1. **Re-run independent Argon reviews** (fresh reviewers, each must open the live app and renders and record per-gate evidence) after the fixes below; only an ACCEPT with evidence changes a status.
-2. **Sheets:** focus handling when the grid narrows (Argon D1, not reproduced), circular-reference message, window ballooning or hang on rapid resize after open, blank strip after fast scroll, doubled gridline under a wrapped row, Slint "private function `paint`" warning, dense-sheet scroll about 50 fps against 60.
-3. **Writer:** tables are Markdown text, so pasted bold, alignment and widths are lost; table undo is per character; Table menu items enabled outside tables; inspector Del Row overrun; caret and placeholder overlap; PDF heading weight and table style; LibreOffice underline not drawn; duplicate-named buttons in UIA; toolbar arrow-key navigation; Ctrl+Home margin; app-local font picker; chart is a summary card on the page, not drawn; picture resize, clipboard paste and alt text; 100x20 table keystroke p95 19.06 ms against 16.7 ms and 20-page render 47.5 ms against 45 ms (gate 10 FAIL).
-4. **Present:** bar chart exported as horizontal in PowerPoint, rotated chart text smear, per-character table undo, new objects stack at one position, pie and multi-series chart fidelity, text-scale chrome glyph, theme colours, `--open` of a `.pptx` bypasses the import warning, per-run text formatting.
-5. **Cross-cutting evidence still missing:** live Linux window evidence beyond typing and F5 (Insert Picture dialog via zenity, typing under WSLg, graceful close), the full viewport/theme/text-scale/scale-factor matrix inspected by a reviewer, gate 9 speech pass (deferred by the owner; tree evidence only), gate 10 on Linux, and a human or recorded-reviewer sign-off per app (gate 14).
+The supervisor's pending list is maintained inside the marked current-truth section above; this historical review record is not a second task queue.

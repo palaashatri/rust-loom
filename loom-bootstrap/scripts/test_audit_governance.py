@@ -20,6 +20,7 @@ class GovernanceTests(unittest.TestCase):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
+        self.use_office_v1_fixture()
 
     def truth_text(self):
         path = self.root / "AGENTS.md"
@@ -87,12 +88,14 @@ class GovernanceTests(unittest.TestCase):
             workflow, count=1, flags=re.DOTALL,
         )
         workflow = workflow.replace('sheets = "IN_PROGRESS"', 'sheets = "LOCKED"', 1)
+        workflow = workflow.replace('writer = "IN_PROGRESS"', 'writer = "LOCKED"', 1)
+        workflow = workflow.replace('present = "IN_PROGRESS"', 'present = "LOCKED"', 1)
         workflow_path.write_text(workflow, encoding="utf-8")
 
         truth = self.truth_text()
         truth = re.sub(
             r'ACTIVE PHASE: [^\n]+\nFOUNDATION STATUS: [^\n]+\nSUITE STATUS: [^\n]+\n'
-            r'APPLICATION DEVELOPMENT: [^\n]+\n(?:ACTIVE APPLICATION: [^\n]+\n)?'
+            r'APPLICATION DEVELOPMENT: [^\n]+\n(?:ACTIVE APPLICATIONS?: [^\n]+\n)?'
             r'(?:ACTIVE REPAIR: [^\n]+\n)?NEXT APPLICATION: [^\n]+',
             'ACTIVE PHASE: AUDIT-REPAIR\nFOUNDATION STATUS: ACCEPTED\nSUITE STATUS: ACCEPTANCE_BLOCKED\n'
             'APPLICATION DEVELOPMENT: LOCKED\nACTIVE REPAIR: SHARED-RECOVERY\nNEXT APPLICATION: SHEETS',
@@ -100,7 +103,61 @@ class GovernanceTests(unittest.TestCase):
         )
         truth = truth.replace('| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
                               '| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |', 1)
+        truth = truth.replace('| 2 | Writer | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
+                              '| 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED |', 1)
+        truth = truth.replace('| 3 | Present | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
+                              '| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED |', 1)
         self.write_truth(truth)
+
+    def use_office_v1_fixture(self):
+        """Use the owner-authorized three-app production work scope."""
+        workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
+        workflow = workflow_path.read_text(encoding="utf-8")
+        workflow = re.sub(r'^phase = "[^"]+"$', 'phase = "office-v1"', workflow,
+                          count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^next_application = "[^"]+"$',
+                          'next_application = "photo"', workflow,
+                          count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^application_development_locked = (true|false)$',
+                          'application_development_locked = false', workflow,
+                          count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^consumer_imports_allowed = (true|false)$',
+                          'consumer_imports_allowed = true', workflow,
+                          count=1, flags=re.MULTILINE)
+        for app, status in (
+            ("sheets", "IN_PROGRESS"),
+            ("writer", "IN_PROGRESS"),
+            ("present", "IN_PROGRESS"),
+            ("photo", "LOCKED"),
+            ("motion", "LOCKED"),
+            ("video", "LOCKED"),
+            ("studio", "LOCKED"),
+            ("encode", "LOCKED"),
+        ):
+            workflow = re.sub(rf'^{app} = "[A-Z_]+"$',
+                              f'{app} = "{status}"', workflow,
+                              count=1, flags=re.MULTILINE)
+        if '"loom-writer/"' not in workflow:
+            workflow = workflow.replace(
+                '  "loom-sheets/",\n',
+                '  "loom-sheets/",\n  "loom-writer/",\n  "loom-present/",\n',
+                1,
+            )
+        workflow_path.write_text(workflow, encoding="utf-8")
+
+        truth = self.truth_text()
+        updated, count = re.subn(
+            r'ACTIVE PHASE: [^\n]+\nFOUNDATION STATUS: [^\n]+\nSUITE STATUS: [^\n]+\n'
+            r'APPLICATION DEVELOPMENT: [^\n]+\nACTIVE APPLICATIONS?: [^\n]+\n'
+            r'NEXT APPLICATION: [^\n]+',
+            'ACTIVE PHASE: OFFICE-V1\nFOUNDATION STATUS: ACCEPTED\n'
+            'SUITE STATUS: ACCEPTANCE_BLOCKED\nAPPLICATION DEVELOPMENT: UNLOCKED\n'
+            'ACTIVE APPLICATIONS: SHEETS, WRITER, PRESENT\nNEXT APPLICATION: PHOTO',
+            truth,
+            count=1,
+        )
+        self.assertEqual(count, 1, "fixture must contain the active workflow gate")
+        self.write_truth(updated)
 
     def run_audit(self):
         return subprocess.run(
@@ -114,9 +171,49 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn(expected, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_recorded_repair_gate_is_valid_without_a_readiness_score(self):
+    def test_recorded_office_v1_gate_is_valid_without_a_readiness_score(self):
+        self.use_office_v1_fixture()
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_office_v1_cannot_accept_an_active_application(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     'writer = "IN_PROGRESS"', 'writer = "ACCEPTED"')
+        self.rejects("writer status must be IN_PROGRESS in office-v1 phase")
+
+    def test_office_v1_cannot_unlock_a_later_application(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     'photo = "LOCKED"', 'photo = "IN_PROGRESS"')
+        self.rejects("application photo must remain LOCKED in office-v1 phase")
+
+    def test_office_v1_cannot_promote_a_product_status(self):
+        self.use_office_v1_fixture()
+        self.replace("current_truth", "| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
+                     "| 1 | Sheets | ACCEPTED | IN_PROGRESS |")
+        self.rejects("Sheets product status must remain ACCEPTANCE_BLOCKED during office-v1")
+
+    def test_office_v1_keeps_photo_as_the_next_application(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     'next_application = "photo"', 'next_application = "writer"')
+        self.rejects("office-v1 next_application must be photo")
+
+    def test_office_v1_preserves_the_existing_foundation_consumer_list(self):
+        self.use_office_v1_fixture()
+        self.replace(
+            "loom-bootstrap/contracts/workflow.toml",
+            'existing_foundation_consumers = ["sheets", "writer", "present", "photo", "motion"]',
+            'existing_foundation_consumers = ["sheets", "writer", "present"]',
+        )
+        self.rejects("office-v1 existing foundation consumer list changed")
+
+    def test_office_v1_rejects_a_locked_app_prefix(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     '  "loom-present/",', '  "loom-present/",\n  "loom-photo/",')
+        self.rejects("office-v1 allowed_active_prefixes changed beyond approved scope")
 
     def test_older_supported_phases_remain_valid(self):
         workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
@@ -164,6 +261,12 @@ class GovernanceTests(unittest.TestCase):
                 truth += "\n| Order | Application | Status |\n|---:|---|---|\n"
                 truth += "".join(f"| {index} | {app.title()} | {statuses[app]} |\n"
                                  for index, app in enumerate(apps, 1))
+                for app in apps:
+                    workflow = re.sub(
+                        rf'^{app} = "(?:LOCKED|IN_PROGRESS|ACCEPTED)"$',
+                        f'{app} = "{statuses[app]}"', workflow,
+                        count=1, flags=re.MULTILINE,
+                    )
                 workflow_path.write_text(workflow, encoding="utf-8")
                 self.write_truth(truth)
                 result = self.run_audit()

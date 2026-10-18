@@ -1,9 +1,9 @@
 schema_version = 1
-phase = "sheets"
+phase = "office-v1"
 foundation_status = "ACCEPTED"
 application_development_locked = false
 consumer_imports_allowed = true
-next_application = "writer"
+next_application = "photo"
 # Keep already-migrated UI compiling; this is not permission for new adoption.
 existing_foundation_consumers = ["sheets", "writer", "present", "photo", "motion"]
 
@@ -18,8 +18,8 @@ application_order = [
   "encode",
 ]
 
-# Outer file boundary for the active application phase. The current owner
-# override authorizes Sheets work; keep later applications serially locked.
+# Outer file boundary for the 2026-10-02/10-06 owner-authorized Sheets,
+# Writer, and Present production push. Product acceptance gates remain blocked.
 allowed_active_prefixes = [
   ".agents/",
   ".github/",
@@ -28,6 +28,8 @@ allowed_active_prefixes = [
   "loom-bootstrap/",
   "loom-core/",
   "loom-sheets/",
+  "loom-writer/",
+  "loom-present/",
   # UI-42 authorizes this exact responsive contract file only.
   "loom-design-bible/contracts/desktop-ui.toml",
 ]
@@ -46,8 +48,8 @@ directions = ["ltr", "rtl"]
 
 [application_status]
 sheets = "IN_PROGRESS"
-writer = "LOCKED"
-present = "LOCKED"
+writer = "IN_PROGRESS"
+present = "IN_PROGRESS"
 photo = "LOCKED"
 motion = "LOCKED"
 video = "LOCKED"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Loom's authority model and serial workflow lock."""
+"""Validate Loom's authority model and application workflow lock."""
 from __future__ import annotations
 
 import os
@@ -114,6 +114,37 @@ else:
         for locked_app in ("photo", "motion", "video", "studio", "encode"):
             if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
                 fail(f"application {locked_app} must remain LOCKED during present phase")
+    elif phase == "office-v1":
+        if foundation_status != "ACCEPTED":
+            fail("office-v1 phase requires accepted foundation")
+        if workflow.get("foundation_gate", {}).get("status") != "ACCEPTED":
+            fail("office-v1 foundation gate must remain ACCEPTED")
+        if workflow.get("application_development_locked") is not False:
+            fail("application development should be unlocked for office-v1")
+        if workflow.get("consumer_imports_allowed") is not True:
+            fail("consumer imports should be allowed for office-v1")
+        if workflow.get("next_application") != "photo":
+            fail("office-v1 next_application must be photo")
+        if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
+            fail("office-v1 existing foundation consumer list changed")
+        for app in APPS:
+            expected = "IN_PROGRESS" if app in ("sheets", "writer", "present") else "LOCKED"
+            if workflow.get("application_status", {}).get(app) != expected:
+                if expected == "IN_PROGRESS":
+                    fail(f"{app} status must be IN_PROGRESS in office-v1 phase")
+                else:
+                    fail(f"application {app} must remain LOCKED in office-v1 phase")
+        office_prefixes = {
+            ".agents/", ".github/", "AGENTS.md", "README.md",
+            "loom-bootstrap/", "loom-core/", "loom-sheets/", "loom-writer/",
+            "loom-present/", "loom-design-bible/contracts/desktop-ui.toml",
+        }
+        prefixes = workflow.get("allowed_active_prefixes")
+        if (not isinstance(prefixes, list)
+                or any(not isinstance(prefix, str) for prefix in prefixes)
+                or len(prefixes) != len(set(prefixes))
+                or set(prefixes) != office_prefixes):
+            fail("office-v1 allowed_active_prefixes changed beyond approved scope")
     elif phase == "photo":
         if foundation_status != "ACCEPTED":
             fail("photo phase requires accepted foundation")
@@ -234,6 +265,15 @@ elif phase == "present":
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: PRESENT",
     )
+elif phase == "office-v1":
+    truth_phrases = (
+        "ACTIVE PHASE: OFFICE-V1",
+        "FOUNDATION STATUS: ACCEPTED",
+        "SUITE STATUS: ACCEPTANCE_BLOCKED",
+        "APPLICATION DEVELOPMENT: UNLOCKED",
+        "ACTIVE APPLICATIONS: SHEETS, WRITER, PRESENT",
+        "NEXT APPLICATION: PHOTO",
+    )
 elif phase == "photo":
     truth_phrases = (
         "ACTIVE PHASE: PHOTO",
@@ -264,13 +304,23 @@ if phase:
     if [value.strip() for value in foundations] != [workflow.get("foundation_status")]:
         fail("AGENTS.md current truth foundation status disagrees with workflow")
 
-if phase == "audit-repair":
-    gate_fields = {
-        "APPLICATION DEVELOPMENT": "LOCKED",
-        "SUITE STATUS": "ACCEPTANCE_BLOCKED",
-        "ACTIVE REPAIR": str(workflow.get("active_repair", "")).upper(),
-        "NEXT APPLICATION": str(workflow.get("next_application", "")).upper(),
-    }
+if phase in ("audit-repair", "office-v1"):
+    if phase == "audit-repair":
+        gate_fields = {
+            "APPLICATION DEVELOPMENT": "LOCKED",
+            "SUITE STATUS": "ACCEPTANCE_BLOCKED",
+            "ACTIVE REPAIR": str(workflow.get("active_repair", "")).upper(),
+            "NEXT APPLICATION": str(workflow.get("next_application", "")).upper(),
+        }
+        table_status_context = "during shared-recovery"
+    else:
+        gate_fields = {
+            "APPLICATION DEVELOPMENT": "UNLOCKED",
+            "SUITE STATUS": "ACCEPTANCE_BLOCKED",
+            "ACTIVE APPLICATIONS": "SHEETS, WRITER, PRESENT",
+            "NEXT APPLICATION": "PHOTO",
+        }
+        table_status_context = "during office-v1"
     for field, expected in gate_fields.items():
         values = re.findall(rf"^{re.escape(field)}: (.+)$", truth_text, re.MULTILINE)
         if [value.strip() for value in values] != [expected]:
@@ -289,7 +339,7 @@ if phase == "audit-repair":
         fail("AGENTS.md current truth must contain exactly one ordered live application status table")
     for name, quality, schedule in rows:
         if quality != "ACCEPTANCE_BLOCKED":
-            fail(f"{name} product status must remain ACCEPTANCE_BLOCKED during shared-recovery")
+            fail(f"{name} product status must remain ACCEPTANCE_BLOCKED {table_status_context}")
         if schedule != workflow.get("application_status", {}).get(name.lower()):
             fail(f"{name} work status disagrees with workflow")
         section = re.search(
@@ -307,7 +357,9 @@ if phase == "audit-repair":
 for app in APPS:
     if phase == "audit-repair" and app in workflow.get("existing_foundation_consumers", []):
         continue
-    if app in ("sheets", "writer", "present", "photo", "motion") and phase in ("sheets", "writer", "present", "photo", "motion"):
+    if app in ("sheets", "writer", "present", "photo", "motion") and phase in (
+        "sheets", "writer", "present", "photo", "motion", "office-v1",
+    ):
         continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"
     if not ui_root.exists():
