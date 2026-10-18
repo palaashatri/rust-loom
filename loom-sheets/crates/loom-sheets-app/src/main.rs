@@ -37,8 +37,8 @@ use loom_sheets_core::{
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
-    ComponentHandle, Global, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer,
-    SharedString, VecModel,
+    ComponentHandle, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    VecModel,
 };
 
 slint::include_modules!();
@@ -125,9 +125,18 @@ mod journey;
 use journey::*;
 
 mod cell_spill;
+mod responsive_layout;
 mod scroll_projection;
 mod template_navigation;
 mod window_chrome;
+#[cfg(test)]
+pub(crate) use responsive_layout::wire_responsive_layout;
+pub(crate) use responsive_layout::{apply_headless_viewport_size, apply_layout_breakpoints};
+#[cfg(test)]
+pub(crate) use responsive_layout::{
+    focused_item_is_within_inspector, layout_breakpoints, ResponsiveToolbarState, INSPECTOR_WIDTH,
+    TABLE_HORIZONTAL_MARGIN,
+};
 
 mod actions;
 mod clipboard_actions;
@@ -147,10 +156,7 @@ pub(crate) const DEFAULT_VISIBLE_ROWS: u32 = 15;
 pub(crate) const GRID_ROW_HEIGHT: f32 = DEFAULT_ROW_HEIGHT;
 pub(crate) const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
 const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
-const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
-const INSPECTOR_WIDTH: f32 = 320.0;
-const TABLE_HORIZONTAL_MARGIN: f32 = 0.0;
-const SHELL_VERTICAL_CHROME: f32 = 220.0;
+pub(crate) const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
@@ -1712,74 +1718,6 @@ pub(crate) fn apply_theme(app: &SheetsApp, theme: &str) {
 
 pub(crate) fn configure_direction(app: &SheetsApp, rtl: bool) {
     app.set_rtl(rtl);
-}
-
-/// Effective (text-scaled) width below which the labeled toolbar row cannot fit
-/// its insert commands. They move into More actions instead of being clipped.
-const COMPACT_TOOLBAR_BELOW: f32 = 600.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ResponsiveToolbarState {
-    icon_only: bool,
-    overflow: bool,
-    labeled: bool,
-    compact: bool,
-}
-
-fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
-    let policy = ResponsivePolicy::get(app);
-    let width = width as f32 / app.get_template_text_scale().max(1.0);
-    ResponsiveToolbarState {
-        icon_only: width < policy.get_priority_1_icon_only_below(),
-        overflow: width < policy.get_priority_2_overflow_below(),
-        labeled: width >= policy.get_priority_2_overflow_below(),
-        compact: width < COMPACT_TOOLBAR_BELOW,
-    }
-}
-
-pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
-    let state = layout_breakpoints(app, width);
-    app.global::<SheetToolbarLayout>()
-        .set_compact(state.compact);
-    app.set_icon_only_toolbar(state.icon_only);
-    app.set_labeled_toolbar(state.labeled);
-    app.set_show_quick_formulas(state.labeled);
-    app.set_wide_toolbar(state.labeled);
-    app.set_labeled_export(state.labeled);
-    app.set_overflow_toolbar(state.overflow);
-    // Keep Format available at every width. The UI moves it into a drawer
-    // when the window is compact instead of disabling the action.
-    app.set_inspector_available(true);
-}
-
-/// Size the headless projection like the native canvas. Snapshot rendering
-/// skips the native resize event, so compute the viewport before projecting.
-pub(crate) fn apply_headless_viewport_size(app: &SheetsApp, width: u32, height: u32) {
-    let policy = ResponsivePolicy::get(app);
-    let effective_width = width as f32 / app.get_template_text_scale().max(1.0);
-    let inspector_width =
-        if app.get_show_inspector() && effective_width >= policy.get_priority_1_icon_only_below() {
-            INSPECTOR_WIDTH
-        } else {
-            0.0
-        };
-    app.set_grid_viewport_width(
-        (width as f32 - inspector_width - TABLE_HORIZONTAL_MARGIN).max(GRID_COL_WIDTH),
-    );
-    app.set_grid_viewport_height(
-        (height as f32 - SHELL_VERTICAL_CHROME)
-            .max(GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT),
-    );
-}
-
-#[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
-fn wire_responsive_layout(app: &SheetsApp) {
-    let app_ref = app.as_weak();
-    app.on_window_resized(move |width| {
-        if let Some(app) = app_ref.upgrade() {
-            apply_layout_breakpoints(&app, width.max(0.0) as u32);
-        }
-    });
 }
 
 pub(crate) struct GuiState {

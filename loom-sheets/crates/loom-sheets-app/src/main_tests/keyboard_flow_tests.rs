@@ -6,7 +6,7 @@
 
 use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle, ElementRoot};
-use slint::platform::{Key, WindowEvent};
+use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::private_unstable_api::re_exports::{ItemWeak, WindowInner};
 
 const WIDTH: f32 = 1280.0;
@@ -1061,25 +1061,243 @@ fn toolbar_text_menu_formatting_and_chart_insertion_work_from_the_keyboard() {
 }
 
 #[test]
-fn narrowing_the_window_does_not_move_keyboard_focus_off_the_grid() {
+fn docked_inspector_resize_keeps_the_first_compact_grid_click_usable() {
     let s = launched(&[("A1", "x")]);
+    assert!(s.app.get_show_inspector(), "the inspector starts open");
+    assert!(
+        s.app.get_inspector_preference(),
+        "startup records the preference"
+    );
     assert!(
         stop(&s.app).is_some_and(|f| f.name.contains("grid")),
         "the grid starts focused: {:?}",
         stop(&s.app)
     );
-    s.app.window().set_size(PhysicalSize::new(1060, 1000));
-    apply_layout_breakpoints(&s.app, 1060);
-    render(&s.app);
-    let after = stop(&s.app);
+
+    wire_responsive_layout(&s.app);
+    s.app.window().set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
     assert!(
-        after.as_ref().is_some_and(|f| f.name.contains("grid")),
-        "narrowing must leave focus on the grid, got {after:?}"
+        stop(&s.app).is_some_and(|f| f.name.contains("grid")),
+        "automatic close preserves grid focus"
     );
-    // The next typed value lands in the sheet.
-    type_text(&s.app, "hello");
+
+    // B2's column and row headers give the blank cell's hit target. The first
+    // click after the breakpoint must reach the grid instead of only dismissing
+    // the full-window compact inspector backdrop.
+    let column = ElementHandle::find_by_accessible_label(&s.app, "Column B")
+        .next()
+        .expect("Column B header");
+    let row = ElementHandle::find_by_accessible_label(&s.app, "Row 2")
+        .next()
+        .expect("Row 2 header");
+    let (column_position, column_size) = (column.absolute_position(), column.size());
+    let (row_position, row_size) = (row.absolute_position(), row.size());
+    let point = slint::LogicalPosition::new(
+        column_position.x + column_size.width / 2.0,
+        row_position.y + row_size.height / 2.0,
+    );
+    let window = s.app.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position: point });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    slint::platform::update_timers_and_animations();
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+
+    assert_eq!(
+        s.app.get_selected_cell(),
+        "B2",
+        "the first B2 click after resizing must select the cell"
+    );
     assert!(
-        s.app.get_is_editing() || s.app.get_formula_edit_buffer().contains("hello"),
-        "typing after a resize reaches the cell editor"
+        !s.app.get_show_inspector(),
+        "the docked inspector closes at compact width"
+    );
+    assert!(
+        s.app.get_inspector_preference(),
+        "automatic close retains the preference"
+    );
+
+    for character in "Item".chars() {
+        let text = character.to_string();
+        key_down(&s.app, text.clone());
+        key_up(&s.app, text);
+    }
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render edited cell");
+    assert!(
+        s.app.get_is_editing(),
+        "typing after the first click enters cell editing"
+    );
+    assert_eq!(
+        s.app.get_formula_edit_buffer(),
+        "Item",
+        "typing after the resize edits the newly selected cell"
+    );
+
+    s.app.invoke_focus_grid();
+    let grid = focus_weak(&s.app);
+    window.set_size(PhysicalSize::new(1280, 800));
+    s.app.invoke_window_resized(1280.0);
+    apply_headless_viewport_size(&s.app, 1280, 800);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render wide window");
+    assert!(
+        s.app.get_show_inspector(),
+        "widening restores the preferred inspector"
+    );
+    assert!(
+        same_focus(&grid, &focus_weak(&s.app)),
+        "automatic reopen must not steal grid focus"
+    );
+}
+
+#[test]
+fn docked_inspector_resize_preserves_formula_bar_focus() {
+    let s = launched(&[]);
+    s.app.invoke_focus_formula_bar();
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("focus formula bar");
+    assert_eq!(focus_name(&s.app), "Formula bar");
+    let formula_bar = focus_weak(&s.app);
+
+    wire_responsive_layout(&s.app);
+    s.app.window().set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
+
+    assert!(
+        !s.app.get_show_inspector(),
+        "the docked inspector closes at compact width"
+    );
+    assert!(
+        same_focus(&formula_bar, &focus_weak(&s.app)),
+        "responsive inspector handling must not steal Formula bar focus"
+    );
+}
+
+#[test]
+fn docked_inspector_resize_preserves_name_box_focus() {
+    let s = launched(&[]);
+    let name_box = ElementHandle::find_by_accessible_label(&s.app, "Name box")
+        .next()
+        .expect("Name box");
+    let position = name_box.absolute_position();
+    let size = name_box.size();
+    let point = slint::LogicalPosition::new(
+        position.x + size.width / 2.0,
+        position.y + size.height / 2.0,
+    );
+    let window = s.app.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position: point });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("focus Name box");
+    assert_eq!(focus_name(&s.app), "Name box");
+    let name_box = focus_weak(&s.app);
+
+    wire_responsive_layout(&s.app);
+    window.set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
+
+    assert!(
+        !s.app.get_show_inspector(),
+        "the docked inspector closes at compact width"
+    );
+    assert!(
+        same_focus(&name_box, &focus_weak(&s.app)),
+        "responsive inspector handling must not steal Name box focus"
+    );
+}
+
+#[test]
+fn compact_resize_restores_grid_focus_from_an_inspector_child() {
+    let s = launched(&[]);
+    s.app.set_rtl(true);
+    render(&s.app);
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    assert_eq!(focus_name(&s.app), "Search");
+    assert!(
+        focused_item_is_within_inspector(&s.app),
+        "Search must be recognized through the inspector's nested item tree"
+    );
+
+    wire_responsive_layout(&s.app);
+    s.app.window().set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
+
+    assert!(!s.app.get_show_inspector());
+    assert!(
+        stop(&s.app).is_some_and(|focus| focus.name.contains("grid")),
+        "the compact transition returns focus to the grid after closing a focused child"
+    );
+}
+
+#[test]
+fn compact_resize_restores_grid_focus_from_an_inspector_format_button() {
+    let s = launched(&[]);
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Toggle bold formatting (Cell inspector)");
+    assert_eq!(
+        focus_name(&s.app),
+        "Toggle bold formatting (Cell inspector)"
+    );
+    assert!(focused_item_is_within_inspector(&s.app));
+
+    wire_responsive_layout(&s.app);
+    s.app.window().set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
+
+    assert!(!s.app.get_show_inspector());
+    assert!(
+        stop(&s.app).is_some_and(|focus| focus.name.contains("grid")),
+        "the compact transition returns focus to the grid after closing a focused Format control"
+    );
+}
+
+#[test]
+fn compact_resize_focus_recovery_does_not_steal_focus_from_a_new_modal() {
+    let s = launched(&[]);
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    assert_eq!(focus_name(&s.app), "Search");
+    assert!(focused_item_is_within_inspector(&s.app));
+
+    wire_responsive_layout(&s.app);
+    s.app.window().set_size(PhysicalSize::new(1060, 800));
+    s.app.invoke_window_resized(1060.0);
+    apply_headless_viewport_size(&s.app, 1060, 800);
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render compact window");
+    assert!(!s.app.get_show_inspector());
+
+    s.app.invoke_open_palette();
+    let _ = snapshot_component(&s.app, 1060.0, 800.0, 1.0).expect("render palette");
+    let palette = focus_weak(&s.app);
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    slint::platform::update_timers_and_animations();
+
+    assert!(s.app.get_palette_open());
+    assert!(
+        same_focus(&palette, &focus_weak(&s.app)),
+        "resize focus recovery must not take focus from the palette"
     );
 }

@@ -60,6 +60,7 @@ export component SheetsApp inherits Window {
     callback toolbar-command(string);
     in-out property <bool> show-inspector: false;
     in-out property <bool> inspector-preference: false;
+    in-out property <bool> inspector-quiet-open: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     property <bool> inspector-docked-visible: root.inspector-visible && !root.icon-only-toolbar;
@@ -72,13 +73,6 @@ export component SheetsApp inherits Window {
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
-    }
-    changed inspector-visible => {
-        if (root.inspector-visible) {
-            inspector-panel.focus-inspector();
-        } else {
-            action-toolbar.focus-inspector-trigger();
-        }
     }
     changed chart-visible => {
         if (!root.chart-visible && root.chart-focused) { root.chart-focused = false; grid-surface.focus-grid(); }
@@ -444,6 +438,7 @@ export component SheetsApp inherits Window {
 
             action-toolbar := SheetActionToolbar {
                 inspector-visible: root.inspector-visible;
+                inspector-preference: root.inspector-preference;
                 inspector-tab: root.inspector-tab;
                 menu-kind: root.toolbar-menu;
                 command(id) => { root.toolbar-command(id); }
@@ -629,6 +624,7 @@ export component SheetsApp inherits Window {
                 inspector-panel := SheetInspector {
                     visible: root.inspector-visible;
                     active: root.inspector-visible;
+                    quiet-open <=> root.inspector-quiet-open;
                     x: root.rtl ? 0px : parent.width - self.width;
                     width: 320px;
                     height: parent.height;

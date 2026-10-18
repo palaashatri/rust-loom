@@ -21,13 +21,45 @@ fn sheets_inspector_remains_available_and_remembers_the_user_choice_at_compact_w
     app.set_inspector_preference(true);
     app.set_show_inspector(true);
     apply_layout_breakpoints(&app, 1024);
-    assert!(app.get_inspector_available() && app.get_show_inspector());
+    assert!(app.get_inspector_available() && !app.get_show_inspector());
+    assert!(
+        app.get_inspector_preference(),
+        "automatic close retains the preference"
+    );
+    apply_layout_breakpoints(&app, 1060);
+    assert!(
+        !app.get_show_inspector(),
+        "same-mode compact resize stays closed"
+    );
     apply_layout_breakpoints(&app, 1280);
-    assert!(app.get_show_inspector());
+    assert!(
+        app.get_show_inspector(),
+        "widening restores the preferred docked inspector"
+    );
+
+    apply_layout_breakpoints(&app, 1024);
+    app.set_show_inspector(true);
+    apply_layout_breakpoints(&app, 1060);
+    assert!(
+        app.get_show_inspector(),
+        "a manually opened compact drawer survives resizing"
+    );
+    apply_layout_breakpoints(&app, 1280);
+    assert!(
+        app.get_show_inspector(),
+        "widening keeps the already-open drawer visible"
+    );
+
     app.set_inspector_preference(false);
     app.set_show_inspector(false);
     apply_layout_breakpoints(&app, 1280);
     assert!(!app.get_show_inspector());
+    apply_layout_breakpoints(&app, 1024);
+    apply_layout_breakpoints(&app, 1280);
+    assert!(
+        !app.get_show_inspector(),
+        "explicit close does not reopen when widened"
+    );
     apply_layout_breakpoints(&app, 1320);
     assert!(!app.get_overflow_toolbar());
 }

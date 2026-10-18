@@ -11,6 +11,7 @@ import { SheetToolbarLayout } from "toolbar_layout.slint";
 /// Chart, Shape and Image move into the More actions menu instead.
 export component SheetActionToolbar inherits LabeledToolbar {
     in property <bool> inspector-visible: false;
+    in property <bool> inspector-preference: false;
     in property <int> inspector-tab: 0;
     /// 0 = none, 1 = View, 2 = Zoom, 3 = Table, 4 = Text, 5 = Export.
     in property <int> menu-kind: 0;
@@ -49,7 +50,7 @@ export component SheetActionToolbar inherits LabeledToolbar {
     public function focus-menu-trigger(kind: int) { root.ask-focus(kind); }
 
     changed inspector-visible => {
-        if (!root.inspector-visible) { root.focus-inspector-trigger(); }
+        if (!root.inspector-visible && !root.inspector-preference) { root.focus-inspector-trigger(); }
     }
 
     // Left-to-right order. Right-to-left is the exact mirror image: the groups
