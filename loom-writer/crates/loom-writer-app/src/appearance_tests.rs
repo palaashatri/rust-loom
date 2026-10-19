@@ -277,7 +277,7 @@ fn menu_check_marks_follow_the_setting_and_state_is_announced_to_assistive_techn
     let h = launched("menu", Some("light"));
     for choice in Appearance::ALL {
         appearance::choose(&h.app, choice);
-        let projection = menu_projection(&h.menu, &h.app).expect("project");
+        let projection = local_menu::menu_projection(&h.menu, &h.app).expect("project");
         for other in Appearance::ALL {
             assert_eq!(
                 projection.get(other.command_id()).expect("state").checked,

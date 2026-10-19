@@ -108,6 +108,9 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
     };
     match result {
         Ok(new_caret) => {
+            if matches!(action, "delete-row" | "delete-col") {
+                clear_table_cell_selection_range();
+            }
             next.set_selection(TextSelection::caret(new_caret));
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
             app.set_status_right(SharedString::from(format!("Table updated: {action}")));
@@ -169,7 +172,14 @@ pub(crate) fn update_table_selection_properties(
     doc: &WriterDocument,
     caret: usize,
 ) {
-    if let Some(loc) = doc.table_cell_at_offset(caret) {
+    let location = doc.table_cell_at_offset(caret);
+    if get_table_cell_selection_range()
+        .is_some_and(|range| location.map_or(true, |location| location.block_id != range.block_id))
+    {
+        clear_table_cell_selection_range();
+    }
+
+    if let Some(loc) = location {
         app.set_is_table_selected(true);
         if let Some(table) = doc.table_from_block(loc.block_id) {
             let loom_table = table.to_loom_table();
@@ -224,6 +234,22 @@ pub(crate) fn update_table_selection_properties(
         app.set_is_table_selected(false);
         app.set_document_accessible_label(SharedString::from("Document body"));
     }
+}
+
+/// A valid, ordinary pointer press starts a new selection and cancels any
+/// keyboard-extended cell range. The label also needs refreshing when the
+/// click leaves the caret unchanged and selection projection returns early.
+pub(crate) fn pointer_selection_start(
+    app: &WriterApp,
+    doc: &WriterDocument,
+    caret: usize,
+    extend: bool,
+) {
+    if extend || get_table_cell_selection_range().is_none() {
+        return;
+    }
+    clear_table_cell_selection_range();
+    update_table_selection_properties(app, doc, caret);
 }
 
 /// A selected range of cells in a table.

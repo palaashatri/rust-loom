@@ -2,7 +2,8 @@
 //! navigation, and dispatch are shared (`loom_desktop::local_menu_bindings!`);
 //! this file only says which commands Writer handles.
 
-use crate::WriterApp;
+use crate::{appearance, view_state, WriterApp};
+use loom_desktop::{CommandStateProjection, DesktopError, NativeMenuBar};
 
 /// Commands Writer's menu bar enables; the same list gates the native menu.
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
@@ -42,6 +43,72 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
 ];
 
 loom_desktop::local_menu_bindings!(WriterApp, SUPPORTED_COMMANDS, set_status_right);
+
+/// State changes that can alter the installed menu's command availability.
+pub(crate) fn enablement_key(app: &WriterApp) -> (bool, bool, bool) {
+    (
+        app.get_is_table_selected(),
+        app.get_can_undo(),
+        app.get_can_redo(),
+    )
+}
+
+const TABLE_STRUCTURAL_COMMANDS: &[&str] = &[
+    "table.insert_row_above",
+    "table.insert_row_below",
+    "table.insert_col_left",
+    "table.insert_col_right",
+    "table.delete_row",
+    "table.delete_column",
+    "table.merge_cells",
+    "table.split_cell",
+];
+
+/// Build the live state consumed by every standard menu surface, including
+/// contextual structural table-command availability.
+pub(crate) fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &WriterApp,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+
+    let mut undo = projection
+        .get("edit.undo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.undo".into()))?;
+    undo.enabled = app.get_can_undo();
+    projection.insert(undo);
+
+    let mut redo = projection
+        .get("edit.redo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.redo".into()))?;
+    redo.enabled = app.get_can_redo();
+    projection.insert(redo);
+
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Writer menu is missing view.inspector".into())
+    })?;
+    inspector.enabled = app.get_inspector_available();
+    inspector.checked = Some(app.get_show_inspector());
+    projection.insert(inspector);
+
+    let table_selected = app.get_is_table_selected();
+    for command_id in TABLE_STRUCTURAL_COMMANDS {
+        if let Some(mut command) = projection.get(command_id).cloned() {
+            command.enabled = table_selected;
+            projection.insert(command);
+        }
+    }
+
+    view_state::project(&mut projection, app);
+    loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
+
+    Ok(projection)
+}
 
 /// Writer's menu bar with only the commands Writer actually handles enabled.
 pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {

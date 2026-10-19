@@ -66,8 +66,8 @@ use loom_command::{
 #[cfg(test)]
 use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
 use loom_desktop::{
-    CommandAction, CommandStateProjection, DesktopError, FileDialogService, FileFilter,
-    MenuBarService, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    CommandAction, DesktopError, FileDialogService, FileFilter, MenuBarService, NativeFileDialogs,
+    NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -1271,6 +1271,7 @@ pub(crate) struct GuiState {
     document_filter: FileFilter,
     pdf_filter: FileFilter,
     registry: Arc<Mutex<CommandRegistry>>,
+    menu_service: RefCell<Option<Arc<NativeMenuBar>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1376,6 +1377,7 @@ pub(crate) fn replace_opened_document(
     path: PathBuf,
     document: WriterDocument,
 ) {
+    table_actions::clear_table_cell_selection_range();
     *state.last_saved.borrow_mut() = document.clone();
     *state.current.borrow_mut() = document;
     *state.save_path.borrow_mut() = Some(path);
@@ -2046,6 +2048,9 @@ fn project_selection_event(
     if selection == previous {
         return false;
     }
+    if selection.anchor != selection.focus {
+        table_actions::clear_table_cell_selection_range();
+    }
 
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
@@ -2144,6 +2149,7 @@ fn warn_recovery_failed(app: &WriterApp, error: &str) {
 fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryWrite) {
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
+    let previous_menu_state = local_menu::enablement_key(app);
     state.syncing_editor.set(true);
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
@@ -2170,47 +2176,10 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     // authoritative CommandRegistry before menus, palette and toolbar react.
     refresh_writer_registry(app, state);
     state.syncing_editor.set(false);
-}
-
-/// Build the live state consumed by every standard desktop menu item.
-///
-/// This intentionally mirrors only commands installed by the standard menu
-/// bar.  App-specific palette entries remain available through
-/// [`dispatch_command`], while undo/redo and inspector state are projected
-/// from the same controller state that drives the visible toolbar.
-fn menu_projection(
-    menu_service: &NativeMenuBar,
-    app: &WriterApp,
-) -> Result<CommandStateProjection, DesktopError> {
-    let menu_bar = menu_service
-        .installed_menu_bar()
-        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu bar is not installed".into()))?;
-    let mut projection = menu_bar.command_state_projection();
-
-    let mut undo = projection
-        .get("edit.undo")
-        .cloned()
-        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.undo".into()))?;
-    undo.enabled = app.get_can_undo();
-    projection.insert(undo);
-
-    let mut redo = projection
-        .get("edit.redo")
-        .cloned()
-        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.redo".into()))?;
-    redo.enabled = app.get_can_redo();
-    projection.insert(redo);
-
-    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
-        DesktopError::InvalidRequest("Writer menu is missing view.inspector".into())
-    })?;
-    inspector.enabled = app.get_inspector_available();
-    inspector.checked = Some(app.get_show_inspector());
-    projection.insert(inspector);
-    view_state::project(&mut projection, app);
-    loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
-
-    Ok(projection)
+    if previous_menu_state != local_menu::enablement_key(app) {
+        let menu = state.menu_service.borrow().clone();
+        sync_writer_menu_if_present(&menu, app, state);
+    }
 }
 
 /// Synchronize labels, enablement, shortcuts, and check state after a
@@ -2231,7 +2200,7 @@ fn sync_menu_state_result(
         let registry = state.registry.lock().unwrap();
         rebuild_palette_with_registry(app, &registry, app.get_palette_query().as_str());
     }
-    let projection = menu_projection(menu_service, app)?;
+    let projection = local_menu::menu_projection(menu_service, app)?;
     menu_service.sync_command_states(&projection)?;
     local_menu::sync(app, menu_service)
 }
@@ -2631,6 +2600,7 @@ fn wire_writer_shared_callbacks(
     state: &Rc<GuiState>,
     menu_service: Option<Arc<NativeMenuBar>>,
 ) {
+    *state.menu_service.borrow_mut() = menu_service.clone();
     find_bar::wire(app, state);
     toolbar_commands::wire(app);
     outline::wire(app, state);
@@ -3318,6 +3288,7 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_selection_changed(move |anchor, focus| {
             if let Some(app) = app_ref.upgrade() {
                 if state.syncing_editor.get() {
@@ -3336,6 +3307,7 @@ fn wire_writer_shared_callbacks(
                     };
                     state.current.borrow_mut().set_selection(selection);
                     apply_state(&app, &state);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
                     reveal_caret(&app, &state);
                     return;
                 }
@@ -3352,16 +3324,17 @@ fn wire_writer_shared_callbacks(
                 drop(current);
                 if changed {
                     refresh_render_projection_of(&app, &state);
-                    refresh_writer_registry(&app, &state);
-                    let registry = state.registry.lock().unwrap();
-                    rebuild_palette_with_registry(
-                        &app,
-                        &registry,
-                        app.get_palette_query().as_str(),
-                    );
-                    drop(registry);
-                    // Accessible announcement already updated via project_selection_event;
-                    // keep menu check states honest via toolbar/registry sync.
+                    if menu_service.is_some() {
+                        sync_writer_menu_if_present(&menu_service, &app, &state);
+                    } else {
+                        refresh_writer_registry(&app, &state);
+                        let registry = state.registry.lock().unwrap();
+                        rebuild_palette_with_registry(
+                            &app,
+                            &registry,
+                            app.get_palette_query().as_str(),
+                        );
+                    }
                     reveal_caret(&app, &state);
                 }
             }
@@ -3379,6 +3352,7 @@ fn wire_writer_shared_callbacks(
                     state.pointer_anchor.set(None);
                     return;
                 };
+                table_actions::pointer_selection_start(&app, &current, offset, extend);
                 let clicks = if extend {
                     1
                 } else {
@@ -3898,6 +3872,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         document_filter,
         pdf_filter,
         registry: Arc::new(Mutex::new(initial_registry)),
+        menu_service: RefCell::new(None),
     });
     // Seed only a fresh document: a recovered session already contains
     // whatever the previous seeded run added.
@@ -4361,6 +4336,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF", ["pdf"]).map_err(|error| error.to_string())?,
         registry: Arc::new(Mutex::new(initial_registry)),
+        menu_service: RefCell::new(None),
     });
 
     wire_writer_journey_callbacks(&app, &state);

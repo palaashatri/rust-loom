@@ -76,6 +76,7 @@ fn make_test_state(
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("document filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
         registry: Arc::new(Mutex::new(registry)),
+        menu_service: RefCell::new(None),
     });
     (app, state)
 }

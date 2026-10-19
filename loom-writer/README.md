@@ -8,7 +8,7 @@ Loom Writer is a local-first word processor. Documents are open, inspectable `.l
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes (`cargo test --workspace`; the ledger records 199 app tests and 136 core tests on 2026-10-07; not re-run while writing this README).
+- **[tests]** covered by automated tests. The 2026-10-19 Windows workspace run passed 569 tests with four ignored; the ledger records the exact command and scope.
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu).
 
@@ -18,7 +18,7 @@ Evidence tags used below:
 - First launch opens an empty "Untitled" document with the caret ready and a hint outside the document. The Quick Start sample exists only on request ("New from Quick Start sample" in the command palette). New opens a template chooser with six templates: Blank, Blank Black, Executive Report, Business Letter, Curriculum Vitae, Newsletter. [tests] [live-W] [live-L]
 - Native Open, Save and Save As for `.loomdoc`; the title bar follows the saved file name; an unsaved dot shows in the title. Cancelling a dialog changes nothing. [tests] [live-W]
 - Closing, New or Open with unsaved changes asks Save / Discard / Cancel (the prompt says "before closing" when it is a close). [tests] [live-W]
-- Crash recovery: the unsaved document is written as a draft 600 ms after the first unrecorded keystroke, off the typing path; Save, Open, formatting, undo and close write immediately. At the next launch the recovered draft reads as unsaved and closing asks. An intentional close (clean, saved or Discard) clears the draft; a crash leaves it. A crash can lose up to 600 ms of the latest typing. [tests] [live-W]
+- Crash recovery: the unsaved document is written as a draft 600 ms after the first unrecorded keystroke, off the typing path; Save, Open, formatting, undo and close write immediately. At the next launch the recovered draft reads as unsaved and closing asks. An intentional close (clean, saved or Discard) clears the draft; a crash leaves it. The 600 ms timer precedes serialization and writing; it is not a maximum durability delay. Source review found deferred completion-ordering and retry gaps requiring failure/race tests and repair. [tests] [live-W]
 - Command line: `loom-writer path/to/file.loomdoc`. [tests]
 
 ### Editing
@@ -29,6 +29,7 @@ Evidence tags used below:
 - Pages: each page is drawn as its own sheet with a gap between pages. Zoom 50% to 200%. Page setup in the Document inspector: A4 or US Letter, Portrait or Landscape, Normal / Narrow / Wide margins. [tests for layout and page setup in core and DOCX]
 - Comments: add on a selection (or on the whole paragraph from a caret), resolve, reopen, delete, jump to the commented text with a highlight on the page, persisted in the file. Anchors move with edits and are restored by undo and redo; deleting the commented text marks the thread "Text removed". A paste over a selection falls back to a text comparison to re-anchor. [tests] [live-W for adding a comment on a selection]
 - Table: Insert > Table adds a table block at the caret; cells edit as text, with "+ Row Below" actions, multiple built-in styles (e.g. Dark 1), undo/redo support, and full PDF/DOCX export. [tests] [live-W]
+- Structural Table commands follow table context; Undo and Redo availability update after same-table edits. Pointer selection and document replacement clear stale cell ranges, and explicit text selections take priority when copying. [tests] Native Windows checks cover row edit/undo/menu state and one full 3×3 copy/paste/save/reopen workflow; visible range highlighting and cell hit-testing still have the defects below.
 - Charts: a chart pasted from Sheets (Insert > Chart from Clipboard) is an object on the page, kept out of the editable text, shown as a titled card with its type and series count (the page does not draw the bars), exported to Word as a real chart part and to PDF as drawn bars, lines or a pie; the Markdown export reads it as `[Chart: title]`. [tests] The chart data cannot be edited in Writer.
 - Outline navigator (View menu): lists headings, a click moves the caret, follows edits. [tests]
 - Pictures: Insert > Picture (toolbar Insert menu, Table menu, command palette) chooses a PNG or JPEG and places it as its own block at the caret, scaled down to the text width and never distorted. A picture is one character in the text: select and delete it, undo and redo it, and it is saved inside the document, so the saved file does not depend on the source file. It moves to the next page instead of being cut, is not counted as a word or a paragraph, and reads as `[Image: name]` in Markdown and HTML. [tests] Word `.docx` export writes a real inline picture (original bytes, size in points) and import reads one back; real Microsoft Word 16 opened a generated file with one inline picture of the expected 225 x 112.5 pt, and LibreOffice 26.2 on Linux placed it at 300 x 150 px. PDF export draws the picture. [tests] [live-W for the on-screen render only through a headless render]
@@ -72,6 +73,7 @@ Evidence tags used below:
 ## Known limitations
 
 - Tables are Markdown text underneath: a grid is drawn over it, Tab and the arrow keys move between cells, and a typed `|` is kept in its cell (stored as `\|`) while Enter in a cell does nothing, but formatting pasted from Sheets (bold, alignment, widths) is not kept. The Word export converts them to real tables.
+- Native Windows table QA found that clicking the displayed C3 selected C2, and a keyboard-selected cell range had no distinct painted highlight. The compact inspector can also mask the table’s right border. These remain open.
 - Pictures cannot be resized, moved or wrapped by text on the page (they sit on their own line; Center and Right alignment apply), have no caption or alt-text field (the file name is the alternative text), and only PNG and JPEG are read; a picture pasted from the clipboard, dragged in, or in a `.docx` as a floating or older-format picture is not imported (floating ones are placed inline). Headers or footers, footnotes, spell check, track changes and columns are not there.
 - Open reads `.loomdoc` and `.docx`. A document opened from Word saves as a new Loom file (the Word file is never overwritten); there is no Markdown import.
 - There is no justified alignment: the page editor cannot place words to justify a line, so the control was removed rather than left inert. The model and the file formats can carry Justify (it is written to `.loomdoc` and as `w:jc both` in Word exports), and a file that already carries it is shown as unavailable rather than as Left.
@@ -80,7 +82,7 @@ Evidence tags used below:
 - PDF embeds only the bundled Inter faces (regular, bold, italic, bold-italic) and cannot export CJK text or other families: it says so in the status line and falls back to Inter. Editor and PDF wrap with the same kerned Inter measurements. Run font size is not measured in layout.
 - Comment threads on a bare caret anchor to the whole paragraph, which the UI does not explain. A paste over a selection re-anchors comments by text comparison.
 - Performance: the editor text box holds the whole text, so the software renderer cannot draw documents past about 30 pages (a test-harness limit; a live Windows release-build window holding a 300-paragraph document stayed responsive). Two document clones per keystroke remain. Native GPU frame time, Linux and macOS numbers are not measured.
-- Recovery drafts are debounced by 600 ms, so up to 600 ms of typing can be lost in a crash.
+- Recovery starts after a 600 ms batching timer; serialization, writing, failure and completion ordering also affect durability. A maximum crash-loss interval is not verified.
 - Accessibility is tree-verified only; spoken screen-reader output, the compact inspector drawer, a fractional-scale live window, Wayland and a native (non-WSLg) Linux desktop are unverified. Linux was driven interactively for launch, typing, Alt+F, Escape and F6, and the palette New Document flow on an earlier nightly.
 - Builds are unsigned (Windows SmartScreen warns on first run).
 

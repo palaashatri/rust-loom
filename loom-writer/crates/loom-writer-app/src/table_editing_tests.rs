@@ -212,6 +212,126 @@ mod tests {
     }
 
     #[test]
+    fn deleting_the_last_row_clamps_caret_and_clears_range_only_after_success() {
+        table_actions::clear_table_cell_selection_range();
+        let (app, state) = make_test_app();
+        app.invoke_insert_table_size(3, 2);
+
+        let block_id = {
+            let mut document = state.current.borrow().clone();
+            let block_id = document
+                .blocks
+                .iter()
+                .find(|block| block.kind == TABLE_BLOCK_KIND)
+                .expect("inserted table")
+                .id;
+            let last_row_offset = (0..document.editor_text().len())
+                .find(|offset| {
+                    document
+                        .table_cell_at_offset(*offset)
+                        .is_some_and(|cell| cell.block_id == block_id && cell.row == 2)
+                })
+                .expect("an offset in the last table row");
+            document.set_selection(TextSelection::caret(last_row_offset));
+            *state.current.borrow_mut() = document;
+            block_id
+        };
+        apply_state(&app, &state);
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id,
+            start_row: 2,
+            start_col: 0,
+            end_row: 2,
+            end_col: 1,
+        }));
+
+        app.invoke_table_action("delete-row".into());
+        {
+            let document = state.current.borrow();
+            let table = document
+                .table_from_block(block_id)
+                .expect("remaining table");
+            assert_eq!(table.rows.len(), 2);
+            let caret = document
+                .table_cell_at_offset(document.selection().anchor)
+                .expect("caret remains in table");
+            assert_eq!((caret.row, caret.col), (1, 0));
+        }
+        assert_eq!(table_actions::get_table_cell_selection_range(), None);
+
+        {
+            let mut document = state.current.borrow().clone();
+            let offset = (0..document.editor_text().len())
+                .find(|offset| {
+                    document
+                        .table_cell_at_offset(*offset)
+                        .is_some_and(|cell| cell.block_id == block_id && cell.row == 1)
+                })
+                .expect("offset in the remaining last row");
+            document.set_selection(TextSelection::caret(offset));
+            *state.current.borrow_mut() = document;
+        };
+        apply_state(&app, &state);
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id,
+            start_row: 1,
+            start_col: 0,
+            end_row: 1,
+            end_col: 1,
+        }));
+        app.invoke_table_action("delete-row".into());
+        {
+            let document = state.current.borrow();
+            assert_eq!(
+                document.table_from_block(block_id).unwrap().rows.len(),
+                1,
+                "deleting the final position in a multi-row table leaves its one-row minimum"
+            );
+            let caret = document
+                .table_cell_at_offset(document.selection().anchor)
+                .expect("caret remains in the sole row");
+            assert_eq!((caret.row, caret.col), (0, 0));
+        }
+        assert_eq!(table_actions::get_table_cell_selection_range(), None);
+
+        let sole_row_offset = {
+            let document = state.current.borrow();
+            (0..document.editor_text().len())
+                .find(|offset| {
+                    document
+                        .table_cell_at_offset(*offset)
+                        .is_some_and(|cell| cell.block_id == block_id && cell.row == 0)
+                })
+                .expect("offset in the sole row")
+        };
+        state
+            .current
+            .borrow_mut()
+            .set_selection(TextSelection::caret(sole_row_offset));
+        apply_state(&app, &state);
+        let sole_row_range = table_actions::TableCellRange {
+            block_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+        };
+        table_actions::set_table_cell_selection_range(Some(sole_row_range));
+        let before_noop = state.current.borrow().clone();
+        let undo_depth = state.history.borrow().undo_len();
+
+        app.invoke_table_action("delete-row".into());
+
+        assert_eq!(*state.current.borrow(), before_noop);
+        assert_eq!(state.history.borrow().undo_len(), undo_depth);
+        assert_eq!(
+            table_actions::get_table_cell_selection_range(),
+            Some(sole_row_range)
+        );
+        table_actions::clear_table_cell_selection_range();
+    }
+
+    #[test]
     fn test_table_style_and_options_in_inspector() {
         let (app, state) = make_test_app();
         app.invoke_insert_table_size(3, 3);

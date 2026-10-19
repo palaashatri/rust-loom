@@ -34,6 +34,31 @@ fn render(app: &WriterApp) {
     let _ = snapshot_component(app, 1280.0, 800.0, 1.0).expect("render");
 }
 
+fn assert_table_action_is_a_recognized_noop_outside_table(app: &WriterApp, state: &GuiState) {
+    let before_document = state.current.borrow().clone();
+    let before_undo_depth = state.history.borrow().undo_len();
+
+    assert!(
+        dispatch_command(app, "table.insert_row_above"),
+        "the known command ID is recognized even when its action has no context"
+    );
+    assert_eq!(
+        *state.current.borrow(),
+        before_document,
+        "a structural action outside a table must not change the document"
+    );
+    assert_eq!(
+        state.history.borrow().undo_len(),
+        before_undo_depth,
+        "a no-op structural action must not add undo history"
+    );
+    assert!(
+        app.get_status_right().starts_with("Table action failed:"),
+        "a rejected table action reports why it did not run: {}",
+        app.get_status_right()
+    );
+}
+
 fn press(app: &WriterApp, role: AccessibleRole, label: &str) {
     render(app);
     ElementHandle::find_by_accessible_label(app, label)
@@ -190,9 +215,261 @@ fn navigator_menu_check_follows_every_control() {
     assert!(!checked());
     assert!(dispatch_command(&app, "view.navigator"));
     assert!(app.get_show_navigator());
-    assert!(checked(), "the menu follows the command");
+    assert!(
+        checked(),
+        "the menu follows the command: {}",
+        app.get_status_right()
+    );
     assert!(local_menu::SUPPORTED_COMMANDS.contains(&"view.navigator"));
     assert!(local_menu::SUPPORTED_COMMANDS.contains(&"file.export_md"));
+}
+
+#[test]
+fn table_menu_enablement_tracks_selection_for_native_and_in_window_menus() {
+    set_platform();
+    let mut document = WriterDocument::new("table-menu", "Table Menu");
+    document.replace_paragraphs("Before table");
+    document.insert_table_block(usize::MAX, 2, 2).unwrap();
+    document.set_selection(TextSelection::caret(0));
+    let table_offset = (0..=document.editor_text().len())
+        .find(|offset| document.table_cell_at_offset(*offset).is_some())
+        .expect("table cell offset");
+
+    let (app, state) = test_state(document, scripted(vec![]));
+    let menu = Arc::new(NativeMenuBar::new());
+    menu.install_menu_bar(&local_menu::writer_menu_bar())
+        .expect("install Writer menu");
+    wire_writer_shared_callbacks(&app, &state, Some(menu.clone()));
+    sync_menu_state(&menu, &app, &state);
+
+    let structural_commands = [
+        "table.insert_row_above",
+        "table.insert_row_below",
+        "table.insert_col_left",
+        "table.insert_col_right",
+        "table.delete_row",
+        "table.delete_column",
+        "table.merge_cells",
+        "table.split_cell",
+    ];
+    let native_enabled = |id: &str| {
+        menu.installed_menu_bar()
+            .and_then(|bar| bar.find_item(id).cloned())
+            .unwrap_or_else(|| panic!("native menu command {id}"))
+            .is_enabled()
+    };
+    let window_enabled = |id: &str| {
+        app.get_local_menu_items()
+            .iter()
+            .find(|item| item.command_id == id)
+            .unwrap_or_else(|| panic!("in-window menu command {id}"))
+            .enabled
+    };
+    let assert_table_commands = |enabled: bool| {
+        for id in structural_commands {
+            assert_eq!(native_enabled(id), enabled, "native menu: {id}");
+            assert_eq!(window_enabled(id), enabled, "in-window menu: {id}");
+        }
+        assert!(
+            native_enabled("insert.table"),
+            "Insert Table stays available"
+        );
+        assert!(
+            window_enabled("insert.table"),
+            "Insert Table stays available"
+        );
+    };
+
+    assert_table_commands(false);
+    assert_table_action_is_a_recognized_noop_outside_table(&app, &state);
+    app.invoke_selection_changed(table_offset as i32, table_offset as i32);
+    assert_table_commands(true);
+    app.invoke_selection_changed(0, 0);
+    assert_table_commands(false);
+    assert_table_action_is_a_recognized_noop_outside_table(&app, &state);
+}
+
+#[test]
+fn table_insert_size_callback_refreshes_both_menus_without_manual_sync() {
+    let (app, state) = test_state(text_document("Body text"), scripted(vec![]));
+    let menu = Arc::new(NativeMenuBar::new());
+    menu.install_menu_bar(&local_menu::writer_menu_bar())
+        .expect("install Writer menu");
+    wire_writer_shared_callbacks(&app, &state, Some(menu.clone()));
+    apply_state(&app, &state);
+    sync_menu_state(&menu, &app, &state);
+
+    let structural_commands = [
+        "table.insert_row_above",
+        "table.insert_row_below",
+        "table.insert_col_left",
+        "table.insert_col_right",
+        "table.delete_row",
+        "table.delete_column",
+        "table.merge_cells",
+        "table.split_cell",
+    ];
+    let assert_table_commands = |enabled: bool| {
+        for id in structural_commands {
+            let native_enabled = menu
+                .installed_menu_bar()
+                .and_then(|bar| bar.find_item(id).cloned())
+                .unwrap_or_else(|| panic!("native menu command {id}"))
+                .is_enabled();
+            let window_enabled = app
+                .get_local_menu_items()
+                .iter()
+                .find(|item| item.command_id == id)
+                .unwrap_or_else(|| panic!("in-window menu command {id}"))
+                .enabled;
+            assert_eq!(native_enabled, enabled, "native menu: {id}");
+            assert_eq!(window_enabled, enabled, "in-window menu: {id}");
+        }
+    };
+
+    assert_table_commands(false);
+    assert!(!app.get_is_table_selected());
+
+    // This is the callback used by the table-size dialog. The app-state
+    // mutation must refresh the menus without an explicit post-insert sync.
+    app.invoke_insert_table_size(2, 2);
+
+    assert!(
+        app.get_is_table_selected(),
+        "the inserted table owns the caret"
+    );
+    assert_table_commands(true);
+}
+
+#[test]
+fn same_table_context_mutation_refreshes_native_and_window_history_menu_state() {
+    set_platform();
+    let mut document = WriterDocument::new("table-history-menu", "Table History Menu");
+    document.replace_paragraphs("Body text");
+    document.insert_table_block(usize::MAX, 2, 2).unwrap();
+    document.set_selection(TextSelection::caret(0));
+    let table_offset = (0..=document.editor_text().len())
+        .find(|offset| document.table_cell_at_offset(*offset).is_some())
+        .expect("table cell offset");
+
+    let (app, state) = test_state(document, scripted(vec![]));
+    let menu = Arc::new(NativeMenuBar::new());
+    menu.install_menu_bar(&local_menu::writer_menu_bar())
+        .expect("install Writer menu");
+    wire_writer_shared_callbacks(&app, &state, Some(menu.clone()));
+    apply_state(&app, &state);
+    sync_menu_state(&menu, &app, &state);
+
+    // Create a real redo entry outside the table, then enter the table. The
+    // selection callback synchronizes both menu surfaces, so redo starts in
+    // an enabled state before the same-context table mutation below.
+    app.invoke_selection_changed(0, 4);
+    app.invoke_toggle_bold();
+    assert!(app.get_can_undo(), "bold creates the undo entry");
+    app.invoke_undo();
+    assert!(app.get_can_redo(), "undo creates the redo entry");
+    app.invoke_selection_changed(table_offset as i32, table_offset as i32);
+    assert!(app.get_is_table_selected());
+
+    let native_enabled = |id: &str| {
+        menu.installed_menu_bar()
+            .and_then(|bar| bar.find_item(id).cloned())
+            .unwrap_or_else(|| panic!("native menu command {id}"))
+            .is_enabled()
+    };
+    let window_enabled = |id: &str| {
+        app.get_local_menu_items()
+            .iter()
+            .find(|item| item.command_id == id)
+            .unwrap_or_else(|| panic!("in-window menu command {id}"))
+            .enabled
+    };
+    assert!(
+        native_enabled("edit.redo"),
+        "native menu initially shows redo"
+    );
+    assert!(
+        window_enabled("edit.redo"),
+        "window menu initially shows redo"
+    );
+
+    app.invoke_table_action("insert-row-below".into());
+    assert!(app.get_is_table_selected(), "the caret stays in the table");
+    assert!(app.get_can_undo(), "table insertion creates an undo entry");
+    assert!(!app.get_can_redo(), "a new table edit clears redo");
+    assert!(
+        native_enabled("edit.undo"),
+        "native menu keeps undo enabled"
+    );
+    assert!(
+        window_enabled("edit.undo"),
+        "window menu keeps undo enabled"
+    );
+    assert!(
+        !native_enabled("edit.redo"),
+        "native menu disables redo after the same-context table edit"
+    );
+    assert!(
+        !window_enabled("edit.redo"),
+        "in-window menu disables redo after the same-context table edit"
+    );
+}
+
+#[test]
+fn table_inspector_delete_row_button_stays_inside_its_reading_edge_padding() {
+    let ui_font = loom_desktop::ui_font::for_this_run(false);
+    println!("Native UI font for inspector geometry: {ui_font}");
+    let mut violations = Vec::new();
+    for width in [1024_u32, 1280] {
+        for text_scale in [1.0_f32, 1.5] {
+            let mut document = WriterDocument::new("table-inspector", "Table Inspector");
+            document.replace_paragraphs("Before table");
+            document.insert_table_block(usize::MAX, 2, 2).unwrap();
+            let table_offset = (0..=document.editor_text().len())
+                .find(|offset| document.table_cell_at_offset(*offset).is_some())
+                .expect("table cell offset");
+            document.set_selection(TextSelection::caret(table_offset));
+
+            let (app, state) = test_state(document, scripted(vec![]));
+            Theme::get(&app).set_ui_font_family(ui_font.clone().into());
+            Theme::get(&app).set_text_scale(text_scale);
+            toolbar_commands::apply_layout_breakpoints(&app, width);
+            app.window().set_size(PhysicalSize::new(width, 800));
+            app.set_inspector_available(true);
+            app.set_show_inspector(true);
+            app.set_inspector_quiet_open(true);
+            wire_writer_shared_callbacks(&app, &state, None);
+            apply_state(&app, &state);
+
+            let _ = snapshot_component(&app, width as f32, 800.0, 1.0).expect("render inspector");
+            let delete_row = ElementHandle::find_by_accessible_label(&app, "Del Row")
+                .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+                .expect("Delete Row remains accessible");
+            let right = delete_row.absolute_position().x + delete_row.size().width;
+            println!(
+                "Del Row geometry: width={width}, text_scale={text_scale}, x={}, y={}, width={}, height={}, right={right}",
+                delete_row.absolute_position().x,
+                delete_row.absolute_position().y,
+                delete_row.size().width,
+                delete_row.size().height,
+            );
+            if right > width as f32 - 16.0 + 1.0 {
+                violations.push(format!(
+                    "Del Row right edge {right} exceeds the 16px inset at {width}px, text scale {text_scale}"
+                ));
+            }
+            if delete_row.size().height + 0.5 < Theme::get(&app).get_scaled_control_height() {
+                violations.push(format!(
+                    "Del Row height {:?} is below the themed control height at {width}px, text scale {text_scale}",
+                    delete_row.size(),
+                ));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "inspector geometry violations: {violations:#?}"
+    );
 }
 
 #[test]

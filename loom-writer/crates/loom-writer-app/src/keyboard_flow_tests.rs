@@ -145,11 +145,7 @@ fn focus_weak(app: &WriterApp) -> ItemWeak {
 }
 
 fn same_focus(a: &ItemWeak, b: &ItemWeak) -> bool {
-    match (a.upgrade(), b.upgrade()) {
-        (Some(a), Some(b)) => a == b,
-        (None, None) => true,
-        _ => false,
-    }
+    a == b
 }
 
 /// The focused item, described by the smallest named accessible element that
@@ -890,7 +886,7 @@ fn reads_in_order(stops: &[&Stop]) -> bool {
     })
 }
 
-fn assert_each_stop_is_usable(stops: &[(ItemWeak, Stop)]) {
+fn assert_each_stop_is_usable(stops: &[(ItemWeak, Stop)], tab_index: i32) {
     for (i, (item, stop)) in stops.iter().enumerate() {
         assert!(
             !stop.name.is_empty(),
@@ -902,10 +898,15 @@ fn assert_each_stop_is_usable(stops: &[(ItemWeak, Stop)]) {
             "stop {i} {} is not on screen: {stop:?}",
             stop.name
         );
-        for (j, (other, _)) in stops.iter().enumerate().skip(i + 1) {
+        for (j, (other, other_stop)) in stops.iter().enumerate().skip(i + 1) {
             assert!(
                 !same_focus(item, other),
-                "stop {i} and {j} are the same control"
+                "inspector tab {tab_index}: stops {i} and {j} share focus; first={stop:?}, second={:?}, first_upgrade={:?}, second_upgrade={:?}, direct_weak_equality={}, names={:?}",
+                other_stop,
+                item.upgrade().map(|item| format!("{item:?}")),
+                other.upgrade().map(|item| format!("{item:?}")),
+                item == other,
+                stops.iter().map(|(_, stop)| &stop.name).collect::<Vec<_>>()
             );
         }
     }
@@ -944,7 +945,7 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
         press(&s.app, Key::F6);
 
         let stops = walk_until(&s.app, &page, 120);
-        assert_each_stop_is_usable(&stops);
+        assert_each_stop_is_usable(&stops, tab_index);
         let first = stop(&s.app);
         let _ = first;
 

@@ -31,6 +31,7 @@ pub(super) fn test_state(
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("document filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
         registry: Arc::new(Mutex::new(registry)),
+        menu_service: RefCell::new(None),
     });
     (app, state)
 }
@@ -134,6 +135,7 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
         registry: Arc::new(Mutex::new(build_writer_registry())),
+        menu_service: RefCell::new(None),
     };
     let request = writer_open_request(&state);
     assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
@@ -754,6 +756,7 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
         registry: Arc::new(Mutex::new(build_writer_registry())),
+        menu_service: RefCell::new(None),
     };
     let menu = NativeMenuBar::new();
     let bar = build_standard_menu_bar(
@@ -780,15 +783,19 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
 
     app.set_show_inspector(true);
     sync_menu_state(&menu, &app, &state);
-    assert!(matches!(
-        menu.installed_menu_bar()
-            .and_then(|bar| bar.find_item("view.inspector").cloned()),
-        Some(MenuItem::Check {
-            checked: true,
-            enabled: true,
-            ..
-        })
-    ));
+    assert!(
+        matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: true,
+                enabled: true,
+                ..
+            })
+        ),
+        "menu check should follow the inspector state: {}",
+        app.get_status_right()
+    );
 }
 
 #[test]
