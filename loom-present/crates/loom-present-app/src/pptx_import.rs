@@ -60,6 +60,10 @@ pub(crate) fn warning_message(warnings: &[String]) -> String {
     )
 }
 
+pub(crate) fn warning_message_with_error(warnings: &[String], error: &str) -> String {
+    format!("{error}\n\n{}", warning_message(warnings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

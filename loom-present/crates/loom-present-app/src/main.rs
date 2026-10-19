@@ -3170,6 +3170,8 @@ mod accessibility_tests;
 #[cfg(test)]
 mod deck_guard_tests;
 #[cfg(test)]
+mod import_warning_tests;
+#[cfg(test)]
 mod layout_bounds_tests;
 #[cfg(test)]
 mod miniature_tests;

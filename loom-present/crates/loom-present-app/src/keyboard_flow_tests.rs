@@ -110,14 +110,14 @@ fn record_test_recovery(directory: &std::path::Path, payload: &[u8]) {
     crate::PRESENT_RECOVERY.with(|slot| *slot.borrow_mut() = Some(recovery));
 }
 
-fn read_test_recovery(directory: &std::path::Path) -> Option<Vec<u8>> {
+pub(super) fn read_test_recovery(directory: &std::path::Path) -> Option<Vec<u8>> {
     loom_production::snapshot::SnapshotRecovery::open_at(directory)
         .expect("read test recovery")
         .restored_payload()
         .map(ToOwned::to_owned)
 }
 
-struct RecoveryScratch(std::path::PathBuf);
+pub(super) struct RecoveryScratch(std::path::PathBuf);
 
 impl RecoveryScratch {
     fn new(payload: &[u8]) -> Self {
@@ -135,7 +135,7 @@ impl RecoveryScratch {
         Self(directory)
     }
 
-    fn new_checkpoint(payload: &[u8]) -> Self {
+    pub(super) fn new_checkpoint(payload: &[u8]) -> Self {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after Unix epoch")
@@ -157,7 +157,7 @@ impl RecoveryScratch {
         Self(directory)
     }
 
-    fn directory(&self) -> &std::path::Path {
+    pub(super) fn directory(&self) -> &std::path::Path {
         &self.0
     }
 }
@@ -171,7 +171,7 @@ impl Drop for RecoveryScratch {
     }
 }
 
-fn make_unreadable_pending_import(path: std::path::PathBuf, bytes: Vec<u8>) {
+pub(super) fn make_unreadable_pending_import(path: std::path::PathBuf, bytes: Vec<u8>) {
     table_actions::PENDING_PPTX_IMPORT.with(|slot| {
         *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
             path,

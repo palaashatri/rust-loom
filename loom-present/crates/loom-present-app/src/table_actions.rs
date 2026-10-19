@@ -25,6 +25,13 @@ thread_local! {
     pub static PENDING_PPTX_IMPORT: RefCell<Option<PendingPptxImport>> = const { RefCell::new(None) };
 }
 
+fn report_import_warning_error(app: &PresentApp, pending: &PendingPptxImport, status: String) {
+    app.set_pptx_import_warning_message(
+        crate::pptx_import::warning_message_with_error(&pending.warnings, &status).into(),
+    );
+    set_status(app, status);
+}
+
 pub fn is_table_editing_cell() -> bool {
     TABLE_EDITING_CELL.with(|c| *c.borrow())
 }
@@ -406,8 +413,9 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                         crate::recovery_deferred::resume_after_import_warning(&app);
                     }
                     Err(error) => {
+                        let status = format!("Import not completed: {error}");
+                        report_import_warning_error(&app, &pending, status);
                         PENDING_PPTX_IMPORT.with(|slot| *slot.borrow_mut() = Some(pending));
-                        set_status(&app, format!("Import not completed: {error}"));
                     }
                 }
             }
@@ -473,20 +481,19 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                                 }
                             }
                             Err(error) => {
+                                let status = format!(
+                                    "Cancel not completed: current presentation recovery could not be secured: {error}"
+                                );
+                                report_import_warning_error(&app, &pending, status);
                                 PENDING_PPTX_IMPORT
                                     .with(|slot| *slot.borrow_mut() = Some(pending));
-                                set_status(
-                                    &app,
-                                    format!(
-                                        "Cancel not completed: current presentation recovery could not be secured: {error}"
-                                    ),
-                                );
                             }
                         }
                     }
                     Err(error) => {
+                        let status = format!("Cancel not completed: {error}");
+                        report_import_warning_error(&app, &pending, status);
                         PENDING_PPTX_IMPORT.with(|slot| *slot.borrow_mut() = Some(pending));
-                        set_status(&app, format!("Cancel not completed: {error}"));
                     }
                 }
             }

@@ -8,7 +8,7 @@ Loom Present is a local-first presentation editor. Decks are open, inspectable `
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes (`cargo test --workspace`; the ledger records 103 app tests and 62 core tests on 2026-10-07; not re-run while writing this README).
+- **[tests]** covered by automated tests. The 2026-10-19 Windows serial workspace run passed 375 tests, with zero failures and two ignored (app 265, core 79); commands and scoped results are in the live ledger. This does not replace native or interoperability checks.
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu).
 
@@ -18,8 +18,8 @@ Evidence tags used below:
 - First launch is a blank one-slide deck with a faint "Click to add title" prompt. The prompt is never saved, exported or drawn in a thumbnail. "New from Sample Deck" is in the File menu and the command palette. [tests] [live-W] [live-L]
 - Native Open, Save and Save As for `.loomdeck`; the window title follows the saved file name and the status bar shows Saved or Edited. A transition-only change also marks the deck Edited. [tests] [live-W]
 - Closing, New or Open with unsaved changes asks Save / Discard / Cancel. [tests] [live-W]
-- PowerPoint opens from the picker or startup show known import losses before replacing the presentation. Cancel keeps the current presentation; Continue requires a recovery checkpoint before showing the imported deck. Unreadable recovery drafts are preserved before replacement. [tests] Windows startup Cancel, Continue and a pre-checkpoint quarantine failure have native checks; broader picker/recovered-work flows remain open.
-- Crash recovery: an unsaved deck is offered back at the next launch and reads as unsaved (closing asks); an intentional close, including Discard, clears it. A 600 ms timer batches edits before background serialization; durability also includes serialization and writing. Source review found deferred error-reporting and completion-ordering gaps that still need fault testing and repair. [tests and live-W for normal recovery flows]
+- PowerPoint opens from the picker or startup show known import losses before replacing the presentation. Cancel keeps the current presentation; Continue requires a recovery checkpoint before showing the imported deck. Unreadable recovery drafts are preserved before replacement. A failed choice keeps the notice open and shows the complete current error above the original loss list; repeated retries do not duplicate the message. [tests] Windows startup Cancel, Continue and a pre-checkpoint quarantine failure have native checks. The error notice and retry focus were checked at 1280x850 and 1024x720 with 2x text; overflowing-body scroll/reset has software-test evidence. Broader picker/recovered-work flows and spoken feedback remain open.
+- Crash recovery: an unsaved deck is offered back at the next launch and reads as unsaved (closing asks). Normal intentional close, including Discard, attempts to clear recovery; a clear failure is logged and may leave recovery data. A 600 ms timer batches edits before background serialization; durability also includes serialization and writing. Source review found deferred error-reporting, completion-ordering and replacement-invalidation gaps that still need fault testing and repair. [tests and live-W for normal recovery flows]
 - Command line: `loom-present path/to/deck.loomdeck`. [tests]
 
 ### Slides and objects
@@ -96,7 +96,7 @@ Present has no F6 region key; Tab and the toolbar order cover the toolbar, inspe
 - PPTX export carries slide text, shapes, pictures, notes and transitions but not click actions or per-element styling; only a one-picture deck is known to open cleanly in PowerPoint. File > Open reads `.loomdeck` and `.pptx` (a PowerPoint deck's text, shapes, pictures, tables and charts import; placeholders that take their position from the slide layout get a default box because layouts are not read). A deck opened from PowerPoint saves as a new Loom file; the `.pptx` is never overwritten.
 - No second-display placement, presenter-view memory of its position, slide-progress or pacing targets. The presenter view's next-slide area is a thumbnail only.
 - Speaker-notes search exists in the core library but has no interface.
-- Recovery drafts are debounced by 600 ms, so up to 600 ms of changes can be lost in a crash.
+- Recovery schedules a timer 600 ms after the first unrecorded change, followed by background serialization and delivery. This is not a maximum crash-loss interval: deferred failures can go unreported, and completion ordering and explicit-Discard replacement need repair. A recovery-clear failure can leave data after close.
 - Accessibility is tree-verified only; spoken screen-reader output, a fractional-scale live window, Wayland and a native (non-WSLg) Linux desktop are unverified. On Linux, Insert Image through the file dialog and a live check of the new slide strip were not re-run.
 - GPU frame time and Linux and macOS performance numbers are not measured.
 - Builds are unsigned (Windows SmartScreen warns on first run).
