@@ -5,13 +5,15 @@
 use std::path::{Path, PathBuf};
 
 use loom_present_core::{
-    load_presentation_session, save_presentation_session, PresentationSession,
+    export_pptx, inspect_pptx_unsupported, load_presentation_session, save_presentation_session,
+    PresentationSession,
 };
 
 use crate::recovery_draft;
 use crate::sample_session;
 use crate::startup_recovery::{
-    kept_drafts_directory, startup_sessions, write_kept_draft, KeptDraft,
+    ensure_kept_draft_is_preserved, kept_drafts_directory, startup_sessions, write_kept_draft,
+    KeptDraft,
 };
 
 /// A fresh scratch folder for one test. The caller removes it.
@@ -44,6 +46,42 @@ fn save_to(dir: &Path, file: &str, session: &PresentationSession) -> PathBuf {
 
 fn slide_count(session: &PresentationSession) -> usize {
     session.document.slides.len()
+}
+
+/// Writes an exported deck with a SmartArt part, which Present warns about and
+/// skips during import.
+fn save_unsupported_pptx(dir: &Path) -> PathBuf {
+    let exported = export_pptx(&sample_session()).expect("export fixture PPTX");
+    let archive = loom_package::zip::PackageArchive::from_bytes(&exported).expect("open PPTX");
+    let mut unsupported = loom_package::zip::PackageArchive::new();
+    for path in archive.paths() {
+        if let Some(bytes) = archive.get(path) {
+            unsupported
+                .add(path, bytes.to_vec())
+                .expect("copy PPTX part");
+        }
+    }
+    unsupported
+        .add("ppt/diagrams/data1.xml", b"<xml></xml>".to_vec())
+        .expect("add unsupported SmartArt part");
+    let bytes = unsupported.to_bytes().expect("package PPTX");
+    assert!(
+        inspect_pptx_unsupported(&bytes)
+            .expect("inspect PPTX")
+            .iter()
+            .any(|warning| warning.contains("SmartArt")),
+        "fixture must trigger the import warning"
+    );
+    let path = dir.join("unsupported.pptx");
+    std::fs::write(&path, bytes).expect("write PPTX");
+    if let Some(output) = std::env::var_os("LOOM_PRESENT_LOSSY_PPTX_OUT") {
+        let output = PathBuf::from(output);
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent).expect("create QA fixture directory");
+        }
+        std::fs::copy(&path, output).expect("copy verified lossy PPTX fixture");
+    }
+    path
 }
 
 #[test]
@@ -110,6 +148,106 @@ fn a_draft_of_another_file_is_kept_while_the_requested_file_opens() {
     assert!(kept.readable);
     let reopened = load_presentation_session(&kept.bytes).expect("kept draft loads");
     assert_eq!(slide_count(&reopened), 4, "the kept bytes are the draft");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_lossy_startup_pptx_stays_pending_while_another_file_draft_is_current() {
+    let dir = scratch("pptx-warning-keeps-recovery");
+    let source = save_to(&dir, "recovered.loomdeck", &sample_session());
+    let recovered = edited_sample();
+    let recovery_bytes = recovery_draft::payload(&recovered, Some(&source)).expect("draft");
+    let requested = save_unsupported_pptx(&dir);
+    let requested_bytes = std::fs::read(&requested).expect("read PPTX fixture");
+
+    let plan = startup_sessions(Some(&recovery_bytes), Some(&requested)).expect("startup");
+    let expected_recovery_package =
+        save_presentation_session(&recovered).expect("package recovered draft");
+
+    assert!(
+        crate::deck_guard::content_matches(&plan.session.document, &recovered.document),
+        "the recovered deck must remain live until the lossy import is accepted"
+    );
+    assert_eq!(plan.session.transitions, recovered.transitions);
+    assert_eq!(plan.save_path.as_deref(), Some(source.as_path()));
+    assert_eq!(plan.restored.as_deref(), Some("recovered"));
+    let pending = plan
+        .pending_import
+        .as_ref()
+        .expect("lossy startup PowerPoint is held for a choice");
+    assert_eq!(pending.path, requested);
+    assert!(pending
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("SmartArt")));
+    assert_eq!(slide_count(&pending.session), 3);
+    assert_eq!(
+        plan.kept.as_ref().map(|kept| kept.bytes.as_slice()),
+        Some(expected_recovery_package.as_slice()),
+        "the full recovered package must be available for quarantine on Continue"
+    );
+    assert_eq!(
+        std::fs::read(&requested).expect("PPTX remains on disk"),
+        requested_bytes,
+        "planning an import must not mutate the requested PowerPoint file"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_same_source_pptx_draft_keeps_precedence_over_the_startup_file() {
+    let dir = scratch("same-pptx-source");
+    let requested = save_unsupported_pptx(&dir);
+    let recovered = edited_sample();
+    let recovery_bytes = recovery_draft::payload(&recovered, Some(&requested)).expect("draft");
+
+    let plan = startup_sessions(Some(&recovery_bytes), Some(&requested)).expect("startup");
+
+    assert!(crate::deck_guard::content_matches(
+        &plan.session.document,
+        &recovered.document
+    ));
+    assert_eq!(plan.session.transitions, recovered.transitions);
+    assert!(plan.kept.is_none(), "same-source work stays in recovery");
+    assert!(
+        plan.pending_import.is_none(),
+        "the same-source recovered draft remains the startup document"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unreadable_recovery_stays_untouched_while_a_lossy_startup_import_waits() {
+    let dir = scratch("unreadable-pptx-warning");
+    let requested = save_unsupported_pptx(&dir);
+    let unreadable = b"not a readable recovery draft";
+
+    let plan = startup_sessions(Some(unreadable), Some(&requested)).expect("startup");
+
+    assert_eq!(
+        slide_count(&plan.session),
+        1,
+        "the unrecovered deck state remains the blank current session"
+    );
+    assert_eq!(
+        slide_count(&plan.baseline),
+        1,
+        "the blank session remains the saved baseline until Continue"
+    );
+    let pending = plan
+        .pending_import
+        .as_ref()
+        .expect("the lossy PowerPoint still requires a choice");
+    assert!(pending
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("SmartArt")));
+    let kept = plan
+        .kept
+        .expect("unreadable recovery is deferred for preservation");
+    assert!(!kept.readable);
+    assert_eq!(kept.bytes.as_slice(), unreadable);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -204,7 +342,37 @@ fn kept_drafts_are_written_beside_the_recovery_store_and_never_overwritten() {
 }
 
 #[test]
+fn unreadable_recovery_is_verified_byte_for_byte_before_a_choice_can_release_it() {
+    let dir = scratch("verified-unreadable");
+    let bytes = b"unreadable recovery bytes".to_vec();
+    let kept = KeptDraft {
+        name: "Unreadable recovered draft".into(),
+        bytes: bytes.clone(),
+        readable: false,
+    };
+    let mut preserved_path = None;
+
+    let path = ensure_kept_draft_is_preserved(&dir, &kept, &mut preserved_path)
+        .expect("quarantine exact recovery bytes");
+
+    assert_eq!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("recovered")
+    );
+    assert_eq!(preserved_path.as_deref(), Some(path.as_path()));
+    assert_eq!(std::fs::read(&path).expect("quarantine bytes"), bytes);
+
+    std::fs::write(&path, b"changed bytes").expect("tamper with quarantine fixture");
+    assert!(
+        ensure_kept_draft_is_preserved(&dir, &kept, &mut preserved_path).is_err(),
+        "a changed quarantine must not be reported as preserved"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn kept_drafts_sit_beside_the_recovery_store_so_clearing_it_cannot_remove_them() {
+    let _state_directory = crate::test_environment::lock_state_directory();
     let store = loom_production::snapshot::application_state_directory("org.loom.present")
         .expect("recovery directory");
     let kept = kept_drafts_directory().expect("kept drafts directory");

@@ -86,6 +86,9 @@ pub(crate) fn request_deck_replacement(
     state: &GuiState,
     operation: PendingReplacement,
 ) -> bool {
+    if app.get_pptx_import_warning_open() {
+        return operation != PendingReplacement::CloseWindow;
+    }
     if !deck_is_dirty(state) {
         return false;
     }

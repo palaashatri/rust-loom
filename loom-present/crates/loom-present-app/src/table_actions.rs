@@ -5,12 +5,18 @@ use std::rc::Rc;
 use loom_present_core::{default_slide_table, PresentationSession, SlideElement, TableDirection};
 use slint::{ComponentHandle, SharedString};
 
-use crate::{refresh, replace_opened_deck, set_status, GuiState, PresentApp};
+use crate::{refresh, set_status, startup_recovery, GuiState, PresentApp};
 
 #[derive(Debug, Clone)]
 pub struct PendingPptxImport {
     pub path: PathBuf,
     pub session: PresentationSession,
+    pub warnings: Vec<String>,
+    pub kept: Option<crate::startup_recovery::KeptDraft>,
+    /// A failed Continue may have partially published the candidate. Cancel must
+    /// checkpoint the still-visible deck before releasing the warning.
+    pub preserved_path: Option<PathBuf>,
+    pub cancel_must_checkpoint_visible_session: bool,
 }
 
 thread_local! {
@@ -387,23 +393,102 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         let state = state.clone();
         app.on_pptx_import_continue(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_pptx_import_warning_open(false);
-                let pending = PENDING_PPTX_IMPORT.with(|p| p.borrow_mut().take());
-                if let Some(pending) = pending {
-                    replace_opened_deck(&app, &state, pending.path.clone(), pending.session);
-                    set_status(&app, format!("Opened {}", pending.path.display()));
+                let Some(mut pending) = PENDING_PPTX_IMPORT.with(|slot| slot.borrow_mut().take())
+                else {
+                    app.set_pptx_import_warning_open(false);
+                    crate::recovery_deferred::resume_after_import_warning(&app);
+                    return;
+                };
+                match crate::accept_pending_pptx_import(&app, &state, &mut pending) {
+                    Ok(status) => {
+                        app.set_pptx_import_warning_open(false);
+                        set_status(&app, status);
+                        crate::recovery_deferred::resume_after_import_warning(&app);
+                    }
+                    Err(error) => {
+                        PENDING_PPTX_IMPORT.with(|slot| *slot.borrow_mut() = Some(pending));
+                        set_status(&app, format!("Import not completed: {error}"));
+                    }
                 }
             }
         });
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_pptx_import_cancel(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_pptx_import_warning_open(false);
-                PENDING_PPTX_IMPORT.with(|p| *p.borrow_mut() = None);
-                set_status(&app, "Open cancelled");
+                let Some(mut pending) = PENDING_PPTX_IMPORT.with(|slot| slot.borrow_mut().take())
+                else {
+                    app.set_pptx_import_warning_open(false);
+                    set_status(&app, "Open cancelled");
+                    crate::recovery_deferred::resume_after_import_warning(&app);
+                    return;
+                };
+                let preserved = if let Some(kept) = pending.kept.as_ref() {
+                    startup_recovery::kept_drafts_directory().and_then(|directory| {
+                        startup_recovery::ensure_kept_draft_is_preserved(
+                            &directory,
+                            kept,
+                            &mut pending.preserved_path,
+                        )
+                        .map(Some)
+                    })
+                } else {
+                    Ok(None)
+                };
+                match preserved {
+                    Ok(path) => {
+                        let recovery = if pending.cancel_must_checkpoint_visible_session {
+                            let payload = {
+                                let session = state.session.borrow();
+                                let source = state.save_path.borrow();
+                                crate::recovery_draft::payload(&session, source.as_deref())
+                            };
+                            payload.and_then(crate::checkpoint_required_recovery)
+                        } else {
+                            crate::ensure_recovery_service()
+                        };
+                        match recovery {
+                            Ok(()) => {
+                                if pending.cancel_must_checkpoint_visible_session {
+                                    crate::recovery_deferred::invalidate();
+                                }
+                                app.set_pptx_import_warning_open(false);
+                                set_status(
+                                    &app,
+                                    path.map_or_else(
+                                        || "Open cancelled".to_string(),
+                                        |path| {
+                                            format!(
+                                                "Open cancelled. Recovery draft kept at {}",
+                                                path.display()
+                                            )
+                                        },
+                                    ),
+                                );
+                                if !pending.cancel_must_checkpoint_visible_session {
+                                    crate::recovery_deferred::resume_after_import_warning(&app);
+                                }
+                            }
+                            Err(error) => {
+                                PENDING_PPTX_IMPORT
+                                    .with(|slot| *slot.borrow_mut() = Some(pending));
+                                set_status(
+                                    &app,
+                                    format!(
+                                        "Cancel not completed: current presentation recovery could not be secured: {error}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        PENDING_PPTX_IMPORT.with(|slot| *slot.borrow_mut() = Some(pending));
+                        set_status(&app, format!("Cancel not completed: {error}"));
+                    }
+                }
             }
         });
     }

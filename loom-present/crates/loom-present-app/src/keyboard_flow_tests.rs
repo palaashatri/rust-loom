@@ -98,6 +98,129 @@ pub(super) fn launched() -> Session {
     launched_with(Rc::new(loom_desktop::ScriptedFileDialogs::default()))
 }
 
+fn record_test_recovery(directory: &std::path::Path, payload: &[u8]) {
+    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(directory)
+        .expect("open test recovery");
+    recovery
+        .record("test recovery", payload.to_vec())
+        .expect("record test recovery");
+    drop(recovery);
+    let recovery = loom_production::snapshot::SnapshotRecovery::open_at(directory)
+        .expect("reopen test recovery");
+    crate::PRESENT_RECOVERY.with(|slot| *slot.borrow_mut() = Some(recovery));
+}
+
+fn read_test_recovery(directory: &std::path::Path) -> Option<Vec<u8>> {
+    loom_production::snapshot::SnapshotRecovery::open_at(directory)
+        .expect("read test recovery")
+        .restored_payload()
+        .map(ToOwned::to_owned)
+}
+
+struct RecoveryScratch(std::path::PathBuf);
+
+impl RecoveryScratch {
+    fn new(payload: &[u8]) -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "loom-present-import-recovery-{}-{stamp}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("create test recovery directory");
+        record_test_recovery(&directory, payload);
+        Self(directory)
+    }
+
+    fn new_checkpoint(payload: &[u8]) -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "loom-present-import-recovery-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create test recovery directory");
+        let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&directory)
+            .expect("open test recovery");
+        recovery
+            .checkpoint("loom.present/1", payload.to_vec())
+            .expect("checkpoint test recovery");
+        drop(recovery);
+        let recovery = loom_production::snapshot::SnapshotRecovery::open_at(&directory)
+            .expect("reopen test recovery");
+        crate::PRESENT_RECOVERY.with(|slot| *slot.borrow_mut() = Some(recovery));
+        Self(directory)
+    }
+
+    fn directory(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for RecoveryScratch {
+    fn drop(&mut self) {
+        crate::PRESENT_RECOVERY.with(|slot| drop(slot.borrow_mut().take()));
+        table_actions::PENDING_PPTX_IMPORT.with(|slot| drop(slot.borrow_mut().take()));
+        recovery_deferred::invalidate();
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn make_unreadable_pending_import(path: std::path::PathBuf, bytes: Vec<u8>) {
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
+            path,
+            session: sample_session(),
+            warnings: vec!["SmartArt diagrams will be skipped".into()],
+            kept: Some(startup_recovery::KeptDraft {
+                name: "Unreadable recovered draft".into(),
+                bytes,
+                readable: false,
+            }),
+            preserved_path: None,
+            cancel_must_checkpoint_visible_session: false,
+        });
+    });
+    recovery_deferred::hold_for_import_warning();
+}
+
+fn unique_kept_draft_name(label: &str) -> String {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after Unix epoch")
+        .as_nanos();
+    format!("{label} {}-{stamp}", std::process::id())
+}
+
+fn name_pending_kept_draft(name: String) {
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .and_then(|pending| pending.kept.as_mut())
+            .expect("pending kept draft")
+            .name = name;
+    });
+}
+
+fn find_preserved_test_draft(name: &str, extension: &str) -> std::path::PathBuf {
+    let directory = startup_recovery::kept_drafts_directory().expect("test kept-draft folder");
+    std::fs::read_dir(directory)
+        .expect("read test kept-draft folder")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|file_name| file_name.to_string_lossy().starts_with(name))
+                && path.extension().is_some_and(|value| value == extension)
+        })
+        .unwrap_or_else(|| panic!("no .{extension} draft was preserved"))
+}
+
 pub(super) fn render(app: &PresentApp) {
     let _ = snapshot_component(app, WIDTH, HEIGHT, 1.0).expect("render");
 }
@@ -624,6 +747,401 @@ fn f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back() {
 fn request_close(app: &PresentApp) {
     app.window().dispatch_event(WindowEvent::CloseRequested);
     render(app);
+}
+
+#[test]
+fn import_warning_blocks_queued_and_direct_new_open_commands() {
+    let directory = std::env::temp_dir().join(format!(
+        "loom-present-import-command-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("create command fixture directory");
+    let replacement_path = directory.join("replacement.loomdeck");
+    let mut replacement = sample_session();
+    replacement.document.title = "Different deck".into();
+    let bytes = loom_present_core::save_presentation_session(&replacement)
+        .expect("package replacement deck");
+    std::fs::write(&replacement_path, bytes).expect("write replacement deck");
+    let s = launched_with(Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [Some(replacement_path)],
+        [],
+    )));
+    let current = s.state.session.borrow().clone();
+    let candidate_path = directory.join("lossy.pptx");
+    make_unreadable_pending_import(candidate_path.clone(), b"unreadable draft".to_vec());
+    s.app.set_pptx_import_warning_open(true);
+
+    assert!(dispatch_command(&s.app, "file.new"));
+    assert!(dispatch_command(&s.app, "file.open"));
+    // Native menu actions run this callback on the event loop after scheduling;
+    // invoking it now models a menu command that was queued before the warning.
+    dispatch_scheduled_menu_action(&s.app, "file.new");
+    dispatch_scheduled_menu_action(&s.app, "file.open");
+    s.app.invoke_new_deck();
+    s.app.invoke_open_deck();
+
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    assert_eq!(
+        table_actions::PENDING_PPTX_IMPORT
+            .with(|slot| { slot.borrow().as_ref().map(|pending| pending.path.clone()) }),
+        Some(candidate_path),
+        "the queued startup candidate remains pending"
+    );
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| drop(slot.borrow_mut().take()));
+    recovery_deferred::invalidate();
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn closing_with_a_startup_import_warning_preserves_recovery_bytes() {
+    let bytes = b"unreadable recovery bytes";
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    make_unreadable_pending_import(recovery.directory().join("lossy.pptx"), bytes.to_vec());
+    s.app.set_pptx_import_warning_open(true);
+    let jobs_before = recovery_deferred::JOBS.with(std::cell::Cell::get);
+    s.app.invoke_recovery_flush();
+    assert_eq!(
+        recovery_deferred::JOBS.with(std::cell::Cell::get),
+        jobs_before,
+        "a deferred snapshot cannot start while the import choice is open"
+    );
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec())
+    );
+
+    request_close(&s.app);
+
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "closing before choosing must leave the recovery payload byte-for-byte intact"
+    );
+}
+
+#[test]
+fn cancelling_a_startup_import_then_editing_preserves_recovery_bytes() {
+    let bytes = b"unreadable recovery bytes";
+    let kept_name = unique_kept_draft_name("Cancel edit recovery");
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    let current = s.state.session.borrow().clone();
+    make_unreadable_pending_import(recovery.directory().join("lossy.pptx"), bytes.to_vec());
+    name_pending_kept_draft(kept_name.clone());
+    s.app.set_pptx_import_warning_open(true);
+
+    s.app.invoke_pptx_import_cancel();
+    assert!(!s.app.get_pptx_import_warning_open());
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "Cancel itself must not reset the recovery store"
+    );
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    let quarantine = find_preserved_test_draft(&kept_name, "recovered");
+    assert_eq!(std::fs::read(&quarantine).expect("read quarantine"), bytes);
+
+    let jobs_before = recovery_deferred::JOBS.with(std::cell::Cell::get);
+    s.app.invoke_add_slide();
+    s.app.invoke_recovery_flush();
+    assert!(
+        recovery_deferred::JOBS.with(std::cell::Cell::get) > jobs_before,
+        "an ordinary edit after Cancel can publish a recovery snapshot"
+    );
+    let updated = recovery_draft::payload(
+        &s.state.session.borrow(),
+        s.state.save_path.borrow().as_deref(),
+    )
+    .expect("serialize post-Cancel edit");
+    crate::record_snapshot_recovery("presentation state", updated)
+        .expect("write post-Cancel recovery snapshot");
+    assert_ne!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "the ordinary post-Cancel snapshot replaces the recovery entry"
+    );
+    assert_eq!(
+        std::fs::read(&quarantine).expect("read quarantine after recovery flush"),
+        bytes,
+        "the exact unreadable bytes remain recoverable after later writes"
+    );
+}
+
+#[test]
+fn normal_cancel_stays_open_if_recovery_service_is_unusable() {
+    let bytes = b"existing recovery bytes";
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new_checkpoint(bytes);
+    let s = launched();
+    make_unreadable_pending_import(recovery.directory().join("lossy.pptx"), bytes.to_vec());
+    s.app.set_pptx_import_warning_open(true);
+
+    let lock_path = recovery.directory().join(".checkpoint.lock");
+    std::fs::remove_file(&lock_path).expect("remove idle recovery lock file");
+    std::fs::create_dir(&lock_path).expect("obstruct the real recovery lock path");
+
+    s.app.invoke_pptx_import_cancel();
+
+    assert!(s.app.get_pptx_import_warning_open());
+    assert!(s
+        .app
+        .get_status_left()
+        .contains("Cancel not completed: current presentation recovery could not be secured"));
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+
+    std::fs::remove_dir(&lock_path).expect("release recovery lock obstruction");
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "normal Cancel must leave the prior recovery bytes untouched"
+    );
+}
+
+#[test]
+fn cancelling_a_startup_import_then_closing_preserves_recovery_bytes() {
+    let bytes = b"unreadable recovery bytes";
+    let kept_name = unique_kept_draft_name("Cancel close recovery");
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    let current = s.state.session.borrow().clone();
+    make_unreadable_pending_import(recovery.directory().join("lossy.pptx"), bytes.to_vec());
+    name_pending_kept_draft(kept_name.clone());
+    s.app.set_pptx_import_warning_open(true);
+
+    s.app.invoke_pptx_import_cancel();
+    assert!(!s.app.get_pptx_import_warning_open());
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec())
+    );
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    let quarantine = find_preserved_test_draft(&kept_name, "recovered");
+    request_close(&s.app);
+
+    assert_eq!(
+        std::fs::read(&quarantine).expect("read quarantine after close"),
+        bytes,
+        "a clean close after Cancel leaves the unreadable bytes recoverable"
+    );
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        None,
+        "the cleanly closed live session can clear its recovery entry"
+    );
+}
+
+#[test]
+fn continuing_a_startup_import_quarantines_recovery_before_replacement() {
+    let bytes = b"unreadable recovery bytes";
+    let kept_name = unique_kept_draft_name("Continue recovery");
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    let mut candidate = sample_session();
+    candidate.document.title = "Imported candidate".into();
+    make_unreadable_pending_import(recovery.directory().join("lossy.pptx"), bytes.to_vec());
+    name_pending_kept_draft(kept_name.clone());
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        slot.borrow_mut().as_mut().expect("pending import").session = candidate.clone();
+    });
+    s.app.set_pptx_import_warning_open(true);
+
+    s.app.invoke_pptx_import_continue();
+
+    assert!(!s.app.get_pptx_import_warning_open());
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &candidate.document
+    ));
+    assert!(s
+        .app
+        .get_status_left()
+        .contains("Import completed with losses: SmartArt diagrams will be skipped"));
+    let quarantine = find_preserved_test_draft(&kept_name, "recovered");
+    assert_eq!(
+        std::fs::read(quarantine).expect("read preserved recovery bytes"),
+        bytes
+    );
+    assert_eq!(
+        read_test_recovery(recovery.directory())
+            .and_then(|bytes| recovery_draft::read(&bytes).ok())
+            .map(|(_, recovered)| recovered.document.title),
+        Some(candidate.document.title.clone()),
+        "the accepted candidate is checkpointed before the warning is released"
+    );
+}
+
+#[test]
+fn cancel_stays_open_after_import_checkpoint_failure_until_visible_deck_is_recoverable() {
+    let bytes = b"unreadable recovery bytes";
+    let kept_name = unique_kept_draft_name("Failed import checkpoint");
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new_checkpoint(bytes);
+    let s = launched();
+    let current = s.state.session.borrow().clone();
+    let candidate_path = recovery.directory().join("lossy.pptx");
+    let mut candidate = sample_session();
+    candidate.document.title = "Imported candidate".into();
+    make_unreadable_pending_import(candidate_path.clone(), bytes.to_vec());
+    name_pending_kept_draft(kept_name.clone());
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        slot.borrow_mut().as_mut().expect("pending import").session = candidate;
+    });
+    s.app.set_pptx_import_warning_open(true);
+
+    // SnapshotRecovery scopes its lock to each operation, so replacing the
+    // unused lock file with a directory makes the real service fail at lock
+    // open without removing a lock held by the test.
+    let lock_path = recovery.directory().join(".checkpoint.lock");
+    std::fs::remove_file(&lock_path).expect("remove idle recovery lock file");
+    std::fs::create_dir(&lock_path).expect("obstruct the real recovery lock path");
+    assert!(lock_path.is_dir(), "the lock obstruction is in place");
+
+    s.app.invoke_pptx_import_continue();
+
+    assert!(s.app.get_pptx_import_warning_open());
+    assert!(s.app.get_status_left().contains("Import not completed"));
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    let quarantine = find_preserved_test_draft(&kept_name, "recovered");
+    assert_eq!(
+        std::fs::read(&quarantine).expect("read quarantined bytes"),
+        bytes
+    );
+
+    std::fs::remove_dir(&lock_path).expect("temporarily release recovery lock obstruction");
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "a failed acceptance leaves the original recovery bytes on disk"
+    );
+    std::fs::remove_file(&lock_path).expect("remove idle recovery lock file");
+    std::fs::create_dir(&lock_path).expect("restore recovery lock obstruction");
+
+    s.app.invoke_pptx_import_cancel();
+
+    assert!(s.app.get_pptx_import_warning_open());
+    assert!(s.app.get_status_left().contains("Cancel not completed"));
+    assert_eq!(
+        table_actions::PENDING_PPTX_IMPORT
+            .with(|slot| slot.borrow().as_ref().map(|pending| pending.path.clone())),
+        Some(candidate_path.clone()),
+        "Cancel keeps the warning pending while recovery cannot cover the visible deck"
+    );
+
+    std::fs::remove_dir(&lock_path).expect("release recovery lock obstruction");
+    s.app.invoke_pptx_import_cancel();
+
+    assert!(!s.app.get_pptx_import_warning_open());
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_none()));
+    let recovered =
+        read_test_recovery(recovery.directory()).expect("Cancel leaves a usable recovery snapshot");
+    let (draft, recovered_session) =
+        recovery_draft::read(&recovered).expect("decode visible-deck recovery");
+    assert_eq!(draft.source, None);
+    assert!(crate::deck_guard::content_matches(
+        &recovered_session.document,
+        &current.document
+    ));
+    assert_eq!(
+        std::fs::read(&quarantine).expect("read final quarantine"),
+        bytes
+    );
+}
+
+#[test]
+fn continue_keeps_candidate_and_session_when_recovery_quarantine_fails() {
+    let bytes = b"unreadable recovery bytes";
+    let kept_name = unique_kept_draft_name("Continue failed recovery");
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    let current = s.state.session.borrow().clone();
+    let candidate_path = recovery.directory().join("lossy.pptx");
+    let missing_quarantine = recovery.directory().join("missing.recovered");
+    let mut candidate = sample_session();
+    candidate.document.title = "Imported candidate".into();
+    make_unreadable_pending_import(candidate_path.clone(), bytes.to_vec());
+    name_pending_kept_draft(kept_name);
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        let mut pending = slot.borrow_mut();
+        let pending = pending.as_mut().expect("pending import");
+        pending.session = candidate;
+        pending.preserved_path = Some(missing_quarantine);
+    });
+    s.app.set_pptx_import_warning_open(true);
+
+    s.app.invoke_pptx_import_continue();
+
+    assert!(s.app.get_pptx_import_warning_open());
+    assert!(s.app.get_status_left().contains("Import not completed"));
+    assert_eq!(
+        table_actions::PENDING_PPTX_IMPORT
+            .with(|slot| { slot.borrow().as_ref().map(|pending| pending.path.clone()) }),
+        Some(candidate_path),
+        "the candidate stays pending until recovery bytes are preserved"
+    );
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec()),
+        "a failed quarantine must leave the recovery entry untouched"
+    );
+}
+
+#[test]
+fn cancel_keeps_the_warning_open_when_quarantine_verification_fails() {
+    let bytes = b"unreadable recovery bytes";
+    let recovery = RecoveryScratch::new(bytes);
+    let s = launched();
+    let current = s.state.session.borrow().clone();
+    let candidate_path = recovery.directory().join("lossy.pptx");
+    let missing_quarantine = recovery.directory().join("missing.recovered");
+    make_unreadable_pending_import(candidate_path.clone(), bytes.to_vec());
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .expect("pending import")
+            .preserved_path = Some(missing_quarantine);
+    });
+    s.app.set_pptx_import_warning_open(true);
+
+    s.app.invoke_pptx_import_cancel();
+
+    assert!(s.app.get_pptx_import_warning_open());
+    assert!(s.app.get_status_left().contains("Cancel not completed"));
+    assert_eq!(
+        table_actions::PENDING_PPTX_IMPORT
+            .with(|slot| { slot.borrow().as_ref().map(|pending| pending.path.clone()) }),
+        Some(candidate_path),
+        "the import candidate remains available for another choice"
+    );
+    assert!(crate::deck_guard::content_matches(
+        &s.state.session.borrow().document,
+        &current.document
+    ));
+    assert_eq!(
+        read_test_recovery(recovery.directory()),
+        Some(bytes.to_vec())
+    );
 }
 
 #[test]

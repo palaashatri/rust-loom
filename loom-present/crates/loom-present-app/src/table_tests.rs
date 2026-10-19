@@ -2,15 +2,16 @@
 #![cfg(test)]
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use loom_desktop::{FileFilter, ScriptedFileDialogs};
+use loom_desktop::{FileDialogService, FileFilter, ScriptedFileDialogs};
 use loom_objects::chart::ChartType;
 use loom_present_core::{
     default_slide_chart, default_slide_table, export_pdf, export_pptx, import_pptx,
     inspect_pptx_unsupported, ElementType, PresentationDocument, PresentationSession, SlideElement,
 };
-use slint::SharedString;
+use slint::{ComponentHandle, SharedString};
 
 use crate::{
     dispatch_command, empty_session, master_palette, refresh,
@@ -43,6 +44,149 @@ fn make_test_fixture() -> (PresentApp, Rc<GuiState>) {
     table_actions::wire(&app, &state);
     crate::wire_app_callbacks(&app, &state);
     (app, state)
+}
+
+struct TestDirectory(PathBuf);
+
+impl TestDirectory {
+    fn new(label: &str) -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "loom-present-{label}-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).expect("create temporary test directory");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct RecoveryScratch {
+    directory: TestDirectory,
+}
+
+struct CheckpointPayloadFaultGuard {
+    directory: PathBuf,
+}
+
+impl CheckpointPayloadFaultGuard {
+    fn before_checkpoint_payload(directory: &Path) -> Self {
+        loom_production::fault_injection::inject(
+            directory,
+            loom_production::fault_injection::FaultStep::CheckpointPayload,
+            0,
+            1,
+        );
+        Self {
+            directory: directory.to_path_buf(),
+        }
+    }
+
+    fn hits(&self) -> u32 {
+        loom_production::fault_injection::hits(
+            &self.directory,
+            loom_production::fault_injection::FaultStep::CheckpointPayload,
+        )
+    }
+}
+
+impl Drop for CheckpointPayloadFaultGuard {
+    fn drop(&mut self) {
+        loom_production::fault_injection::clear(&self.directory);
+    }
+}
+
+impl RecoveryScratch {
+    fn new_checkpoint(payload: &[u8]) -> Self {
+        let directory = TestDirectory::new("import-recovery");
+        let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(directory.path())
+            .expect("open isolated test recovery");
+        recovery
+            .checkpoint("loom.present/1", payload.to_vec())
+            .expect("seed isolated recovery checkpoint");
+        drop(recovery);
+        let recovery = loom_production::snapshot::SnapshotRecovery::open_at(directory.path())
+            .expect("reopen isolated test recovery");
+        crate::PRESENT_RECOVERY.with(|slot| *slot.borrow_mut() = Some(recovery));
+        Self { directory }
+    }
+
+    fn directory(&self) -> &Path {
+        self.directory.path()
+    }
+
+    fn latest_payload(&self) -> Option<Vec<u8>> {
+        loom_production::snapshot::SnapshotRecovery::open_at(self.directory())
+            .expect("reopen isolated test recovery payload")
+            .restored_payload()
+            .map(ToOwned::to_owned)
+    }
+}
+
+impl Drop for RecoveryScratch {
+    fn drop(&mut self) {
+        crate::PRESENT_RECOVERY.with(|slot| drop(slot.borrow_mut().take()));
+        table_actions::PENDING_PPTX_IMPORT.with(|slot| drop(slot.borrow_mut().take()));
+        crate::recovery_deferred::invalidate();
+    }
+}
+
+fn lossy_smartart_pptx(directory: &TestDirectory) -> (PathBuf, PresentationSession) {
+    let source = PresentationSession::new(PresentationDocument::new("doc-1", "Unsupported Test"));
+    let pptx_bytes = export_pptx(&source).expect("export test PPTX");
+    let archive = loom_package::zip::PackageArchive::from_bytes(&pptx_bytes).expect("open zip");
+    let mut archive_with_smartart = loom_package::zip::PackageArchive::new();
+    for path in archive.paths() {
+        if let Some(bytes) = archive.get(path) {
+            let _ = archive_with_smartart.add(path, bytes.to_vec());
+        }
+    }
+    let _ = archive_with_smartart.add("ppt/diagrams/data1.xml", b"<xml></xml>".to_vec());
+    let bytes = archive_with_smartart
+        .to_bytes()
+        .expect("write test package");
+    let warnings = inspect_pptx_unsupported(&bytes).expect("inspect test package");
+    assert!(warnings.iter().any(|warning| warning.contains("SmartArt")));
+    let candidate = PresentationSession::new(import_pptx(&bytes).expect("import test package"));
+    let path = directory.path().join("unsupported.pptx");
+    std::fs::write(&path, bytes).expect("write test PPTX");
+    (path, candidate)
+}
+
+fn state_with_dialogs(
+    app: &PresentApp,
+    initial: PresentationSession,
+    dialogs: Rc<dyn FileDialogService>,
+) -> Rc<GuiState> {
+    let state = Rc::new(GuiState {
+        last_saved: RefCell::new(initial.document.clone()),
+        last_saved_transitions: RefCell::new(initial.transitions.clone()),
+        session: RefCell::new(initial),
+        pending_replacement: std::cell::Cell::new(None),
+        selected_element: std::cell::Cell::new(0),
+        inspector_available: std::cell::Cell::new(true),
+        save_path: RefCell::new(None),
+        dialogs,
+        deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+        pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+        menu_service: None,
+        drag_state: RefCell::new(DragState::default()),
+    });
+    refresh(app, &state);
+    table_actions::wire(app, &state);
+    state
 }
 
 #[test]
@@ -375,66 +519,325 @@ fn test_pptx_export_import_roundtrip_with_tables_and_charts() {
 
 #[test]
 fn test_pptx_import_warning_dialog_flow() {
+    let scratch = TestDirectory::new("pptx-warning");
+    let (test_file, candidate) = lossy_smartart_pptx(&scratch);
+    let prior = PresentationSession::new(PresentationDocument::new(
+        "prior-checkpoint",
+        "Prior saved checkpoint",
+    ));
+    let prior_package =
+        loom_present_core::save_presentation_session(&prior).expect("package prior checkpoint");
+    let prior_recovery =
+        crate::recovery_draft::wrap(Some(Path::new("prior.loomdeck")), &prior_package);
+    let recovery = RecoveryScratch::new_checkpoint(&prior_recovery);
     let (app, _state) = make_test_fixture();
-
-    // Create a mock PPTX containing unsupported SmartArt
-    let doc = PresentationDocument::new("doc-1", "Unsupported Test");
-    let session = PresentationSession::new(doc);
-    let pptx_bytes = export_pptx(&session).expect("export pptx");
-
-    // Add an unsupported SmartArt part
-    let archive = loom_package::zip::PackageArchive::from_bytes(&pptx_bytes).expect("open zip");
-    let mut new_archive = loom_package::zip::PackageArchive::new();
-    for path in archive.paths() {
-        if let Some(bytes) = archive.get(path) {
-            let _ = new_archive.add(path, bytes.to_vec());
-        }
-    }
-    // Inject SmartArt diagram
-    let _ = new_archive.add("ppt/diagrams/data1.xml", b"<xml></xml>".to_vec());
-    let buf = new_archive.to_bytes().expect("write package");
-
-    let warnings = inspect_pptx_unsupported(&buf).expect("inspect");
-    assert!(warnings.iter().any(|w| w.contains("SmartArt")));
-
-    let temp_dir = std::env::temp_dir().join(format!("loom-pptx-warn-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir).unwrap();
-    let test_file = temp_dir.join("test.pptx");
-    std::fs::write(&test_file, &buf).unwrap();
-
-    let dialogs = ScriptedFileDialogs::new([Some(test_file.clone())], []);
+    let dialogs = ScriptedFileDialogs::new([Some(test_file.clone()), Some(test_file.clone())], []);
     let mut empty_s = empty_session();
     if let Some(s) = empty_s.document.active_slide_mut() {
         s.elements.clear();
     }
-    let state_with_dialog = Rc::new(GuiState {
-        last_saved: RefCell::new(empty_s.document.clone()),
-        last_saved_transitions: RefCell::default(),
-        session: RefCell::new(empty_s),
-        pending_replacement: std::cell::Cell::new(None),
-        selected_element: std::cell::Cell::new(0),
-        inspector_available: std::cell::Cell::new(true),
-        save_path: RefCell::new(None),
-        dialogs: Rc::new(dialogs),
-        deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
-        pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
-        menu_service: None,
-        drag_state: RefCell::new(DragState::default()),
-    });
-    table_actions::wire(&app, &state_with_dialog);
+    let original_session = empty_s.clone();
+    let state_with_dialog = state_with_dialogs(&app, empty_s, Rc::new(dialogs));
 
-    // Open through picker triggers warning
+    // The picker opens a candidate, but leaves the visible session and recovery
+    // checkpoint untouched until the user chooses.
     crate::open_deck_from_picker(&app, &state_with_dialog);
     assert!(app.get_pptx_import_warning_open());
     assert!(app.get_pptx_import_warning_message().contains("SmartArt"));
+    assert!(crate::deck_guard::content_matches(
+        &state_with_dialog.session.borrow().document,
+        &original_session.document
+    ));
+    assert_eq!(recovery.latest_payload(), Some(prior_recovery.clone()));
 
     // Cancel preserves current session
     app.invoke_pptx_import_cancel();
     assert!(!app.get_pptx_import_warning_open());
-    assert_eq!(state_with_dialog.session.borrow().document.slides.len(), 1);
+    assert!(crate::deck_guard::content_matches(
+        &state_with_dialog.session.borrow().document,
+        &original_session.document
+    ));
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_none()));
+    assert_eq!(recovery.latest_payload(), Some(prior_recovery));
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    // Reopen through the real picker path so Continue exercises the candidate
+    // and warning callbacks rather than a hand-built pending-import value.
+    crate::open_deck_from_picker(&app, &state_with_dialog);
+    assert!(app.get_pptx_import_warning_open());
+
+    app.invoke_pptx_import_continue();
+
+    assert!(!app.get_pptx_import_warning_open());
+    assert!(crate::deck_guard::content_matches(
+        &state_with_dialog.session.borrow().document,
+        &candidate.document
+    ));
+    assert!(app
+        .get_status_left()
+        .contains("Import completed with losses: SmartArt"));
+    let recovered = recovery
+        .latest_payload()
+        .expect("accepted import has a recovery payload before deferred flush");
+    let (draft, recovered_session) =
+        crate::recovery_draft::read(&recovered).expect("read accepted import recovery");
+    assert_eq!(draft.source.as_deref(), Some(test_file.as_path()));
+    assert!(crate::deck_guard::content_matches(
+        &recovered_session.document,
+        &candidate.document
+    ));
+    assert_eq!(recovered_session.transitions, candidate.transitions);
+}
+
+#[test]
+fn picker_continue_keeps_the_warning_open_without_a_recovery_service() {
+    let scratch = TestDirectory::new("pptx-warning-no-recovery");
+    let (test_file, _candidate) = lossy_smartart_pptx(&scratch);
+    let recovery = RecoveryScratch::new_checkpoint(b"prior recovery fixture");
+    crate::PRESENT_RECOVERY.with(|slot| drop(slot.borrow_mut().take()));
+    let (app, _initial_state) = make_test_fixture();
+    let original = empty_session();
+    let state = state_with_dialogs(
+        &app,
+        original.clone(),
+        Rc::new(ScriptedFileDialogs::new([Some(test_file.clone())], [])),
+    );
+    app.show().expect("show test app");
+    crate::wire_close_guard(&app, &state);
+
+    crate::open_deck_from_picker(&app, &state);
+    assert!(app.get_pptx_import_warning_open());
+    app.invoke_pptx_import_continue();
+
+    assert!(app.get_pptx_import_warning_open());
+    assert!(app.get_status_left().contains("Import not completed"));
+    assert!(crate::deck_guard::content_matches(
+        &state.session.borrow().document,
+        &original.document
+    ));
+    assert_eq!(
+        table_actions::PENDING_PPTX_IMPORT
+            .with(|slot| slot.borrow().as_ref().map(|pending| pending.path.clone())),
+        Some(test_file)
+    );
+    assert!(crate::PRESENT_RECOVERY.with(|slot| slot.borrow().is_none()));
+
+    app.invoke_pptx_import_cancel();
+
+    assert!(app.get_pptx_import_warning_open());
+    assert!(app
+        .get_status_left()
+        .contains("Cancel not completed: current presentation recovery could not be secured"));
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(
+        !app.window().is_visible(),
+        "a missing service before checkpointing must not strand the warning on close"
+    );
+    assert!(app.get_pptx_import_warning_open());
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+    assert!(crate::deck_guard::content_matches(
+        &state.session.borrow().document,
+        &original.document
+    ));
+    assert_eq!(
+        state.session.borrow().transitions,
+        original.transitions,
+        "the visible session must remain unchanged"
+    );
+    assert_eq!(
+        recovery.latest_payload(),
+        Some(b"prior recovery fixture".to_vec()),
+        "closing with the candidate still pending preserves the previous recovery payload"
+    );
+}
+
+#[test]
+fn pre_checkpoint_quarantine_failure_does_not_block_close_or_change_recovery() {
+    let scratch = TestDirectory::new("pptx-warning-quarantine-failure");
+    let (test_file, _candidate) = lossy_smartart_pptx(&scratch);
+    let _state_directory = crate::test_environment::StateDirectoryScratch::new();
+    let kept_directory = crate::startup_recovery::kept_drafts_directory()
+        .expect("compute isolated kept-drafts directory");
+    std::fs::create_dir_all(kept_directory.parent().expect("kept-drafts parent"))
+        .expect("create isolated state parent");
+    std::fs::write(&kept_directory, b"block directory creation")
+        .expect("place a file where the kept-drafts directory belongs");
+
+    let raw_recovery = b"unreadable recovery fixture".to_vec();
+    let recovery = RecoveryScratch::new_checkpoint(&raw_recovery);
+    let plan = crate::startup_recovery::startup_sessions(Some(&raw_recovery), Some(&test_file))
+        .expect("prepare startup with unreadable recovery and lossy PPTX");
+    let candidate = plan.pending_import.expect("lossy startup candidate");
+    let kept = plan.kept.expect("unreadable startup recovery to preserve");
+    assert!(!kept.readable);
+    assert_eq!(kept.bytes, raw_recovery);
+    let original = plan.session;
+    let pending = table_actions::PendingPptxImport {
+        path: candidate.path,
+        session: candidate.session,
+        warnings: candidate.warnings,
+        kept: Some(kept),
+        preserved_path: None,
+        cancel_must_checkpoint_visible_session: false,
+    };
+
+    let (app, _initial_state) = make_test_fixture();
+    app.show().expect("show test app");
+    let state = state_with_dialogs(
+        &app,
+        original.clone(),
+        Rc::new(ScriptedFileDialogs::new([], [])),
+    );
+    crate::wire_close_guard(&app, &state);
+    table_actions::PENDING_PPTX_IMPORT.with(|slot| *slot.borrow_mut() = Some(pending));
+    crate::recovery_deferred::hold_for_import_warning();
+    app.set_pptx_import_warning_open(true);
+
+    app.invoke_pptx_import_continue();
+
+    assert!(app.get_pptx_import_warning_open());
+    assert!(app.get_status_left().contains("Import not completed"));
+    assert!(
+        app.get_status_left().contains("could not create"),
+        "the kept-drafts directory blocker must fail quarantine before checkpointing: {}",
+        app.get_status_left()
+    );
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+    assert!(crate::deck_guard::content_matches(
+        &state.session.borrow().document,
+        &original.document
+    ));
+    assert_eq!(
+        recovery.latest_payload(),
+        Some(raw_recovery.clone()),
+        "quarantine refusal occurs before the import candidate reaches recovery"
+    );
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(
+        !app.window().is_visible(),
+        "a quarantine failure before checkpointing must allow a safe close"
+    );
+    assert!(app.get_pptx_import_warning_open());
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+    assert!(crate::deck_guard::content_matches(
+        &state.session.borrow().document,
+        &original.document
+    ));
+    assert_eq!(
+        recovery.latest_payload(),
+        Some(raw_recovery),
+        "closing preserves the exact prior recovery payload"
+    );
+}
+
+#[test]
+fn cancel_after_a_partial_import_checkpoint_restores_the_visible_deck() {
+    let scratch = TestDirectory::new("pptx-warning-partial-checkpoint");
+    let (test_file, candidate) = lossy_smartart_pptx(&scratch);
+    let original = PresentationSession::new(PresentationDocument::new(
+        "visible-before-import",
+        "Visible before import",
+    ));
+    let original_package =
+        loom_present_core::save_presentation_session(&original).expect("package visible deck");
+    let original_recovery = crate::recovery_draft::wrap(None, &original_package);
+    let recovery = RecoveryScratch::new_checkpoint(&original_recovery);
+    assert!(recovery.directory().join("operations.jsonl").is_file());
+    let (app, _initial_state) = make_test_fixture();
+    app.show().expect("show test app");
+    let state = state_with_dialogs(
+        &app,
+        original.clone(),
+        Rc::new(ScriptedFileDialogs::new([Some(test_file.clone())], [])),
+    );
+    crate::wire_close_guard(&app, &state);
+    crate::open_deck_from_picker(&app, &state);
+    assert!(app.get_pptx_import_warning_open());
+
+    // The candidate record appends before the checkpoint-generation payload
+    // write fails, leaving a real partially published recovery state.
+    let failpoint = CheckpointPayloadFaultGuard::before_checkpoint_payload(recovery.directory());
+    app.invoke_pptx_import_continue();
+    assert_eq!(
+        failpoint.hits(),
+        1,
+        "the checkpoint payload write was injected"
+    );
+    drop(failpoint);
+
+    assert!(
+        app.get_pptx_import_warning_open(),
+        "Continue should remain pending on checkpoint failure; status={}",
+        app.get_status_left()
+    );
+    assert!(app.get_status_left().contains("Import not completed"));
+    assert!(crate::deck_guard::content_matches(
+        &state.session.borrow().document,
+        &original.document
+    ));
+    let partially_published = recovery
+        .latest_payload()
+        .expect("candidate operation is retained after checkpoint-generation failure");
+    let (partial_draft, partial_session) =
+        crate::recovery_draft::read(&partially_published).expect("read candidate operation");
+    assert_eq!(partial_draft.source.as_deref(), Some(test_file.as_path()));
+    assert!(crate::deck_guard::content_matches(
+        &partial_session.document,
+        &candidate.document
+    ));
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(
+        app.window().is_visible(),
+        "close stays blocked until recovery is repaired"
+    );
+    assert!(app.get_pptx_import_warning_open());
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()));
+    assert!(app
+        .get_status_left()
+        .contains("Choose Cancel to keep this presentation or Continue to retry"));
+    let still_partial = recovery
+        .latest_payload()
+        .expect("blocked close retains the journaled import candidate");
+    let (still_partial_draft, still_partial_session) =
+        crate::recovery_draft::read(&still_partial).expect("read retained candidate operation");
+    assert_eq!(
+        still_partial_draft.source.as_deref(),
+        Some(test_file.as_path())
+    );
+    assert!(crate::deck_guard::content_matches(
+        &still_partial_session.document,
+        &candidate.document
+    ));
+
+    app.invoke_pptx_import_cancel();
+
+    assert!(!app.get_pptx_import_warning_open());
+    assert!(table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_none()));
+    let recovered = recovery
+        .latest_payload()
+        .expect("Cancel checkpoints the visible deck before closing the warning");
+    let (draft, recovered_session) =
+        crate::recovery_draft::read(&recovered).expect("read visible-deck recovery");
+    assert_eq!(draft.source, None);
+    assert!(crate::deck_guard::content_matches(
+        &recovered_session.document,
+        &original.document
+    ));
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    assert!(
+        !app.window().is_visible(),
+        "close proceeds after recovery is repaired"
+    );
 }
 
 #[test]

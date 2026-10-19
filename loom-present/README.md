@@ -18,7 +18,8 @@ Evidence tags used below:
 - First launch is a blank one-slide deck with a faint "Click to add title" prompt. The prompt is never saved, exported or drawn in a thumbnail. "New from Sample Deck" is in the File menu and the command palette. [tests] [live-W] [live-L]
 - Native Open, Save and Save As for `.loomdeck`; the window title follows the saved file name and the status bar shows Saved or Edited. A transition-only change also marks the deck Edited. [tests] [live-W]
 - Closing, New or Open with unsaved changes asks Save / Discard / Cancel. [tests] [live-W]
-- Crash recovery: an unsaved deck is offered back at the next launch and reads as unsaved (closing asks); an intentional close, including Discard, clears it. Drafts are marked stale by a 600 ms timer and serialised on a worker thread, so up to 600 ms of the latest changes can be lost in a crash. [tests] [live-W]
+- PowerPoint opens from the picker or startup show known import losses before replacing the presentation. Cancel keeps the current presentation; Continue requires a recovery checkpoint before showing the imported deck. Unreadable recovery drafts are preserved before replacement. [tests] Windows startup Cancel, Continue and a pre-checkpoint quarantine failure have native checks; broader picker/recovered-work flows remain open.
+- Crash recovery: an unsaved deck is offered back at the next launch and reads as unsaved (closing asks); an intentional close, including Discard, clears it. A 600 ms timer batches edits before background serialization; durability also includes serialization and writing. Source review found deferred error-reporting and completion-ordering gaps that still need fault testing and repair. [tests and live-W for normal recovery flows]
 - Command line: `loom-present path/to/deck.loomdeck`. [tests]
 
 ### Slides and objects

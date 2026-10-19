@@ -39,6 +39,9 @@ thread_local! {
 /// The deck changed. Marks the draft stale and arms the timer, once per window.
 pub(crate) fn note_edit(app: &PresentApp) {
     STALE.with(|stale| stale.set(true));
+    if import_warning_pending() {
+        return;
+    }
     if ARMED.with(|armed| armed.replace(true)) {
         return;
     }
@@ -53,9 +56,27 @@ pub(crate) fn note_edit(app: &PresentApp) {
     });
 }
 
+/// Suspends pending recovery writes while an import decision owns the session.
+/// Any work already being serialized is invalidated and retried after a choice.
+pub(crate) fn hold_for_import_warning() {
+    TIMER.with(Timer::stop);
+    ARMED.with(|armed| armed.set(false));
+    STALE.with(|stale| stale.set(true));
+    EPOCH.with(|epoch| epoch.set(epoch.get() + 1));
+}
+
+/// Resumes the stale draft after Cancel or Continue has finished safely.
+pub(crate) fn resume_after_import_warning(app: &PresentApp) {
+    if STALE.with(Cell::get) {
+        note_edit(app);
+    }
+}
+
 /// Drop any draft that is stale or in flight: a checkpoint or a cleared store
 /// already covers (or supersedes) it.
 pub(crate) fn invalidate() {
+    TIMER.with(Timer::stop);
+    ARMED.with(|armed| armed.set(false));
     STALE.with(|stale| stale.set(false));
     EPOCH.with(|epoch| epoch.set(epoch.get() + 1));
 }
@@ -78,6 +99,10 @@ fn content_of(session: &PresentationSession) -> PresentationSession {
 /// worker thread and record the result when it comes back. `source` is the file
 /// the deck is saved to, so the draft can be restored under that name.
 pub(crate) fn flush(session: &PresentationSession, source: Option<&Path>) {
+    if import_warning_pending() {
+        STALE.with(|stale| stale.set(true));
+        return;
+    }
     if !STALE.with(|stale| stale.replace(false)) {
         return;
     }
@@ -106,7 +131,15 @@ fn deliver(epoch: u64, bytes: Vec<u8>) {
     if EPOCH.with(Cell::get) != epoch {
         return;
     }
+    if import_warning_pending() {
+        STALE.with(|stale| stale.set(true));
+        return;
+    }
     let _ = crate::record_snapshot_recovery("presentation state", bytes);
+}
+
+fn import_warning_pending() -> bool {
+    crate::table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some())
 }
 
 #[cfg(test)]

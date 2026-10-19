@@ -26,6 +26,7 @@ i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 slint-build = "1.7"
 
 [dev-dependencies]
+loom-production = { path = "../../../loom-core/crates/loom-production", features = ["fault-injection"] }
 loom-package.workspace = true
 loom-pdf = { workspace = true, features = ["test-support"] }
 i-slint-backend-testing = "1.17.1"

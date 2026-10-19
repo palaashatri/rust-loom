@@ -4,6 +4,7 @@
 //! own file name, or, when a different file is opened, kept in a file of its own
 //! before recovery is reset. Only an explicit Discard removes a draft.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +29,8 @@ pub(crate) struct StartupPlan {
     pub(crate) restored: Option<String>,
     /// A draft that must leave recovery before recovery is reset.
     pub(crate) kept: Option<KeptDraft>,
+    /// A lossy PowerPoint candidate awaiting an explicit choice.
+    pub(crate) pending_import: Option<crate::pptx_import::Candidate>,
 }
 
 /// A recovered draft that is written to a file of its own.
@@ -50,6 +53,7 @@ impl StartupPlan {
             save_path,
             restored: None,
             kept: None,
+            pending_import: None,
         }
     }
 
@@ -67,6 +71,7 @@ impl StartupPlan {
             save_path,
             restored: Some(name),
             kept: None,
+            pending_import: None,
         }
     }
 }
@@ -78,12 +83,43 @@ pub(crate) fn startup_sessions(
     recovered: Option<&[u8]>,
     open: Option<&Path>,
 ) -> Result<StartupPlan, String> {
+    if let Some(path) = open.filter(|path| crate::pptx_import::is_pptx_path(path)) {
+        // A draft of the requested PowerPoint file remains the startup source;
+        // importing the file again would replace recovered work before a choice.
+        if recovery_source_matches(recovered, path) {
+            return startup_sessions_with_opened(recovered, open, None);
+        }
+
+        let candidate = crate::pptx_import::prepare(path)?;
+        if candidate.warnings.is_empty() {
+            return startup_sessions_with_opened(recovered, open, Some(candidate.session));
+        }
+
+        // Keep the recovered session live and defer both draft quarantine and
+        // recovery reset until Continue. Cancel then leaves recovery untouched.
+        let mut requested =
+            startup_sessions_with_opened(recovered, open, Some(candidate.session.clone()))?;
+        let kept = requested.kept.take();
+        let mut current = startup_sessions_with_opened(recovered, None, None)?;
+        current.kept = kept;
+        current.pending_import = Some(candidate);
+        return Ok(current);
+    }
+
+    startup_sessions_with_opened(recovered, open, None)
+}
+
+fn startup_sessions_with_opened(
+    recovered: Option<&[u8]>,
+    open: Option<&Path>,
+    opened: Option<PresentationSession>,
+) -> Result<StartupPlan, String> {
     let Some(bytes) = recovered else {
-        return opened_or_blank(open);
+        return opened_or_blank(open, opened);
     };
     let Ok((draft, deck)) = recovery_draft::read(bytes) else {
         // Recovery data this version cannot read is kept as it was found.
-        let mut plan = opened_or_blank(open)?;
+        let mut plan = opened_or_blank(open, opened)?;
         plan.kept = Some(KeptDraft {
             name: UNREADABLE_NAME.into(),
             bytes: bytes.to_vec(),
@@ -96,7 +132,7 @@ pub(crate) fn startup_sessions(
     match (open, source) {
         (Some(path), Some(ref source)) if same_file(source, path) => {
             // The draft was edited from the file being opened.
-            match load_session(path).ok() {
+            match opened.clone().or_else(|| load_session(path).ok()) {
                 Some(saved) if same_content(&deck, &saved) => {
                     Ok(StartupPlan::clean(saved, Some(path.to_path_buf())))
                 }
@@ -118,7 +154,11 @@ pub(crate) fn startup_sessions(
                 },
                 None => same_content(&deck, &empty_session()),
             };
-            let mut plan = StartupPlan::clean(load_session(path)?, Some(path.to_path_buf()));
+            let session = match opened.clone() {
+                Some(session) => session,
+                None => load_session(path)?,
+            };
+            let mut plan = StartupPlan::clean(session, Some(path.to_path_buf()));
             if !is_clean {
                 plan.kept = Some(KeptDraft {
                     name,
@@ -138,14 +178,27 @@ pub(crate) fn startup_sessions(
     }
 }
 
-fn opened_or_blank(open: Option<&Path>) -> Result<StartupPlan, String> {
+fn opened_or_blank(
+    open: Option<&Path>,
+    opened: Option<PresentationSession>,
+) -> Result<StartupPlan, String> {
     match open {
-        Some(path) => Ok(StartupPlan::clean(
-            load_session(path)?,
-            Some(path.to_path_buf()),
-        )),
+        Some(path) => {
+            let session = match opened {
+                Some(session) => session,
+                None => load_session(path)?,
+            };
+            Ok(StartupPlan::clean(session, Some(path.to_path_buf())))
+        }
         None => Ok(StartupPlan::clean(empty_session(), None)),
     }
+}
+
+fn recovery_source_matches(recovered: Option<&[u8]>, path: &Path) -> bool {
+    recovered
+        .and_then(|bytes| recovery_draft::read(bytes).ok())
+        .and_then(|(draft, _)| draft.source)
+        .is_some_and(|source| same_file(&source, path))
 }
 
 /// Two paths name one file, comparing canonical paths when both exist.
@@ -204,6 +257,57 @@ pub(crate) fn write_kept_draft(
     loom_storage::atomic_write(&path, &kept.bytes)
         .map_err(|error| format!("could not write '{}': {error}", path.display()))?;
     Ok(path)
+}
+
+/// Makes sure a recovered draft has been durably written before its recovery
+/// entry can be replaced or cleared. The output path is retained for retries.
+pub(crate) fn ensure_kept_draft_is_preserved(
+    directory: &Path,
+    kept: &KeptDraft,
+    preserved_path: &mut Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = preserved_path.as_ref() {
+        verify_kept_draft_file(path, kept)?;
+        return Ok(path.clone());
+    }
+    let path = write_kept_draft(directory, kept, unix_seconds())?;
+    verify_kept_draft_file(&path, kept)?;
+    *preserved_path = Some(path.clone());
+    Ok(path)
+}
+
+fn verify_kept_draft_file(path: &Path, kept: &KeptDraft) -> Result<(), String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("could not verify '{}': {error}", path.display()))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("could not inspect '{}': {error}", path.display()))?
+        .len();
+    if length != kept.bytes.len() as u64 {
+        return Err(format!(
+            "could not verify '{}': preserved bytes have the wrong length",
+            path.display()
+        ));
+    }
+
+    let mut offset = 0;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("could not verify '{}': {error}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        if kept.bytes.get(offset..offset + count) != Some(&buffer[..count]) {
+            return Err(format!(
+                "could not verify '{}': preserved bytes do not match the recovered draft",
+                path.display()
+            ));
+        }
+        offset += count;
+    }
+    Ok(())
 }
 
 /// A name that is safe as a file name on every platform.

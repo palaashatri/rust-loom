@@ -18,13 +18,13 @@ use loom_desktop::{
     OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    calculate_smart_snapping, export_pdf, export_pptx, import_pptx, inspect_pptx_unsupported,
-    load_presentation_session, lock_aspect, normalize_angle_degrees, save_presentation_session,
-    ElementType, PresentationDocument, PresentationSession, SlideElement, SnapGuide,
-    TransitionKind,
+    calculate_smart_snapping, export_pdf, export_pptx, load_presentation_session, lock_aspect,
+    normalize_angle_degrees, save_presentation_session, ElementType, PresentationDocument,
+    PresentationSession, SlideElement, SnapGuide, TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
+pub(crate) use pptx_import::load_session;
 use slint::{
     private_unstable_api::re_exports::EventResult, ComponentHandle, Model, PhysicalSize,
     SharedString,
@@ -221,26 +221,6 @@ fn empty_session() -> PresentationSession {
         }
     }
     PresentationSession::new(document)
-}
-
-fn load_session(path: &Path) -> Result<PresentationSession, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| format!("failed to read presentation '{}': {error}", path.display()))?;
-    let is_pptx = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("pptx"))
-        .unwrap_or(false);
-    let mut session = if is_pptx {
-        import_pptx(&bytes).map(PresentationSession::new)?
-    } else {
-        load_presentation_session(&bytes)
-            .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))?
-    };
-    // A deck opens on its first slide, whichever slide was showing when it was saved,
-    // so the editor and the slideshow both start at the beginning.
-    session.document.active_index = 0;
-    Ok(session)
 }
 
 fn initial_session(args: &Args) -> Result<PresentationSession, String> {
@@ -1079,6 +1059,87 @@ fn replace_opened_deck(
     refresh(app, state);
 }
 
+/// Persists any draft being quarantined, then synchronously covers an accepted
+/// PowerPoint candidate in recovery before it can replace the visible deck.
+pub(crate) fn accept_pending_pptx_import(
+    app: &PresentApp,
+    state: &GuiState,
+    pending: &mut table_actions::PendingPptxImport,
+) -> Result<String, String> {
+    let mut kept_path = None;
+    if let Some(kept) = pending.kept.as_ref() {
+        let directory = startup_recovery::kept_drafts_directory()?;
+        let preserved_path = startup_recovery::ensure_kept_draft_is_preserved(
+            &directory,
+            kept,
+            &mut pending.preserved_path,
+        )?;
+        kept_path = Some(preserved_path.clone());
+    }
+
+    let payload = recovery_draft::payload(&pending.session, Some(&pending.path))?;
+    checkpoint_pending_import_recovery(pending, payload)
+        .map_err(|error| format!("could not checkpoint imported presentation recovery: {error}"))?;
+    recovery_deferred::invalidate();
+
+    let path = pending.path.clone();
+    let session = pending.session.clone();
+    replace_opened_deck(app, state, path.clone(), session);
+    let mut status = format!(
+        "Opened {}. Import completed with losses: {}",
+        path.display(),
+        pending.warnings.join("; ")
+    );
+    if let Some(kept_path) = kept_path {
+        status.push_str(&format!(". Unsaved draft kept at {}", kept_path.display()));
+    }
+    Ok(status)
+}
+
+/// Checkpoint a candidate through the live recovery service. Warning acceptance
+/// must fail closed instead of treating an absent recovery slot as success.
+pub(crate) fn checkpoint_required_recovery(payload: Vec<u8>) -> Result<(), String> {
+    PRESENT_RECOVERY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let recovery = slot
+            .as_mut()
+            .ok_or_else(|| "recovery service is unavailable".to_string())?;
+        recovery
+            .checkpoint("loom.present/1", payload)
+            .map_err(|error| error.to_string())
+    })
+}
+
+/// Marks that Cancel must restore the visible session before a candidate checkpoint can mutate recovery.
+fn checkpoint_pending_import_recovery(
+    pending: &mut table_actions::PendingPptxImport,
+    payload: Vec<u8>,
+) -> Result<(), String> {
+    PRESENT_RECOVERY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let recovery = slot
+            .as_mut()
+            .ok_or_else(|| "recovery service is unavailable".to_string())?;
+        pending.cancel_must_checkpoint_visible_session = true;
+        recovery
+            .checkpoint("loom.present/1", payload)
+            .map_err(|error| error.to_string())
+    })
+}
+
+/// Confirms an active recovery slot exists and its store can be opened now; later writes can still fail.
+pub(crate) fn ensure_recovery_service() -> Result<(), String> {
+    let directory = PRESENT_RECOVERY.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|recovery| recovery.directory().to_path_buf())
+            .ok_or_else(|| "recovery service is unavailable".to_string())
+    })?;
+    loom_production::snapshot::SnapshotRecovery::open_at(directory)
+        .map(|_| ())
+        .map_err(|error| format!("recovery service is not usable: {error}"))
+}
+
 fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
     let session = empty_session();
     *state.last_saved.borrow_mut() = session.document.clone();
@@ -1123,38 +1184,32 @@ fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
 fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
-            let is_pptx = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("pptx"))
-                .unwrap_or(false);
-            if is_pptx {
-                match std::fs::read(&path) {
-                    Ok(bytes) => {
-                        let warnings = inspect_pptx_unsupported(&bytes).unwrap_or_default();
-                        match import_pptx(&bytes).map(PresentationSession::new) {
-                            Ok(session) => {
-                                if !warnings.is_empty() {
-                                    let msg = format!(
-                                        "This PowerPoint presentation contains elements that Loom Present cannot fully edit:\n\n• {}\n\nDo you want to continue importing?",
-                                        warnings.join("\n• ")
-                                    );
-                                    app.set_pptx_import_warning_message(msg.into());
-                                    table_actions::PENDING_PPTX_IMPORT.with(|p| {
-                                        *p.borrow_mut() = Some(table_actions::PendingPptxImport {
-                                            path: path.clone(),
-                                            session,
-                                        });
-                                    });
-                                    app.set_pptx_import_warning_open(true);
-                                    set_status(app, "Review the PowerPoint import warning before replacing this deck");
-                                } else {
-                                    replace_opened_deck(app, state, path.clone(), session);
-                                    set_status(app, format!("Opened {}", path.display()));
-                                }
-                            }
-                            Err(error) => set_status(app, format!("Open failed: {error}")),
-                        }
+            if pptx_import::is_pptx_path(&path) {
+                match pptx_import::prepare(&path) {
+                    Ok(candidate) if !candidate.warnings.is_empty() => {
+                        app.set_pptx_import_warning_message(
+                            pptx_import::warning_message(&candidate.warnings).into(),
+                        );
+                        table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+                            *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
+                                path: candidate.path,
+                                session: candidate.session,
+                                warnings: candidate.warnings,
+                                kept: None,
+                                preserved_path: None,
+                                cancel_must_checkpoint_visible_session: false,
+                            });
+                        });
+                        recovery_deferred::hold_for_import_warning();
+                        app.set_pptx_import_warning_open(true);
+                        set_status(
+                            app,
+                            "Review the PowerPoint import warning before replacing this deck",
+                        );
+                    }
+                    Ok(candidate) => {
+                        replace_opened_deck(app, state, candidate.path.clone(), candidate.session);
+                        set_status(app, format!("Opened {}", candidate.path.display()));
                     }
                     Err(error) => set_status(app, format!("Open failed: {error}")),
                 }
@@ -1605,10 +1660,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let mut startup =
         startup_recovery::startup_sessions(recovered.as_deref(), initial_path.as_deref())?;
+    let pending_import = startup.pending_import.take();
+    let deferred_kept = if pending_import.is_some() {
+        startup.kept.take()
+    } else {
+        None
+    };
     // A draft of another file is written to a file of its own before recovery is
-    // reset, so opening this file never loses it.
-    let kept = match startup.kept.take() {
-        Some(kept) => {
+    // reset, so opening this file never loses it. A warned import waits for the
+    // user's choice before either step.
+    let kept = match (pending_import.is_none(), startup.kept.take()) {
+        (true, Some(kept)) => {
             let directory = startup_recovery::kept_drafts_directory()?;
             let path = startup_recovery::write_kept_draft(
                 &directory,
@@ -1618,7 +1680,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             reset_recovery_store()?;
             Some((kept.name, path))
         }
-        None => None,
+        _ => None,
     };
     let (initial, saved_baseline) = (startup.session, startup.baseline);
     let deck_filter =
@@ -1665,7 +1727,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     wire_palette(&app);
-    refresh(&app, &state);
     match (kept, startup.restored) {
         (Some((name, path)), _) => set_status(
             &app,
@@ -1674,6 +1735,27 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         (None, Some(name)) => set_status(&app, format!("Restored unsaved changes to {name}")),
         (None, None) => {}
     }
+    if let Some(candidate) = pending_import {
+        let warnings = candidate.warnings.clone();
+        app.set_pptx_import_warning_message(pptx_import::warning_message(&warnings).into());
+        table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+            *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
+                path: candidate.path,
+                session: candidate.session,
+                warnings,
+                kept: deferred_kept,
+                preserved_path: None,
+                cancel_must_checkpoint_visible_session: false,
+            });
+        });
+        recovery_deferred::hold_for_import_warning();
+        app.set_pptx_import_warning_open(true);
+        set_status(
+            &app,
+            "Review the PowerPoint import warning before replacing this deck",
+        );
+    }
+    refresh(&app, &state);
     if args.theme_chooser {
         app.set_theme_chooser_open(true);
     }
@@ -1691,7 +1773,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 /// The slide editor takes keyboard focus once the window exists, unless a
 /// startup overlay owns it, so arrows, Delete and Ctrl+Z work without a click.
 fn focus_editor_at_launch(app: &PresentApp) {
-    if !(app.get_theme_chooser_open() || app.get_palette_open() || app.get_save_changes_open()) {
+    if !(app.get_theme_chooser_open()
+        || app.get_palette_open()
+        || app.get_save_changes_open()
+        || app.get_pptx_import_warning_open())
+    {
         app.invoke_focus_editor();
     }
 }
@@ -1753,6 +1839,9 @@ fn build_present_menu_bar() -> MenuBar {
 }
 
 fn dispatch_command(app: &PresentApp, id: &str) -> bool {
+    if app.get_pptx_import_warning_open() {
+        return is_present_menu_command(id);
+    }
     match id {
         "file.new" => app.invoke_new_deck(),
         "file.new_sample" => app.invoke_new_sample_deck(),
@@ -1839,15 +1928,19 @@ fn schedule_menu_action(
     let error_id = id.clone();
     app_ref
         .upgrade_in_event_loop(move |app| {
-            if !dispatch_command(&app, &id) {
-                set_status(&app, format!("Unsupported menu command: {id}"));
-            }
+            dispatch_scheduled_menu_action(&app, &id);
         })
         .map_err(|error| {
             DesktopError::InvalidRequest(format!(
                 "failed to schedule Present menu command {error_id}: {error}"
             ))
         })
+}
+
+fn dispatch_scheduled_menu_action(app: &PresentApp, id: &str) {
+    if !dispatch_command(app, id) {
+        set_status(app, format!("Unsupported menu command: {id}"));
+    }
 }
 
 /// Closing with unsaved work asks first, through the same Save / Discard /
@@ -1858,6 +1951,9 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
     let app_ref = app.as_weak();
     app.window().on_close_requested(move || {
         if let Some(app) = app_ref.upgrade() {
+            if close_blocked_by_pending_import_recovery(&app) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
             if request_deck_replacement(&app, &state, PendingReplacement::CloseWindow) {
                 return slint::CloseRequestResponse::KeepWindowShown;
             }
@@ -1867,6 +1963,24 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
         end_session_recovery();
         slint::CloseRequestResponse::HideWindow
     });
+}
+
+/// A failed import acceptance may already be present in the recovery journal.
+/// Keep the window available until Cancel restores coverage for the visible deck
+/// or Continue successfully accepts the candidate.
+fn close_blocked_by_pending_import_recovery(app: &PresentApp) -> bool {
+    let must_resolve = table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|pending| pending.cancel_must_checkpoint_visible_session)
+    });
+    if must_resolve {
+        set_status(
+            app,
+            "Cannot close yet: import recovery is incomplete. Choose Cancel to keep this presentation or Continue to retry.",
+        );
+    }
+    must_resolve
 }
 
 /// Empties the recovery store and opens it again, so this session records from an
@@ -1884,6 +1998,9 @@ fn reset_recovery_store() -> Result<(), String> {
 /// deck is not offered again. A crash never reaches here, so it stays recoverable.
 fn end_session_recovery() {
     recovery_deferred::invalidate();
+    if table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()) {
+        return;
+    }
     let cleared = PRESENT_RECOVERY.with(|slot| match slot.borrow_mut().take() {
         Some(recovery) => recovery.clear().map_err(|error| error.to_string()),
         None => Ok(()),
@@ -1902,6 +2019,9 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
         }
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
         Some(PendingReplacement::CloseWindow) => {
+            if close_blocked_by_pending_import_recovery(app) {
+                return;
+            }
             presenter::close();
             end_session_recovery();
             let _ = slint::ComponentHandle::hide(app);
@@ -3005,6 +3125,7 @@ mod model_sync;
 mod object_parts;
 mod palette_rank;
 mod picture_view;
+mod pptx_import;
 mod presenter;
 mod presenter_thumbs;
 mod recovery_deferred;
@@ -3024,6 +3145,8 @@ mod startup_recovery_tests;
 mod table_actions;
 #[cfg(test)]
 mod template_chooser_tests;
+#[cfg(test)]
+mod test_environment;
 mod view_state;
 mod window_chrome;
 
