@@ -8,7 +8,7 @@ Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workb
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes (`cargo test --workspace`; the ledger records 440 app tests and 250 core tests on 2026-10-07; not re-run while writing this README).
+- **[tests]** covered by an automated test that passes. The latest full workspace run recorded in the ledger (2026-10-20) passed 561 app tests and 298 core tests; two interop fixtures were ignored. See `.work/production-20261018/sheets-d5-final-workspace-tests-20261020.log`.
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 
