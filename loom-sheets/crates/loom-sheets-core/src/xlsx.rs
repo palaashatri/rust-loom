@@ -35,9 +35,59 @@ const EMU_PER_PIXEL: f32 = 9_525.0;
 mod tests {
     use super::*;
     use crate::style::{CellAlignment, FillColor};
-    use crate::{CellRef, ChartKind, Sheet, SheetChart, SheetObject};
+    use crate::{CalcError, CellRef, ChartKind, Sheet, SheetChart, SheetObject, Value};
     use loom_package::zip::PackageArchive;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn circular_and_generic_reference_errors_keep_ref_xlsx_compatibility() {
+        let mut sheet = Sheet::new("Errors");
+        sheet.set_str("A1", "=B1");
+        sheet.set_str("B1", "=A1");
+        sheet.set_str("C1", "=#REF!");
+        sheet.set_str("D1", "=Missing!A1");
+        sheet.set_str("E1", "#REF!");
+
+        let values = crate::workbook::evaluate_workbook(std::slice::from_ref(&sheet));
+        assert_eq!(
+            values[0].get(&CellRef::parse("A1").unwrap()),
+            Some(&Value::Error(CalcError::Circular))
+        );
+        assert_eq!(
+            values[0].get(&CellRef::parse("D1").unwrap()),
+            Some(&Value::Error(CalcError::Ref))
+        );
+        assert_eq!(
+            values[0].get(&CellRef::parse("C1").unwrap()),
+            Some(&Value::Error(CalcError::Ref))
+        );
+
+        let bytes = export_xlsx_sheets(&[sheet]).expect("cycle export");
+        let archive = PackageArchive::from_bytes(&bytes).expect("cycle package");
+        let worksheet = String::from_utf8_lossy(
+            archive
+                .get("xl/worksheets/sheet1.xml")
+                .expect("worksheet XML"),
+        );
+        let shared_strings =
+            String::from_utf8_lossy(archive.get("xl/sharedStrings.xml").expect("shared strings"));
+        assert!(
+            worksheet.contains("<c r=\"C1\" t=\"e\"><f>#REF!</f><v>#REF!</v></c>"),
+            "formula #REF! cell serialization: {worksheet}"
+        );
+        assert!(
+            worksheet.contains("<c r=\"E1\" t=\"s\"><v>0</v></c>"),
+            "literal #REF! cell serialization: {worksheet}"
+        );
+        assert!(
+            shared_strings.contains("<si><t xml:space=\"preserve\">#REF!</t></si>"),
+            "literal #REF! raw text preservation: {shared_strings}"
+        );
+        for (cell, formula) in [("A1", "B1"), ("B1", "A1"), ("D1", "Missing!A1")] {
+            let exported = format!("<c r=\"{cell}\" t=\"e\"><f>{formula}</f><v>#REF!</v></c>");
+            assert!(worksheet.contains(&exported), "{cell}: {worksheet}");
+        }
+    }
 
     #[test]
     fn rich_xlsx_roundtrip_preserves_styles_charts_and_embedded_images() {

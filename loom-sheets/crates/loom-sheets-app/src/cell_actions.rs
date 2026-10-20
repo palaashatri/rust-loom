@@ -4,15 +4,44 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use loom_desktop::NativeMenuBar;
-use loom_sheets_core::{CellRange, CellRef};
+use loom_sheets_core::{CalcError, CellRange, CellRef, Value};
 use slint::{ComponentHandle, SharedString};
 
 use crate::workbook_worker::CellUpdate;
 use crate::{
-    apply_sheet, commit_formula_edit, evaluate, fill_selection_down, fill_target_range,
-    project_current, selection_from_app, sync_menu_state, update_selection_range, GridSelection,
-    GuiState, SheetsApp,
+    apply_sheet, commit_formula_edit, evaluate, evaluate_current, fill_selection_down,
+    fill_target_range, project_current, selection_from_app, sync_menu_state,
+    update_selection_range, GridSelection, GuiState, SheetsApp,
 };
+
+pub(crate) struct CellFeedback {
+    pub(crate) message: String,
+    pub(crate) circular: bool,
+}
+
+fn displayed_top_left(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Array(values, _, _) => values.first().and_then(displayed_top_left),
+        value => Some(value),
+    }
+}
+
+pub(crate) fn cell_feedback(cell: CellRef, value: Option<&Value>) -> CellFeedback {
+    match value.and_then(displayed_top_left) {
+        Some(Value::Error(CalcError::Circular)) => CellFeedback {
+            message: format!("Circular reference in {}: #REF!", cell.to_a1()),
+            circular: true,
+        },
+        Some(Value::Error(error)) => CellFeedback {
+            message: format!("Formula error in {}: #{}", cell.to_a1(), error.code()),
+            circular: false,
+        },
+        _ => CellFeedback {
+            message: format!("Cell {} updated", cell.to_a1()),
+            circular: false,
+        },
+    }
+}
 
 pub(crate) fn register_cell_edit_action(
     app: &SheetsApp,
@@ -78,14 +107,10 @@ pub(crate) fn register_cell_edit_action(
                     } else {
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
-                        let feedback = match evaluate(&state.current.borrow()).get(&cell) {
-                            Some(loom_sheets_core::Value::Error(error)) => {
-                                format!("Formula error in {}: #{}", cell.to_a1(), error.code())
-                            }
-                            _ => format!("Cell {} updated", cell.to_a1()),
-                        };
-                        app.set_formula_feedback(SharedString::from(feedback.clone()));
-                        app.set_status_left(SharedString::from(feedback));
+                        let values = evaluate_current(&state);
+                        let feedback = cell_feedback(cell, values.get(&cell));
+                        app.set_formula_feedback(SharedString::from(feedback.message.clone()));
+                        app.set_status_left(SharedString::from(feedback.message));
                     }
                 }
             }

@@ -87,6 +87,12 @@ pub(super) fn is_plausible_formula(raw: &str) -> bool {
     if body.is_empty() {
         return false;
     }
+    if matches!(
+        body,
+        "#DIV/0!" | "#N/A" | "#VALUE!" | "#NAME?" | "#REF!" | "#NUM!"
+    ) {
+        return true;
+    }
     let mut depth = 0i32;
     let mut quote: Option<char> = None;
     let mut last = ' ';
@@ -320,6 +326,16 @@ fn prefix_future_functions(formula: &str) -> String {
 mod tests {
     use super::*;
     use crate::xlsx::formula_import::{loom_formula, DefinedNames};
+
+    #[test]
+    fn error_literal_formulas_are_plausible_for_xlsx_export() {
+        for formula in [
+            "=#DIV/0!", "=#N/A", "=#VALUE!", "=#NAME?", "=#REF!", "=#NUM!",
+        ] {
+            assert!(is_plausible_formula(formula), "{formula}");
+        }
+        assert!(!is_plausible_formula("=#REF!+"));
+    }
 
     #[test]
     fn future_functions_get_their_prefix_outside_text() {

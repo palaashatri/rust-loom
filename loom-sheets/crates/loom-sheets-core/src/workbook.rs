@@ -135,7 +135,10 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
                         continue;
                     }
                     if !visiting.insert(node) {
-                        results[node.0].insert(node.1, Value::Error(CalcError::Ref));
+                        // A DFS back-edge is proof that this formula belongs
+                        // to a dependency cycle. Its dependents will propagate
+                        // the same error through normal evaluation.
+                        results[node.0].insert(node.1, Value::Error(CalcError::Circular));
                         evaluated.insert(node);
                         continue;
                     }
@@ -699,18 +702,42 @@ mod tests {
     }
 
     #[test]
-    fn cross_sheet_cycles_become_ref_errors() {
+    fn cross_sheet_cycles_are_circular_and_keep_ref_display() {
         let mut first = Sheet::new("First");
         first.set_str("A1", "=Second!A1+1");
+        first.set_str("B1", "=A1+1");
         let mut second = Sheet::new("Second");
         second.set_str("A1", "=First!A1+1");
         let evaluated = evaluate_workbook(&[first, second]);
         assert_eq!(
             evaluated[0].get(&CellRef::parse("A1").unwrap()),
-            Some(&Value::Error(CalcError::Ref))
+            Some(&Value::Error(CalcError::Circular))
+        );
+        assert_eq!(
+            evaluated[0].get(&CellRef::parse("B1").unwrap()),
+            Some(&Value::Error(CalcError::Circular))
         );
         assert_eq!(
             evaluated[1].get(&CellRef::parse("A1").unwrap()),
+            Some(&Value::Error(CalcError::Circular))
+        );
+        assert_eq!(
+            evaluated[0][&CellRef::parse("A1").unwrap()].display(),
+            "#REF!"
+        );
+        assert_eq!(
+            evaluated[0][&CellRef::parse("B1").unwrap()].display(),
+            "#REF!"
+        );
+    }
+
+    #[test]
+    fn unresolved_sheet_reference_stays_a_generic_ref_error() {
+        let mut sheet = Sheet::new("First");
+        sheet.set_str("A1", "=Missing!A1");
+        let evaluated = evaluate_workbook(&[sheet]);
+        assert_eq!(
+            evaluated[0].get(&CellRef::parse("A1").unwrap()),
             Some(&Value::Error(CalcError::Ref))
         );
     }

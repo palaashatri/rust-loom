@@ -26,8 +26,8 @@ Evidence tags used below:
 
 ### Grid, selection and editing
 - Growing sheet (up to 1,048,576 rows by 16,384 columns), pinned headers, text overflowing into empty neighbours, numbers shrunk (fewer decimals, scientific, `####`) rather than cut off. [tests] [live-W]
-- Mouse: click, drag a range, Shift-click, click a column or row header, the select-all corner, drag a header edge to resize (one undo step), double-click an edge to autofit, double-click a cell to edit, name box (`D50`, `B2:C3`), wheel scrolling, auto-scroll when dragging past the edge. [tests] [live-W]
-- Keyboard: arrows, Shift+arrows, Tab / Shift+Tab, Enter, Page Up/Down, Home, Ctrl+Home/End, Ctrl+Arrow data-edge jumps (with Shift to extend), Ctrl+A. Typing starts an edit. After a run of Tab-then-Enter the cursor returns to the column where the run began. [tests] [live-W]
+- Mouse: click, drag a range, Shift-click, click a column or row header, the select-all corner, drag a header edge to resize (one undo step), double-click an edge to autofit, double-click a cell to edit, name box (`D50`, `B2:C3`), wheel scrolling, auto-scroll when dragging past the edge. [tests] Native Windows checks cover basic selection/editing; autofit and drag auto-scroll need their own native checks.
+- Keyboard: arrows, Shift+arrows, Tab / Shift+Tab, Enter, Page Up/Down, Home, Ctrl+Home/End, Ctrl+Arrow data-edge jumps (with Shift to extend), Ctrl+A. Typing starts an edit. After a run of Tab-then-Enter the cursor returns to the column where the run began. [tests] Ctrl+Arrow has an earlier live Windows check and current workspace tests; the complete keyboard matrix remains open.
 - Formula bar with an in-cell mirror; Enter commits and moves down, Tab commits and moves right, Escape cancels. Quick SUM/AVG/COUNT formulas and the status-bar SUM/AVG/COUNT for a selection. [tests] [live-W]
 - Copy, cut and paste through the real system clipboard (tab-separated text, plus an HTML table and Loom's own table format). A paste inside Sheets, or from a Writer/Present/web table, brings the cell formats (bold, italic, underline, text colour, fill, alignment, wrap) with the values as one undo step; plain text from another program leaves the target's formatting alone. [tests] Formulas keep their references shifted when pasted inside Sheets; text from other programs pastes as cells; one copied cell fills a selection. Fill down. [tests] [live-W]
 - Undo and redo for every edit, including formatting, sorting, row/column changes, sheet operations, objects and gestures. [tests] [live-W]
@@ -36,7 +36,7 @@ Evidence tags used below:
 - Zoom 50% to 300%. [tests]
 
 ### Formulas
-- More than 100 Excel-compatible functions: math, statistics (including `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `RANK.EQ`, `STDEV.S`), text, logic (`IFS`, `SWITCH`, `XOR`, `IFNA`, `IS*`), lookup (`VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`), dates, finance (`PMT`, `FV`, `PV`, `NPV`, `IRR`, `NPER`, `RATE`) and dynamic arrays (`FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TRANSPOSE`). Operators `+ - * / ^ & %` and comparisons use Excel precedence; cross-sheet and absolute references work; a circular reference shows `#REF!` without a message. [tests]
+- Functions include math, statistics (including `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `RANK.EQ`, `STDEV.S`), text, logic (`IF`, `IFERROR`, `IFS`, `SWITCH`, `XOR`, `IFNA`, `IS*`), lookup (`VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`), dates, finance (`PMT`, `FV`, `PV`, `NPV`, `NPER`, `RATE`, `IRR`) and dynamic arrays (`FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TRANSPOSE`). Operators `+ - * / ^ & %` and comparisons use Excel precedence; cross-sheet and absolute references work. Known circular references return `#REF!` and identify the formula cell in the status bar. Formula-engine parity, including conditional/circular dependency edge cases, remains open. [tests] [live-W]
 - A differential test compares 2,072 formulas against results produced by real Microsoft Excel 16 (`tests/fixtures/excel_corpus.json`). There are zero unexplained mismatches and 38 allow-listed differences, listed in `tests/excel_differential.rs` (locale-dependent text parsing, fraction formats, omitted arguments, whole-column references such as `A:C`, the space intersection operator, a few rare lookup modes). [tests]
 
 ### Formatting, charts and objects
@@ -88,6 +88,8 @@ Menu mnemonics are the first letter of each menu not already used; Sheets has Fi
 
 ## Known limitations
 
+- Open native QA findings include rapid-resize instability after Open, a blank strip after fast scrolling, doubled gridlines under wrapped rows, and dense-sheet scrolling below the frame-rate budget. Empty-reference display and chart redo require native rechecks after their source repairs. The Slint private `paint` warning remains.
+- After the Alt+Space system-menu Size route, native QA observed grid characters being ignored until Alt was tapped. Retained modifier state is a hypothesis; the actual event/physical-input cause is unverified.
 - No pivot tables (only the formula-backed summaries above); PivotTables in an XLSX import arrive as cached cells.
 - XLSX export writes one chart series per chart at a fixed anchor. Import warns about, and drops or approximates, everything in the warning list above (for example merged cells, comments, fonts and text colours, extra chart series). Only one set of exported files was checked in Excel 16; import was checked on Excel-authored fixtures, not a wide corpus.
 - Formulas outside the Excel corpus, fraction formats, omitted arguments, whole-column references and the space intersection operator are not supported or differ (see the 38 allow-listed differences).

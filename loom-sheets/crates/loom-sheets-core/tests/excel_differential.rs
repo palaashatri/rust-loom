@@ -59,7 +59,7 @@ fn error_code(e: CalcError) -> &'static str {
         CalcError::NA => "#N/A",
         CalcError::Value => "#VALUE!",
         CalcError::Name => "#NAME?",
-        CalcError::Ref => "#REF!",
+        CalcError::Ref | CalcError::Circular => "#REF!",
         CalcError::Num => "#NUM!",
         CalcError::Spill => "#SPILL!",
         CalcError::Calc => "#CALC!",

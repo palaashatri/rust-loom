@@ -1,4 +1,83 @@
 use super::*;
+use slint::platform::{Key, PointerEventButton, WindowEvent};
+use slint::SharedString;
+
+fn render_worker_test_window(app: &SheetsApp) {
+    let _ = loom_test_support::capture::snapshot_component(app, 1280.0, 800.0, 1.0)
+        .expect("render worker test window");
+}
+
+fn click_worker_test_point(app: &SheetsApp, point: slint::LogicalPosition) {
+    let window = app.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position: point });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    render_worker_test_window(app);
+}
+
+fn click_worker_test_grid_cell(app: &SheetsApp, column_label: &str, row_label: &str) {
+    let column =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(app, column_label)
+            .next()
+            .expect("column header");
+    let row = i_slint_backend_testing::ElementHandle::find_by_accessible_label(app, row_label)
+        .next()
+        .expect("row header");
+    let (column_position, column_size) = (column.absolute_position(), column.size());
+    let (row_position, row_size) = (row.absolute_position(), row.size());
+    click_worker_test_point(
+        app,
+        slint::LogicalPosition::new(
+            column_position.x + column_size.width / 2.0,
+            row_position.y + row_size.height / 2.0,
+        ),
+    );
+}
+
+fn click_worker_test_element(app: &SheetsApp, accessible_label: &str) {
+    let element =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(app, accessible_label)
+            .next()
+            .expect("accessible element");
+    let (position, size) = (element.absolute_position(), element.size());
+    click_worker_test_point(
+        app,
+        slint::LogicalPosition::new(
+            position.x + size.width / 2.0,
+            position.y + size.height / 2.0,
+        ),
+    );
+}
+
+fn tap_worker_test_key(app: &SheetsApp, text: impl Into<SharedString>) {
+    let text = text.into();
+    let window = app.window();
+    window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+    window.dispatch_event(WindowEvent::KeyReleased { text });
+    render_worker_test_window(app);
+}
+
+fn commit_worker_test_formula_with_return(
+    app: &SheetsApp,
+    column_label: &str,
+    cell_address: &str,
+    formula: &str,
+) {
+    click_worker_test_grid_cell(app, column_label, "Row 2");
+    assert_eq!(app.get_selected_cell().as_str(), cell_address);
+    click_worker_test_element(app, "Formula bar");
+    for character in formula.chars() {
+        tap_worker_test_key(app, character.to_string());
+    }
+    assert_eq!(app.get_formula_edit_buffer().as_str(), formula);
+    tap_worker_test_key(app, SharedString::from(Key::Return));
+}
 
 #[test]
 fn sheet_mutations_are_sent_to_the_background_workbook_worker() {
@@ -143,6 +222,89 @@ fn worker_result_rejects_old_revisions_and_other_tabs_without_changing_draft() {
     drop(app);
     drop(state);
     crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+}
+
+#[test]
+fn stale_and_wrong_tab_circular_worker_results_preserve_feedback() {
+    set_platform();
+    let recovery_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-cell-worker-circular-feedback-guards-{}",
+        std::process::id()
+    ));
+    struct RecoveryDataGuard(std::path::PathBuf);
+    impl Drop for RecoveryDataGuard {
+        fn drop(&mut self) {
+            crate::cell_edit_recovery::remove_test_recovery_data(&self.0);
+        }
+    }
+    let _recovery_data = RecoveryDataGuard(recovery_dir.clone());
+
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    state.current.borrow_mut().set_str("A1", "=Report!A1");
+    state
+        .sheets
+        .borrow_mut()
+        .get_mut(1)
+        .expect("stored sibling tab")
+        .set_str("A1", "=Data!A1");
+    assert_eq!(
+        attach_test_worker(&app, &state, "circular-feedback-guards"),
+        recovery_dir
+    );
+
+    let circular_result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(state.worker_revision.get())
+        .expect("worker result for cross-tab cycle");
+    let cell = CellRef::parse("A1").unwrap();
+    assert_eq!(circular_result.active_sheet, 0);
+    assert_eq!(
+        circular_result.values.get(&cell),
+        Some(&Value::Error(loom_sheets_core::CalcError::Circular))
+    );
+
+    let stale_revision = circular_result.revision;
+    let latest_revision = state.next_worker_revision();
+    state.pending_cell_commit.set(Some((latest_revision, cell)));
+    app.set_formula_feedback("Calculating…".into());
+    app.set_status_left("Calculating…".into());
+    let mut stale_result = circular_result.clone();
+    stale_result.revision = stale_revision;
+    assert!(!apply_workbook_worker_result(&app, &state, stale_result));
+    assert_eq!(app.get_formula_feedback().as_str(), "Calculating…");
+    assert_eq!(app.get_status_left().as_str(), "Calculating…");
+    assert_eq!(
+        state.pending_cell_commit.get(),
+        Some((latest_revision, cell))
+    );
+
+    let current_revision = state.worker_revision.get();
+    state
+        .pending_cell_commit
+        .set(Some((current_revision, cell)));
+    app.set_formula_feedback("Calculating…".into());
+    app.set_status_left("Calculating…".into());
+    let mut wrong_tab_result = circular_result;
+    wrong_tab_result.revision = current_revision;
+    wrong_tab_result.active_sheet = 1;
+    assert!(!apply_workbook_worker_result(
+        &app,
+        &state,
+        wrong_tab_result
+    ));
+    assert_eq!(app.get_formula_feedback().as_str(), "Calculating…");
+    assert_eq!(app.get_status_left().as_str(), "Calculating…");
+    assert_eq!(
+        state.pending_cell_commit.get(),
+        Some((current_revision, cell))
+    );
+
+    drop(app);
+    drop(state);
 }
 
 #[test]
@@ -294,4 +456,86 @@ fn formula_bar_commit_sends_a_cell_delta_and_keeps_old_values_until_result() {
     drop(app);
     drop(state);
     crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+}
+
+#[test]
+fn circular_reference_worker_result_keeps_ref_values_and_shows_polite_feedback() {
+    set_platform();
+    let recovery_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-cell-worker-circular-reference-feedback-{}",
+        std::process::id()
+    ));
+    struct RecoveryDataGuard(std::path::PathBuf);
+    impl Drop for RecoveryDataGuard {
+        fn drop(&mut self) {
+            crate::cell_edit_recovery::remove_test_recovery_data(&self.0);
+        }
+    }
+    let _recovery_data = RecoveryDataGuard(recovery_dir.clone());
+    let s = keyboard_flow_tests::launched(&[]);
+    assert_eq!(
+        attach_test_worker(&s.app, &s.state, "circular-reference-feedback"),
+        recovery_dir
+    );
+
+    commit_worker_test_formula_with_return(&s.app, "Column F", "F2", "=G2");
+    assert_eq!(s.app.get_selected_cell().as_str(), "F3");
+    let first_revision = s.state.worker_revision.get();
+    let first_result = s
+        .state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(first_revision)
+        .expect("worker result for F2");
+    assert!(apply_workbook_worker_result(&s.app, &s.state, first_result));
+
+    commit_worker_test_formula_with_return(&s.app, "Column G", "G2", "=F2");
+    assert_eq!(s.app.get_selected_cell().as_str(), "G3");
+    // The user can begin the next cell while the worker result is pending. The
+    // result must preserve this in-progress formula draft.
+    for character in "draft".chars() {
+        tap_worker_test_key(&s.app, character.to_string());
+    }
+    assert!(s.app.get_is_editing());
+    assert_eq!(s.app.get_formula_edit_buffer().as_str(), "draft");
+
+    let second_revision = s.state.worker_revision.get();
+    let second_result = s
+        .state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(second_revision)
+        .expect("worker result for G2");
+    assert_eq!(second_result.revision, second_revision);
+    for cell in [CellRef::parse("F2").unwrap(), CellRef::parse("G2").unwrap()] {
+        let value = second_result
+            .values
+            .get(&cell)
+            .expect("cycle result exists");
+        assert_eq!(value, &Value::Error(loom_sheets_core::CalcError::Circular));
+        assert!(matches!(value, Value::Error(error) if error.code() == "REF!"));
+        assert_eq!(value.display(), "#REF!");
+    }
+    assert!(apply_workbook_worker_result(
+        &s.app,
+        &s.state,
+        second_result
+    ));
+
+    let expected_message = "Circular reference in G2: #REF!";
+    assert_eq!(s.app.get_status_left().as_str(), expected_message);
+    assert_eq!(s.app.get_formula_edit_buffer().as_str(), "draft");
+    assert!(s.app.get_is_editing());
+    let messages: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&s.app, expected_message)
+            .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].accessible_live_region(),
+        Some(i_slint_backend_testing::AccessibleLiveness::Polite)
+    );
 }

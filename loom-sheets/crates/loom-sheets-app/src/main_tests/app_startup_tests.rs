@@ -206,6 +206,192 @@ fn formula_errors_are_visible_in_a_polite_live_region() {
 }
 
 #[test]
+fn circular_reference_feedback_is_visible_in_a_polite_live_region() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+
+    app.set_selected_cell("F2".into());
+    app.invoke_commit_selected_cell("=G2".into());
+    app.set_selected_cell("G2".into());
+    app.invoke_commit_selected_cell("=F2".into());
+
+    let expected_message = "Circular reference in G2: #REF!";
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+
+    let values = evaluate(&state.current.borrow());
+    for cell in [CellRef::parse("F2").unwrap(), CellRef::parse("G2").unwrap()] {
+        let value = values.get(&cell).expect("cycle result exists");
+        assert_eq!(value, &Value::Error(loom_sheets_core::CalcError::Circular));
+        assert!(matches!(value, Value::Error(error) if error.code() == "REF!"));
+        assert_eq!(value.display(), "#REF!");
+    }
+
+    let messages: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, expected_message)
+            .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].accessible_live_region(),
+        Some(i_slint_backend_testing::AccessibleLiveness::Polite)
+    );
+}
+
+#[test]
+fn dependent_on_circular_reference_gets_circular_feedback() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+
+    app.set_selected_cell("F2".into());
+    app.invoke_commit_selected_cell("=G2".into());
+    app.set_selected_cell("G2".into());
+    app.invoke_commit_selected_cell("=F2".into());
+    app.set_selected_cell("H2".into());
+    app.invoke_commit_selected_cell("=HSTACK(F2,G2)".into());
+
+    let expected_message = "Circular reference in H2: #REF!";
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    let values = evaluate(&state.current.borrow());
+    let value = values
+        .get(&CellRef::parse("H2").unwrap())
+        .expect("dependent result exists");
+    assert_eq!(
+        value,
+        &Value::Array(
+            vec![
+                Value::Error(loom_sheets_core::CalcError::Circular),
+                Value::Error(loom_sheets_core::CalcError::Circular),
+            ],
+            1,
+            2,
+        )
+    );
+    assert_eq!(value.display(), "#REF!");
+
+    let messages: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, expected_message)
+            .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].accessible_live_region(),
+        Some(i_slint_backend_testing::AccessibleLiveness::Polite)
+    );
+}
+
+#[test]
+fn mixed_array_feedback_uses_the_displayed_top_left_reference_error() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+
+    app.set_selected_cell("F2".into());
+    app.invoke_commit_selected_cell("=G2".into());
+    app.set_selected_cell("G2".into());
+    app.invoke_commit_selected_cell("=F2".into());
+    app.set_selected_cell("H3".into());
+    app.invoke_commit_selected_cell("=#REF!".into());
+    app.set_selected_cell("H2".into());
+    app.invoke_commit_selected_cell("=HSTACK(H3,F2)".into());
+
+    let expected_message = "Formula error in H2: #REF!";
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    assert_eq!(app.get_formula_feedback().as_str(), expected_message);
+
+    let values = crate::evaluate_current(&state);
+    let value = values
+        .get(&CellRef::parse("H2").unwrap())
+        .expect("mixed array result exists");
+    assert_eq!(
+        value,
+        &Value::Array(
+            vec![
+                Value::Error(loom_sheets_core::CalcError::Ref),
+                Value::Error(loom_sheets_core::CalcError::Circular),
+            ],
+            1,
+            2,
+        )
+    );
+    assert_eq!(value.display(), "#REF!");
+    assert_eq!(
+        values.get(&CellRef::parse("I2").unwrap()),
+        Some(&Value::Error(loom_sheets_core::CalcError::Circular))
+    );
+}
+
+#[test]
+fn sibling_tab_cycle_feedback_uses_the_full_workbook_calculation() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    state
+        .sheets
+        .borrow_mut()
+        .get_mut(1)
+        .expect("stored sibling tab")
+        .set_str("A1", "=Data!A1");
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+
+    app.set_selected_cell("A1".into());
+    app.invoke_commit_selected_cell("=Report!A1".into());
+
+    let expected_message = "Circular reference in A1: #REF!";
+    let values = crate::evaluate_current(&state);
+    assert_eq!(
+        values.get(&CellRef::parse("A1").unwrap()),
+        Some(&Value::Error(loom_sheets_core::CalcError::Circular))
+    );
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    let messages: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, expected_message)
+            .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].accessible_live_region(),
+        Some(i_slint_backend_testing::AccessibleLiveness::Polite)
+    );
+}
+
+#[test]
+fn unknown_sheet_reference_keeps_generic_ref_feedback() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+
+    app.set_selected_cell("H2".into());
+    app.invoke_commit_selected_cell("='Missing'!A1".into());
+
+    let expected_message = "Formula error in H2: #REF!";
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    let value = evaluate(&state.current.borrow())
+        .get(&CellRef::parse("H2").unwrap())
+        .cloned()
+        .expect("unknown-sheet result exists");
+    assert_eq!(value, Value::Error(loom_sheets_core::CalcError::Ref));
+    assert_eq!(value.display(), "#REF!");
+
+    app.set_selected_cell("H3".into());
+    app.invoke_commit_selected_cell("=#REF!".into());
+    assert_eq!(app.get_status_left().as_str(), "Formula error in H3: #REF!");
+    let value = evaluate(&state.current.borrow())
+        .get(&CellRef::parse("H3").unwrap())
+        .cloned()
+        .expect("literal error result exists");
+    assert_eq!(value, Value::Error(loom_sheets_core::CalcError::Ref));
+    assert_eq!(value.display(), "#REF!");
+}
+
+#[test]
 fn readonly_save_error_feedback_is_short_and_actionable() {
     assert_eq!(
         save_error_feedback(

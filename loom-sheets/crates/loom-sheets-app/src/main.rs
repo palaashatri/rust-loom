@@ -2110,12 +2110,8 @@ pub(crate) fn apply_workbook_worker_result(
     }
     let pending_cell = state.pending_cell_commit.get();
     let cell_feedback = pending_cell.and_then(|(revision, cell)| {
-        (revision == result.revision).then(|| match result.values.get(&cell) {
-            Some(Value::Error(error)) => {
-                format!("Formula error in {}: #{}", cell.to_a1(), error.code())
-            }
-            _ => format!("Cell {} updated", cell.to_a1()),
-        })
+        (revision == result.revision)
+            .then(|| cell_actions::cell_feedback(cell, result.values.get(&cell)))
     });
     let superseded_pending_cell =
         pending_cell.is_some_and(|(revision, _)| revision < result.revision);
@@ -2162,8 +2158,8 @@ pub(crate) fn apply_workbook_worker_result(
     if worker_failure::has_current_failure(state) {
         state.dirty_content.set(true);
     }
-    if let Some(feedback) = cell_feedback {
-        app.set_formula_feedback(SharedString::from(feedback));
+    if let Some(feedback) = cell_feedback.as_ref() {
+        app.set_formula_feedback(SharedString::from(feedback.message.clone()));
     } else if superseded_pending_cell && app.get_formula_feedback().as_str() == "Calculating…" {
         app.set_formula_feedback("".into());
     }
@@ -2183,7 +2179,11 @@ pub(crate) fn apply_workbook_worker_result(
             });
         }
     } else if app.get_status_left().as_str() == "Calculating…" {
-        app.set_status_left("Ready".into());
+        if let Some(feedback) = cell_feedback.as_ref().filter(|feedback| feedback.circular) {
+            app.set_status_left(SharedString::from(feedback.message.clone()));
+        } else {
+            app.set_status_left("Ready".into());
+        }
     }
     true
 }

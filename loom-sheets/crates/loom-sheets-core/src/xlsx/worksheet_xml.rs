@@ -103,7 +103,7 @@ fn error_literal(error: CalcError) -> &'static str {
         CalcError::NA => "#N/A",
         CalcError::Value => "#VALUE!",
         CalcError::Name | CalcError::Parse => "#NAME?",
-        CalcError::Ref => "#REF!",
+        CalcError::Ref | CalcError::Circular => "#REF!",
         CalcError::Spill => "#SPILL!",
         CalcError::Num => "#NUM!",
         CalcError::Calc => "#CALC!",

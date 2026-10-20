@@ -202,9 +202,37 @@ fn dependency_order_and_cycle() {
     let mut cyc = Sheet::new("c");
     cyc.set_str("A1", "=B1");
     cyc.set_str("B1", "=A1");
+    cyc.set_str("C1", "=A1");
     let vals = evaluate(&cyc);
     assert_eq!(
         vals.get(&CellRef::parse("A1").unwrap()),
+        Some(&Value::Error(CalcError::Circular))
+    );
+    assert_eq!(
+        vals.get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Error(CalcError::Circular))
+    );
+    assert_eq!(
+        vals.get(&CellRef::parse("C1").unwrap()),
+        Some(&Value::Error(CalcError::Circular))
+    );
+    assert_eq!(vals[&CellRef::parse("C1").unwrap()].display(), "#REF!");
+    assert_eq!(CalcError::Circular.code(), CalcError::Ref.code());
+}
+
+#[test]
+fn unresolved_and_literal_ref_values_are_not_circular() {
+    let mut sheet = Sheet::new("references");
+    sheet.set_str("A1", "=Missing!A1");
+    sheet.set_str("B1", "=#REF!");
+
+    let values = evaluate(&sheet);
+    assert_eq!(
+        values.get(&CellRef::parse("A1").unwrap()),
+        Some(&Value::Error(CalcError::Ref))
+    );
+    assert_eq!(
+        values.get(&CellRef::parse("B1").unwrap()),
         Some(&Value::Error(CalcError::Ref))
     );
 }
@@ -381,6 +409,145 @@ fn calculation_cache_recalculates_transitive_dependents() {
         cache.values.get(&CellRef::parse("C1").unwrap()),
         Some(&Value::Number(12.0))
     );
+}
+
+#[test]
+fn calculation_cache_marks_only_cycle_remainder_and_dependents_circular() {
+    let mut sheet = Sheet::new("incremental cycle");
+    sheet.set_str("A1", "=B1");
+    sheet.set_str("B1", "=A1");
+    sheet.set_str("C1", "=A1");
+    sheet.set_str("D1", "=#REF!");
+    sheet.set_str("E1", "=Missing!A1");
+    sheet.set_str("F1", "=Z99");
+    sheet.set_str("G1", "9");
+    sheet.set_str("H1", "=G1");
+
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    let affected = cache.recalculate(
+        &sheet,
+        &[
+            CellRef::parse("A1").unwrap(),
+            CellRef::parse("D1").unwrap(),
+            CellRef::parse("E1").unwrap(),
+            CellRef::parse("F1").unwrap(),
+            CellRef::parse("G1").unwrap(),
+        ],
+    );
+
+    assert!(affected.contains(&CellRef::parse("C1").unwrap()));
+    for cell in ["A1", "B1", "C1"] {
+        assert_eq!(
+            cache.values.get(&CellRef::parse(cell).unwrap()),
+            Some(&Value::Error(CalcError::Circular)),
+            "{cell} is in or depends on the cycle"
+        );
+    }
+    assert_eq!(
+        cache.values.get(&CellRef::parse("D1").unwrap()),
+        Some(&Value::Error(CalcError::Ref))
+    );
+    assert_eq!(
+        cache.values.get(&CellRef::parse("E1").unwrap()),
+        Some(&Value::Error(CalcError::Ref))
+    );
+    assert_eq!(
+        cache.values.get(&CellRef::parse("F1").unwrap()),
+        Some(&Value::Empty)
+    );
+    assert_eq!(
+        cache.values.get(&CellRef::parse("G1").unwrap()),
+        Some(&Value::Number(9.0))
+    );
+    assert_eq!(
+        cache.values.get(&CellRef::parse("H1").unwrap()),
+        Some(&Value::Number(9.0))
+    );
+}
+
+#[test]
+fn calculation_cache_matches_full_evaluation_when_iferror_depends_on_a_cycle() {
+    let mut sheet = Sheet::new("incremental IFERROR cycle");
+    sheet.set_str("A1", "=B1");
+    sheet.set_str("B1", "1");
+    sheet.set_str("C1", "=IFERROR(A1,42)");
+
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    sheet.set_str("B1", "=A1");
+    cache.recalculate(&sheet, &[CellRef::parse("B1").unwrap()]);
+
+    let full = evaluate(&sheet);
+    for cell in ["A1", "B1", "C1"] {
+        let reference = CellRef::parse(cell).unwrap();
+        assert_eq!(
+            cache.values.get(&reference),
+            full.get(&reference),
+            "incremental value for {cell} must match full evaluation"
+        );
+    }
+    assert_eq!(
+        cache.values.get(&CellRef::parse("C1").unwrap()),
+        Some(&Value::Number(42.0))
+    );
+}
+
+#[test]
+fn calculation_cache_evaluates_iferror_inside_a_cycle_like_full_evaluation() {
+    let mut sheet = Sheet::new("incremental IFERROR cycle");
+    sheet.set_str("A1", "=B1");
+    sheet.set_str("B1", "1");
+
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    sheet.set_str("B1", "=IFERROR(A1,42)");
+    cache.recalculate(&sheet, &[CellRef::parse("B1").unwrap()]);
+
+    let full = evaluate(&sheet);
+    for cell in ["A1", "B1"] {
+        let reference = CellRef::parse(cell).unwrap();
+        assert_eq!(
+            cache.values.get(&reference),
+            full.get(&reference),
+            "incremental value for {cell} must match full evaluation"
+        );
+    }
+    assert_eq!(
+        cache.values.get(&CellRef::parse("A1").unwrap()),
+        Some(&Value::Error(CalcError::Circular))
+    );
+    assert_eq!(
+        cache.values.get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(42.0))
+    );
+}
+
+#[test]
+fn calculation_cache_matches_full_evaluation_when_iferror_is_cycle_backedge_target() {
+    let mut sheet = Sheet::new("incremental IFERROR back-edge");
+    sheet.set_str("A1", "1");
+    sheet.set_str("B1", "=A1");
+
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    sheet.set_str("A1", "=IFERROR(B1,42)");
+    cache.recalculate(&sheet, &[CellRef::parse("A1").unwrap()]);
+
+    let full = evaluate(&sheet);
+    for cell in ["A1", "B1"] {
+        let reference = CellRef::parse(cell).unwrap();
+        assert_eq!(
+            cache.values.get(&reference),
+            full.get(&reference),
+            "incremental value for {cell} must match full evaluation"
+        );
+        assert_eq!(
+            cache.values.get(&reference),
+            Some(&Value::Error(CalcError::Circular)),
+            "the full evaluator marks the DFS back-edge target circular"
+        );
+    }
 }
 
 #[test]

@@ -337,8 +337,12 @@ pub enum CalcError {
     Value,
     /// Name not recognized.
     Name,
-    /// Formula references its own cell (cycle).
+    /// Invalid, missing, or otherwise unresolved reference.
     Ref,
+    /// Formula dependency graph contains a circular reference.
+    ///
+    /// This retains the spreadsheet-compatible `#REF!` display and code.
+    Circular,
     /// Spill range blocked by content.
     Spill,
     /// Parse error.
@@ -358,6 +362,7 @@ impl CalcError {
             Self::Value => "VALUE!",
             Self::Name => "NAME?",
             Self::Ref => "REF!",
+            Self::Circular => "REF!",
             Self::Spill => "SPILL!",
             Self::Parse => "PARSE!",
             Self::Num => "NUM!",
@@ -2568,8 +2573,65 @@ impl CalculationCache {
                 progress = true;
             }
         }
-        for cell in remaining {
-            self.values.insert(cell, Value::Error(CalcError::Ref));
+        // Kahn evaluation leaves only cyclic nodes and their dependents. Walk
+        // that remainder in stable order so only a real DFS back-edge is
+        // marked circular; evaluate every other formula on unwind so functions
+        // such as IFERROR can handle errors from the cycle.
+        enum Frame {
+            Expand(CellRef),
+            Evaluate(CellRef),
+        }
+        let mut roots: Vec<CellRef> = remaining.iter().copied().collect();
+        roots.sort();
+        let mut stack: Vec<Frame> = roots.into_iter().rev().map(Frame::Expand).collect();
+        let mut visiting = HashSet::new();
+        let mut evaluated = HashSet::new();
+        while let Some(frame) = stack.pop() {
+            match frame {
+                Frame::Expand(cell) => {
+                    if evaluated.contains(&cell) {
+                        continue;
+                    }
+                    if !visiting.insert(cell) {
+                        self.values.insert(cell, Value::Error(CalcError::Circular));
+                        evaluated.insert(cell);
+                        continue;
+                    }
+                    stack.push(Frame::Evaluate(cell));
+                    if let Some(dependencies) = self.dependencies.get(&cell) {
+                        let mut ordered: Vec<CellRef> = dependencies
+                            .iter()
+                            .copied()
+                            .filter(|dependency| remaining.contains(dependency))
+                            .collect();
+                        ordered.sort();
+                        for dependency in ordered.into_iter().rev() {
+                            stack.push(Frame::Expand(dependency));
+                        }
+                    }
+                }
+                Frame::Evaluate(cell) => {
+                    visiting.remove(&cell);
+                    if evaluated.contains(&cell) {
+                        continue;
+                    }
+                    evaluated.insert(cell);
+                    let value = match sheet.cells.get(&cell) {
+                        None => Value::Empty,
+                        Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
+                        Some(raw) => match parse_formula(raw.raw[1..].trim()) {
+                            Ok(formula) => {
+                                let lookup = |reference: CellRef| {
+                                    self.values.get(&reference).cloned().unwrap_or(Value::Empty)
+                                };
+                                eval_expr(&formula.root, &lookup)
+                            }
+                            Err(error) => Value::Error(error),
+                        },
+                    };
+                    self.values.insert(cell, value);
+                }
+            }
         }
         affected
     }
