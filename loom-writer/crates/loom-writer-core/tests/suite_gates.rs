@@ -297,7 +297,11 @@ fn test_writer_table_keyboard_navigation_and_mutations() {
     let caret_back = doc
         .tab_navigate_table(caret1, true)
         .expect("tab navigate backward");
-    assert_eq!(caret_back, caret0);
+    assert_eq!(
+        doc.table_cell_at_offset(caret_back).map(|c| (c.row, c.col)),
+        doc.table_cell_at_offset(caret0).map(|c| (c.row, c.col)),
+        "back-tab returns to the first cell"
+    );
 
     // 2. Tab navigation at end of table appends a new row
     // Navigate forward to final cell

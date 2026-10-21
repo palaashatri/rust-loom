@@ -422,6 +422,21 @@ pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
             .with_description("Insert an image from a file at the caret")
             .with_category("insert")
             .with_order(28),
+        CommandSpec::new("picture.larger", "Make Picture Larger")
+            .with_undo_label("Resize Picture")
+            .with_description("Enlarge the picture at the caret by 25%")
+            .with_category("insert")
+            .with_order(29),
+        CommandSpec::new("picture.smaller", "Make Picture Smaller")
+            .with_undo_label("Resize Picture")
+            .with_description("Shrink the picture at the caret by 20%")
+            .with_category("insert")
+            .with_order(30),
+        CommandSpec::new("picture.reset_size", "Reset Picture Size")
+            .with_undo_label("Resize Picture")
+            .with_description("Return the picture at the caret to its natural size")
+            .with_category("insert")
+            .with_order(31),
         CommandSpec::new("table.insert_row_above", "Insert Row Above")
             .with_undo_label("Insert Row Above")
             .with_description("Insert a new table row above current row")
@@ -499,6 +514,9 @@ pub(crate) fn sync_table_registry_enablement(
         "writer.chart.insert",
         "insert.image",
         "writer.image.insert",
+        "picture.larger",
+        "picture.smaller",
+        "picture.reset_size",
     ] {
         registry.set_enabled(&CommandId::new(id), true);
     }

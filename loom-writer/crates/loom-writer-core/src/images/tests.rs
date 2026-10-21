@@ -338,3 +338,48 @@ fn replace_all_keeps_the_style_of_text_between_the_matches() {
     assert_eq!(italic, vec!["italic"], "the italic word keeps its style");
     assert_eq!(bold, vec!["bold"]);
 }
+
+#[test]
+fn a_picture_scales_keeps_its_ratio_resets_and_takes_alt_text() {
+    let mut doc = document_with_text();
+    let id = doc.insert_image_block(0, picture(40, 20, 3)).unwrap();
+    assert!(doc.scale_image_block(id, 2.0));
+    let size = |d: &WriterDocument| {
+        let i = d
+            .blocks
+            .iter()
+            .find(|b| b.id == id)
+            .unwrap()
+            .image
+            .clone()
+            .unwrap();
+        (i.width_pt, i.height_pt)
+    };
+    assert_eq!(size(&doc), (60.0, 30.0));
+    assert!(doc.scale_image_block(id, 0.0001), "clamped, not refused");
+    let (w, h) = size(&doc);
+    assert!(h >= 15.99 && (w / h - 2.0).abs() < 0.01, "{w} x {h}");
+    assert!(doc.reset_image_block_size(id));
+    assert_eq!(size(&doc), (30.0, 15.0));
+    assert!(!doc.reset_image_block_size(id), "already natural size");
+    assert!(
+        !doc.scale_image_block(1, 2.0),
+        "a paragraph is not a picture"
+    );
+    assert!(doc.set_image_block_alt(id, "  A red square  "));
+    assert!(
+        !doc.set_image_block_alt(id, "   "),
+        "blank alt text is refused"
+    );
+    let saved = crate::save_document(&doc).unwrap();
+    let back = crate::load_document(&saved).unwrap();
+    let image = back
+        .blocks
+        .iter()
+        .find(|b| b.is_image())
+        .unwrap()
+        .image
+        .clone()
+        .unwrap();
+    assert_eq!(image.name, "A red square");
+}

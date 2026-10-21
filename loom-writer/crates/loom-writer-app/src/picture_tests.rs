@@ -157,3 +157,31 @@ fn a_picture_is_not_counted_as_a_paragraph_in_the_status_bar() {
         "{status} should count {text_blocks} paragraphs, not {total_blocks}"
     );
 }
+
+#[test]
+fn picture_commands_resize_the_picture_under_the_caret_and_undo() {
+    let (app, state) = app_choosing(Some(png_file("resize", 240, 120)));
+    app.invoke_insert_image();
+    let width = |state: &GuiState| {
+        state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .find_map(|b| b.image.as_ref().map(|i| i.width_pt))
+            .unwrap()
+    };
+    let natural = width(&state);
+    assert!(crate::dispatch_command(&app, "picture.larger"));
+    assert!((width(&state) - natural * 1.25).abs() < 0.01);
+    assert!(crate::dispatch_command(&app, "picture.smaller"));
+    assert!((width(&state) - natural).abs() < 0.01);
+    assert!(crate::dispatch_command(&app, "picture.larger"));
+    assert!(crate::dispatch_command(&app, "picture.reset_size"));
+    assert!((width(&state) - natural).abs() < 0.01);
+    app.invoke_undo();
+    assert!(
+        (width(&state) - natural * 1.25).abs() < 0.01,
+        "undo restores the larger size"
+    );
+}

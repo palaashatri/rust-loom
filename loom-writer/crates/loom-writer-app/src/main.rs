@@ -499,6 +499,9 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
         "insert.image" | "writer.image.insert" => app.invoke_insert_image(),
+        "picture.larger" | "picture.smaller" | "picture.reset_size" => {
+            picture_actions::dispatch(app, id);
+        }
         "table.insert_row_above" | "writer.table.insert_row_above" => {
             app.invoke_table_action("insert-row-above".into())
         }

@@ -167,6 +167,71 @@ impl RichBlock {
 }
 
 impl WriterDocument {
+    /// Scales the picture in block `id` by `factor` (never below 16 pt or above
+    /// 20,000 pt a side), keeping its aspect ratio. `false` when `id` is not an
+    /// intact picture or nothing changed.
+    pub fn scale_image_block(&mut self, id: u64, factor: f32) -> bool {
+        let Some(block) = self.blocks.iter_mut().find(|b| b.id == id && b.is_image()) else {
+            return false;
+        };
+        let Some(image) = block.image.as_mut() else {
+            return false;
+        };
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        let shortest = image.width_pt.min(image.height_pt).max(1.0);
+        let longest = image.width_pt.max(image.height_pt);
+        let factor = factor.max(16.0 / shortest).min(20_000.0 / longest);
+        let (w, h) = (image.width_pt * factor, image.height_pt * factor);
+        if (w - image.width_pt).abs() < 0.01 && (h - image.height_pt).abs() < 0.01 {
+            return false;
+        }
+        image.width_pt = w;
+        image.height_pt = h;
+        true
+    }
+
+    /// Restores picture `id` to its natural size (96 pixels to the inch).
+    pub fn reset_image_block_size(&mut self, id: u64) -> bool {
+        let Some(image) = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id && b.is_image())
+            .and_then(|b| b.image.as_mut())
+        else {
+            return false;
+        };
+        let (w, h) = (
+            image.width_px as f32 * POINTS_PER_PIXEL,
+            image.height_px as f32 * POINTS_PER_PIXEL,
+        );
+        if (w - image.width_pt).abs() < 0.01 && (h - image.height_pt).abs() < 0.01 {
+            return false;
+        }
+        image.width_pt = w;
+        image.height_pt = h;
+        true
+    }
+
+    /// Sets the alternative text of picture `id`; empty text is refused.
+    pub fn set_image_block_alt(&mut self, id: u64, alt: &str) -> bool {
+        let alt = alt.trim();
+        let Some(image) = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id && b.is_image())
+            .and_then(|b| b.image.as_mut())
+        else {
+            return false;
+        };
+        if alt.is_empty() || image.name == alt {
+            return false;
+        }
+        image.name = alt.to_string();
+        true
+    }
+
     /// Inserts a picture as its own block at `offset` of the editor text and
     /// returns the block id. A paragraph is added after it when it would be
     /// the last block, so typing can continue below the picture.
