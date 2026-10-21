@@ -26,6 +26,9 @@ export struct WriterRenderBlock {
     /// page ink is used.
     has-color: bool,
     color: color,
+    /// True for generated table-cell text, whose High Contrast ink is forced
+    /// to black over the High Contrast-only white cell surface.
+    table-cell: bool,
 }
 
 /// A selection highlight or collapsed caret rectangle projected from the
@@ -63,7 +66,13 @@ export struct WriterTableCellRect {
     bg-color: color,
     has-bg: bool,
     border-color: color,
+    selection-border-color: color,
     border-width: length,
+    selected: bool,
+    /// True for actual table cells; chart surfaces keep their own appearance.
+    table-cell: bool,
+    /// Canonical editor byte offset for a table cell; -1 for non-cell shapes.
+    caret-offset: int,
 }
 
 /// An inline picture placed on the page stack.
@@ -162,9 +171,26 @@ component WriterDocumentEditor inherits Rectangle {
             y: cell.y * root.page-zoom;
             width: max(1px, cell.width * root.page-zoom);
             height: max(1px, cell.height * root.page-zoom);
-            background: cell.has-bg ? cell.bg-color : transparent;
-            border-color: cell.border-color;
+            background: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? Theme.palette().paper
+                : cell.has-bg ? cell.bg-color : transparent;
+            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? Theme.palette().paper-ink
+                : cell.border-color;
             border-width: cell.border-width * root.page-zoom;
+            accessible-role: none;
+        }
+        for cell in root.table-cell-rects : Rectangle {
+            x: cell.x * root.page-zoom;
+            y: cell.y * root.page-zoom;
+            width: max(1px, cell.width * root.page-zoom);
+            height: max(1px, cell.height * root.page-zoom);
+            background: Theme.palette().selection.with-alpha(0.22);
+            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? cell.selection-border-color
+                : Theme.palette().selection;
+            border-width: max(1px, 2px * root.page-zoom);
+            visible: cell.selected;
             accessible-role: none;
         }
         for pic in PageImages.items : Image {
@@ -210,7 +236,9 @@ component WriterDocumentEditor inherits Rectangle {
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             default-font-size: block.font-size * root.page-zoom;
-            default-color: block.has-color ? block.color : Theme.palette().paper-ink;
+            default-color: Theme.active-theme == "high-contrast" && block.table-cell
+                ? Theme.palette().paper-ink
+                : block.has-color ? block.color : Theme.palette().paper-ink;
             horizontal-alignment: block.alignment == 1
                 ? TextHorizontalAlignment.center
                 : block.alignment == 2
@@ -236,7 +264,9 @@ component WriterDocumentEditor inherits Rectangle {
             y: selection.y * root.page-zoom;
             width: max(1px, selection.width * root.page-zoom);
             height: max(1px, selection.height * root.page-zoom);
-            background: selection.has-color ? selection.color : Theme.palette().paper-ink;
+            background: Theme.active-theme == "high-contrast"
+                ? Theme.palette().paper-ink
+                : selection.has-color ? selection.color : Theme.palette().paper-ink;
             visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
             accessible-role: none;
         }

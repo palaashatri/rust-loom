@@ -152,39 +152,214 @@ pub(super) fn record_document(
 }
 
 /// Write the draft from the timer without blocking the window: the document is
-/// copied now, serialized on a worker thread, and recorded on the UI thread
-/// (where the store lives) unless a synchronous write or a clear happened
-/// meanwhile. Failures are reported through `app` when the result arrives.
+/// copied now, serialized on one worker thread at a time, and recorded on the UI
+/// thread (where the store lives) unless a newer edit, synchronous write, or a
+/// clear invalidated it. While a worker is active, only the newest snapshot waits.
 pub(super) fn record_document_deferred(
     app: &crate::WriterApp,
     document: &WriterDocument,
     source: Option<PathBuf>,
-) -> Result<(), String> {
+) -> Result<DeferredDispatch, String> {
     #[cfg(test)]
     WRITES.with(|writes| writes.set(writes.get() + 1));
     let epoch = DEFERRED.with(DeferredWrite::epoch);
-    let copy = document.clone();
-    let weak = app.as_weak();
-    std::thread::Builder::new()
+    let snapshot = DeferredSnapshot {
+        epoch,
+        document: document.clone(),
+        source,
+        app: app.as_weak(),
+    };
+    if let Some(snapshot) = DEFERRED.with(|state| state.submit(snapshot)) {
+        start_deferred_snapshot(snapshot)?;
+        Ok(DeferredDispatch::Started)
+    } else {
+        Ok(DeferredDispatch::Queued)
+    }
+}
+
+#[derive(Clone)]
+struct DeferredSnapshot {
+    epoch: u64,
+    document: WriterDocument,
+    source: Option<PathBuf>,
+    app: slint::Weak<crate::WriterApp>,
+}
+
+fn start_deferred_snapshot(snapshot: DeferredSnapshot) -> Result<(), String> {
+    let retry = snapshot.clone();
+    #[cfg(test)]
+    let test_worker = DEFERRED_TEST_WORKER.with(|worker| worker.borrow().clone());
+    let result = std::thread::Builder::new()
         .name("writer-recovery".into())
         .spawn(move || {
-            let payload = loom_writer_core::save_document(&copy)
-                .map(|package| recovery_draft::encode(source.as_deref(), &package))
+            #[cfg(test)]
+            if let Some(worker) = test_worker.as_ref() {
+                worker.before_serialize();
+            }
+            let payload = loom_writer_core::save_document(&snapshot.document)
+                .map(|package| recovery_draft::encode(snapshot.source.as_deref(), &package))
                 .map_err(|error| format!("could not prepare recovery data: {error}"));
-            // Without a running event loop there is nowhere to record it.
-            let _ = slint::invoke_from_event_loop(move || {
-                if DEFERRED.with(DeferredWrite::epoch) != epoch {
-                    return;
+            #[cfg(test)]
+            if let Some(worker) = test_worker.as_ref() {
+                worker.after_serialize();
+            }
+            let complete = move || deliver_deferred_snapshot(snapshot, payload);
+            #[cfg(test)]
+            match test_worker {
+                Some(worker) => {
+                    let _ = worker.completed.send(Box::new(complete));
                 }
-                let result =
-                    payload.and_then(|payload| record_snapshot_recovery("writer state", payload));
-                if let (Err(error), Some(app)) = (result, weak.upgrade()) {
+                None => {
+                    // Without a running event loop there is nowhere to record it.
+                    let _ = slint::invoke_from_event_loop(complete);
+                }
+            }
+            #[cfg(not(test))]
+            {
+                // Without a running event loop there is nowhere to record it.
+                let _ = slint::invoke_from_event_loop(complete);
+            }
+        });
+    match result {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            DEFERRED.with(|state| state.start_failed(retry));
+            Err(format!("could not start the recovery writer: {error}"))
+        }
+    }
+}
+
+fn deliver_deferred_snapshot(snapshot: DeferredSnapshot, payload: Result<Vec<u8>, String>) {
+    if DEFERRED.with(DeferredWrite::epoch) == snapshot.epoch {
+        let result = payload.and_then(|payload| {
+            #[cfg(test)]
+            if INJECT_FAILURE.with(std::cell::Cell::get) {
+                return Err("injected recovery failure".into());
+            }
+            record_snapshot_recovery("writer state", payload)
+        });
+        match result {
+            Ok(()) => {
+                DEFERRED.with(|state| state.delivered(snapshot.epoch));
+                if let Some(app) = snapshot.app.upgrade() {
+                    crate::clear_recovery_failed(&app);
+                }
+            }
+            Err(error) => {
+                DEFERRED.with(|state| state.retryable(snapshot.epoch));
+                if let Some(app) = snapshot.app.upgrade() {
                     crate::warn_recovery_failed(&app, &error);
                 }
-            });
-        })
-        .map(|_| ())
-        .map_err(|error| format!("could not start the recovery writer: {error}"))
+            }
+        }
+    }
+
+    if let Some(next) = DEFERRED.with(DeferredWrite::finished) {
+        let weak = next.app.clone();
+        if let Err(error) = start_deferred_snapshot(next) {
+            if let Some(app) = weak.upgrade() {
+                crate::warn_recovery_failed(&app, &error);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeferredDispatch {
+    Started,
+    Queued,
+}
+
+#[cfg(test)]
+pub(super) type DeferredCompletion = Box<dyn FnOnce() + Send + 'static>;
+
+#[cfg(test)]
+#[derive(Clone)]
+struct DeferredTestWorker {
+    started: std::sync::mpsc::Sender<usize>,
+    completed: std::sync::mpsc::Sender<DeferredCompletion>,
+    release_first: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
+    start_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    max_in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+impl DeferredTestWorker {
+    fn before_serialize(&self) {
+        use std::sync::atomic::Ordering;
+
+        let index = self.start_count.fetch_add(1, Ordering::SeqCst);
+        let active = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_in_flight.fetch_max(active, Ordering::SeqCst);
+        let _ = self.started.send(index);
+        if index == 0 {
+            if let Ok(receiver) = self.release_first.lock() {
+                let _ = receiver.recv();
+            }
+        }
+    }
+
+    fn after_serialize(&self) {
+        use std::sync::atomic::Ordering;
+
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+pub(super) struct DeferredWriteTestHarness {
+    pub(super) started: std::sync::mpsc::Receiver<usize>,
+    pub(super) completed: std::sync::mpsc::Receiver<DeferredCompletion>,
+    release_first: std::sync::mpsc::Sender<()>,
+    max_in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+impl DeferredWriteTestHarness {
+    pub(super) fn install() -> Self {
+        let (started_tx, started) = std::sync::mpsc::channel();
+        let (completed_tx, completed) = std::sync::mpsc::channel();
+        let (release_first, release_first_rx) = std::sync::mpsc::channel();
+        let max_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker = DeferredTestWorker {
+            started: started_tx,
+            completed: completed_tx,
+            release_first: std::sync::Arc::new(std::sync::Mutex::new(release_first_rx)),
+            start_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            in_flight: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            max_in_flight: max_in_flight.clone(),
+        };
+        DEFERRED_TEST_WORKER.with(|slot| *slot.borrow_mut() = Some(worker));
+        Self {
+            started,
+            completed,
+            release_first,
+            max_in_flight,
+        }
+    }
+
+    pub(super) fn release_first(&self) {
+        let _ = self.release_first.send(());
+    }
+
+    pub(super) fn max_in_flight(&self) -> usize {
+        self.max_in_flight.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+impl Drop for DeferredWriteTestHarness {
+    fn drop(&mut self) {
+        DEFERRED_TEST_WORKER.with(|slot| *slot.borrow_mut() = None);
+        self.release_first();
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static DEFERRED_TEST_WORKER: std::cell::RefCell<Option<DeferredTestWorker>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Checkpoint the recovery store after the document has been saved to `source`.
@@ -213,9 +388,9 @@ pub(super) fn discard_document_recovery() -> Result<(), String> {
     })
 }
 
-/// How long after the first unrecorded keystroke the draft is written. A
-/// crash loses at most this much typing; a pause or any other action (save,
-/// open, formatting, undo, close) writes at once.
+/// How long after an unrecorded keystroke before recovery serialization is
+/// attempted. This debounce interval is not a crash-loss bound: serialization
+/// and the recovery-store write can still be in progress after it fires.
 pub(super) const WRITE_DELAY: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// Bookkeeping for writing the recovery draft off the keystroke path: typing
@@ -225,9 +400,11 @@ pub(super) const WRITE_DELAY: std::time::Duration = std::time::Duration::from_mi
 pub(super) struct DeferredWrite {
     stale: std::cell::Cell<bool>,
     armed: std::cell::Cell<bool>,
-    /// Bumped by every synchronous write or clear, so a draft still being
-    /// serialized when one happens is dropped instead of landing after it.
+    /// Bumped by edits and synchronous writes so older serialized drafts are
+    /// discarded before they can reach the recovery store.
     epoch: std::cell::Cell<u64>,
+    in_flight: std::cell::Cell<bool>,
+    pending: std::cell::RefCell<Option<DeferredSnapshot>>,
 }
 
 impl DeferredWrite {
@@ -235,6 +412,7 @@ impl DeferredWrite {
     /// the timer, which is only once per delay window.
     pub(super) fn note_edit(&self) -> bool {
         self.stale.set(true);
+        self.epoch.set(self.epoch.get().wrapping_add(1));
         !self.armed.replace(true)
     }
 
@@ -247,7 +425,48 @@ impl DeferredWrite {
     /// A synchronous write already recorded the current document.
     pub(super) fn settled(&self) {
         self.stale.set(false);
-        self.epoch.set(self.epoch.get() + 1);
+        self.armed.set(false);
+        self.pending.borrow_mut().take();
+        self.epoch.set(self.epoch.get().wrapping_add(1));
+    }
+
+    fn submit(&self, snapshot: DeferredSnapshot) -> Option<DeferredSnapshot> {
+        if self.in_flight.get() {
+            self.pending.replace(Some(snapshot));
+            None
+        } else {
+            self.pending.borrow_mut().take();
+            self.in_flight.set(true);
+            Some(snapshot)
+        }
+    }
+
+    fn start_failed(&self, snapshot: DeferredSnapshot) {
+        self.in_flight.set(false);
+        if snapshot.epoch == self.epoch.get() {
+            self.pending.replace(Some(snapshot));
+            self.stale.set(true);
+        }
+    }
+
+    fn finished(&self) -> Option<DeferredSnapshot> {
+        self.in_flight.set(false);
+        let pending = self.pending.borrow_mut().take();
+        pending
+            .filter(|snapshot| snapshot.epoch == self.epoch.get())
+            .inspect(|_| self.in_flight.set(true))
+    }
+
+    fn delivered(&self, epoch: u64) {
+        if self.epoch.get() == epoch {
+            self.stale.set(false);
+        }
+    }
+
+    fn retryable(&self, epoch: u64) {
+        if self.epoch.get() == epoch {
+            self.stale.set(true);
+        }
     }
 
     pub(super) fn epoch(&self) -> u64 {

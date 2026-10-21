@@ -29,6 +29,7 @@ mod palette_catalog;
 mod palette_wiring;
 mod picture_actions;
 mod picture_view;
+mod pointer_hit_test;
 mod projection;
 use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 mod reading_time;
@@ -1583,10 +1584,6 @@ fn compute_render_projection(
     }
 }
 
-thread_local! {
-    static LAST_TABLE_CELL_RECTS: RefCell<Vec<WriterTableCellRect>> = const { RefCell::new(Vec::new()) };
-}
-
 fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     let ComputedProjection {
         projection,
@@ -1596,15 +1593,15 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
     app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
     app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
-    let table_rects_changed = LAST_TABLE_CELL_RECTS.with(|cell| {
-        let mut prev = cell.borrow_mut();
-        if *prev != projection.table_cell_rects {
-            *prev = projection.table_cell_rects.clone();
-            true
-        } else {
-            false
-        }
-    });
+    // Compare against this component's own model: a thread-local cache lets
+    // one WriterApp suppress publication to another app with identical cells.
+    let table_rects = app.get_table_cell_rects();
+    let table_rects_changed = table_rects.row_count() != projection.table_cell_rects.len()
+        || projection
+            .table_cell_rects
+            .iter()
+            .enumerate()
+            .any(|(index, rect)| table_rects.row_data(index).as_ref() != Some(rect));
     if table_rects_changed {
         app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
     }
@@ -1687,88 +1684,30 @@ fn comment_selection_range(doc: &WriterDocument, comment_id: &str) -> Option<(us
     Some((block_start + thread.start, block_start + thread.end))
 }
 
-/// Convert a pointer in the editor's local (zoomed) coordinates to the
-/// canonical UTF-8 byte offset used by `WriterDocument::selection`.
-///
-/// The hit-test deliberately consumes the same page fragments as the rich
-/// projection. It therefore accounts for heading metrics, paragraph spacing,
-/// centered/right alignment, and cumulative page offsets instead of asking a
-/// single body-metric TextInput to infer a line.
+#[cfg(test)]
 fn writer_pointer_offset(
     doc: &WriterDocument,
     viewport: PageViewport,
     x: f32,
     y: f32,
 ) -> Option<usize> {
-    if doc.blocks.is_empty() {
-        return Some(0);
-    }
-    let style = doc.page.page_style();
-    let zoom = normalize_page_zoom(viewport.zoom, 1.0);
-    let flow = doc
-        .flow(
-            &style,
-            PageViewport {
-                width: style.width_pt,
-                height: style.height_pt,
-                zoom: 1.0,
-                scroll_x: 0.0,
-                scroll_y: 0.0,
-            },
-        )
-        .ok()?;
-    let base_page = flow.page_bounds().first().copied()?;
-    let local_x = x / zoom;
-    let local_y = y / zoom;
-    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    // Only the page under the pointer and its neighbours can hold the nearest
-    // line, so the rest of a long document is never visited.
-    let pointer_y = local_y + base_page.y + style.margin_top_pt;
-    let reach = style.height_pt + loom_writer_core::PAGE_GAP_PT;
-    let pages = flow.visible_pages(pointer_y - reach, pointer_y + reach);
+    pointer_hit_test::writer_pointer_offset(doc, viewport, x, y)
+}
 
-    let mut nearest: Option<(f32, usize)> = None;
-    for line in flow.lines_on(pages) {
-        let block = &doc.blocks[line.block_index];
-        let font_size = style.font_size_for_kind(block.kind.as_str());
-        let line_y = line.bounds.y - base_page.y - style.margin_top_pt;
-        let line_height = line.bounds.height;
-        let distance = if local_y < line_y {
-            line_y - local_y
-        } else if local_y > line_y + line_height {
-            local_y - (line_y + line_height)
-        } else {
-            0.0
-        };
-        // A line no nearer than the best so far is never chosen; skip shaping it.
-        if nearest.is_some_and(|(best_distance, _)| distance >= best_distance) {
-            continue;
-        }
-        let alignment_offset = match block.style.alignment {
-            loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
-            loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
-            loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
-        };
-        let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
-        let local_byte = loom_writer_core::offset_at_x(
-            &block.text.as_str()[line.start..line.end],
-            line.start,
-            &block.runs,
-            font_size,
-            local_x - line_x,
-        );
-        let offset = line.global_start + local_byte;
-        if distance <= f32::EPSILON {
-            return Some(offset);
-        }
-        if nearest
-            .map(|(best_distance, _)| distance < best_distance)
-            .unwrap_or(true)
-        {
-            nearest = Some((distance, offset));
-        }
-    }
-    nearest.map(|(_, offset)| offset)
+fn writer_pointer_offset_with_app(
+    app: &WriterApp,
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    x: f32,
+    y: f32,
+) -> Option<usize> {
+    pointer_hit_test::writer_pointer_offset_with_model(
+        doc,
+        viewport,
+        x,
+        y,
+        &app.get_table_cell_rects(),
+    )
 }
 
 #[allow(dead_code)]
@@ -2048,7 +1987,7 @@ fn project_selection_event(
     if selection == previous {
         return false;
     }
-    if selection.anchor != selection.focus {
+    if table_actions::get_table_cell_selection_range().is_some() {
         table_actions::clear_table_cell_selection_range();
     }
 
@@ -2139,14 +2078,27 @@ enum RecoveryWrite {
     Deferred,
 }
 
+const RECOVERY_FAILED_STATUS: &str =
+    "Recovery failed. Save a copy now; autosave may be out of date.";
+
+/// A later successful recovery write removes only its own failure warning.
+fn clear_recovery_failed(app: &WriterApp) {
+    if app.get_status_left() == RECOVERY_FAILED_STATUS {
+        app.set_status_left(SharedString::default());
+    }
+}
+
 fn warn_recovery_failed(app: &WriterApp, error: &str) {
     eprintln!("Writer recovery save failed: {error}");
-    app.set_status_left(SharedString::from(
-        "Recovery failed. Save a copy now; autosave may be out of date.",
-    ));
+    app.set_status_left(SharedString::from(RECOVERY_FAILED_STATUS));
 }
 
 fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryWrite) {
+    if recovery_write == RecoveryWrite::Now {
+        // A synchronous state transition supersedes every deferred snapshot,
+        // including when the committed document is clean and needs no write.
+        recovery::DEFERRED.with(recovery::DeferredWrite::settled);
+    }
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     let previous_menu_state = local_menu::enablement_key(app);
@@ -2721,7 +2673,7 @@ fn wire_writer_shared_callbacks(
                 let y = rect.rect.y - base.y - style.margin_top_pt * zoom
                     + rect.rect.height / 2.0
                     + step;
-                writer_pointer_offset(&current, viewport, x, y)
+                writer_pointer_offset_with_app(&app, &current, viewport, x, y)
             };
             let Some(offset) = target else { return };
             let anchor = if extend {
@@ -2758,6 +2710,7 @@ fn wire_writer_shared_callbacks(
             if in_table {
                 let mut next = state.current.borrow().clone();
                 if let Ok(new_caret) = next.tab_navigate_table(start, false) {
+                    table_actions::clear_table_cell_selection_range();
                     let rows_changed = {
                         let current = state.current.borrow();
                         current.blocks != next.blocks
@@ -2857,6 +2810,7 @@ fn wire_writer_shared_callbacks(
                     focus.max(0) as usize,
                 ));
                 if text_changed {
+                    table_actions::clear_table_cell_selection_range();
                     apply_pending_typing_style(&mut next, before, focus.max(0) as usize);
                     apply_typing(&app, &state, next);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
@@ -3340,55 +3294,7 @@ fn wire_writer_shared_callbacks(
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_pointer_pressed(move |x, y, extend| {
-            if let Some(app) = app_ref.upgrade() {
-                let viewport = *state.viewport.borrow();
-                let current = state.current.borrow();
-                let Some(offset) = writer_pointer_offset(&current, viewport, x, y) else {
-                    state.pointer_active.set(false);
-                    state.pointer_anchor.set(None);
-                    return;
-                };
-                table_actions::pointer_selection_start(&app, &current, offset, extend);
-                let clicks = if extend {
-                    1
-                } else {
-                    multi_click::register_press(x, y)
-                };
-                if clicks >= 2 {
-                    let text = current.editor_text();
-                    let (start, end) = if clicks == 2 {
-                        multi_click::word_range(&text, offset)
-                    } else {
-                        multi_click::paragraph_range(&text, offset)
-                    };
-                    drop(current);
-                    state.pointer_active.set(false);
-                    state.pointer_anchor.set(None);
-                    app.invoke_selection_changed(
-                        start.min(i32::MAX as usize) as i32,
-                        end.min(i32::MAX as usize) as i32,
-                    );
-                    return;
-                }
-                let anchor = if extend {
-                    current.selection().anchor
-                } else {
-                    offset
-                };
-                drop(current);
-                state.pointer_anchor.set(Some(anchor));
-                state.pointer_active.set(true);
-                app.invoke_selection_changed(
-                    anchor.min(i32::MAX as usize) as i32,
-                    offset.min(i32::MAX as usize) as i32,
-                );
-            }
-        });
-    }
+    table_actions::wire_pointer_pressed(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3399,7 +3305,8 @@ fn wire_writer_shared_callbacks(
             if let Some(app) = app_ref.upgrade() {
                 let viewport = *state.viewport.borrow();
                 let current = state.current.borrow();
-                let Some(offset) = writer_pointer_offset(&current, viewport, x, y) else {
+                let Some(offset) = writer_pointer_offset_with_app(&app, &current, viewport, x, y)
+                else {
                     return;
                 };
                 let anchor = state.pointer_anchor.get().unwrap_or(offset);
@@ -3419,7 +3326,9 @@ fn wire_writer_shared_callbacks(
                 if state.pointer_active.get() {
                     let viewport = *state.viewport.borrow();
                     let current = state.current.borrow();
-                    if let Some(offset) = writer_pointer_offset(&current, viewport, x, y) {
+                    if let Some(offset) =
+                        writer_pointer_offset_with_app(&app, &current, viewport, x, y)
+                    {
                         let anchor = state.pointer_anchor.get().unwrap_or(offset);
                         drop(current);
                         app.invoke_selection_changed(

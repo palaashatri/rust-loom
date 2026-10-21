@@ -268,6 +268,206 @@ fn interactive_recovery_write_failures_are_visible_via_injection() {
     let _ = std::fs::remove_file(temp_save);
 }
 
+const DEFERRED_ORDER_TEST: &str =
+    "recovery_tests::deferred_recovery_drops_obsolete_serialization_before_delivery";
+
+#[test]
+fn deferred_recovery_drops_obsolete_serialization_before_delivery() {
+    match child_mode().as_deref() {
+        Some("deferred-order") => {
+            set_platform();
+            assert!(recovery::initialize_editing_session(None)
+                .expect("initialize isolated deferred recovery")
+                .draft
+                .is_none());
+            let app = WriterApp::new().expect("create Writer UI for deferred recovery test");
+            let harness = recovery::DeferredWriteTestHarness::install();
+
+            let mut older = WriterDocument::new("deferred-order", "Deferred order");
+            older.replace_paragraphs("older snapshot");
+            recovery::DEFERRED.with(|state| {
+                state.note_edit();
+                assert!(state.fire());
+            });
+            assert_eq!(
+                recovery::record_document_deferred(&app, &older, None)
+                    .expect("start first real serializer"),
+                recovery::DeferredDispatch::Started
+            );
+            assert_eq!(
+                harness
+                    .started
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("first serializer starts"),
+                0
+            );
+
+            let mut latest = WriterDocument::new("deferred-order", "Deferred order");
+            latest.replace_paragraphs("newest snapshot");
+            recovery::DEFERRED.with(|state| {
+                state.note_edit();
+                assert!(state.fire());
+            });
+            let latest_dispatch = recovery::record_document_deferred(&app, &latest, None)
+                .expect("submit newer recovery snapshot");
+            if latest_dispatch == recovery::DeferredDispatch::Started {
+                assert_eq!(
+                    harness
+                        .started
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .expect("current code starts the newer serializer concurrently"),
+                    1
+                );
+                let newer_completion = harness
+                    .completed
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("newer serializer completes before the delayed first one");
+                newer_completion();
+            } else {
+                assert!(matches!(
+                    harness.started.try_recv(),
+                    Err(std::sync::mpsc::TryRecvError::Empty)
+                ));
+            }
+
+            harness.release_first();
+            let older_completion = harness
+                .completed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("delayed first serializer completes");
+            older_completion();
+            if latest_dispatch == recovery::DeferredDispatch::Queued {
+                assert_eq!(
+                    harness
+                        .started
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .expect("the newest pending serializer starts after the first completes"),
+                    1
+                );
+                let latest_completion = harness
+                    .completed
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("newest pending serializer completes");
+                latest_completion();
+            }
+
+            let reopened = recovery::initialize_editing_session(None)
+                .expect("reopen persisted deferred recovery")
+                .draft
+                .expect("the latest draft is available after reopen");
+            assert_eq!(
+                (reopened.document.editor_text(), harness.max_in_flight(),),
+                ("newest snapshot".to_owned(), 1),
+                "recovery keeps the latest edit and runs at most one serializer at a time"
+            );
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {
+            let root = isolated_root();
+            std::fs::create_dir_all(&root).expect("create isolated deferred recovery root");
+            let status = run_child(DEFERRED_ORDER_TEST, "deferred-order", &root, None, None);
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(status.success(), "deferred recovery child failed: {status}");
+        }
+    }
+}
+
+const DEFERRED_RETRY_TEST: &str = "recovery_tests::deferred_recovery_retry_clears_failure_status";
+
+#[test]
+fn deferred_recovery_retry_clears_failure_status() {
+    match child_mode().as_deref() {
+        Some("deferred-retry") => {
+            set_platform();
+            assert!(recovery::initialize_editing_session(None)
+                .expect("initialize isolated deferred recovery")
+                .draft
+                .is_none());
+            let app = WriterApp::new().expect("create Writer UI for deferred retry test");
+            let harness = recovery::DeferredWriteTestHarness::install();
+            let mut document = WriterDocument::new("deferred-retry", "Deferred retry");
+            document.replace_paragraphs("recovery retry snapshot");
+
+            recovery::DEFERRED.with(|state| {
+                state.note_edit();
+                assert!(state.fire());
+            });
+            let retry_epoch = recovery::DEFERRED.with(recovery::DeferredWrite::epoch);
+            assert_eq!(
+                recovery::record_document_deferred(&app, &document, None)
+                    .expect("start deferred recovery write"),
+                recovery::DeferredDispatch::Started
+            );
+            assert_eq!(
+                harness
+                    .started
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("first serializer starts"),
+                0
+            );
+            harness.release_first();
+            let failed_delivery = harness
+                .completed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("first serializer completes");
+            recovery::INJECT_FAILURE.with(|failure| failure.set(true));
+            failed_delivery();
+            recovery::INJECT_FAILURE.with(|failure| failure.set(false));
+            assert_eq!(
+                app.get_status_left(),
+                "Recovery failed. Save a copy now; autosave may be out of date."
+            );
+            assert!(recovery::DEFERRED.with(recovery::DeferredWrite::is_stale));
+
+            assert!(recovery::DEFERRED.with(|state| state.fire()));
+            assert_eq!(
+                recovery::DEFERRED.with(recovery::DeferredWrite::epoch),
+                retry_epoch,
+                "retry the failed snapshot without a new edit"
+            );
+            assert_eq!(
+                recovery::record_document_deferred(&app, &document, None)
+                    .expect("retry deferred recovery write"),
+                recovery::DeferredDispatch::Started
+            );
+            assert_eq!(
+                harness
+                    .started
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("retry serializer starts"),
+                1
+            );
+            let successful_delivery = harness
+                .completed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("retry serializer completes");
+            successful_delivery();
+
+            assert_eq!(
+                recovery::DEFERRED.with(recovery::DeferredWrite::epoch),
+                retry_epoch
+            );
+            assert!(!recovery::DEFERRED.with(recovery::DeferredWrite::is_stale));
+            assert_eq!(
+                app.get_status_left(),
+                "",
+                "a successful same-epoch retry clears the stale recovery warning"
+            );
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {
+            let root = isolated_root();
+            std::fs::create_dir_all(&root).expect("create isolated deferred retry root");
+            let status = run_child(DEFERRED_RETRY_TEST, "deferred-retry", &root, None, None);
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(
+                status.success(),
+                "deferred recovery retry child failed: {status}"
+            );
+        }
+    }
+}
+
 const INITIALIZATION_FAILURE_TEST: &str =
     "recovery_tests::initialization_failure_is_visible_on_startup";
 

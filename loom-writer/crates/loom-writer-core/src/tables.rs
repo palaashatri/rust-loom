@@ -89,6 +89,23 @@ impl WriterDocument {
         Some(parse_table_markdown(block.text.as_str()))
     }
 
+    /// Returns the parsed cell text and maps each displayed UTF-8 byte
+    /// boundary to a byte boundary in the table block's Markdown source.
+    pub fn table_cell_display_map(
+        &self,
+        block_id: u64,
+        row: usize,
+        col: usize,
+    ) -> Option<(String, Vec<usize>)> {
+        let block = self
+            .blocks
+            .iter()
+            .find(|block| block.id == block_id && block.kind == TABLE_BLOCK_KIND)?;
+        let rows = table_data_rows(block.text.as_str());
+        let cell = rows.get(row)?.get(col)?;
+        Some((cell.text.clone(), cell.source_offsets.clone()))
+    }
+
     /// Locates the table cell containing the given offset in the canonical editor text.
     pub fn table_cell_at_offset(&self, offset: usize) -> Option<TableCellLocation> {
         let mut block_start = 0usize;
@@ -100,10 +117,22 @@ impl WriterDocument {
             {
                 let offset_in_block = offset - block_start;
                 let grid = compute_cell_ranges(block.text.as_str());
-                for (r, row_ranges) in grid.iter().enumerate() {
-                    for (c, &(start, end)) in row_ranges.iter().enumerate() {
-                        if offset_in_block >= start.saturating_sub(2) && offset_in_block <= end + 2
-                        {
+                // Prefer an actual cell-text boundary over the padded range
+                // used to make pipes and surrounding whitespace navigable.
+                // Otherwise an empty cell's padding can claim the first byte
+                // of a populated cell that follows it.
+                for exact_range in [true, false] {
+                    for (r, row_ranges) in grid.iter().enumerate() {
+                        for (c, &(start, end)) in row_ranges.iter().enumerate() {
+                            let matches = if exact_range {
+                                offset_in_block >= start && offset_in_block <= end
+                            } else {
+                                offset_in_block >= start.saturating_sub(2)
+                                    && offset_in_block <= end + 2
+                            };
+                            if !matches {
+                                continue;
+                            }
                             return Some(TableCellLocation {
                                 block_id: block.id,
                                 block_index: index,
@@ -471,53 +500,12 @@ pub struct TableCellLocation {
     pub cell_end: usize,
 }
 
-/// Computes byte ranges (start, end) for each cell in the markdown table block text.
+/// Computes the canonical Markdown byte range for each parsed table cell.
 pub fn compute_cell_ranges(text: &str) -> Vec<Vec<(usize, usize)>> {
-    let mut grid = Vec::new();
-    let mut line_offset = 0;
-
-    for line in text.lines() {
-        let Some(first_pipe) = line.find('|') else {
-            line_offset += line.len() + 1;
-            continue;
-        };
-        let Some(last_pipe) = line.rfind('|') else {
-            line_offset += line.len() + 1;
-            continue;
-        };
-        if first_pipe >= last_pipe {
-            line_offset += line.len() + 1;
-            continue;
-        }
-
-        // Check if delimiter row
-        let inner = &line[first_pipe + 1..last_pipe];
-        let cells: Vec<&str> = inner.split('|').collect();
-        let is_delimiter = cells.iter().all(|c| {
-            let t = c.trim().replace(['-', ':', ' '], "");
-            t.is_empty() && !c.trim().is_empty()
-        });
-
-        if is_delimiter {
-            line_offset += line.len() + 1;
-            continue;
-        }
-
-        let mut row_cells = Vec::new();
-        let mut pipe_idx = first_pipe;
-        while let Some(next_pipe_rel) = line[pipe_idx + 1..].find('|') {
-            let next_pipe = pipe_idx + 1 + next_pipe_rel;
-            let cell_start = line_offset + pipe_idx + 2;
-            let cell_end = line_offset + next_pipe.saturating_sub(1);
-            row_cells.push((cell_start, cell_end.max(cell_start)));
-            pipe_idx = next_pipe;
-        }
-
-        grid.push(row_cells);
-        line_offset += line.len() + 1;
-    }
-
-    grid
+    table_data_rows(text)
+        .into_iter()
+        .map(|row| row.into_iter().map(|cell| cell.source_range()).collect())
+        .collect()
 }
 
 /// Index in `document.blocks` after which a table inserted at `offset` lands.
@@ -534,24 +522,207 @@ pub(crate) fn block_insert_index(document: &WriterDocument, offset: usize) -> us
     document.blocks.len()
 }
 
-/// Splits a row body on pipes that are not escaped with a backslash, so a
-/// cell holding a literal `|` (written `\|`) stays in one cell.
-fn split_cells(inner: &str) -> Vec<&str> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedTableCellText {
+    text: String,
+    source_offsets: Vec<usize>,
+}
+
+impl ParsedTableCellText {
+    fn source_range(&self) -> (usize, usize) {
+        (
+            self.source_offsets.first().copied().unwrap_or(0),
+            self.source_offsets.last().copied().unwrap_or(0),
+        )
+    }
+}
+
+struct ParsedTableLine {
+    cells: Vec<ParsedTableCellText>,
+    is_delimiter: bool,
+}
+
+/// Splits cell source spans on unescaped pipes. A pipe is escaped when it is
+/// preceded by an odd run of backslashes, matching Markdown table serialization.
+fn split_cell_ranges(inner: &str) -> Vec<std::ops::Range<usize>> {
     let mut cells = Vec::new();
     let mut start = 0;
-    let mut escaped = false;
-    for (index, c) in inner.char_indices() {
-        match c {
-            '\\' => escaped = !escaped,
-            '|' if !escaped => {
-                cells.push(&inner[start..index]);
-                start = index + 1;
-            }
-            _ => escaped = false,
+    let mut backslashes = 0usize;
+    for (index, character) in inner.char_indices() {
+        if character == '|' && backslashes % 2 == 0 {
+            cells.push(start..index);
+            start = index + character.len_utf8();
+        }
+        if character == '\\' {
+            backslashes += 1;
+        } else {
+            backslashes = 0;
         }
     }
-    cells.push(&inner[start..]);
+    cells.push(start..inner.len());
     cells
+}
+
+fn mapped_plain_text(text: &str, source_start: usize) -> ParsedTableCellText {
+    let mut source_offsets = Vec::with_capacity(text.len() + 1);
+    source_offsets.push(source_start);
+    for (index, character) in text.char_indices() {
+        source_offsets.extend((1..=character.len_utf8()).map(|byte| source_start + index + byte));
+    }
+    ParsedTableCellText {
+        text: text.to_string(),
+        source_offsets,
+    }
+}
+
+/// Applies the parser's trim and `\\|` decoding while retaining canonical
+/// source offsets for every byte boundary in the resulting UTF-8 display text.
+fn mapped_cell_text(source: &str, source_start: usize) -> ParsedTableCellText {
+    let leading_trim = source.len() - source.trim_start().len();
+    let trimmed = source.trim();
+    let source_start = source_start + leading_trim;
+    let mut text = String::with_capacity(trimmed.len());
+    let mut source_offsets = Vec::with_capacity(trimmed.len() + 1);
+    source_offsets.push(source_start);
+    let mut characters = trimmed.char_indices().peekable();
+
+    while let Some((index, character)) = characters.next() {
+        if character == '\\' && characters.peek().is_some_and(|(_, next)| *next == '|') {
+            let (pipe_index, pipe) = characters.next().expect("peeked escaped pipe");
+            text.push(pipe);
+            source_offsets.push(source_start + pipe_index + pipe.len_utf8());
+        } else {
+            text.push(character);
+            source_offsets
+                .extend((1..=character.len_utf8()).map(|byte| source_start + index + byte));
+        }
+    }
+
+    ParsedTableCellText {
+        text,
+        source_offsets,
+    }
+}
+
+fn append_mapped_cell(left: &mut ParsedTableCellText, right: ParsedTableCellText) {
+    if right.text.is_empty() {
+        return;
+    }
+    if left.text.is_empty() {
+        *left = right;
+        return;
+    }
+
+    left.text.push(' ');
+    left.source_offsets
+        .push(right.source_offsets.first().copied().unwrap_or(0));
+    left.text.push_str(&right.text);
+    left.source_offsets
+        .extend(right.source_offsets.into_iter().skip(1));
+}
+
+fn is_table_metadata_line(trimmed: &str) -> bool {
+    trimmed.starts_with("<!-- loom-table:") && trimmed.ends_with("-->")
+}
+
+fn parse_table_line(line: &str, line_offset: usize) -> Option<ParsedTableLine> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed_offset = line_offset + line.len() - line.trim_start().len();
+    let Some(first_pipe) = trimmed.find('|') else {
+        return Some(ParsedTableLine {
+            cells: vec![mapped_plain_text(trimmed, trimmed_offset)],
+            is_delimiter: false,
+        });
+    };
+    let Some(last_pipe) = trimmed.rfind('|') else {
+        unreachable!("a found pipe is also the last pipe")
+    };
+    if first_pipe >= last_pipe {
+        return Some(ParsedTableLine {
+            cells: vec![mapped_plain_text(trimmed, trimmed_offset)],
+            is_delimiter: false,
+        });
+    }
+
+    let prefix = &trimmed[..first_pipe];
+    let suffix = &trimmed[last_pipe + 1..];
+    let inner_start = trimmed_offset + first_pipe + 1;
+    let inner = &trimmed[first_pipe + 1..last_pipe];
+    let mut cells = split_cell_ranges(inner)
+        .into_iter()
+        .map(|range| mapped_cell_text(&inner[range.clone()], inner_start + range.start))
+        .collect::<Vec<_>>();
+    let is_delimiter = cells.iter().all(|cell| {
+        let compact = cell.text.replace(['-', ':', ' '], "");
+        compact.is_empty() && !cell.text.is_empty()
+    });
+    if is_delimiter {
+        return Some(ParsedTableLine {
+            cells,
+            is_delimiter: true,
+        });
+    }
+
+    if !prefix.trim().is_empty() {
+        let prefix_start = trimmed_offset;
+        let prefix = mapped_cell_text(prefix, prefix_start);
+        if let Some(first_cell) = cells.first_mut() {
+            if first_cell.text.is_empty() {
+                *first_cell = prefix;
+            } else {
+                let mut combined = prefix;
+                append_mapped_cell(&mut combined, first_cell.clone());
+                *first_cell = combined;
+            }
+        }
+    }
+    if !suffix.trim().is_empty() {
+        let suffix_start = trimmed_offset + last_pipe + 1;
+        let suffix = mapped_cell_text(suffix, suffix_start);
+        if let Some(last_cell) = cells.last_mut() {
+            if last_cell.text.is_empty() {
+                *last_cell = suffix;
+            } else {
+                append_mapped_cell(last_cell, suffix);
+            }
+        }
+    }
+
+    Some(ParsedTableLine {
+        cells,
+        is_delimiter: false,
+    })
+}
+
+fn for_each_markdown_line(markdown: &str, mut visit: impl FnMut(&str, usize)) {
+    let mut line_offset = 0;
+    for line_with_ending in markdown.split_inclusive('\n') {
+        let line = line_with_ending
+            .strip_suffix('\n')
+            .unwrap_or(line_with_ending);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        visit(line, line_offset);
+        line_offset += line_with_ending.len();
+    }
+}
+
+fn table_data_rows(markdown: &str) -> Vec<Vec<ParsedTableCellText>> {
+    let mut rows = Vec::new();
+    for_each_markdown_line(markdown, |line, line_offset| {
+        let trimmed = line.trim();
+        if is_table_metadata_line(trimmed) {
+            return;
+        }
+        if let Some(parsed) = parse_table_line(line, line_offset) {
+            if !parsed.is_delimiter {
+                rows.push(parsed.cells);
+            }
+        }
+    });
+    rows
 }
 
 /// Parses a Markdown table written by [`WriterTable::to_markdown`]. The
@@ -564,9 +735,9 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
     let mut first_column = false;
     let mut merges = Vec::new();
 
-    for line in markdown.lines() {
+    for_each_markdown_line(markdown, |line, line_offset| {
         let trimmed = line.trim();
-        if trimmed.starts_with("<!-- loom-table:") && trimmed.ends_with("-->") {
+        if is_table_metadata_line(trimmed) {
             let inner = trimmed
                 .trim_start_matches("<!-- loom-table:")
                 .trim_end_matches("-->")
@@ -590,57 +761,17 @@ pub fn parse_table_markdown(markdown: &str) -> WriterTable {
                     }
                 }
             }
-            continue;
+            return;
         }
-        let Some(first_pipe) = trimmed.find('|') else {
-            if !trimmed.is_empty() {
-                rows.push(vec![trimmed.to_string()]);
-            }
-            continue;
+        let Some(parsed) = parse_table_line(line, line_offset) else {
+            return;
         };
-        let Some(last_pipe) = trimmed.rfind('|') else {
-            continue;
-        };
-        if first_pipe >= last_pipe {
-            if !trimmed.is_empty() {
-                rows.push(vec![trimmed.to_string()]);
-            }
-            continue;
-        }
-        let prefix = trimmed[..first_pipe].trim();
-        let suffix = trimmed[last_pipe + 1..].trim();
-        let inner = &trimmed[first_pipe + 1..last_pipe];
-        let mut cells: Vec<String> = split_cells(inner)
-            .into_iter()
-            .map(|cell| cell.trim().replace("\\|", "|"))
-            .collect();
-        if cells.iter().all(|cell| {
-            let compact = cell.replace(['-', ':', ' '], "");
-            compact.is_empty() && !cell.is_empty()
-        }) {
+        if parsed.is_delimiter {
             header_row = true;
-            continue;
+            return;
         }
-        if !prefix.is_empty() {
-            if let Some(first_cell) = cells.first_mut() {
-                if first_cell.is_empty() {
-                    *first_cell = prefix.to_string();
-                } else {
-                    *first_cell = format!("{prefix} {first_cell}");
-                }
-            }
-        }
-        if !suffix.is_empty() {
-            if let Some(last_cell) = cells.last_mut() {
-                if last_cell.is_empty() {
-                    *last_cell = suffix.to_string();
-                } else {
-                    *last_cell = format!("{last_cell} {suffix}");
-                }
-            }
-        }
-        rows.push(cells);
-    }
+        rows.push(parsed.cells.into_iter().map(|cell| cell.text).collect());
+    });
     WriterTable {
         id: String::new(),
         rows,

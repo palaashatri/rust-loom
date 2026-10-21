@@ -1,6 +1,6 @@
 //! Real table editing actions and callbacks for Loom Writer (Wave 1).
 
-use loom_writer_core::{TextSelection, WriterDocument};
+use loom_writer_core::{compute_cell_ranges, TextSelection, WriterDocument};
 use slint::{ComponentHandle, SharedString};
 use std::rc::Rc;
 
@@ -96,9 +96,33 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
                 let max_c = range.start_col.max(range.end_col);
                 let row_span = max_r - min_r + 1;
                 let col_span = max_c - min_c + 1;
-                clear_table_cell_selection_range();
-                next.merge_cells_at_offset(caret, row_span, col_span)
-                    .map(|_| caret)
+                let merge_offset = next
+                    .blocks
+                    .iter()
+                    .position(|block| block.id == range.block_id)
+                    .and_then(|block_index| {
+                        let block = &next.blocks[block_index];
+                        let cell_start = compute_cell_ranges(block.text.as_str())
+                            .get(min_r)
+                            .and_then(|row| row.get(min_c))
+                            .map(|(start, _)| *start)?;
+                        let block_start = next
+                            .blocks
+                            .iter()
+                            .take(block_index)
+                            .map(|block| block.text.len_bytes() + 1)
+                            .sum::<usize>();
+                        Some(block_start + cell_start)
+                    });
+                match merge_offset {
+                    Some(_) if row_span == 1 && col_span == 1 => {
+                        Err("Select at least two cells to merge".to_string())
+                    }
+                    Some(offset) => next
+                        .merge_cells_at_offset(offset, row_span, col_span)
+                        .map(|_| offset),
+                    None => Err("Selected table cells no longer exist".to_string()),
+                }
             } else {
                 next.merge_cells_at_offset(caret, 1, 2).map(|_| caret)
             }
@@ -108,7 +132,17 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
     };
     match result {
         Ok(new_caret) => {
-            if matches!(action, "delete-row" | "delete-col") {
+            if matches!(
+                action,
+                "insert-row-above"
+                    | "insert-row-below"
+                    | "insert-col-left"
+                    | "insert-col-right"
+                    | "delete-row"
+                    | "delete-col"
+                    | "merge-cells"
+                    | "split-cell"
+            ) {
                 clear_table_cell_selection_range();
             }
             next.set_selection(TextSelection::caret(new_caret));
@@ -126,6 +160,7 @@ pub(crate) fn table_navigate_backwards(app: &WriterApp, state: &GuiState) {
     let caret = state.current.borrow().selection().anchor;
     let mut next = state.current.borrow().clone();
     if let Ok(new_caret) = next.tab_navigate_table(caret, true) {
+        clear_table_cell_selection_range();
         state
             .current
             .borrow_mut()
@@ -239,17 +274,81 @@ pub(crate) fn update_table_selection_properties(
 /// A valid, ordinary pointer press starts a new selection and cancels any
 /// keyboard-extended cell range. The label also needs refreshing when the
 /// click leaves the caret unchanged and selection projection returns early.
-pub(crate) fn pointer_selection_start(
+pub(crate) fn clear_pointer(
     app: &WriterApp,
     doc: &WriterDocument,
     caret: usize,
     extend: bool,
-) {
+) -> bool {
     if extend || get_table_cell_selection_range().is_none() {
-        return;
+        return false;
     }
     clear_table_cell_selection_range();
     update_table_selection_properties(app, doc, caret);
+    true
+}
+
+/// Refreshes the painted cells after the caller releases its document borrow.
+pub(crate) fn refresh_cells(app: &WriterApp, state: &GuiState, cleared: bool) {
+    if cleared {
+        crate::refresh_render_projection_of(app, state);
+    }
+}
+
+/// Wires page presses here so clearing the virtual cell range is followed by
+/// a projection refresh after the document borrow has been released.
+pub(crate) fn wire_pointer_pressed(app: &WriterApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_pointer_pressed(move |x, y, extend| {
+        let Some(app) = app_ref.upgrade() else {
+            return;
+        };
+        let viewport = *state.viewport.borrow();
+        let current = state.current.borrow();
+        let Some(offset) = crate::writer_pointer_offset_with_app(&app, &current, viewport, x, y)
+        else {
+            state.pointer_active.set(false);
+            state.pointer_anchor.set(None);
+            return;
+        };
+        let cleared = clear_pointer(&app, &current, offset, extend);
+        let clicks = if extend {
+            1
+        } else {
+            crate::multi_click::register_press(x, y)
+        };
+        if clicks >= 2 {
+            let text = current.editor_text();
+            let (start, end) = if clicks == 2 {
+                crate::multi_click::word_range(&text, offset)
+            } else {
+                crate::multi_click::paragraph_range(&text, offset)
+            };
+            drop(current);
+            refresh_cells(&app, &state, cleared);
+            state.pointer_active.set(false);
+            state.pointer_anchor.set(None);
+            app.invoke_selection_changed(
+                start.min(i32::MAX as usize) as i32,
+                end.min(i32::MAX as usize) as i32,
+            );
+            return;
+        }
+        let anchor = if extend {
+            current.selection().anchor
+        } else {
+            offset
+        };
+        drop(current);
+        refresh_cells(&app, &state, cleared);
+        state.pointer_anchor.set(Some(anchor));
+        state.pointer_active.set(true);
+        app.invoke_selection_changed(
+            anchor.min(i32::MAX as usize) as i32,
+            offset.min(i32::MAX as usize) as i32,
+        );
+    });
 }
 
 /// A selected range of cells in a table.
@@ -260,6 +359,14 @@ pub(crate) struct TableCellRange {
     pub start_col: usize,
     pub end_row: usize,
     pub end_col: usize,
+}
+
+impl TableCellRange {
+    pub(crate) fn contains_cell(self, block_id: u64, row: usize, col: usize) -> bool {
+        self.block_id == block_id
+            && (self.start_row.min(self.end_row)..=self.start_row.max(self.end_row)).contains(&row)
+            && (self.start_col.min(self.end_col)..=self.start_col.max(self.end_col)).contains(&col)
+    }
 }
 
 thread_local! {
@@ -434,6 +541,30 @@ pub(crate) fn handle_table_key(
         key == s.as_str() || key == name
     };
 
+    // A collapsed caret-navigation key leaves the virtual cell range and
+    // continues through the editor's normal navigation path. This includes
+    // page and word/line navigation, not only the four plain arrows.
+    let navigates_caret = [
+        (slint::platform::Key::RightArrow, "Right"),
+        (slint::platform::Key::LeftArrow, "Left"),
+        (slint::platform::Key::DownArrow, "Down"),
+        (slint::platform::Key::UpArrow, "Up"),
+        (slint::platform::Key::PageUp, "PageUp"),
+        (slint::platform::Key::PageDown, "PageDown"),
+        (slint::platform::Key::Home, "Home"),
+        (slint::platform::Key::End, "End"),
+    ]
+    .into_iter()
+    .any(|(key_code, name)| matches_key(key_code, name));
+    if !shift && !alt && navigates_caret && get_table_cell_selection_range().is_some() {
+        clear_table_cell_selection_range();
+        let doc = state.current.borrow();
+        update_table_selection_properties(app, &doc, caret);
+        drop(doc);
+        crate::refresh_render_projection_of(app, state);
+        return false;
+    }
+
     // Ctrl+Alt shortcuts
     if ctrl && alt {
         let action = if matches_key(slint::platform::Key::UpArrow, "Up") {
@@ -500,6 +631,8 @@ pub(crate) fn handle_table_key(
             set_table_cell_selection_range(Some(range));
             let doc = state.current.borrow();
             update_table_selection_properties(app, &doc, caret);
+            drop(doc);
+            crate::refresh_render_projection_of(app, state);
             return true;
         }
     }

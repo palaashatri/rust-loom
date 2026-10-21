@@ -16,6 +16,341 @@ mod tests {
         (app, state)
     }
 
+    fn make_app_with_active_table_range(
+        caret_row: usize,
+        caret_col: usize,
+    ) -> (WriterApp, Rc<GuiState>, u64) {
+        table_actions::clear_table_cell_selection_range();
+        let (app, state) = make_test_app();
+        let mut document = WriterDocument::new("test-range", "Test Range");
+        document.replace_paragraphs("Intro");
+        document.insert_table_block(usize::MAX, 3, 3).unwrap();
+        let block_id = document
+            .blocks
+            .iter()
+            .find(|block| block.kind == TABLE_BLOCK_KIND)
+            .expect("inserted table block")
+            .id;
+        let mut table = document.table_from_block(block_id).unwrap();
+        for row in 0..3 {
+            for col in 0..3 {
+                table.set(row, col, format!("R{row}C{col}"));
+            }
+        }
+        document
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == block_id)
+            .unwrap()
+            .text = loom_writer_core::Text::from_str(&table.to_markdown());
+        let caret = (0..document.editor_text().len())
+            .find(|offset| {
+                document.table_cell_at_offset(*offset).is_some_and(|cell| {
+                    cell.block_id == block_id && cell.row == caret_row && cell.col == caret_col
+                })
+            })
+            .expect("caret offset in requested table cell");
+        document.set_selection(TextSelection::caret(caret));
+        *state.current.borrow_mut() = document;
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: 1,
+            end_col: 1,
+        }));
+        apply_state(&app, &state);
+
+        let rects = app.get_table_cell_rects();
+        let selected = (0..rects.row_count())
+            .filter_map(|index| rects.row_data(index))
+            .filter(|rect| rect.selected)
+            .count();
+        assert_eq!(selected, 4, "the fixture starts with A1:B2 highlighted");
+        assert_eq!(
+            app.get_document_accessible_label().as_str(),
+            "Table 3 by 3, cells A1:B2 selected",
+            "the active range is announced before the action"
+        );
+        (app, state, block_id)
+    }
+
+    fn assert_active_range_cleared_and_copy_is_full_table(
+        app: &WriterApp,
+        state: &GuiState,
+        expected_cell: (usize, usize),
+        expected_text: &str,
+    ) {
+        assert_eq!(table_actions::get_table_cell_selection_range(), None);
+        let document = state.current.borrow();
+        let caret = document
+            .table_cell_at_offset(document.selection().anchor)
+            .expect("caret remains in the table");
+        assert_eq!((caret.row, caret.col), expected_cell);
+        drop(document);
+
+        let rects = app.get_table_cell_rects();
+        assert!(
+            (0..rects.row_count())
+                .filter_map(|index| rects.row_data(index))
+                .all(|rect| !rect.selected),
+            "the stale range is no longer highlighted"
+        );
+        assert_eq!(
+            app.get_document_accessible_label().as_str(),
+            format!(
+                "Table 3 by 3, cell {}{}: {expected_text}",
+                (b'A' + expected_cell.1 as u8) as char,
+                expected_cell.0 + 1
+            ),
+            "the accessible label follows the caret cell"
+        );
+
+        loom_clipboard::set_mock_clipboard_enabled(true);
+        clipboard_actions::copy_action(app, state);
+        let copied = loom_clipboard::read_clipboard()
+            .expect("Copy writes the focused table to the clipboard")
+            .to_table()
+            .expect("Copy keeps the clipboard table format");
+        assert_eq!(copied.row_count(), 3, "Copy no longer uses A1:B2 only");
+        assert_eq!(copied.col_count(), 3, "Copy retains all table columns");
+        assert_eq!(copied.cell_text(2, 2).as_deref(), Some("R2C2"));
+        loom_clipboard::set_mock_clipboard_enabled(false);
+    }
+
+    fn assert_range_cleared_and_copy_has_dimensions(
+        app: &WriterApp,
+        state: &GuiState,
+        expected_rows: usize,
+        expected_cols: usize,
+    ) {
+        assert_eq!(table_actions::get_table_cell_selection_range(), None);
+        let rects = app.get_table_cell_rects();
+        assert!(
+            (0..rects.row_count())
+                .filter_map(|index| rects.row_data(index))
+                .all(|rect| !rect.selected),
+            "a successful table mutation clears the painted cell range"
+        );
+
+        loom_clipboard::set_mock_clipboard_enabled(true);
+        clipboard_actions::copy_action(app, state);
+        let copied = loom_clipboard::read_clipboard()
+            .expect("Copy writes the whole updated table")
+            .to_table()
+            .expect("Copy preserves the table clipboard format");
+        assert_eq!(copied.row_count(), expected_rows);
+        assert_eq!(copied.col_count(), expected_cols);
+        loom_clipboard::set_mock_clipboard_enabled(false);
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_tab_before_highlight_announcement_and_copy() {
+        // User action: Tab moves from A1 to B1 while A1:B2 is selected.
+        // Current failure: A1:B2 stays highlighted, announced, and copied.
+        // Required behavior: clear the virtual range and use the caret cell.
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+
+        app.invoke_insert_tab();
+
+        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 1), "R0C1");
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_shift_tab_before_highlight_announcement_and_copy() {
+        // User action: Shift+Tab moves from B1 to A1 while A1:B2 is selected.
+        // Current failure: A1:B2 stays highlighted, announced, and copied.
+        // Required behavior: clear the virtual range and use the caret cell.
+        let (app, state, _) = make_app_with_active_table_range(0, 1);
+
+        app.invoke_table_navigate_backwards();
+
+        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 0), "R0C0");
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_text_edit_before_highlight_announcement_and_copy() {
+        // User action: type in A1 while A1:B2 is selected.
+        // Current failure: A1:B2 stays highlighted, announced, and copied.
+        // Required behavior: clear the virtual range and use the edited table.
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        let (text, caret) = {
+            let document = state.current.borrow();
+            (document.editor_text(), document.selection().focus)
+        };
+        let mut edited = text;
+        edited.insert(caret, 'X');
+        let next_caret = (caret + 1) as i32;
+
+        app.invoke_document_edited(edited.into(), next_caret, next_caret);
+
+        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 0), "X R0C0");
+    }
+
+    fn assert_collapsed_navigation_clears_range(key: slint::platform::Key, ctrl: bool) {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        let key: SharedString = key.into();
+
+        let handled =
+            table_actions::handle_table_key(&app, &state, key.as_str(), false, ctrl, false);
+
+        assert!(!handled, "normal caret navigation remains with the editor");
+        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 0), "R0C0");
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_page_up_navigation() {
+        assert_collapsed_navigation_clears_range(slint::platform::Key::PageUp, false);
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_page_down_navigation() {
+        assert_collapsed_navigation_clears_range(slint::platform::Key::PageDown, false);
+    }
+
+    #[test]
+    fn table_cell_range_clears_on_home_end_and_word_navigation() {
+        for (key, ctrl) in [
+            (slint::platform::Key::LeftArrow, false),
+            (slint::platform::Key::RightArrow, false),
+            (slint::platform::Key::UpArrow, false),
+            (slint::platform::Key::DownArrow, false),
+            (slint::platform::Key::Home, false),
+            (slint::platform::Key::End, false),
+            (slint::platform::Key::LeftArrow, true),
+            (slint::platform::Key::RightArrow, true),
+            (slint::platform::Key::UpArrow, true),
+            (slint::platform::Key::DownArrow, true),
+            (slint::platform::Key::PageUp, true),
+            (slint::platform::Key::PageDown, true),
+            (slint::platform::Key::Home, true),
+            (slint::platform::Key::End, true),
+        ] {
+            assert_collapsed_navigation_clears_range(key, ctrl);
+        }
+    }
+
+    #[test]
+    fn table_cell_range_clears_after_successful_row_insertion_above() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::table_action(&app, &state, "insert-row-above");
+        assert_range_cleared_and_copy_has_dimensions(&app, &state, 4, 3);
+    }
+
+    #[test]
+    fn table_cell_range_clears_after_successful_row_insertion_below() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::table_action(&app, &state, "insert-row-below");
+        assert_range_cleared_and_copy_has_dimensions(&app, &state, 4, 3);
+    }
+
+    #[test]
+    fn table_cell_range_clears_after_successful_column_insertion_left() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::table_action(&app, &state, "insert-col-left");
+        assert_range_cleared_and_copy_has_dimensions(&app, &state, 3, 4);
+    }
+
+    #[test]
+    fn table_cell_range_clears_after_successful_column_insertion_right() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::table_action(&app, &state, "insert-col-right");
+        assert_range_cleared_and_copy_has_dimensions(&app, &state, 3, 4);
+    }
+
+    #[test]
+    fn merging_a_range_extended_up_and_left_starts_at_its_top_left_cell() {
+        let (app, state, block_id) = make_app_with_active_table_range(2, 2);
+        table_actions::clear_table_cell_selection_range();
+
+        let left: slint::SharedString = slint::platform::Key::LeftArrow.into();
+        let up: slint::SharedString = slint::platform::Key::UpArrow.into();
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            left.as_str(),
+            true,
+            false,
+            false,
+        ));
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            up.as_str(),
+            true,
+            false,
+            false,
+        ));
+
+        let range = table_actions::get_table_cell_selection_range()
+            .expect("Shift+Left and Shift+Up select a 2x2 range from C3 to B2");
+        assert_eq!(
+            (
+                range.block_id,
+                range.start_row,
+                range.start_col,
+                range.end_row,
+                range.end_col,
+            ),
+            (block_id, 2, 2, 1, 1)
+        );
+
+        table_actions::table_action(&app, &state, "merge-cells");
+
+        let document = state.current.borrow();
+        let table = document
+            .table_from_block(block_id)
+            .expect("the merged table remains in the document");
+        assert_eq!(
+            table.merges,
+            vec![(1, 1, 2, 2)],
+            "the selected B2:C3 rectangle merges from its top-left cell"
+        );
+        let caret = document
+            .table_cell_at_offset(document.selection().anchor)
+            .expect("the caret remains inside the merged table");
+        assert_eq!(
+            (caret.row, caret.col),
+            (1, 1),
+            "the caret stays in merged B2 instead of landing in A3 after the rows shrink"
+        );
+    }
+
+    #[test]
+    fn merging_a_single_virtual_cell_reports_unavailable_without_mutation() {
+        let (app, state, block_id) = make_app_with_active_table_range(0, 0);
+        let range = table_actions::TableCellRange {
+            block_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 0,
+        };
+        table_actions::set_table_cell_selection_range(Some(range));
+        apply_state(&app, &state);
+        let before = state.current.borrow().clone();
+        let undo_before = state.history.borrow().undo_len();
+        let redo_before = state.history.borrow().redo_len();
+        app.set_status_right("Ready".into());
+
+        table_actions::table_action(&app, &state, "merge-cells");
+
+        assert_eq!(
+            *state.current.borrow(),
+            before,
+            "a one-cell merge does not create a false document change"
+        );
+        assert_eq!(state.history.borrow().undo_len(), undo_before);
+        assert_eq!(state.history.borrow().redo_len(), redo_before);
+        assert_eq!(table_actions::get_table_cell_selection_range(), Some(range));
+        assert_eq!(
+            app.get_status_right().as_str(),
+            "Table action failed: Select at least two cells to merge",
+            "the status explains why the selected range could not be merged"
+        );
+        table_actions::clear_table_cell_selection_range();
+    }
+
     #[test]
     fn test_insert_table_with_dimensions_creates_table_and_places_caret() {
         let (app, state) = make_test_app();
