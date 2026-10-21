@@ -212,6 +212,22 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     });
 }
 
+/// Shows why the document refused an edit and redraws the editor from the
+/// document, so text the document refused does not stay on screen.
+pub(crate) fn refuse_edit(
+    app: &WriterApp,
+    state: &GuiState,
+    error: &loom_writer_core::WriterError,
+) {
+    let message = match error {
+        loom_writer_core::WriterError::Invalid(message) => message.clone(),
+        other => format!("Edit failed: {other}"),
+    };
+    // Redrawing the status line from the document comes first, so the reason stays visible.
+    crate::apply_state(app, state);
+    app.set_status_left(SharedString::from(message));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

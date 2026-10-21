@@ -9,6 +9,8 @@ use std::rc::Rc;
 
 use crate::{apply_with_history, GuiState, HistoryKind, WriterApp};
 
+mod paste_policy;
+
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
@@ -42,7 +44,6 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
 pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
     let doc = state.current.borrow();
     let selection = doc.selection();
-    let caret = selection.focus;
 
     // A noncollapsed editor selection is explicit text intent, even when its
     // focus is still inside the table that previously held a cell range.
@@ -69,28 +70,18 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
         }
     }
 
-    // 1. If inside a table cell, or table block is focused:
-    if let Some(loc) = doc.table_cell_at_offset(caret) {
-        if let Some(loom_tbl) = doc.loom_table_from_block(loc.block_id) {
-            let clip = ClipboardData::from_table(&loom_tbl);
-            if write_clipboard(&clip).is_ok() {
-                app.set_status_left(slint::SharedString::from(with_rich_note(format!(
-                    "Copied table ({}x{})",
-                    loom_tbl.row_count(),
-                    loom_tbl.col_count()
-                ))));
-                return;
-            }
-        }
-    }
+    // A caret inside a table copies nothing: the whole table is copied only
+    // when a cell range or the table is selected (handled above).
 
-    // 2. Regular text copy
+    // Regular text copy
     let text = doc.selected_text();
     if !text.is_empty() {
         let clip = text_clipboard_data(text);
         if write_clipboard(&clip).is_ok() {
             app.set_status_left("Copied text".into());
         }
+    } else {
+        app.set_status_left("Nothing selected".into());
     }
 }
 
@@ -324,12 +315,17 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
     };
 
     let mut next = state.current.borrow().clone();
-    let caret = next.selection().focus;
 
     // Check if clipboard contains a table
     let table_opt = resolve_table_with_note(&clip);
 
     if let Some((table, note)) = table_opt {
+        // A table replaces the selected text, as pasted text does.
+        if !next.selection().is_collapsed() && !replace_selection(&mut next, "") {
+            app.set_status_left("Paste failed: the selection cannot be replaced here".into());
+            return;
+        }
+        let caret = next.selection().focus;
         // Insert table block
         match next.insert_table_object(caret, &table) {
             Ok(_) => {
@@ -348,11 +344,18 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
         return;
     }
 
-    // Otherwise paste as plain text
-    if let Some(text) = clip.plain_text.or(clip.tsv).filter(|text| !text.is_empty()) {
+    // Otherwise paste as plain text (HTML's readable text when there is no plain text)
+    let text = clip
+        .plain_text
+        .or(clip.tsv)
+        .or_else(|| clip.html.as_deref().map(paste_policy::visible_text))
+        .filter(|text| !text.is_empty());
+    if let Some(text) = text {
         if replace_selection(&mut next, &text) {
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
             app.set_status_left("Pasted text".into());
+        } else {
+            app.set_status_left("Paste failed: the text cannot be placed here".into());
         }
         return;
     }
@@ -362,10 +365,12 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
     crate::picture_paste::paste_picture(app, state);
 }
 
-/// Resolves a table from clipboard data following W2 rules:
-/// - Private `loom_objects_json` with Table
-/// - HTML with `<table>`
-/// - TSV / plain text only if it has tabs on >= 2 rows!
+/// Resolves a table from clipboard data:
+/// - the private `loom_objects_json` holding a table;
+/// - HTML, but only when a table is the whole payload (a table inside running
+///   text pastes as text, so the text around it is not lost);
+/// - tab-separated text, but only when it has the shape of a grid (see
+///   `paste_policy::tsv_is_table`). Plain text alone is never a table.
 ///
 /// Also returns a sentence for the status line when the safety limits dropped
 /// part of an HTML table.
@@ -377,29 +382,26 @@ pub(crate) fn resolve_table_with_note(clip: &ClipboardData) -> Option<(Table, Op
         }
     }
 
-    // 2. HTML table
+    // 2. HTML: a table inside running text is not a table paste.
     if let Some(html) = &clip.html {
-        if html.contains("<table") || html.contains("<TABLE") {
-            if let Some((table, report)) = html_to_table_with_report(html) {
-                return Some((table, report.message()));
+        if paste_policy::html_has_table(html) {
+            if !paste_policy::html_is_only_table(html) {
+                return None;
             }
+            return html_to_table_with_report(html)
+                .map(|(table, report)| (table, report.message()));
         }
     }
 
-    // 3. TSV / plain text: MUST have tabs on >= 2 rows to become a table!
-    if let Some(tsv_or_text) = clip.tsv.as_deref().or(clip.plain_text.as_deref()) {
-        let tabbed_rows = tsv_or_text
-            .lines()
-            .filter(|line| line.contains('\t'))
-            .count();
-        if tabbed_rows >= 2 {
-            return Some((tsv_to_table(tsv_or_text), None));
-        }
-    }
-
-    None
+    // 3. Tab-separated text with the shape of a grid.
+    let tsv = clip.tsv.as_deref()?;
+    paste_policy::tsv_is_table(tsv).then(|| (tsv_to_table(tsv), None))
 }
 
 #[cfg(test)]
 #[path = "clipboard_actions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "clipboard_paste_policy_tests.rs"]
+mod paste_policy_tests;

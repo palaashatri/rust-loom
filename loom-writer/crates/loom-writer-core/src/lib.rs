@@ -25,7 +25,9 @@ mod images;
 mod layout;
 mod markdown;
 mod page_setup;
+mod paragraph_edit;
 mod paragraph_match;
+mod replace;
 mod search;
 mod style_json;
 mod tables;
@@ -453,6 +455,7 @@ impl WriterDocument {
     ) -> Vec<RichBlock> {
         let normalized = normalize_editor_text(plain_text);
         let old_blocks = std::mem::take(&mut self.blocks);
+        let known_edit = edit.is_some();
         let edit = match edit {
             Some(edit)
                 if edit.new_end <= normalized.len()
@@ -469,10 +472,20 @@ impl WriterDocument {
             let tables = tables::map_tables_through_edit(&old_blocks, &normalized, edit);
             tables::split_editor_text(&normalized, &tables)
         };
+        let mut next_id = old_blocks.iter().map(|block| block.id).max().unwrap_or(0) + 1;
+        if let Some(blocks) = known_edit
+            .then(|| {
+                paragraph_edit::rebuild(&old_blocks, &paragraphs, edit, &normalized, &mut next_id)
+            })
+            .flatten()
+        {
+            self.blocks = blocks;
+            self.selection = self.clamp_selection(self.selection.clone());
+            return old_blocks;
+        }
         let exact_matches = exact_paragraph_matches(&old_blocks, &paragraphs);
         let mut metadata_matches = metadata_matches(&old_blocks, &paragraphs, &exact_matches);
         tables::pin_table_matches(&old_blocks, &forced, &mut metadata_matches);
-        let mut next_id = old_blocks.iter().map(|block| block.id).max().unwrap_or(0) + 1;
         let blocks = paragraphs
             .into_iter()
             .enumerate()
@@ -3390,68 +3403,7 @@ impl WriterWorkspace {
 impl WriterDocument {
     /// Finds literal text in every block.
     pub fn find_all(&self, query: &str, case_sensitive: bool) -> Vec<SearchMatch> {
-        if query.is_empty() {
-            return Vec::new();
-        }
-        let needle = if case_sensitive {
-            query.to_string()
-        } else {
-            query.to_lowercase()
-        };
-        let mut matches = Vec::new();
-        for block in &self.blocks {
-            if case_sensitive {
-                matches.extend(
-                    block
-                        .text
-                        .as_str()
-                        .match_indices(query)
-                        .map(|(start, value)| SearchMatch {
-                            block_id: block.id,
-                            start,
-                            end: start + value.len(),
-                        }),
-                );
-            } else if needle.is_ascii() && block.text.as_str().is_ascii() {
-                // The common case: plain ASCII text and query, matched byte by byte.
-                matches.extend(
-                    search::ascii_case_insensitive(block.text.as_str(), needle.as_bytes()).map(
-                        |(start, end)| SearchMatch {
-                            block_id: block.id,
-                            start,
-                            end,
-                        },
-                    ),
-                );
-            } else {
-                // Unicode lowercase can change byte length, so search by character
-                // windows and map matches back to original UTF-8 byte offsets.
-                let original = block.text.as_str();
-                let boundaries: Vec<usize> = original
-                    .char_indices()
-                    .map(|(index, _)| index)
-                    .chain(std::iter::once(original.len()))
-                    .collect();
-                for start_char in 0..boundaries.len().saturating_sub(1) {
-                    for end_char in start_char + 1..boundaries.len() {
-                        let candidate = &original[boundaries[start_char]..boundaries[end_char]];
-                        let lowered = candidate.to_lowercase();
-                        if lowered == needle {
-                            matches.push(SearchMatch {
-                                block_id: block.id,
-                                start: boundaries[start_char],
-                                end: boundaries[end_char],
-                            });
-                            break;
-                        }
-                        if lowered.len() > needle.len().saturating_mul(4).max(needle.len() + 8) {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        matches
+        replace::find_all(self, query, case_sensitive)
     }
 
     /// Counts total occurrences of a query string across all blocks.
@@ -3461,52 +3413,7 @@ impl WriterDocument {
 
     /// Replaces literal text in every block while remapping style runs.
     pub fn replace_all(&mut self, query: &str, replacement: &str, case_sensitive: bool) -> usize {
-        if query.is_empty() {
-            return 0;
-        }
-        let mut replacements = 0;
-        for block in &mut self.blocks {
-            let before = block.text.as_str().to_string();
-            let spans: Vec<(usize, usize)> = if case_sensitive {
-                before
-                    .match_indices(query)
-                    .map(|(start, found)| (start, start + found.len()))
-                    .collect()
-            } else {
-                WriterDocument {
-                    id: String::new(),
-                    title: String::new(),
-                    page: PageSetup::default(),
-                    comments: Vec::new(),
-                    blocks: vec![block.clone()],
-                    selection: TextSelection::caret(0),
-                }
-                .find_all(query, false)
-                .into_iter()
-                .map(|hit| (hit.start, hit.end))
-                .collect()
-            };
-            if spans.is_empty() {
-                continue;
-            }
-            replacements += spans.len();
-            // One replacement at a time, last first: the style runs are
-            // remapped around that one change, so a run between two matches is
-            // never swallowed by a single before/after comparison that spans
-            // them (which dropped the italic of a neighbouring word).
-            let mut current = before.clone();
-            let mut runs = block.runs.clone();
-            for (start, end) in spans.into_iter().rev() {
-                let mut next = current.clone();
-                next.replace_range(start..end, replacement);
-                runs = remap_style_runs(&current, &next, &runs);
-                current = next;
-            }
-            if current != before {
-                block.runs = runs;
-                block.text = Text::from_str(&current);
-            }
-        }
+        let replacements = replace::replace_all(self, query, replacement, case_sensitive);
         self.selection = self.clamp_selection(self.selection.clone());
         replacements
     }

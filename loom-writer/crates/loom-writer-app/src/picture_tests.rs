@@ -269,3 +269,52 @@ fn picture_description_needs_the_caret_on_a_picture() {
         app.get_status_left()
     );
 }
+
+#[test]
+fn typing_at_the_end_of_a_picture_line_is_refused_and_the_picture_keeps_its_text() {
+    let path = png_file("typing", 240, 120);
+    let (app, state) = app_choosing(Some(path));
+    app.invoke_insert_image();
+    assert_eq!(pictures(&state), 1, "one picture block was inserted");
+    let picture_text = state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .find(|block| block.is_image())
+        .unwrap()
+        .text
+        .as_str()
+        .to_string();
+    let text = state.current.borrow().editor_text();
+    let end = text.find(&picture_text).unwrap() + picture_text.len();
+    let mut typed = text.clone();
+    typed.insert(end, 'x');
+    app.invoke_document_edited(typed.as_str().into(), end as i32 + 1, end as i32 + 1);
+
+    assert_eq!(pictures(&state), 1, "the picture is still a picture");
+    let kept = state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .find(|block| block.is_image())
+        .unwrap()
+        .text
+        .as_str()
+        .to_string();
+    assert_eq!(
+        kept, picture_text,
+        "the picture keeps exactly its own characters"
+    );
+    assert_eq!(
+        state.current.borrow().editor_text(),
+        text,
+        "the typed text was refused"
+    );
+    assert!(
+        app.get_status_left().contains("keeps its own line"),
+        "{}",
+        app.get_status_left()
+    );
+}

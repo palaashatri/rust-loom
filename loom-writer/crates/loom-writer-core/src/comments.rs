@@ -279,6 +279,15 @@ impl WriterDocument {
         let edit = caret
             .and_then(|caret| TextEdit::from_caret(&old_text, &new_text, caret))
             .unwrap_or_else(|| TextEdit::diff(&old_text, &new_text));
+        if crate::images::edit_touches_picture(&self.blocks, edit.old_start, edit.old_end) {
+            return Err(WriterError::Invalid(
+                "a picture keeps its own line; type in a text line beside it".into(),
+            ));
+        }
+        if self.exit_list_on_enter(edit, &new_text[edit.new_start..edit.new_end]) {
+            self.set_selection(crate::TextSelection::caret(edit.old_start));
+            return Ok(true);
+        }
         let inherited = character_style_at_global(self, edit.old_start, self.selection.affinity);
         self.replace_paragraphs_with_edit(&new_text, edit);
         apply_global_character_style(self, edit.new_start, edit.new_end, inherited);

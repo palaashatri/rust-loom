@@ -365,5 +365,11 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+mod edit_guard;
+pub(crate) use edit_guard::edit_touches_picture;
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod edit_guard_tests;

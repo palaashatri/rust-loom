@@ -427,13 +427,19 @@ fn ordinary_arrow_clears_table_range_before_copy_and_render() {
             "the ordinary arrow removes the stale {name} highlight"
         );
     }
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+        plain_text: Some("sentinel".into()),
+        ..Default::default()
+    })
+    .expect("write the sentinel");
     app.invoke_copy();
-    let copied_table = resolve_table_with_note(&read_clipboard().expect("read the copied table"))
-        .map(|(table, _)| (table.row_count(), table.col_count()));
     assert_eq!(
-        copied_table,
-        Some((3, 3)),
-        "Copy falls back to the whole table instead of using stale cells"
+        read_clipboard()
+            .expect("read the clipboard")
+            .plain_text
+            .as_deref(),
+        Some("sentinel"),
+        "Copy with a collapsed caret copies nothing, so no stale cells are copied"
     );
 }
 

@@ -433,8 +433,8 @@ fn writer_keystroke_stage_profile() {
                 DocumentSelection::range(selection.anchor, selection.focus),
             );
         });
-        stage("document_bytes", &mut || {
-            let _ = document_bytes(&base);
+        stage("retained_bytes", &mut || {
+            let _ = crate::history::retained_bytes(&base, &base);
         });
         stage("apply_state_with deferred", &mut || {
             apply_state_with(&app, &state, RecoveryWrite::Deferred);

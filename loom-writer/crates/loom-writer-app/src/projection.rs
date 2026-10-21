@@ -437,6 +437,8 @@ pub(crate) fn project(
         let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let marker = list_marker(block.kind.as_str(), numbers[line.block_index]);
+        // The column the block's lines are aligned in: the text column less its indent.
+        let column_width = block.text_column_width(&style);
         let x = ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
         let y = ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
         let height = (line.bounds.height / zoom).max(font_size * style.line_height);
@@ -444,8 +446,8 @@ pub(crate) fn project(
         if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
             let width = line.bounds.width / zoom;
             let shift = match block.style.alignment {
-                loom_text::Alignment::Center => (content_width - width) / 2.0,
-                loom_text::Alignment::Right => content_width - width,
+                loom_text::Alignment::Center => (column_width - width) / 2.0,
+                loom_text::Alignment::Right => column_width - width,
                 _ => 0.0,
             };
             images.push(PageImagePart {
@@ -492,7 +494,7 @@ pub(crate) fn project(
                     };
                     let cols = table.columns().max(1);
                     let num_rows = table.rows.len();
-                    let col_width = content_width / cols as f32;
+                    let col_width = column_width / cols as f32;
                     let row_height = (style.body_font_size_pt * style.line_height + 8.0).max(24.0);
                     let table_x = 0.0_f32;
                     let table_y = y;
@@ -635,7 +637,7 @@ pub(crate) fn project(
             if seen_chart_blocks.insert(block.id) {
                 if let Some(chart) = loom_writer_core::chart_from_block(block) {
                     let chart_title = chart.title.as_deref().unwrap_or("Chart");
-                    let chart_w = content_width.min(460.0);
+                    let chart_w = column_width.min(460.0);
                     let chart_h = 200.0f32;
                     table_cell_rects.push(WriterTableCellRect {
                         x: 0.0,
@@ -697,7 +699,7 @@ pub(crate) fn project(
                 &fragment_block(block, line.start, line.end),
                 x,
                 y,
-                content_width,
+                column_width,
                 height,
                 &marker,
                 &family,

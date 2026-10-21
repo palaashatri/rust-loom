@@ -93,17 +93,21 @@ fn history_budget_evicts_oldest_entries() {
     assert_eq!(history.undo(), Some(c));
 }
 
+/// Old entries leave when the budget is exceeded, but the newest entry stays
+/// undoable even when it alone is larger than the budget.
 #[test]
-fn history_byte_budget_is_bounded() {
+fn history_byte_budget_evicts_old_entries_and_keeps_the_newest() {
     let mut history = EditorHistory::with_budget(32, 1000);
     let a = text_document(&"a".repeat(400));
     let b = text_document(&"b".repeat(400));
     let c = text_document(&"c".repeat(400));
 
     history.record(a, b.clone(), HistoryKind::DocumentAction, 0);
-    history.record(b, c, HistoryKind::DocumentAction, 1);
+    history.record(b.clone(), c, HistoryKind::DocumentAction, 1);
 
-    assert!(history.total_bytes() <= 1000);
+    assert_eq!(history.undo_len(), 1);
+    assert_eq!(history.total_bytes(), history.undo[0].bytes);
+    assert_eq!(history.undo(), Some(b));
 }
 
 #[test]

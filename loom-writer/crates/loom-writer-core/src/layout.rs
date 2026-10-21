@@ -208,10 +208,44 @@ impl FlowLine {
 /// a line of body text (cell padding), so its lines reserve the row height the
 /// page draws and whatever follows the table starts below it.
 pub(crate) fn text_line_height(style: &PageStyle, block: &RichBlock) -> f32 {
-    if block.kind == crate::TABLE_BLOCK_KIND {
-        return (style.body_font_size_pt * style.line_height + 8.0).max(24.0);
+    let base = if block.kind == crate::TABLE_BLOCK_KIND {
+        (style.body_font_size_pt * style.line_height + 8.0).max(24.0)
+    } else {
+        style.font_size_for_kind(block.kind.as_str()) * style.line_height
+    };
+    base * line_spacing_factor(block)
+}
+
+/// The block's line spacing relative to the default paragraph spacing, so a
+/// paragraph at the default spacing keeps the page's own line height.
+pub(crate) fn line_spacing_factor(block: &RichBlock) -> f32 {
+    let factor = block.style.line_spacing / loom_text::ParagraphStyle::default().line_spacing;
+    if factor.is_finite() && factor > 0.0 {
+        factor
+    } else {
+        1.0
     }
-    style.font_size_for_kind(block.kind.as_str()) * style.line_height
+}
+
+impl RichBlock {
+    /// Points the block's lines are indented from the left margin: its left
+    /// indent, never negative and never so large that the column closes.
+    pub fn left_indent_pt(&self, style: &PageStyle) -> f32 {
+        let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let indent = if self.style.left_indent.is_finite() {
+            self.style.left_indent
+        } else {
+            0.0
+        };
+        indent.clamp(0.0, (usable - 1.0).max(0.0))
+    }
+
+    /// The width the block's lines wrap and align to: the text column less
+    /// its left indent.
+    pub fn text_column_width(&self, style: &PageStyle) -> f32 {
+        let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        (usable - self.left_indent_pt(style)).max(1.0)
+    }
 }
 
 struct Pagination {
@@ -265,7 +299,7 @@ impl WriterDocument {
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let picture = block.object_display_size(usable_width, usable_height);
             let line_height = picture.map_or(text_line_height(style, block), |(_, h)| h);
-            let info = wrapped(block, font_size, usable_width);
+            let info = wrapped(block, font_size, block.text_column_width(style));
             for line in info.lines.iter() {
                 if lines.len() > page_first_line
                     && height_used + line_height > usable_height + f32::EPSILON
@@ -378,7 +412,7 @@ impl WriterDocument {
                     * zoom;
                 let width = lines[at].bounds.width * zoom;
                 lines[at].bounds = PageRect {
-                    x: content_x,
+                    x: content_x + block.left_indent_pt(style) * zoom,
                     y: line_y,
                     width,
                     height: line_height,
@@ -567,13 +601,12 @@ impl WriterDocument {
             .partition_point(|start| *start <= offset)
             .saturating_sub(1);
         let style = self.page.page_style();
-        let width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
         begin_pass();
         let before: usize = self.blocks[..index]
             .iter()
             .map(|block| {
                 let font_size = style.font_size_for_kind(block.kind.as_str());
-                wrapped(block, font_size, width).graphemes + 1
+                wrapped(block, font_size, block.text_column_width(&style)).graphemes + 1
             })
             .sum();
         end_pass(self.blocks.len());
@@ -585,12 +618,11 @@ impl WriterDocument {
     /// keystroke recounts only the paragraph it changed.
     pub fn text_counts(&self) -> (usize, usize) {
         let style = self.page.page_style();
-        let width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
         begin_pass();
         let (mut words, mut chars) = (0usize, 0usize);
         for block in &self.blocks {
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let info = wrapped(block, font_size, width);
+            let info = wrapped(block, font_size, block.text_column_width(&style));
             words += info.words;
             chars += info.chars;
         }
@@ -642,8 +674,6 @@ fn rects_for_lines(
         )
     };
     let (lo, hi) = (lo.max(window.start), hi.min(window.end).min(lines.len()));
-    let available_width =
-        (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
     let mut result = Vec::new();
     // The last block measured: a selection covers many lines of few blocks.
     let mut measured: Option<(usize, Rc<LineMeasure>)> = None;
@@ -662,6 +692,7 @@ fn rects_for_lines(
         };
         // Block byte offsets in, points out.
         let advance = |from: usize, to: usize| positions.advance(from, to) * zoom;
+        let available_width = block.text_column_width(style) * zoom;
         let alignment_offset = match block.style.alignment {
             loom_text::Alignment::Center => ((available_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (available_width - line.bounds.width).max(0.0),
@@ -866,3 +897,6 @@ mod layout_tests;
 
 #[cfg(test)]
 mod layout_checks;
+
+#[cfg(test)]
+mod indent_tests;

@@ -1,0 +1,124 @@
+//! Paragraph structure edits through the real callbacks: Enter splits keep
+//! formatting, Enter on an empty list item and Backspace at the start of one
+//! remove the marker, and a join keeps the first paragraph's kind.
+
+use super::actions_tests::test_state;
+use super::*;
+use loom_text::Alignment;
+use slint::platform::Key;
+
+fn session(blocks: Vec<RichBlock>) -> (WriterApp, Rc<GuiState>) {
+    let mut document = WriterDocument::new("test", "Test");
+    document.blocks = blocks;
+    let (app, state) = test_state(
+        document,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    wire_writer_shared_callbacks(&app, &state, None);
+    (app, state)
+}
+
+fn key(app: &WriterApp, key: Key) -> bool {
+    app.invoke_handle_table_key(SharedString::from(key), false, false, false)
+}
+
+fn kinds(state: &GuiState) -> Vec<String> {
+    state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .map(|b| b.kind.clone())
+        .collect()
+}
+
+fn caret(state: &GuiState, at: usize) {
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::caret(at));
+}
+
+#[test]
+fn enter_in_the_middle_of_a_centered_heading_keeps_both_halves_formatted() {
+    let mut heading = RichBlock::new(1, "heading2", "Hello world");
+    heading.style.alignment = Alignment::Center;
+    let (app, state) = session(vec![heading]);
+    app.invoke_document_edited("Hello\n world".into(), 6, 6);
+    let doc = state.current.borrow();
+    assert_eq!(doc.editor_text(), "Hello\n world");
+    assert!(doc.blocks.iter().all(|b| b.kind == "heading2"));
+    assert!(doc
+        .blocks
+        .iter()
+        .all(|b| b.style.alignment == Alignment::Center));
+}
+
+#[test]
+fn enter_at_the_end_of_a_list_item_adds_an_item_and_numbers_follow() {
+    let (app, state) = session(vec![
+        RichBlock::new(1, "list-numbered", "one"),
+        RichBlock::new(2, "list-numbered", "two"),
+    ]);
+    app.invoke_document_edited("one\n\ntwo".into(), 4, 4);
+    assert_eq!(kinds(&state), ["list-numbered"; 3]);
+}
+
+#[test]
+fn enter_on_an_empty_list_item_leaves_the_list_as_one_undoable_step() {
+    let (app, state) = session(vec![
+        RichBlock::new(1, "list-numbered", "one"),
+        RichBlock::new(2, "list-numbered", ""),
+    ]);
+    caret(&state, 4);
+    assert!(key(&app, Key::Return));
+    assert_eq!(kinds(&state), ["list-numbered", "paragraph"]);
+    assert_eq!(state.current.borrow().editor_text(), "one\n");
+    app.invoke_undo();
+    assert_eq!(kinds(&state), ["list-numbered", "list-numbered"]);
+}
+
+#[test]
+fn enter_on_a_non_empty_list_item_is_left_to_the_editor() {
+    let (app, state) = session(vec![RichBlock::new(1, "list-bulleted", "item")]);
+    caret(&state, 0);
+    assert!(!key(&app, Key::Return));
+    assert_eq!(kinds(&state), ["list-bulleted"]);
+}
+
+#[test]
+fn backspace_at_the_start_of_a_list_item_removes_the_marker_before_joining() {
+    let (app, state) = session(vec![
+        RichBlock::new(1, "paragraph", "intro"),
+        RichBlock::new(2, "list-bulleted", "item"),
+    ]);
+    caret(&state, 6);
+    assert!(key(&app, Key::Backspace));
+    assert_eq!(kinds(&state), ["paragraph", "paragraph"]);
+    assert_eq!(state.current.borrow().editor_text(), "intro\nitem");
+    // The next Backspace is an ordinary join, left to the editor.
+    assert!(!key(&app, Key::Backspace));
+    app.invoke_document_edited("introitem".into(), 5, 5);
+    assert_eq!(state.current.borrow().editor_text(), "introitem");
+    assert_eq!(kinds(&state), ["paragraph"]);
+}
+
+#[test]
+fn backspace_inside_a_list_item_is_left_to_the_editor() {
+    let (app, state) = session(vec![RichBlock::new(1, "list-bulleted", "item")]);
+    caret(&state, 2);
+    assert!(!key(&app, Key::Backspace));
+    assert_eq!(kinds(&state), ["list-bulleted"]);
+}
+
+#[test]
+fn joining_paragraphs_with_backspace_keeps_the_first_ones_kind() {
+    let mut first = RichBlock::new(1, "heading1", "Head");
+    first.style.alignment = Alignment::Center;
+    let (app, state) = session(vec![first, RichBlock::new(2, "paragraph", "tail")]);
+    app.invoke_document_edited("Headtail".into(), 4, 4);
+    let doc = state.current.borrow();
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].kind, "heading1");
+    assert_eq!(doc.blocks[0].style.alignment, Alignment::Center);
+}

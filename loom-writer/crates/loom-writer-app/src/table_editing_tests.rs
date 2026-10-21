@@ -106,15 +106,22 @@ mod tests {
             "the accessible label follows the caret cell"
         );
 
+        // A collapsed caret copies nothing, so no stale A1:B2 range can be copied.
         loom_clipboard::set_mock_clipboard_enabled(true);
+        loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+            plain_text: Some("sentinel".into()),
+            ..Default::default()
+        })
+        .expect("write the sentinel");
         clipboard_actions::copy_action(app, state);
         let copied = loom_clipboard::read_clipboard()
-            .expect("Copy writes the focused table to the clipboard")
-            .to_table()
-            .expect("Copy keeps the clipboard table format");
-        assert_eq!(copied.row_count(), 3, "Copy no longer uses A1:B2 only");
-        assert_eq!(copied.col_count(), 3, "Copy retains all table columns");
-        assert_eq!(copied.cell_text(2, 2).as_deref(), Some("R2C2"));
+            .expect("read the clipboard")
+            .plain_text;
+        assert_eq!(
+            copied.as_deref(),
+            Some("sentinel"),
+            "Copy with a collapsed caret copies nothing"
+        );
         loom_clipboard::set_mock_clipboard_enabled(false);
     }
 
@@ -133,12 +140,29 @@ mod tests {
             "a successful table mutation clears the painted cell range"
         );
 
+        // The whole updated table is copied once it is selected: a collapsed caret copies nothing.
+        let table_id = state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+            .map(|block| block.id)
+            .expect("the updated table");
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id: table_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: expected_rows - 1,
+            end_col: expected_cols - 1,
+        }));
         loom_clipboard::set_mock_clipboard_enabled(true);
         clipboard_actions::copy_action(app, state);
         let copied = loom_clipboard::read_clipboard()
-            .expect("Copy writes the whole updated table")
+            .expect("Copy writes the selected table")
             .to_table()
             .expect("Copy preserves the table clipboard format");
+        table_actions::clear_table_cell_selection_range();
         assert_eq!(copied.row_count(), expected_rows);
         assert_eq!(copied.col_count(), expected_cols);
         loom_clipboard::set_mock_clipboard_enabled(false);

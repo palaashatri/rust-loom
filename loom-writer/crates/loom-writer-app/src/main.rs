@@ -21,6 +21,8 @@ mod file_title;
 mod find_bar;
 mod font_picker;
 mod font_store;
+mod history;
+mod list_keys;
 mod local_menu;
 mod markdown_export;
 mod multi_click;
@@ -43,6 +45,7 @@ mod typing_style;
 mod view_state;
 mod window_chrome;
 
+use history::{EditorHistory, HistoryKind};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -83,9 +86,6 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "loom-writer-document.loomdoc";
 const EXPORT_FILENAME: &str = "loom-writer-export.pdf";
-const HISTORY_MAX_ENTRIES: usize = 128;
-const HISTORY_MAX_BYTES: usize = 8 * 1024 * 1024;
-const TYPING_COALESCE_WINDOW_MS: u64 = 750;
 
 #[derive(Debug)]
 struct Args {
@@ -1084,175 +1084,6 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
         app.set_palette_selected(count - 1);
     } else if count == 0 {
         app.set_palette_selected(0);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HistoryKind {
-    Typing,
-    DocumentAction,
-}
-
-#[derive(Debug, Clone)]
-struct HistoryEntry {
-    before: WriterDocument,
-    after: WriterDocument,
-    kind: HistoryKind,
-    last_edit_ms: u64,
-    /// Estimated size of each document, taken once when it enters the entry so
-    /// trimming the history never re-measures every entry.
-    before_bytes: usize,
-    after_bytes: usize,
-}
-
-impl HistoryEntry {
-    fn memory_bytes(&self) -> usize {
-        self.before_bytes + self.after_bytes
-    }
-}
-
-/// A cheap estimate of a document's size: its text plus a fixed cost per
-/// block, style run and comment.
-fn document_bytes(document: &WriterDocument) -> usize {
-    let blocks: usize = document
-        .blocks
-        .iter()
-        .map(|block| block.text.len_bytes() + block.kind.len() + 64 + block.runs.len() * 48)
-        .sum();
-    let comments: usize = document
-        .comments
-        .iter()
-        .map(|thread| thread.id.len() + thread.author.len() + thread.body.len() + 48)
-        .sum();
-    document.id.len() + document.title.len() + blocks + comments
-}
-
-#[derive(Debug)]
-struct EditorHistory {
-    undo: Vec<HistoryEntry>,
-    redo: Vec<HistoryEntry>,
-    max_entries: usize,
-    max_bytes: usize,
-    total_bytes: usize,
-}
-
-impl EditorHistory {
-    fn new() -> Self {
-        Self::with_budget(HISTORY_MAX_ENTRIES, HISTORY_MAX_BYTES)
-    }
-
-    fn with_budget(max_entries: usize, max_bytes: usize) -> Self {
-        Self {
-            undo: Vec::new(),
-            redo: Vec::new(),
-            max_entries,
-            max_bytes,
-            total_bytes: 0,
-        }
-    }
-
-    fn record(
-        &mut self,
-        before: WriterDocument,
-        after: WriterDocument,
-        kind: HistoryKind,
-        now_ms: u64,
-    ) {
-        if before == after {
-            return;
-        }
-        self.redo.clear();
-        if let Some(last) = self.undo.last_mut() {
-            if kind == HistoryKind::Typing
-                && last.kind == HistoryKind::Typing
-                && last.after == before
-                && now_ms.saturating_sub(last.last_edit_ms) <= TYPING_COALESCE_WINDOW_MS
-            {
-                last.after_bytes = document_bytes(&after);
-                last.after = after;
-                last.last_edit_ms = now_ms;
-                self.recalculate_and_trim();
-                return;
-            }
-        }
-        self.undo.push(HistoryEntry {
-            before_bytes: document_bytes(&before),
-            after_bytes: document_bytes(&after),
-            before,
-            after,
-            kind,
-            last_edit_ms: now_ms,
-        });
-        self.recalculate_and_trim();
-    }
-
-    fn undo(&mut self) -> Option<WriterDocument> {
-        let entry = self.undo.pop()?;
-        let before = entry.before.clone();
-        self.redo.push(entry);
-        Some(before)
-    }
-
-    fn redo(&mut self) -> Option<WriterDocument> {
-        let entry = self.redo.pop()?;
-        let after = entry.after.clone();
-        self.undo.push(entry);
-        Some(after)
-    }
-
-    #[cfg(test)]
-    fn undo_len(&self) -> usize {
-        self.undo.len()
-    }
-
-    #[cfg(test)]
-    fn redo_len(&self) -> usize {
-        self.redo.len()
-    }
-
-    /// Whether undo is currently available — authoritative for `edit.undo` enablement.
-    fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
-    /// Whether redo is currently available — authoritative for `edit.redo` enablement.
-    fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
-    }
-
-    fn entry_count(&self) -> usize {
-        self.undo.len() + self.redo.len()
-    }
-
-    #[cfg(test)]
-    fn total_bytes(&self) -> usize {
-        self.total_bytes
-    }
-
-    fn recalculate_and_trim(&mut self) {
-        self.total_bytes = self
-            .undo
-            .iter()
-            .chain(&self.redo)
-            .map(HistoryEntry::memory_bytes)
-            .sum();
-        while self.entry_count() > self.max_entries || self.total_bytes > self.max_bytes {
-            if self.undo.len() > 1 {
-                self.undo.remove(0);
-            } else if !self.redo.is_empty() {
-                self.redo.remove(0);
-            } else if self.undo.len() == 1 {
-                self.undo.clear();
-            } else {
-                break;
-            }
-            self.total_bytes = self
-                .undo
-                .iter()
-                .chain(&self.redo)
-                .map(HistoryEntry::memory_bytes)
-                .sum();
-        }
     }
 }
 
@@ -2800,15 +2631,14 @@ fn wire_writer_shared_callbacks(
                 };
                 let before = state.current.borrow().selection();
                 let mut next = state.current.borrow().clone();
-                let text_changed = match next
-                    .replace_editor_text_at(text.as_str(), usize::try_from(focus).ok())
-                {
-                    Ok(changed) => changed,
-                    Err(error) => {
-                        app.set_status_left(SharedString::from(format!("Edit failed: {error}")));
-                        return;
-                    }
-                };
+                let text_changed =
+                    match next.replace_editor_text_at(text.as_str(), usize::try_from(focus).ok()) {
+                        Ok(changed) => changed,
+                        Err(error) => {
+                            picture_actions::refuse_edit(&app, &state, &error);
+                            return;
+                        }
+                    };
                 next.set_selection(TextSelection::range(
                     anchor.max(0) as usize,
                     focus.max(0) as usize,
@@ -4858,6 +4688,8 @@ mod rtl_tests;
 mod scale_surfaces_tests;
 
 #[cfg(test)]
+mod history_tests;
+#[cfg(test)]
 mod keyboard_flow_tests;
 #[cfg(test)]
 mod table_rules_tests;
@@ -4870,6 +4702,8 @@ mod clipboard_text_tests;
 mod docx_save_tests;
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod list_keys_tests;
 #[cfg(test)]
 mod picture_tests;
 #[cfg(test)]

@@ -116,6 +116,24 @@ fn test_writer_copy_table_writes_multiformat_clipboard_for_sheets() {
     crate::wire_writer_shared_callbacks(&app, &state, None);
 
     app.invoke_insert_table_size(2, 2);
+    // A collapsed caret copies nothing; the whole table is copied once selected.
+    let table_id = state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+        .map(|block| block.id)
+        .expect("the inserted table");
+    crate::table_actions::set_table_cell_selection_range(Some(
+        crate::table_actions::TableCellRange {
+            block_id: table_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: 1,
+            end_col: 1,
+        },
+    ));
     app.invoke_copy();
 
     let clip = read_clipboard().expect("read clipboard");
@@ -463,13 +481,31 @@ fn stale_table_range_is_cleared_when_replacing_document_with_same_table_id() {
         std::path::PathBuf::from("replacement.loomdoc"),
         replacement,
     );
+    let remaining_range = crate::table_actions::get_table_cell_selection_range();
+    // A collapsed caret copies nothing, so the replacement table is copied by selecting it.
+    let replacement_table = state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+        .map(|block| block.id)
+        .expect("the replacement table");
+    crate::table_actions::set_table_cell_selection_range(Some(
+        crate::table_actions::TableCellRange {
+            block_id: replacement_table,
+            start_row: 0,
+            start_col: 0,
+            end_row: 2,
+            end_col: 2,
+        },
+    ));
     app.invoke_copy();
 
     let clipboard = read_clipboard().expect("read mock clipboard");
     let copied_table = clipboard
         .to_table()
         .expect("decode copied replacement table");
-    let remaining_range = crate::table_actions::get_table_cell_selection_range();
     crate::table_actions::clear_table_cell_selection_range();
     assert_eq!(
         copied_table.row_count(),
@@ -543,29 +579,25 @@ fn pointer_selecting_another_cell_clears_table_range_before_copy() {
     );
     let label_after_pointer = app.get_document_accessible_label().to_string();
     let range_after_pointer = crate::table_actions::get_table_cell_selection_range();
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+        plain_text: Some("sentinel".into()),
+        ..Default::default()
+    })
+    .expect("write the sentinel");
     app.invoke_copy();
 
-    let clipboard = read_clipboard().expect("read mock clipboard");
-    let copied_table = clipboard.to_table().expect("decode copied table");
-    let copied_size = (copied_table.row_count(), copied_table.col_count());
-    let copied_last_cell = copied_table.cell_text(2, 2);
+    let copied_text = read_clipboard().expect("read mock clipboard").plain_text;
     crate::table_actions::clear_table_cell_selection_range();
     loom_clipboard::set_mock_clipboard_enabled(false);
 
     assert_eq!(
-            (
-                label_after_pointer,
-                range_after_pointer,
-                copied_size,
-                copied_last_cell,
-            ),
+            (label_after_pointer, range_after_pointer, copied_text),
             (
                 "Table 3 by 3, cell C3: cell-2-2".to_owned(),
                 None,
-                (3, 3),
-                Some("cell-2-2".to_owned()),
+                Some("sentinel".to_owned()),
             ),
-            "a pointer selection clears the stale range, refreshes its label, and copies the full table"
+            "a pointer selection clears the stale range and refreshes its label; a collapsed caret copies nothing"
         );
 }
 
@@ -608,28 +640,24 @@ fn pointer_reselecting_the_anchor_clears_table_range_when_caret_is_unchanged() {
     );
     let label_after_pointer = app.get_document_accessible_label().to_string();
     let range_after_pointer = crate::table_actions::get_table_cell_selection_range();
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
+        plain_text: Some("sentinel".into()),
+        ..Default::default()
+    })
+    .expect("write the sentinel");
     app.invoke_copy();
 
-    let clipboard = read_clipboard().expect("read mock clipboard");
-    let copied_table = clipboard.to_table().expect("decode copied table");
-    let copied_size = (copied_table.row_count(), copied_table.col_count());
-    let copied_last_cell = copied_table.cell_text(2, 2);
+    let copied_text = read_clipboard().expect("read mock clipboard").plain_text;
     crate::table_actions::clear_table_cell_selection_range();
     loom_clipboard::set_mock_clipboard_enabled(false);
 
     assert_eq!(
-            (
-                label_after_pointer,
-                range_after_pointer,
-                copied_size,
-                copied_last_cell,
-            ),
+            (label_after_pointer, range_after_pointer, copied_text),
             (
                 "Table 3 by 3, cell A1: cell-0-0".to_owned(),
                 None,
-                (3, 3),
-                Some("cell-2-2".to_owned()),
+                Some("sentinel".to_owned()),
             ),
-            "reselecting the unchanged caret clears the stale range, refreshes its label, and copies the full table"
+            "reselecting the unchanged caret clears the stale range and refreshes its label; a collapsed caret copies nothing"
         );
 }

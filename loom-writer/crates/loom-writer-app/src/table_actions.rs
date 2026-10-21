@@ -55,6 +55,9 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
             let Some(app) = app_ref.upgrade() else {
                 return false;
             };
+            if crate::list_keys::handle(&app, &state, key.as_str(), ctrl, alt) {
+                return true;
+            }
             handle_table_key(&app, &state, key.as_str(), shift, ctrl, alt)
         });
     }

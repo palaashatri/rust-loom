@@ -176,13 +176,15 @@ fn history_sizes_are_measured_once_per_entry() {
         doc = next;
     }
     for entry in history.undo.iter() {
-        assert_eq!(entry.before_bytes, document_bytes(&entry.before));
-        assert_eq!(entry.after_bytes, document_bytes(&entry.after));
+        assert_eq!(
+            entry.bytes,
+            crate::history::retained_bytes(&entry.before, &entry.after)
+        );
     }
-    let total: usize = history.undo.iter().map(HistoryEntry::memory_bytes).sum();
+    let total: usize = history.undo.iter().map(|entry| entry.bytes).sum();
     assert_eq!(history.total_bytes(), total);
 
-    // Typing that coalesces into one entry re-measures only the new "after".
+    // Typing that coalesces into one entry re-measures the entry against its new "after".
     let mut typing = EditorHistory::with_budget(32, usize::MAX);
     let first = text_document("a");
     let second = text_document("ab");
@@ -190,8 +192,11 @@ fn history_sizes_are_measured_once_per_entry() {
     typing.record(first, second.clone(), HistoryKind::Typing, 0);
     typing.record(second, third.clone(), HistoryKind::Typing, 100);
     assert_eq!(typing.undo_len(), 1);
-    assert_eq!(typing.undo[0].after_bytes, document_bytes(&third));
-    assert_eq!(typing.total_bytes(), typing.undo[0].memory_bytes());
+    assert_eq!(
+        typing.undo[0].bytes,
+        crate::history::retained_bytes(&typing.undo[0].before, &third)
+    );
+    assert_eq!(typing.total_bytes(), typing.undo[0].bytes);
 }
 
 #[test]

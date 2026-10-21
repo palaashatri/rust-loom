@@ -163,7 +163,6 @@ fn writer_text_metric_offset(
         )
         .ok()?;
     let base_page = flow.page_bounds().first().copied()?;
-    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
     // Only the page under the pointer and its neighbours can hold the nearest
     // line, so the rest of a long document is never visited.
     let pointer_y = local_y + base_page.y + style.margin_top_pt;
@@ -187,9 +186,11 @@ fn writer_text_metric_offset(
         if nearest.is_some_and(|(best_distance, _)| distance >= best_distance) {
             continue;
         }
+        // The column the line is aligned in: the text column less the indent.
+        let column_width = block.text_column_width(&style);
         let alignment_offset = match block.style.alignment {
-            loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
-            loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
+            loom_text::Alignment::Center => ((column_width - line.bounds.width) / 2.0).max(0.0),
+            loom_text::Alignment::Right => (column_width - line.bounds.width).max(0.0),
             loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
         };
         let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;

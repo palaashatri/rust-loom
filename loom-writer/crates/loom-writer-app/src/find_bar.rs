@@ -332,7 +332,7 @@ fn replace_all(app: &WriterApp, state: &GuiState) {
     let bar = app.global::<FindBar>();
     let (query, replacement) = (bar.get_query(), bar.get_replacement());
     let mut next = state.current.borrow().clone();
-    let count = next.replace_all(query.as_str(), replacement.as_str(), false);
+    let count = next.replace_all(query.as_str(), replacement.as_str(), bar.get_match_case());
     if count == 0 {
         bar.set_status(SharedString::from("No matches"));
         return;
@@ -534,6 +534,18 @@ mod app_tests {
             state.current.borrow().editor_text(),
             "The cat sat.\nAnother Cat here."
         );
+    }
+
+    #[test]
+    fn replace_all_honours_match_case() {
+        let (app, state) = setup("Cat cat");
+        let bar = app.global::<FindBar>();
+        bar.set_match_case(true);
+        bar.set_query("cat".into());
+        bar.set_replacement("dog".into());
+        bar.invoke_replace_all();
+        assert_eq!(state.current.borrow().editor_text(), "Cat dog");
+        assert_eq!(bar.get_status().as_str(), "1 replaced");
     }
 
     #[test]

@@ -194,6 +194,9 @@ fn pdf_lines(
         let gap = if index == 0 { 0.0 } else { block_gap };
         let kind = block.kind.as_str();
         let text = block.text.as_str();
+        // An indented paragraph wraps and lays out in the narrower column the
+        // editor gives it.
+        let column = column - block.left_indent_pt(page_style);
         if kind == crate::TABLE_BLOCK_KIND {
             // Row heights depend on the wrapped cells, so the table is laid out
             // here, where pagination needs the heights.
@@ -257,7 +260,8 @@ fn pdf_lines(
             }
         };
         let style = block_style(kind, body, page_style);
-        let height = style.size_pt * page_style.line_height;
+        let height =
+            style.size_pt * page_style.line_height * crate::layout::line_spacing_factor(block);
         let marker_width = pdf_text_width(&marker, &style);
         let ranges = export_flow::wrap(
             text,
@@ -318,6 +322,8 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             y = top;
         }
         let block = &doc.blocks[line.block];
+        let indent = block.left_indent_pt(&page_style);
+        let column = column - indent;
         match &line.content {
             LineContent::Text {
                 start,
@@ -329,7 +335,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 let width = export_flow::line_width(marker, text, &block.runs, style, *start);
                 let shift = align_shift(block.style.alignment, column, width);
                 let text_line = StyledLine {
-                    x: page_style.margin_left_pt + shift,
+                    x: page_style.margin_left_pt + indent + shift,
                     y,
                     marker,
                     text,
@@ -340,7 +346,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             }
             LineContent::TableRow { layout, row } => {
                 let shift = align_shift(block.style.alignment, column, layout.width);
-                let origin = (page_style.margin_left_pt + shift, y);
+                let origin = (page_style.margin_left_pt + indent + shift, y);
                 export_table::draw_row(&mut pdf, page, layout, *row, origin);
             }
             LineContent::Chart {
@@ -349,14 +355,14 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 height,
             } => {
                 let shift = align_shift(block.style.alignment, column, *width);
-                let origin = (page_style.margin_left_pt + shift, y);
+                let origin = (page_style.margin_left_pt + indent + shift, y);
                 draw_chart_card(&mut pdf, page, chart, origin, *width, *height);
             }
             LineContent::Picture { width, height } => {
                 let shift = align_shift(block.style.alignment, column, *width);
                 if let Some(image) = block.image.as_ref().and_then(|i| pdf_image(i).ok()) {
                     let id = pdf.add_image(image);
-                    let x = page_style.margin_left_pt + shift;
+                    let x = page_style.margin_left_pt + indent + shift;
                     pdf.draw_image_with_transform(
                         page,
                         id,

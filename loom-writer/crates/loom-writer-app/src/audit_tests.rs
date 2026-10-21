@@ -93,12 +93,13 @@ fn test_deep_audit_undo_redo_isolation_and_coalescing() {
     doc0.replace_paragraphs("Initial");
 
     let mut doc1 = doc0.clone();
-    doc1.replace_paragraphs("Initial edit");
+    doc1.replace_paragraphs("Initiale");
 
     let mut doc2 = doc1.clone();
-    doc2.replace_paragraphs("Initial edit 2");
+    doc2.replace_paragraphs("Initialed");
 
-    // Coalescing typing edits
+    // Typing within one word coalesces into one undo step (a space or
+    // punctuation after a word starts a new step; see history_tests).
     history.record(doc0.clone(), doc1.clone(), HistoryKind::Typing, 100);
     history.record(doc1.clone(), doc2.clone(), HistoryKind::Typing, 200);
     assert_eq!(history.undo_len(), 1); // coalesced
