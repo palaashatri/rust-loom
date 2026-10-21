@@ -20,6 +20,8 @@ export global FindBar {
     in-out property <string> status: "";
     /// Case-sensitive matching.
     in-out property <bool> match-case: false;
+    /// A match must not be part of a longer word.
+    in-out property <bool> whole-word: false;
     /// Secondary highlights for every match but the current one; empty while
     /// the bar is closed.
     in-out property <[FindRect]> match-rects: [];
@@ -150,12 +152,43 @@ export component FindBarOverlay inherits Rectangle {
             LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
         }
 
-        LoomToggle {
-            label: "Match case";
-            checked: FindBar.match-case;
-            toggled(value) => {
-                FindBar.match-case = value;
-                FindBar.query-changed(FindBar.query);
+        // The options mirror in right-to-left, like the buttons above.
+        if !Theme.rtl : HorizontalLayout {
+            spacing: Theme.tokens.space.md;
+            LoomToggle {
+                label: "Match case";
+                checked: FindBar.match-case;
+                toggled(value) => {
+                    FindBar.match-case = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+            LoomToggle {
+                label: "Whole word";
+                checked: FindBar.whole-word;
+                toggled(value) => {
+                    FindBar.whole-word = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+        }
+        if Theme.rtl : HorizontalLayout {
+            spacing: Theme.tokens.space.md;
+            LoomToggle {
+                label: "Whole word";
+                checked: FindBar.whole-word;
+                toggled(value) => {
+                    FindBar.whole-word = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+            LoomToggle {
+                label: "Match case";
+                checked: FindBar.match-case;
+                toggled(value) => {
+                    FindBar.match-case = value;
+                    FindBar.query-changed(FindBar.query);
+                }
             }
         }
 

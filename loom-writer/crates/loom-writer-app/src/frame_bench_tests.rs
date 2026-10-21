@@ -211,7 +211,8 @@ fn bench_size(pages: usize, mode: &str) {
     let t = Instant::now();
     bar.invoke_query_changed("dolor".into());
     let find_ms = ms(t);
-    let match_count = find_bar::editor_matches(&state.current.borrow(), "dolor", false).len();
+    let match_count =
+        find_bar::editor_matches(&state.current.borrow(), "dolor", Default::default()).len();
     let rss = peak_working_set_mb();
 
     eprintln!(

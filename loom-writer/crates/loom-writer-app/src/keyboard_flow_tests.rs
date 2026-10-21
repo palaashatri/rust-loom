@@ -822,11 +822,14 @@ fn find_bar_opens_steps_replaces_and_closes_from_the_keyboard() {
 
     // Tab reaches Match case and every button, in reading order, inside the bar.
     let mut names = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..5 {
         tab(&s.app);
         names.push(focus_name(&s.app));
     }
-    assert_eq!(names, ["Previous", "Next", "Done", "Match case"]);
+    assert_eq!(
+        names,
+        ["Previous", "Next", "Done", "Match case", "Whole word"]
+    );
 
     // Escape closes from a button, not only from the field, and returns to the page.
     press(&s.app, Key::Escape);

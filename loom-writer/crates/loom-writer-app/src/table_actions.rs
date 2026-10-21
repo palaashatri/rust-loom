@@ -6,6 +6,9 @@ use std::rc::Rc;
 
 use crate::{apply_state, apply_with_history, GuiState, HistoryKind, WriterApp};
 
+#[path = "break_keys.rs"]
+pub(crate) mod break_keys;
+
 /// Wires table-related callbacks into the Slint WriterApp.
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     {
@@ -55,7 +58,12 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
             let Some(app) = app_ref.upgrade() else {
                 return false;
             };
-            if crate::list_keys::handle(&app, &state, key.as_str(), ctrl, alt) {
+            if crate::caret_keys::handle(&app, &state, key.as_str(), shift, ctrl, alt) {
+                return true;
+            }
+            if break_keys::handle(&app, &state, key.as_str(), shift, ctrl, alt)
+                || crate::list_keys::handle(&app, &state, key.as_str(), ctrl, alt)
+            {
                 return true;
             }
             handle_table_key(&app, &state, key.as_str(), shift, ctrl, alt)

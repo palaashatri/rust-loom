@@ -167,10 +167,17 @@ impl Markup {
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
-        if matches!(ch, '\u{5c}' | '*' | '_' | '`' | '[' | ']' | '~') {
-            out.push('\u{5c}');
+        match ch {
+            // A line break inside the paragraph and a page break.
+            '\u{b}' => out.push_str("<br>"),
+            '\u{c}' => out.push_str("\n\n<div style=\"page-break-after: always\"></div>\n\n"),
+            _ => {
+                if matches!(ch, '\u{5c}' | '*' | '_' | '`' | '[' | ']' | '~') {
+                    out.push('\u{5c}');
+                }
+                out.push(ch);
+            }
         }
-        out.push(ch);
     }
     out
 }
@@ -178,6 +185,17 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::{RichBlock, WriterDocument, TABLE_BLOCK_KIND};
+
+    #[test]
+    fn line_and_page_breaks_are_written_as_html_breaks() {
+        let mut doc = WriterDocument::new("breaks", "Breaks");
+        doc.push(RichBlock::new(1, "paragraph", "One\u{b}Two\u{c}"));
+        doc.push(RichBlock::new(2, "paragraph", "Next"));
+        let markdown = doc.to_markdown();
+        assert!(markdown.contains("One<br>Two"), "{markdown}");
+        assert!(markdown.contains("page-break-after: always"), "{markdown}");
+        assert!(!markdown.contains(['\u{b}', '\u{c}']));
+    }
 
     #[test]
     fn blocks_are_separated_so_markdown_readers_do_not_merge_them() {

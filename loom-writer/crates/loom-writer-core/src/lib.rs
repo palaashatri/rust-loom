@@ -13,6 +13,7 @@ use loom_package::zip::{self, PackageArchive};
 use loom_text::ParagraphStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod caret_move;
 mod charts;
 mod comments;
 pub mod docx;
@@ -35,6 +36,7 @@ mod tables;
 pub mod test_fonts;
 mod text_metrics;
 
+pub use caret_move::{visual_caret_move, CaretTarget, VisualMove};
 pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
@@ -44,6 +46,7 @@ pub use layout::{DocumentFlow, FlowLine};
 pub use loom_objects;
 pub use page_setup::PageSetup;
 use paragraph_match::{exact_paragraph_matches, metadata_matches};
+pub use replace::FindOptions;
 use style_json::{
     alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, parse_line_break,
     runs_json, selection_json,

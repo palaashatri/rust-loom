@@ -18,10 +18,13 @@ use crate::{search, RichBlock, SearchMatch, Text, WriterDocument, TABLE_BLOCK_KI
 pub(crate) fn block_matches(
     block: &RichBlock,
     query: &str,
-    case_sensitive: bool,
+    options: FindOptions,
 ) -> Vec<(usize, usize)> {
     let text = block.text.as_str();
-    let candidates = candidate_matches(text, query, case_sensitive);
+    let mut candidates = candidate_matches(text, query, options.case_sensitive);
+    if options.whole_word {
+        candidates.retain(|&(start, end)| is_whole_word(text, query, start, end));
+    }
     let accepted = if block.kind == TABLE_BLOCK_KIND {
         let divider = divider_range(text);
         let bytes = text.as_bytes();
@@ -38,6 +41,29 @@ pub(crate) fn block_matches(
         candidates
     };
     non_overlapping(accepted)
+}
+
+/// How a search matches: both default to off (case-insensitive, any substring).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FindOptions {
+    pub case_sensitive: bool,
+    /// A match must not touch a letter, digit or underscore on a side where the
+    /// query itself begins or ends with one, so `cat` skips `concatenate`
+    /// while a query ending in a space still matches before any letter.
+    pub whole_word: bool,
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Whether `start..end` of `text` sits on word boundaries for `query`.
+fn is_whole_word(text: &str, query: &str, start: usize, end: usize) -> bool {
+    let starts_word = query.chars().next().is_some_and(is_word_char);
+    let ends_word = query.chars().next_back().is_some_and(is_word_char);
+    let before_ok = !starts_word || !text[..start].chars().next_back().is_some_and(is_word_char);
+    let after_ok = !ends_word || !text[end..].chars().next().is_some_and(is_word_char);
+    before_ok && after_ok
 }
 
 /// Every occurrence of `query` in `text`, sorted by start, overlaps included.
@@ -134,11 +160,27 @@ pub(crate) fn find_all(
     query: &str,
     case_sensitive: bool,
 ) -> Vec<SearchMatch> {
+    find_all_with(
+        document,
+        query,
+        FindOptions {
+            case_sensitive,
+            whole_word: false,
+        },
+    )
+}
+
+/// Every match under `options`, in block order.
+pub(crate) fn find_all_with(
+    document: &WriterDocument,
+    query: &str,
+    options: FindOptions,
+) -> Vec<SearchMatch> {
     document
         .blocks
         .iter()
         .flat_map(|block| {
-            block_matches(block, query, case_sensitive)
+            block_matches(block, query, options)
                 .into_iter()
                 .map(move |(start, end)| SearchMatch {
                     block_id: block.id,
@@ -156,9 +198,23 @@ pub(crate) fn replace_all(
     replacement: &str,
     case_sensitive: bool,
 ) -> usize {
+    let options = FindOptions {
+        case_sensitive,
+        whole_word: false,
+    };
+    replace_all_with(document, query, replacement, options)
+}
+
+/// Replaces every match under `options` and returns how many were replaced.
+pub(crate) fn replace_all_with(
+    document: &mut WriterDocument,
+    query: &str,
+    replacement: &str,
+    options: FindOptions,
+) -> usize {
     let mut replacements = 0;
     for index in 0..document.blocks.len() {
-        let spans = block_matches(&document.blocks[index], query, case_sensitive);
+        let spans = block_matches(&document.blocks[index], query, options);
         if spans.is_empty() {
             continue;
         }
@@ -255,6 +311,25 @@ fn map_offset(offset: usize, changes: &[(usize, usize, usize)], is_start: bool) 
         };
     }
     (offset as isize + shift) as usize
+}
+
+impl WriterDocument {
+    /// Finds literal text in every block under `options`.
+    pub fn find_all_with(&self, query: &str, options: FindOptions) -> Vec<SearchMatch> {
+        find_all_with(self, query, options)
+    }
+
+    /// Replaces every match under `options` and returns how many were replaced.
+    pub fn replace_all_with(
+        &mut self,
+        query: &str,
+        replacement: &str,
+        options: FindOptions,
+    ) -> usize {
+        let replacements = replace_all_with(self, query, replacement, options);
+        self.selection = self.clamp_selection(self.selection.clone());
+        replacements
+    }
 }
 
 #[cfg(test)]

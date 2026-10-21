@@ -151,6 +151,58 @@ fn match_case_switches_between_case_sensitive_and_insensitive_matching() {
     assert_eq!(highlight_count(&app), 2);
 }
 
+#[test]
+fn whole_word_limits_find_count_highlights_and_stepping_to_whole_words() {
+    let (app, state) = setup("cat concatenate Cat cats cat");
+    let bar = app.global::<FindBar>();
+    bar.invoke_open_requested(false);
+    query(&app, "cat");
+    assert!(
+        bar.get_status().as_str().ends_with("of 5"),
+        "{}",
+        bar.get_status()
+    );
+    bar.set_whole_word(true);
+    bar.invoke_query_changed(bar.get_query());
+    assert!(
+        bar.get_status().as_str().ends_with("of 3"),
+        "{}",
+        bar.get_status()
+    );
+    assert_eq!(highlight_count(&app), 2);
+    assert_eq!(selected(&state), "cat");
+    bar.invoke_find_next();
+    assert_eq!(selected(&state), "Cat");
+    bar.invoke_find_next();
+    bar.invoke_find_next();
+    assert_eq!(
+        selected(&state),
+        "cat",
+        "stepping wraps over whole words only"
+    );
+    assert_eq!(
+        state
+            .current
+            .borrow()
+            .selection()
+            .anchor
+            .min(state.current.borrow().selection().focus),
+        0
+    );
+}
+
+#[test]
+fn whole_word_applies_to_replace_and_replace_all() {
+    let (app, state) = setup("cat concatenate cat");
+    let bar = app.global::<FindBar>();
+    bar.set_whole_word(true);
+    bar.set_query("cat".into());
+    bar.set_replacement("dog".into());
+    bar.invoke_replace_all();
+    assert_eq!(state.current.borrow().editor_text(), "dog concatenate dog");
+    assert_eq!(bar.get_status().as_str(), "2 replaced");
+}
+
 /// Highlights are built for the pages near the view, not for every match in
 /// the document: the work must not grow with the length of the document.
 #[test]
@@ -164,7 +216,9 @@ fn highlights_are_built_only_for_matches_near_the_view() {
             let bar = app.global::<FindBar>();
             bar.invoke_open_requested(false);
             query(&app, "dolor");
-            let total = find_bar::editor_matches(&state.current.borrow(), "dolor", false).len();
+            let total =
+                find_bar::editor_matches(&state.current.borrow(), "dolor", Default::default())
+                    .len();
             (total, highlight_count(&app))
         })
         .collect();

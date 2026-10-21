@@ -75,7 +75,7 @@ pub fn offset_at_x(
     font_size: f32,
     x: f32,
 ) -> usize {
-    let visible = text.trim_end_matches('\n').len();
+    let visible = text.trim_end_matches(['\n', '\u{b}', '\u{c}']).len();
     LineMeasure::new(
         text,
         text_start,

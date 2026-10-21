@@ -10,6 +10,7 @@
 )]
 
 mod appearance;
+mod caret_keys;
 mod caret_scroll;
 mod clipboard_actions;
 mod document_formatting;
@@ -4696,6 +4697,8 @@ mod table_rules_tests;
 #[cfg(test)]
 mod typing_style_tests;
 
+#[cfg(test)]
+mod caret_keys_tests;
 #[cfg(test)]
 mod clipboard_text_tests;
 #[cfg(test)]

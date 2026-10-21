@@ -135,3 +135,52 @@ fn find_counts_the_same_matches_that_replace_all_replaces_in_a_table() {
     );
     assert_eq!(doc.replace_all("-", "x", false), counted);
 }
+
+#[test]
+fn whole_word_skips_matches_inside_longer_words() {
+    use crate::FindOptions;
+    let doc = paragraph("cat concatenate cat_x cats Cat. (cat) \u{e9}cat cat\u{e9}");
+    let whole = FindOptions {
+        case_sensitive: false,
+        whole_word: true,
+    };
+    let spans: Vec<_> = doc
+        .find_all_with("cat", whole)
+        .into_iter()
+        .map(|hit| (hit.start, hit.end))
+        .collect();
+    // "cat", "Cat." and "(cat)"; not concatenate, cat_x, cats, \u{e9}cat, cat\u{e9}.
+    assert_eq!(spans.len(), 3, "{spans:?}");
+    assert_eq!(spans[0], (0, 3));
+    assert_eq!(doc.find_all("cat", false).len(), 8);
+    let sensitive_whole = FindOptions {
+        case_sensitive: true,
+        whole_word: true,
+    };
+    assert_eq!(doc.find_all_with("cat", sensitive_whole).len(), 2);
+}
+
+#[test]
+fn whole_word_replace_all_changes_only_whole_words() {
+    use crate::FindOptions;
+    let mut doc = paragraph("cat concatenate cat");
+    let whole = FindOptions {
+        case_sensitive: false,
+        whole_word: true,
+    };
+    assert_eq!(doc.replace_all_with("cat", "dog", whole), 2);
+    assert_eq!(doc.blocks[0].text.as_str(), "dog concatenate dog");
+}
+
+#[test]
+fn whole_word_only_checks_the_sides_where_the_query_has_a_word_character() {
+    use crate::FindOptions;
+    let whole = FindOptions {
+        case_sensitive: false,
+        whole_word: true,
+    };
+    let doc = paragraph("foo bar foobar");
+    // A trailing space needs no boundary after it.
+    assert_eq!(doc.find_all_with("foo ", whole).len(), 1);
+    assert_eq!(doc.find_all_with("bar", whole).len(), 1);
+}

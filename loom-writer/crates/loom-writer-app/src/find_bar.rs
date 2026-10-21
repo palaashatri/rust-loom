@@ -5,12 +5,12 @@
 //! selection is the highlight, and every other match is highlighted softly
 //! while the bar is open. F3 and Shift+F3 step through matches even with the
 //! bar closed (using the last query). Ctrl+H adds a replace row. Matching
-//! ignores case unless "Match case" is on. Replacing is a document edit, so it is undoable and recovered like
+//! ignores case unless "Match case" is on, and matches any substring unless "Whole word" is on. Replacing is a document edit, so it is undoable and recovered like
 //! any other.
 
 use std::rc::Rc;
 
-use loom_writer_core::{TextSelection, WriterDocument};
+use loom_writer_core::{FindOptions, TextSelection, WriterDocument};
 use slint::{ComponentHandle, SharedString};
 
 use crate::{
@@ -29,11 +29,11 @@ const PREFILL_LIMIT: usize = 80;
 pub(crate) fn editor_matches(
     document: &WriterDocument,
     query: &str,
-    case_sensitive: bool,
+    options: FindOptions,
 ) -> Vec<(usize, usize)> {
     // Hits come back in block order, so one walk over the blocks places them all.
     let mut hits = document
-        .find_all(query, case_sensitive)
+        .find_all_with(query, options)
         .into_iter()
         .peekable();
     let mut placed = Vec::with_capacity(hits.len());
@@ -115,7 +115,16 @@ pub(crate) fn status_text(
 }
 
 fn matches_for(app: &WriterApp, document: &WriterDocument, query: &str) -> Vec<(usize, usize)> {
-    editor_matches(document, query, app.global::<FindBar>().get_match_case())
+    editor_matches(document, query, options_of(app))
+}
+
+/// The find options currently set on the bar.
+fn options_of(app: &WriterApp) -> FindOptions {
+    let bar = app.global::<FindBar>();
+    FindOptions {
+        case_sensitive: bar.get_match_case(),
+        whole_word: bar.get_whole_word(),
+    }
 }
 
 /// Soft highlights for every match but the current one, limited to the pages
@@ -332,7 +341,7 @@ fn replace_all(app: &WriterApp, state: &GuiState) {
     let bar = app.global::<FindBar>();
     let (query, replacement) = (bar.get_query(), bar.get_replacement());
     let mut next = state.current.borrow().clone();
-    let count = next.replace_all(query.as_str(), replacement.as_str(), bar.get_match_case());
+    let count = next.replace_all_with(query.as_str(), replacement.as_str(), options_of(app));
     if count == 0 {
         bar.set_status(SharedString::from("No matches"));
         return;
@@ -427,11 +436,11 @@ mod tests {
     fn matches_are_offsets_in_the_editor_text_across_paragraphs() {
         let doc = document("The cat sat.\nA CAT naps.\nNo felines");
         let text = doc.editor_text();
-        let hits = editor_matches(&doc, "cat", false);
+        let hits = editor_matches(&doc, "cat", FindOptions::default());
         assert_eq!(hits.len(), 2);
         assert_eq!(&text[hits[0].0..hits[0].1], "cat");
         assert_eq!(&text[hits[1].0..hits[1].1], "CAT");
-        assert!(editor_matches(&doc, "", false).is_empty());
+        assert!(editor_matches(&doc, "", FindOptions::default()).is_empty());
     }
 
     #[test]

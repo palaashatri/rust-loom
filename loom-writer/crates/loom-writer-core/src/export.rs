@@ -315,8 +315,15 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     let mut page = pdf.add_page(page_style.width_pt, page_style.height_pt);
     let mut y = top;
 
+    // A page break (form feed) ends its line; the next line starts a page.
+    let mut break_pending = false;
     for line in pdf_lines(doc, &page_style, &body, column) {
-        y -= line.gap;
+        if std::mem::take(&mut break_pending) {
+            page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+            y = top;
+        } else {
+            y -= line.gap;
+        }
         if y - line.height < page_style.margin_bottom_pt && y < top {
             page = pdf.add_page(page_style.width_pt, page_style.height_pt);
             y = top;
@@ -332,6 +339,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 style,
             } => {
                 let text = &block.text.as_str()[*start..*end];
+                break_pending = block.text.as_str()[*end..].starts_with('\u{c}');
                 let width = export_flow::line_width(marker, text, &block.runs, style, *start);
                 let shift = align_shift(block.style.alignment, column, width);
                 let text_line = StyledLine {

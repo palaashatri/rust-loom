@@ -215,8 +215,10 @@ fn render_row(
 ) -> WriterRenderBlock {
     let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
     WriterRenderBlock {
-        content: slint::StyledText::from_markdown(&writer_render_markup(block))
-            .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
+        content: slint::StyledText::from_markdown(
+            &crate::table_actions::break_keys::without_breaks(writer_render_markup(block)),
+        )
+        .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
         x,
         y,
         width,

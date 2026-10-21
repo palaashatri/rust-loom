@@ -64,7 +64,8 @@ pub(super) fn attr(value: &str) -> String {
 }
 
 /// Appends the children of a run for `value`: `<w:t>` for text, `<w:tab/>`
-/// for a tab and `<w:br/>` for a line break (`\n` or vertical tab). Carriage
+/// for a tab, `<w:br/>` for a line break (a newline or vertical tab) and
+/// `<w:br w:type="page"/>` for a page break (form feed). Carriage
 /// returns and characters XML forbids are dropped. Returns whether anything
 /// was written, so callers can skip an empty run.
 pub(super) fn push_run_children(out: &mut String, value: &str) -> bool {
@@ -87,6 +88,10 @@ pub(super) fn push_run_children(out: &mut String, value: &str) -> bool {
             '\n' | '\u{B}' => {
                 flush(out, &mut pending);
                 out.push_str("<w:br/>");
+            }
+            '\u{C}' => {
+                flush(out, &mut pending);
+                out.push_str("<w:br w:type=\"page\"/>");
             }
             '\r' => {}
             c if is_xml_char(c) => pending.push(c),

@@ -594,12 +594,16 @@ fn parse_run_text(r_xml: &str) -> String {
                 }
             }
             Some(("br", p)) => {
-                out.push('\n');
                 let tag_abs = cursor + p;
                 cursor = tag_abs + "<w:br".len();
-                if let Some(end) = r_xml[cursor..].find('>') {
-                    cursor += end + 1;
-                }
+                let tag_end = r_xml[cursor..]
+                    .find('>')
+                    .map_or(r_xml.len(), |end| cursor + end);
+                // A page break is a form feed; every other break is a line
+                // break inside the paragraph (vertical tab).
+                let page = r_xml[cursor..tag_end].contains("w:type=\"page\"");
+                out.push(if page { '\u{c}' } else { '\u{b}' });
+                cursor = (tag_end + 1).min(r_xml.len());
             }
             _ => break,
         }

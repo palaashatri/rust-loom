@@ -423,7 +423,7 @@ impl LineMeasure {
         for index in 0..self.len() {
             let (start, end) = (self.bounds[index] as usize, self.bounds[index + 1] as usize);
             let grapheme = &text[start..end];
-            if grapheme == "\n" {
+            if matches!(grapheme, "\n" | "\u{b}" | "\u{c}") {
                 ranges.push((self.bounds[line_start] as usize, end));
                 line_start = index + 1;
                 last_break = None;

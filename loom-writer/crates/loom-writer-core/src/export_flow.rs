@@ -53,7 +53,7 @@ pub(crate) fn wrap(
     first_width: f32,
     width: f32,
 ) -> Vec<(usize, usize)> {
-    let mut segments: Vec<&str> = text.split('\n').collect();
+    let mut segments: Vec<&str> = text.split(['\n', '\u{b}', '\u{c}']).collect();
     if segments.len() > 1 && segments.last() == Some(&"") {
         segments.pop();
     }

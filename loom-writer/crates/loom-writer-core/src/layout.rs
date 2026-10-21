@@ -17,6 +17,9 @@ use std::rc::Rc;
 
 use loom_text::StyleRun;
 
+mod placement;
+use placement::{Placer, Segment};
+
 use crate::text_metrics::{block_measure, LineMeasure};
 use crate::{
     floor_grapheme_boundary, DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect,
@@ -285,11 +288,7 @@ impl WriterDocument {
         let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
         let body_line = style.body_font_size_pt * style.line_height;
         begin_pass();
-        let mut lines: Vec<FlowLine> = Vec::new();
-        let mut page_lines = Vec::new();
-        let mut page_first_line = 0usize;
-        let mut page_index = 0usize;
-        let mut height_used = 0.0_f32;
+        let mut placer = Placer::new(usable_height);
         let mut block_starts = Vec::with_capacity(self.blocks.len());
         let mut block_start = 0usize;
         for (block_index, block) in self.blocks.iter().enumerate() {
@@ -300,41 +299,56 @@ impl WriterDocument {
             let picture = block.object_display_size(usable_width, usable_height);
             let line_height = picture.map_or(text_line_height(style, block), |(_, h)| h);
             let info = wrapped(block, font_size, block.text_column_width(style));
-            for line in info.lines.iter() {
-                if lines.len() > page_first_line
-                    && height_used + line_height > usable_height + f32::EPSILON
-                {
-                    page_lines.push(page_first_line..lines.len());
-                    page_first_line = lines.len();
-                    page_index += 1;
-                    height_used = 0.0;
+            if block.kind.starts_with("heading") && placer.has_content() {
+                // A heading never ends a page without the start of its text.
+                let own = info.lines.len() as f32 * line_height;
+                let mut used = placer.used + own;
+                if used + body_line <= usable_height + f32::EPSILON {
+                    used += body_line;
                 }
-                lines.push(FlowLine {
-                    block_index,
-                    start: line.start,
-                    end: line.end,
-                    global_start: block_start + line.start,
-                    page: page_index,
-                    bounds: PageRect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: picture.map_or(line.advance_pt, |(w, _)| w),
-                        height: 0.0,
-                    },
-                });
-                height_used += line_height;
+                if let Some(next) = self.blocks.get(block_index + 1) {
+                    let next_size = style.font_size_for_kind(next.kind.as_str());
+                    let next_lines = wrapped(next, next_size, next.text_column_width(style));
+                    let next_height = next
+                        .object_display_size(usable_width, usable_height)
+                        .map_or(text_line_height(style, next), |(_, h)| h);
+                    let wanted = if next_lines.lines.len() >= 3 { 2 } else { 1 };
+                    let mut probe = Placer::new(usable_height);
+                    probe.used = used;
+                    if !probe.fits(wanted, next_height) {
+                        placer.next_page();
+                    }
+                }
+            }
+            let text = block.text.as_str();
+            let controlled = picture.is_none() && block.kind != crate::TABLE_BLOCK_KIND;
+            let mut segment_start = 0usize;
+            for (index, line) in info.lines.iter().enumerate() {
+                let breaks = text[line.start..line.end].ends_with('\u{c}');
+                if breaks || index + 1 == info.lines.len() {
+                    placer.place(&Segment {
+                        block_index,
+                        block_start,
+                        lines: &info.lines[segment_start..=index],
+                        line_height,
+                        fixed_width: picture.map(|(w, _)| w),
+                        controlled,
+                        break_after: breaks,
+                    });
+                    segment_start = index + 1;
+                }
             }
             // Paragraph spacing consumes one body line unless the next block
             // starts on a fresh page.
             if block_index + 1 < self.blocks.len()
-                && height_used > 0.0
-                && height_used + body_line <= usable_height + f32::EPSILON
+                && placer.used > 0.0
+                && placer.used + body_line <= usable_height + f32::EPSILON
             {
-                height_used += body_line;
+                placer.used += body_line;
             }
             block_start += block.text.len_bytes() + 1;
         }
-        page_lines.push(page_first_line..lines.len());
+        let (lines, page_lines) = placer.finish();
         end_pass(self.blocks.len());
         Ok(Pagination {
             lines,
@@ -900,3 +914,6 @@ mod layout_checks;
 
 #[cfg(test)]
 mod indent_tests;
+
+#[cfg(test)]
+mod break_tests;

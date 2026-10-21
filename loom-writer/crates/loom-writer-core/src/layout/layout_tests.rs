@@ -34,6 +34,13 @@ impl WriterDocument {
             fragments: Vec::new(),
         }];
         let mut height_used = 0.0_f32;
+        let body_line = style.body_font_size_pt * style.line_height;
+        let new_page = |pages: &mut Vec<DocumentPage>| {
+            pages.push(DocumentPage {
+                index: pages.len(),
+                fragments: Vec::new(),
+            });
+        };
         for (block_index, block) in self.blocks.iter().enumerate() {
             let text = block.text.as_str();
             // Pagination must use the same block metrics as `layout`: a
@@ -45,37 +52,97 @@ impl WriterDocument {
             let line_height = font_size * style.line_height;
             let ranges =
                 crate::text_metrics::wrap_by_width(text, &block.runs, font_size, usable_width);
-            for (start, end) in ranges {
-                if !pages.last().is_some_and(|page| page.fragments.is_empty())
-                    && height_used + line_height > usable_height + f32::EPSILON
-                {
-                    pages.push(DocumentPage {
-                        index: pages.len(),
-                        fragments: Vec::new(),
-                    });
+            let page_has_content = |pages: &Vec<DocumentPage>| {
+                pages.last().is_some_and(|page| !page.fragments.is_empty())
+            };
+            // Keep with next: a heading does not end a page without the first
+            // lines of the block after it.
+            if block.kind.starts_with("heading") && page_has_content(&pages) {
+                let mut after = height_used + ranges.len() as f32 * line_height;
+                if after + body_line <= usable_height + f32::EPSILON {
+                    after += body_line;
+                }
+                if let Some(next) = self.blocks.get(block_index + 1) {
+                    let next_size = style.font_size_for_kind(next.kind.as_str());
+                    let next_line = next_size * style.line_height;
+                    let next_lines = crate::text_metrics::wrap_by_width(
+                        next.text.as_str(),
+                        &next.runs,
+                        next_size,
+                        usable_width,
+                    )
+                    .len();
+                    let wanted = if next_lines >= 3 { 2 } else { 1 };
+                    let mut probe = after;
+                    let mut fitting = 0;
+                    while fitting < wanted && probe + next_line <= usable_height + f32::EPSILON {
+                        probe += next_line;
+                        fitting += 1;
+                    }
+                    if fitting < wanted {
+                        new_page(&mut pages);
+                        height_used = 0.0;
+                    }
+                }
+            }
+            // Widow and orphan control: a paragraph of three or more lines never
+            // leaves one line alone at the foot of a page or the head of the next.
+            let total = ranges.len();
+            let mut done = 0;
+            while done < total {
+                let remaining = total - done;
+                let mut take = 0;
+                let mut used = height_used;
+                while take < remaining && used + line_height <= usable_height + f32::EPSILON {
+                    used += line_height;
+                    take += 1;
+                }
+                if take < remaining && total >= 3 {
+                    if remaining - take == 1 {
+                        take = take.saturating_sub(1);
+                        if take < 2 && done == 0 {
+                            take = 0;
+                        }
+                    }
+                    if done == 0 && take == 1 {
+                        take = 0;
+                    }
+                }
+                if take == 0 {
+                    if page_has_content(&pages) {
+                        new_page(&mut pages);
+                        height_used = 0.0;
+                        continue;
+                    }
+                    take = 1;
+                }
+                for &(start, end) in &ranges[done..done + take] {
+                    pages
+                        .last_mut()
+                        .expect("at least one page")
+                        .fragments
+                        .push(PageFragment {
+                            block_id: block.id,
+                            start,
+                            end,
+                            text: text[start..end].to_string(),
+                        });
+                    height_used += line_height;
+                }
+                done += take;
+                if done < total {
+                    new_page(&mut pages);
                     height_used = 0.0;
                 }
-                pages
-                    .last_mut()
-                    .expect("at least one page")
-                    .fragments
-                    .push(PageFragment {
-                        block_id: block.id,
-                        start,
-                        end,
-                        text: text[start..end].to_string(),
-                    });
-                height_used += line_height;
             }
             // Paragraph spacing consumes one body line unless the next block
             // starts on a fresh page. This mirrors `layout`, which adds the
             // same gap only between fragments that share a page.
             if block_index + 1 < self.blocks.len()
                 && height_used > 0.0
-                && height_used + style.body_font_size_pt * style.line_height
-                    <= usable_height + f32::EPSILON
+                && height_used + body_line <= usable_height + f32::EPSILON
             {
-                height_used += style.body_font_size_pt * style.line_height;
+                height_used += body_line;
             }
         }
         Ok(pages)
