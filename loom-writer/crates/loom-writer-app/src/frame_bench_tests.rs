@@ -439,3 +439,79 @@ fn writer_keystroke_stage_profile() {
         });
     }
 }
+
+#[test]
+fn writer_table_stage_profile() {
+    if std::env::var("LOOM_FRAME_BENCH").is_err() {
+        return;
+    }
+    let mut doc = blank_document();
+    doc.insert_table_block(0, 100, 20).unwrap();
+    let (app, state) = setup(doc);
+    let base = state.current.borrow().clone();
+    let stage = |name: &str, f: &mut dyn FnMut()| {
+        let t = Instant::now();
+        for _ in 0..10 {
+            f();
+        }
+        eprintln!("TSTAGE {name}: {:.2} ms", ms(t) / 10.0);
+    };
+    let text = base.editor_text();
+    let mut n = 0usize;
+    let mut variants: Vec<loom_writer_core::WriterDocument> = Vec::new();
+    stage("replace_editor_text_at (edit)", &mut || {
+        n += 1;
+        let mut edited = text.clone();
+        edited.insert(4, 'x');
+        let mut d = base.clone();
+        let _ = d.replace_editor_text_at(&edited, Some(5));
+        variants.push(d);
+    });
+    let mut i = 0usize;
+    stage("apply edited doc (cache miss)", &mut || {
+        let d = &variants[i % variants.len()];
+        i += 1;
+        let mut d = d.clone();
+        d.blocks[0].id += i as u64 + 1000;
+        apply_document_with_viewport(&app, &d, *state.viewport.borrow());
+    });
+    let edited_text = {
+        let mut t = base.editor_text();
+        t.insert(4, 'x');
+        t
+    };
+    stage("editor_text", &mut || {
+        let _ = base.editor_text();
+    });
+    stage("divider_ranges", &mut || {
+        let _ = crate::table_rules::divider_ranges(&base);
+    });
+    stage("table_ends", &mut || {
+        let _ = crate::table_rules::table_ends(&base);
+    });
+    stage("edit_touches_divider", &mut || {
+        let d = crate::table_rules::divider_ranges(&base);
+        let _ = crate::table_rules::edit_touches_divider(&base.editor_text(), &edited_text, &d);
+    });
+    stage("table_safe_edit", &mut || {
+        let _ = base.table_safe_edit(&edited_text, Some(5));
+    });
+    stage("document clone", &mut || {
+        let _ = base.clone();
+    });
+    stage("apply_document_with_viewport", &mut || {
+        apply_document_with_viewport(&app, &base, *state.viewport.borrow());
+    });
+    stage("document_is_dirty", &mut || {
+        let _ = document_is_dirty(&state);
+    });
+    stage("refresh_writer_registry", &mut || {
+        refresh_writer_registry(&app, &state);
+    });
+    stage("reveal_caret", &mut || {
+        reveal_caret(&app, &state);
+    });
+    stage("apply_state (whole)", &mut || {
+        apply_state(&app, &state);
+    });
+}
