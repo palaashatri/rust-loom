@@ -71,8 +71,7 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
 
     // 1. If inside a table cell, or table block is focused:
     if let Some(loc) = doc.table_cell_at_offset(caret) {
-        if let Some(writer_table) = doc.table_from_block(loc.block_id) {
-            let loom_tbl = writer_table.to_loom_table();
+        if let Some(loom_tbl) = doc.loom_table_from_block(loc.block_id) {
             let clip = ClipboardData::from_table(&loom_tbl);
             if write_clipboard(&clip).is_ok() {
                 app.set_status_left(slint::SharedString::from(with_rich_note(format!(
@@ -350,12 +349,17 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
     }
 
     // Otherwise paste as plain text
-    if let Some(text) = clip.plain_text.or(clip.tsv) {
-        if !text.is_empty() && replace_selection(&mut next, &text) {
+    if let Some(text) = clip.plain_text.or(clip.tsv).filter(|text| !text.is_empty()) {
+        if replace_selection(&mut next, &text) {
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
             app.set_status_left("Pasted text".into());
         }
+        return;
     }
+
+    // A copy with no text may hold a picture (a screenshot or an image copied
+    // from a paint program or browser): it pastes as a picture block.
+    crate::picture_paste::paste_picture(app, state);
 }
 
 /// Resolves a table from clipboard data following W2 rules:

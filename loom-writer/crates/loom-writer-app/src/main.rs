@@ -28,6 +28,7 @@ mod outline;
 mod palette_catalog;
 mod palette_wiring;
 mod picture_actions;
+mod picture_paste;
 mod picture_view;
 mod pointer_hit_test;
 mod projection;
@@ -499,7 +500,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
         "insert.image" | "writer.image.insert" => app.invoke_insert_image(),
-        "picture.larger" | "picture.smaller" | "picture.reset_size" => {
+        "picture.larger" | "picture.smaller" | "picture.reset_size" | "picture.alt_text" => {
             picture_actions::dispatch(app, id);
         }
         "table.insert_row_above" | "writer.table.insert_row_above" => {

@@ -1,0 +1,106 @@
+import { LoomButton, LoomTextField } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// State shared with Rust for the Picture Description dialog. Rust opens it,
+/// fills `value`, and handles `save(text)` and `cancel()`.
+export global PictureAlt {
+    in-out property <bool> open: false;
+    in-out property <string> value: "";
+    // Raised each time the dialog opens, so the field takes focus again.
+    in-out property <int> focus-tick: 0;
+    callback save(string);
+    callback cancel();
+}
+
+/// Edits the description (alternative text) of the picture at the caret. Enter
+/// or Save applies it; Escape or Cancel closes it without change. Tab moves
+/// between the field and the two buttons. The dialog is modal: while open it
+/// takes every key so the window's shortcuts cannot act behind it.
+export component PictureAltDialog inherits FocusScope {
+    width: 100%;
+    height: 100%;
+    visible: PictureAlt.open;
+
+    key-pressed(event) => {
+        if (event.text == Key.Escape) { PictureAlt.cancel(); return accept; }
+        if (event.text == Key.Tab || event.text == Key.Backtab) {
+            if (event.text == Key.Backtab || event.modifiers.shift) {
+                if (save-button.has-focus) { field.focus-input(); } else { save-button.grab-focus(); }
+            } else {
+                if (save-button.has-focus) { cancel-button.grab-focus(); } else { field.focus-input(); }
+            }
+        }
+        return accept;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000066;
+
+        // This full-window hit target keeps clicks from reaching the page.
+        TouchArea { clicked => { root.focus(); } }
+
+        Rectangle {
+            width: min(440px, root.width - 48px);
+            height: min(layout.preferred-height, root.height - 48px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            layout := VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.xl;
+
+                Text {
+                    text: "Picture Description";
+                    font-size: Theme.type.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
+                Text {
+                    text: "Describe the picture for screen readers. It is saved with the document.";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink-secondary;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    wrap: word-wrap;
+                }
+                field := LoomTextField {
+                    label: "Description";
+                    value <=> PictureAlt.value;
+                    focus-request: PictureAlt.focus-tick;
+                    capture-tab: true;
+                    accepted(text) => { PictureAlt.save(text); }
+                    tabbed(backwards) => {
+                        if (backwards) { cancel-button.grab-focus(); } else { save-button.grab-focus(); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.tokens.space.sm;
+                    cancel-button := LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        width: self.preferred-width;
+                        height: Theme.tokens.metrics.control-height;
+                        clicked => { PictureAlt.cancel(); }
+                    }
+                    save-button := LoomButton {
+                        label: "Save";
+                        variant: "primary";
+                        width: self.preferred-width;
+                        height: Theme.tokens.metrics.control-height;
+                        clicked => { PictureAlt.save(PictureAlt.value); }
+                    }
+                }
+            }
+        }
+    }
+}

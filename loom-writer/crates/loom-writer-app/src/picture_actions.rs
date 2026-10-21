@@ -8,7 +8,65 @@ use loom_desktop::{FileFilter, OpenFileRequest};
 use loom_writer_core::{InlineImage, TextSelection};
 use slint::{ComponentHandle, SharedString};
 
-use crate::{apply_with_history, GuiState, HistoryKind, WriterApp};
+use crate::{apply_with_history, GuiState, HistoryKind, PictureAlt, WriterApp};
+
+std::thread_local! {
+    /// The picture the open Picture Description dialog edits.
+    static ALT_TARGET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Opens the description dialog for the picture at the caret, prefilled with
+/// its current alternative text. Nothing changes until Save is accepted.
+fn open_description_dialog(app: &WriterApp, state: &GuiState) {
+    let (block, name) = {
+        let document = state.current.borrow();
+        let Some(block) = picture_at_caret(&document) else {
+            drop(document);
+            app.set_status_left("Place the caret on a picture first".into());
+            return;
+        };
+        let name = document
+            .blocks
+            .iter()
+            .find(|candidate| candidate.id == block)
+            .and_then(|candidate| candidate.image.as_ref())
+            .map(|image| image.name.clone())
+            .unwrap_or_default();
+        (block, name)
+    };
+    ALT_TARGET.with(|target| target.set(Some(block)));
+    let dialog = app.global::<PictureAlt>();
+    dialog.set_value(name.into());
+    dialog.set_focus_tick(dialog.get_focus_tick() + 1);
+    dialog.set_open(true);
+}
+
+/// Closes the dialog and hands keyboard focus back to the page.
+fn close_description_dialog(app: &WriterApp) {
+    ALT_TARGET.with(|target| target.set(None));
+    app.global::<PictureAlt>().set_open(false);
+    app.invoke_focus_page();
+}
+
+/// Applies a typed description as one undoable step. A blank description is
+/// refused with a status message and the dialog stays open for editing.
+fn save_description(app: &WriterApp, state: &GuiState, text: &str) {
+    let text = text.trim();
+    if text.is_empty() {
+        app.set_status_left("A picture description cannot be empty".into());
+        return;
+    }
+    let Some(block) = ALT_TARGET.with(std::cell::Cell::get) else {
+        close_description_dialog(app);
+        return;
+    };
+    let mut next = state.current.borrow().clone();
+    if next.set_image_block_alt(block, text) {
+        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        app.set_status_left("Picture description updated".into());
+    }
+    close_description_dialog(app);
+}
 
 fn request(state: &GuiState) -> OpenFileRequest {
     OpenFileRequest {
@@ -83,6 +141,10 @@ fn picture_at_caret(document: &loom_writer_core::WriterDocument) -> Option<u64> 
 
 /// Picture size and description commands. `false` when `id` is not one of them.
 pub(crate) fn run_picture_command(app: &WriterApp, state: &GuiState, id: &str) -> bool {
+    if id == "picture.alt_text" {
+        open_description_dialog(app, state);
+        return true;
+    }
     let apply: fn(&mut loom_writer_core::WriterDocument, u64) -> bool = match id {
         "picture.larger" => |d, b| d.scale_image_block(b, 1.25),
         "picture.smaller" => |d, b| d.scale_image_block(b, 0.8),
@@ -119,6 +181,19 @@ pub(crate) fn dispatch(app: &WriterApp, id: &str) {
 /// Wires the Insert Picture command.
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     STATE.with(|slot| *slot.borrow_mut() = Some(Rc::downgrade(state)));
+    let dialog = app.global::<PictureAlt>();
+    let (save_app, save_state) = (app.as_weak(), state.clone());
+    dialog.on_save(move |text| {
+        if let Some(app) = save_app.upgrade() {
+            save_description(&app, &save_state, &text);
+        }
+    });
+    let cancel_app = app.as_weak();
+    dialog.on_cancel(move || {
+        if let Some(app) = cancel_app.upgrade() {
+            close_description_dialog(&app);
+        }
+    });
     let state = state.clone();
     let app_ref = app.as_weak();
     app.on_insert_image(move || {

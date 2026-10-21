@@ -185,3 +185,87 @@ fn picture_commands_resize_the_picture_under_the_caret_and_undo() {
         "undo restores the larger size"
     );
 }
+
+fn picture_name(state: &GuiState) -> Option<String> {
+    state
+        .current
+        .borrow()
+        .blocks
+        .iter()
+        .find(|block| block.is_image())
+        .and_then(|block| block.image.as_ref())
+        .map(|image| image.name.clone())
+}
+
+/// Inserts one picture named `photo.png` and leaves the caret on it.
+fn app_with_one_picture() -> (WriterApp, Rc<GuiState>) {
+    let (app, state) = app_choosing(Some(png_file("alt", 80, 40)));
+    app.invoke_insert_image();
+    assert_eq!(pictures(&state), 1);
+    (app, state)
+}
+
+#[test]
+fn picture_description_dialog_is_prefilled_and_save_applies_one_undoable_step() {
+    let (app, state) = app_with_one_picture();
+    assert!(crate::dispatch_command(&app, "picture.alt_text"));
+    let dialog = app.global::<PictureAlt>();
+    assert!(dialog.get_open(), "the dialog opened");
+    assert_eq!(dialog.get_value(), "photo.png", "prefilled");
+
+    dialog.invoke_save("A red square".into());
+    assert!(!dialog.get_open(), "applying closes the dialog");
+    assert_eq!(picture_name(&state).as_deref(), Some("A red square"));
+    assert!(app.get_can_undo());
+
+    app.invoke_undo();
+    assert_eq!(
+        picture_name(&state).as_deref(),
+        Some("photo.png"),
+        "one undo restores the previous description"
+    );
+}
+
+#[test]
+fn cancelling_the_picture_description_changes_nothing() {
+    let (app, state) = app_with_one_picture();
+    let before = state.current.borrow().clone();
+    assert!(crate::dispatch_command(&app, "picture.alt_text"));
+    let dialog = app.global::<PictureAlt>();
+    dialog.set_value("Changed but cancelled".into());
+    dialog.invoke_cancel();
+    assert!(!dialog.get_open(), "cancel closes the dialog");
+    assert_eq!(*state.current.borrow(), before, "nothing changed");
+}
+
+#[test]
+fn a_blank_picture_description_is_refused_and_the_dialog_stays_open() {
+    let (app, state) = app_with_one_picture();
+    let before = state.current.borrow().clone();
+    assert!(crate::dispatch_command(&app, "picture.alt_text"));
+    let dialog = app.global::<PictureAlt>();
+    dialog.invoke_save("   ".into());
+    assert_eq!(*state.current.borrow(), before, "the description is kept");
+    assert!(dialog.get_open(), "the user can type a description");
+    assert!(
+        app.get_status_left().contains("cannot be empty"),
+        "{}",
+        app.get_status_left()
+    );
+}
+
+#[test]
+fn picture_description_needs_the_caret_on_a_picture() {
+    let (app, _state) = app_choosing(None);
+    assert!(crate::dispatch_command(&app, "picture.alt_text"));
+    assert!(
+        !app.global::<PictureAlt>().get_open(),
+        "no picture, no dialog"
+    );
+    assert!(
+        app.get_status_left()
+            .contains("Place the caret on a picture"),
+        "{}",
+        app.get_status_left()
+    );
+}

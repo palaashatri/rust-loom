@@ -9,6 +9,8 @@
 use crate::comments::TextEdit;
 use crate::{RichBlock, WriterDocument, WriterTable};
 
+mod markup;
+
 /// Block kind for markdown table blocks.
 pub const TABLE_BLOCK_KIND: &str = "table";
 
@@ -64,7 +66,10 @@ impl WriterDocument {
             next_id += 1;
         }
         let writer_table = WriterTable::from_loom_table(table);
-        let text = writer_table.to_markdown();
+        let text = markup::with_alignment(
+            &writer_table.to_markdown(),
+            &markup::column_alignments(table),
+        );
         let block = RichBlock::new(next_id, TABLE_BLOCK_KIND, &text);
         let insert_at = block_insert_index(self, offset);
         self.blocks.insert(insert_at, block);
@@ -87,6 +92,57 @@ impl WriterDocument {
             return None;
         }
         Some(parse_table_markdown(block.text.as_str()))
+    }
+
+    /// Reads a table block as a `loom_objects::Table`, keeping each cell's bold
+    /// and italic runs and each column's alignment from the stored Markdown.
+    pub fn loom_table_from_block(&self, block_id: u64) -> Option<loom_objects::Table> {
+        let block = self
+            .blocks
+            .iter()
+            .find(|block| block.id == block_id && block.kind == TABLE_BLOCK_KIND)?;
+        let markdown = block.text.as_str();
+        let mut table = parse_table_markdown(markdown).to_loom_table();
+        let mut raw_rows: Vec<Vec<ParsedTableCellText>> = Vec::new();
+        let mut alignments = Vec::new();
+        for_each_markdown_line(markdown, |line, line_offset| {
+            if is_table_metadata_line(line.trim()) {
+                return;
+            }
+            let Some(parsed) = parse_table_line_raw(line, line_offset) else {
+                return;
+            };
+            if parsed.is_delimiter {
+                alignments = parsed
+                    .cells
+                    .iter()
+                    .map(|cell| markup::divider_alignment(&cell.text))
+                    .collect();
+            } else {
+                raw_rows.push(parsed.cells);
+            }
+        });
+        for (row, cells) in raw_rows.iter().enumerate() {
+            for (column, cell) in cells.iter().enumerate() {
+                if row < table.row_count() && column < table.col_count() {
+                    table.set_cell_rich_text(row, column, markup::runs(&cell.text));
+                }
+            }
+        }
+        for (column, alignment) in alignments.into_iter().enumerate() {
+            if column >= table.col_count() {
+                break;
+            }
+            for row in 0..table.row_count() {
+                if let Some(cell) = table.cell_mut(row, column) {
+                    cell.style_override = Some(loom_objects::table::CellStyleOverride {
+                        horizontal_align: Some(alignment),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        Some(table)
     }
 
     /// Returns the parsed cell text and maps each displayed UTF-8 byte
@@ -625,7 +681,19 @@ fn is_table_metadata_line(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- loom-table:") && trimmed.ends_with("-->")
 }
 
+/// Parses one table line for readers: emphasis markers are removed from each
+/// cell and its offsets still point at the stored source.
 fn parse_table_line(line: &str, line_offset: usize) -> Option<ParsedTableLine> {
+    parse_table_line_raw(line, line_offset).map(|mut parsed| {
+        if !parsed.is_delimiter {
+            parsed.cells = parsed.cells.into_iter().map(markup::display).collect();
+        }
+        parsed
+    })
+}
+
+/// Parses one table line with each cell's stored Markdown source.
+fn parse_table_line_raw(line: &str, line_offset: usize) -> Option<ParsedTableLine> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
@@ -795,7 +863,11 @@ impl WriterTable {
         table.first_column = self.first_column;
         for (r, row) in self.rows.iter().enumerate() {
             for (c, cell_text) in row.iter().enumerate() {
-                table.set_cell_text(r, c, cell_text);
+                if cell_text.contains('*') {
+                    table.set_cell_rich_text(r, c, markup::runs(cell_text));
+                } else {
+                    table.set_cell_text(r, c, cell_text);
+                }
             }
         }
         for &(r, c, rs, cs) in &self.merges {
@@ -808,7 +880,11 @@ impl WriterTable {
     pub fn from_loom_table(table: &loom_objects::Table) -> Self {
         let mut rows = Vec::with_capacity(table.row_count());
         for row in &table.rows {
-            let cells = row.cells.iter().map(|c| c.content.text()).collect();
+            let cells = row
+                .cells
+                .iter()
+                .map(|c| markup::cell_markup(&c.content.runs))
+                .collect();
             rows.push(cells);
         }
         let mut merges = Vec::new();
@@ -1342,3 +1418,6 @@ mod tests {
         assert_eq!(table4.columns(), 2);
     }
 }
+
+#[cfg(test)]
+mod markup_tests;

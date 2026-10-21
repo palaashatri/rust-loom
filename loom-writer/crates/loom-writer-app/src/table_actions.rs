@@ -437,6 +437,11 @@ pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
             .with_description("Return the picture at the caret to its natural size")
             .with_category("insert")
             .with_order(31),
+        CommandSpec::new("picture.alt_text", "Picture Description...")
+            .with_undo_label("Picture Description")
+            .with_description("Edit the description of the picture at the caret")
+            .with_category("insert")
+            .with_order(38),
         CommandSpec::new("table.insert_row_above", "Insert Row Above")
             .with_undo_label("Insert Row Above")
             .with_description("Insert a new table row above current row")
@@ -517,6 +522,7 @@ pub(crate) fn sync_table_registry_enablement(
         "picture.larger",
         "picture.smaller",
         "picture.reset_size",
+        "picture.alt_text",
     ] {
         registry.set_enabled(&CommandId::new(id), true);
     }

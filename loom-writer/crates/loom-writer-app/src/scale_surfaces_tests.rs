@@ -117,6 +117,11 @@ pub(super) fn open_surface(app: &WriterApp, surface: &str) {
             app.set_save_changes_closing(true);
             app.set_save_changes_open(true);
         }
+        "picture-description" => {
+            let dialog = app.global::<crate::PictureAlt>();
+            dialog.set_value("A red square photographed at the harbour".into());
+            dialog.set_open(true);
+        }
         "templates" => app.set_template_chooser_open(true),
         "palette" => {
             let item = |label: &str, shortcut: &str| CommandPaletteItem {
@@ -175,6 +180,7 @@ fn dialogs_menus_find_bar_and_palette_fit_at_every_text_scale() {
         "none",
         "save-changes",
         "save-changes-closing",
+        "picture-description",
         "templates",
         "palette",
         "find",

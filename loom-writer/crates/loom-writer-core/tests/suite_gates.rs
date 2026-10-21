@@ -99,9 +99,17 @@ fn test_sheets_range_pastes_as_writer_table_and_exports_docx_and_reimports() {
     let writer_tbl = WriterTable::from_loom_table(&resolved_tbl);
     assert_eq!(writer_tbl.rows.len(), 3);
     assert_eq!(writer_tbl.columns(), 3);
-    assert_eq!(writer_tbl.rows[0], vec!["Product", "Qty", "Price"]);
-    assert_eq!(writer_tbl.rows[1], vec!["Apples", "50", "$1.50"]);
-    assert_eq!(writer_tbl.rows[2], vec!["Oranges", "30", "$2.00"]);
+    // The Sheets header is bold, which the stored cell keeps as emphasis
+    // markup; the text a reader sees is the plain words.
+    let plain = writer_tbl.to_loom_table();
+    let text = |row: usize| -> Vec<String> {
+        (0..3)
+            .map(|col| plain.cell_text(row, col).unwrap())
+            .collect()
+    };
+    assert_eq!(text(0), vec!["Product", "Qty", "Price"]);
+    assert_eq!(text(1), vec!["Apples", "50", "$1.50"]);
+    assert_eq!(text(2), vec!["Oranges", "30", "$2.00"]);
 
     // 5. Insert table into WriterDocument
     let mut doc = WriterDocument::new("suite-report", "Suite Report");

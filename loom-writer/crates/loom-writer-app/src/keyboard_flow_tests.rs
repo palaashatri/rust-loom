@@ -1179,3 +1179,41 @@ fn table_insertion_cell_navigation_and_docx_import_warning_work_from_the_keyboar
     assert_eq!(*log.borrow(), ["cancel"]);
     assert!(same_focus(&focus_weak(&s.app), &page));
 }
+
+#[test]
+fn picture_description_dialog_takes_focus_tabs_its_controls_and_returns_focus_on_escape() {
+    let s = launched("Hello");
+    let page = focus_weak(&s.app);
+    let dialog = s.app.global::<crate::PictureAlt>();
+    dialog.set_value("Photo".into());
+    dialog.set_focus_tick(dialog.get_focus_tick() + 1);
+    dialog.set_open(true);
+    render(&s.app);
+    assert!(
+        !same_focus(&focus_weak(&s.app), &page),
+        "the dialog took keyboard focus from the page"
+    );
+    assert!(
+        focus_name(&s.app).contains("Description"),
+        "the field is focused: {}",
+        focus_name(&s.app)
+    );
+    tab(&s.app);
+    assert!(
+        focus_name(&s.app).contains("Save"),
+        "Tab moves to Save: {}",
+        focus_name(&s.app)
+    );
+    tab(&s.app);
+    assert!(
+        focus_name(&s.app).contains("Cancel"),
+        "Tab moves to Cancel: {}",
+        focus_name(&s.app)
+    );
+    press(&s.app, Key::Escape);
+    assert!(!dialog.get_open(), "Escape closes the dialog");
+    assert!(
+        same_focus(&focus_weak(&s.app), &page),
+        "focus returns to the page"
+    );
+}

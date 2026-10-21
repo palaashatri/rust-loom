@@ -105,6 +105,36 @@ mod windows {
 
         Ok(data)
     }
+
+    /// Reads a picture from the clipboard as PNG bytes: the registered `PNG`
+    /// format when another program supplied one, otherwise the device-independent
+    /// bitmap converted to PNG. `Ok(None)` when no picture is offered.
+    pub fn read_image() -> Result<Option<Vec<u8>>, ClipboardOsError> {
+        let _clip = clipboard_win::Clipboard::new()
+            .map_err(|e| ClipboardOsError::IoError(e.to_string()))?;
+
+        if let Some(png_format) = clipboard_win::register_format("PNG") {
+            if clipboard_win::is_format_avail(png_format.get()) {
+                if let Ok(bytes) = clipboard_win::get::<Vec<u8>, _>(
+                    clipboard_win::formats::RawData(png_format.get()),
+                ) {
+                    if !bytes.is_empty() {
+                        return Ok(Some(bytes));
+                    }
+                }
+            }
+        }
+
+        if clipboard_win::is_format_avail(clipboard_win::formats::CF_DIB) {
+            if let Ok(dib) = clipboard_win::get::<Vec<u8>, _>(clipboard_win::formats::RawData(
+                clipboard_win::formats::CF_DIB,
+            )) {
+                return Ok(crate::picture::dib_to_png(&dib));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 /// Marker that carries the Loom-private JSON inside the HTML flavour, for
@@ -199,8 +229,38 @@ mod unix {
 // Test / mock storage
 thread_local! {
     static MOCK_CLIPBOARD: std::cell::RefCell<Option<ClipboardData>> = const { std::cell::RefCell::new(None) };
+    static MOCK_IMAGE: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
     static MOCK_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static MOCK_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test hook: put a picture on the in-memory clipboard, as if another program
+/// had copied an image. Writing text or data to the clipboard replaces it.
+pub fn set_mock_clipboard_image(png: Option<Vec<u8>>) {
+    MOCK_IMAGE.with(|c| *c.borrow_mut() = png);
+}
+
+/// Reads the picture on the clipboard as PNG bytes, if it holds one. Bytes are
+/// returned as the clipboard supplied them after conversion; the caller checks
+/// that they decode. Other clipboard content gives `Ok(None)`.
+pub fn read_clipboard_image() -> Result<Option<Vec<u8>>, ClipboardOsError> {
+    if MOCK_ENABLED.with(std::cell::Cell::get) {
+        if MOCK_FAILS.with(std::cell::Cell::get) {
+            return Err(ClipboardOsError::Unavailable);
+        }
+        return Ok(MOCK_IMAGE.with(|c| c.borrow().clone()));
+    }
+
+    #[cfg(windows)]
+    {
+        windows::read_image()
+    }
+    #[cfg(not(windows))]
+    {
+        // Picture paste is implemented for Windows; X11 and Wayland pictures
+        // would come through arboard's image API, which is not wired yet.
+        Ok(None)
+    }
 }
 
 /// Test hook: enable in-memory mock clipboard.
@@ -234,6 +294,7 @@ pub fn write_clipboard(data: &ClipboardData) -> Result<(), ClipboardOsError> {
             return Err(ClipboardOsError::Unavailable);
         }
         MOCK_CLIPBOARD.with(|c| *c.borrow_mut() = Some(data.clone()));
+        MOCK_IMAGE.with(|c| *c.borrow_mut() = None);
         return Ok(());
     }
 
@@ -357,6 +418,36 @@ mod tests {
             read.loom_objects_json.as_deref(),
             Some("{\"type\":\"test\",\"v\":-1}")
         );
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn a_mock_picture_is_read_back_and_a_later_write_replaces_it() {
+        set_mock_clipboard_enabled(true);
+        set_mock_clipboard_image(Some(vec![1, 2, 3]));
+        assert_eq!(read_clipboard_image().unwrap(), Some(vec![1, 2, 3]));
+
+        write_clipboard(&ClipboardData {
+            plain_text: Some("words".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            read_clipboard_image().unwrap(),
+            None,
+            "copying text takes the picture off the clipboard"
+        );
+
+        set_mock_clipboard_image(Some(vec![4]));
+        set_mock_clipboard_fails(true);
+        assert!(read_clipboard_image().is_err());
+        set_mock_clipboard_fails(false);
+        set_mock_clipboard_image(None);
+        set_mock_clipboard_enabled(false);
     }
 }
 

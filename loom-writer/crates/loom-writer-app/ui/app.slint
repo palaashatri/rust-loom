@@ -14,7 +14,7 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
     WriterStatusBar, WriterRenderBlock, WriterSelectionRect,
-    WriterCommentRect, WriterTableCellRect, WriterOutlinePane, WriterOutlineEntry
+    WriterCommentRect, WriterTableCellRect, WriterOutlinePane, WriterOutlineEntry, PictureAltDialog
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
@@ -22,7 +22,7 @@ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
-export { WriterTableCellRect, WriterPageImage, PageImages } from "writer_components.slint";
+export { WriterTableCellRect, WriterPageImage, PageImages, PictureAlt } from "writer_components.slint";
 
 export component WriterApp inherits Window {
     // Set from the document's name and unsaved state, as Sheets does.
@@ -685,6 +685,7 @@ export component WriterApp inherits Window {
         create-template(idx) => { root.create-template(idx); }
     }
 
+PictureAltDialog {}
     if root.save-changes-open : WriterSaveChangesDialog {
         width: root.width;
         height: root.height;

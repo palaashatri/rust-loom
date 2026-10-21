@@ -159,6 +159,7 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                 vec![
                     MenuItem::action("insert.table", "Insert Table..."),
                     MenuItem::action("insert.image", "Insert Picture..."),
+                    MenuItem::action("picture.alt_text", "Picture Description..."),
                     MenuItem::Separator,
                     MenuItem::action_with_shortcut(
                         "table.insert_row_above",

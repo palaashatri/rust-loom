@@ -285,8 +285,14 @@ fn writer_frame_bench_100x20_table() {
         Err(_) => return,
     };
     let mut doc = blank_document();
-    doc.insert_table_block(0, 100, 20)
-        .expect("insert 100x20 table");
+    let (rows, cols) = match std::env::var("LOOM_TABLE_DIMS") {
+        Ok(v) => {
+            let (r, c) = v.split_once('x').expect("ROWSxCOLS");
+            (r.parse().unwrap(), c.parse().unwrap())
+        }
+        Err(_) => (100, 20),
+    };
+    doc.insert_table_block(0, rows, cols).expect("insert table");
     let (app, state) = setup(doc);
     let _ = try_render(&app);
     focus_page_at_launch(&app);
@@ -315,6 +321,7 @@ fn writer_frame_bench_100x20_table() {
 
     // 100 timed samples through Window::dispatch_event
     let mut latencies = Vec::with_capacity(100);
+    let mut pressed = Vec::with_capacity(100);
     for i in 0..100 {
         let ch = (b'a' + (i % 26) as u8) as char;
         let t = Instant::now();
@@ -322,12 +329,15 @@ fn writer_frame_bench_100x20_table() {
             .dispatch_event(slint::platform::WindowEvent::KeyPressed {
                 text: ch.to_string().into(),
             });
+        pressed.push(ms(t));
         app.window()
             .dispatch_event(slint::platform::WindowEvent::KeyReleased {
                 text: ch.to_string().into(),
             });
         latencies.push(ms(t));
     }
+    let (pp50, _, _) = stats(pressed);
+    eprintln!("WRITER_TABLE_PRESS_ONLY p50={pp50:.2}");
     let (p50, p95, max) = stats(latencies);
 
     eprintln!(
