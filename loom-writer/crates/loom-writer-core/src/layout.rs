@@ -104,8 +104,13 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         WRAP_MISSES.with(|misses| misses.set(misses.get() + 1));
         let measure =
             reusable.unwrap_or_else(|| Rc::new(block_measure(text, &block.runs, font_size)));
-        let lines: Rc<[WrappedLine]> = measure
-            .wrap(text, width)
+        // A table is one line per row: its cells are drawn in columns, not wrapped.
+        let spans: Vec<(usize, usize)> = if block.kind == crate::TABLE_BLOCK_KIND {
+            crate::tables::table_row_spans(text)
+        } else {
+            measure.wrap(text, width).into_iter().collect()
+        };
+        let lines: Rc<[WrappedLine]> = spans
             .into_iter()
             .map(|(start, end)| WrappedLine {
                 start,
@@ -114,7 +119,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
             })
             .collect();
         let (mut words, mut chars) = (0, 0);
-        crate::tables::for_each_counted_text(&block.kind, text, |part| {
+        crate::tables::for_each_counted_text(block, |part| {
             words += part.split_whitespace().count();
             chars += part.chars().count();
         });

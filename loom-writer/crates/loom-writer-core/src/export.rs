@@ -201,7 +201,11 @@ fn pdf_lines(
             // Row heights depend on the wrapped cells, so the table is laid out
             // here, where pagination needs the heights.
             let line_height = body.size_pt * page_style.line_height;
-            let layout = Rc::new(TableLayout::new(text, body, column, line_height));
+            let table = block
+                .typed_table()
+                .cloned()
+                .unwrap_or_else(|| loom_objects::Table::new(1, 1));
+            let layout = Rc::new(TableLayout::new(&table, body, column, line_height));
             for row in 0..layout.row_count() {
                 lines.push(PdfLine {
                     block: index,
@@ -809,9 +813,8 @@ mod tests {
     #[test]
     fn export_pdf_draws_table_cells_in_aligned_columns_without_pipes() {
         let mut document = WriterDocument::new("table", "Table");
-        document.push(RichBlock::new(
+        document.push(crate::tables::markdown_table_block(
             document.next_id(),
-            crate::TABLE_BLOCK_KIND,
             "| Name | Qty |\n| --- | --- |\n| Ada | 3 |\n| Grace | 12 |",
         ));
         let pdf = export_pdf(&document);

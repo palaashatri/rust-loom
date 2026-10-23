@@ -171,11 +171,7 @@ fn the_goal_column_survives_a_short_line_and_resets_after_other_movement() {
 fn keys_inside_a_table_are_left_to_cell_navigation() {
     let (app, state) = session(vec![
         RichBlock::new(1, "paragraph", "above"),
-        RichBlock::new(
-            2,
-            loom_writer_core::TABLE_BLOCK_KIND,
-            "| a | b |\n| - | - |\n| c | d |",
-        ),
+        loom_writer_core::markdown_table_block(2, "| a | b |\n| - | - |\n| c | d |"),
     ]);
     app.invoke_selection_changed(8, 8);
     assert!(state.current.borrow().table_cell_at_offset(8).is_some());

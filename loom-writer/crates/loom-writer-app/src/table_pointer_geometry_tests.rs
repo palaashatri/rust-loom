@@ -6,7 +6,6 @@ use super::writer_pointer_offset_with_model;
 use crate::projection;
 use loom_writer_core::{
     PageStyle, PageViewport, RichBlock, TextSelection, WriterDocument, WriterTable,
-    TABLE_BLOCK_KIND,
 };
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
@@ -29,9 +28,10 @@ fn table_document(rows: usize, cols: usize) -> WriterDocument {
         }
     }
     let mut document = WriterDocument::new("table-pointer-geometry", "Table pointer geometry");
-    document
-        .blocks
-        .push(RichBlock::new(1, TABLE_BLOCK_KIND, &table.to_markdown()));
+    document.blocks.push(loom_writer_core::markdown_table_block(
+        1,
+        &table.to_markdown(),
+    ));
     document
 }
 
@@ -49,9 +49,10 @@ fn page_with_table(rows: usize, cols: usize) -> (WriterDocument, u64) {
         "paragraph",
         "Intro paragraph above the table",
     ));
-    document
-        .blocks
-        .push(RichBlock::new(2, TABLE_BLOCK_KIND, &table.to_markdown()));
+    document.blocks.push(loom_writer_core::markdown_table_block(
+        2,
+        &table.to_markdown(),
+    ));
     document
         .blocks
         .push(RichBlock::new(3, "paragraph", "Body after the table"));
@@ -405,7 +406,7 @@ fn sample_table_document() -> (WriterDocument, u64) {
         .iter_mut()
         .find(|block| block.id == table_id)
         .expect("the inserted table block")
-        .text = loom_writer_core::Text::from_str(&table.to_markdown());
+        .set_table(table.to_loom_table());
     (document, table_id)
 }
 
@@ -553,7 +554,9 @@ fn ctrl_end_in_a_long_table_keeps_the_caret_cell_inside_the_window() {
     crate::table_actions::clear_table_cell_selection_range();
     let (rows, cols) = (100, 20);
     let document = table_document(rows, cols);
-    let ranges = loom_writer_core::compute_cell_ranges(document.blocks[0].text.as_str());
+    let ranges = document
+        .table_cell_ranges(document.blocks[0].id)
+        .expect("table ranges");
     let end = ranges[rows - 1][cols - 1].1;
     let table_id = 1;
     let (app, state) = rendered_window(document, 1280, WINDOW_HEIGHT as u32, 1.0, 0.0);

@@ -63,9 +63,8 @@ pub(super) fn rich_document() -> WriterDocument {
         .push(RichBlock::new(10, "paragraph", "Interrupt"));
     doc.blocks
         .push(RichBlock::new(11, "list-numbered", "Restarted"));
-    doc.blocks.push(RichBlock::new(
+    doc.blocks.push(crate::tables::markdown_table_block(
         12,
-        TABLE_BLOCK_KIND,
         "| Name | Qty |\n| --- | --- |\n| Tea | 2 |\n| A \\| B | 3 |",
     ));
     doc.blocks

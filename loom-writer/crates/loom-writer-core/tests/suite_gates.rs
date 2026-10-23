@@ -12,8 +12,7 @@ use loom_objects::chart::{Chart, ChartSeries, ChartType};
 use loom_writer_core::docx::import_docx;
 use loom_writer_core::export_docx;
 use loom_writer_core::{
-    compute_cell_ranges, RichBlock, TableArrowDirection, WriterDocument, WriterTable,
-    TABLE_BLOCK_KIND,
+    RichBlock, TableArrowDirection, WriterDocument, WriterTable, TABLE_BLOCK_KIND,
 };
 use std::time::Instant;
 
@@ -116,9 +115,8 @@ fn test_sheets_range_pastes_as_writer_table_and_exports_docx_and_reimports() {
     doc.blocks
         .push(RichBlock::new(1, "heading1", "Financial Overview"));
     let table_block_id = doc.next_id();
-    doc.blocks.push(RichBlock::new(
+    doc.blocks.push(loom_writer_core::markdown_table_block(
         table_block_id,
-        TABLE_BLOCK_KIND,
         &writer_tbl.to_markdown(),
     ));
     doc.blocks
@@ -148,14 +146,19 @@ fn test_sheets_range_pastes_as_writer_table_and_exports_docx_and_reimports() {
         .expect("table block present in reimported document");
 
     let parsed_table = reimported
-        .table_from_block(reimported_table_block.id)
+        .loom_table_from_block(reimported_table_block.id)
         .expect("parsed table from reimported block");
 
-    assert_eq!(parsed_table.rows.len(), 3);
-    assert_eq!(parsed_table.columns(), 3);
-    assert_eq!(parsed_table.rows[0], vec!["Product", "Qty", "Price"]);
-    assert_eq!(parsed_table.rows[1], vec!["Apples", "50", "$1.50"]);
-    assert_eq!(parsed_table.rows[2], vec!["Oranges", "30", "$2.00"]);
+    assert_eq!(parsed_table.row_count(), 3);
+    assert_eq!(parsed_table.col_count(), 3);
+    let texts = |r: usize| -> Vec<String> {
+        (0..parsed_table.col_count())
+            .map(|c| parsed_table.cell_text(r, c).unwrap_or_default())
+            .collect()
+    };
+    assert_eq!(texts(0), vec!["Product", "Qty", "Price"]);
+    assert_eq!(texts(1), vec!["Apples", "50", "$1.50"]);
+    assert_eq!(texts(2), vec!["Oranges", "30", "$2.00"]);
 }
 
 #[test]
@@ -230,16 +233,16 @@ fn test_writer_100x20_table_keystroke_latency_under_16_7_ms() {
 
     let mut doc = WriterDocument::new("perf-doc", "Performance Test Document");
     let table_block_id = doc.next_id();
-    doc.blocks.push(RichBlock::new(
+    doc.blocks.push(loom_writer_core::markdown_table_block(
         table_block_id,
-        TABLE_BLOCK_KIND,
         &table.to_markdown(),
     ));
 
     // Target cells across multiple regions: top, middle, bottom
     let sample_cells = [(0, 0), (25, 5), (50, 10), (75, 15), (99, 19)];
-    let block_text = doc.blocks[0].text.as_str();
-    let grid = compute_cell_ranges(block_text);
+    let grid = doc
+        .table_cell_ranges(table_block_id)
+        .expect("table cell ranges");
 
     let mut latencies_us = Vec::with_capacity(100);
 
@@ -326,9 +329,9 @@ fn test_writer_table_keyboard_navigation_and_mutations() {
     assert!(caret_new_row > current_caret);
 
     let table = doc
-        .table_from_block(table_block_id)
+        .loom_table_from_block(table_block_id)
         .expect("table after append");
-    assert_eq!(table.rows.len(), 4, "new row was appended");
+    assert_eq!(table.row_count(), 4, "new row was appended");
 
     // 3. Arrow navigation
     let caret_down = doc
@@ -344,25 +347,25 @@ fn test_writer_table_keyboard_navigation_and_mutations() {
     let caret_inserted_row = doc
         .insert_table_row_at_offset(caret_right, true)
         .expect("insert row below");
-    let table_after_insert = doc.table_from_block(table_block_id).unwrap();
-    assert_eq!(table_after_insert.rows.len(), 5);
+    let table_after_insert = doc.loom_table_from_block(table_block_id).unwrap();
+    assert_eq!(table_after_insert.row_count(), 5);
 
     let _ = doc
         .delete_table_row_at_offset(caret_inserted_row)
         .expect("delete row");
-    let table_after_delete = doc.table_from_block(table_block_id).unwrap();
-    assert_eq!(table_after_delete.rows.len(), 4);
+    let table_after_delete = doc.loom_table_from_block(table_block_id).unwrap();
+    assert_eq!(table_after_delete.row_count(), 4);
 
     // 5. Column insertion and deletion
     let caret_col_insert = doc
         .insert_table_column_at_offset(caret0, true)
         .expect("insert column right");
-    let table_col_insert = doc.table_from_block(table_block_id).unwrap();
-    assert_eq!(table_col_insert.columns(), 4);
+    let table_col_insert = doc.loom_table_from_block(table_block_id).unwrap();
+    assert_eq!(table_col_insert.col_count(), 4);
 
     let _ = doc
         .delete_table_column_at_offset(caret_col_insert)
         .expect("delete column");
-    let table_col_delete = doc.table_from_block(table_block_id).unwrap();
-    assert_eq!(table_col_delete.columns(), 3);
+    let table_col_delete = doc.loom_table_from_block(table_block_id).unwrap();
+    assert_eq!(table_col_delete.col_count(), 3);
 }

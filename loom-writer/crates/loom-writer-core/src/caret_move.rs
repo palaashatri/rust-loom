@@ -366,7 +366,7 @@ mod tests {
     fn tables_are_stepped_over() {
         let doc = doc(vec![
             RichBlock::new(1, "paragraph", "above"),
-            RichBlock::new(2, TABLE_BLOCK_KIND, "| a | b |\n| - | - |\n| c | d |"),
+            crate::tables::markdown_table_block(2, "| a | b |\n| - | - |\n| c | d |"),
             RichBlock::new(3, "paragraph", "below"),
         ]);
         let below_start: usize = 6 + doc.blocks[1].text.as_str().len() + 1;

@@ -6,7 +6,7 @@ use crate::{WriterDocument, TABLE_BLOCK_KIND};
 fn document_with(blocks: &[(&str, &str)]) -> WriterDocument {
     let mut doc = WriterDocument::new("r", "R");
     for (kind, text) in blocks {
-        doc.push(crate::RichBlock::new(doc.next_id(), kind, text));
+        doc.push(crate::tables::test_block(doc.next_id(), kind, text));
     }
     doc
 }
@@ -101,28 +101,36 @@ fn replace_all_keeps_a_comment_on_a_replaced_word_attached_to_its_replacement() 
 }
 
 #[test]
-fn replace_all_leaves_a_table_divider_row_alone() {
+fn replace_all_changes_only_the_cell_text_of_a_table() {
     let mut doc = document_with(&[(TABLE_BLOCK_KIND, "| a | b |\n| --- | --- |\n| - | 2 |")]);
     assert_eq!(doc.replace_all("-", "x", false), 1, "only the cell text");
-    assert_eq!(doc.editor_text(), "| a | b |\n| --- | --- |\n| x | 2 |");
+    assert_eq!(doc.editor_text(), "a\u{1f}b\u{1e}x\u{1f}2");
 }
 
 #[test]
-fn replace_all_never_changes_table_pipes() {
+fn a_table_search_never_matches_the_separators() {
     let mut doc = document_with(&[(TABLE_BLOCK_KIND, "| a | b |\n| --- | --- |\n| 1 | 2 |")]);
-    assert_eq!(doc.replace_all("|", "/", false), 0);
-    assert_eq!(doc.replace_all("1 | 2", "x", false), 0, "spans a pipe");
-    assert_eq!(doc.editor_text(), "| a | b |\n| --- | --- |\n| 1 | 2 |");
+    assert_eq!(
+        doc.replace_all("|", "/", false),
+        0,
+        "pipes are not table text"
+    );
+    assert_eq!(
+        doc.replace_all("1 | 2", "x", false),
+        0,
+        "no match spans a cell"
+    );
+    assert_eq!(doc.editor_text(), "a\u{1f}b\u{1e}1\u{1f}2");
 }
 
 #[test]
 fn a_replacement_containing_a_pipe_is_escaped_inside_a_table() {
     let mut doc = document_with(&[(TABLE_BLOCK_KIND, "| a | b |\n| --- | --- |\n| 1 | 2 |")]);
     assert_eq!(doc.replace_all("2", "x|y", false), 1);
-    let table = crate::parse_table_markdown(doc.blocks[0].text.as_str());
-    assert_eq!(table.columns(), 2, "the pipe stayed inside its cell");
-    assert_eq!(table.rows.len(), 2);
-    assert_eq!(table.get(1, 1), Some("x|y"));
+    let table = doc.loom_table_from_block(doc.blocks[0].id).expect("table");
+    assert_eq!(table.col_count(), 2, "the pipe stayed inside its cell");
+    assert_eq!(table.row_count(), 2);
+    assert_eq!(table.cell_text(1, 1).as_deref(), Some("x|y"));
 }
 
 #[test]

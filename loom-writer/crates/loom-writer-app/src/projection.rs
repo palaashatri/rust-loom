@@ -479,7 +479,9 @@ pub(crate) fn project(
                         .map(|previous| previous.text.as_str().len() + 1)
                         .sum::<usize>();
                     let mut cell_offsets = vec![-1; num_rows * cols];
-                    for (row, ranges) in loom_writer_core::compute_cell_ranges(block.text.as_str())
+                    for (row, ranges) in doc
+                        .table_cell_ranges(block.id)
+                        .unwrap_or_default()
                         .into_iter()
                         .enumerate()
                         .take(num_rows)

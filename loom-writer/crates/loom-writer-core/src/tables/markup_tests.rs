@@ -286,3 +286,129 @@ fn the_docx_body_keeps_the_bold_run_and_the_centred_column_after_a_row_insert() 
         "markup leaked into the DOCX body"
     );
 }
+
+#[test]
+fn changing_the_table_style_keeps_the_bold_header_and_the_centred_column() {
+    let mut document = paste(&header_bold_and_centred_table());
+    let id = document.blocks.last().expect("table block").id;
+    document
+        .set_table_style_at_offset(cell_offset(&document, 0, 0), "table-style-dark-1")
+        .expect("the style is applied");
+
+    let read = document
+        .loom_table_from_block(id)
+        .expect("stored table parses");
+    assert!(is_bold(&read, 0, 0, "Item"), "the header stays bold");
+    assert!(
+        is_bold(&read, 1, 0, "Apples"),
+        "a bold body cell stays bold"
+    );
+    for row in 0..read.row_count() {
+        assert_eq!(
+            alignment_of(&read, row, 1),
+            Some(HorizontalAlign::Center),
+            "row {row} keeps the centred Qty column"
+        );
+    }
+    assert_eq!(
+        document
+            .table_from_block(id)
+            .expect("table parses")
+            .style_id,
+        "table-style-dark-1"
+    );
+}
+
+#[test]
+fn toggling_the_header_option_keeps_the_bold_header_and_the_centred_column() {
+    let mut document = paste(&header_bold_and_centred_table());
+    let id = document.blocks.last().expect("table block").id;
+    for state in ["off", "on"] {
+        document
+            .toggle_table_option_at_offset(cell_offset(&document, 0, 0), "header_row")
+            .expect("the option toggles");
+
+        let read = document
+            .loom_table_from_block(id)
+            .expect("stored table parses");
+        assert!(
+            is_bold(&read, 0, 0, "Item"),
+            "the header stays bold with the header option {state}"
+        );
+        assert!(
+            is_bold(&read, 1, 0, "Apples"),
+            "a bold body cell stays bold with the header option {state}"
+        );
+        for row in 0..read.row_count() {
+            assert_eq!(
+                alignment_of(&read, row, 1),
+                Some(HorizontalAlign::Center),
+                "row {row} keeps the centred Qty column with the header option {state}"
+            );
+        }
+    }
+}
+
+#[test]
+fn merging_cells_keeps_the_surviving_cell_bold_and_writes_no_markup_into_its_text() {
+    let mut document = paste(&header_bold_and_centred_table());
+    let id = document.blocks.last().expect("table block").id;
+    document
+        .merge_cells_at_offset(cell_offset(&document, 1, 0), 1, 2)
+        .expect("the two body cells merge");
+
+    let read = document
+        .loom_table_from_block(id)
+        .expect("stored table parses");
+    assert!(
+        is_bold(&read, 1, 0, "Apples"),
+        "the surviving cell keeps its bold text"
+    );
+    let shown = document.table_from_block(id).expect("table parses");
+    let text = shown.get(1, 0).expect("the surviving cell");
+    assert_eq!(text, "Apples 50");
+    assert!(
+        !text.contains('*') && !text.contains('|'),
+        "markup leaked into the merged cell text: {text:?}"
+    );
+}
+
+#[test]
+fn splitting_a_merged_cell_keeps_the_neighbouring_bold_and_centred_cells() {
+    let mut model = header_bold_and_centred_table();
+    model
+        .merge_cells(1, 0, 1, 2)
+        .expect("the model merges the body cells");
+    let mut document = paste(&model);
+    let id = document.blocks.last().expect("table block").id;
+    assert_eq!(
+        document.table_from_block(id).expect("table parses").merges,
+        vec![(1, 0, 1, 2)],
+        "the merge is stored before the split"
+    );
+
+    document
+        .split_cell_at_offset(cell_offset(&document, 1, 0))
+        .expect("the merged cell splits");
+
+    let read = document
+        .loom_table_from_block(id)
+        .expect("stored table parses");
+    assert!(is_bold(&read, 0, 0, "Item"), "the header keeps its bold");
+    assert!(
+        is_bold(&read, 0, 2, "Price"),
+        "the header keeps its bold on the right"
+    );
+    for row in 0..read.row_count() {
+        assert_eq!(
+            alignment_of(&read, row, 1),
+            Some(HorizontalAlign::Center),
+            "row {row} keeps the centred Qty column after the split"
+        );
+    }
+    assert!(document
+        .table_from_block(id)
+        .expect("table parses")
+        .merges
+        .is_empty());
+}

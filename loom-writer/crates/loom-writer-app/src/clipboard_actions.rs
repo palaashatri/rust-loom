@@ -109,12 +109,12 @@ fn table_range_clipboard_data(
     document: &loom_writer_core::WriterDocument,
     range: crate::table_actions::TableCellRange,
 ) -> Option<(ClipboardData, usize, usize, usize)> {
-    let writer_table = document.table_from_block(range.block_id)?;
+    let source = document.loom_table_from_block(range.block_id)?;
     let min_row = range.start_row.min(range.end_row);
     let max_row = range.start_row.max(range.end_row);
     let min_col = range.start_col.min(range.end_col);
     let max_col = range.start_col.max(range.end_col);
-    if max_row >= writer_table.rows.len() || max_col >= writer_table.columns() {
+    if max_row >= source.row_count() || max_col >= source.col_count() {
         return None;
     }
     let row_count = max_row.checked_sub(min_row)?.checked_add(1)?;
@@ -122,8 +122,13 @@ fn table_range_clipboard_data(
     let mut sub_table = Table::new(row_count, col_count);
     for row in 0..row_count {
         for col in 0..col_count {
-            let text = writer_table.get(min_row + row, min_col + col)?;
-            sub_table.set_cell_text(row, col, text);
+            // The copied cells keep their own bold and italic runs.
+            let runs = source
+                .cell(min_row + row, min_col + col)?
+                .content
+                .runs
+                .clone();
+            sub_table.set_cell_rich_text(row, col, runs);
         }
     }
 
@@ -131,11 +136,11 @@ fn table_range_clipboard_data(
         .blocks
         .iter()
         .position(|block| block.id == range.block_id)?;
-    let cell_start =
-        loom_writer_core::compute_cell_ranges(document.blocks.get(block_index)?.text.as_str())
-            .get(min_row)?
-            .get(min_col)?
-            .0;
+    let cell_start = document
+        .table_cell_ranges(range.block_id)?
+        .get(min_row)?
+        .get(min_col)?
+        .0;
     let block_start = document
         .blocks
         .iter()
@@ -178,15 +183,17 @@ pub(crate) fn cut_action(app: &WriterApp, state: &GuiState) {
             let max_row = range.start_row.max(range.end_row);
             let min_col = range.start_col.min(range.end_col);
             let max_col = range.start_col.max(range.end_col);
-            let Some(mut table) = next.table_from_block(range.block_id) else {
+            let Some(mut table) = next.loom_table_from_block(range.block_id) else {
                 drop(current);
                 app.set_status_left("Cut failed: selected table range is unavailable".into());
                 return;
             };
+            // Clearing a cell keeps every other cell's runs, alignment and fills.
             let mut valid_range = true;
             for row in min_row..=max_row {
                 for col in min_col..=max_col {
-                    valid_range &= table.set(row, col, "");
+                    valid_range &= table.cell(row, col).is_some();
+                    table.set_cell_text(row, col, "");
                 }
             }
             if !valid_range {
@@ -203,9 +210,8 @@ pub(crate) fn cut_action(app: &WriterApp, state: &GuiState) {
                 app.set_status_left("Cut failed: selected table range is unavailable".into());
                 return;
             };
-            let updated = table.to_markdown();
-            let table_changed = block.text.as_str() != updated.as_str();
-            block.text = loom_writer_core::Text::from_str(&updated);
+            let table_changed = block.typed_table() != Some(&table);
+            block.set_table(table);
             next.set_selection(loom_writer_core::TextSelection::caret(top_left_offset));
             drop(current);
 

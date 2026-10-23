@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use loom_objects::table::{HorizontalAlign, TextRun};
+use loom_objects::table::{HorizontalAlign, Table, TextRun};
 use loom_text::{Alignment, CharacterStyle, FontWeight};
 
 use super::comments::{self, Anchor, CommentPlan};
@@ -12,7 +12,6 @@ use super::package::{
     STYLE_TABLE,
 };
 use super::xml::{self, R_NS, W_NS, XML_DECLARATION};
-use crate::tables::{read_stored, StoredTable};
 use crate::{PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument, TABLE_BLOCK_KIND};
 
 /// The body part plus what the numbering part needs to know about it.
@@ -111,13 +110,14 @@ impl Geometry {
 /// Builds the document part.
 pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
     let geometry = Geometry::of(doc);
-    let tables: Vec<Option<StoredTable>> = doc
+    let tables: Vec<Option<Table>> = doc
         .blocks
         .iter()
         .map(|block| {
             (block.kind == TABLE_BLOCK_KIND)
-                .then(|| read_stored(block.text.as_str()))
-                .filter(|table| table.table.columns() > 0)
+                .then(|| block.typed_table().cloned())
+                .flatten()
+                .filter(|table| table.col_count() > 0)
         })
         .collect();
 
@@ -525,12 +525,44 @@ fn push_cell_runs(out: &mut String, runs: &[TextRun], bold: bool) {
     }
 }
 
-/// A Markdown-source table as a real Word table: equal column widths across
+/// The alignment of a column: the first explicit alignment set on its cells.
+fn column_alignment(table: &Table, column: usize) -> Option<HorizontalAlign> {
+    (0..table.row_count()).find_map(|row| {
+        table
+            .cell(row, column)
+            .and_then(|cell| cell.style_override.as_ref())
+            .and_then(|style| style.horizontal_align)
+    })
+}
+
+/// The merged cell spans of a table as `(row, column, row_span, column_span)`.
+fn merge_spans(table: &Table) -> Vec<(usize, usize, usize, usize)> {
+    let mut spans = Vec::new();
+    for row in 0..table.row_count() {
+        for column in 0..table.col_count() {
+            if let Some(cell) = table.cell(row, column) {
+                if !cell.is_covered && (cell.row_span > 1 || cell.col_span > 1) {
+                    spans.push((row, column, cell.row_span, cell.col_span));
+                }
+            }
+        }
+    }
+    spans
+}
+
+/// The runs of one cell, each keeping its bold and italic.
+fn cell_runs(table: &Table, row: usize, column: usize) -> Vec<TextRun> {
+    table
+        .cell(row, column)
+        .map_or_else(Vec::new, |cell| cell.content.runs.clone())
+}
+
+/// A table as a real Word table: equal column widths across
 /// the text area and a repeating, shaded, bold header row when the source
 /// has a header separator. Short rows are padded to a rectangle.
-fn table_xml(stored: &StoredTable, text_width: i32) -> String {
-    let table = &stored.table;
-    let columns = table.columns();
+fn table_xml(table: &Table, text_width: i32) -> String {
+    let merges = merge_spans(table);
+    let columns = table.col_count();
     let each = text_width / columns as i32;
     let widths: Vec<i32> = (0..columns)
         .map(|column| {
@@ -561,7 +593,7 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
         first_column: table.first_column,
         ..Default::default()
     };
-    for row_index in 0..table.rows.len() {
+    for row_index in 0..table.row_count() {
         let header = table.header_row && row_index == 0;
         out.push_str("<w:tr><w:trPr><w:cantSplit/>");
         if header {
@@ -569,8 +601,8 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
         }
         out.push_str("</w:trPr>");
         for (column, width) in widths.iter().enumerate() {
-            let paragraph = cell_paragraph(stored.alignments.get(column));
-            if let Some(&(mr, mc, mrs, mcs)) = table.merges.iter().find(|(r, c, rs, cs)| {
+            let paragraph = cell_paragraph(column_alignment(table, column).as_ref());
+            if let Some(&(mr, mc, mrs, mcs)) = merges.iter().find(|(r, c, rs, cs)| {
                 row_index >= *r && row_index < *r + *rs && column >= *c && column < *c + *cs
             }) {
                 if column > mc {
@@ -580,7 +612,7 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
                 let resolved = catalog_style.resolve_cell(
                     row_index,
                     column,
-                    table.rows.len(),
+                    table.row_count(),
                     columns,
                     &options,
                     None,
@@ -611,7 +643,7 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
                     "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr>{paragraph}"
                 ));
                 if row_index == mr {
-                    let runs = stored.cell_runs(row_index, column);
+                    let runs = cell_runs(table, row_index, column);
                     push_cell_runs(&mut out, &runs, header || resolved.bold);
                 }
                 out.push_str("</w:p></w:tc>");
@@ -621,7 +653,7 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
             let resolved = catalog_style.resolve_cell(
                 row_index,
                 column,
-                table.rows.len(),
+                table.row_count(),
                 columns,
                 &options,
                 None,
@@ -637,7 +669,7 @@ fn table_xml(stored: &StoredTable, text_width: i32) -> String {
             out.push_str(&format!(
                 "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr>{paragraph}"
             ));
-            let runs = stored.cell_runs(row_index, column);
+            let runs = cell_runs(table, row_index, column);
             push_cell_runs(&mut out, &runs, header || resolved.bold);
             out.push_str("</w:p></w:tc>");
         }

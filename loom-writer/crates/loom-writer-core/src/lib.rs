@@ -53,13 +53,19 @@ use style_json::{
     runs_json, selection_json,
 };
 pub use tables::{
-    compute_cell_ranges, parse_table_markdown, TableArrowDirection, TableCellLocation,
-    INSERT_COLUMNS, INSERT_ROWS, TABLE_BLOCK_KIND,
+    apply_flat_text, flat_table_text, is_table_separator, markdown_table_block,
+    TableArrowDirection, TableCellLocation, TableTextMap, INSERT_COLUMNS, INSERT_ROWS,
+    TABLE_BLOCK_KIND, TABLE_CELL_SEPARATOR, TABLE_ROW_SEPARATOR,
 };
 pub use text_metrics::{offset_at_x, text_advance};
 
 /// Stable document id.
 pub type DocId = String;
+
+/// The version of the document content JSON this build writes. Format 2 stores
+/// tables as typed objects; format 1 (no `format` key) stored them as Markdown
+/// text, which is migrated on load. A higher number is refused.
+pub const WRITER_CONTENT_FORMAT: u32 = 2;
 
 /// A single rich-text block (paragraph or heading) in the document.
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +85,9 @@ pub struct RichBlock {
     /// The chart of a [`CHART_BLOCK_KIND`] block, as JSON. It is kept out of
     /// the block's text so the editor never shows or edits it.
     pub chart: Option<std::sync::Arc<String>>,
+    /// The cells of a [`TABLE_BLOCK_KIND`] block. Its text is derived from
+    /// them (see `tables::store`), so the editor never reads cell markup.
+    pub table: Option<std::sync::Arc<loom_objects::Table>>,
 }
 
 impl RichBlock {
@@ -92,6 +101,7 @@ impl RichBlock {
             runs: Vec::new(),
             image: None,
             chart: None,
+            table: None,
         }
     }
 }
@@ -351,7 +361,13 @@ impl WriterDocument {
             if i > 0 {
                 out.push('\n');
             }
-            out.push_str(b.text.as_str());
+            // A table's separators read as a tab between cells and a line break between rows.
+            out.push_str(
+                &b.text
+                    .as_str()
+                    .replace(TABLE_CELL_SEPARATOR, "\t")
+                    .replace(TABLE_ROW_SEPARATOR, "\n"),
+            );
         }
         out
     }
@@ -400,7 +416,9 @@ impl WriterDocument {
         if start >= end || start >= text.len() {
             return String::new();
         }
-        text[start..end].to_string()
+        text[start..end]
+            .replace(TABLE_CELL_SEPARATOR, "\t")
+            .replace(TABLE_ROW_SEPARATOR, "\n")
     }
 
     /// Replace the active selection with `replacement`, preserving rich-text
@@ -427,6 +445,16 @@ impl WriterDocument {
                 new_start: start,
                 new_end: start + replacement.len(),
             };
+            // A table keeps its cells: the edit goes through the table's own cells.
+            if let Some(index) = self.table_holding_edit(&next_text, edit) {
+                self.type_into_table(index, &next_text, edit)?;
+                return Ok(self.selection.clone());
+            }
+            if self.edit_tears_a_table(edit) {
+                return Err(WriterError::Invalid(
+                    "a table's cells change only inside the table".into(),
+                ));
+            }
             self.replace_paragraphs_with_edit(&next_text, edit);
             let inserted_end = start + replacement.len();
             apply_global_character_style(self, start, inserted_end, inherited);
@@ -545,6 +573,7 @@ impl WriterDocument {
     pub fn to_content_json(&self) -> String {
         let mut s = String::with_capacity(256);
         s.push('{');
+        s.push_str(&format!("\"format\":{WRITER_CONTENT_FORMAT},"));
         s.push_str("\"id\":");
         s.push_str(&pkg_json::escape(&self.id));
         s.push_str(",\"title\":");
@@ -578,6 +607,11 @@ impl WriterDocument {
                 s.push_str(",\"chart\":");
                 s.push_str(&pkg_json::escape(chart));
             }
+            if let Some(table) = &b.table {
+                // The typed table; the block's text is only its flat editor text.
+                s.push_str(",\"table\":");
+                s.push_str(&table.to_json().unwrap_or_else(|_| "null".to_string()));
+            }
             s.push('}');
         }
         s.push(']');
@@ -595,7 +629,8 @@ impl WriterDocument {
     pub fn from_content_json(s: &str) -> Result<Self, WriterError> {
         let mut id = String::new();
         let mut title = String::new();
-        let mut blocks: Vec<RichBlock> = Vec::new();
+        let mut raw_blocks: Option<String> = None;
+        let mut format = 1u32;
         let mut selection = TextSelection::caret(0);
         let mut page = PageSetup::default();
         let mut comments: Vec<CommentThread> = Vec::new();
@@ -608,6 +643,11 @@ impl WriterDocument {
             match k.as_str() {
                 "id" => id = json_value_text(v),
                 "title" => title = json_value_text(v),
+                "format" => {
+                    format = json_value_text(v)
+                        .parse()
+                        .map_err(|_| WriterError::Invalid("bad content format".into()))?
+                }
                 "blocks" => {
                     let raw = match v {
                         JsonValue::Raw(raw) => raw,
@@ -615,7 +655,7 @@ impl WriterDocument {
                             return Err(WriterError::Json("expected blocks array".into()))
                         }
                     };
-                    blocks = parse_blocks(raw)?;
+                    raw_blocks = Some(raw.clone());
                 }
                 "selection" => {
                     if let JsonValue::Raw(raw) = v {
@@ -637,6 +677,13 @@ impl WriterDocument {
                 _ => {}
             }
         }
+        if format > WRITER_CONTENT_FORMAT {
+            return Err(WriterError::Invalid(format!(
+                "written by a newer Writer (content format {format}); this Writer reads format {WRITER_CONTENT_FORMAT} and older"
+            )));
+        }
+        let (blocks, legacy) = parse_blocks(raw_blocks.as_deref().unwrap_or("[]"))?;
+        tables::remap_legacy_offsets(&blocks, &legacy, &mut comments, &mut selection);
         let mut document = Self {
             id,
             title,
@@ -661,6 +708,10 @@ impl WriterDocument {
         out.push_str(&self.title);
         out.push_str("</title>\n</head>\n<body>\n");
         for b in &self.blocks {
+            if let Some(table) = b.typed_table() {
+                out.push_str(&tables::table_html(table));
+                continue;
+            }
             let tag = match b.kind.as_str() {
                 "heading1" => "h1",
                 "heading2" => "h2",
@@ -716,7 +767,7 @@ impl WriterDocument {
         let mut chars_no_spaces = 0;
         let mut sentences = 0;
         for b in &self.blocks {
-            tables::for_each_counted_text(&b.kind, b.text.as_str(), |text| {
+            tables::for_each_counted_text(b, |text| {
                 chars += text.chars().count();
                 chars_no_spaces += text.chars().filter(|c| !c.is_whitespace()).count();
                 words += text.split_whitespace().count();
@@ -775,7 +826,7 @@ impl WriterDocument {
         // Blocks are joined by one line break each, which counts as a character.
         let (mut words, mut characters) = (0, self.blocks.len().saturating_sub(1));
         for block in &self.blocks {
-            tables::for_each_counted_text(&block.kind, block.text.as_str(), |text| {
+            tables::for_each_counted_text(block, |text| {
                 words += text.split_whitespace().count();
                 characters += text.chars().count();
             });
@@ -1697,16 +1748,18 @@ impl std::fmt::Display for WriterError {
 
 impl std::error::Error for WriterError {}
 
-fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
+fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>), WriterError> {
     // raw is a JSON array string. Reuse a bounded parser.
     let p = ContentParser::new(raw);
     let items = p.parse_array()?;
     let mut out = Vec::with_capacity(items.len());
+    let mut legacy = Vec::with_capacity(items.len());
     for item in items {
         let fields = ContentParser::new(&item).parse()?;
         let mut id = 0u64;
         let mut kind = String::new();
         let mut text = String::new();
+        let mut table_raw = None;
         let mut legacy_alignment = None;
         let mut style_raw = None;
         let mut runs_raw = None;
@@ -1738,6 +1791,11 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
                     }
                 }
                 "chart" => chart_json = Some(json_value_text(v)),
+                "table" => {
+                    if let JsonValue::Raw(raw) = v {
+                        table_raw = Some(raw.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -1755,9 +1813,38 @@ fn parse_blocks(raw: &str) -> Result<Vec<RichBlock>, WriterError> {
             b.image = parse_image(&raw)?;
         }
         charts::attach_chart(&mut b, chart_json);
+        let mut legacy_block = tables::LegacyBlock {
+            old_len: b.text.len_bytes(),
+            map: None,
+        };
+        if kind == tables::TABLE_BLOCK_KIND {
+            match table_raw {
+                // Format 2: the typed table is the source; the text is derived from it.
+                Some(table_json) => {
+                    let table = loom_objects::Table::from_json(&table_json)
+                        .map_err(|e| WriterError::Invalid(format!("table {id}: {e}")))?;
+                    b.set_table(table);
+                }
+                None if text.contains(tables::TABLE_CELL_SEPARATOR)
+                    || text.contains(tables::TABLE_ROW_SEPARATOR) =>
+                {
+                    return Err(WriterError::Invalid(format!(
+                        "table {id} has editor text but no table"
+                    )));
+                }
+                // Format 1: Markdown text, migrated once. The next save writes format 2.
+                None => {
+                    let migrated = tables::migrate(&text, id);
+                    legacy_block.old_len = text.len();
+                    legacy_block.map = Some(migrated.map);
+                    b.set_table(migrated.table);
+                }
+            }
+        }
         out.push(b);
+        legacy.push(legacy_block);
     }
-    Ok(out)
+    Ok((out, legacy))
 }
 
 fn parse_image(raw: &str) -> Result<Option<InlineImage>, WriterError> {
@@ -4237,7 +4324,7 @@ mod tests {
             ("list-bulleted", "Last item"),
             ("paragraph", "After the list"),
         ] {
-            doc.push(RichBlock::new(doc.next_id(), kind, text));
+            doc.push(crate::tables::test_block(doc.next_id(), kind, text));
         }
         let md = doc.to_markdown();
         assert!(

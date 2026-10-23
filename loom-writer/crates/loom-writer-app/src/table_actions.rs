@@ -1,6 +1,6 @@
 //! Real table editing actions and callbacks for Loom Writer (Wave 1).
 
-use loom_writer_core::{compute_cell_ranges, TextSelection, WriterDocument};
+use loom_writer_core::{TextSelection, WriterDocument};
 use slint::{ComponentHandle, SharedString};
 use std::rc::Rc;
 
@@ -116,8 +116,8 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
                     .iter()
                     .position(|block| block.id == range.block_id)
                     .and_then(|block_index| {
-                        let block = &next.blocks[block_index];
-                        let cell_start = compute_cell_ranges(block.text.as_str())
+                        let cell_start = next
+                            .table_cell_ranges(range.block_id)?
                             .get(min_r)
                             .and_then(|row| row.get(min_c))
                             .map(|(start, _)| *start)?;

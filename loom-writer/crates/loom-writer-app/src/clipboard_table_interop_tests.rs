@@ -178,7 +178,7 @@ fn copying_body_text_after_leaving_selected_table_cells_copies_only_body_text() 
         .iter_mut()
         .find(|block| block.id == table_block_id)
         .expect("table block remains present")
-        .text = loom_writer_core::Text::from_str(&table.to_markdown());
+        .set_table(table.to_loom_table());
     let table_offset = (0..=document.editor_text().len())
         .find(|offset| document.table_cell_at_offset(*offset).is_some())
         .expect("offset inside inserted table");
@@ -334,7 +334,7 @@ fn explicit_text_selection_ending_inside_table_is_copied_as_text() {
         .iter_mut()
         .find(|block| block.id == table_id)
         .unwrap()
-        .text = loom_writer_core::Text::from_str(&table.to_markdown());
+        .set_table(table.to_loom_table());
     let table_offset = (0..=document.editor_text().len())
         .find(|offset| document.table_cell_at_offset(*offset).is_some())
         .expect("first table cell offset");

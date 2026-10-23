@@ -39,9 +39,11 @@ pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
                 let indent = "  ".repeat(usize::from(block.effective_list_level()));
                 out.push_str(&format!("{indent}- {}\n", inline(block)));
             }
-            // A table block already holds its Markdown, so it is written as it is.
+            // A table block is written from its typed cells.
             TABLE_BLOCK_KIND => {
-                out.push_str(&format!("{}\n", block.text.as_str()));
+                if let Some(table) = block.typed_table() {
+                    out.push_str(&crate::tables::table_markdown(table));
+                }
             }
             "list-numbered" => {
                 let indent = "  ".repeat(usize::from(block.effective_list_level()));
@@ -207,7 +209,7 @@ mod tests {
             (6, "paragraph", "After the table"),
             (7, "list-bulleted", "Last"),
         ] {
-            doc.push(RichBlock::new(id, kind, text));
+            doc.push(crate::tables::test_block(id, kind, text));
         }
         // Items of one list stay tight; a change of list, a table and a paragraph
         // each get a blank line before them.

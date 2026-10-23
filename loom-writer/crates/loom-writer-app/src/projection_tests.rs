@@ -5,6 +5,7 @@
 use super::actions_tests::{test_state, text_document};
 use super::frame_bench_tests::{build_document, setup};
 use super::*;
+use loom_writer_core::Text;
 
 fn rows_in_window(doc: &WriterDocument, viewport: PageViewport) -> projection::Projection {
     projection::project(doc, viewport, Some(800.0))

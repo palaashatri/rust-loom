@@ -52,9 +52,8 @@ fn fixture_document() -> WriterDocument {
         .push(RichBlock::new(7, "list-numbered", "Second step"));
     doc.blocks
         .push(RichBlock::new(8, "list-numbered", "Third step"));
-    doc.blocks.push(RichBlock::new(
+    doc.blocks.push(loom_writer_core::markdown_table_block(
         9,
-        TABLE_BLOCK_KIND,
         "| Name | Qty |\n| --- | --- |\n| Tea | 2 |\n| Coffee | 3 |",
     ));
     doc.blocks.push(RichBlock::new(

@@ -226,18 +226,13 @@ mod tests {
     #[test]
     fn pointer_in_populated_cell_after_empty_cell_uses_painted_cell() {
         let markdown = "|  | B |";
-        assert_eq!(
-            loom_writer_core::compute_cell_ranges(markdown),
-            vec![vec![(3, 3), (5, 6)]],
-            "the fixture has an empty first cell and B at source offset 5"
-        );
-
         let mut document = WriterDocument::new("empty-leading-cell", "Empty leading cell");
-        document.push(loom_writer_core::RichBlock::new(
-            1,
-            loom_writer_core::TABLE_BLOCK_KIND,
-            markdown,
-        ));
+        document.push(loom_writer_core::markdown_table_block(1, markdown));
+        assert_eq!(
+            document.table_cell_ranges(1),
+            Some(vec![vec![(0, 0), (1, 2)]]),
+            "the first cell is empty and B follows its separator"
+        );
         let viewport = PageViewport::default();
         let projection = crate::projection::project(
             &document,
@@ -248,7 +243,7 @@ mod tests {
 
         let rects = projection.table_cell_rects;
         let populated_cell = &rects[1];
-        assert_eq!(populated_cell.caret_offset, 5);
+        assert_eq!(populated_cell.caret_offset, 1, "B starts after the empty cell and its separator");
         let x = populated_cell.x + 6.0;
         let y = populated_cell.y + populated_cell.height / 2.0;
         let hit = writer_pointer_offset_with_rect_lookup(
@@ -262,7 +257,7 @@ mod tests {
         .expect("pointer inside the projected B cell resolves to a document offset");
 
         assert_eq!(
-            hit, 5,
+            hit, 1,
             "clicking at B's painted text origin places the caret before B"
         );
         let location = document

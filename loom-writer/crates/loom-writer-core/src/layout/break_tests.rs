@@ -1,9 +1,7 @@
 //! Soft line breaks (vertical tab), page breaks (form feed), widow/orphan
 //! control and keep-with-next, in layout, PDF and DOCX.
 
-use crate::{
-    export_pdf, import_docx, PageSetup, PageStyle, PageViewport, RichBlock, WriterDocument,
-};
+use crate::{export_pdf, import_docx, PageSetup, PageStyle, PageViewport, WriterDocument};
 
 /// A page that holds exactly five 10-point lines and has no margins.
 fn tiny_style() -> PageStyle {
@@ -22,7 +20,7 @@ fn tiny_style() -> PageStyle {
 fn document(blocks: &[(&str, &str)]) -> WriterDocument {
     let mut doc = WriterDocument::new("b", "B");
     for (kind, text) in blocks {
-        doc.push(RichBlock::new(doc.next_id(), kind, text));
+        doc.push(crate::tables::test_block(doc.next_id(), kind, text));
     }
     doc
 }

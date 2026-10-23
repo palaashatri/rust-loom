@@ -494,16 +494,6 @@ fn writer_table_stage_profile() {
     stage("editor_text", &mut || {
         let _ = base.editor_text();
     });
-    stage("divider_ranges", &mut || {
-        let _ = crate::table_rules::divider_ranges(&base);
-    });
-    stage("table_ends", &mut || {
-        let _ = crate::table_rules::table_ends(&base);
-    });
-    stage("edit_touches_divider", &mut || {
-        let d = crate::table_rules::divider_ranges(&base);
-        let _ = crate::table_rules::edit_touches_divider(&base.editor_text(), &edited_text, &d);
-    });
     stage("table_safe_edit", &mut || {
         let _ = base.table_safe_edit(&edited_text, Some(5));
     });

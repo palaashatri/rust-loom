@@ -3,7 +3,6 @@
 
 use super::actions_tests::test_state;
 use super::*;
-use loom_writer_core::TABLE_BLOCK_KIND;
 
 fn session(blocks: Vec<RichBlock>) -> (WriterApp, Rc<GuiState>) {
     let mut document = WriterDocument::new("test", "Test");
@@ -74,7 +73,7 @@ fn the_list_level_commands_do_nothing_outside_a_list_item() {
 #[test]
 fn the_list_level_commands_do_nothing_inside_a_table_cell() {
     let table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
-    let (app, state) = session(vec![RichBlock::new(1, TABLE_BLOCK_KIND, table)]);
+    let (app, state) = session(vec![loom_writer_core::markdown_table_block(1, table)]);
     caret(&state, 2);
     let before = state.current.borrow().blocks.clone();
     assert!(dispatch_command(&app, "list.level.increase"));

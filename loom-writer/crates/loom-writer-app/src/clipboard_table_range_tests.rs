@@ -7,11 +7,9 @@ fn table_text_hit_test_document() -> (loom_writer_core::WriterDocument, String) 
     table.set(0, 1, "target");
     let markdown = table.to_markdown();
     let mut document = loom_writer_core::WriterDocument::new("painted-cell-text", "Document");
-    document.blocks.push(loom_writer_core::RichBlock::new(
-        1,
-        loom_writer_core::TABLE_BLOCK_KIND,
-        &markdown,
-    ));
+    document
+        .blocks
+        .push(loom_writer_core::markdown_table_block(1, &markdown));
     (document, markdown)
 }
 
@@ -52,7 +50,7 @@ fn painted_table_cell_bold_runs(
 // source Markdown byte offset, keeping the escaped pipe in the same cell.
 #[test]
 fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
-    let (document, markdown) = table_text_hit_test_document();
+    let (document, _markdown) = table_text_hit_test_document();
     let projection = crate::projection::project(
         &document,
         loom_writer_core::PageViewport::default(),
@@ -73,7 +71,10 @@ fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
         + loom_writer_core::text_advance(prefix, 0, &runs, font_size)
         + loom_writer_core::text_advance(first_tea_glyph, tea_start, &runs, font_size) * 0.1;
     let y = cell_rect.y + cell_rect.height / 2.0;
-    let expected_source_offset = markdown.find("tea").expect("canonical source suffix");
+    let expected_source_offset = document
+        .editor_text()
+        .find("tea")
+        .expect("canonical source suffix");
 
     let hit =
         crate::writer_pointer_offset(&document, loom_writer_core::PageViewport::default(), x, y)
@@ -94,8 +95,11 @@ fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
 
 #[test]
 fn painted_table_caret_uses_trimmed_unescaped_utf8_cell_text() {
-    let (mut document, markdown) = table_text_hit_test_document();
-    let tea_start = markdown.find("tea").expect("canonical source suffix");
+    let (mut document, _markdown) = table_text_hit_test_document();
+    let tea_start = document
+        .editor_text()
+        .find("tea")
+        .expect("canonical source suffix");
     document.set_selection(loom_writer_core::TextSelection::caret(tea_start));
     let selected_cell = document
         .table_cell_at_offset(tea_start)

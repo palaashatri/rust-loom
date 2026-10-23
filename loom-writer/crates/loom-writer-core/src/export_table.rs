@@ -3,12 +3,11 @@
 //! separator row, so a table reads as a table rather than as Markdown source.
 //! A row is as tall as its tallest wrapped cell.
 
-use loom_objects::table::HorizontalAlign;
+use loom_objects::table::{HorizontalAlign, Table};
 use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
 use loom_text::{CharacterStyle, FontWeight, StyleRun};
 
 use crate::export_flow::{self, line_width};
-use crate::tables::{read_stored, StoredTable};
 use crate::text_metrics::pdf_text_width;
 
 /// Space between a cell's text and each of its column rules.
@@ -30,11 +29,14 @@ struct Cell {
 }
 
 impl Cell {
-    /// The cell stored at row `row`, column `column`.
-    fn of(stored: &StoredTable, row: usize, column: usize) -> Self {
+    /// The cell at row `row`, column `column`.
+    fn of(table: &Table, row: usize, column: usize) -> Self {
         let mut text = String::new();
         let mut runs = Vec::new();
-        for piece in stored.cell_runs(row, column) {
+        for piece in table
+            .cell(row, column)
+            .map_or(&[][..], |cell| cell.content.runs.as_slice())
+        {
             let start = text.len();
             text.push_str(&piece.text);
             if piece.bold || piece.italic {
@@ -130,19 +132,18 @@ impl TableLayout {
     /// Sizes each column to its widest cell, fitting the table into `max_width`
     /// (see `fit_columns`), and wraps each cell onto as many lines as its column
     /// needs. `line_height` is the distance between the lines of one cell.
-    pub(crate) fn new(markdown: &str, body: &TextStyle, max_width: f32, line_height: f32) -> Self {
-        let stored = read_stored(markdown);
-        let columns = stored.table.columns();
-        let header_row = stored.table.header_row;
+    pub(crate) fn new(table: &Table, body: &TextStyle, max_width: f32, line_height: f32) -> Self {
+        let columns = table.col_count();
+        let header_row = table.header_row;
         let is_header = |index: usize| header_row && index == 0;
         // A column wants its widest whole cell, but it can always narrow to its
         // longest word, so words stay whole for as long as the table allows.
         let mut natural = vec![MIN_COLUMN_PT; columns];
         let mut shortest = vec![MIN_COLUMN_PT; columns];
-        let cells: Vec<Vec<Cell>> = (0..stored.table.rows.len())
+        let cells: Vec<Vec<Cell>> = (0..table.row_count())
             .map(|row| {
                 (0..columns)
-                    .map(|column| Cell::of(&stored, row, column))
+                    .map(|column| Cell::of(table, row, column))
                     .collect()
             })
             .collect();
@@ -188,7 +189,7 @@ impl TableLayout {
             })
             .collect();
         let alignments = (0..columns)
-            .map(|column| stored.alignments.get(column).copied().unwrap_or_default())
+            .map(|column| column_alignment(table, column))
             .collect();
         Self {
             starts,
@@ -347,6 +348,18 @@ fn draw_line(
 }
 
 /// The body style, in bold for a header cell.
+/// The alignment of a column: the first explicit alignment set on its cells.
+fn column_alignment(table: &Table, column: usize) -> HorizontalAlign {
+    (0..table.row_count())
+        .find_map(|row| {
+            table
+                .cell(row, column)
+                .and_then(|cell| cell.style_override.as_ref())
+                .and_then(|style| style.horizontal_align)
+        })
+        .unwrap_or_default()
+}
+
 fn cell_style(body: &TextStyle, header: bool) -> TextStyle {
     TextStyle {
         bold: body.bold || header,
@@ -358,7 +371,7 @@ fn cell_style(body: &TextStyle, header: bool) -> TextStyle {
 mod tests {
     use super::CELL_PAD_X_PT;
     use crate::text_metrics::pdf_text_width;
-    use crate::{export_pdf, RichBlock, WriterDocument, WriterTable, TABLE_BLOCK_KIND};
+    use crate::{export_pdf, WriterDocument, WriterTable};
     use loom_pdf::TextStyle;
 
     const HEADER: &[&str] = &["Quarter", "Notes", "Owner"];
@@ -468,7 +481,10 @@ mod tests {
         }
         let mut document = WriterDocument::new("table", "Table");
         let id = document.next_id();
-        document.push(RichBlock::new(id, TABLE_BLOCK_KIND, &table.to_markdown()));
+        document.push(crate::tables::markdown_table_block(
+            id,
+            &table.to_markdown(),
+        ));
         document
     }
 
@@ -526,7 +542,7 @@ mod tests {
         let mut document = WriterDocument::new("empty", "Empty");
         let id = document.next_id();
         let markdown = WriterTable::new("empty", 3, 3).to_markdown();
-        document.push(RichBlock::new(id, TABLE_BLOCK_KIND, &markdown));
+        document.push(crate::tables::markdown_table_block(id, &markdown));
         let pdf = export_pdf(&document);
 
         let edges = row_edges(&pdf);
@@ -623,7 +639,7 @@ mod tests {
     fn markdown_document(markdown: &str) -> WriterDocument {
         let mut document = WriterDocument::new("table", "Table");
         let id = document.next_id();
-        document.push(RichBlock::new(id, TABLE_BLOCK_KIND, markdown));
+        document.push(crate::tables::markdown_table_block(id, markdown));
         document
     }
 

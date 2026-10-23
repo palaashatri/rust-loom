@@ -70,7 +70,7 @@ fn populated_document_with_table(
         .iter_mut()
         .find(|block| block.id == table_id)
         .unwrap()
-        .text = loom_writer_core::Text::from_str(&table.to_markdown());
+        .set_table(table.to_loom_table());
 
     let editor_text = document.editor_text();
     let first_cell_offset = (0..=editor_text.len())
@@ -212,78 +212,32 @@ fn pointer_position_for_cell(
         "the target offset belongs to the intended table cell"
     );
 
-    let style = document.page.page_style();
-    let flow = document
-        .flow(
-            &style,
-            crate::PageViewport {
-                width: style.width_pt,
-                height: style.height_pt,
-                zoom: 1.0,
-                scroll_x: 0.0,
-                scroll_y: 0.0,
-            },
-        )
-        .expect("layout table for pointer hit testing");
-    let base_page = flow.page_bounds().first().copied().expect("first page");
-    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-
-    for line in flow.lines() {
-        let block = &document.blocks[line.block_index];
-        if block.id != table_id {
-            continue;
-        }
-        let alignment_offset = match block.style.alignment {
-            loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
-            loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
-            loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
-        };
-        let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
-        let line_y = line.bounds.y - base_page.y - style.margin_top_pt + line.bounds.height / 2.0;
-        let line_text = &block.text.as_str()[line.start..line.end];
-        let font_size = style.font_size_for_kind(block.kind.as_str());
-        let max_step = (line.bounds.width.max(0.0) * 4.0).ceil() as usize;
-        for step in 0..=max_step {
-            let local_x = step as f32 / 4.0;
-            let local_byte = loom_writer_core::offset_at_x(
-                line_text,
-                line.start,
-                &block.runs,
-                font_size,
-                local_x,
-            );
-            let candidate = line.global_start + local_byte;
-            let Some(location) = document.table_cell_at_offset(candidate) else {
-                continue;
-            };
-            if (location.block_id, location.row, location.col)
-                != (table_id, target_row, target_column)
-            {
-                continue;
-            }
-            let point = (line_x + local_x, line_y);
-            if let Some(actual_offset) = crate::writer_pointer_offset(
-                document,
-                crate::PageViewport::default(),
-                point.0,
-                point.1,
-            ) {
-                if document
-                    .table_cell_at_offset(actual_offset)
-                    .is_some_and(|actual| {
-                        (actual.block_id, actual.row, actual.col)
-                            == (table_id, target_row, target_column)
-                    })
-                {
-                    return (point, actual_offset);
-                }
-            }
-        }
-    }
-
-    panic!(
-            "the Writer pointer hit-test has a real position inside table cell ({target_row}, {target_column})"
-        );
+    // The painted cell's centre, in the page's own coordinates. A table row is one
+    // line of text in the layout, so the painted rectangles are the reliable target.
+    let columns = document
+        .loom_table_from_block(table_id)
+        .expect("the painted table exists")
+        .col_count();
+    let projection = crate::projection::project(
+        document,
+        crate::PageViewport::default(),
+        Some(loom_writer_core::PageStyle::default().height_pt),
+    );
+    let rect = &projection.table_cell_rects[target_row * columns + target_column];
+    let point = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    let actual_offset =
+        crate::writer_pointer_offset(document, crate::PageViewport::default(), point.0, point.1)
+            .expect("the pointer hits the painted cell");
+    assert_eq!(
+        document.table_cell_at_offset(actual_offset).map(|actual| (
+            actual.block_id,
+            actual.row,
+            actual.col
+        )),
+        Some((table_id, target_row, target_column)),
+        "the painted centre of cell ({target_row}, {target_column}) hit-tests into that cell"
+    );
+    (point, actual_offset)
 }
 
 fn document_body_window_origin(app: &WriterApp) -> (f32, f32) {

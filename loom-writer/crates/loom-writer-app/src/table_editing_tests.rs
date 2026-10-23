@@ -42,7 +42,7 @@ mod tests {
             .iter_mut()
             .find(|block| block.id == block_id)
             .unwrap()
-            .text = loom_writer_core::Text::from_str(&table.to_markdown());
+            .set_table(table.to_loom_table());
         let caret = (0..document.editor_text().len())
             .find(|offset| {
                 document.table_cell_at_offset(*offset).is_some_and(|cell| {
@@ -208,7 +208,7 @@ mod tests {
 
         app.invoke_document_edited(edited.into(), next_caret, next_caret);
 
-        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 0), "X R0C0");
+        assert_active_range_cleared_and_copy_is_full_table(&app, &state, (0, 0), "XR0C0");
     }
 
     fn assert_collapsed_navigation_clears_range(key: slint::platform::Key, ctrl: bool) {
@@ -774,7 +774,7 @@ mod tests {
             .iter_mut()
             .find(|b| b.id == tbl_id)
         {
-            b.text = loom_writer_core::Text::from_str(&updated.to_markdown());
+            b.set_table(updated.to_loom_table());
         }
 
         // Save to target for external COM verification using the APP's export path
@@ -834,7 +834,7 @@ mod tests {
         tbl.set(1, 0, "CellTwoOne");
         tbl.set(1, 1, "CellTwoTwo");
         if let Some(b) = doc.blocks.iter_mut().find(|b| b.id == tbl_id) {
-            b.text = loom_writer_core::Text::from_str(&tbl.to_markdown());
+            b.set_table(tbl.to_loom_table());
         }
         // Add paragraph after table
         doc.blocks.push(loom_writer_core::RichBlock::new(
@@ -1069,7 +1069,7 @@ mod tests {
             }
         }
         if let Some(b) = doc.blocks.iter_mut().find(|b| b.id == tbl_id) {
-            b.text = loom_writer_core::Text::from_str(&tbl.to_markdown());
+            b.set_table(tbl.to_loom_table());
         }
         let first_cell_start = doc
             .table_cell_at_offset(doc.blocks[0].text.len_bytes() + 3)

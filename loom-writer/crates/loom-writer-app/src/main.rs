@@ -43,7 +43,6 @@ mod reading_time;
 mod recovery;
 mod recovery_draft;
 mod table_actions;
-mod table_rules;
 mod toolbar_commands;
 mod typing_style;
 mod view_state;
@@ -81,8 +80,8 @@ use loom_desktop::{
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
-    floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, Text,
-    TextSelection, WriterDocument,
+    floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
+    WriterDocument,
 };
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
@@ -379,9 +378,6 @@ fn blank_startup_document() -> WriterDocument {
 
 /// Hint shown in the status bar (not in the document) on a fresh blank start.
 const START_HINT: &str = "Start typing, or press Ctrl+K for commands";
-
-/// Status shown when an edit would change a table's divider row.
-const TABLE_DIVIDER_REFUSAL: &str = "The table divider row is not editable.";
 
 fn apply_startup_hint(app: &WriterApp, document: &WriterDocument, restored_or_requested: bool) {
     if !restored_or_requested && document.is_empty() {
@@ -2193,23 +2189,25 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
             .rev()
             .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
         {
-            let mut table = loom_writer_core::parse_table_markdown(block.text.as_str());
-            let sample = [
-                ["Region", "Sessions", "Change"],
-                ["North", "1,204", "+8.1%"],
-                ["South", "987", "+5.4%"],
-            ];
-            for (row, values) in sample.iter().enumerate() {
-                for (column, value) in values.iter().enumerate() {
-                    table.set(row, column, *value);
+            if let Some(mut table) = block.typed_table().cloned() {
+                let sample = [
+                    ["Region", "Sessions", "Change"],
+                    ["North", "1,204", "+8.1%"],
+                    ["South", "987", "+5.4%"],
+                ];
+                for (row, values) in sample.iter().enumerate() {
+                    for (column, value) in values.iter().enumerate() {
+                        table.set_cell_text(row, column, *value);
+                    }
                 }
+                block.set_table(table);
             }
-            block.text = Text::from_str(&table.to_markdown());
         }
         let mut offset = 0;
         for block in &document.blocks {
             if block.kind == loom_writer_core::TABLE_BLOCK_KIND {
-                document.set_selection(DocumentSelection::caret(offset + 2));
+                // The first cell starts at the block's first byte.
+                document.set_selection(DocumentSelection::caret(offset));
                 break;
             }
             offset += block.text.len_bytes() + 1;
@@ -2596,43 +2594,6 @@ fn wire_writer_shared_callbacks(
                 if state.syncing_editor.get() {
                     return;
                 }
-                // The divider row of a table is not text: an edit that would change it
-                // is refused, and the editor is set back to the document.
-                let touches_divider = {
-                    let current = state.current.borrow();
-                    let dividers = table_rules::divider_ranges(&current);
-                    !dividers.is_empty()
-                        && table_rules::edit_touches_divider(
-                            &current.editor_text(),
-                            text.as_str(),
-                            &dividers,
-                        )
-                };
-                if touches_divider {
-                    apply_state(&app, &state);
-                    app.set_status_left(SharedString::from(TABLE_DIVIDER_REFUSAL));
-                    return;
-                }
-                // Text typed right after a table starts a paragraph of its own.
-                let table_ends = table_rules::table_ends(&state.current.borrow());
-                let broken = if table_ends.is_empty() {
-                    None
-                } else {
-                    table_rules::break_after_table(
-                        &state.current.borrow().editor_text(),
-                        text.as_str(),
-                        &table_ends,
-                        focus.max(0) as usize,
-                    )
-                };
-                let (text, anchor, focus) = match broken {
-                    Some((edited, caret)) => {
-                        let caret = caret.min(i32::MAX as usize) as i32;
-                        let anchor = if anchor == focus { caret } else { anchor };
-                        (SharedString::from(edited), anchor, caret)
-                    }
-                    None => (text, anchor, focus),
-                };
                 // Typed pipes and line breaks must not split a table cell; the
                 // caret follows the text the document keeps.
                 let (text, anchor, focus) = {
@@ -3103,25 +3064,6 @@ fn wire_writer_shared_callbacks(
                     return;
                 }
                 let raw_focus = focus.max(0) as usize;
-                let previous = state.current.borrow().selection().focus;
-                let caret = table_rules::skip_divider(&state.current.borrow(), previous, raw_focus);
-                if caret != raw_focus {
-                    // The caret stepped onto a table divider: carry on past it.
-                    let anchor = anchor.max(0) as usize;
-                    let selection = if anchor == raw_focus {
-                        TextSelection::caret(caret)
-                    } else {
-                        TextSelection::range(anchor, caret)
-                    };
-                    state.current.borrow_mut().set_selection(selection);
-                    apply_state(&app, &state);
-                    sync_writer_menu_if_present(&menu_service, &app, &state);
-                    // A press must not move the page under the pointer.
-                    if !press_reveal::is_suppressed() {
-                        reveal_caret(&app, &state);
-                    }
-                    return;
-                }
                 // A caret past the end of the text can be an edit still arriving; the
                 // document clamps it, so only a caret that really moved drops the style.
                 let clamped = state
@@ -4718,7 +4660,6 @@ mod history_tests;
 #[cfg(test)]
 mod keyboard_flow_tests;
 #[cfg(test)]
-mod table_rules_tests;
 #[cfg(test)]
 mod typing_style_tests;
 
@@ -4735,9 +4676,9 @@ mod list_keys_tests;
 #[cfg(test)]
 mod list_level_actions_tests;
 #[cfg(test)]
-mod picture_tests;
-#[cfg(test)]
 mod picture_drag_tests;
+#[cfg(test)]
+mod picture_tests;
 #[cfg(test)]
 mod table_editing_tests;
 #[cfg(test)]

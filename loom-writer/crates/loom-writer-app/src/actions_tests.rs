@@ -1444,9 +1444,8 @@ fn document_with_a_table() -> WriterDocument {
     document
         .blocks
         .push(loom_writer_core::RichBlock::new(1, "paragraph", "Intro"));
-    document.blocks.push(loom_writer_core::RichBlock::new(
+    document.blocks.push(loom_writer_core::markdown_table_block(
         2,
-        loom_writer_core::TABLE_BLOCK_KIND,
         &table.to_markdown(),
     ));
     document

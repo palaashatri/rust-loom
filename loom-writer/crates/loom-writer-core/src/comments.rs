@@ -271,14 +271,17 @@ impl WriterDocument {
             self.set_selection(self.selection.clone());
             return Ok(false);
         }
-        let (new_text, caret) = self.keep_table_rows_intact(&old_text, new_text, caret);
-        if old_text == new_text {
-            self.set_selection(self.selection.clone());
-            return Ok(false);
-        }
         let edit = caret
             .and_then(|caret| TextEdit::from_caret(&old_text, &new_text, caret))
             .unwrap_or_else(|| TextEdit::diff(&old_text, &new_text));
+        if let Some(index) = self.table_holding_edit(&new_text, edit) {
+            return self.type_into_table(index, &new_text, edit);
+        }
+        if self.edit_tears_a_table(edit) {
+            return Err(WriterError::Invalid(
+                "a table's cells change only inside the table".into(),
+            ));
+        }
         if crate::images::edit_touches_picture(&self.blocks, edit.old_start, edit.old_end) {
             return Err(WriterError::Invalid(
                 "a picture keeps its own line; type in a text line beside it".into(),
@@ -295,66 +298,116 @@ impl WriterDocument {
         Ok(true)
     }
 
-    /// A table is stored as Markdown rows, so a typed `|` would start a new
-    /// column and a line break would split a row. Text typed or pasted into a
-    /// table block therefore keeps its pipes (written `\\|`) and loses its line
-    /// breaks (Enter does nothing, pasted lines are joined with a space).
-    /// The edited text and caret after this rule, for a caller (the editor) that
-    /// must show the caret where the document will put it.
+    /// The edited text and caret the editor should show for an edit. Text typed
+    /// or pasted into a table keeps its cells: separators are dropped, line
+    /// breaks become spaces, and a line break in a cell does nothing. Other edits
+    /// pass through unchanged.
     pub fn table_safe_edit(&self, new_text: &str, caret: Option<usize>) -> (String, Option<usize>) {
         let new_text = normalize_editor_text(new_text);
-        self.keep_table_rows_intact(&self.editor_text(), new_text, caret)
+        let old_text = self.editor_text();
+        let edit = caret
+            .and_then(|caret| TextEdit::from_caret(&old_text, &new_text, caret))
+            .unwrap_or_else(|| TextEdit::diff(&old_text, &new_text));
+        let Some(index) = self.table_holding_edit(&new_text, edit) else {
+            return (new_text, caret);
+        };
+        let (block_start, flat) = self.table_block_text(index);
+        let range = edit.old_start - block_start..edit.old_end - block_start;
+        let inserted = &new_text[edit.new_start..edit.new_end];
+        let (updated, typed) = crate::tables::flat_after_typing(&flat, range.clone(), inserted);
+        let mut shown = String::with_capacity(old_text.len() + updated.len());
+        shown.push_str(&old_text[..block_start]);
+        shown.push_str(&updated);
+        shown.push_str(&old_text[block_start + flat.len()..]);
+        (shown, Some(block_start + range.start + typed))
     }
 
-    fn keep_table_rows_intact(
-        &self,
-        old_text: &str,
-        new_text: String,
-        caret: Option<usize>,
-    ) -> (String, Option<usize>) {
-        let edit = caret
-            .and_then(|caret| TextEdit::from_caret(old_text, &new_text, caret))
-            .unwrap_or_else(|| TextEdit::diff(old_text, &new_text));
-        if edit.new_start >= edit.new_end || edit.new_end > new_text.len() {
-            return (new_text, caret);
-        }
-        let in_table = block_at_offset(&self.blocks, edit.old_start).is_some_and(|(block, at)| {
-            // After the last row's closing pipe is outside every cell:
-            // text typed there starts a paragraph of its own.
-            block.kind == crate::TABLE_BLOCK_KIND && at < block.text.len_bytes()
-        });
-        if !in_table {
-            return (new_text, caret);
-        }
+    /// Applies an edit that lies inside table block `index` to its cells.
+    pub(crate) fn type_into_table(
+        &mut self,
+        index: usize,
+        new_text: &str,
+        edit: TextEdit,
+    ) -> Result<bool, WriterError> {
+        let (block_start, flat) = self.table_block_text(index);
+        let block_id = self.blocks[index].id;
+        let range = edit.old_start - block_start..edit.old_end - block_start;
         let inserted = &new_text[edit.new_start..edit.new_end];
-        let mut clean = String::with_capacity(inserted.len() + 2);
-        // A pipe that is already escaped stays as it is, so applying the rule
-        // to its own output changes nothing.
-        let mut escaped = new_text[..edit.new_start].ends_with('\\');
-        for c in inserted.chars() {
-            match c {
-                '\n' if inserted == "\n" => {}
-                '\n' => clean.push(' '),
-                '|' if !escaped => clean.push_str("\\|"),
-                other => clean.push(other),
-            }
-            escaped = c == '\\' && !escaped;
+        let (updated, typed) = crate::tables::flat_after_typing(&flat, range.clone(), inserted);
+        if updated == flat {
+            self.set_selection(crate::TextSelection::caret(block_start + range.start));
+            return Ok(false);
         }
-        if clean == inserted {
-            return (new_text, caret);
+        let before = (!self.comments.is_empty()).then(|| self.blocks.clone());
+        self.edit_table_text(block_id, &updated)
+            .map_err(WriterError::Invalid)?;
+        self.set_selection(crate::TextSelection::caret(
+            block_start + range.start + typed,
+        ));
+        if let Some(before) = before {
+            // Only the table's span changed, so the editor edit is that span.
+            let delta = updated.len() as isize - flat.len() as isize;
+            let applied = TextEdit {
+                old_start: block_start + range.start,
+                old_end: block_start + range.end,
+                new_start: block_start + range.start,
+                new_end: (block_start as isize + range.end as isize + delta) as usize,
+            };
+            Self::rebase_comment_anchors_through(
+                &mut self.comments,
+                &before,
+                &self.blocks,
+                applied,
+            );
         }
-        let mut fixed = String::with_capacity(new_text.len() + clean.len());
-        fixed.push_str(&new_text[..edit.new_start]);
-        fixed.push_str(&clean);
-        fixed.push_str(&new_text[edit.new_end..]);
-        let caret = caret.map(|c| {
-            if c >= edit.new_end {
-                c + clean.len() - inserted.len()
-            } else {
-                c
+        Ok(true)
+    }
+
+    /// The editor offset where table block `index` starts, and its flat text.
+    fn table_block_text(&self, index: usize) -> (usize, String) {
+        let start = self.blocks[..index]
+            .iter()
+            .map(|block| block.text.len_bytes() + 1)
+            .sum::<usize>();
+        (start, self.blocks[index].text.as_str().to_string())
+    }
+
+    /// The table block an edit lies inside, if it does. A line break typed at a
+    /// table's edge starts a paragraph beside the table instead.
+    pub(crate) fn table_holding_edit(&self, new_text: &str, edit: TextEdit) -> Option<usize> {
+        let inserted = &new_text[edit.new_start..edit.new_end];
+        let mut start = 0usize;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let end = start + block.text.len_bytes();
+            if block.typed_table().is_some() && start <= edit.old_start && edit.old_end <= end {
+                let line_break =
+                    inserted == "\n" && edit.old_start == edit.old_end && edit.old_start == end;
+                return (!line_break).then_some(index);
             }
-        });
-        (fixed, caret)
+            start = end + 1;
+        }
+        None
+    }
+
+    /// Whether an edit removes text across a table's edge without covering the
+    /// whole table. Joining a table to a neighbouring paragraph is refused.
+    pub(crate) fn edit_tears_a_table(&self, edit: TextEdit) -> bool {
+        if edit.old_start == edit.old_end {
+            return false;
+        }
+        let mut start = 0usize;
+        for block in &self.blocks {
+            let end = start + block.text.len_bytes();
+            if block.typed_table().is_some() {
+                let reaches = edit.old_start <= end && edit.old_end >= start;
+                let covers = edit.old_start <= start && edit.old_end >= end;
+                if reaches && !covers {
+                    return true;
+                }
+            }
+            start = end + 1;
+        }
+        false
     }
 
     /// Replace the editor's canonical text with only the old/new diff to go on.
@@ -799,19 +852,24 @@ mod table_input_tests {
     #[test]
     fn a_pipe_typed_into_a_cell_stays_in_the_cell() {
         let (mut doc, id, caret) = table_doc();
-        let before = doc.table_from_block(id).unwrap();
-        let (rows, cols) = (before.rows.len(), before.columns());
+        let before = doc.loom_table_from_block(id).unwrap();
+        let (rows, cols) = (before.row_count(), before.col_count());
         let edited = splice(&doc, caret, "a|b");
         let (safe, new_caret) = doc.table_safe_edit(&edited, Some(caret + 3));
-        assert_eq!(new_caret, Some(caret + 4), "the caret follows the escape");
-        doc.replace_editor_text_at(&safe, new_caret).unwrap();
-        let after = doc.table_from_block(id).expect("still a table");
         assert_eq!(
-            (after.rows.len(), after.columns()),
+            new_caret,
+            Some(caret + 3),
+            "the caret follows the typed text"
+        );
+        doc.replace_editor_text_at(&safe, new_caret).unwrap();
+        let after = doc.loom_table_from_block(id).expect("still a table");
+        assert_eq!(
+            (after.row_count(), after.col_count()),
             (rows, cols),
             "no new column"
         );
-        assert!(after.rows[0][0].contains('b'), "{:?}", after.rows[0][0]);
+        let first = after.cell_text(0, 0).unwrap_or_default();
+        assert!(first.contains('b'), "{first:?}");
     }
 
     #[test]
@@ -842,13 +900,10 @@ two",
         );
         doc.replace_editor_text_at(&edited, Some(caret + 7))
             .unwrap();
-        let table = doc.table_from_block(id).unwrap();
-        assert_eq!(table.rows.len(), 2, "no new row");
-        assert!(
-            table.rows[0][0].contains("one two"),
-            "{:?}",
-            table.rows[0][0]
-        );
+        let table = doc.loom_table_from_block(id).unwrap();
+        assert_eq!(table.row_count(), 2, "no new row");
+        let first = table.cell_text(0, 0).unwrap_or_default();
+        assert!(first.contains("one two"), "{first:?}");
     }
 
     #[test]

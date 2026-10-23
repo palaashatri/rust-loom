@@ -7,8 +7,7 @@
 use loom_package::zip::PackageArchive;
 use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphStyle, StyleRun};
 
-use crate::tables::TABLE_BLOCK_KIND;
-use crate::{RichBlock, WriterDocument, WriterTable};
+use crate::{RichBlock, WriterDocument};
 
 /// Unescapes the five predefined XML entities in one left-to-right pass.
 pub(crate) fn xml_unescape(value: &str) -> String {
@@ -671,18 +670,16 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
         return None;
     }
 
-    let writer_table = WriterTable {
-        id: format!("tbl-{id}"),
-        rows,
-        header_row,
-        style_id: "table-style-medium-1".to_string(),
-        banded_rows: true,
-        first_column: false,
-        merges: Vec::new(),
-    };
-    let markdown = writer_table.to_markdown();
-    let block = RichBlock::new(id, TABLE_BLOCK_KIND, &markdown);
-    Some((block, next_cursor))
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    let mut table = loom_objects::Table::new(rows.len(), columns);
+    table.id = format!("tbl-{id}");
+    table.header_row = header_row;
+    for (row, cells) in rows.iter().enumerate() {
+        for (column, text) in cells.iter().enumerate() {
+            table.set_cell_text(row, column, text);
+        }
+    }
+    Some((RichBlock::table_block(id, table), next_cursor))
 }
 
 fn extract_attribute_value(tag_snippet: &str, attr_name: &str) -> Option<String> {

@@ -8,13 +8,12 @@
 //! table keeps its rows and columns. Comment anchors rebase through every change,
 //! so each thread keeps pointing at the same words.
 
-use std::ops::Range;
-
-use crate::{search, RichBlock, SearchMatch, Text, WriterDocument, TABLE_BLOCK_KIND};
+use crate::tables::{is_table_separator, TABLE_BLOCK_KIND};
+use crate::{search, RichBlock, SearchMatch, Text, WriterDocument};
 
 /// Byte ranges of the matches of `query` in `block`, non-overlapping and left to
-/// right. Matches inside a table block exclude its divider row and any match that
-/// would cover a structural pipe.
+/// right. A table block is searched as its flat text, whose cell and row
+/// separators never match a query, so a match stays inside one cell.
 pub(crate) fn block_matches(
     block: &RichBlock,
     query: &str,
@@ -25,22 +24,7 @@ pub(crate) fn block_matches(
     if options.whole_word {
         candidates.retain(|&(start, end)| is_whole_word(text, query, start, end));
     }
-    let accepted = if block.kind == TABLE_BLOCK_KIND {
-        let divider = divider_range(text);
-        let bytes = text.as_bytes();
-        candidates
-            .into_iter()
-            .filter(|&(start, end)| {
-                let on_divider = divider
-                    .as_ref()
-                    .is_some_and(|divider| start < divider.end && end > divider.start);
-                !on_divider && !has_structural_pipe(bytes, start, end)
-            })
-            .collect()
-    } else {
-        candidates
-    };
-    non_overlapping(accepted)
+    non_overlapping(candidates)
 }
 
 /// How a search matches: both default to off (case-insensitive, any substring).
@@ -124,36 +108,6 @@ fn non_overlapping(sorted: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     kept
 }
 
-/// Byte range of a table block's divider row: its second line, when it has one.
-fn divider_range(text: &str) -> Option<Range<usize>> {
-    let start = text.find('\n')? + 1;
-    let end = text[start..]
-        .find('\n')
-        .map_or(text.len(), |offset| start + offset);
-    Some(start..end)
-}
-
-/// Whether `start..end` covers an unescaped `|`, which separates table cells.
-fn has_structural_pipe(bytes: &[u8], start: usize, end: usize) -> bool {
-    (start..end).any(|index| bytes[index] == b'|' && (index == 0 || bytes[index - 1] != b'\\'))
-}
-
-/// Replacement text as it must be stored in a table cell: every unescaped pipe
-/// is escaped and every line break becomes a space.
-fn table_cell_text(replacement: &str) -> String {
-    let mut out = String::with_capacity(replacement.len());
-    let mut escaped = false;
-    for c in replacement.chars() {
-        match c {
-            '\n' => out.push(' '),
-            '|' if !escaped => out.push_str("\\|"),
-            other => out.push(other),
-        }
-        escaped = c == '\\' && !escaped;
-    }
-    out
-}
-
 /// Every match in the document, in block order.
 pub(crate) fn find_all(
     document: &WriterDocument,
@@ -220,7 +174,7 @@ pub(crate) fn replace_all_with(
         }
         replacements += spans.len();
         let insert = if document.blocks[index].kind == TABLE_BLOCK_KIND {
-            table_cell_text(replacement)
+            cell_replacement(replacement)
         } else {
             replacement.to_string()
         };
@@ -243,12 +197,28 @@ pub(crate) fn replace_all_with(
             current = next;
         }
         if current != before {
-            let block = &mut document.blocks[index];
-            block.runs = runs;
-            block.text = Text::from_str(&current);
+            if document.blocks[index].kind == TABLE_BLOCK_KIND {
+                // The replacement keeps the grid (no separators, no line breaks),
+                // so the cells take the change and keep their own runs.
+                let _ = document.edit_table_text(block_id, &current);
+            } else {
+                let block = &mut document.blocks[index];
+                block.runs = runs;
+                block.text = Text::from_str(&current);
+            }
         }
     }
     replacements
+}
+
+/// Replacement text as a table cell holds it: separators are dropped and line
+/// breaks become spaces.
+fn cell_replacement(replacement: &str) -> String {
+    replacement
+        .chars()
+        .filter(|c| !is_table_separator(*c))
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect()
 }
 
 /// Maps each comment thread in `block_id` through the changes made to that block.
