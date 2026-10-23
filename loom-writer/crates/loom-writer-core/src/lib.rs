@@ -24,6 +24,7 @@ mod export_table;
 pub mod fonts;
 mod images;
 mod layout;
+mod list_levels;
 mod markdown;
 mod page_setup;
 mod paragraph_edit;
@@ -1793,6 +1794,9 @@ fn parse_paragraph_style(
             "first_line_indent" => parse_f32_value(value, &mut style.first_line_indent),
             "break_rule" => {
                 style.break_rule = parse_line_break(&json_value_text(value));
+            }
+            "list_level" => {
+                style.list_level = list_levels::parse_list_level(&json_value_text(value));
             }
             _ => {}
         }
@@ -4632,6 +4636,7 @@ mod tests {
             right_indent: 3.5,
             first_line_indent: -2.0,
             break_rule: loom_text::LineBreakRule::Char,
+            list_level: 0,
         };
         block.runs = vec![
             loom_text::StyleRun {

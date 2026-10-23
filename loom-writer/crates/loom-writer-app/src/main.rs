@@ -24,6 +24,7 @@ mod font_picker;
 mod font_store;
 mod history;
 mod list_keys;
+mod list_level_actions;
 mod local_menu;
 mod markdown_export;
 mod multi_click;
@@ -31,9 +32,11 @@ mod outline;
 mod palette_catalog;
 mod palette_wiring;
 mod picture_actions;
+mod picture_drag;
 mod picture_paste;
 mod picture_view;
 mod pointer_hit_test;
+mod press_reveal;
 mod projection;
 use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 mod reading_time;
@@ -404,6 +407,7 @@ fn open_quick_start_sample(app: &WriterApp, state: &GuiState) {
     *state.history.borrow_mut() = EditorHistory::new();
     apply_state(app, state);
     app.set_status_left("Opened the Quick Start sample".into());
+    recovery::end_replaced_session(app);
     app.invoke_focus_page();
 }
 
@@ -504,6 +508,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "picture.larger" | "picture.smaller" | "picture.reset_size" | "picture.alt_text" => {
             picture_actions::dispatch(app, id);
         }
+        id if list_level_actions::dispatch(app, id) => {}
         "table.insert_row_above" | "writer.table.insert_row_above" => {
             app.invoke_table_action("insert-row-above".into())
         }
@@ -1221,6 +1226,7 @@ pub(crate) fn replace_opened_document(
     *state.history.borrow_mut() = EditorHistory::new();
     set_recovery_notice(None);
     apply_state(app, state);
+    recovery::end_replaced_session(app);
 }
 
 /// Whether `path` names a Loom Writer document (the format Save writes).
@@ -1406,6 +1412,8 @@ struct ComputedProjection {
     projection: projection::Projection,
     page_style: PageStyle,
     match_rects: Vec<FindRect>,
+    /// The picture the caret is on, marked on the page.
+    picture_selected: Option<usize>,
 }
 
 fn compute_render_projection(
@@ -1417,6 +1425,7 @@ fn compute_render_projection(
         projection: projection::project(doc, viewport, Some(app.get_page_view_height())),
         page_style: doc.page.page_style(),
         match_rects: find_bar::match_rects(app, doc),
+        picture_selected: picture_actions::picture_key(doc),
     }
 }
 
@@ -1425,6 +1434,7 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
         projection,
         page_style,
         match_rects,
+        picture_selected,
     } = computed;
     app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
     app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
@@ -1441,7 +1451,7 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     if table_rects_changed {
         app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
     }
-    picture_view::publish(app, &projection.images);
+    picture_view::publish(app, &projection.images, picture_selected);
     app.set_page_count(projection.page_count);
 
     app.set_page_stack_height(projection.stack_height);
@@ -1872,13 +1882,22 @@ fn reveal_caret(app: &WriterApp, state: &GuiState) {
         let Ok(flow) = current.flow(&style, projection::layout_viewport(&style, viewport)) else {
             return;
         };
-        let caret = TextSelection::caret(current.selection().focus);
-        let Some(rect) = flow.caret_rect(&current, &caret) else {
-            return;
+        // A table row is painted at its own pitch, so a caret in a table is
+        // measured where the page draws it, not on the taller core line.
+        let focus = current.selection().focus;
+        let span = match projection::table_row_view_span(&current, &style, &flow, focus) {
+            Some(span) => span,
+            None => {
+                let caret = TextSelection::caret(focus);
+                let Some(rect) = flow.caret_rect(&current, &caret) else {
+                    return;
+                };
+                (rect.rect.y, rect.rect.y + rect.rect.height)
+            }
         };
         (
-            rect.rect.y + caret_scroll::PAGE_TOP_INSET,
-            rect.rect.y + rect.rect.height + caret_scroll::PAGE_TOP_INSET,
+            span.0 + caret_scroll::PAGE_TOP_INSET,
+            span.1 + caret_scroll::PAGE_TOP_INSET,
         )
     };
     let scroll = state.viewport.borrow().scroll_y;
@@ -3097,7 +3116,10 @@ fn wire_writer_shared_callbacks(
                     state.current.borrow_mut().set_selection(selection);
                     apply_state(&app, &state);
                     sync_writer_menu_if_present(&menu_service, &app, &state);
-                    reveal_caret(&app, &state);
+                    // A press must not move the page under the pointer.
+                    if !press_reveal::is_suppressed() {
+                        reveal_caret(&app, &state);
+                    }
                     return;
                 }
                 // A caret past the end of the text can be an edit still arriving; the
@@ -3124,7 +3146,11 @@ fn wire_writer_shared_callbacks(
                             app.get_palette_query().as_str(),
                         );
                     }
-                    reveal_caret(&app, &state);
+                    // A press keeps the page still; a drag still reveals so its
+                    // focus stays in view.
+                    if !press_reveal::is_suppressed() {
+                        reveal_caret(&app, &state);
+                    }
                 }
             }
         });
@@ -3134,6 +3160,9 @@ fn wire_writer_shared_callbacks(
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_pointer_moved(move |x, y| {
+            if picture_drag::pointer_moved(x, y) {
+                return;
+            }
             if !state.pointer_active.get() {
                 return;
             }
@@ -3156,23 +3185,15 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_pointer_released(move |x, y| {
+        app.on_pointer_released(move |_x, _y| {
             if let Some(app) = app_ref.upgrade() {
-                if state.pointer_active.get() {
-                    let viewport = *state.viewport.borrow();
-                    let current = state.current.borrow();
-                    if let Some(offset) =
-                        writer_pointer_offset_with_app(&app, &current, viewport, x, y)
-                    {
-                        let anchor = state.pointer_anchor.get().unwrap_or(offset);
-                        drop(current);
-                        app.invoke_selection_changed(
-                            anchor.min(i32::MAX as usize) as i32,
-                            offset.min(i32::MAX as usize) as i32,
-                        );
-                    }
+                if picture_drag::pointer_released(&app, &state) {
+                    return;
                 }
             }
+            // The press and the moves before it already selected the cell. Recomputing
+            // from the release point would read the layout after any reveal, which can
+            // place a different cell under the same point.
             state.pointer_active.set(false);
             state.pointer_anchor.set(None);
         });
@@ -3180,6 +3201,7 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         app.on_pointer_cancelled(move || {
+            picture_drag::cancel();
             state.pointer_active.set(false);
             state.pointer_anchor.set(None);
         });
@@ -3752,6 +3774,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         TemplateId::Newsletter => "newsletter",
                     }
                 )));
+                recovery::end_replaced_session(&app);
             }
         });
     }
@@ -4669,6 +4692,8 @@ mod page_stack_tests;
 #[cfg(test)]
 mod projection_tests;
 #[cfg(test)]
+mod recovery_order_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod review_tests;
@@ -4708,7 +4733,11 @@ mod inspector_startup_tests;
 #[cfg(test)]
 mod list_keys_tests;
 #[cfg(test)]
+mod list_level_actions_tests;
+#[cfg(test)]
 mod picture_tests;
+#[cfg(test)]
+mod picture_drag_tests;
 #[cfg(test)]
 mod table_editing_tests;
 #[cfg(test)]

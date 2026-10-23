@@ -232,7 +232,8 @@ pub(crate) fn line_spacing_factor(block: &RichBlock) -> f32 {
 
 impl RichBlock {
     /// Points the block's lines are indented from the left margin: its left
-    /// indent, never negative and never so large that the column closes.
+    /// indent plus its list level's indent, never negative and never so large
+    /// that the column closes.
     pub fn left_indent_pt(&self, style: &PageStyle) -> f32 {
         let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
         let indent = if self.style.left_indent.is_finite() {
@@ -240,7 +241,7 @@ impl RichBlock {
         } else {
             0.0
         };
-        indent.clamp(0.0, (usable - 1.0).max(0.0))
+        (indent + self.list_indent_pt()).clamp(0.0, (usable - 1.0).max(0.0))
     }
 
     /// The width the block's lines wrap and align to: the text column less

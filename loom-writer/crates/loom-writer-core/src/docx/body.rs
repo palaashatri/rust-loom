@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 
+use loom_objects::table::{HorizontalAlign, TextRun};
 use loom_text::{Alignment, CharacterStyle, FontWeight};
 
 use super::comments::{self, Anchor, CommentPlan};
@@ -11,10 +12,8 @@ use super::package::{
     STYLE_TABLE,
 };
 use super::xml::{self, R_NS, W_NS, XML_DECLARATION};
-use crate::{
-    parse_table_markdown, PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument,
-    WriterTable, TABLE_BLOCK_KIND,
-};
+use crate::tables::{read_stored, StoredTable};
+use crate::{PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument, TABLE_BLOCK_KIND};
 
 /// The body part plus what the numbering part needs to know about it.
 pub(super) struct Body {
@@ -112,13 +111,13 @@ impl Geometry {
 /// Builds the document part.
 pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
     let geometry = Geometry::of(doc);
-    let tables: Vec<Option<WriterTable>> = doc
+    let tables: Vec<Option<StoredTable>> = doc
         .blocks
         .iter()
         .map(|block| {
             (block.kind == TABLE_BLOCK_KIND)
-                .then(|| parse_table_markdown(block.text.as_str()))
-                .filter(|table| table.columns() > 0)
+                .then(|| read_stored(block.text.as_str()))
+                .filter(|table| table.table.columns() > 0)
         })
         .collect();
 
@@ -178,7 +177,14 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
             }
             None => None,
         };
-        previous_numbered = list == Some(ListKind::Numbered);
+        // A numbered run goes on through its deeper items, so Word keeps the
+        // top-level count as Writer does. A top-level bullet or any other block
+        // ends the run.
+        previous_numbered = match list {
+            Some(ListKind::Numbered) => true,
+            Some(ListKind::Bullet) => previous_numbered && block.effective_list_level() > 0,
+            None => false,
+        };
         xml.push_str("<w:p>");
         xml.push_str(&paragraph_properties(block, num_id));
         xml.push_str(&paragraph_content(block, plan.anchors_for(block.id)));
@@ -267,8 +273,9 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
         out.push_str(&format!("<w:pStyle w:val=\"{id}\"/>"));
     }
     if let Some(id) = num_id {
+        let level = block.effective_list_level();
         out.push_str(&format!(
-            "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{id}\"/></w:numPr>"
+            "<w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{id}\"/></w:numPr>"
         ));
     }
 
@@ -298,9 +305,10 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
     let mut indent = String::new();
     if num_id.is_some() {
         // The list level supplies a hanging indent; keep it when the user
-        // moved the item.
-        if left != 0 || right != 0 {
-            indent.push_str(&format!(" w:left=\"{}\"", 720 + left));
+        // moved the item. A nested item sits 18 pt in per level, as Writer draws it.
+        let level_twips = twips(block.list_indent_pt());
+        if left != 0 || right != 0 || level_twips != 0 {
+            indent.push_str(&format!(" w:left=\"{}\"", 720 + level_twips + left));
             if right != 0 {
                 indent.push_str(&format!(" w:right=\"{right}\""));
             }
@@ -493,10 +501,35 @@ fn paragraph_content(block: &RichBlock, anchors: &[Anchor]) -> String {
     out
 }
 
+/// The opening `<w:p>` of a table cell. The column's alignment becomes the
+/// paragraph's justification.
+fn cell_paragraph(alignment: Option<&HorizontalAlign>) -> &'static str {
+    match alignment {
+        Some(HorizontalAlign::Center) => "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        Some(HorizontalAlign::Right) => "<w:p><w:pPr><w:jc w:val=\"right\"/></w:pPr>",
+        _ => "<w:p>",
+    }
+}
+
+/// Writes one cell's text as runs. Each run keeps its stored bold and italic;
+/// `bold` is the cell's own bold, from the header row or the table style.
+fn push_cell_runs(out: &mut String, runs: &[TextRun], bold: bool) {
+    for piece in runs {
+        let mut props = RunProps::of(
+            None,
+            bold || piece.bold,
+            CharacterStyle::default().font_size,
+        );
+        props.italic = piece.italic;
+        push_run(out, &props, &piece.text);
+    }
+}
+
 /// A Markdown-source table as a real Word table: equal column widths across
 /// the text area and a repeating, shaded, bold header row when the source
 /// has a header separator. Short rows are padded to a rectangle.
-fn table_xml(table: &WriterTable, text_width: i32) -> String {
+fn table_xml(stored: &StoredTable, text_width: i32) -> String {
+    let table = &stored.table;
     let columns = table.columns();
     let each = text_width / columns as i32;
     let widths: Vec<i32> = (0..columns)
@@ -528,7 +561,7 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
         first_column: table.first_column,
         ..Default::default()
     };
-    for (row_index, row) in table.rows.iter().enumerate() {
+    for row_index in 0..table.rows.len() {
         let header = table.header_row && row_index == 0;
         out.push_str("<w:tr><w:trPr><w:cantSplit/>");
         if header {
@@ -536,6 +569,7 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
         }
         out.push_str("</w:trPr>");
         for (column, width) in widths.iter().enumerate() {
+            let paragraph = cell_paragraph(stored.alignments.get(column));
             if let Some(&(mr, mc, mrs, mcs)) = table.merges.iter().find(|(r, c, rs, cs)| {
                 row_index >= *r && row_index < *r + *rs && column >= *c && column < *c + *cs
             }) {
@@ -574,13 +608,11 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
                     ""
                 };
                 out.push_str(&format!(
-                    "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr><w:p>"
+                    "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr>{paragraph}"
                 ));
                 if row_index == mr {
-                    let cell = row.get(column).map_or("", String::as_str);
-                    let is_bold = header || resolved.bold;
-                    let props = RunProps::of(None, is_bold, CharacterStyle::default().font_size);
-                    push_run(&mut out, &props, cell);
+                    let runs = stored.cell_runs(row_index, column);
+                    push_cell_runs(&mut out, &runs, header || resolved.bold);
                 }
                 out.push_str("</w:p></w:tc>");
                 continue;
@@ -603,12 +635,10 @@ fn table_xml(table: &WriterTable, text_width: i32) -> String {
                 String::new()
             };
             out.push_str(&format!(
-                "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr><w:p>"
+                "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr>{paragraph}"
             ));
-            let cell = row.get(column).map_or("", String::as_str);
-            let is_bold = header || resolved.bold;
-            let props = RunProps::of(None, is_bold, CharacterStyle::default().font_size);
-            push_run(&mut out, &props, cell);
+            let runs = stored.cell_runs(row_index, column);
+            push_cell_runs(&mut out, &runs, header || resolved.bold);
             out.push_str("</w:p></w:tc>");
         }
         out.push_str("</w:tr>");

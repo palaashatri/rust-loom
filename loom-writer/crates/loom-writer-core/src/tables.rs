@@ -6,10 +6,14 @@
 //! model can desync. This module lives outside `lib.rs` to keep the crate
 //! root within its registered byte ceiling.
 
+use loom_objects::table::HorizontalAlign;
+
 use crate::comments::TextEdit;
 use crate::{RichBlock, WriterDocument, WriterTable};
 
 mod markup;
+
+pub(crate) use markup::{read_stored, StoredTable};
 
 /// Block kind for markdown table blocks.
 pub const TABLE_BLOCK_KIND: &str = "table";
@@ -101,48 +105,39 @@ impl WriterDocument {
             .blocks
             .iter()
             .find(|block| block.id == block_id && block.kind == TABLE_BLOCK_KIND)?;
-        let markdown = block.text.as_str();
-        let mut table = parse_table_markdown(markdown).to_loom_table();
-        let mut raw_rows: Vec<Vec<ParsedTableCellText>> = Vec::new();
-        let mut alignments = Vec::new();
-        for_each_markdown_line(markdown, |line, line_offset| {
-            if is_table_metadata_line(line.trim()) {
-                return;
-            }
-            let Some(parsed) = parse_table_line_raw(line, line_offset) else {
-                return;
-            };
-            if parsed.is_delimiter {
-                alignments = parsed
-                    .cells
-                    .iter()
-                    .map(|cell| markup::divider_alignment(&cell.text))
-                    .collect();
-            } else {
-                raw_rows.push(parsed.cells);
-            }
-        });
-        for (row, cells) in raw_rows.iter().enumerate() {
-            for (column, cell) in cells.iter().enumerate() {
+        let stored = read_stored(block.text.as_str());
+        let mut table = stored.table.to_loom_table();
+        for (row, cells) in stored.sources.iter().enumerate() {
+            for column in 0..cells.len() {
                 if row < table.row_count() && column < table.col_count() {
-                    table.set_cell_rich_text(row, column, markup::runs(&cell.text));
+                    table.set_cell_rich_text(row, column, stored.cell_runs(row, column));
                 }
             }
         }
-        for (column, alignment) in alignments.into_iter().enumerate() {
+        for (column, alignment) in stored.alignments.iter().enumerate() {
             if column >= table.col_count() {
                 break;
             }
             for row in 0..table.row_count() {
                 if let Some(cell) = table.cell_mut(row, column) {
                     cell.style_override = Some(loom_objects::table::CellStyleOverride {
-                        horizontal_align: Some(alignment),
+                        horizontal_align: Some(*alignment),
                         ..Default::default()
                     });
                 }
             }
         }
         Some(table)
+    }
+
+    /// Reads a table block for an edit. Cell sources keep their emphasis markers
+    /// and each column has an alignment from the divider row.
+    fn editable_table(&self, block_id: u64) -> Option<(WriterTable, Vec<HorizontalAlign>)> {
+        let block = self
+            .blocks
+            .iter()
+            .find(|block| block.id == block_id && block.kind == TABLE_BLOCK_KIND)?;
+        Some(read_stored(block.text.as_str()).into_editable())
     }
 
     /// Returns the parsed cell text and maps each displayed UTF-8 byte
@@ -223,8 +218,8 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let block_idx = loc.block_index;
-        let mut table = self
-            .table_from_block(loc.block_id)
+        let (mut table, alignments) = self
+            .editable_table(loc.block_id)
             .ok_or_else(|| "Failed to parse table".to_string())?;
         let rows = table.rows.len();
         let cols = table.columns();
@@ -247,7 +242,7 @@ impl WriterDocument {
         } else {
             // At the last cell of the table: append a new row
             table.rows.push(vec![String::new(); cols]);
-            let new_markdown = table.to_markdown();
+            let new_markdown = markup::stored_markdown(&table, &alignments);
             self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
             (rows, 0)
         };
@@ -316,13 +311,13 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let block_idx = loc.block_index;
-        let mut table = self
-            .table_from_block(loc.block_id)
+        let (mut table, alignments) = self
+            .editable_table(loc.block_id)
             .ok_or_else(|| "Failed to parse table".to_string())?;
         let cols = table.columns();
         let insert_idx = if below { loc.row + 1 } else { loc.row };
         table.rows.insert(insert_idx, vec![String::new(); cols]);
-        let new_markdown = table.to_markdown();
+        let new_markdown = markup::stored_markdown(&table, &alignments);
         self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
 
         let block_start = self
@@ -348,14 +343,14 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let block_idx = loc.block_index;
-        let mut table = self
-            .table_from_block(loc.block_id)
+        let (mut table, alignments) = self
+            .editable_table(loc.block_id)
             .ok_or_else(|| "Failed to parse table".to_string())?;
         if table.rows.len() <= 1 {
             return Err("Cannot delete the only row of a table".to_string());
         }
         table.rows.remove(loc.row);
-        let new_markdown = table.to_markdown();
+        let new_markdown = markup::stored_markdown(&table, &alignments);
         self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
 
         let block_start = self
@@ -387,15 +382,17 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let block_idx = loc.block_index;
-        let mut table = self
-            .table_from_block(loc.block_id)
+        let (mut table, mut alignments) = self
+            .editable_table(loc.block_id)
             .ok_or_else(|| "Failed to parse table".to_string())?;
         let insert_col = if right { loc.col + 1 } else { loc.col };
         for row in &mut table.rows {
             let idx = insert_col.min(row.len());
             row.insert(idx, String::new());
         }
-        let new_markdown = table.to_markdown();
+        // A new column is left-aligned; the others keep the alignment they had.
+        alignments.insert(insert_col.min(alignments.len()), HorizontalAlign::Left);
+        let new_markdown = markup::stored_markdown(&table, &alignments);
         self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
 
         let block_start = self
@@ -421,8 +418,8 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let block_idx = loc.block_index;
-        let mut table = self
-            .table_from_block(loc.block_id)
+        let (mut table, mut alignments) = self
+            .editable_table(loc.block_id)
             .ok_or_else(|| "Failed to parse table".to_string())?;
         if table.columns() <= 1 {
             return Err("Cannot delete the only column of a table".to_string());
@@ -432,7 +429,10 @@ impl WriterDocument {
                 row.remove(loc.col);
             }
         }
-        let new_markdown = table.to_markdown();
+        if loc.col < alignments.len() {
+            alignments.remove(loc.col);
+        }
+        let new_markdown = markup::stored_markdown(&table, &alignments);
         self.blocks[block_idx].text = crate::Text::from_str(&new_markdown);
 
         let block_start = self

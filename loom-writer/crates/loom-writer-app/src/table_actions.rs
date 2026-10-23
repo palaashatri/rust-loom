@@ -11,6 +11,7 @@ pub(crate) mod break_keys;
 
 /// Wires table-related callbacks into the Slint WriterApp.
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
+    crate::list_level_actions::wire(state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -58,11 +59,14 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
             let Some(app) = app_ref.upgrade() else {
                 return false;
             };
+            if crate::picture_drag::handle_key(&app, &state, key.as_str(), shift, ctrl, alt) {
+                return true;
+            }
             if crate::caret_keys::handle(&app, &state, key.as_str(), shift, ctrl, alt) {
                 return true;
             }
             if break_keys::handle(&app, &state, key.as_str(), shift, ctrl, alt)
-                || crate::list_keys::handle(&app, &state, key.as_str(), ctrl, alt)
+                || crate::list_keys::handle(&app, &state, key.as_str(), shift, ctrl, alt)
             {
                 return true;
             }
@@ -315,6 +319,9 @@ pub(crate) fn wire_pointer_pressed(app: &WriterApp, state: &Rc<GuiState>) {
         let Some(app) = app_ref.upgrade() else {
             return;
         };
+        if crate::picture_drag::pointer_pressed(&app, &state, x, y) {
+            return;
+        }
         let viewport = *state.viewport.borrow();
         let current = state.current.borrow();
         let Some(offset) = crate::writer_pointer_offset_with_app(&app, &current, viewport, x, y)
@@ -340,10 +347,12 @@ pub(crate) fn wire_pointer_pressed(app: &WriterApp, state: &Rc<GuiState>) {
             refresh_cells(&app, &state, cleared);
             state.pointer_active.set(false);
             state.pointer_anchor.set(None);
-            app.invoke_selection_changed(
-                start.min(i32::MAX as usize) as i32,
-                end.min(i32::MAX as usize) as i32,
-            );
+            crate::press_reveal::during_press(|| {
+                app.invoke_selection_changed(
+                    start.min(i32::MAX as usize) as i32,
+                    end.min(i32::MAX as usize) as i32,
+                );
+            });
             return;
         }
         let anchor = if extend {
@@ -355,10 +364,12 @@ pub(crate) fn wire_pointer_pressed(app: &WriterApp, state: &Rc<GuiState>) {
         refresh_cells(&app, &state, cleared);
         state.pointer_anchor.set(Some(anchor));
         state.pointer_active.set(true);
-        app.invoke_selection_changed(
-            anchor.min(i32::MAX as usize) as i32,
-            offset.min(i32::MAX as usize) as i32,
-        );
+        crate::press_reveal::during_press(|| {
+            app.invoke_selection_changed(
+                anchor.min(i32::MAX as usize) as i32,
+                offset.min(i32::MAX as usize) as i32,
+            );
+        });
     });
 }
 
@@ -453,6 +464,30 @@ pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
             .with_description("Edit the description of the picture at the caret")
             .with_category("insert")
             .with_order(38),
+        CommandSpec::new("insert.page_break", "Insert Page Break")
+            .with_undo_label("Insert Page Break")
+            .with_description("End the page at the caret; the text after it starts the next page")
+            .with_category("insert")
+            .with_order(39)
+            .with_shortcut("Ctrl+Enter"),
+        CommandSpec::new("insert.line_break", "Insert Line Break")
+            .with_undo_label("Insert Line Break")
+            .with_description("End the line at the caret without starting a new paragraph")
+            .with_category("insert")
+            .with_order(40)
+            .with_shortcut("Shift+Enter"),
+        CommandSpec::new("list.level.increase", "Increase List Level")
+            .with_undo_label("Increase List Level")
+            .with_description("Indent the list item at the caret one level deeper")
+            .with_category("format")
+            .with_order(41)
+            .with_shortcut("Tab"),
+        CommandSpec::new("list.level.decrease", "Decrease List Level")
+            .with_undo_label("Decrease List Level")
+            .with_description("Move the list item at the caret one level shallower")
+            .with_category("format")
+            .with_order(42)
+            .with_shortcut("Shift+Tab"),
         CommandSpec::new("table.insert_row_above", "Insert Row Above")
             .with_undo_label("Insert Row Above")
             .with_description("Insert a new table row above current row")

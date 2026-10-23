@@ -3,9 +3,12 @@
 //! separator row, so a table reads as a table rather than as Markdown source.
 //! A row is as tall as its tallest wrapped cell.
 
+use loom_objects::table::HorizontalAlign;
 use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
+use loom_text::{CharacterStyle, FontWeight, StyleRun};
 
-use crate::parse_table_markdown;
+use crate::export_flow::{self, line_width};
+use crate::tables::{read_stored, StoredTable};
 use crate::text_metrics::pdf_text_width;
 
 /// Space between a cell's text and each of its column rules.
@@ -19,9 +22,92 @@ const RULE_RGB: (f32, f32, f32) = (0.55, 0.55, 0.55);
 /// Background of the header row.
 const HEADER_FILL_RGB: (f32, f32, f32) = (0.90, 0.90, 0.90);
 
-/// One row after wrapping: the wrapped lines of each cell and the row's height.
+/// One cell's plain text with the bold and italic runs inside it, as byte
+/// ranges of that text.
+struct Cell {
+    text: String,
+    runs: Vec<StyleRun>,
+}
+
+impl Cell {
+    /// The cell stored at row `row`, column `column`.
+    fn of(stored: &StoredTable, row: usize, column: usize) -> Self {
+        let mut text = String::new();
+        let mut runs = Vec::new();
+        for piece in stored.cell_runs(row, column) {
+            let start = text.len();
+            text.push_str(&piece.text);
+            if piece.bold || piece.italic {
+                let style = CharacterStyle {
+                    weight: if piece.bold {
+                        FontWeight::Bold
+                    } else {
+                        FontWeight::Regular
+                    },
+                    italic: piece.italic,
+                    ..CharacterStyle::default()
+                };
+                runs.push(StyleRun {
+                    start,
+                    end: text.len(),
+                    style,
+                });
+            }
+        }
+        Self { text, runs }
+    }
+
+    /// The drawn width of the cell's longest whitespace-separated word.
+    fn longest_word(&self, style: &TextStyle) -> f32 {
+        let mut longest = 0.0f32;
+        let mut word_start: Option<usize> = None;
+        for (index, ch) in self.text.char_indices().chain([(self.text.len(), ' ')]) {
+            match (ch.is_whitespace(), word_start) {
+                (false, None) => word_start = Some(index),
+                (true, Some(start)) => {
+                    let word = &self.text[start..index];
+                    longest = longest.max(line_width("", word, &self.runs, style, start));
+                    word_start = None;
+                }
+                _ => {}
+            }
+        }
+        longest
+    }
+}
+
+/// One wrapped line of a cell: its text, the runs inside it (byte ranges of
+/// that text) and its drawn width.
+struct Line {
+    text: String,
+    runs: Vec<StyleRun>,
+    width: f32,
+}
+
+impl Line {
+    /// The part of `cell` from `start` to `end`, with its runs made relative to it.
+    fn of(cell: &Cell, start: usize, end: usize, style: &TextStyle) -> Self {
+        let text = cell.text[start..end].to_string();
+        let runs: Vec<StyleRun> = cell
+            .runs
+            .iter()
+            .filter_map(|run| {
+                let (from, to) = (run.start.max(start), run.end.min(end));
+                (from < to).then(|| StyleRun {
+                    start: from - start,
+                    end: to - start,
+                    style: run.style.clone(),
+                })
+            })
+            .collect();
+        let width = line_width("", &text, &runs, style, 0);
+        Self { text, runs, width }
+    }
+}
+
+/// One row after wrapping: the lines of each cell and the row's height.
 struct WrappedRow {
-    cells: Vec<Vec<String>>,
+    cells: Vec<Vec<Line>>,
     height: f32,
     header: bool,
 }
@@ -29,6 +115,8 @@ struct WrappedRow {
 /// Column positions and wrapped rows of one table, shared by its rows.
 pub(crate) struct TableLayout {
     starts: Vec<f32>,
+    widths: Vec<f32>,
+    alignments: Vec<HorizontalAlign>,
     /// The table's width, from its left edge to the end of its last column.
     pub(crate) width: f32,
     /// The body style the cells are set in.
@@ -43,22 +131,28 @@ impl TableLayout {
     /// (see `fit_columns`), and wraps each cell onto as many lines as its column
     /// needs. `line_height` is the distance between the lines of one cell.
     pub(crate) fn new(markdown: &str, body: &TextStyle, max_width: f32, line_height: f32) -> Self {
-        let table = parse_table_markdown(markdown);
-        let columns = table.columns();
+        let stored = read_stored(markdown);
+        let columns = stored.table.columns();
+        let header_row = stored.table.header_row;
+        let is_header = |index: usize| header_row && index == 0;
         // A column wants its widest whole cell, but it can always narrow to its
         // longest word, so words stay whole for as long as the table allows.
         let mut natural = vec![MIN_COLUMN_PT; columns];
         let mut shortest = vec![MIN_COLUMN_PT; columns];
-        for (index, row) in table.rows.iter().enumerate() {
-            let style = cell_style(body, table.header_row && index == 0);
+        let cells: Vec<Vec<Cell>> = (0..stored.table.rows.len())
+            .map(|row| {
+                (0..columns)
+                    .map(|column| Cell::of(&stored, row, column))
+                    .collect()
+            })
+            .collect();
+        for (index, row) in cells.iter().enumerate() {
+            let style = cell_style(body, is_header(index));
             for (column, cell) in row.iter().enumerate() {
-                let whole = pdf_text_width(cell, &style) + 2.0 * CELL_PAD_X_PT;
-                natural[column] = natural[column].max(whole);
-                let longest = cell
-                    .split_whitespace()
-                    .map(|word| pdf_text_width(word, &style))
-                    .fold(0.0, f32::max);
-                shortest[column] = shortest[column].max(longest + 2.0 * CELL_PAD_X_PT);
+                let whole = line_width("", &cell.text, &cell.runs, &style, 0);
+                natural[column] = natural[column].max(whole + 2.0 * CELL_PAD_X_PT);
+                let longest = cell.longest_word(&style) + 2.0 * CELL_PAD_X_PT;
+                shortest[column] = shortest[column].max(longest);
             }
         }
         for (short, full) in shortest.iter_mut().zip(&natural) {
@@ -71,32 +165,35 @@ impl TableLayout {
             starts.push(width);
             width += column;
         }
-        let rows = table
-            .rows
+        let rows = cells
             .iter()
             .enumerate()
             .map(|(index, row)| {
-                let header = table.header_row && index == 0;
+                let header = is_header(index);
                 let style = cell_style(body, header);
-                let cells: Vec<Vec<String>> = widths
+                let lines: Vec<Vec<Line>> = widths
                     .iter()
                     .enumerate()
                     .map(|(column, column_width)| {
-                        let text = row.get(column).map_or("", String::as_str);
                         let inner = (column_width - 2.0 * CELL_PAD_X_PT).max(1.0);
-                        wrap(text, &style, inner)
+                        wrap_cell(&row[column], &style, inner)
                     })
                     .collect();
-                let lines = cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
+                let count = lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
                 WrappedRow {
-                    cells,
-                    height: lines as f32 * line_height + 2.0 * CELL_PAD_Y_PT,
+                    cells: lines,
+                    height: count as f32 * line_height + 2.0 * CELL_PAD_Y_PT,
                     header,
                 }
             })
             .collect();
+        let alignments = (0..columns)
+            .map(|column| stored.alignments.get(column).copied().unwrap_or_default())
+            .collect();
         Self {
             starts,
+            widths,
+            alignments,
             width,
             body: body.clone(),
             line_height,
@@ -136,15 +233,17 @@ pub(crate) fn draw_row(
     let style = cell_style(&layout.body, row.header);
     let size = layout.body.size_pt;
     for (column, lines) in row.cells.iter().enumerate() {
+        let inner = (layout.widths[column] - 2.0 * CELL_PAD_X_PT).max(1.0);
         let x = left + layout.starts[column] + CELL_PAD_X_PT;
-        for (line, text) in lines.iter().enumerate() {
-            if text.is_empty() {
+        for (index, line) in lines.iter().enumerate() {
+            if line.text.is_empty() {
                 continue;
             }
             // The first baseline sits one em below the top padding; each later
             // line is one line height lower.
-            let baseline = top - CELL_PAD_Y_PT - size - line as f32 * layout.line_height;
-            pdf.draw_text(page, x, baseline, text, &style);
+            let baseline = top - CELL_PAD_Y_PT - size - index as f32 * layout.line_height;
+            let shift = align_shift(layout.alignments[column], inner, line.width);
+            draw_line(pdf, page, (x + shift, baseline), line, &style);
         }
     }
     let rule = PathStyle::stroked(RULE_RGB, 0.5);
@@ -191,37 +290,60 @@ fn fit_columns(natural: &[f32], shortest: &[f32], max_width: f32) -> Vec<f32> {
 /// Slack for float rounding, so a word that exactly fills its column stays whole.
 const WRAP_SLACK_PT: f32 = 0.05;
 
-/// The lines a cell's text takes in `max_width`. Words stay whole where they
-/// fit; a word wider than the column breaks between characters. Every character
-/// is kept, and an empty cell still takes one line.
-fn wrap(text: &str, style: &TextStyle, max_width: f32) -> Vec<String> {
-    let limit = max_width + WRAP_SLACK_PT;
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        let joined = if line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{line} {word}")
-        };
-        if pdf_text_width(&joined, style) <= limit {
-            line = joined;
-            continue;
-        }
-        if !line.is_empty() {
-            lines.push(std::mem::take(&mut line));
-        }
-        for ch in word.chars() {
-            line.push(ch);
-            if line.chars().count() > 1 && pdf_text_width(&line, style) > limit {
-                let next = line.pop().unwrap_or(ch);
-                lines.push(std::mem::take(&mut line));
-                line.push(next);
-            }
-        }
+/// The lines a cell's text takes in `inner` points, wrapped as the paragraphs of
+/// the PDF wrap: words stay whole where they fit, a word wider than the column
+/// breaks between characters, every character is kept, and an empty cell still
+/// takes one line. The runs are measured in their faces.
+fn wrap_cell(cell: &Cell, style: &TextStyle, inner: f32) -> Vec<Line> {
+    let width = inner + WRAP_SLACK_PT;
+    export_flow::wrap(&cell.text, &cell.runs, style, width, width)
+        .into_iter()
+        .map(|(start, end)| Line::of(cell, start, end, style))
+        .collect()
+}
+
+/// How far a line of `width` moves right inside a cell's `inner` width for the
+/// column's alignment. Left-aligned lines stay at the padding.
+fn align_shift(alignment: HorizontalAlign, inner: f32, width: f32) -> f32 {
+    match alignment {
+        HorizontalAlign::Center => (inner - width) / 2.0,
+        HorizontalAlign::Right => inner - width,
+        _ => 0.0,
     }
-    lines.push(line);
-    lines
+    .max(0.0)
+}
+
+/// Draws one line as pieces, one per stretch of one style, so bold and italic
+/// runs are set in their own faces. `origin` is the line's left edge and baseline.
+fn draw_line(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    origin: (f32, f32),
+    line: &Line,
+    base: &TextStyle,
+) {
+    let (mut x, baseline) = origin;
+    let mut cuts = vec![0, line.text.len()];
+    for run in &line.runs {
+        cuts.extend([run.start, run.end]);
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let mut style = base.clone();
+        if let Some(run) = line
+            .runs
+            .iter()
+            .find(|run| run.start <= from && from < run.end)
+        {
+            style.bold |= run.style.weight.numeric() >= FontWeight::Bold.numeric();
+            style.italic |= run.style.italic;
+        }
+        let piece = &line.text[from..to];
+        pdf.draw_text(page, x, baseline, piece, &style);
+        x += pdf_text_width(piece, &style);
+    }
 }
 
 /// The body style, in bold for a header cell.
@@ -234,6 +356,7 @@ fn cell_style(body: &TextStyle, header: bool) -> TextStyle {
 
 #[cfg(test)]
 mod tests {
+    use super::CELL_PAD_X_PT;
     use crate::text_metrics::pdf_text_width;
     use crate::{export_pdf, RichBlock, WriterDocument, WriterTable, TABLE_BLOCK_KIND};
     use loom_pdf::TextStyle;
@@ -494,5 +617,47 @@ mod tests {
         let squeezed = super::fit_columns(&[300.0, 300.0], &[250.0, 250.0], 400.0);
         assert!((squeezed.iter().sum::<f32>() - 400.0).abs() < 0.01);
         assert!((squeezed[0] - squeezed[1]).abs() < 0.01);
+    }
+
+    /// A document holding one stored table, given as its Markdown source.
+    fn markdown_document(markdown: &str) -> WriterDocument {
+        let mut document = WriterDocument::new("table", "Table");
+        let id = document.next_id();
+        document.push(RichBlock::new(id, TABLE_BLOCK_KIND, markdown));
+        document
+    }
+
+    #[test]
+    fn bold_and_italic_cell_runs_use_their_faces_and_centred_columns_are_centred() {
+        let markdown = "| **Item** | Qty |\n| --- | :---: |\n| **Apples** | 50 |\n| *Note* | 7 |";
+        let pdf = export_pdf(&markdown_document(markdown));
+        let runs = text_runs(&pdf);
+        let drawn = |text: &str| {
+            runs.iter()
+                .find(|run| run.2 == text)
+                .unwrap_or_else(|| panic!("{text:?} is drawn: {runs:?}"))
+        };
+        assert!(
+            drawn("Apples").3,
+            "a bold cell run is drawn in the bold face"
+        );
+        let printed = content(&pdf);
+        assert!(
+            printed
+                .lines()
+                .any(|line| line.contains("/F3 ") && line.contains("(Note) Tj")),
+            "an italic cell run is drawn in the oblique face: {printed}"
+        );
+        assert!(
+            !printed.contains('*') && !printed.contains('|'),
+            "no markup is printed"
+        );
+        let columns = column_edges(&pdf);
+        let fifty = drawn("50");
+        assert!(
+            fifty.0 > columns[1] + CELL_PAD_X_PT + 1.0,
+            "50 is centred in its column: x {} in {columns:?}",
+            fifty.0
+        );
     }
 }

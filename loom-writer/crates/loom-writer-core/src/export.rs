@@ -188,7 +188,7 @@ fn pdf_lines(
     column: f32,
 ) -> Vec<PdfLine> {
     let mut lines = Vec::new();
-    let mut numbered_index = 0usize;
+    let numbers = doc.list_item_numbers();
     let block_gap = body.size_pt * page_style.line_height;
     for (index, block) in doc.blocks.iter().enumerate() {
         let gap = if index == 0 { 0.0 } else { block_gap };
@@ -245,19 +245,13 @@ fn pdf_lines(
                 continue;
             }
         }
-        let marker = match kind {
-            "list-bulleted" => {
-                numbered_index = 0;
-                "- ".to_string()
-            }
-            "list-numbered" => {
-                numbered_index += 1;
-                format!("{numbered_index}. ")
-            }
-            _ => {
-                numbered_index = 0;
-                String::new()
-            }
+        // The marker is the one the editor draws for the item's level, so the
+        // PDF and the page show the same bullet or number.
+        let glyph = block.list_marker(numbers[index]);
+        let marker = if glyph.is_empty() {
+            glyph
+        } else {
+            format!("{glyph} ")
         };
         let style = block_style(kind, body, page_style);
         let height =

@@ -8,6 +8,7 @@ use loom_desktop::{FileFilter, OpenFileRequest};
 use loom_writer_core::{InlineImage, TextSelection};
 use slint::{ComponentHandle, SharedString};
 
+use crate::picture_view;
 use crate::{apply_with_history, GuiState, HistoryKind, PictureAlt, WriterApp};
 
 std::thread_local! {
@@ -137,6 +138,37 @@ fn picture_at_caret(document: &loom_writer_core::WriterDocument) -> Option<u64> 
         block_start = block_end + 1;
     }
     None
+}
+
+/// The picture the caret is on, as its block. The page outlines this picture
+/// and the keyboard resize acts on it.
+pub(crate) fn selected_picture(
+    document: &loom_writer_core::WriterDocument,
+) -> Option<&loom_writer_core::RichBlock> {
+    let id = picture_at_caret(document)?;
+    document.blocks.iter().find(|block| block.id == id)
+}
+
+/// The page identity of the selected picture (see `picture_view::picture_key`).
+pub(crate) fn picture_key(document: &loom_writer_core::WriterDocument) -> Option<usize> {
+    selected_picture(document)?
+        .image
+        .as_ref()
+        .map(picture_view::picture_key)
+}
+
+/// The picture block with the given page identity.
+pub(crate) fn picture_block_for_key(
+    document: &loom_writer_core::WriterDocument,
+    key: usize,
+) -> Option<&loom_writer_core::RichBlock> {
+    document.blocks.iter().find(|block| {
+        block.is_image()
+            && block
+                .image
+                .as_ref()
+                .is_some_and(|image| picture_view::picture_key(image) == key)
+    })
 }
 
 /// Picture size and description commands. `false` when `id` is not one of them.

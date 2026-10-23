@@ -6,7 +6,8 @@
 
 use crate::projection::PageImagePart;
 use crate::{PageImages, WriterApp, WriterPageImage};
-use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use loom_writer_core::InlineImage;
+use slint::{ComponentHandle, Image, Model, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -26,11 +27,41 @@ type Placed = (u32, u32, u32, u32, usize);
 
 thread_local! {
     static DECODED: RefCell<HashMap<usize, Decoded>> = RefCell::new(HashMap::new());
-    static LAST: RefCell<Vec<Placed>> = const { RefCell::new(Vec::new()) };
+    static SHOWN: RefCell<Shown> = RefCell::new(Shown::default());
+}
+
+/// What the canvas shows, kept so one picture can be previewed in place and
+/// the selection outline can follow the caret without laying the page out again.
+#[derive(Default)]
+struct Shown {
+    /// Where the projection laid each picture out, with its identity.
+    placed: Vec<Placed>,
+    /// The picture items as laid out, before selection and any preview.
+    layout: Vec<WriterPageImage>,
+    /// The identity of the selected picture, if one is on the page.
+    selected: Option<usize>,
+    /// The model the canvas reads.
+    model: Option<Rc<VecModel<WriterPageImage>>>,
+}
+
+/// A picture as the projection laid it out, in page points.
+pub(crate) struct LaidOut {
+    pub key: usize,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Identity of a picture on the page: the address of its bytes. Insertion,
+/// loading and pasting each read the bytes afresh, so no two pictures in a
+/// document share them, and the document, projection and canvas agree on it.
+pub(crate) fn picture_key(image: &InlineImage) -> usize {
+    Arc::as_ptr(&image.bytes) as usize
 }
 
 fn key(part: &PageImagePart) -> usize {
-    Arc::as_ptr(&part.image.bytes) as usize
+    picture_key(&part.image)
 }
 
 /// The picture decoded for the screen; an unreadable picture is a blank
@@ -55,8 +86,9 @@ fn decoded(part: &PageImagePart) -> Image {
     })
 }
 
-/// Sets the canvas's pictures; does nothing when they are as before.
-pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart]) {
+/// Sets the canvas's pictures, marking the one whose identity is `selected`;
+/// does nothing when the pictures and the selection are as before.
+pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart], selected: Option<usize>) {
     let placed: Vec<Placed> = parts
         .iter()
         .map(|p| {
@@ -69,21 +101,92 @@ pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart]) {
             )
         })
         .collect();
-    if LAST.with(|last| *last.borrow() == placed) {
-        return;
-    }
-    LAST.with(|last| *last.borrow_mut() = placed);
-    let items: Vec<WriterPageImage> = parts
+    SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        if shown.placed != placed {
+            shown.layout = parts
+                .iter()
+                .map(|p| WriterPageImage {
+                    x: p.x,
+                    y: p.y,
+                    width: p.width,
+                    height: p.height,
+                    source: decoded(p),
+                    label: p.label.clone().into(),
+                    selected: false,
+                })
+                .collect();
+            shown.placed = placed;
+        } else if shown.model.is_some() && shown.selected == selected {
+            return;
+        }
+        shown.selected = selected;
+        show(app, &mut shown);
+    });
+}
+
+/// Rebuilds the canvas model from the layout, marking the selected picture.
+fn show(app: &WriterApp, shown: &mut Shown) {
+    let selected = shown.selected;
+    let items: Vec<WriterPageImage> = shown
+        .layout
         .iter()
-        .map(|p| WriterPageImage {
-            x: p.x,
-            y: p.y,
-            width: p.width,
-            height: p.height,
-            source: decoded(p),
-            label: p.label.clone().into(),
+        .zip(&shown.placed)
+        .map(|(item, placed)| {
+            let mut item = item.clone();
+            item.selected = Some(placed.4) == selected;
+            item
         })
         .collect();
-    app.global::<PageImages>()
-        .set_items(Rc::new(VecModel::from(items)).into());
+    let model = Rc::new(VecModel::from(items));
+    app.global::<PageImages>().set_items(model.clone().into());
+    shown.model = Some(model);
+}
+
+/// Where the projection laid each picture out, not where a drag previews it:
+/// the geometry that pointer hit tests use.
+pub(crate) fn laid_out() -> Vec<LaidOut> {
+    SHOWN.with(|shown| {
+        shown
+            .borrow()
+            .placed
+            .iter()
+            .map(|p| LaidOut {
+                key: p.4,
+                x: f32::from_bits(p.0),
+                y: f32::from_bits(p.1),
+                width: f32::from_bits(p.2),
+                height: f32::from_bits(p.3),
+            })
+            .collect()
+    })
+}
+
+/// Shows picture `key` at the given geometry on the canvas only; the document
+/// is untouched. Used for the live preview of a resize drag.
+pub(crate) fn preview(key: usize, x: f32, y: f32, width: f32, height: f32) {
+    let (model, row) = SHOWN.with(|shown| {
+        let shown = shown.borrow();
+        (
+            shown.model.clone(),
+            shown.placed.iter().position(|p| p.4 == key),
+        )
+    });
+    let (Some(model), Some(row)) = (model, row) else {
+        return;
+    };
+    if let Some(mut item) = model.row_data(row) {
+        item.x = x;
+        item.y = y;
+        item.width = width;
+        item.height = height;
+        model.set_row_data(row, item);
+    }
+}
+
+/// Shows picture `key` as the projection laid it out, ending a preview.
+pub(crate) fn restore(key: usize) {
+    if let Some(laid) = laid_out().into_iter().find(|laid| laid.key == key) {
+        preview(laid.key, laid.x, laid.y, laid.width, laid.height);
+    }
 }

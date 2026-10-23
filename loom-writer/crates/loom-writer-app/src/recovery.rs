@@ -162,13 +162,7 @@ pub(super) fn record_document_deferred(
 ) -> Result<DeferredDispatch, String> {
     #[cfg(test)]
     WRITES.with(|writes| writes.set(writes.get() + 1));
-    let epoch = DEFERRED.with(DeferredWrite::epoch);
-    let snapshot = DeferredSnapshot {
-        epoch,
-        document: document.clone(),
-        source,
-        app: app.as_weak(),
-    };
+    let snapshot = deferred_snapshot(app, document, source);
     if let Some(snapshot) = DEFERRED.with(|state| state.submit(snapshot)) {
         start_deferred_snapshot(snapshot)?;
         Ok(DeferredDispatch::Started)
@@ -180,9 +174,29 @@ pub(super) fn record_document_deferred(
 #[derive(Clone)]
 struct DeferredSnapshot {
     epoch: u64,
+    /// Submission order. A completion is recorded only when it is newer than the
+    /// last snapshot recorded, so a slower serializer cannot replace a newer draft.
+    sequence: u64,
     document: WriterDocument,
     source: Option<PathBuf>,
     app: slint::Weak<crate::WriterApp>,
+}
+
+/// Copy the document for a deferred recording, stamped with the current epoch and
+/// the next submission sequence number.
+fn deferred_snapshot(
+    app: &crate::WriterApp,
+    document: &WriterDocument,
+    source: Option<PathBuf>,
+) -> DeferredSnapshot {
+    let (epoch, sequence) = DEFERRED.with(|state| (state.epoch(), state.allocate_sequence()));
+    DeferredSnapshot {
+        epoch,
+        sequence,
+        document: document.clone(),
+        source,
+        app: app.as_weak(),
+    }
 }
 
 fn start_deferred_snapshot(snapshot: DeferredSnapshot) -> Result<(), String> {
@@ -223,14 +237,48 @@ fn start_deferred_snapshot(snapshot: DeferredSnapshot) -> Result<(), String> {
     match result {
         Ok(_) => Ok(()),
         Err(error) => {
+            schedule_retry(&retry);
             DEFERRED.with(|state| state.start_failed(retry));
             Err(format!("could not start the recovery writer: {error}"))
         }
     }
 }
 
+/// Arm the retry of a recording that failed. Typing alone would never write the
+/// draft again, so the failure itself schedules the next attempt, at the same
+/// debounce interval. The retry does nothing when an edit, save, or replacement has
+/// changed the epoch since: that change has its own write.
+fn schedule_retry(failed: &DeferredSnapshot) {
+    let (epoch, app, document, source) = (
+        failed.epoch,
+        failed.app.clone(),
+        failed.document.clone(),
+        failed.source.clone(),
+    );
+    let retry = move || {
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        if DEFERRED.with(|state| state.retry_due(epoch)) {
+            if let Err(error) = record_document_deferred(&app, &document, source.clone()) {
+                crate::warn_recovery_failed(&app, &error);
+            }
+        }
+    };
+    #[cfg(test)]
+    RETRY_SCHEDULED.with(|slot| *slot.borrow_mut() = Some(Box::new(retry)));
+    #[cfg(not(test))]
+    RECOVERY_RETRY.with(|timer| timer.start(slint::TimerMode::SingleShot, WRITE_DELAY, retry));
+}
+
+#[cfg(not(test))]
+std::thread_local! {
+    /// Fires the retry of a failed recording, on the UI thread that records.
+    static RECOVERY_RETRY: slint::Timer = slint::Timer::default();
+}
+
 fn deliver_deferred_snapshot(snapshot: DeferredSnapshot, payload: Result<Vec<u8>, String>) {
-    if DEFERRED.with(DeferredWrite::epoch) == snapshot.epoch {
+    if DEFERRED.with(|state| state.accepts(&snapshot)) {
         let result = payload.and_then(|payload| {
             #[cfg(test)]
             if INJECT_FAILURE.with(std::cell::Cell::get) {
@@ -240,13 +288,14 @@ fn deliver_deferred_snapshot(snapshot: DeferredSnapshot, payload: Result<Vec<u8>
         });
         match result {
             Ok(()) => {
-                DEFERRED.with(|state| state.delivered(snapshot.epoch));
+                DEFERRED.with(|state| state.delivered(snapshot.sequence));
                 if let Some(app) = snapshot.app.upgrade() {
                     crate::clear_recovery_failed(&app);
                 }
             }
             Err(error) => {
                 DEFERRED.with(|state| state.retryable(snapshot.epoch));
+                schedule_retry(&snapshot);
                 if let Some(app) = snapshot.app.upgrade() {
                     crate::warn_recovery_failed(&app, &error);
                 }
@@ -362,6 +411,30 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Starts one serializer without the one-at-a-time gate that
+/// `record_document_deferred` applies. Production never has two in flight; tests
+/// use this to drive the delivery rules directly.
+#[cfg(test)]
+pub(super) fn start_snapshot_for_test(
+    app: &crate::WriterApp,
+    document: &WriterDocument,
+) -> Result<(), String> {
+    start_deferred_snapshot(deferred_snapshot(app, document, None))
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// The retry a failed recording armed, for a test to run as the timer would.
+    static RETRY_SCHEDULED: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Take the retry armed by the last failed recording, if one was armed.
+#[cfg(test)]
+pub(super) fn take_scheduled_retry() -> Option<Box<dyn FnMut()>> {
+    RETRY_SCHEDULED.with(|slot| slot.borrow_mut().take())
+}
+
 /// Checkpoint the recovery store after the document has been saved to `source`.
 pub(super) fn checkpoint_document(
     document: &WriterDocument,
@@ -388,6 +461,25 @@ pub(super) fn discard_document_recovery() -> Result<(), String> {
     })
 }
 
+/// A document replacement that discards the open document (New, Open, a template,
+/// or the Quick Start sample) ends its recovery session. In-flight writes of the old
+/// document are invalidated, and the stored draft is cleared, so a later crash
+/// cannot restore discarded text. The slot is reopened empty so the replacement
+/// document is recorded normally. With no live slot there is nothing stored to forget.
+pub(super) fn end_replaced_session(app: &crate::WriterApp) {
+    DEFERRED.with(DeferredWrite::settled);
+    let Some(live) = LOOM_SNAPSHOT_RECOVERY.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    let cleared = live.clear().map_err(|error| error.to_string());
+    // Reopen the slot whether or not the clear worked: an unopened slot would
+    // silently drop every later edit.
+    let reopened = initialize_snapshot_recovery().map(|_| ());
+    if let Err(error) = cleared.and(reopened) {
+        crate::warn_recovery_failed(app, &error);
+    }
+}
+
 /// How long after an unrecorded keystroke before recovery serialization is
 /// attempted. This debounce interval is not a crash-loss bound: serialization
 /// and the recovery-store write can still be in progress after it fires.
@@ -405,6 +497,10 @@ pub(super) struct DeferredWrite {
     epoch: std::cell::Cell<u64>,
     in_flight: std::cell::Cell<bool>,
     pending: std::cell::RefCell<Option<DeferredSnapshot>>,
+    /// The last sequence number handed to a deferred snapshot.
+    last_sequence: std::cell::Cell<u64>,
+    /// The sequence of the newest deferred snapshot recorded so far.
+    recorded_sequence: std::cell::Cell<u64>,
 }
 
 impl DeferredWrite {
@@ -457,16 +553,39 @@ impl DeferredWrite {
             .inspect(|_| self.in_flight.set(true))
     }
 
-    fn delivered(&self, epoch: u64) {
-        if self.epoch.get() == epoch {
-            self.stale.set(false);
-        }
+    /// The snapshot with this sequence number is now the recorded draft.
+    fn delivered(&self, sequence: u64) {
+        self.recorded_sequence.set(sequence);
+        self.stale.set(false);
     }
 
     fn retryable(&self, epoch: u64) {
         if self.epoch.get() == epoch {
             self.stale.set(true);
         }
+    }
+
+    /// Whether a failed recording is due its retry: nothing newer has replaced it.
+    /// Taking the retry clears the stale mark; the retry sets it again if it fails.
+    fn retry_due(&self, epoch: u64) -> bool {
+        if self.epoch.get() == epoch && self.stale.get() {
+            self.stale.set(false);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A completed serialization may be recorded only in the current epoch and only
+    /// when no newer snapshot has been recorded before it.
+    fn accepts(&self, snapshot: &DeferredSnapshot) -> bool {
+        snapshot.epoch == self.epoch.get() && snapshot.sequence > self.recorded_sequence.get()
+    }
+
+    fn allocate_sequence(&self) -> u64 {
+        let next = self.last_sequence.get() + 1;
+        self.last_sequence.set(next);
+        next
     }
 
     pub(super) fn epoch(&self) -> u64 {

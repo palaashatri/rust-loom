@@ -53,17 +53,13 @@ pub(crate) fn xml_unescape(value: &str) -> String {
     out
 }
 
-/// True when a list paragraph sits below the first numbering level.
-fn has_nested_list_level(xml: &str) -> bool {
-    let mut rest = xml;
-    while let Some(pos) = rest.find("<w:ilvl w:val=\"") {
-        rest = &rest[pos + "<w:ilvl w:val=\"".len()..];
-        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-        if digits.parse::<u32>().is_ok_and(|level| level > 0) {
-            return true;
-        }
-    }
-    false
+/// The `w:val` of the paragraph's `w:ilvl`, the numbering level it sits at.
+fn num_pr_level(p_xml: &str) -> Option<String> {
+    let start = p_xml.find("<w:numPr")?;
+    let rest = &p_xml[start..];
+    let snippet = &rest[..rest.find("</w:numPr>").unwrap_or(rest.len())];
+    let at = snippet.find("<w:ilvl")?;
+    extract_attribute_value(&snippet[at..], "w:val")
 }
 
 /// Inspects a `.docx` package archive for unsupported constructs.
@@ -129,10 +125,6 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         }
         if xml.contains("<wp:anchor") && !warnings.iter().any(|w: &String| w.contains("Floating")) {
             warnings.push("Floating pictures are placed in the text, one to a line.".to_string());
-        }
-        // Bullets and numbering import; only nested levels are flattened.
-        if has_nested_list_level(&xml) {
-            warnings.push("Nested list levels are flattened to a single level.".to_string());
         }
     }
 
@@ -429,6 +421,12 @@ fn parse_paragraph(
                 _ => {}
             }
         }
+    }
+
+    // A list item's nesting is the numbering level Word stores as `w:ilvl`.
+    if crate::list_levels::is_list_kind(&kind) {
+        paragraph_style.list_level =
+            num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
     }
 
     // Runs

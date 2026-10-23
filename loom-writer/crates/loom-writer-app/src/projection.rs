@@ -78,33 +78,6 @@ pub(crate) fn window_pages(
     flow.visible_pages(-span, 2.0 * span)
 }
 
-/// The number shown beside each numbered list item, `0` elsewhere. Numbers
-/// run across consecutive numbered blocks and restart after any other kind.
-fn list_numbers(doc: &WriterDocument) -> Vec<usize> {
-    let mut counter = 0usize;
-    doc.blocks
-        .iter()
-        .map(|block| match block.kind.as_str() {
-            "list-numbered" => {
-                counter += 1;
-                counter
-            }
-            _ => {
-                counter = 0;
-                0
-            }
-        })
-        .collect()
-}
-
-fn list_marker(kind: &str, number: usize) -> String {
-    match kind {
-        "list-bulleted" => "\u{2022}".to_string(),
-        "list-numbered" => format!("{number}."),
-        _ => String::new(),
-    }
-}
-
 fn floor_char_boundary(text: &str, mut index: usize) -> usize {
     index = index.min(text.len());
     while !text.is_char_boundary(index) {
@@ -266,7 +239,7 @@ pub(crate) fn ui_selection_rects(
 /// a conservative height from the content width, stacked in order.
 fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlock> {
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    let numbers = list_numbers(doc);
+    let numbers = doc.list_item_numbers();
     let mut y = 0.0_f32;
     doc.blocks
         .iter()
@@ -275,7 +248,7 @@ fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlo
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let height = writer_render_height_for_width(block, font_size, content_width)
                 .max(font_size * style.line_height);
-            let marker = list_marker(block.kind.as_str(), numbers[index]);
+            let marker = block.list_marker(numbers[index]);
             let row = render_row(block, 0.0, y, content_width, height, &marker, "");
             y += height;
             row
@@ -419,7 +392,7 @@ pub(crate) fn project(
     };
 
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    let numbers = list_numbers(doc);
+    let numbers = doc.list_item_numbers();
     let selection = doc.selection();
     let selected_table_range =
         crate::table_actions::get_table_cell_selection_range().filter(|range| {
@@ -438,7 +411,7 @@ pub(crate) fn project(
     for line in flow.lines_on(pages.clone()) {
         let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
-        let marker = list_marker(block.kind.as_str(), numbers[line.block_index]);
+        let marker = block.list_marker(numbers[line.block_index]);
         // The column the block's lines are aligned in: the text column less its indent.
         let column_width = block.text_column_width(&style);
         let x = ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
@@ -497,9 +470,10 @@ pub(crate) fn project(
                     let cols = table.columns().max(1);
                     let num_rows = table.rows.len();
                     let col_width = column_width / cols as f32;
-                    let row_height = (style.body_font_size_pt * style.line_height + 8.0).max(24.0);
+                    let row_height = table_row_height(&style);
                     let table_x = 0.0_f32;
-                    let table_y = y;
+                    let table_y =
+                        block_top_y(&flow, line.block_index, &style, base_page).unwrap_or(y);
                     let block_start = doc.blocks[..line.block_index]
                         .iter()
                         .map(|previous| previous.text.as_str().len() + 1)
@@ -855,6 +829,49 @@ pub(crate) fn project(
         stack_height,
         pages,
     }
+}
+
+/// The height of one table row as the page paints it. The core layout reserves
+/// a taller band per table row for its Markdown text; the page draws rows at
+/// this pitch, so the caret and the reveal follow this height.
+pub(crate) fn table_row_height(style: &PageStyle) -> f32 {
+    (style.body_font_size_pt * style.line_height + 8.0).max(24.0)
+}
+
+/// The canvas y that a table block's rows are drawn from: the top of the
+/// block's first line in the whole flow. It does not depend on which pages are
+/// drawn, so the rows keep their place as the page scrolls past a page break.
+fn block_top_y(
+    flow: &DocumentFlow,
+    block_index: usize,
+    style: &PageStyle,
+    base_page: PageRect,
+) -> Option<f32> {
+    let lines = flow.lines();
+    let first = lines.partition_point(|line| line.block_index < block_index);
+    let line = lines
+        .get(first)
+        .filter(|line| line.block_index == block_index)?;
+    let zoom = flow.zoom().max(f32::EPSILON);
+    Some(((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0))
+}
+
+/// The top and bottom, in viewport coordinates (the frame `DocumentFlow`
+/// reports for lines), of the painted table row that holds `offset`. `None`
+/// when `offset` is not in a table, so the caller measures the core line.
+pub(crate) fn table_row_view_span(
+    doc: &WriterDocument,
+    style: &PageStyle,
+    flow: &DocumentFlow,
+    offset: usize,
+) -> Option<(f32, f32)> {
+    let location = doc.table_cell_at_offset(offset)?;
+    let base = flow.page_bounds().first().copied()?;
+    let top = block_top_y(flow, location.block_index, style, base)?;
+    let zoom = flow.zoom().max(f32::EPSILON);
+    let row = table_row_height(style);
+    let view_top = (top + location.row as f32 * row) * zoom + style.margin_top_pt * zoom + base.y;
+    Some((view_top, view_top + row * zoom))
 }
 
 fn parse_hex_color(hex: &str) -> u32 {

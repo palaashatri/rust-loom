@@ -880,9 +880,10 @@ fn docx_warnings_name_only_what_is_lost() {
         .add("word/document.xml", nested.into_bytes())
         .unwrap();
     let bytes = archive.to_bytes().expect("pack nested");
+    // Nested levels import at their level now, so a nested list is not a loss.
     let nested_warnings = super::inspect_docx_unsupported(&bytes).expect("inspect");
     assert!(
-        nested_warnings.iter().any(|w| w.contains("Nested list")),
+        !nested_warnings.iter().any(|w| w.contains("list")),
         "{nested_warnings:?}"
     );
 }

@@ -106,6 +106,11 @@ pub(crate) fn paragraph_style_json(style: &loom_text::ParagraphStyle) -> String 
     out.push_str(&json_f32(style.first_line_indent));
     out.push_str(",\"break_rule\":");
     out.push_str(&pkg_json::escape(line_break_name(style.break_rule)));
+    // Written only for a nested item, so files without nesting are unchanged.
+    if style.list_level > 0 {
+        out.push_str(",\"list_level\":");
+        out.push_str(&style.list_level.to_string());
+    }
     out.push('}');
     out
 }

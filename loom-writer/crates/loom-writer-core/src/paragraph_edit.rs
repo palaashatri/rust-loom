@@ -24,6 +24,17 @@ fn is_text_kind(kind: &str) -> bool {
     !matches!(kind, TABLE_BLOCK_KIND | IMAGE_BLOCK_KIND | CHART_BLOCK_KIND)
 }
 
+/// One step out of a list for a list item that is at its own start (or empty):
+/// a nested item moves up a level, a top-level item becomes a paragraph.
+fn step_out_of_list(block: &mut RichBlock) {
+    let level = block.effective_list_level();
+    if level > 0 {
+        block.style.list_level = level - 1;
+    } else {
+        block.kind = "paragraph".to_string();
+    }
+}
+
 /// Rebuild the blocks of an edit that splits or joins paragraphs. `None` means
 /// the edit is not of that kind (or touches a table, picture or chart), and
 /// the caller falls back to matching paragraphs by their text.
@@ -181,21 +192,23 @@ impl WriterDocument {
         None
     }
 
-    /// Turn the list item that starts at `offset` into a plain paragraph: the
-    /// first Backspace at the start of an item removes its marker before it
-    /// can join the paragraph above. Returns whether a marker was removed.
+    /// Backspace at the start of a list item: a nested item first moves up one
+    /// level and keeps its marker; a top-level item loses its marker, so the
+    /// next Backspace can join it to the paragraph above. Returns whether the
+    /// item at `offset` changed.
     pub fn unlist_block_at(&mut self, offset: usize) -> bool {
         self.list_block_starting_at(offset)
-            .map(|block| block.kind = "paragraph".to_string())
+            .map(step_out_of_list)
             .is_some()
     }
 
-    /// Enter on an empty list item leaves the list instead of adding another
-    /// empty item. Returns whether the item at `offset` was empty and listed.
+    /// Enter on an empty list item first moves a nested item up one level; a
+    /// top-level item leaves the list instead of adding another empty item.
+    /// Returns whether the item at `offset` was empty and listed.
     pub fn exit_empty_list_item_at(&mut self, offset: usize) -> bool {
         self.list_block_starting_at(offset)
             .filter(|block| block.text.is_empty())
-            .map(|block| block.kind = "paragraph".to_string())
+            .map(step_out_of_list)
             .is_some()
     }
 

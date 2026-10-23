@@ -65,6 +65,8 @@ pub(crate) enum PaletteAction {
     ToggleUnderline,
     SetHeading(i32),
     SetAlignment(i32),
+    /// A command that is run by its identifier, as the menus run it.
+    Command(&'static str),
     InsertTable,
     InsertTableRowAbove,
     InsertTableRowBelow,
@@ -92,6 +94,7 @@ pub(crate) fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) ->
             app.invoke_select_alignment(index);
             true
         }
+        PaletteAction::Command(id) => dispatch_command(app, id),
         PaletteAction::InsertTable => dispatch_command(app, "writer.table.insert"),
         PaletteAction::InsertTableRowAbove => dispatch_command(app, "table.insert_row_above"),
         PaletteAction::InsertTableRowBelow => dispatch_command(app, "table.insert_row_below"),
@@ -315,6 +318,30 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "writer.align.right-all",
             label: "Align All Right",
             shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::Command("insert.page_break"),
+            id: "insert.page_break",
+            label: "Insert Page Break",
+            shortcut: "Ctrl+Enter",
+        },
+        PaletteCommand {
+            action: PaletteAction::Command("insert.line_break"),
+            id: "insert.line_break",
+            label: "Insert Line Break",
+            shortcut: "Shift+Enter",
+        },
+        PaletteCommand {
+            action: PaletteAction::Command("list.level.increase"),
+            id: "list.level.increase",
+            label: "Increase List Level",
+            shortcut: "Tab",
+        },
+        PaletteCommand {
+            action: PaletteAction::Command("list.level.decrease"),
+            id: "list.level.decrease",
+            label: "Decrease List Level",
+            shortcut: "Shift+Tab",
         },
     ]
     .into_iter()

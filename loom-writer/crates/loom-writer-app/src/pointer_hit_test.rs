@@ -216,6 +216,10 @@ fn writer_text_metric_offset(
 }
 
 #[cfg(test)]
+#[path = "table_pointer_geometry_tests.rs"]
+mod table_pointer_geometry_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

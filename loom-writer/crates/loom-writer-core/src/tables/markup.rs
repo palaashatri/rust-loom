@@ -14,6 +14,7 @@ use std::ops::Range;
 use loom_objects::table::{HorizontalAlign, Table, TextRun};
 
 use super::ParsedTableCellText;
+use crate::WriterTable;
 
 /// One character of a cell with its emphasis and its byte range in the source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +241,77 @@ pub(crate) fn with_alignment(markdown: &str, alignments: &[HorizontalAlign]) -> 
     }
     lines[1] = divider;
     lines.join("\n")
+}
+
+/// A stored table as its text describes it: the displayed table (metadata and
+/// plain cell text), each cell's Markdown source with its emphasis markers, and
+/// each column's alignment from the divider row.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredTable {
+    pub(crate) table: WriterTable,
+    pub(crate) sources: Vec<Vec<String>>,
+    pub(crate) alignments: Vec<HorizontalAlign>,
+}
+
+impl StoredTable {
+    /// The emphasis runs of one cell, over the text a reader sees.
+    pub(crate) fn cell_runs(&self, row: usize, column: usize) -> Vec<TextRun> {
+        self.sources
+            .get(row)
+            .and_then(|cells| cells.get(column))
+            .map_or_else(Vec::new, |source| runs(source))
+    }
+
+    /// The table ready for an edit. Its rows hold the stored sources, so emphasis
+    /// and escapes are written back as they were, and every column has an alignment.
+    pub(crate) fn into_editable(self) -> (WriterTable, Vec<HorizontalAlign>) {
+        let Self {
+            mut table,
+            sources,
+            mut alignments,
+        } = self;
+        table.rows = sources;
+        alignments.resize(table.columns(), HorizontalAlign::Left);
+        (table, alignments)
+    }
+}
+
+/// Reads a stored table for export and editing (see [`StoredTable`]).
+pub(crate) fn read_stored(markdown: &str) -> StoredTable {
+    let table = super::parse_table_markdown(markdown);
+    let mut sources = Vec::new();
+    let mut alignments = Vec::new();
+    super::for_each_markdown_line(markdown, |line, line_offset| {
+        if super::is_table_metadata_line(line.trim()) {
+            return;
+        }
+        let Some(parsed) = super::parse_table_line_raw(line, line_offset) else {
+            return;
+        };
+        if parsed.is_delimiter {
+            alignments = parsed
+                .cells
+                .iter()
+                .map(|cell| divider_alignment(&cell.text))
+                .collect();
+        } else {
+            sources.push(parsed.cells.into_iter().map(|cell| cell.text).collect());
+        }
+    });
+    StoredTable {
+        table,
+        sources,
+        alignments,
+    }
+}
+
+/// Writes an edited table back to Markdown. Cell text is written as stored, so
+/// its emphasis markers come back unchanged, and each column's alignment is kept
+/// in the divider row.
+pub(crate) fn stored_markdown(table: &WriterTable, alignments: &[HorizontalAlign]) -> String {
+    let mut aligned = alignments.to_vec();
+    aligned.resize(table.columns(), HorizontalAlign::Left);
+    with_alignment(&table.to_markdown(), &aligned)
 }
 
 #[cfg(test)]

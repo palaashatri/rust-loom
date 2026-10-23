@@ -17,7 +17,7 @@ const STATE_HOME_ENV: &str = "HOME";
 #[cfg(not(any(windows, target_os = "macos")))]
 const STATE_HOME_ENV: &str = "XDG_STATE_HOME";
 
-fn isolated_root() -> PathBuf {
+pub(super) fn isolated_root() -> PathBuf {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!(
@@ -26,7 +26,7 @@ fn isolated_root() -> PathBuf {
     ))
 }
 
-fn run_child(
+pub(super) fn run_child(
     test_name: &str,
     mode: &str,
     root: &Path,
@@ -48,7 +48,7 @@ fn run_child(
     command.status().expect("run isolated Writer process")
 }
 
-fn make_test_state(
+pub(super) fn make_test_state(
     document: WriterDocument,
     save_path: Option<PathBuf>,
 ) -> (WriterApp, Rc<GuiState>) {
@@ -81,7 +81,7 @@ fn make_test_state(
     (app, state)
 }
 
-fn child_mode() -> Option<String> {
+pub(super) fn child_mode() -> Option<String> {
     std::env::var(CHILD_MODE).ok()
 }
 

@@ -243,10 +243,10 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     let s = launched("Hello");
     let page = focus_weak(&s.app);
     let menus = labels(&s.app);
-    assert_eq!(menus, ["File", "Edit", "View", "Format", "Table"]);
+    assert_eq!(menus, ["File", "Edit", "View", "Format", "Insert", "Table"]);
 
-    // Each menu answers to the first letter no earlier menu used: Format is O, Table is T.
-    for (index, letter) in ["f", "e", "v", "o", "t"].iter().enumerate() {
+    // Each menu answers to the first letter no earlier menu used: Format is O, Insert is I, Table is T.
+    for (index, letter) in ["f", "e", "v", "o", "i", "t"].iter().enumerate() {
         alt(&s.app, letter);
         assert_eq!(
             s.app.get_local_menu_open_index(),
@@ -971,7 +971,10 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
             names(inspector)
         );
         let (menu, toolbar) = rest.split_at(toolbar_start - menu_start);
-        assert_eq!(names(menu), ["File", "Edit", "View", "Format", "Table"]);
+        assert_eq!(
+            names(menu),
+            ["File", "Edit", "View", "Format", "Insert", "Table"]
+        );
         assert!(reads_in_order(menu));
         assert!(
             reads_in_order(toolbar),

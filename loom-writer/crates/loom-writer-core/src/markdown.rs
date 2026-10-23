@@ -12,13 +12,13 @@ use crate::{RichBlock, WriterDocument, TABLE_BLOCK_KIND};
 /// The document as Markdown.
 pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
     let mut out = String::new();
-    let mut numbered_index = 0usize;
+    let numbers = doc.list_item_numbers();
     // Paragraphs and headings end with a blank line; list items and table rows end
     // with one newline. After such a line, a blank line comes before the next block,
     // except before the next item of the same list, which stays tight. Without it,
     // Markdown readers fold the next block into the item or table above.
     let mut previous: Option<&str> = None;
-    for block in &doc.blocks {
+    for (index, block) in doc.blocks.iter().enumerate() {
         let kind = block.kind.as_str();
         if let Some(before) = previous {
             let tight_item = is_list_item(before) && before == kind;
@@ -34,26 +34,24 @@ pub(crate) fn document_markdown(doc: &WriterDocument) -> String {
             "heading4" => out.push_str(&format!("#### {}\n\n", inline(block))),
             "heading5" => out.push_str(&format!("##### {}\n\n", inline(block))),
             "heading6" => out.push_str(&format!("###### {}\n\n", inline(block))),
+            // A nested item is indented two spaces per level, as Markdown nests lists.
             "list-bulleted" => {
-                numbered_index = 0;
-                out.push_str(&format!("- {}\n", inline(block)));
+                let indent = "  ".repeat(usize::from(block.effective_list_level()));
+                out.push_str(&format!("{indent}- {}\n", inline(block)));
             }
             // A table block already holds its Markdown, so it is written as it is.
             TABLE_BLOCK_KIND => {
-                numbered_index = 0;
                 out.push_str(&format!("{}\n", block.text.as_str()));
             }
             "list-numbered" => {
-                numbered_index += 1;
-                out.push_str(&format!("{}. {}\n", numbered_index, inline(block)));
+                let indent = "  ".repeat(usize::from(block.effective_list_level()));
+                out.push_str(&format!("{indent}{}. {}\n", numbers[index], inline(block)));
             }
             _ if block.object_placeholder().is_some() => {
-                numbered_index = 0;
                 let placeholder = block.object_placeholder().unwrap_or_default();
                 out.push_str(&format!("{placeholder}\n\n"));
             }
             _ => {
-                numbered_index = 0;
                 out.push_str(&format!("{}\n\n", inline(block)));
             }
         }

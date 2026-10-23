@@ -83,6 +83,9 @@ pub struct ParagraphStyle {
     pub first_line_indent: f32,
     /// Break rule.
     pub break_rule: LineBreakRule,
+    /// Nesting level of a list item, 0 for the top level. Writer keeps it at 0
+    /// for other paragraphs and omits it from files when it is 0.
+    pub list_level: u8,
 }
 
 impl Default for ParagraphStyle {
@@ -96,6 +99,7 @@ impl Default for ParagraphStyle {
             right_indent: 0.0,
             first_line_indent: 0.0,
             break_rule: LineBreakRule::Word,
+            list_level: 0,
         }
     }
 }

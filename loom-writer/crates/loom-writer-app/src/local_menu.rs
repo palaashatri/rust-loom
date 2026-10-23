@@ -29,6 +29,10 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "format.bold",
     "format.italic",
     "format.underline",
+    "list.level.increase",
+    "list.level.decrease",
+    "insert.page_break",
+    "insert.line_break",
     "insert.table",
     "insert.chart",
     "insert.image",
@@ -110,6 +114,16 @@ pub(crate) fn menu_projection(
     Ok(projection)
 }
 
+/// A shortcut for a bare key, with or without Shift (Tab, Shift+Tab, Shift+Enter).
+fn key_shortcut(key: &str, shift: bool) -> loom_desktop::MenuShortcut {
+    loom_desktop::MenuShortcut {
+        key: key.to_string(),
+        primary_modifier: false,
+        shift,
+        alt: false,
+    }
+}
+
 /// Writer's menu bar with only the commands Writer actually handles enabled.
 pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
     use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
@@ -151,6 +165,32 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                         "format.underline",
                         "Underline",
                         MenuShortcut::primary("U"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "list.level.increase",
+                        "Increase List Level",
+                        key_shortcut("Tab", false),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "list.level.decrease",
+                        "Decrease List Level",
+                        key_shortcut("Tab", true),
+                    ),
+                ],
+            ),
+            Menu::new(
+                "Insert",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "insert.page_break",
+                        "Page Break",
+                        MenuShortcut::primary("Enter"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "insert.line_break",
+                        "Line Break",
+                        key_shortcut("Enter", true),
                     ),
                 ],
             ),

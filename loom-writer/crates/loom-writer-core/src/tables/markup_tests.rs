@@ -138,3 +138,151 @@ fn table_block_kind_is_unchanged_by_paste() {
         TABLE_BLOCK_KIND
     );
 }
+
+/// A 3x3 table with a bold header row, a centred Qty column and a bold body cell.
+fn header_bold_and_centred_table() -> Table {
+    let mut table = Table::new(3, 3);
+    table.header_row = true;
+    for (column, text) in ["Item", "Qty", "Price"].into_iter().enumerate() {
+        table.set_cell_rich_text(0, column, vec![run(text, true, false)]);
+    }
+    table.set_cell_rich_text(1, 0, vec![run("Apples", true, false)]);
+    table.set_cell_rich_text(1, 1, vec![run("50", false, false)]);
+    table.set_cell_rich_text(1, 2, vec![run("1.50", false, false)]);
+    table.set_cell_rich_text(2, 0, vec![run("Pears", false, false)]);
+    table.set_cell_rich_text(2, 1, vec![run("7", false, false)]);
+    table.set_cell_rich_text(2, 2, vec![run("2.00", false, false)]);
+    for row in 0..3 {
+        table.cell_mut(row, 1).expect("cell").style_override = Some(CellStyleOverride {
+            horizontal_align: Some(HorizontalAlign::Center),
+            ..Default::default()
+        });
+    }
+    table
+}
+
+/// The byte offset where cell (`row`, `column`) of the last block starts.
+fn cell_offset(document: &WriterDocument, row: usize, column: usize) -> usize {
+    let index = document.blocks.len() - 1;
+    let before: usize = document.blocks[..index]
+        .iter()
+        .map(|block| block.text.len_bytes() + 1)
+        .sum();
+    let grid = crate::tables::compute_cell_ranges(document.blocks[index].text.as_str());
+    before + grid[row][column].0
+}
+
+fn alignment_of(table: &Table, row: usize, column: usize) -> Option<HorizontalAlign> {
+    table
+        .cell(row, column)
+        .and_then(|cell| cell.style_override.as_ref())
+        .and_then(|style| style.horizontal_align)
+}
+
+fn is_bold(table: &Table, row: usize, column: usize, text: &str) -> bool {
+    table.cell(row, column).is_some_and(|cell| {
+        cell.content
+            .runs
+            .iter()
+            .any(|run| run.bold && run.text == text)
+    })
+}
+
+/// The Word table cell (`<w:tc>` to `</w:tc>`) whose text is `text`.
+fn cell_xml<'a>(body: &'a str, text: &str) -> &'a str {
+    let at = body
+        .find(&format!(">{text}<"))
+        .unwrap_or_else(|| panic!("{text:?} is in the body"));
+    let start = body[..at]
+        .rfind("<w:tc>")
+        .expect("a cell starts before its text");
+    let end = at + body[at..].find("</w:tc>").expect("the cell ends");
+    &body[start..end]
+}
+
+#[test]
+fn inserting_a_row_keeps_the_bold_header_and_the_centred_column() {
+    let mut document = paste(&header_bold_and_centred_table());
+    let id = document.blocks.last().expect("table block").id;
+    document
+        .insert_table_row_at_offset(cell_offset(&document, 0, 0), true)
+        .expect("row inserted");
+
+    let read = document
+        .loom_table_from_block(id)
+        .expect("stored table parses");
+    assert_eq!(read.row_count(), 4);
+    assert!(is_bold(&read, 0, 0, "Item"), "the header cell stays bold");
+    assert!(
+        is_bold(&read, 2, 0, "Apples"),
+        "the bold body cell moved down with its text"
+    );
+    for row in 0..read.row_count() {
+        assert_eq!(
+            alignment_of(&read, row, 1),
+            Some(HorizontalAlign::Center),
+            "row {row} keeps the centred Qty column"
+        );
+    }
+}
+
+#[test]
+fn deleting_a_row_and_inserting_or_deleting_columns_keeps_emphasis_and_alignment() {
+    let mut document = paste(&header_bold_and_centred_table());
+    let id = document.blocks.last().expect("table block").id;
+    document
+        .delete_table_row_at_offset(cell_offset(&document, 1, 0))
+        .expect("row deleted");
+    document
+        .insert_table_column_at_offset(cell_offset(&document, 0, 1), false)
+        .expect("column inserted");
+    document
+        .delete_table_column_at_offset(cell_offset(&document, 0, 0))
+        .expect("column deleted");
+
+    let read = document
+        .loom_table_from_block(id)
+        .expect("stored table parses");
+    assert_eq!((read.row_count(), read.col_count()), (2, 3));
+    assert!(
+        is_bold(&read, 0, 1, "Qty"),
+        "the header moved with its column"
+    );
+    assert_eq!(alignment_of(&read, 0, 1), Some(HorizontalAlign::Center));
+    assert_eq!(
+        alignment_of(&read, 1, 1),
+        Some(HorizontalAlign::Center),
+        "the centred column keeps its alignment on every row"
+    );
+    assert_eq!(
+        alignment_of(&read, 0, 0),
+        Some(HorizontalAlign::Left),
+        "the inserted column is left-aligned"
+    );
+}
+
+#[test]
+fn the_docx_body_keeps_the_bold_run_and_the_centred_column_after_a_row_insert() {
+    let mut document = paste(&header_bold_and_centred_table());
+    document
+        .insert_table_row_at_offset(cell_offset(&document, 0, 0), true)
+        .expect("row inserted");
+    let docx = export_docx(&document).expect("docx exports").bytes;
+    let archive = PackageArchive::from_bytes(&docx).expect("zip reads back");
+    let body =
+        String::from_utf8_lossy(archive.get("word/document.xml").expect("body part")).into_owned();
+
+    assert!(cell_xml(&body, "Item").contains("<w:b/>"), "header is bold");
+    assert!(
+        cell_xml(&body, "Apples").contains("<w:b/>"),
+        "a bold body cell is bold in Word"
+    );
+    assert!(
+        cell_xml(&body, "50").contains("<w:jc w:val=\"center\"/>"),
+        "the centred column is centred in Word"
+    );
+    assert!(
+        !body.contains("**") && !body.contains("\\*") && !body.contains('|'),
+        "markup leaked into the DOCX body"
+    );
+}

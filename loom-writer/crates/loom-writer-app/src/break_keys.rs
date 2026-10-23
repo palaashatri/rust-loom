@@ -28,10 +28,22 @@ pub(crate) fn handle(
     if alt || (key != return_key.as_str() && key != "\n") {
         return false;
     }
-    let insertion = match (shift, ctrl) {
-        (true, false) => SOFT_BREAK.to_string(),
-        (false, true) => format!("{PAGE_BREAK}\n"),
+    let soft = match (shift, ctrl) {
+        (true, false) => true,
+        (false, true) => false,
         _ => return false,
+    };
+    insert_break(app, state, soft);
+    true
+}
+
+/// Puts a line break (`soft`) or a page break at the selection, as one undo
+/// step. The keys and the menu and palette commands both come here.
+pub(crate) fn insert_break(app: &WriterApp, state: &GuiState, soft: bool) {
+    let insertion = if soft {
+        SOFT_BREAK.to_string()
+    } else {
+        format!("{PAGE_BREAK}\n")
     };
     let selection = state.current.borrow().selection();
     let (low, high) = (
@@ -43,11 +55,11 @@ pub(crate) fn handle(
         app.set_status_right(SharedString::from(
             "Line and page breaks cannot go inside a table cell",
         ));
-        return true;
+        return;
     }
     let text = next.editor_text();
     let (Some(before), Some(after)) = (text.get(..low), text.get(high..)) else {
-        return false;
+        return;
     };
     let edited = format!("{before}{insertion}{after}");
     let caret = low + insertion.len();
@@ -55,7 +67,7 @@ pub(crate) fn handle(
         Ok(_) => {
             next.set_selection(TextSelection::caret(caret));
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
-            app.set_status_right(SharedString::from(if shift {
+            app.set_status_right(SharedString::from(if soft {
                 "Line break inserted"
             } else {
                 "Page break inserted"
@@ -63,7 +75,6 @@ pub(crate) fn handle(
         }
         Err(error) => app.set_status_right(SharedString::from(format!("Not inserted: {error}"))),
     }
-    true
 }
 
 /// The markup text without the break characters, which draw as nothing.

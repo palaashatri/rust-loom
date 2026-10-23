@@ -84,11 +84,23 @@ export struct WriterPageImage {
     height: length,
     source: image,
     label: string,
+    /// True for the picture the caret is on: it draws an outline and corner handles.
+    selected: bool,
 }
 
 /// The pictures the page shows; set from Rust with the rest of the projection.
 export global PageImages {
     in-out property <[WriterPageImage]> items: [];
+}
+
+/// A corner handle of the selected picture: 8 px, drawn over the picture.
+component PictureCornerHandle inherits Rectangle {
+    width: 8px;
+    height: 8px;
+    background: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+    border-width: 1px;
+    border-color: Theme.palette().paper;
+    accessible-role: none;
 }
 
 /// Writer's selection-aware text editor.
@@ -194,15 +206,37 @@ component WriterDocumentEditor inherits Rectangle {
             visible: cell.selected;
             accessible-role: none;
         }
-        for pic in PageImages.items : Image {
+        for pic in PageImages.items : Rectangle {
             x: pic.x * root.page-zoom;
             y: pic.y * root.page-zoom;
             width: max(1px, pic.width * root.page-zoom);
             height: max(1px, pic.height * root.page-zoom);
-            source: pic.source;
-            image-fit: fill;
-            accessible-role: image;
-            accessible-label: pic.label;
+            accessible-role: none;
+            Image {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                source: pic.source;
+                image-fit: fill;
+                accessible-role: image;
+                accessible-label: pic.label;
+            }
+            // The outline and corner handles of the selected picture.
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                border-width: 2px;
+                border-color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+                visible: pic.selected;
+                accessible-role: none;
+            }
+            PictureCornerHandle { x: -4px; y: -4px; visible: pic.selected; }
+            PictureCornerHandle { x: parent.width - 4px; y: -4px; visible: pic.selected; }
+            PictureCornerHandle { x: -4px; y: parent.height - 4px; visible: pic.selected; }
+            PictureCornerHandle { x: parent.width - 4px; y: parent.height - 4px; visible: pic.selected; }
         }
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;
