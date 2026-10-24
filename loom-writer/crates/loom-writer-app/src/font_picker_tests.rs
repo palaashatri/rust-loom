@@ -447,9 +447,13 @@ fn a_line_with_two_families_is_drawn_as_rows_placed_by_the_measurement() {
     let document = state.current.borrow();
     let runs = &document.blocks[0].runs;
     let before = loom_writer_core::text_advance("Hello ", 0, runs, 11.0);
-    // The third stretch starts after the space that follows the wide word: the
-    // page markup strips a row's leading white space, so it is not drawn.
-    let through = loom_writer_core::text_advance("Hello wide ", 0, runs, 11.0);
+    // The third stretch starts right after the wide word and draws its own
+    // leading space: nothing strips white space from the start of a row.
+    let through = loom_writer_core::text_advance("Hello wide", 0, runs, 11.0);
+    assert_eq!(
+        rows[2].segments.row_data(0).map(|s| s.text.to_string()),
+        Some(" world".to_string())
+    );
     assert!(
         (rows[1].x - before).abs() < 0.05,
         "{} against {before}",

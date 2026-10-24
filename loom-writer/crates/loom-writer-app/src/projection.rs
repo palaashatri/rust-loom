@@ -15,15 +15,19 @@ use loom_writer_core::{
     DocumentFlow, PageRect, PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection,
     WriterDocument,
 };
-use slint::SharedString;
+use slint::{ModelRc, SharedString, VecModel};
+
+#[path = "render_text.rs"]
+pub(crate) mod render_text;
+use render_text::{row_text, Align};
 
 /// Screens of height kept when the view height is not yet known.
 const PAGE_VIEW_FALLBACK_SCREENS: f32 = 2.0;
 
 use crate::{
     normalize_page_scroll, normalize_page_zoom, writer_render_alignment,
-    writer_render_height_for_width, writer_render_markup, WriterCommentRect, WriterRenderBlock,
-    WriterSelectionRect, WriterTableCellRect,
+    writer_render_height_for_width, WriterCommentRect, WriterRenderBlock, WriterSelectionRect,
+    WriterTableCellRect,
 };
 
 /// Everything the page canvas shows for one document state.
@@ -170,7 +174,7 @@ fn line_segments(block: &RichBlock, start: usize, end: usize) -> Vec<Segment> {
 }
 
 /// The family the page draws `stored` in: empty for the document font, which
-/// the markup already uses, else the installed family that stands for it.
+/// the row already uses, else the installed family that stands for it.
 fn drawn_family(stored: &str, cache: &mut HashMap<String, String>) -> String {
     if fonts::is_document_font(stored) {
         return String::new();
@@ -188,26 +192,53 @@ fn drawn_family(stored: &str, cache: &mut HashMap<String, String>) -> String {
         .clone()
 }
 
-fn render_row(
-    block: &RichBlock,
+/// Where a row sits on the page, in points from the content box.
+#[derive(Clone, Copy)]
+struct Frame {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
+}
+
+impl Frame {
+    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
+/// One row of the page: the typed text of `block` ([`row_text`]) in `frame`.
+/// `align` says how the text sits across the frame's width.
+fn render_row(
+    block: &RichBlock,
+    frame: Frame,
     marker: &str,
     family: &str,
+    align: Align,
 ) -> WriterRenderBlock {
-    let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
-    WriterRenderBlock {
-        content: slint::StyledText::from_markdown(
-            &crate::table_actions::break_keys::without_breaks(writer_render_markup(block)),
-        )
-        .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
+    let Frame {
         x,
         y,
         width,
         height,
-        font_size: PageStyle::default().font_size_for_kind(block.kind.as_str()),
+    } = frame;
+    let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
+    let font_size = PageStyle::default().font_size_for_kind(block.kind.as_str());
+    let text = row_text(block, font_size, width, align);
+    WriterRenderBlock {
+        segments: ModelRc::new(VecModel::from(text.segments)),
+        rules: ModelRc::new(VecModel::from(text.rules)),
+        positioned: text.positioned,
+        x,
+        y,
+        width,
+        height,
+        font_size,
         font_family: SharedString::from(family),
         alignment: writer_render_alignment(block.style.alignment),
         marker: SharedString::from(marker),
@@ -260,7 +291,8 @@ fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlo
             let height = writer_render_height_for_width(block, font_size, content_width)
                 .max(font_size * style.line_height);
             let marker = block.list_marker(numbers[index]);
-            let row = render_row(block, 0.0, y, content_width, height, &marker, "");
+            let frame = Frame::new(0.0, y, content_width, height);
+            let row = render_row(block, frame, &marker, "", Align::Block);
             y += height;
             row
         })
@@ -609,15 +641,13 @@ pub(crate) fn project(
                             else {
                                 continue;
                             };
-                            let mut row = render_row(
-                                &cell_block,
+                            let frame = Frame::new(
                                 table_x + col_starts[c] + 6.0,
                                 cur_y + 4.0,
                                 col_widths[c] - 12.0,
                                 row_height - 8.0,
-                                "",
-                                "",
                             );
+                            let mut row = render_row(&cell_block, frame, "", "", Align::Block);
                             row.table_cell = true;
                             // The style's own text colour (white on a dark
                             // header fill), not the page ink.
@@ -662,15 +692,8 @@ pub(crate) fn project(
                             ..Default::default()
                         },
                     });
-                    rows.push(render_row(
-                        &title_block,
-                        12.0,
-                        y + 8.0,
-                        chart_w - 24.0,
-                        24.0,
-                        "",
-                        "",
-                    ));
+                    let frame = Frame::new(12.0, y + 8.0, chart_w - 24.0, 24.0);
+                    rows.push(render_row(&title_block, frame, "", "", Align::Block));
                     let summary_text = format!(
                         "[{:?} chart: {} categories, {} series]",
                         chart.chart_type,
@@ -678,15 +701,8 @@ pub(crate) fn project(
                         chart.series.len()
                     );
                     let summary_block = RichBlock::new(block.id, "paragraph", &summary_text);
-                    rows.push(render_row(
-                        &summary_block,
-                        12.0,
-                        y + 36.0,
-                        chart_w - 24.0,
-                        20.0,
-                        "",
-                        "",
-                    ));
+                    let frame = Frame::new(12.0, y + 36.0, chart_w - 24.0, 20.0);
+                    rows.push(render_row(&summary_block, frame, "", "", Align::Block));
                 }
             }
             continue;
@@ -695,14 +711,15 @@ pub(crate) fn project(
         let segments = line_segments(block, line.start, line.end);
         if let [only] = segments.as_slice() {
             let family = drawn_family(&only.family, &mut families);
+            // The layout measured this line; its text sits where the
+            // layout's own highlight for it does.
+            let measured = line.bounds.width / zoom;
             rows.push(render_row(
                 &fragment_block(block, line.start, line.end),
-                x,
-                y,
-                column_width,
-                height,
+                Frame::new(x, y, column_width, height),
                 &marker,
                 &family,
+                Align::Line(measured),
             ));
             continue;
         }
@@ -712,15 +729,12 @@ pub(crate) fn project(
         let text = block.text.as_str();
         let mut drawn_any = false;
         for segment in &segments {
-            // The page markup strips white space at the start of a row, so a
-            // stretch is drawn from its first visible character and placed by
-            // the measurement of that character.
-            let stretch = &text[segment.start..segment.end];
-            let skipped = stretch.len() - stretch.trim_start().len();
-            let start = segment.start + skipped;
-            if start >= segment.end {
+            // White space between two stretches draws nothing, so it gets no
+            // row of its own.
+            if text[segment.start..segment.end].trim().is_empty() {
                 continue;
             }
+            let start = segment.start;
             let from = line.global_start + (start - line.start);
             let to = line.global_start + (segment.end - line.start);
             let rects = flow.selection_rects(
@@ -738,12 +752,10 @@ pub(crate) fn project(
             let family = drawn_family(&segment.family, &mut families);
             let mut row = render_row(
                 &fragment_block(block, start, segment.end),
-                segment_x,
-                y,
-                width,
-                height,
+                Frame::new(segment_x, y, width, height),
                 if drawn_any { "" } else { &marker },
                 &family,
+                Align::Start,
             );
             row.alignment = writer_render_alignment(loom_text::Alignment::Left);
             if drawn_any {

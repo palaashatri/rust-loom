@@ -77,15 +77,6 @@ pub(crate) fn insert_break(app: &WriterApp, state: &GuiState, soft: bool) {
     }
 }
 
-/// The markup text without the break characters, which draw as nothing.
-pub(crate) fn without_breaks(markup: String) -> String {
-    if markup.contains([SOFT_BREAK, PAGE_BREAK]) {
-        markup.replace([SOFT_BREAK, PAGE_BREAK], "")
-    } else {
-        markup
-    }
-}
-
 #[cfg(test)]
 #[path = "break_keys_tests.rs"]
 mod tests;

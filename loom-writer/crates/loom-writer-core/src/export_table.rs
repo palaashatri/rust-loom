@@ -812,7 +812,10 @@ mod tests {
                     && x2 >= x + 0.5
             })
         };
-        assert!(rule_under("2"), "the underlined cell run has a rule under it");
+        assert!(
+            rule_under("2"),
+            "the underlined cell run has a rule under it"
+        );
         assert!(!rule_under("Tea"), "an untouched cell has no rule");
     }
 

@@ -358,24 +358,6 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
     set_selection_italic(&mut document, DocumentSelection::range(0, 6), true);
     set_selection_underline(&mut document, DocumentSelection::range(0, 6), true);
 
-    let markup = writer_render_markup(&document.blocks[0]);
-    assert!(
-        markup.contains("**"),
-        "bold run must reach the display projection"
-    );
-    assert!(
-        markup.contains("*"),
-        "italic run must reach the display projection"
-    );
-    assert!(
-        markup.contains("<u>"),
-        "underline run must reach the display projection"
-    );
-    assert!(
-        slint::StyledText::from_markdown(&markup).is_ok(),
-        "combined character-style markup must be accepted by StyledText"
-    );
-
     apply_document(&app, &document);
     let rows = app.get_render_blocks();
     assert_eq!(rows.row_count(), 1);
@@ -389,24 +371,28 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
         row.height > row.font_size,
         "wrapped row needs explicit layout height"
     );
-    assert_ne!(
-        row.content,
-        slint::StyledText::from_plain_text(document.blocks[0].text.as_str()),
-        "styled rows must not silently fall back to plain text"
-    );
-    let content_debug = format!("{:?}", row.content);
+    let segments: Vec<_> = row.segments.iter().collect();
+    assert_eq!(segments.len(), 2, "one styled word and the plain rest");
+    let styled = &segments[0];
+    assert_eq!(styled.text.as_str(), "Styled", "plain words, no markup");
     assert!(
-        content_debug.contains("Strong"),
-        "bold span missing from StyledText"
+        styled.weight >= 700 && styled.italic && styled.underline,
+        "bold, italic and underline reach the page: {styled:?}"
+    );
+    assert_eq!(segments[1].text.as_str(), " heading");
+    assert!(
+        segments[1].weight < 700 && !segments[1].italic && !segments[1].underline,
+        "the rest stays plain"
     );
     assert!(
-        content_debug.contains("Emphasis"),
-        "italic span missing from StyledText"
+        row.positioned,
+        "several looks are placed segment by segment"
     );
     assert!(
-        content_debug.contains("Underline"),
-        "underline span missing from StyledText"
+        segments[0].x > 0.0 && segments[1].x > segments[0].x,
+        "a centred line starts inside the row, its segments follow in order: {segments:?}"
     );
+    assert_eq!(row.rules.row_count(), 1, "the underline is drawn as a rule");
 }
 
 #[test]

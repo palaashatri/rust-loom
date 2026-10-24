@@ -133,9 +133,3 @@ fn breaks_do_not_go_inside_a_table_cell() {
     assert!(press(&app, false, true));
     assert_eq!(state.current.borrow().editor_text(), before);
 }
-
-#[test]
-fn break_characters_are_not_drawn() {
-    let markup = super::without_breaks("a\u{b}b\u{c}".to_string());
-    assert_eq!(markup, "ab");
-}

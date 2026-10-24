@@ -9,9 +9,37 @@ export { WriterOutlinePane, WriterOutlineEntry } from "outline_pane.slint";
 export { WriterInspector } from "inspector.slint";
 export { PictureAltDialog, PictureAlt } from "picture_alt_dialog.slint";
 
+/// One stretch of a row's text that is drawn in a single look: the plain words
+/// of the document and the character style they carry, never markup.
+export struct WriterTextSegment {
+    text: string,
+    /// Left edge and top from the row's own, for a positioned row.
+    x: length,
+    y: length,
+    /// 700 for a bold run, else 400: the page measures weights below Bold as
+    /// Regular, so it draws them that way too.
+    weight: int,
+    italic: bool,
+    underline: bool,
+    strikethrough: bool,
+}
+
+/// A line drawn under (underline) or through (strikethrough) a segment, in the
+/// row's own coordinates. Slint's text item cannot draw either by itself.
+export struct WriterTextRule {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
 /// A rendered paragraph projected from the Writer document model.
 export struct WriterRenderBlock {
-    content: styled-text,
+    segments: [WriterTextSegment],
+    rules: [WriterTextRule],
+    /// False: one segment that the text item aligns and wraps itself. True:
+    /// each segment sits at its own `x`/`y` and the row is not wrapped again.
+    positioned: bool,
     x: length,
     y: length,
     width: length,
@@ -304,23 +332,49 @@ component WriterDocumentEditor inherits Rectangle {
             vertical-alignment: top;
             accessible-role: none;
         }
-        for block in root.render-blocks : StyledText {
+        for block in root.render-blocks : Rectangle {
             x: block.x * root.page-zoom;
             y: block.y * root.page-zoom;
-            text: block.content;
-            default-font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
-            default-font-size: block.font-size * root.page-zoom;
-            default-color: Theme.active-theme == "high-contrast" && block.table-cell
+            accessible-role: none;
+            property <color> ink: Theme.active-theme == "high-contrast" && block.table-cell
                 ? Theme.palette().paper-ink
                 : block.has-color ? block.color : Theme.palette().paper-ink;
-            horizontal-alignment: block.alignment == 1
-                ? TextHorizontalAlignment.center
-                : block.alignment == 2
-                    ? TextHorizontalAlignment.right
-                    : TextHorizontalAlignment.left;
-            vertical-alignment: top;
+            // One Text per typed segment. A row of plain text is one segment
+            // that the Text aligns and wraps itself; a row with several looks
+            // or with rules is positioned segment by segment from Rust.
+            for segment in block.segments : Text {
+                x: block.positioned ? segment.x * root.page-zoom : 0px;
+                y: block.positioned ? segment.y * root.page-zoom : 0px;
+                width: block.positioned
+                    ? max(1px, (block.width - segment.x + 4px) * root.page-zoom)
+                    : parent.width;
+                height: block.positioned
+                    ? max(block.font-size * 1.4, block.height - segment.y) * root.page-zoom
+                    : parent.height;
+                text: segment.text;
+                font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
+                font-size: block.font-size * root.page-zoom;
+                font-weight: segment.weight;
+                font-italic: segment.italic;
+                color: parent.ink;
+                wrap: block.positioned ? TextWrap.no-wrap : TextWrap.word-wrap;
+                horizontal-alignment: !block.positioned && block.alignment == 1
+                    ? TextHorizontalAlignment.center
+                    : !block.positioned && block.alignment == 2
+                        ? TextHorizontalAlignment.right
+                        : TextHorizontalAlignment.left;
+                vertical-alignment: top;
+            }
+            for rule in block.rules : Rectangle {
+                x: rule.x * root.page-zoom;
+                y: rule.y * root.page-zoom;
+                width: max(1px, rule.width * root.page-zoom);
+                height: max(1px, rule.height * root.page-zoom);
+                background: parent.ink;
+                accessible-role: none;
+            }
         }
         for block in root.render-blocks : Text {
             x: block.x * root.page-zoom;

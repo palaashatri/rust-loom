@@ -50,7 +50,6 @@ mod window_chrome;
 
 use history::{EditorHistory, HistoryKind};
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -1560,7 +1559,7 @@ fn writer_render_height(block: &RichBlock, font_size: f32) -> f32 {
 }
 
 fn writer_render_height_for_width(block: &RichBlock, font_size: f32, usable_width: f32) -> f32 {
-    // StyledText computes height from the available width. Give each row a
+    // Page text wraps to the available width. Give each row a
     // conservative explicit height derived from the same PageStyle content
     // width used by the core layout; clipping is worse than a little leading.
     let average_glyph_width = (font_size * 0.55).max(1.0);
@@ -1583,139 +1582,10 @@ fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
         loom_text::Alignment::Left => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
-        // StyledText does not expose a justify mode.  Preserve an explicit
+        // The page text item has no justify mode.  Preserve an explicit
         // unsupported sentinel so persisted Justify documents are not falsely
         // projected as left-aligned paragraphs.
         loom_text::Alignment::Justify => -1,
-    }
-}
-
-fn writer_render_markup(block: &RichBlock) -> String {
-    let text = block.text.as_str();
-    if text.is_empty() {
-        return String::new();
-    }
-
-    let mut boundaries = BTreeSet::from([0usize, text.len()]);
-    for run in &block.runs {
-        boundaries.insert(floor_char_boundary_for_render(text, run.start));
-        boundaries.insert(floor_char_boundary_for_render(text, run.end));
-    }
-    let boundaries = boundaries.into_iter().collect::<Vec<_>>();
-    // Neighbouring pieces that render alike (runs can differ in font size or
-    // family, which the markup does not express) must share one wrapper:
-    // wrapping each separately puts `**` next to `**`, which the parser then
-    // prints as literal asterisks.
-    let mut spans: Vec<(usize, usize, Option<&loom_text::CharacterStyle>)> = Vec::new();
-    for pair in boundaries.windows(2) {
-        let (start, end) = (pair[0], pair[1]);
-        if start >= end {
-            continue;
-        }
-        let style = block
-            .runs
-            .iter()
-            .find(|run| run.start <= start && start < run.end)
-            .map(|run| &run.style);
-        match spans.last_mut() {
-            Some(last) if markup_signature(last.2) == markup_signature(style) => last.1 = end,
-            _ => spans.push((start, end, style)),
-        }
-    }
-    let mut markup = String::with_capacity(text.len() + block.runs.len() * 8);
-    for (start, end, style) in spans {
-        let escaped = escape_writer_markdown(&text[start..end]);
-        append_writer_styled_span(&mut markup, &escaped, style);
-    }
-    markup
-}
-
-/// The character attributes the page markup can express.
-fn markup_signature(style: Option<&loom_text::CharacterStyle>) -> (bool, bool, bool, bool) {
-    match style {
-        None => (false, false, false, false),
-        Some(style) => (
-            style.underline,
-            style.strikethrough,
-            style.italic,
-            style.weight.numeric() >= loom_text::FontWeight::Bold.numeric(),
-        ),
-    }
-}
-
-fn floor_char_boundary_for_render(text: &str, offset: usize) -> usize {
-    let mut value = offset.min(text.len());
-    while value > 0 && !text.is_char_boundary(value) {
-        value -= 1;
-    }
-    value
-}
-
-fn escape_writer_markdown(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '*' | '_' | '`' | '[' | ']' | '~' | '#' | '\\' => {
-                escaped.push('\\');
-                escaped.push(ch);
-            }
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
-fn append_writer_styled_span(
-    markup: &mut String,
-    escaped: &str,
-    style: Option<&loom_text::CharacterStyle>,
-) {
-    let Some(style) = style else {
-        markup.push_str(escaped);
-        return;
-    };
-
-    // CommonMark cannot close emphasis after whitespace or open it before
-    // whitespace, so such delimiters would print literally. Keep the edge
-    // whitespace outside the wrappers.
-    let core = escaped.trim_matches(|c: char| c.is_whitespace());
-    if core.len() != escaped.len() {
-        let lead = escaped.len()
-            - escaped
-                .trim_start_matches(|c: char| c.is_whitespace())
-                .len();
-        markup.push_str(&escaped[..lead]);
-        if !core.is_empty() {
-            append_writer_styled_span(markup, core, Some(style));
-        }
-        markup.push_str(&escaped[lead + core.len()..]);
-        return;
-    }
-
-    // Keep the wrappers properly nested so StyledText's CommonMark parser
-    // preserves combined bold/italic/underline runs.
-    let mut wrappers: Vec<(&str, &str)> = Vec::new();
-    if style.underline {
-        wrappers.push(("<u>", "</u>"));
-    }
-    if style.strikethrough {
-        wrappers.push(("~~", "~~"));
-    }
-    if style.italic {
-        wrappers.push(("*", "*"));
-    }
-    if style.weight.numeric() >= loom_text::FontWeight::Bold.numeric() {
-        wrappers.push(("**", "**"));
-    }
-    for (open, _) in &wrappers {
-        markup.push_str(open);
-    }
-    markup.push_str(escaped);
-    for (_, close) in wrappers.iter().rev() {
-        markup.push_str(close);
     }
 }
 
@@ -4137,9 +4007,15 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             formatted_document.blocks.len()
         ));
     }
-    let preview_markup = writer_render_markup(&formatted_document.blocks[0]);
-    if !preview_markup.contains("**") || !preview_markup.contains('*') {
-        return Err("journey rich preview did not project bold and italic markup".into());
+    let first_row = render_rows
+        .row_data(0)
+        .ok_or("journey rich preview has no first row")?;
+    if !first_row
+        .segments
+        .iter()
+        .any(|segment| segment.weight >= 700 && segment.italic)
+    {
+        return Err("journey rich preview did not project bold and italic text".into());
     }
     screenshots.push(capture_writer_journey_step(
         &app,
@@ -4627,6 +4503,10 @@ mod appearance_tests;
 #[cfg(test)]
 mod audit_tests;
 #[cfg(test)]
+mod comment_colour_tests;
+#[cfg(test)]
+mod comment_composer_tests;
+#[cfg(test)]
 mod docx_export_tests;
 #[cfg(test)]
 mod find_tests;
@@ -4643,11 +4523,9 @@ mod recovery_order_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
+mod render_text_tests;
+#[cfg(test)]
 mod review_tests;
-#[cfg(test)]
-mod comment_colour_tests;
-#[cfg(test)]
-mod comment_composer_tests;
 
 #[cfg(test)]
 mod text_scale_tests;

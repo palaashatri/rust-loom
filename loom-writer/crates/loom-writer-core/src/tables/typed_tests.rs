@@ -351,12 +351,24 @@ fn exports_read_the_typed_table() {
     });
     let document = document_with(table);
     let markdown = document.to_markdown();
-    assert!(markdown.contains("**Head**"), "bold is written as emphasis: {markdown}");
-    assert!(markdown.contains(":---:"), "the centred column is marked: {markdown}");
+    assert!(
+        markdown.contains("**Head**"),
+        "bold is written as emphasis: {markdown}"
+    );
+    assert!(
+        markdown.contains(":---:"),
+        "the centred column is marked: {markdown}"
+    );
     let pdf = crate::export_pdf(&document);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
-    assert!(content.contains("Head"), "the PDF prints the bold cell's text");
-    assert!(!content.contains('*'), "no Markdown emphasis reaches the PDF");
+    assert!(
+        content.contains("Head"),
+        "the PDF prints the bold cell's text"
+    );
+    assert!(
+        !content.contains('*'),
+        "no Markdown emphasis reaches the PDF"
+    );
 }
 
 #[test]
@@ -365,6 +377,10 @@ fn layout_has_one_line_per_table_row() {
     let flow = document
         .flow(&crate::PageStyle::default(), crate::PageViewport::default())
         .expect("the table lays out");
-    let lines = flow.lines().iter().filter(|line| line.block_index == 0).count();
+    let lines = flow
+        .lines()
+        .iter()
+        .filter(|line| line.block_index == 0)
+        .count();
     assert_eq!(lines, 2, "a table is one line per row, never wrapped");
 }

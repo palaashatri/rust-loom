@@ -243,7 +243,10 @@ mod tests {
 
         let rects = projection.table_cell_rects;
         let populated_cell = &rects[1];
-        assert_eq!(populated_cell.caret_offset, 1, "B starts after the empty cell and its separator");
+        assert_eq!(
+            populated_cell.caret_offset, 1,
+            "B starts after the empty cell and its separator"
+        );
         let x = populated_cell.x + 6.0;
         let y = populated_cell.y + populated_cell.height / 2.0;
         let hit = writer_pointer_offset_with_rect_lookup(

@@ -1,4 +1,5 @@
 use super::actions_tests::{test_state, text_document};
+use super::projection::render_text::{row_text, Align};
 use super::*;
 
 #[test]
@@ -469,10 +470,9 @@ fn closing_a_clean_document_does_not_prompt() {
 }
 
 #[test]
-fn adjacent_runs_that_render_alike_merge_into_one_span() {
-    // Regression: runs that differ only in font size or family (attributes the
-    // page markup does not express) were each wrapped separately, so delimiters
-    // met as `****` / `~~~~` and the page showed literal asterisks and tildes.
+fn adjacent_runs_that_render_alike_merge_into_one_segment() {
+    // Runs that differ only in font size or family (attributes the page does
+    // not draw per run) are one look, so they are one segment and one rule.
     let mut document = text_document("Write, format, and export.");
     set_selection_bold(&mut document, DocumentSelection::range(0, 13), true);
     set_selection_strikethrough(&mut document, DocumentSelection::range(0, 13), true);
@@ -483,30 +483,38 @@ fn adjacent_runs_that_render_alike_merge_into_one_span() {
     second.style.font_size += 2.0;
     document.blocks[0].runs = vec![first, second];
 
-    let markup = writer_render_markup(&document.blocks[0]);
+    let row = row_text(&document.blocks[0], 12.0, 400.0, Align::Block);
+    let texts: Vec<&str> = row.segments.iter().map(|s| s.text.as_str()).collect();
 
-    assert!(
-        !markup.contains("****") && !markup.contains("~~~~"),
-        "spans that render alike must merge, got {markup:?}"
+    assert_eq!(
+        texts,
+        ["Write, format", ", and export."],
+        "runs that draw alike must merge into one segment"
     );
-    assert!(
-        markup.starts_with("~~**Write, format**~~"),
-        "one merged bold+strike span expected, got {markup:?}"
+    assert!(row.segments[0].weight >= 700 && row.segments[0].strikethrough);
+    assert_eq!(
+        row.rules.len(),
+        1,
+        "one strikethrough rule for the merged run"
     );
 }
 
 #[test]
-fn styled_spans_keep_edge_whitespace_outside_their_delimiters() {
-    // Regression: a styled span ending in a space produced `**text **`, which
-    // CommonMark cannot close, so the page showed literal asterisks.
+fn styled_segments_keep_their_edge_whitespace_in_the_drawn_text() {
+    // A styled run that ends in a space draws that space, and the segments
+    // add up to exactly the text the user typed.
     let mut document = text_document("open .loomdoc packages");
     set_selection_bold(&mut document, DocumentSelection::range(0, 5), true);
     set_selection_italic(&mut document, DocumentSelection::range(0, 5), true);
     set_selection_bold(&mut document, DocumentSelection::range(5, 13), true);
 
-    let markup = writer_render_markup(&document.blocks[0]);
+    let row = row_text(&document.blocks[0], 12.0, 400.0, Align::Block);
+    let texts: Vec<&str> = row.segments.iter().map(|s| s.text.as_str()).collect();
 
-    assert_eq!(markup, "***open*** **.loomdoc** packages");
+    assert_eq!(texts, ["open ", ".loomdoc", " packages"]);
+    assert!(row.segments[0].weight >= 700 && row.segments[0].italic);
+    assert!(row.segments[1].weight >= 700 && !row.segments[1].italic);
+    assert!(row.segments[2].weight < 700);
 }
 
 /// After a successful Save or Save As the window must stop showing the unsaved
