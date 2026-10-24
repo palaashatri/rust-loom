@@ -454,7 +454,7 @@ pub fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                                 let source = state.save_path.borrow();
                                 crate::recovery_draft::payload(&session, source.as_deref())
                             };
-                            payload.and_then(crate::checkpoint_required_recovery)
+                            payload.and_then(crate::recovery_replacement::checkpoint_required_recovery)
                         } else {
                             crate::ensure_recovery_service()
                         };

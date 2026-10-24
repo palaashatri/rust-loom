@@ -82,7 +82,7 @@ pub(super) fn launched_with(dialogs: Rc<dyn FileDialogService>) -> Session {
         .session
         .borrow_mut()
         .select_element("cover-title", false);
-    refresh(&app, &state);
+    refresh_without_recovery(&app, &state);
     local_menu::sync(&app, &menu).expect("project menu");
     render(&app);
     focus_editor_at_launch(&app);

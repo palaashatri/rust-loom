@@ -1,0 +1,83 @@
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component RecoveryFailureNotice inherits Rectangle {
+    in property <string> failure-message: "";
+
+    callback retry();
+    callback save-as();
+
+    height: 148px + Theme.scaled-control-height - Theme.tokens.metrics.control-height;
+    horizontal-stretch: 1;
+    background: Theme.palette().danger-surface;
+    border-width: 1px;
+    border-color: Theme.palette().danger;
+    accessible-role: groupbox;
+    accessible-label: "Recovery failure";
+
+    VerticalLayout {
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
+        padding-top: Theme.tokens.space.sm;
+        padding-bottom: Theme.tokens.space.sm;
+        spacing: Theme.tokens.space.xs;
+
+        Text {
+            text: "Recovery failed. Your latest edits remain pending.";
+            font-size: Theme.type.body;
+            font-weight: 700;
+            color: Theme.palette().danger;
+            wrap: word-wrap;
+            horizontal-alignment: Theme.rtl ? right : left;
+        }
+
+        error-scroll := ScrollView {
+            vertical-stretch: 1;
+            min-height: 32px;
+            preferred-height: 56px;
+            viewport-width: self.width;
+            viewport-height: max(self.height, error-content.preferred-height);
+
+            error-content := Rectangle {
+                width: parent.viewport-width;
+                min-height: parent.height;
+                preferred-height: error-copy.preferred-height;
+
+                error-copy := Text {
+                    width: parent.width;
+                    text: root.failure-message;
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                    wrap: word-wrap;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    accessible-role: text;
+                    accessible-label: self.text;
+                    accessible-live-region: AccessibleLiveness.polite;
+                }
+            }
+        }
+
+        action-row := Rectangle {
+            height: Theme.scaled-control-height;
+
+            retry-button := LoomButton {
+                label: "Retry";
+                variant: "primary";
+                width: self.preferred-width;
+                height: Theme.scaled-control-height;
+                x: Theme.rtl ? 0px : parent.width - self.width - save-as-button.width - Theme.tokens.space.sm;
+                clicked => { root.retry(); }
+            }
+
+            save-as-button := LoomButton {
+                label: "Save As";
+                variant: "secondary";
+                width: self.preferred-width;
+                height: Theme.scaled-control-height;
+                x: Theme.rtl ? retry-button.x + retry-button.width + Theme.tokens.space.sm : parent.width - self.width;
+                clicked => { root.save-as(); }
+            }
+        }
+    }
+}

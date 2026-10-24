@@ -824,7 +824,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
         1 => format!("{} {slides} · 1 issue to fix", document.len()),
         n => format!("{} {slides} · {n} issues to fix", document.len()),
     };
-    app.set_status_left(SharedString::from(status));
+    recovery_deferred::project_status(app, SharedString::from(status));
     app.set_status_right(deck_status_text(state).into());
     app.set_deck_dirty(deck_is_dirty(state));
     picture_view::sync(app, document);
@@ -980,7 +980,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 }
 
 fn set_status(app: &PresentApp, value: impl Into<SharedString>) {
-    app.set_status_left(value.into());
+    recovery_deferred::project_status(app, value);
 }
 
 fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
@@ -1096,20 +1096,6 @@ pub(crate) fn accept_pending_pptx_import(
     Ok(status)
 }
 
-/// Checkpoint a candidate through the live recovery service. Warning acceptance
-/// must fail closed instead of treating an absent recovery slot as success.
-pub(crate) fn checkpoint_required_recovery(payload: Vec<u8>) -> Result<(), String> {
-    PRESENT_RECOVERY.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let recovery = slot
-            .as_mut()
-            .ok_or_else(|| "recovery service is unavailable".to_string())?;
-        recovery
-            .checkpoint("loom.present/1", payload)
-            .map_err(|error| error.to_string())
-    })
-}
-
 /// Marks that Cancel must restore the visible session before a candidate checkpoint can mutate recovery.
 fn checkpoint_pending_import_recovery(
     pending: &mut table_actions::PendingPptxImport,
@@ -1141,6 +1127,9 @@ pub(crate) fn ensure_recovery_service() -> Result<(), String> {
 }
 
 fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
+    if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+        return;
+    }
     let session = empty_session();
     *state.last_saved.borrow_mut() = session.document.clone();
     *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
@@ -1152,6 +1141,9 @@ fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
 }
 
 fn replace_with_template(app: &PresentApp, state: &GuiState, choice: i32) {
+    if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+        return;
+    }
     let session = slide_layouts::template_session(empty_session(), choice);
     *state.last_saved.borrow_mut() = session.document.clone();
     *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
@@ -1169,6 +1161,9 @@ fn replace_with_template(app: &PresentApp, state: &GuiState, choice: i32) {
 }
 
 fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
+    if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+        return;
+    }
     let session = sample_session();
     *state.last_saved.borrow_mut() = session.document.clone();
     *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
@@ -1208,16 +1203,25 @@ fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
                         );
                     }
                     Ok(candidate) => {
-                        replace_opened_deck(app, state, candidate.path.clone(), candidate.session);
-                        set_status(app, format!("Opened {}", candidate.path.display()));
+                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
+                            replace_opened_deck(
+                                app,
+                                state,
+                                candidate.path.clone(),
+                                candidate.session,
+                            );
+                            set_status(app, format!("Opened {}", candidate.path.display()));
+                        }
                     }
                     Err(error) => set_status(app, format!("Open failed: {error}")),
                 }
             } else {
                 match load_session(&path) {
                     Ok(session) => {
-                        replace_opened_deck(app, state, path.clone(), session);
-                        set_status(app, format!("Opened {}", path.display()));
+                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
+                            replace_opened_deck(app, state, path.clone(), session);
+                            set_status(app, format!("Opened {}", path.display()));
+                        }
                     }
                     Err(error) => set_status(app, format!("Open failed: {error}")),
                 }
@@ -1267,15 +1271,15 @@ fn save_current_deck(
     app.set_status_right(deck_status_text(state).into());
     app.set_deck_dirty(deck_is_dirty(state));
     recovery_deferred::invalidate();
-    match checkpoint_snapshot_recovery(recovery_draft::wrap(Some(path.as_path()), &bytes)) {
+    match recovery_replacement::checkpoint_saved_deck(recovery_draft::wrap(
+        Some(path.as_path()),
+        &bytes,
+    )) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
-        Err(error) => set_status(
-            app,
-            format!(
-                "Saved {}, but recovery checkpoint failed: {error}",
-                path.display()
-            ),
-        ),
+        Err(error) => {
+            recovery_deferred::report_checkpoint_failure(app, error);
+            set_status(app, "Deck saved; recovery checkpoint failed");
+        }
     }
     Ok(true)
 }
@@ -1677,7 +1681,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 &kept,
                 startup_recovery::unix_seconds(),
             )?;
-            reset_recovery_store()?;
+            recovery_replacement::reset_recovery_store()?;
             Some((kept.name, path))
         }
         _ => None,
@@ -1950,17 +1954,19 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
     let state = state.clone();
     let app_ref = app.as_weak();
     app.window().on_close_requested(move || {
-        if let Some(app) = app_ref.upgrade() {
-            if close_blocked_by_pending_import_recovery(&app) {
-                return slint::CloseRequestResponse::KeepWindowShown;
-            }
-            if request_deck_replacement(&app, &state, PendingReplacement::CloseWindow) {
-                return slint::CloseRequestResponse::KeepWindowShown;
-            }
+        let Some(app) = app_ref.upgrade() else {
+            return slint::CloseRequestResponse::HideWindow;
+        };
+        if close_blocked_by_pending_import_recovery(&app) {
+            return slint::CloseRequestResponse::KeepWindowShown;
+        }
+        if request_deck_replacement(&app, &state, PendingReplacement::CloseWindow) {
+            return slint::CloseRequestResponse::KeepWindowShown;
+        }
+        if !recovery_replacement::prepare_to_close(&app) {
+            return slint::CloseRequestResponse::KeepWindowShown;
         }
         // The presenter window must not keep the process alive after the deck closes.
-        presenter::close();
-        end_session_recovery();
         slint::CloseRequestResponse::HideWindow
     });
 }
@@ -1983,29 +1989,9 @@ fn close_blocked_by_pending_import_recovery(app: &PresentApp) -> bool {
     must_resolve
 }
 
-/// Empties the recovery store and opens it again, so this session records from an
-/// empty store. The caller has written anything it must keep first.
-fn reset_recovery_store() -> Result<(), String> {
-    recovery_deferred::invalidate();
-    let closed = PRESENT_RECOVERY.with(|slot| slot.borrow_mut().take());
-    if let Some(recovery) = closed {
-        recovery.clear().map_err(|error| error.to_string())?;
-    }
-    initialize_snapshot_recovery().map(|_| ())
-}
-
-/// The window is really closing: drop the recovery data so a discarded or saved
-/// deck is not offered again. A crash never reaches here, so it stays recoverable.
+#[cfg(test)]
 fn end_session_recovery() {
-    recovery_deferred::invalidate();
-    if table_actions::PENDING_PPTX_IMPORT.with(|slot| slot.borrow().is_some()) {
-        return;
-    }
-    let cleared = PRESENT_RECOVERY.with(|slot| match slot.borrow_mut().take() {
-        Some(recovery) => recovery.clear().map_err(|error| error.to_string()),
-        None => Ok(()),
-    });
-    if let Err(error) = cleared {
+    if let Err(error) = recovery_replacement::reset_for_close() {
         eprintln!("Present could not clear its recovery data: {error}");
     }
 }
@@ -2022,9 +2008,9 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
             if close_blocked_by_pending_import_recovery(app) {
                 return;
             }
-            presenter::close();
-            end_session_recovery();
-            let _ = slint::ComponentHandle::hide(app);
+            if recovery_replacement::prepare_to_close(app) {
+                let _ = slint::ComponentHandle::hide(app);
+            }
         }
         None => {}
     }
@@ -2036,15 +2022,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     deck_guard::wire(app, state);
     table_actions::wire(app, state);
     element_style_ui::wire(app, state);
-    {
-        let state = state.clone();
-        app.on_recovery_flush(move || {
-            if let Ok(session) = state.session.try_borrow() {
-                let source = state.save_path.borrow().clone();
-                recovery_deferred::flush(&session, source.as_deref());
-            }
-        });
-    }
+    recovery_deferred::wire_callbacks(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2913,8 +2891,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_open_presenter(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Err(error) = presenter::open(&app, &state.session.borrow()) {
-                    app.set_status_left(
-                        format!("Could not open the presenter view: {error}").into(),
+                    recovery_deferred::project_status(
+                        &app,
+                        format!("Could not open the presenter view: {error}"),
                     );
                 }
             }
@@ -3128,8 +3107,11 @@ mod picture_view;
 mod pptx_import;
 mod presenter;
 mod presenter_thumbs;
+#[cfg(test)]
+mod recovery_close_tests;
 mod recovery_deferred;
 mod recovery_draft;
+mod recovery_replacement;
 #[cfg(test)]
 mod scaling_tests;
 mod slide_focus;

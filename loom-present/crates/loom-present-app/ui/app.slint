@@ -13,6 +13,8 @@ import {
 } from "foundation.slint";
 import { PptxImportWarningDialog } from "pptx_import_warning.slint";
 import { InsertTableDialog } from "insert_table_dialog.slint";
+import { RecoveryFailureNotice } from "recovery_failure_notice.slint";
+import { SaveChangesDialog } from "save_changes_dialog.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
@@ -147,6 +149,7 @@ export component PresentApp inherits Window {
     in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
+    in property <string> recovery-failure-message: "";
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
     in-out property <bool> save-changes-closing: false;
@@ -240,6 +243,7 @@ export component PresentApp inherits Window {
     callback strip-window-changed(int, int);
     /// A deferred recovery draft is due.
     callback recovery-flush();
+    callback recovery-retry();
     callback duplicate-slide;
     callback move-slide-up;
     callback move-slide-down;
@@ -657,6 +661,12 @@ export component PresentApp inherits Window {
                 }
             }
 
+            if !root.is-preview-mode && root.recovery-failure-message != "" : RecoveryFailureNotice {
+                failure-message: root.recovery-failure-message;
+                retry => { root.recovery-retry(); }
+                save-as => { root.save-as-deck(); }
+            }
+
             if !root.is-preview-mode : PresentStatusBar {
                 leading-text: root.status-left;
                 trailing-text: root.status-right;
@@ -770,37 +780,18 @@ export component PresentApp inherits Window {
         close-requested => { root.palette-open = false; root.palette-close(); }
     }
 
-    if root.save-changes-open : save-changes-focus := FocusScope {
+    SaveChangesDialog {
+        x: 0px;
+        y: 0px;
         width: root.width;
         height: root.height;
-        init => { save-button.grab-focus(); }
-        key-pressed(event) => {
-            if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
-            if (event.text == Key.Tab || event.text == Key.Backtab) {
-                if (event.text == Key.Backtab || event.modifiers.shift) {
-                    if (save-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { cancel-button.grab-focus(); } else { save-button.grab-focus(); }
-                } else {
-                    if (cancel-button.has-focus) { discard-button.grab-focus(); } else if (discard-button.has-focus) { save-button.grab-focus(); } else { cancel-button.grab-focus(); }
-                }
-                return accept;
-            }
-            return reject;
-        }
-      Rectangle {
-        width: parent.width; height: parent.height; background: #00000066;
-        TouchArea { clicked => { save-changes-focus.focus(); } }
-        Rectangle { width: min(440px * max(1.0, Theme.text-scale), root.width - 48px); height: min(save-changes-layout.preferred-height, root.height - 48px); x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
-            save-changes-layout := VerticalLayout { padding: 24px; spacing: 12px;
-                Text { text: "Save changes?"; font-size: 22px * max(1.0, Theme.text-scale); font-weight: 700; color: Theme.palette().ink; horizontal-alignment: root.rtl ? right : left; }
-                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; font-size: Theme.type.body; wrap: word-wrap; horizontal-alignment: root.rtl ? right : left; }
-                Rectangle { height: Theme.tokens.metrics.control-height;
-                    save-button := LoomButton { label: root.save-changes-closing ? "Save and close" : "Save"; variant: "primary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? 0px : parent.width - self.width; clicked => { root.save-changes-save(); } }
-                    discard-button := LoomButton { label: "Discard"; variant: "danger"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? save-button.width + 8px : save-button.x - 8px - self.width; clicked => { root.save-changes-discard(); } }
-                    cancel-button := LoomButton { label: "Cancel"; variant: "secondary"; width: self.preferred-width; height: Theme.tokens.metrics.control-height; x: root.rtl ? discard-button.x + discard-button.width + 8px : discard-button.x - 8px - self.width; clicked => { root.save-changes-cancel(); } }
-                }
-            }
-        }
-      }
+        open: root.save-changes-open;
+        document-name: root.save-changes-document;
+        closing: root.save-changes-closing;
+        rtl: root.rtl;
+        save => { root.save-changes-save(); }
+        discard => { root.save-changes-discard(); }
+        cancel => { root.save-changes-cancel(); }
     }
     PptxImportWarningDialog {
         width: root.width;
