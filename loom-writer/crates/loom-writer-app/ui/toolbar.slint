@@ -46,9 +46,9 @@ export component WriterActionToolbar inherits LabeledToolbar {
     /// of `menu-kind`), so closing a menu with Escape does not lose the place.
     public function focus-menu-trigger(kind: int) { root.ask-focus(kind); }
 
-    changed inspector-visible => {
-        if (!root.inspector-visible) { root.focus-inspector-trigger(); }
-    }
+    // Closing the inspector does not move focus from a change handler: the
+    // window asks for it from the user's close action (`focus-inspector-tab`),
+    // because AccessKit can run pending change handlers while it builds the tree.
 
     // Left-to-right order. Right-to-left is the exact mirror image: the groups
     // and the items inside each group are reversed.

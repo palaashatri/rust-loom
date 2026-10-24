@@ -9,6 +9,9 @@ use crate::{apply_state, apply_with_history, GuiState, HistoryKind, WriterApp};
 #[path = "break_keys.rs"]
 pub(crate) mod break_keys;
 
+#[path = "table_format_actions.rs"]
+pub(crate) mod table_format_actions;
+
 /// Wires table-related callbacks into the Slint WriterApp.
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     crate::list_level_actions::wire(state);
@@ -94,6 +97,10 @@ pub(crate) fn insert_table_size(app: &WriterApp, state: &GuiState, rows: usize, 
 
 /// Dispatches a structural table action (insert/delete row/col, merge, split).
 pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
+    if let Some(index) = table_format_actions::column_alignment_index(action) {
+        table_format_actions::align_table_columns_for_index(app, state, index);
+        return;
+    }
     let caret = state.current.borrow().selection().anchor;
     let mut next = state.current.borrow().clone();
     let result = match action {
@@ -162,11 +169,36 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
             }
             next.set_selection(TextSelection::caret(new_caret));
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
-            app.set_status_right(SharedString::from(format!("Table updated: {action}")));
+            app.set_status_right(SharedString::from(table_action_status(action)));
         }
         Err(err) => {
             app.set_status_right(SharedString::from(format!("Table action failed: {err}")));
         }
+    }
+}
+
+/// The status line's words for a structural table action, given its dispatch id.
+fn table_action_status(action: &str) -> &'static str {
+    match action {
+        "insert-row-above" => "Inserted a row above",
+        "insert-row-below" => "Inserted a row below",
+        "insert-col-left" => "Inserted a column to the left",
+        "insert-col-right" => "Inserted a column to the right",
+        "delete-row" => "Deleted the row",
+        "delete-col" => "Deleted the column",
+        "merge-cells" => "Merged the selected cells",
+        "split-cell" => "Split the cell",
+        _ => "Table updated",
+    }
+}
+
+/// The inspector's name for a table option id.
+fn table_option_label(option: &str) -> &'static str {
+    match option {
+        "header_row" => "Header row",
+        "banded_rows" => "Banded rows",
+        "first_column" => "First column",
+        _ => "Table option",
     }
 }
 
@@ -191,7 +223,11 @@ pub(crate) fn set_table_style(app: &WriterApp, state: &GuiState, style_id: &str)
     match next.set_table_style_at_offset(caret, style_id) {
         Ok(()) => {
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
-            app.set_status_right(SharedString::from(format!("Table style set: {style_id}")));
+            let status = match loom_objects::TableStyleCatalog::get(style_id) {
+                Some(style) => format!("Table style set: {}", style.name),
+                None => "Table style set".to_string(),
+            };
+            app.set_status_right(SharedString::from(status));
         }
         Err(err) => {
             app.set_status_right(SharedString::from(format!("Style failed: {err}")));
@@ -207,7 +243,8 @@ pub(crate) fn toggle_table_option(app: &WriterApp, state: &GuiState, option: &st
         Ok(()) => {
             apply_with_history(app, state, next, HistoryKind::DocumentAction);
             app.set_status_right(SharedString::from(format!(
-                "Table option toggled: {option}"
+                "Table option toggled: {}",
+                table_option_label(option)
             )));
         }
         Err(err) => {
@@ -414,13 +451,13 @@ pub(crate) fn clear_table_cell_selection_range() {
 pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
     use loom_command::CommandSpec;
     vec![
-        CommandSpec::new("insert.table", "Insert Table...")
+        CommandSpec::new("insert.table", "Insert Table")
             .with_undo_label("Insert Table")
             .with_description("Insert a table at the caret; its cells are edited as text")
             .with_category("insert")
             .with_order(20),
-        CommandSpec::new("writer.table.insert", "Insert Markdown Table (text)")
-            .with_undo_label("Insert Markdown Table")
+        CommandSpec::new("writer.table.insert", "Insert Table")
+            .with_undo_label("Insert Table")
             .with_description("Insert a Markdown table at the caret; its cells are edited as text")
             .with_category("insert")
             .with_order(21),
@@ -633,6 +670,16 @@ pub(crate) fn handle_table_key(
         drop(doc);
         crate::refresh_render_projection_of(app, state);
         return false;
+    }
+
+    // Ctrl+B, Ctrl+I and Ctrl+U format the typed runs of the selected cells or
+    // of the selected text inside one cell; other selections keep their path.
+    if ctrl && !alt && !shift {
+        if let Some(emphasis) = table_format_actions::Emphasis::from_shortcut(key) {
+            if table_format_actions::toggle_emphasis(app, state, emphasis) {
+                return true;
+            }
+        }
     }
 
     // Ctrl+Alt shortcuts

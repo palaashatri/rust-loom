@@ -1133,7 +1133,7 @@ fn table_insertion_cell_navigation_and_docx_import_warning_work_from_the_keyboar
 
     // Insert a table from the Ctrl+K command palette.
     ctrl(&s.app, "k");
-    type_text(&s.app, "markdown table");
+    type_text(&s.app, "insert table");
     press(&s.app, Key::Return);
     assert!(!s.app.get_palette_open());
     assert!(

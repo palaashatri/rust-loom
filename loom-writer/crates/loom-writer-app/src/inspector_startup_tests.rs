@@ -162,3 +162,81 @@ fn focus_page_at_launch_focuses_editor_synchronously_without_mutating_focus_duri
         "ensure_tree_instantiated must not mutate focus_item after focus_page_at_launch"
     );
 }
+
+#[test]
+fn narrowing_after_launch_closes_the_inspector_without_moving_focus_during_tree_build() {
+    use slint::private_unstable_api::re_exports::WindowInner;
+    // Launch docked (1296 px) with the inspector open and draw once as the
+    // window first shows; the page owns keyboard focus.
+    let (app, _state) = launched(1296);
+    let _ = snapshot_component(&app, 1296.0, 800.0, 1.0).expect("initial show draw");
+    let window_inner = WindowInner::from_pub(app.window());
+    window_inner.ensure_tree_instantiated();
+    let page = window_inner
+        .focus_item
+        .borrow()
+        .upgrade()
+        .expect("the page owns focus after launch");
+
+    // Narrow to 1060 px right after launch: the auto-opened inspector closes.
+    app.invoke_window_resized(1060.0);
+    assert!(
+        !app.get_show_inspector(),
+        "the auto-opened inspector closes"
+    );
+
+    // AccessKit's build_new_tree runs pending change handlers while it holds
+    // its adapter borrow. Closing must not move focus from inside them: a
+    // focus change there re-borrows the adapter and panics on Windows and Linux.
+    window_inner.ensure_tree_instantiated();
+    let after = window_inner
+        .focus_item
+        .borrow()
+        .upgrade()
+        .expect("focused item after the tree build");
+    assert_eq!(
+        page, after,
+        "closing the auto-opened inspector moved focus during tree instantiation"
+    );
+}
+
+/// Whether the keyboard focus sits inside any element with this accessible
+/// label, judged by window geometry (the focused item's centre inside it).
+fn focus_is_on_element_labelled(app: &WriterApp, label: &str) -> bool {
+    use slint::private_unstable_api::re_exports::WindowInner;
+    let Some(item) = WindowInner::from_pub(app.window())
+        .focus_item
+        .borrow()
+        .upgrade()
+    else {
+        return false;
+    };
+    let geometry = item.geometry();
+    let origin = item.map_to_window(geometry.origin);
+    let (cx, cy) = (
+        origin.x + geometry.size.width / 2.0,
+        origin.y + geometry.size.height / 2.0,
+    );
+    ElementHandle::find_by_accessible_label(app, label).any(|element| {
+        let (p, s) = (element.absolute_position(), element.size());
+        cx >= p.x && cx <= p.x + s.width && cy >= p.y && cy <= p.y + s.height
+    })
+}
+
+#[test]
+fn closing_the_docked_inspector_returns_focus_to_its_toolbar_tab() {
+    // A user closes the inspector (the same callback its close button, its
+    // Format tab and the View menu use). Focus goes back to the Format tab.
+    let (app, _state) = launched(1280);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render open");
+    assert!(app.get_show_inspector());
+
+    app.invoke_toggle_inspector();
+    assert!(!app.get_show_inspector());
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render closed");
+
+    assert!(
+        focus_is_on_element_labelled(&app, "Format"),
+        "closing the inspector must return focus to its Format tab"
+    );
+}

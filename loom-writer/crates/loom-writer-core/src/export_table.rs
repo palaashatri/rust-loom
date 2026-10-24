@@ -39,7 +39,7 @@ impl Cell {
         {
             let start = text.len();
             text.push_str(&piece.text);
-            if piece.bold || piece.italic {
+            if piece.bold || piece.italic || piece.underline {
                 let style = CharacterStyle {
                     weight: if piece.bold {
                         FontWeight::Bold
@@ -47,6 +47,7 @@ impl Cell {
                         FontWeight::Regular
                     },
                     italic: piece.italic,
+                    underline: piece.underline,
                     ..CharacterStyle::default()
                 };
                 runs.push(StyleRun {
@@ -333,6 +334,7 @@ fn draw_line(
     for pair in cuts.windows(2) {
         let (from, to) = (pair[0], pair[1]);
         let mut style = base.clone();
+        let mut underline = false;
         if let Some(run) = line
             .runs
             .iter()
@@ -340,10 +342,24 @@ fn draw_line(
         {
             style.bold |= run.style.weight.numeric() >= FontWeight::Bold.numeric();
             style.italic |= run.style.italic;
+            underline = run.style.underline;
         }
         let piece = &line.text[from..to];
         pdf.draw_text(page, x, baseline, piece, &style);
-        x += pdf_text_width(piece, &style);
+        let width = pdf_text_width(piece, &style);
+        // An underlined run gets the same rule the paragraphs draw under it.
+        if underline && !piece.trim().is_empty() {
+            let rule_y = baseline - style.size_pt * 0.12;
+            pdf.draw_line(
+                page,
+                x,
+                rule_y,
+                x + width,
+                rule_y,
+                PathStyle::stroked(style.fill_rgb, (style.size_pt / 24.0).max(0.5)),
+            );
+        }
+        x += width;
     }
 }
 
@@ -674,6 +690,167 @@ mod tests {
             fifty.0 > columns[1] + CELL_PAD_X_PT + 1.0,
             "50 is centred in its column: x {} in {columns:?}",
             fifty.0
+        );
+    }
+
+    /// A typed 2x2 table after a paragraph: `Name`/`Qty` over `Tea`/`2`.
+    fn typed_table_document() -> (WriterDocument, u64) {
+        use loom_objects::table::Table;
+        let mut table = Table::new(2, 2);
+        table.set_cell_text(0, 0, "Name");
+        table.set_cell_text(0, 1, "Qty");
+        table.set_cell_text(1, 0, "Tea");
+        table.set_cell_text(1, 1, "2");
+        let mut document = WriterDocument::new("table", "Table");
+        document
+            .blocks
+            .push(crate::RichBlock::table_block(9, table));
+        (document, 9)
+    }
+
+    /// The `w:tc` element of the DOCX table whose text is `text`.
+    fn docx_cell_with_text<'a, 'i>(
+        document: &'a roxmltree::Document<'i>,
+        text: &str,
+    ) -> roxmltree::Node<'a, 'i> {
+        document
+            .descendants()
+            .filter(|node| node.tag_name().name() == "tc")
+            .find(|cell| {
+                cell.descendants()
+                    .filter(|node| node.tag_name().name() == "t")
+                    .filter_map(|node| node.text())
+                    .collect::<String>()
+                    == text
+            })
+            .unwrap_or_else(|| panic!("a cell reading {text:?}"))
+    }
+
+    #[test]
+    fn docx_cells_keep_the_editor_column_alignment_bold_and_underline() {
+        use loom_objects::table::HorizontalAlign;
+        let (mut document, id) = typed_table_document();
+        document
+            .set_table_column_alignment(id, 1..2, HorizontalAlign::Center)
+            .expect("centre column Qty");
+        document
+            .set_table_cells_runs(id, 1..2, 1..2, |run| run.underline = true)
+            .expect("underline cell 2");
+        let export = crate::export_docx(&document).expect("docx");
+        let archive =
+            loom_package::zip::PackageArchive::from_bytes(&export.bytes).expect("zip reads back");
+        let xml = String::from_utf8(
+            archive
+                .get("word/document.xml")
+                .expect("document part")
+                .to_vec(),
+        )
+        .expect("utf-8");
+        let body = roxmltree::Document::parse(&xml).expect("well formed");
+        let has = |cell: roxmltree::Node, name: &str| {
+            cell.descendants()
+                .any(|node| node.tag_name().name() == name)
+        };
+        let centred = |cell: roxmltree::Node| {
+            cell.descendants().any(|node| {
+                node.tag_name().name() == "jc"
+                    && node
+                        .attributes()
+                        .any(|attr| attr.name() == "val" && attr.value() == "center")
+            })
+        };
+        let two = docx_cell_with_text(&body, "2");
+        assert!(centred(two), "the centred column is centred in Word too");
+        assert!(has(two, "u"), "the underlined run is underlined in Word");
+        let tea = docx_cell_with_text(&body, "Tea");
+        assert!(!centred(tea), "column Name keeps its own alignment");
+        assert!(!has(tea, "u"), "untouched cells are not underlined");
+    }
+
+    #[test]
+    fn a_centred_typed_column_is_centred_in_the_pdf() {
+        use loom_objects::table::HorizontalAlign;
+        let (mut document, id) = typed_table_document();
+        let left = text_runs(&export_pdf(&document));
+        document
+            .set_table_column_alignment(id, 1..2, HorizontalAlign::Center)
+            .expect("centre column Qty");
+        let centred = text_runs(&export_pdf(&document));
+        let x_of = |runs: &[(f32, f32, String, bool)]| {
+            runs.iter()
+                .find(|run| run.2 == "2")
+                .map(|run| run.0)
+                .expect("2 is drawn")
+        };
+        assert!(
+            x_of(&centred) > x_of(&left) + 1.0,
+            "2 moves right when its column is centred: {} -> {}",
+            x_of(&left),
+            x_of(&centred)
+        );
+    }
+
+    #[test]
+    fn an_underlined_typed_cell_run_draws_a_rule_under_its_text_in_the_pdf() {
+        let (mut document, id) = typed_table_document();
+        document
+            .set_table_cells_runs(id, 1..2, 1..2, |run| run.underline = true)
+            .expect("underline cell 2");
+        let pdf = export_pdf(&document);
+        let runs = text_runs(&pdf);
+        let rule_under = |text: &str| {
+            let (x, baseline, _, _) = runs
+                .iter()
+                .find(|run| run.2 == text)
+                .unwrap_or_else(|| panic!("{text:?} is drawn"))
+                .clone();
+            segments(&pdf).iter().any(|&(x1, y1, x2, y2)| {
+                (y1 - y2).abs() < 0.01
+                    && y1 < baseline
+                    && y1 > baseline - 3.0
+                    && x1 <= x + 0.5
+                    && x2 >= x + 0.5
+            })
+        };
+        assert!(rule_under("2"), "the underlined cell run has a rule under it");
+        assert!(!rule_under("Tea"), "an untouched cell has no rule");
+    }
+
+    #[test]
+    fn typed_column_widths_are_the_split_word_draws() {
+        let (mut document, id) = typed_table_document();
+        let mut table = document.loom_table_from_block(id).expect("table");
+        table.columns[0].width_pt *= 3.0;
+        document
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == id)
+            .expect("table block")
+            .set_table(table);
+        let export = crate::export_docx(&document).expect("docx");
+        let archive =
+            loom_package::zip::PackageArchive::from_bytes(&export.bytes).expect("zip reads back");
+        let xml = String::from_utf8(
+            archive
+                .get("word/document.xml")
+                .expect("document part")
+                .to_vec(),
+        )
+        .expect("utf-8");
+        let body = roxmltree::Document::parse(&xml).expect("well formed");
+        let grid: Vec<f32> = body
+            .descendants()
+            .filter(|node| node.tag_name().name() == "gridCol")
+            .filter_map(|node| {
+                node.attributes()
+                    .find(|attr| attr.name() == "w")
+                    .and_then(|attr| attr.value().parse().ok())
+            })
+            .collect();
+        assert_eq!(grid.len(), 2, "two grid columns");
+        assert!(
+            (grid[0] / grid[1] - 3.0).abs() < 0.01,
+            "Word's first column is three times the second, as on the page: {grid:?}"
         );
     }
 }

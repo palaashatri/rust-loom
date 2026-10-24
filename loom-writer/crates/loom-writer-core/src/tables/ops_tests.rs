@@ -5,7 +5,7 @@
 
 use loom_objects::table::{CellStyleOverride, HorizontalAlign, Table, TextRun};
 
-use super::{markdown_table_block, TableArrowDirection, TABLE_BLOCK_KIND};
+use super::{markdown_table_block, TableArrowDirection, TABLE_BLOCK_KIND, TABLE_CELL_SEPARATOR};
 use crate::{RichBlock, TextSelection, WriterDocument};
 
 fn document() -> WriterDocument {
@@ -383,4 +383,194 @@ fn table_style_and_options_are_stored_on_the_typed_table() {
     assert!(document
         .toggle_table_option_at_offset(caret, "not_an_option")
         .is_err());
+}
+
+// Typed cell formatting: bold, italic and underline live on each cell's runs,
+// and column alignment lives on each cell's style override.
+
+fn is_bold(run: &TextRun) -> bool {
+    run.bold
+}
+
+fn make_bold(run: &mut TextRun) {
+    run.bold = true;
+}
+
+fn make_plain(run: &mut TextRun) {
+    run.bold = false;
+}
+
+/// A 2x2 table `7` with A B / C D, after a paragraph.
+fn two_by_two_document() -> WriterDocument {
+    let mut document = WriterDocument::new("doc", "Doc");
+    document
+        .blocks
+        .push(RichBlock::new(1, "paragraph", "Intro"));
+    let mut table = Table::new(2, 2);
+    table.set_cell_text(0, 0, "A");
+    table.set_cell_text(0, 1, "B");
+    table.set_cell_text(1, 0, "C");
+    table.set_cell_text(1, 1, "D");
+    document.blocks.push(RichBlock::table_block(7, table));
+    document
+}
+
+fn cell_pieces(table: &Table, row: usize, column: usize) -> Vec<(String, bool)> {
+    table
+        .cell(row, column)
+        .expect("cell")
+        .content
+        .runs
+        .iter()
+        .map(|run| (run.text.clone(), run.bold))
+        .collect()
+}
+
+#[test]
+fn bold_on_a_cell_range_is_stored_on_each_selected_cell_only() {
+    let mut document = two_by_two_document();
+    assert_eq!(
+        document.table_cells_have(7, 0..2, 0..2, is_bold),
+        Some(false)
+    );
+    document
+        .set_table_cells_runs(7, 0..1, 0..2, make_bold)
+        .expect("bold the top row");
+    let table = table_of(&document, 7);
+    assert_eq!(cell_pieces(&table, 0, 0), vec![("A".to_string(), true)]);
+    assert_eq!(cell_pieces(&table, 0, 1), vec![("B".to_string(), true)]);
+    assert_eq!(cell_pieces(&table, 1, 0), vec![("C".to_string(), false)]);
+    assert_eq!(
+        table.cell_text(0, 1).as_deref(),
+        Some("B"),
+        "text unchanged"
+    );
+    assert_eq!(
+        document.table_cells_have(7, 0..1, 0..2, is_bold),
+        Some(true)
+    );
+    assert_eq!(
+        document.table_cells_have(7, 0..2, 0..2, is_bold),
+        Some(false)
+    );
+}
+
+#[test]
+fn bold_on_selected_text_inside_one_cell_changes_only_that_text() {
+    let mut document = WriterDocument::new("doc", "Doc");
+    let mut table = Table::new(1, 2);
+    table.set_cell_text(0, 0, "Hello");
+    table.set_cell_text(0, 1, "World");
+    document.blocks.push(RichBlock::table_block(3, table));
+    // Flat text is "Hello", a separator at 5, then "World". Select "ell".
+    assert_eq!(document.table_block_id_for_range(1..4), Some(3));
+    assert_eq!(document.set_table_text_runs(1..4, make_bold), Ok(true));
+    let table = table_of(&document, 3);
+    assert_eq!(
+        cell_pieces(&table, 0, 0),
+        vec![
+            ("H".to_string(), false),
+            ("ell".to_string(), true),
+            ("o".to_string(), false),
+        ]
+    );
+    assert_eq!(
+        cell_pieces(&table, 0, 1),
+        vec![("World".to_string(), false)]
+    );
+    assert_eq!(document.table_text_has(1..4, is_bold), Some(true));
+    assert_eq!(document.table_text_has(0..5, is_bold), Some(false));
+}
+
+#[test]
+fn text_outside_a_table_and_text_crossing_into_one_is_not_a_table_range() {
+    let document = document_with_table_between_paragraphs();
+    let mut document = document;
+    assert_eq!(
+        document.table_block_id_for_range(0..5),
+        None,
+        "the intro paragraph"
+    );
+    assert_eq!(document.table_text_has(0..5, is_bold), None);
+    assert_eq!(document.set_table_text_runs(0..5, make_bold), Ok(false));
+    // "Intro" ends at 5 and the table block starts at 6: 0..8 crosses both.
+    assert_eq!(document.table_block_id_for_range(0..8), None);
+    assert_eq!(document.set_table_text_runs(0..8, make_bold), Ok(false));
+    assert!(document
+        .blocks
+        .iter()
+        .filter(|block| block.kind == TABLE_BLOCK_KIND)
+        .all(|block| block.typed_table().is_some_and(|table| table
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter())
+            .all(|cell| cell.content.runs.iter().all(|run| !run.bold)))));
+}
+
+#[test]
+fn column_alignment_is_written_to_every_cell_of_that_column_only() {
+    let mut document = two_by_two_document();
+    document
+        .set_table_column_alignment(7, 1..2, HorizontalAlign::Center)
+        .expect("align column B");
+    let table = table_of(&document, 7);
+    for row in 0..2 {
+        let aligned = table
+            .cell(row, 1)
+            .and_then(|cell| cell.style_override.as_ref())
+            .and_then(|style| style.horizontal_align);
+        assert_eq!(aligned, Some(HorizontalAlign::Center), "row {row} column B");
+        let untouched = table
+            .cell(row, 0)
+            .and_then(|cell| cell.style_override.as_ref())
+            .and_then(|style| style.horizontal_align);
+        assert_eq!(untouched, None, "row {row} column A keeps its alignment");
+    }
+}
+
+#[test]
+fn typing_into_a_bold_empty_cell_produces_bold_text() {
+    let mut document = WriterDocument::new("doc", "Doc");
+    document
+        .blocks
+        .push(RichBlock::table_block(4, Table::new(1, 2)));
+    document
+        .set_table_cells_runs(4, 0..1, 0..1, make_bold)
+        .expect("bold the empty cell");
+    assert_eq!(
+        document.table_cells_have(4, 0..1, 0..1, is_bold),
+        Some(true)
+    );
+    document
+        .edit_table_text(4, &format!("x{TABLE_CELL_SEPARATOR}"))
+        .expect("type into the cell");
+    let table = table_of(&document, 4);
+    assert_eq!(cell_pieces(&table, 0, 0), vec![("x".to_string(), true)]);
+}
+
+#[test]
+fn bold_on_a_merged_cell_skips_the_cells_it_covers() {
+    let mut document = WriterDocument::new("doc", "Doc");
+    let mut table = Table::new(1, 2);
+    table.set_cell_text(0, 0, "Hi");
+    table.merge_cells(0, 0, 1, 2).expect("merge");
+    document.blocks.push(RichBlock::table_block(5, table));
+    document
+        .set_table_cells_runs(5, 0..1, 0..2, make_bold)
+        .expect("bold the merged row");
+    assert_eq!(
+        document.table_cells_have(5, 0..1, 0..2, is_bold),
+        Some(true)
+    );
+    document
+        .set_table_cells_runs(5, 0..1, 0..2, make_plain)
+        .expect("plain again");
+    assert_eq!(
+        document.table_cells_have(5, 0..1, 0..2, is_bold),
+        Some(false)
+    );
+    assert_eq!(
+        table_of(&document, 5).cell_text(0, 0).as_deref(),
+        Some("Hi")
+    );
 }

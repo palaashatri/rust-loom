@@ -237,3 +237,29 @@ fn highlights_are_built_only_for_matches_near_the_view() {
         "a 5x longer document does not 5x the highlight work: {small_rects} vs {big_rects}"
     );
 }
+
+#[test]
+fn replace_all_clears_the_highlights_and_selection_of_the_matches_it_replaced() {
+    let (app, state) = setup("cat and cat");
+    app.global::<FindBar>().invoke_open_requested(false);
+    query(&app, "cat");
+    assert_eq!(
+        highlight_count(&app),
+        1,
+        "the second match is highlighted while the first is selected"
+    );
+    let bar = app.global::<FindBar>();
+    bar.set_replacement("dog".into());
+    bar.invoke_replace_all();
+    assert_eq!(state.current.borrow().editor_text(), "dog and dog");
+    assert_eq!(
+        highlight_count(&app),
+        0,
+        "no highlight stays on text that was replaced"
+    );
+    assert_eq!(
+        selected(&state),
+        "",
+        "Replace all leaves a caret, not a selection"
+    );
+}

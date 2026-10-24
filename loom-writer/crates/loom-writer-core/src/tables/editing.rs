@@ -149,3 +149,127 @@ fn group(chars: &[(char, usize)], templates: &[TextRun]) -> Vec<TextRun> {
     out.retain(|run| !run.text.is_empty());
     out
 }
+
+/// The bytes of one cell's text that a selection covers, as cell-local offsets.
+/// An empty cell is covered when the selection starts at or before it and
+/// reaches past it, so a selection across cells styles the empty ones too.
+pub(crate) fn cell_part(
+    cell_start: usize,
+    cell_len: usize,
+    scope: &Range<usize>,
+) -> Option<Range<usize>> {
+    if cell_len == 0 {
+        return (scope.start <= cell_start && cell_start < scope.end).then_some(0..0);
+    }
+    let from = scope.start.max(cell_start);
+    let to = scope.end.min(cell_start + cell_len);
+    (from < to).then(|| (from - cell_start)..(to - cell_start))
+}
+
+/// Whether the runs of one cell have `has` everywhere in `part`. A cell with no
+/// text is covered by one of its empty runs carrying the style.
+pub(crate) fn runs_cover(
+    runs: &[TextRun],
+    part: Range<usize>,
+    has: &dyn Fn(&TextRun) -> bool,
+) -> bool {
+    let total: usize = runs.iter().map(|run| run.text.len()).sum();
+    if total == 0 {
+        return runs.iter().any(has);
+    }
+    let mut offset = 0;
+    for run in runs {
+        let (start, end) = (offset, offset + run.text.len());
+        offset = end;
+        if part.start.max(start) < part.end.min(end) && !has(run) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The runs of one cell after `change` applies to the bytes `part` of its text.
+/// Runs are split at the part's edges and neighbours with equal style are
+/// merged. A cell with no text keeps one empty run that carries the style, so
+/// text typed into it takes the style.
+pub(crate) fn restyle_runs(
+    runs: &[TextRun],
+    part: Range<usize>,
+    change: &dyn Fn(&mut TextRun),
+) -> Vec<TextRun> {
+    let total: usize = runs.iter().map(|run| run.text.len()).sum();
+    if total == 0 {
+        let mut run = runs.first().cloned().unwrap_or_else(|| TextRun::plain(""));
+        run.text.clear();
+        change(&mut run);
+        return if run == TextRun::plain("") {
+            Vec::new()
+        } else {
+            vec![run]
+        };
+    }
+    let mut pieces: Vec<TextRun> = Vec::with_capacity(runs.len() + 2);
+    let mut offset = 0;
+    for run in runs {
+        let len = run.text.len();
+        let start = offset;
+        offset += len;
+        let from = char_edge(&run.text, part.start.saturating_sub(start));
+        let to = char_edge(&run.text, part.end.saturating_sub(start));
+        if to <= from {
+            pieces.push(run.clone());
+            continue;
+        }
+        pieces.extend(piece_of(run, 0, from, None));
+        pieces.extend(piece_of(run, from, to, Some(change)));
+        pieces.extend(piece_of(run, to, len, None));
+    }
+    let mut out: Vec<TextRun> = Vec::new();
+    for piece in pieces {
+        if piece.text.is_empty() {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if same_style(last, &piece) => last.text.push_str(&piece.text),
+            _ => out.push(piece),
+        }
+    }
+    out
+}
+
+/// `offset` clamped to the text and moved back to a character boundary.
+fn char_edge(text: &str, offset: usize) -> usize {
+    let mut index = offset.min(text.len());
+    while !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+/// A copy of `run` holding bytes `from..to` of its text, changed by `change`
+/// when given. `None` for an empty stretch.
+fn piece_of(
+    run: &TextRun,
+    from: usize,
+    to: usize,
+    change: Option<&dyn Fn(&mut TextRun)>,
+) -> Option<TextRun> {
+    (from < to).then(|| {
+        let mut piece = run.clone();
+        piece.text = run.text[from..to].to_string();
+        if let Some(change) = change {
+            change(&mut piece);
+        }
+        piece
+    })
+}
+
+/// Whether two runs share their formatting, ignoring their text.
+fn same_style(a: &TextRun, b: &TextRun) -> bool {
+    a.bold == b.bold
+        && a.italic == b.italic
+        && a.underline == b.underline
+        && a.font_size_pt == b.font_size_pt
+        && a.font_family == b.font_family
+        && a.color == b.color
+}

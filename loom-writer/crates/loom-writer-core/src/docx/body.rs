@@ -507,6 +507,7 @@ fn cell_paragraph(alignment: Option<&HorizontalAlign>) -> &'static str {
     match alignment {
         Some(HorizontalAlign::Center) => "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>",
         Some(HorizontalAlign::Right) => "<w:p><w:pPr><w:jc w:val=\"right\"/></w:pPr>",
+        Some(HorizontalAlign::Justify) => "<w:p><w:pPr><w:jc w:val=\"both\"/></w:pPr>",
         _ => "<w:p>",
     }
 }
@@ -521,6 +522,7 @@ fn push_cell_runs(out: &mut String, runs: &[TextRun], bold: bool) {
             CharacterStyle::default().font_size,
         );
         props.italic = piece.italic;
+        props.underline = piece.underline;
         push_run(out, &props, &piece.text);
     }
 }
@@ -557,22 +559,43 @@ fn cell_runs(table: &Table, row: usize, column: usize) -> Vec<TextRun> {
         .map_or_else(Vec::new, |cell| cell.content.runs.clone())
 }
 
-/// A table as a real Word table: equal column widths across
+/// The column widths of a table in twips across the text area: the typed widths
+/// scaled to fill it, the same split the page draws, so a table of equal
+/// columns is split equally. The last column takes the rounding remainder.
+fn column_widths(table: &Table, text_width: i32) -> Vec<i32> {
+    let columns = table.col_count();
+    if columns == 0 {
+        return Vec::new();
+    }
+    let typed: Vec<f32> = (0..columns)
+        .map(|column| {
+            table
+                .columns
+                .get(column)
+                .map_or(0.0, |col| col.width_pt.max(0.0))
+        })
+        .collect();
+    let sum: f32 = typed.iter().sum();
+    let mut widths: Vec<i32> = if sum <= 0.0 {
+        vec![text_width / columns as i32; columns]
+    } else {
+        typed
+            .iter()
+            .map(|width| (text_width as f32 * width / sum).round() as i32)
+            .collect()
+    };
+    let used: i32 = widths[..columns - 1].iter().sum();
+    widths[columns - 1] = (text_width - used).max(1);
+    widths
+}
+
+/// A table as a real Word table: the typed column widths across
 /// the text area and a repeating, shaded, bold header row when the source
 /// has a header separator. Short rows are padded to a rectangle.
 fn table_xml(table: &Table, text_width: i32) -> String {
     let merges = merge_spans(table);
     let columns = table.col_count();
-    let each = text_width / columns as i32;
-    let widths: Vec<i32> = (0..columns)
-        .map(|column| {
-            if column + 1 == columns {
-                text_width - each * (columns as i32 - 1)
-            } else {
-                each
-            }
-        })
-        .collect();
+    let widths = column_widths(table, text_width);
 
     let look = if table.header_row { 1 } else { 0 };
     let mut out = format!(

@@ -5,9 +5,13 @@
 //! placed from the same [`TableTextMap`] the editor uses, so they always land on
 //! the cell the operation names.
 
-use loom_objects::table::{Table, TableCell, TableRow, DEFAULT_ROW_HEIGHT_PT};
+use std::ops::Range;
 
-use super::editing::apply_flat_text;
+use loom_objects::table::{
+    HorizontalAlign, Table, TableCell, TableRow, TextRun, DEFAULT_ROW_HEIGHT_PT,
+};
+
+use super::editing::{apply_flat_text, cell_part, restyle_runs, runs_cover};
 use super::store::TableTextMap;
 use super::{block_insert_index, TableArrowDirection, TableCellLocation, TABLE_BLOCK_KIND};
 use crate::{RichBlock, TextSelection, WriterDocument, WriterTable};
@@ -474,5 +478,190 @@ impl WriterTable {
             first_column: table.first_column,
             merges,
         }
+    }
+}
+
+/// Typed cell formatting. Bold, italic and underline are stored on each cell's
+/// runs, so the page, PDF and DOCX draw the same runs. Alignment is stored on
+/// each cell's style override, the place both exporters read it from.
+impl WriterDocument {
+    /// The index and start offset of the table block whose text holds all of
+    /// `range`. `None` when the range is not inside one table block.
+    fn table_block_span(&self, range: &Range<usize>) -> Option<(usize, usize)> {
+        let mut start = 0usize;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let end = start + block.text.len_bytes();
+            if block.typed_table().is_some() && range.start >= start && range.end <= end {
+                return Some((index, start));
+            }
+            start = end + 1;
+        }
+        None
+    }
+
+    /// The table block that holds every offset of `range`, when the whole range
+    /// lies inside one table block.
+    pub fn table_block_id_for_range(&self, range: Range<usize>) -> Option<u64> {
+        self.table_block_span(&range)
+            .map(|(index, _)| self.blocks[index].id)
+    }
+
+    /// Whether every typed run of the cells in `rows` x `columns` satisfies `has`.
+    /// Merged-away cells are skipped. `None` when `block_id` is not a table block.
+    pub fn table_cells_have(
+        &self,
+        block_id: u64,
+        rows: Range<usize>,
+        columns: Range<usize>,
+        has: impl Fn(&TextRun) -> bool,
+    ) -> Option<bool> {
+        let index = self.table_index(block_id)?;
+        let table = self.blocks[index].typed_table()?;
+        for row in rows {
+            for column in columns.clone() {
+                let Some(cell) = table.cell(row, column) else {
+                    continue;
+                };
+                if cell.is_covered {
+                    continue;
+                }
+                let len: usize = cell.content.runs.iter().map(|run| run.text.len()).sum();
+                if !runs_cover(&cell.content.runs, 0..len, &has) {
+                    return Some(false);
+                }
+            }
+        }
+        Some(true)
+    }
+
+    /// Changes the typed runs of every cell in `rows` x `columns`, as one undo
+    /// step. Merged-away cells are left alone.
+    pub fn set_table_cells_runs(
+        &mut self,
+        block_id: u64,
+        rows: Range<usize>,
+        columns: Range<usize>,
+        change: impl Fn(&mut TextRun),
+    ) -> Result<(), String> {
+        let index = self
+            .table_index(block_id)
+            .ok_or_else(|| "Not a table block".to_string())?;
+        let mut table = self.blocks[index]
+            .typed_table()
+            .cloned()
+            .ok_or_else(|| "Table block has no table".to_string())?;
+        for row in rows {
+            for column in columns.clone() {
+                let Some(cell) = table.cell_mut(row, column) else {
+                    continue;
+                };
+                if cell.is_covered {
+                    continue;
+                }
+                let len: usize = cell.content.runs.iter().map(|run| run.text.len()).sum();
+                cell.content.runs = restyle_runs(&cell.content.runs, 0..len, &change);
+            }
+        }
+        self.blocks[index].set_table(table);
+        Ok(())
+    }
+
+    /// Whether the selected table text (global editor offsets) all satisfies
+    /// `has`. `None` when the range is not inside one table block.
+    pub fn table_text_has(
+        &self,
+        range: Range<usize>,
+        has: impl Fn(&TextRun) -> bool,
+    ) -> Option<bool> {
+        let (index, block_start) = self.table_block_span(&range)?;
+        let table = self.blocks[index].typed_table()?;
+        let scope = (range.start - block_start)..(range.end - block_start);
+        let map = TableTextMap::new(table);
+        for row in 0..table.row_count() {
+            for column in 0..table.col_count() {
+                let (Some(cell_range), Some(cell)) =
+                    (map.cell_range(row, column), table.cell(row, column))
+                else {
+                    continue;
+                };
+                if cell.is_covered {
+                    continue;
+                }
+                if let Some(part) = cell_part(cell_range.start, cell_range.len(), &scope) {
+                    if !runs_cover(&cell.content.runs, part, &has) {
+                        return Some(false);
+                    }
+                }
+            }
+        }
+        Some(true)
+    }
+
+    /// Changes the typed runs of the cell text inside `range` (global editor
+    /// offsets). `Ok(false)` when the range is not inside one table block.
+    pub fn set_table_text_runs(
+        &mut self,
+        range: Range<usize>,
+        change: impl Fn(&mut TextRun),
+    ) -> Result<bool, String> {
+        let Some((index, block_start)) = self.table_block_span(&range) else {
+            return Ok(false);
+        };
+        let mut table = self.blocks[index]
+            .typed_table()
+            .cloned()
+            .ok_or_else(|| "Table block has no table".to_string())?;
+        let scope = (range.start - block_start)..(range.end - block_start);
+        let map = TableTextMap::new(&table);
+        let mut parts = Vec::new();
+        for row in 0..table.row_count() {
+            for column in 0..table.col_count() {
+                let (Some(cell_range), Some(cell)) =
+                    (map.cell_range(row, column), table.cell(row, column))
+                else {
+                    continue;
+                };
+                if cell.is_covered {
+                    continue;
+                }
+                if let Some(part) = cell_part(cell_range.start, cell_range.len(), &scope) {
+                    parts.push((row, column, part));
+                }
+            }
+        }
+        for (row, column, part) in parts {
+            if let Some(cell) = table.cell_mut(row, column) {
+                cell.content.runs = restyle_runs(&cell.content.runs, part, &change);
+            }
+        }
+        self.blocks[index].set_table(table);
+        Ok(true)
+    }
+
+    /// Sets the horizontal alignment of every cell in the given columns of a table.
+    pub fn set_table_column_alignment(
+        &mut self,
+        block_id: u64,
+        columns: Range<usize>,
+        align: HorizontalAlign,
+    ) -> Result<(), String> {
+        let index = self
+            .table_index(block_id)
+            .ok_or_else(|| "Not a table block".to_string())?;
+        let mut table = self.blocks[index]
+            .typed_table()
+            .cloned()
+            .ok_or_else(|| "Table block has no table".to_string())?;
+        for row in 0..table.row_count() {
+            for column in columns.clone() {
+                if let Some(cell) = table.cell_mut(row, column) {
+                    cell.style_override
+                        .get_or_insert_with(Default::default)
+                        .horizontal_align = Some(align);
+                }
+            }
+        }
+        self.blocks[index].set_table(table);
+        Ok(())
     }
 }

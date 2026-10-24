@@ -132,9 +132,9 @@ pub(crate) fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     app.set_compact_inspector_layout(compact);
     if compact && clear_auto_opened_inspector(app) {
         app.set_show_inspector(false);
-        // Closing the inspector hands focus to its toolbar button after this
-        // function returns; nobody asked for that here, so refocus the page on
-        // the next turn of the event loop and typing keeps landing in it.
+        // Nobody asked for focus to move here, so the page takes it on the next
+        // turn of the event loop and typing keeps landing in it. The focus
+        // request runs outside any change handler (see `focus-inspector-tab`).
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(30), move || {
             if let Some(app) = weak.upgrade() {

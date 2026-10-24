@@ -6,7 +6,7 @@ use loom_command::{CommandRegistry, CommandSpec};
 
 /// Other words a command answers to, besides its label. A query that equals one
 /// of them lifts the command above commands that only share the word in a label
-/// ("Insert Markdown Table" shares "markdown" with "Export Markdown").
+/// (a query for "markdown" should find "Export Markdown (.md)" first).
 const PALETTE_ALIASES: &[(&str, &[&str])] = &[("file.export_md", &["markdown", "md", ".md"])];
 
 /// Score added to a command for answering to the query exactly. Registry scores
@@ -214,7 +214,7 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         PaletteCommand {
             action: PaletteAction::InsertTable,
             id: "writer.table.insert",
-            label: "Insert Markdown Table (text)",
+            label: "Insert Table",
             shortcut: "",
         },
         PaletteCommand {

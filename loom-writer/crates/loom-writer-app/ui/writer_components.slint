@@ -56,6 +56,9 @@ export struct WriterCommentRect {
     width: length,
     height: length,
     marker: bool,
+    /// The highlight behind the commented text: a document colour from Rust,
+    /// so it is the same in light, dark and high contrast.
+    fill: color,
 }
 
 /// A table cell rectangle projected with borders and background fills.
@@ -101,6 +104,40 @@ component PictureCornerHandle inherits Rectangle {
     border-width: 1px;
     border-color: Theme.palette().paper;
     accessible-role: none;
+}
+
+/// The page-margin chip that marks a comment's first line. It is drawn in page
+/// ink on page paper in every theme, so it reads the same in dark and high
+/// contrast. Its label is spoken, never drawn, so it cannot run past the page.
+component CommentMarker inherits Rectangle {
+    in property <string> label: "";
+    callback clicked;
+
+    width: Theme.tokens.metrics.control-height * max(1.0, Theme.text-scale);
+    height: Theme.tokens.metrics.control-height * max(1.0, Theme.text-scale);
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus : Theme.palette().paper-muted;
+    background: Theme.palette().paper;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    Icon {
+        x: (root.width - self.size) / 2;
+        y: (root.height - self.size) / 2;
+        size: Theme.tokens.metrics.icon-size * max(1.0, Theme.text-scale);
+        icon: "comment";
+        tint: Theme.palette().paper-ink;
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { clicked => { focus.focus(); root.clicked(); } }
 }
 
 /// Writer's selection-aware text editor.
@@ -165,7 +202,11 @@ component WriterDocumentEditor inherits Rectangle {
             width: max(1px, comment.width * root.page-zoom);
             height: max(1px, comment.height * root.page-zoom);
             border-radius: 2px;
-            background: Theme.palette().content-accent-soft;
+            background: comment.fill;
+            // High contrast outlines each anchor in page ink, so its edge does not
+            // depend on the highlight colour.
+            border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
+            border-color: Theme.palette().paper-ink;
             accessible-role: none;
         }
         // Secondary highlights for the other find matches; the current match
@@ -488,13 +529,10 @@ export component WriterPageCanvas inherits Rectangle {
             }
             // An icon-only chip: its label is spoken, never drawn, so it cannot
             // run past the page edge at any zoom or text scale.
-            for comment in root.comment-rects : LoomIconButton {
+            for comment in root.comment-rects : CommentMarker {
                 visible: comment.marker;
-                enabled: comment.marker;
                 x: page.width - page.page-padding / 2 - self.width / 2;
                 y: page.page-padding + comment.y * root.page-zoom - self.height / 2;
-                text-scale: Theme.text-scale;
-                icon: "comment";
                 label: comment.label;
                 clicked => { root.activate-comment(comment.comment-id); }
             }

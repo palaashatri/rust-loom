@@ -3432,6 +3432,11 @@ fn wire_writer_inspector_toggle(
                 toolbar_commands::clear_auto_opened_inspector(&app);
                 let visible = app.get_show_inspector();
                 app.set_show_inspector(!visible);
+                if visible {
+                    // The user closed it: its toolbar tab takes focus here, in
+                    // the user's action, not in a change handler.
+                    app.invoke_focus_inspector_tab();
+                }
                 if let Some(menu_service) = menu_service.as_ref() {
                     sync_menu_state(menu_service, &app, &state);
                 }
@@ -4639,6 +4644,10 @@ mod recovery_order_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod comment_colour_tests;
+#[cfg(test)]
+mod comment_composer_tests;
 
 #[cfg(test)]
 mod text_scale_tests;

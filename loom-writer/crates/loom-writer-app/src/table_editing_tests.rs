@@ -1128,4 +1128,76 @@ mod tests {
         );
         loom_clipboard::set_mock_clipboard_enabled(false);
     }
+
+    /// The status line says what the table action did, in words. It never
+    /// shows the internal action id the menu and palette dispatched.
+    #[test]
+    fn structural_table_actions_report_what_changed_in_words_not_ids() {
+        for (action, expected) in [
+            ("insert-row-above", "Inserted a row above"),
+            ("insert-row-below", "Inserted a row below"),
+            ("insert-col-left", "Inserted a column to the left"),
+            ("insert-col-right", "Inserted a column to the right"),
+            ("delete-row", "Deleted the row"),
+            ("delete-col", "Deleted the column"),
+        ] {
+            let (app, state, _) = make_app_with_active_table_range(1, 1);
+            table_actions::clear_table_cell_selection_range();
+            app.set_status_right("Ready".into());
+            table_actions::table_action(&app, &state, action);
+            assert_eq!(
+                app.get_status_right().as_str(),
+                expected,
+                "the status after {action}"
+            );
+        }
+    }
+
+    #[test]
+    fn merging_the_selected_cells_reports_it_in_words() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::table_action(&app, &state, "merge-cells");
+        assert_eq!(app.get_status_right().as_str(), "Merged the selected cells");
+    }
+
+    #[test]
+    fn table_style_and_option_changes_name_the_style_and_option_in_words() {
+        let (app, _state) = make_test_app();
+        app.invoke_insert_table_size(3, 3);
+        app.invoke_set_table_style("table-style-dark-1".into());
+        assert_eq!(
+            app.get_status_right().as_str(),
+            "Table style set: Table Style Dark 1",
+            "the style is named as the style gallery names it"
+        );
+        app.invoke_toggle_table_option("banded_rows".into());
+        assert_eq!(
+            app.get_status_right().as_str(),
+            "Table option toggled: Banded rows",
+            "the option is named as the inspector labels it"
+        );
+    }
+
+    /// Insert Table opens no dialog, so its name has no ellipsis, in the palette
+    /// and in the menu alike.
+    #[test]
+    fn the_table_insert_command_is_named_insert_table_without_an_ellipsis() {
+        let (app, _state) = make_test_app();
+        let row = master_palette(&app)
+            .into_iter()
+            .find(|command| command.id == "writer.table.insert")
+            .expect("the palette offers the table insert");
+        assert_eq!(row.label, "Insert Table");
+        let spec = table_actions::table_command_specs()
+            .into_iter()
+            .find(|spec| spec.id.as_str() == "writer.table.insert")
+            .expect("the registry lists the table insert");
+        assert_eq!(spec.label, "Insert Table");
+        let menu = local_menu::writer_menu_bar();
+        assert_eq!(
+            menu.find_item("insert.table").and_then(|item| item.label()),
+            Some("Insert Table"),
+            "the Table menu item opens nothing and is not marked with an ellipsis"
+        );
+    }
 }

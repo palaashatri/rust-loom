@@ -103,7 +103,7 @@ export component FindBarOverlay inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 accessible-role: text;
-                accessible-label: "Find results";
+                accessible-label: FindBar.status == "" ? "Find results" : "Find results: " + FindBar.status;
                 accessible-live-region: AccessibleLiveness.polite;
             }
             if !root.stacked : LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
@@ -123,7 +123,7 @@ export component FindBarOverlay inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 accessible-role: text;
-                accessible-label: "Find results";
+                accessible-label: FindBar.status == "" ? "Find results" : "Find results: " + FindBar.status;
                 accessible-live-region: AccessibleLiveness.polite;
             }
             LoomTextField {

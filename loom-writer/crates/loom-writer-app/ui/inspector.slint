@@ -37,6 +37,8 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     /// Set to put the keyboard caret in the new-comment field.
     in-out property <bool> comment-focus-pending: false;
+    /// Set by the composer when it takes focus; cleared by the next activation change.
+    property <bool> composer-took-focus: false;
     /// Set once at launch so the first automatic open does not take focus.
     in-out property <bool> quiet-open: false;
     in-out property <string> comment-draft: "";
@@ -83,10 +85,13 @@ export component WriterInspector inherits LoomPanel {
 
     // Opening the inspector moves focus into it (a user action). Startup returns
     // focus to the page afterwards, so no ring is drawn at launch.
+    // The composer's init runs before this handler when the panel opens, so it
+    // may already have taken focus; the panel must not take it back.
     changed active => {
-        if (root.active && !root.comment-focus-pending && !root.quiet-open) {
+        if (root.active && !root.comment-focus-pending && !root.quiet-open && !root.composer-took-focus) {
             tab-control.grab-focus();
         }
+        root.composer-took-focus = false;
         if (root.active) { root.quiet-open = false; }
     }
 
@@ -462,8 +467,8 @@ export component WriterInspector inherits LoomPanel {
             if root.inspector-tab == 1 : VerticalLayout {
                 spacing: Theme.tokens.space.md;
                 property <bool> focus-pending: root.comment-focus-pending;
-                init => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; } }
-                changed focus-pending => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; } }
+                init => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; root.composer-took-focus = true; } }
+                changed focus-pending => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; root.composer-took-focus = true; } }
 
             LoomSectionHeader { title: "Comments"; }
 

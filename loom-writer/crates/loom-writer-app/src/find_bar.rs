@@ -340,11 +340,20 @@ fn replace_current(app: &WriterApp, state: &GuiState) {
 fn replace_all(app: &WriterApp, state: &GuiState) {
     let bar = app.global::<FindBar>();
     let (query, replacement) = (bar.get_query(), bar.get_replacement());
+    let first_match = matches_for(app, &state.current.borrow(), query.as_str())
+        .first()
+        .map(|&(start, _)| start);
     let mut next = state.current.borrow().clone();
     let count = next.replace_all_with(query.as_str(), replacement.as_str(), options_of(app));
     if count == 0 {
         bar.set_status(SharedString::from("No matches"));
         return;
+    }
+    // Replacing shifts the text after each match, so the selection from before
+    // would now cover other words. The first replacement starts where the first
+    // match did, so the caret goes to its end, as Replace leaves it.
+    if let Some(start) = first_match {
+        next.set_selection(TextSelection::caret(start + replacement.len()));
     }
     apply_with_history(app, state, next, HistoryKind::DocumentAction);
     bar.set_status(SharedString::from(format!("{count} replaced")));
@@ -478,6 +487,8 @@ mod tests {
 mod app_tests {
     use super::*;
     use crate::actions_tests::{test_state, text_document};
+    use i_slint_backend_testing::ElementHandle;
+    use loom_test_support::capture::snapshot_component;
 
     fn setup(text: &str) -> (WriterApp, Rc<GuiState>) {
         let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
@@ -573,5 +584,45 @@ mod app_tests {
         assert_eq!(selected(&state), "cat");
         bar.invoke_replace_current();
         assert_eq!(state.current.borrow().editor_text(), "one owl two owl");
+    }
+
+    #[test]
+    fn replace_all_leaves_no_selection_on_the_offsets_it_shifted() {
+        let (app, state) = setup("The entry sat.\nAnother entry here.");
+        let bar = app.global::<FindBar>();
+        bar.set_replacement("e".into());
+        bar.set_query("entry".into());
+        bar.invoke_query_changed("entry".into());
+        assert_eq!(selected(&state), "entry");
+        bar.invoke_replace_all();
+        assert_eq!(
+            state.current.borrow().editor_text(),
+            "The e sat.\nAnother e here."
+        );
+        let (low, high) = selection_range(&state.current.borrow());
+        assert_eq!(
+            low, high,
+            "the selection from before Replace all must not stay on the text now at its old offsets"
+        );
+    }
+
+    #[test]
+    fn the_find_results_name_says_which_match_is_selected_in_both_directions() {
+        for rtl in [false, true] {
+            let (app, _state) = setup("The cat sat.\nAnother Cat here.");
+            crate::configure_direction(&app, rtl);
+            let bar = app.global::<FindBar>();
+            bar.invoke_open_requested(false);
+            bar.set_query("cat".into());
+            bar.invoke_query_changed("cat".into());
+            bar.invoke_find_next();
+            assert_eq!(bar.get_status().as_str(), "2 of 2");
+            let _ = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render");
+            assert_eq!(
+                ElementHandle::find_by_accessible_label(&app, "Find results: 2 of 2").count(),
+                1,
+                "the count is part of the results name a screen reader reads (rtl={rtl})"
+            );
+        }
     }
 }
