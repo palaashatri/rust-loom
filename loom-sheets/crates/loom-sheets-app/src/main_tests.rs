@@ -60,6 +60,8 @@ mod grid_gesture_tests;
 mod grid_interaction_tests;
 #[path = "main_tests/grid_pointer_tests.rs"]
 mod grid_pointer_tests;
+#[path = "main_tests/grid_scroll_coverage_tests.rs"]
+mod grid_scroll_coverage_tests;
 #[path = "main_tests/grid_tab_enter_tests.rs"]
 mod grid_tab_enter_tests;
 #[path = "main_tests/import_title_tests.rs"]

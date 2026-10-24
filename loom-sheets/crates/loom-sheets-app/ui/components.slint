@@ -205,6 +205,7 @@ export component SheetTable inherits Rectangle {
                 viewport-height: max(self.height, root.grid-content-height);
                 viewport-x <=> root.grid-scroll-x;
                 viewport-y <=> root.grid-scroll-y;
+                changed viewport-y => { root.grid-scrolled(); }
                 flicked => { root.grid-scrolled(); }
 
                 projected-grid := GridLayout {

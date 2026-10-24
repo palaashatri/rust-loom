@@ -88,7 +88,7 @@ Menu mnemonics are the first letter of each menu not already used; Sheets has Fi
 
 ## Known limitations
 
-- Open native QA findings include rapid-resize instability after Open, a blank strip after fast scrolling, doubled gridlines under wrapped rows, and dense-sheet scrolling below the frame-rate budget. Empty-reference display and chart redo require native rechecks after their source repairs. The Slint private `paint` warning remains.
+- Open native QA findings include rapid-resize instability after Open, doubled gridlines under wrapped rows, and dense-sheet scrolling below the frame-rate budget. The blank strip observed after a fast scroll was rechecked on the current Windows build with a 10,000-row CSV: repeated forward and reverse scrolls kept the viewport filled. This does not measure frame rate or establish behavior on other platforms. Empty-reference display and chart redo require native rechecks after their source repairs. The Slint private `paint` warning remains.
 - After the Alt+Space system-menu Size route, native QA observed grid characters being ignored until Alt was tapped. Retained modifier state is a hypothesis; the actual event/physical-input cause is unverified.
 - No pivot tables (only the formula-backed summaries above); PivotTables in an XLSX import arrive as cached cells.
 - XLSX export writes one chart series per chart at a fixed anchor. Import warns about, and drops or approximates, everything in the warning list above (for example merged cells, comments, fonts and text colours, extra chart series). Only one set of exported files was checked in Excel 16; import was checked on Excel-authored fixtures, not a wide corpus.
