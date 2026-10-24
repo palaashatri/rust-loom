@@ -3070,6 +3070,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "clipboard-win",
+ "image",
  "loom-objects",
  "serde",
  "serde_json",
@@ -3120,10 +3121,10 @@ version = "0.1.0"
 dependencies = [
  "copypasta",
  "fs2",
- "i-slint-core",
  "i-slint-backend-testing",
  "i-slint-backend-winit",
  "i-slint-common",
+ "i-slint-core",
  "image",
  "loom-clipboard",
  "loom-desktop",
