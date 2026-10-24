@@ -1,9 +1,10 @@
 name: Loom downloadable builds
 
 # Builds every Loom application for Linux, Windows, and macOS (Apple silicon and
-# Intel) and publishes portable archives: unzip, run, no installer.
+# Intel) and publishes unsigned archives that do not need a Loom installer.
 #
-#   - every push to main refreshes the rolling "nightly" pre-release
+#   - every source branch or tag push creates four platform artifacts (one archive each)
+#   - pushes to main refresh the rolling "nightly" pre-release
 #   - a v* tag publishes a versioned release
 #   - workflow_dispatch builds the archives as workflow artifacts only
 #
@@ -13,16 +14,10 @@ name: Loom downloadable builds
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: loom-release-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   APPS: "writer sheets present photo motion video studio encode"
@@ -59,7 +54,10 @@ jobs:
       CARGO_INCREMENTAL: "0"
       RUST_MIN_STACK: "33554432"
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -75,15 +73,22 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Configure static Windows CRT
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # RUSTFLAGS overrides each workspace's target rustflags, so retain
+          # the required Slint stack size while statically linking the CRT.
+          echo 'RUSTFLAGS=-C target-feature=+crt-static -C link-arg=/STACK:33554432' >> "$GITHUB_ENV"
+
       - name: Build every application (release)
         shell: bash
         run: |
           set -euo pipefail
-          # Windows: each workspace's .cargo/config.toml links a 32 MiB stack
-          # (Slint's generated UI recurses deeply) and every app crate opts into
-          # the GUI subsystem itself, so double-clicking opens no console.
-          # Do not pass global RUSTFLAGS here: they also reach proc-macro DLLs
-          # and build scripts, where /ENTRY breaks linking.
+          # Windows app crates select the GUI subsystem themselves, so
+          # double-clicking opens no console. The Windows RUSTFLAGS above do
+          # not include /ENTRY, which would break proc-macro and build-script
+          # links; they repeat the stack setting from the workspace config.
           for app in $APPS; do
             echo "::group::build loom-$app"
             # Build from inside the workspace: cargo reads .cargo/config.toml
@@ -93,6 +98,36 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Verify Windows executables do not import the CRT DLLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) {
+            throw "Visual Studio locator not found: $vswhere"
+          }
+          $dumpbinPaths = @(& $vswhere -latest -products '*' -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe')
+          if ($LASTEXITCODE -ne 0 -or $dumpbinPaths.Count -eq 0) {
+            throw 'Could not locate the Visual C++ dumpbin.exe tool.'
+          }
+          $dumpbin = $dumpbinPaths[0]
+          $crtDllPattern = '(?im)^\s*(?:VCRUNTIME[^ \t]*|MSVCP[^ \t]*|UCRTBASE|API-MS-WIN-CRT-[^ \t]*)\.DLL\s*$'
+          foreach ($app in ($env:APPS -split '\s+')) {
+            $exe = Join-Path $env:GITHUB_WORKSPACE "target-release\release\loom-$app.exe"
+            if (-not (Test-Path -LiteralPath $exe)) {
+              throw "Built executable not found: $exe"
+            }
+            $dependencies = & $dumpbin /nologo /dependents $exe 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for loom-$app.exe: $dependencies"
+            }
+            $dependencyText = $dependencies -join "`n"
+            if ($dependencyText -match $crtDllPattern) {
+              throw "loom-$app.exe still imports a Microsoft CRT DLL:`n$dependencyText"
+            }
+          }
+          Write-Host 'All eight executables have no VCRUNTIME, MSVCP, or UCRT DLL imports.'
+
       - name: Stage the portable archive
         shell: bash
         run: |
@@ -100,7 +135,7 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
           else
-            version="nightly-${GITHUB_SHA::7}"
+            version="nightly-${GITHUB_SHA}"
           fi
           name="loom-${version}-${{ matrix.label }}"
           stage="dist/${name}"
@@ -110,11 +145,16 @@ jobs:
             test -f "${src}" || { echo "missing binary ${src}"; exit 1; }
             cp "${src}" "${stage}/"
           done
+          printf '%s\n' "${GITHUB_SHA}" > "${stage}/SOURCE-COMMIT.txt"
           cp LICENSE "${stage}/LICENSE"
           cat > "${stage}/README.txt" <<'EOF'
-          Loom - portable build
-          =====================
-          Run any application directly; nothing needs to be installed:
+          Loom - portable build (no Loom installer required)
+          =================================================
+          Run an application directly after unpacking. The operating system must
+          provide its normal desktop, graphics, font, and audio runtime libraries.
+          Loom Video requires FFmpeg and a sibling FFprobe executable.
+          Loom Encode additionally requires FFmpeg on PATH.
+          Linux file dialogs require zenity or xdg-desktop-portal.
             loom-writer   word processor
             loom-sheets   spreadsheets
             loom-present  presentations
@@ -123,9 +163,6 @@ jobs:
             loom-video    video editing
             loom-studio   audio
             loom-encode   media transcoding (needs FFmpeg on PATH)
-
-          Windows: the build is unsigned, so SmartScreen may say "Windows protected
-          your PC". Choose "More info", then "Run anyway".
 
           macOS: the build is unsigned. After unpacking, remove the quarantine flag:
             xattr -dr com.apple.quarantine .
@@ -136,6 +173,21 @@ jobs:
             chmod +x loom-*   # if your archive tool dropped the execute bit
           EOF
           if [ "${{ matrix.archive }}" = "zip" ]; then
+            cat >> "${stage}/README.txt" <<'EOF'
+
+          Windows: the Microsoft C/C++ runtime (VCRUNTIME, MSVCP, and UCRT) is
+          statically linked into each executable, so no Visual C++ Redistributable
+          is required. The build is unsigned, so SmartScreen may say "Windows
+          protected your PC". Choose "More info", then "Run anyway".
+          EOF
+          else
+            cat >> "${stage}/README.txt" <<'EOF'
+
+          Windows CRT: not applicable to these non-Windows binaries. The separate
+          Windows archive statically links the Microsoft C/C++ runtime.
+          EOF
+          fi
+          if [ "${{ matrix.archive }}" = "zip" ]; then
             (cd dist && 7z a -tzip "${name}.zip" "${name}" > /dev/null)
             echo "ARCHIVE=dist/${name}.zip" >> "$GITHUB_ENV"
           else
@@ -144,33 +196,71 @@ jobs:
           fi
           ls -la dist
 
-      - name: Smoke test one binary
+      - name: Smoke test all application binaries from the archive
         shell: bash
         run: |
           set -euo pipefail
-          # Headless render through the real application; proves the binary
-          # starts, links, and paints on this OS.
-          out="$RUNNER_TEMP/loom-sheets-smoke.png"
-          "target-release/release/loom-sheets${{ matrix.exe }}" --screenshot "$out" --size 1280x800 --example
-          test -s "$out"
+          # Each app's --screenshot path renders its production Slint component
+          # without opening native file dialogs or running media jobs. Video
+          # and Encode show their no-tool state when FFmpeg is unavailable.
+          archive_path="$ARCHIVE"
+          archive_file="${ARCHIVE##*/}"
+          smoke_root="$RUNNER_TEMP/loom-archive-smoke"
+          mkdir -p "$smoke_root"
+          case "$archive_file" in
+            *.zip)
+              archive_root="${archive_file%.zip}"
+              (cd "$smoke_root" && 7z x -y "$archive_path" > /dev/null)
+              ;;
+            *.tar.gz)
+              archive_root="${archive_file%.tar.gz}"
+              tar -xzf "$archive_path" -C "$smoke_root"
+              ;;
+            *) echo "unsupported archive: $archive_file" >&2; exit 1 ;;
+          esac
+          archive_dir="$smoke_root/$archive_root"
+          test -f "$archive_dir/SOURCE-COMMIT.txt"
+          test -f "$archive_dir/LICENSE"
+          test -f "$archive_dir/README.txt"
+          for app in $APPS; do
+            out="$RUNNER_TEMP/loom-${app}-smoke.png"
+            binary="$archive_dir/loom-${app}${{ matrix.exe }}"
+            test -f "$binary"
+            if [ "$app" = sheets ]; then
+              "$binary" --screenshot "$out" --size 1280x800 --example
+            else
+              "$binary" --screenshot "$out"
+            fi
+            test -s "$out"
+          done
 
-      - uses: actions/upload-artifact@v4
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: loom-${{ matrix.label }}
           path: ${{ env.ARCHIVE }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
   publish:
     name: publish release
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    concurrency:
+      group: loom-release-publish-${{ github.ref }}
+      # Serialize mutable release operations without canceling any push's build.
+      # The publisher rejects candidates that are behind the current nightly ref.
+      queue: max
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # actions/download-artifact v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           path: assets
           merge-multiple: true
@@ -184,14 +274,564 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          api_request() {
+            local method="$1"
+            local url="$2"
+            local output="$3"
+            local payload="${4:-}"
+            local -a args=(
+              --silent --show-error --output "$output" --write-out '%{http_code}'
+              --request "$method"
+              --header "Accept: application/vnd.github+json"
+              --header "Authorization: Bearer ${GH_TOKEN}"
+              --header "X-GitHub-Api-Version: 2022-11-28"
+            )
+            if [ -n "$payload" ]; then
+              args+=(--header 'Content-Type: application/json' --data "$payload")
+            fi
+            # GETs are safe to repeat. A failed PATCH or POST may already have
+            # changed GitHub state, so mutating requests stay single-shot.
+            local attempt delay response_code curl_status
+            delay=1
+            for ((attempt = 1; attempt <= 4; attempt++)); do
+              if response_code="$(curl "${args[@]}" "$url")"; then
+                case "$response_code" in
+                  408|425|429|5[0-9][0-9])
+                    if [ "$method" = "GET" ] && [ "$attempt" -lt 4 ]; then
+                      echo "Transient GitHub API response HTTP ${response_code}; retrying GET in ${delay}s (attempt ${attempt}/4)." >&2
+                      sleep "$delay"
+                      delay=$((delay * 2))
+                      continue
+                    fi
+                    printf '%s' "$response_code"
+                    return 0
+                    ;;
+                  *)
+                    printf '%s' "$response_code"
+                    return 0
+                    ;;
+                esac
+              else
+                curl_status=$?
+                if [ "$method" = "GET" ] && [ "$attempt" -lt 4 ]; then
+                  echo "Transient GitHub API transport failure for GET (curl exit ${curl_status}); retrying in ${delay}s (attempt ${attempt}/4)." >&2
+                  sleep "$delay"
+                  delay=$((delay * 2))
+                  continue
+                fi
+                echo "GitHub API request failed (curl exit ${curl_status}); mutating requests are not retried." >&2
+                return "$curl_status"
+              fi
+            done
+          }
+
+          api_root="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          release_json="$RUNNER_TEMP/loom-release.json"
+          ref_json="$RUNNER_TEMP/loom-tag-ref.json"
+          scratch_root="$(mktemp -d "$RUNNER_TEMP/loom-release-publish.XXXXXX")"
+          trap 'rm -rf -- "$scratch_root"' EXIT
+
+          archive_marker() {
+            local archive="$1"
+            local filename="${archive##*/}"
+            local member
+            case "$filename" in
+              *.zip)
+                member="${filename%.zip}/SOURCE-COMMIT.txt"
+                python3 -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); n=[x for x in z.namelist() if x==sys.argv[2]]; assert len(n)==1; sys.stdout.buffer.write(z.read(n[0]))' "$archive" "$member"
+                ;;
+              *.tar.gz)
+                member="${filename%.tar.gz}/SOURCE-COMMIT.txt"
+                python3 -c 'import sys,tarfile; t=tarfile.open(sys.argv[1],"r:gz"); n=[x for x in t.getmembers() if x.name==sys.argv[2]]; assert len(n)==1; f=t.extractfile(n[0]); assert f is not None; sys.stdout.buffer.write(f.read())' "$archive" "$member"
+                ;;
+              *)
+                echo "unsupported archive format: ${filename}" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          asset_exists() {
+            jq -e --arg name "$1" 'any(.assets[]; .name == $name)' "$release_json" >/dev/null
+          }
+
+          refresh_release() {
+            local tag="$1"
+            local status
+            if ! status="$(api_request GET "${api_root}/releases/tags/$(jq -rn --arg tag "$tag" '$tag | @uri')" "$release_json")"; then
+              echo "Could not inspect release ${tag}." >&2
+              return 1
+            fi
+            if [ "$status" != "200" ]; then
+              echo "Could not inspect release ${tag} (HTTP ${status})." >&2
+              cat "$release_json" >&2
+              return 1
+            fi
+            jq -e '(.id | type == "number") and (.assets | type == "array") and (.tag_name | type == "string")' "$release_json" >/dev/null
+          }
+
+          resolve_ref_commit() {
+            local kind object_sha resolved_sha status
+            local depth
+            kind="$(jq -r '.object.type // empty' "$ref_json")"
+            object_sha="$(jq -r '.object.sha // empty' "$ref_json")"
+            resolved_sha=""
+            for ((depth = 0; depth < 8; depth++)); do
+              case "$kind" in
+                commit)
+                  resolved_sha="$object_sha"
+                  break
+                  ;;
+                tag)
+                  if ! status="$(api_request GET "${api_root}/git/tags/${object_sha}" "$ref_json")"; then
+                    echo "Could not dereference annotated tag ${tag}." >&2
+                    return 1
+                  fi
+                  if [ "$status" != "200" ]; then
+                    echo "Could not dereference annotated tag ${tag} (HTTP ${status})." >&2
+                    cat "$ref_json" >&2
+                    return 1
+                  fi
+                  kind="$(jq -r '.object.type // empty' "$ref_json")"
+                  object_sha="$(jq -r '.object.sha // empty' "$ref_json")"
+                  ;;
+                *)
+                  echo "Tag ${tag} points to unsupported Git object type '${kind}'." >&2
+                  return 1
+                  ;;
+              esac
+            done
+            if [ -z "$resolved_sha" ]; then
+              echo "Git ref did not resolve to a commit within eight tag objects." >&2
+              return 1
+            fi
+            printf '%s' "$resolved_sha"
+          }
+
+          resolve_tag_commit() {
+            local tag="$1"
+            local encoded status
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! status="$(api_request GET "${api_root}/git/ref/tags/${encoded}" "$ref_json")"; then
+              echo "Could not inspect tag ${tag}." >&2
+              return 1
+            fi
+            if [ "$status" != "200" ]; then
+              echo "Could not inspect tag ${tag} (HTTP ${status})." >&2
+              cat "$ref_json" >&2
+              return 1
+            fi
+            jq -e --arg ref "refs/tags/${tag}" '.ref == $ref' "$ref_json" >/dev/null
+            resolve_ref_commit
+          }
+
+          verify_tag_commit() {
+            local tag="$1"
+            local expected="$2"
+            local resolved_sha
+            if ! resolved_sha="$(resolve_tag_commit "$tag")"; then
+              echo "Tag ${tag} does not resolve to the expected source commit." >&2
+              return 1
+            fi
+            if [ "$resolved_sha" != "$expected" ]; then
+              echo "Tag ${tag} resolves to ${resolved_sha:-an unresolved object}, expected ${expected}; refusing to publish mixed or stale assets." >&2
+              return 1
+            fi
+          }
+
+          ensure_nightly_not_behind() {
+            local current_sha="$1"
+            local candidate_sha="$2"
+            local compare_json="$RUNNER_TEMP/loom-commit-compare.json"
+            local status relation
+            if [ "$current_sha" = "$candidate_sha" ]; then
+              return 0
+            fi
+            if ! status="$(api_request GET "${api_root}/compare/${current_sha}...${candidate_sha}" "$compare_json")"; then
+              echo "Could not compare nightly candidate ${candidate_sha} with current commit ${current_sha}." >&2
+              return 1
+            fi
+            if [ "$status" != "200" ]; then
+              echo "Could not compare nightly commits (HTTP ${status}); refusing to move the rolling tag." >&2
+              cat "$compare_json" >&2
+              return 1
+            fi
+            relation="$(jq -r '.status // empty' "$compare_json")"
+            case "$relation" in
+              ahead|identical)
+                ;;
+              behind|diverged|*)
+                echo "Nightly candidate ${candidate_sha} is ${relation:-unrelated} to current commit ${current_sha}; refusing to regress the rolling tag." >&2
+                return 1
+                ;;
+            esac
+          }
+
+          check_nightly_candidate_order() {
+            local tag="$1"
+            local candidate_sha="$2"
+            local encoded status current_sha
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! status="$(api_request GET "${api_root}/git/ref/tags/${encoded}" "$ref_json")"; then
+              echo "Could not inspect nightly tag ${tag}." >&2
+              return 1
+            fi
+            case "$status" in
+              404)
+                return 0
+                ;;
+              200)
+                jq -e --arg ref "refs/tags/${tag}" '.ref == $ref' "$ref_json" >/dev/null
+                current_sha="$(resolve_ref_commit)"
+                ensure_nightly_not_behind "$current_sha" "$candidate_sha"
+                ;;
+              *)
+                echo "Could not inspect nightly tag ${tag} (HTTP ${status}); refusing to publish." >&2
+                cat "$ref_json" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          download_asset() {
+            local tag="$1"
+            local name="$2"
+            local destination="$3"
+            gh release download "$tag" --dir "$destination" --pattern "$name"
+            [ -f "$destination/$name" ] || { echo "could not download release asset ${name}" >&2; return 1; }
+          }
+
+          prepare_release_asset_set() {
+            local tag="$1"
+            local source_sha="$2"
+            local marker_name="$3"
+            local checksum_name="$4"
+            local allow_unrelated_assets="$5"
+            shift 5
+            local -a archives=("$@")
+            local archive name source marker marker_missing=false checksum_exists=false
+            local -a archive_names=() missing_archives=() manifest_names=()
+            local -a expected_names=()
+            local asset_names_before_mutation asset_names_after_refresh
+            local remote_dir="$scratch_root/download"
+            local candidate_dir="$scratch_root/candidate"
+            local verify_dir="$scratch_root/verified"
+            local marker_source="$scratch_root/${marker_name}"
+            mkdir -p "$remote_dir" "$candidate_dir" "$verify_dir"
+            printf '%s\n' "$source_sha" > "$marker_source"
+
+            [ "${#archives[@]}" -eq 4 ] || { echo "expected four platform archives, found ${#archives[@]}" >&2; return 1; }
+            asset_names_before_mutation="$(jq -r '.assets[].name' "$release_json" | LC_ALL=C sort)"
+            for archive in "${archives[@]}"; do
+              [ -f "$archive" ] || { echo "missing archive ${archive}" >&2; return 1; }
+              marker="$(archive_marker "$archive")"
+              [ "$marker" = "$source_sha" ] || { echo "archive ${archive} embeds source ${marker}, expected ${source_sha}" >&2; return 1; }
+              name="${archive##*/}"
+              archive_names+=("$name")
+              expected_names+=("$name")
+            done
+            expected_names+=("$marker_name" "$checksum_name")
+            manifest_names=("${archive_names[@]}" "$marker_name")
+
+            if asset_exists "$marker_name"; then
+              download_asset "$tag" "$marker_name" "$remote_dir"
+              marker="$(cat "$remote_dir/$marker_name")"
+              [ "$marker" = "$source_sha" ] || { echo "release marker ${marker_name} names source ${marker}, expected ${source_sha}" >&2; return 1; }
+              cp "$remote_dir/$marker_name" "$candidate_dir/$marker_name"
+            else
+              if jq -e '.assets | length > 0' "$release_json" >/dev/null; then
+                if [ "$allow_unrelated_assets" = true ]; then
+                  for name in "${archive_names[@]}" "$checksum_name"; do
+                    if asset_exists "$name"; then
+                      echo "Release ${tag} has current-source assets but no source marker ${marker_name}; refusing to resume an unproven release." >&2
+                      return 1
+                    fi
+                  done
+                else
+                  echo "Release ${tag} has existing assets but no source marker ${marker_name}; refusing to resume an unproven release." >&2
+                  return 1
+                fi
+              fi
+              marker_missing=true
+              cp "$marker_source" "$candidate_dir/$marker_name"
+            fi
+
+            for archive in "${archives[@]}"; do
+              name="${archive##*/}"
+              if asset_exists "$name"; then
+                download_asset "$tag" "$name" "$remote_dir"
+                cp "$remote_dir/$name" "$candidate_dir/$name"
+              else
+                missing_archives+=("$archive")
+                cp "$archive" "$candidate_dir/$name"
+              fi
+            done
+
+            if asset_exists "$checksum_name"; then
+              checksum_exists=true
+              download_asset "$tag" "$checksum_name" "$remote_dir"
+              (cd "$candidate_dir" && sha256sum "${manifest_names[@]}" > "$scratch_root/computed-checksums.txt")
+              if ! cmp -s "$scratch_root/computed-checksums.txt" "$remote_dir/$checksum_name"; then
+                echo "Release ${tag} has a checksum that does not match its remote and candidate archives; refusing to extend it." >&2
+                return 1
+              fi
+              cp "$remote_dir/$checksum_name" "$candidate_dir/$checksum_name"
+            else
+              (cd "$candidate_dir" && sha256sum "${manifest_names[@]}" > "$checksum_name")
+            fi
+
+            # Upload only absent names. Before any upload, refresh and require
+            # the same asset inventory plus draft state. This keeps a published
+            # version with missing files from exposing a partial asset set; an
+            # uncertain or externally changed release fails closed.
+            if [ "$marker_missing" = true ] || ((${#missing_archives[@]} > 0)) || [ "$checksum_exists" = false ]; then
+              refresh_release "$tag"
+              asset_names_after_refresh="$(jq -r '.assets[].name' "$release_json" | LC_ALL=C sort)"
+              [ "$asset_names_after_refresh" = "$asset_names_before_mutation" ] || {
+                echo "Release ${tag} asset inventory changed during validation; refusing asset mutation." >&2
+                return 1
+              }
+              [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || {
+                echo "published version release is incomplete; refusing asset mutation while it is public. Mark it draft to resume safely." >&2
+                return 1
+              }
+            fi
+
+            # Existing release assets are never replaced.
+            if [ "$marker_missing" = true ]; then
+              gh release upload "$tag" "$marker_source"
+            fi
+            if ((${#missing_archives[@]} > 0)); then
+              gh release upload "$tag" "${missing_archives[@]}"
+            fi
+            if [ "$checksum_exists" = false ]; then
+              gh release upload "$tag" "$candidate_dir/$checksum_name"
+            fi
+
+            refresh_release "$tag"
+            for name in "${expected_names[@]}"; do
+              asset_exists "$name" || { echo "release ${tag} is missing expected asset ${name} after upload" >&2; return 1; }
+              download_asset "$tag" "$name" "$verify_dir"
+            done
+            marker="$(cat "$verify_dir/$marker_name")"
+            [ "$marker" = "$source_sha" ] || { echo "verified marker ${marker_name} names source ${marker}, expected ${source_sha}" >&2; return 1; }
+            for name in "${archive_names[@]}"; do
+              marker="$(archive_marker "$verify_dir/$name")"
+              [ "$marker" = "$source_sha" ] || { echo "verified archive ${name} embeds source ${marker}, expected ${source_sha}" >&2; return 1; }
+            done
+            (cd "$verify_dir" && sha256sum "${manifest_names[@]}" > "$scratch_root/verified-checksums.txt")
+            cmp -s "$scratch_root/verified-checksums.txt" "$verify_dir/$checksum_name" || { echo "verified release checksum ${checksum_name} does not describe the downloaded asset set" >&2; return 1; }
+            (cd "$verify_dir" && sha256sum -c "$checksum_name")
+          }
+
+          create_draft_release() {
+            local tag="$1"
+            local target_sha="$2"
+            local title="$3"
+            local notes="$4"
+            local encoded status ref_status
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! ref_status="$(api_request GET "${api_root}/git/ref/tags/${encoded}" "$ref_json")"; then
+              echo "Could not inspect tag ${tag} before creating its draft release." >&2
+              return 1
+            fi
+            case "$ref_status" in
+              200)
+                jq -e --arg ref "refs/tags/${tag}" '.ref == $ref' "$ref_json" >/dev/null
+                gh release create "$tag" --draft --verify-tag --title "$title" --notes "$notes"
+                ;;
+              404)
+                gh release create "$tag" --draft --target "$target_sha" --title "$title" --notes "$notes"
+                ;;
+              *)
+                echo "Could not inspect tag ${tag} (HTTP ${ref_status}); refusing to create a release." >&2
+                cat "$ref_json" >&2
+                return 1
+                ;;
+            esac
+            refresh_release "$tag"
+          }
+
+          publish_version_tag() {
+            local tag="$1"
+            local encoded status is_draft
+            local -a archives=(assets/loom-*)
+            verify_tag_commit "$tag" "$GITHUB_SHA"
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! status="$(api_request GET "${api_root}/releases/tags/${encoded}" "$release_json")"; then
+              echo "Could not inspect release ${tag}." >&2
+              return 1
+            fi
+            case "$status" in
+              200)
+                jq -e --arg tag "$tag" '(.id | type == "number") and (.assets | type == "array") and (.tag_name == $tag)' "$release_json" >/dev/null
+                ;;
+              404)
+                create_draft_release "$tag" "$GITHUB_SHA" "Loom ${tag}" "Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. See README.txt inside each archive."
+                ;;
+              *)
+                echo "Could not inspect release ${tag} (HTTP ${status}); refusing to publish." >&2
+                cat "$release_json" >&2
+                return 1
+                ;;
+            esac
+            prepare_release_asset_set "$tag" "$GITHUB_SHA" "SOURCE-COMMIT.txt" "SHA256SUMS.txt" false "${archives[@]}"
+            verify_tag_commit "$tag" "$GITHUB_SHA"
+            is_draft="$(jq -r '.draft // false' "$release_json")"
+            if [ "$is_draft" = "true" ]; then
+              gh release edit "$tag" --draft=false
+            fi
+            refresh_release "$tag"
+            [ "$(jq -r '.draft // false' "$release_json")" = "false" ] || { echo "Release ${tag} is complete but remains a draft." >&2; return 1; }
+            if ! verify_tag_commit "$tag" "$GITHUB_SHA"; then
+              redraft_release_after_tag_mismatch "$tag" || true
+              return 1
+            fi
+          }
+
+          redraft_release_after_tag_mismatch() {
+            local tag="$1"
+            echo "Tag ${tag} changed after release publication; attempting to hide the release again." >&2
+            if ! gh release edit "$tag" --draft; then
+              echo "Could not request draft state for release ${tag}; checking its observed state." >&2
+            fi
+            if ! refresh_release "$tag"; then
+              echo "Could not verify draft state for release ${tag}; it may remain publicly visible." >&2
+              return 1
+            fi
+            [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || {
+              echo "Release ${tag} may remain publicly visible after the tag changed." >&2
+              return 1
+            }
+            echo "Release ${tag} is back in draft after the tag changed." >&2
+          }
+
+          update_tag_ref() {
+            local tag="$1"
+            local target_sha="$2"
+            local encoded status payload expected_status current_sha
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! status="$(api_request GET "${api_root}/git/ref/tags/${encoded}" "$ref_json")"; then
+              echo "Could not inspect tag ${tag} before updating it." >&2
+              return 1
+            fi
+            case "$status" in
+              200)
+                jq -e --arg ref "refs/tags/${tag}" '.ref == $ref' "$ref_json" >/dev/null
+                current_sha="$(resolve_ref_commit)"
+                ensure_nightly_not_behind "$current_sha" "$target_sha"
+                # Refuse a stale read if an external writer advanced the ref
+                # before this PATCH. A non-fast-forward update must not clobber
+                # the newer target.
+                payload="$(jq -cn --arg sha "$target_sha" '{sha:$sha, force:false}')"
+                expected_status="200"
+                status="$(api_request PATCH "${api_root}/git/refs/tags/${encoded}" "$ref_json" "$payload")"
+                ;;
+              404)
+                payload="$(jq -cn --arg ref "refs/tags/${tag}" --arg sha "$target_sha" '{ref:$ref, sha:$sha}')"
+                expected_status="201"
+                status="$(api_request POST "${api_root}/git/refs" "$ref_json" "$payload")"
+                ;;
+              *)
+                echo "Could not inspect tag ${tag} (HTTP ${status})." >&2
+                cat "$ref_json" >&2
+                return 1
+                ;;
+            esac
+            if [ "$status" != "$expected_status" ]; then
+              echo "Could not point tag ${tag} to ${target_sha} (HTTP ${status})." >&2
+              cat "$ref_json" >&2
+              return 1
+            fi
+            verify_tag_commit "$tag" "$target_sha"
+          }
+
+          publish_nightly() {
+            local tag="nightly"
+            local source_sha="$GITHUB_SHA"
+            local marker_name="LOOM-SOURCE-${GITHUB_SHA}.txt"
+            local checksum_name="SHA256SUMS-nightly-${GITHUB_SHA}.txt"
+            local release_status
+            local -a archives=(assets/loom-nightly-${GITHUB_SHA}-*)
+            local -a current_names=() old_names=()
+            local name current keep
+            local title="Loom nightly (${GITHUB_SHA::7})"
+            local notes="Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. Unzip and run; see README.txt inside each archive."
+
+            [ "${#archives[@]}" -eq 4 ] || { echo "expected four current nightly archives, found ${#archives[@]}" >&2; return 1; }
+            # A queued publisher may start after a newer push; reject an older
+            # or divergent candidate before it mutates the rolling release.
+            check_nightly_candidate_order "$tag" "$source_sha"
+            if ! release_status="$(api_request GET "${api_root}/releases/tags/${tag}" "$release_json")"; then
+              echo "Could not inspect the nightly release." >&2
+              return 1
+            fi
+            case "$release_status" in
+              200)
+                jq -e '.tag_name == "nightly" and (.id | type == "number") and (.assets | type == "array")' "$release_json" >/dev/null
+                ;;
+              404)
+                create_draft_release "$tag" "$source_sha" "$title" "$notes"
+                ;;
+              *)
+                echo "Could not inspect the nightly release (HTTP ${release_status}); refusing to publish." >&2
+                cat "$release_json" >&2
+                return 1
+                ;;
+            esac
+
+            check_nightly_candidate_order "$tag" "$source_sha"
+            # GitHub has one release for the rolling nightly tag. Draft it
+            # before touching assets so a partial candidate is never public.
+            # This makes nightly downloads temporarily unavailable until the
+            # candidate verifies, the ref moves, stale assets are pruned, and
+            # the complete release is published again.
+            if [ "$(jq -r '.draft // false' "$release_json")" = "false" ]; then
+              gh release edit "$tag" --draft
+              refresh_release "$tag"
+            fi
+            [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || { echo "Nightly release must be a draft before candidate assets are changed." >&2; return 1; }
+
+            prepare_release_asset_set "$tag" "$source_sha" "$marker_name" "$checksum_name" true "${archives[@]}"
+            update_tag_ref "$tag" "$source_sha"
+
+            current_names=("${archives[@]##*/}" "$marker_name" "$checksum_name")
+            mapfile -t old_names < <(jq -r '.assets[].name' "$release_json")
+            for name in "${old_names[@]}"; do
+              case "$name" in
+                loom-nightly-*|SHA256SUMS-nightly-*.txt|SHA256SUMS.txt|LOOM-SOURCE-*.txt)
+                  keep=false
+                  for current in "${current_names[@]}"; do
+                    if [ "$name" = "$current" ]; then keep=true; break; fi
+                  done
+                  if [ "$keep" = false ]; then
+                    gh release delete-asset "$tag" "$name" --yes
+                  fi
+                  ;;
+              esac
+            done
+            refresh_release "$tag"
+            for name in "${current_names[@]}"; do
+              asset_exists "$name" || { echo "nightly pruning removed expected asset ${name}" >&2; return 1; }
+            done
+            # Ref movement and release publication are separate GitHub API
+            # calls. GitHub offers no conditional ref update, so an external
+            # writer can still move the ref after a check. The non-force PATCH
+            # avoids clobbering a newer ref; the post-publish check below
+            # attempts to hide a release if the unavoidable API race lands.
+            verify_tag_commit "$tag" "$source_sha"
+            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease --draft=false
+            refresh_release "$tag"
+            [ "$(jq -r '.draft // false' "$release_json")" = "false" ] || { echo "Nightly asset set is complete but the release remains a draft." >&2; return 1; }
+            if ! verify_tag_commit "$tag" "$source_sha"; then
+              redraft_release_after_tag_mismatch "$tag" || true
+              return 1
+            fi
+          }
+
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            gh release create "${GITHUB_REF_NAME}" assets/* \
-              --title "Loom ${GITHUB_REF_NAME}" --generate-notes
+            publish_version_tag "${GITHUB_REF_NAME}"
           else
-            # Rolling pre-release: replace the previous nightly.
-            gh release delete nightly --cleanup-tag --yes || true
-            gh release create nightly assets/* \
-              --target "${GITHUB_SHA}" --prerelease \
-              --title "Loom nightly (${GITHUB_SHA::7})" \
-              --notes "Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. Unzip and run; see README.txt inside the archive."
+            publish_nightly
           fi
