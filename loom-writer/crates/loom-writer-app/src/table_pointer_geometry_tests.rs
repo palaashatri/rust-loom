@@ -548,49 +548,71 @@ fn a_held_drag_below_the_visible_bottom_scrolls_the_page_to_keep_the_focus_visib
 /// The painted text of each cell must sit inside that cell's own rectangle, and a
 /// press on that painted text must select the cell. The presses above aim at
 /// centres computed from the published rectangles, so they cannot see a cell
-/// that is drawn somewhere other than the model places it. This test reads the
-/// rendered tree and presses on the painted text itself, through the pointer
-/// surface, at each display scale.
+/// that is drawn somewhere other than the model places it. These tests read the
+/// rendered tree and press on the painted text itself, through the pointer
+/// surface, at each display scale and each page zoom.
 #[test]
 fn a_press_on_each_painted_cell_text_selects_that_cell_at_every_scale() {
     for scale in [1.0_f32, 1.5, 2.0] {
         let (app, state) = rendered_window(table_document(3, 3), 1280, 800, scale, 0.0);
-        let rects = app.get_table_cell_rects();
-        for row in 0..3 {
-            for col in 0..3 {
-                let label = format!("r{row}c{col}");
-                let painted: Vec<_> =
-                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, &label)
-                        .collect();
-                assert_eq!(painted.len(), 1, "{label} is painted once at scale {scale}");
-                let text = painted[0].absolute_position();
-                let size = painted[0].size();
-                let centre = (text.x + size.width / 2.0, text.y + size.height / 2.0);
-                let (origin_x, origin_y) = fresh_document_origin(&app);
-                let rect = rects
-                    .row_data(row * 3 + col)
-                    .expect("one rectangle per cell");
-                let inside_x =
-                    centre.0 >= origin_x + rect.x && centre.0 < origin_x + rect.x + rect.width;
-                let inside_y =
-                    centre.1 >= origin_y + rect.y && centre.1 < origin_y + rect.y + rect.height;
-                assert!(
-                    inside_x && inside_y,
-                    "{label} at scale {scale}: its painted text centre is at {centre:?}, \
-                     outside its rectangle at origin ({origin_x}, {origin_y}) with \
-                     x {} y {} w {} h {}",
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    rect.height
-                );
-                dispatch_window_press(&app, centre);
-                assert_eq!(
-                    focused_cell(&state, 1),
-                    Some((row, col)),
-                    "a press on the painted {label} at scale {scale} selects that cell"
-                );
-            }
+        assert_painted_cells_select_themselves(&app, &state, 1.0, &format!("scale {scale}"));
+    }
+}
+
+#[test]
+fn a_press_on_each_painted_cell_text_selects_that_cell_at_every_zoom() {
+    for zoom in [0.75_f32, 1.5, 2.0] {
+        let (app, state) = crate::actions_tests::test_state(
+            table_document(3, 3),
+            std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None])),
+        );
+        app.window().set_size(slint::PhysicalSize::new(1280, 800));
+        crate::wire_writer_shared_callbacks(&app, &state, None);
+        app.invoke_page_zoom_changed(zoom);
+        crate::apply_state(&app, &state);
+        let _ = loom_test_support::capture::snapshot_component(&app, 1280.0, 800.0, 1.0)
+            .expect("render the page before pointer input");
+        crate::focus_page_at_launch(&app);
+        assert_painted_cells_select_themselves(&app, &state, zoom, &format!("zoom {zoom}"));
+    }
+}
+
+/// For each cell of a 3x3 table on the rendered page: its painted text must lie
+/// inside its rectangle at `zoom`, and a press on that text must select the cell.
+fn assert_painted_cells_select_themselves(
+    app: &crate::WriterApp,
+    state: &crate::GuiState,
+    zoom: f32,
+    condition: &str,
+) {
+    let rects = app.get_table_cell_rects();
+    for row in 0..3 {
+        for col in 0..3 {
+            let label = format!("r{row}c{col}");
+            let painted: Vec<_> =
+                i_slint_backend_testing::ElementHandle::find_by_accessible_label(app, &label)
+                    .collect();
+            assert_eq!(painted.len(), 1, "{label} is painted once at {condition}");
+            let text = painted[0].absolute_position();
+            let size = painted[0].size();
+            let centre = (text.x + size.width / 2.0, text.y + size.height / 2.0);
+            let (origin_x, origin_y) = fresh_document_origin(app);
+            let rect = rects
+                .row_data(row * 3 + col)
+                .expect("one rectangle per cell");
+            let (left, top) = (origin_x + rect.x * zoom, origin_y + rect.y * zoom);
+            let (right, bottom) = (left + rect.width * zoom, top + rect.height * zoom);
+            assert!(
+                centre.0 >= left && centre.0 < right && centre.1 >= top && centre.1 < bottom,
+                "{label} at {condition}: its painted text centre is at {centre:?}, \
+                 outside its rectangle {left}..{right} by {top}..{bottom}"
+            );
+            dispatch_window_press(app, centre);
+            assert_eq!(
+                focused_cell(state, 1),
+                Some((row, col)),
+                "a press on the painted {label} at {condition} selects that cell"
+            );
         }
     }
 }
