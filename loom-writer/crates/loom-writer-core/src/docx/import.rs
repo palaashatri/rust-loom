@@ -7,6 +7,7 @@
 use loom_package::zip::PackageArchive;
 use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphStyle, StyleRun};
 
+use super::inline_style::{property_tag, writer_color};
 use crate::{RichBlock, WriterDocument};
 
 /// Unescapes the five predefined XML entities in one left-to-right pass.
@@ -501,8 +502,8 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
     if tag_is_enabled(pr, "w:strike") {
         style.strikethrough = true;
     }
-    if let Some(sz_pos) = pr.find("<w:sz") {
-        if let Some(val) = extract_attribute_value(&pr[sz_pos..], "w:val") {
+    if let Some(sz_tag) = property_tag(pr, "w:sz") {
+        if let Some(val) = extract_attribute_value(sz_tag, "w:val") {
             if let Ok(half_pts) = val.parse::<f32>() {
                 style.font_size = half_pts / 2.0;
                 // The file sets this size on the run, so it is the run's own.
@@ -510,47 +511,39 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
             }
         }
     }
-    if let Some(col_pos) = pr.find("<w:color") {
-        if let Some(val) = extract_attribute_value(&pr[col_pos..], "w:val") {
-            if val != "auto" && !val.is_empty() {
-                style.color = Some(format!("#{val}FF"));
+    if let Some(color_tag) = property_tag(pr, "w:color") {
+        if let Some(val) = extract_attribute_value(color_tag, "w:val") {
+            if val == "auto" {
+                style.color = None;
+            } else if let Some(color) = writer_color(&val) {
+                style.color = Some(color);
             }
         }
     }
-    if let Some(fonts_pos) = pr.find("<w:rFonts") {
-        if let Some(val) = extract_attribute_value(&pr[fonts_pos..], "w:ascii") {
+    if let Some(fonts_tag) = property_tag(pr, "w:rFonts") {
+        if let Some(val) = extract_attribute_value(fonts_tag, "w:ascii") {
             if !val.is_empty() {
                 style.font_family = val;
             }
+        }
+    }
+    if let Some(vertical_tag) = property_tag(pr, "w:vertAlign") {
+        if let Some(val) = extract_attribute_value(vertical_tag, "w:val") {
+            style.superscript = val == "superscript";
+            style.subscript = val == "subscript";
         }
     }
     style
 }
 
 fn tag_is_enabled(xml: &str, tag_name: &str) -> bool {
-    let needle = format!("<{tag_name}");
-    let mut from = 0;
-    while let Some(found) = xml[from..].find(&needle) {
-        let pos = from + found;
-        let end = pos + needle.len();
-        // `<w:b` also begins `<w:bCs/>`, a different property, so only the exact
-        // element name counts: it must end at whitespace, `/` or `>`.
-        if matches!(
-            xml[end..].chars().next(),
-            Some(' ' | '\t' | '\r' | '\n' | '/' | '>')
-        ) {
-            let Some(close) = xml[pos..].find('>') else {
-                return false;
-            };
-            let tag_str = &xml[pos..=pos + close];
-            return match extract_attribute_value(tag_str, "w:val") {
-                Some(val) => val != "0" && val != "false" && val != "none",
-                None => true,
-            };
-        }
-        from = end;
+    let Some(tag) = property_tag(xml, tag_name) else {
+        return false;
+    };
+    match extract_attribute_value(tag, "w:val") {
+        Some(val) => val != "0" && val != "false" && val != "none",
+        None => true,
     }
-    false
 }
 
 /// Parses text from `<w:t>`, `<w:tab/>`, `<w:br/>` inside a run.

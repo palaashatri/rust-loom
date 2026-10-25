@@ -224,6 +224,9 @@ fn a_table_range_marks_exactly_its_cells_as_painted_selected() {
     }
 }
 
+#[path = "table_range_render_tests.rs"]
+mod table_range_render_tests;
+
 /// Every press in a 3x3 table, at each window size and scale factor, selects
 /// the cell under the pointer. The editor origin is measured for each window.
 #[test]

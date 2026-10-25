@@ -17,15 +17,19 @@ use std::rc::Rc;
 
 use loom_text::StyleRun;
 
+mod metrics;
 mod placement;
+mod selection;
+pub(crate) use metrics::{block_bidi_runs, block_positions};
 use placement::{Placer, Segment};
+use selection::{floor_in_blocks, rects_for_lines};
 
-use crate::text_metrics::bidi::{visible_end, BidiRuns, LineOrder};
-use crate::text_metrics::{block_measure, LineMeasure};
+use crate::text_metrics::bidi::BidiRuns;
+use crate::text_metrics::justification::{line_geometry_with_measure, measure_block};
+use crate::text_metrics::LineMeasure;
 use crate::{
-    floor_grapheme_boundary, DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect,
-    PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection, VisibleRange, WriterDocument,
-    PAGE_GAP_PT,
+    DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect, PageStyle, PageViewport,
+    RichBlock, SelectionRect, TextSelection, VisibleRange, WriterDocument, PAGE_GAP_PT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -46,6 +50,8 @@ struct CachedBlock {
     runs: Vec<StyleRun>,
     /// Where every grapheme of the text sits, independent of the wrap width.
     measure: Rc<LineMeasure>,
+    /// Paragraph bidi levels, shared by every wrapped line of this block.
+    bidi_runs: Option<Rc<BidiRuns>>,
     lines: Rc<[WrappedLine]>,
     words: usize,
     chars: usize,
@@ -83,13 +89,15 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         // The grapheme positions depend on the text, runs and size only, so a
         // block that is re-wrapped at a new width keeps them.
         let mut reusable: Option<Rc<LineMeasure>> = None;
+        let mut reusable_bidi: Option<Option<Rc<BidiRuns>>> = None;
         if let Some(hit) = cache.blocks.get_mut(&block.id) {
             if hit.epoch == epoch
                 && hit.font_bits == font_bits
                 && hit.text == text
                 && hit.runs == block.runs
+                && hit.kind == block.kind
             {
-                if hit.width_bits == width_bits && hit.kind == block.kind {
+                if hit.width_bits == width_bits {
                     hit.seen = generation;
                     return BlockInfo {
                         lines: hit.lines.clone(),
@@ -99,12 +107,13 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                     };
                 }
                 reusable = Some(hit.measure.clone());
+                reusable_bidi = Some(hit.bidi_runs.clone());
             }
         }
         #[cfg(test)]
         WRAP_MISSES.with(|misses| misses.set(misses.get() + 1));
-        let measure =
-            reusable.unwrap_or_else(|| Rc::new(block_measure(text, &block.runs, font_size)));
+        let measure = reusable.unwrap_or_else(|| Rc::new(measure_block(block, font_size)));
+        let bidi_runs = reusable_bidi.unwrap_or_else(|| BidiRuns::of(text).map(Rc::new));
         // A table is one line per row: its cells are drawn in columns, not wrapped.
         let spans: Vec<(usize, usize)> = if block.kind == crate::TABLE_BLOCK_KIND {
             crate::tables::table_row_spans(text)
@@ -135,6 +144,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                 text: text.to_string(),
                 runs: block.runs.clone(),
                 measure,
+                bidi_runs,
                 lines: lines.clone(),
                 words,
                 chars,
@@ -165,29 +175,6 @@ fn end_pass(block_count: usize) {
             cache.blocks.retain(|_, block| block.seen == generation);
         }
     });
-}
-
-/// Where every grapheme of `block` sits at `font_size`: from the cache when
-/// the block is unchanged since it was wrapped, else measured now. Carets and
-/// selection rectangles are read from this, so they land where the glyphs the
-/// page draws are, kerning included.
-fn block_positions(block: &RichBlock, font_size: f32) -> Rc<LineMeasure> {
-    let text = block.text.as_str();
-    let epoch = crate::fonts::font_epoch();
-    let cached = WRAP_CACHE.with(|cache| {
-        cache
-            .borrow()
-            .blocks
-            .get(&block.id)
-            .filter(|hit| {
-                hit.epoch == epoch
-                    && hit.font_bits == font_size.to_bits()
-                    && hit.text == text
-                    && hit.runs == block.runs
-            })
-            .map(|hit| hit.measure.clone())
-    });
-    cached.unwrap_or_else(|| Rc::new(block_measure(text, &block.runs, font_size)))
 }
 
 /// One wrapped line placed on a page.
@@ -457,7 +444,20 @@ impl WriterDocument {
                     .object_display_size(usable_width, usable_height)
                     .map_or(text_line_height(style, block), |(_, h)| h)
                     * zoom;
-                let width = lines[at].bounds.width * zoom;
+                let line = &lines[at];
+                let geometry = line_geometry_with_measure(
+                    block,
+                    line.start..line.end,
+                    &block_positions(block, style.font_size_for_kind(block.kind.as_str())),
+                    block.text_column_width(style),
+                    block.style.alignment.resolve(block.text.as_str())
+                        == loom_text::Alignment::Justify,
+                );
+                let width = if geometry.gaps.is_empty() {
+                    line.bounds.width * zoom
+                } else {
+                    geometry.width * zoom
+                };
                 lines[at].bounds = PageRect {
                     x: content_x + block.text_start_pt(style) * zoom,
                     y: line_y,
@@ -613,8 +613,8 @@ impl WriterDocument {
         floor_in_blocks(self, &self.block_starts(), offset)
     }
 
-    /// Floor both ends of `selection` to grapheme boundaries and clamp them to
-    /// the editor text, without building that text.
+    /// Floor both selection ends to grapheme boundaries and clamp them to the
+    /// editor text, without building that text.
     pub fn clamp_selection(&self, mut selection: TextSelection) -> TextSelection {
         let starts = self.block_starts();
         selection.anchor = floor_in_blocks(self, &starts, selection.anchor);
@@ -635,9 +635,8 @@ impl WriterDocument {
             .collect()
     }
 
-    /// Number of user-perceived characters before `offset` in the editor text,
-    /// each newline between blocks counting as one. Whole blocks before the
-    /// offset come from the per-block cache.
+    /// Number of user-perceived characters before `offset`; whole preceding
+    /// blocks come from the per-block layout cache.
     pub fn grapheme_position(&self, offset: usize) -> usize {
         if self.blocks.is_empty() {
             return 0;
@@ -661,8 +660,7 @@ impl WriterDocument {
         before + crate::grapheme_count(&text[..offset - starts[index]])
     }
 
-    /// Words and characters in the editor text, from the per-block cache so a
-    /// keystroke recounts only the paragraph it changed.
+    /// Words and characters in the editor text, from the per-block cache.
     pub fn text_counts(&self) -> (usize, usize) {
         let style = self.page.page_style();
         begin_pass();
@@ -676,166 +674,6 @@ impl WriterDocument {
         end_pass(self.blocks.len());
         (words, chars + self.blocks.len().saturating_sub(1))
     }
-}
-
-/// Floor an editor-stream offset to a grapheme boundary using only the block
-/// it falls in. Graphemes never span the newline between blocks, so this
-/// equals flooring in the joined text without building it.
-fn floor_in_blocks(doc: &WriterDocument, block_starts: &[usize], offset: usize) -> usize {
-    let Some(last) = doc.blocks.len().checked_sub(1) else {
-        return 0;
-    };
-    let total = block_starts[last] + doc.blocks[last].text.len_bytes();
-    let offset = offset.min(total);
-    let index = block_starts
-        .partition_point(|start| *start <= offset)
-        .saturating_sub(1);
-    let start = block_starts[index];
-    start + floor_grapheme_boundary(doc.blocks[index].text.as_str(), offset - start)
-}
-
-/// Selection highlights or caret for `selection` on the lines in `window`
-/// (indexes into `lines`). Lines are in document order, so the lines a
-/// selection touches are found by binary search rather than a scan.
-fn rects_for_lines(
-    doc: &WriterDocument,
-    style: &PageStyle,
-    zoom: f32,
-    block_starts: &[usize],
-    lines: &[FlowLine],
-    selection: &TextSelection,
-    window: Range<usize>,
-) -> Vec<SelectionRect> {
-    let anchor = floor_in_blocks(doc, block_starts, selection.anchor);
-    let focus = floor_in_blocks(doc, block_starts, selection.focus);
-    let (selection_start, selection_end) = (anchor.min(focus), anchor.max(focus));
-    let (lo, hi) = if selection_start < selection_end {
-        (
-            lines.partition_point(|line| line.global_end() <= selection_start),
-            lines.partition_point(|line| line.global_start < selection_end),
-        )
-    } else {
-        (
-            lines.partition_point(|line| line.global_end() < selection_start),
-            lines.partition_point(|line| line.global_start <= selection_start),
-        )
-    };
-    let (lo, hi) = (lo.max(window.start), hi.min(window.end).min(lines.len()));
-    let mut result = Vec::new();
-    // The last block measured: a selection covers many lines of few blocks.
-    let mut measured: Option<(usize, Rc<LineMeasure>)> = None;
-    let mut bidi_runs: Option<(usize, Option<Rc<BidiRuns>>)> = None;
-    for at in lo..hi.max(lo) {
-        let line = &lines[at];
-        let block = &doc.blocks[line.block_index];
-        let font_size = style.font_size_for_kind(block.kind.as_str());
-        let source = &block.text.as_str()[line.start..line.end];
-        let positions = match &measured {
-            Some((index, positions)) if *index == line.block_index => positions.clone(),
-            _ => {
-                let positions = block_positions(block, font_size);
-                measured = Some((line.block_index, positions.clone()));
-                positions
-            }
-        };
-        let bidi = match &bidi_runs {
-            Some((index, bidi)) if *index == line.block_index => bidi.clone(),
-            _ => {
-                let bidi = BidiRuns::of(block.text.as_str()).map(Rc::new);
-                bidi_runs = Some((line.block_index, bidi.clone()));
-                bidi
-            }
-        };
-        // A right-to-left line is highlighted and carets are placed in the order
-        // its glyphs are drawn in; every other line keeps its logical advances.
-        let order = bidi.as_deref().and_then(|bidi| {
-            let visible = visible_end(block.text.as_str(), line.start..line.end);
-            LineOrder::build(bidi, block.text.as_str(), &positions, line.start..visible)
-        });
-        // Block byte offsets in, points out.
-        let advance = |from: usize, to: usize| positions.advance(from, to) * zoom;
-        let available_width = block.text_column_width(style) * zoom;
-        let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
-            loom_text::Alignment::Center => ((available_width - line.bounds.width) / 2.0).max(0.0),
-            loom_text::Alignment::Right => (available_width - line.bounds.width).max(0.0),
-            loom_text::Alignment::Left
-            | loom_text::Alignment::Justify
-            | loom_text::Alignment::Start => 0.0,
-        };
-        let line_x = line.bounds.x + alignment_offset;
-        let (global_start, global_end) = (line.global_start, line.global_end());
-        let overlap_start = selection_start.max(global_start);
-        let overlap_end = selection_end.min(global_end);
-        if overlap_start < overlap_end {
-            let local_start = overlap_start - global_start;
-            let local_end = overlap_end - global_start;
-            let from = line.start + local_start.min(source.len());
-            let to = line.start + local_end.min(source.len());
-            if let Some(order) = &order {
-                for span in order.spans(from..to) {
-                    result.push(SelectionRect {
-                        page_index: line.page,
-                        block_id: block.id,
-                        start: span.start,
-                        end: span.end,
-                        rect: PageRect {
-                            x: line_x + span.left,
-                            y: line.bounds.y,
-                            width: span.right - span.left,
-                            height: line.bounds.height,
-                        },
-                    });
-                }
-            } else {
-                result.push(SelectionRect {
-                    page_index: line.page,
-                    block_id: block.id,
-                    start: line.start + local_start,
-                    end: line.start + local_end,
-                    rect: PageRect {
-                        x: line_x + advance(line.start, from),
-                        y: line.bounds.y,
-                        width: advance(from, to),
-                        height: line.bounds.height,
-                    },
-                });
-            }
-        } else if selection_start == selection_end {
-            let at_start = selection_start == global_start;
-            let at_end = selection_start == global_end;
-            let strictly_inside = selection_start > global_start && selection_start < global_end;
-            let has_previous_boundary = at > 0 && lines[at - 1].global_end() == global_start;
-            let is_last_line = at + 1 == lines.len();
-            let use_line = strictly_inside
-                || (at_start
-                    && (!has_previous_boundary
-                        || selection.affinity == crate::CaretAffinity::Downstream))
-                || (at_end
-                    && (selection.affinity == crate::CaretAffinity::Upstream || is_last_line));
-            if use_line {
-                let local = selection_start
-                    .saturating_sub(global_start)
-                    .min(source.len());
-                let caret_x = match &order {
-                    Some(order) => order.x_of(line.start + local, selection.affinity),
-                    None => advance(line.start, line.start + local),
-                };
-                result.push(SelectionRect {
-                    page_index: line.page,
-                    block_id: block.id,
-                    start: line.start + local,
-                    end: line.start + local,
-                    rect: PageRect {
-                        x: line_x + caret_x,
-                        y: line.bounds.y,
-                        width: 1.0,
-                        height: line.bounds.height,
-                    },
-                });
-            }
-        }
-    }
-    result
 }
 
 /// Whole-document pagination placed in viewport coordinates.

@@ -8,6 +8,8 @@
 use loom_pdf::TextStyle;
 use loom_text::StyleRun;
 
+use crate::text_metrics::bidi::visible_end;
+use crate::text_metrics::justification::{line_geometry, LineGeometry};
 use crate::text_metrics::{drawn_size, pdf_text_width, LineMeasure, Style, Uncovered};
 
 /// The text of one block measured as the PDF draws it: `base` is the face
@@ -20,6 +22,32 @@ fn measure(text: &str, text_start: usize, runs: &[StyleRun], base: &TextStyle) -
         drawn_size(base),
         Style::new(base.bold, base.italic),
         Uncovered::Drawn,
+    )
+}
+
+/// The PDF's own wrapped-line measurement passed through the same byte-offset
+/// space expansion algorithm as the editor.
+pub(crate) fn block_measure(text: &str, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+    measure(text, 0, runs, base)
+}
+
+pub(crate) fn justification_geometry(
+    text: &str,
+    positions: &LineMeasure,
+    start: usize,
+    end: usize,
+    available_width: f32,
+    requested: bool,
+    paragraph_has_bidi: bool,
+) -> LineGeometry {
+    let visible = visible_end(text, start..end);
+    line_geometry(
+        text,
+        start..end,
+        positions.advance(start, visible),
+        available_width,
+        requested,
+        paragraph_has_bidi,
     )
 }
 
@@ -182,6 +210,99 @@ mod tests {
             text.replace(' ', ""),
             "wrapping keeps every letter once"
         );
+    }
+
+    #[test]
+    fn pdf_justification_geometry_expands_soft_wraps_only() {
+        let text = format!("one two {}", "x".repeat(80));
+        let base = plain();
+        let width = 100.0;
+        let measure = block_measure(&text, &[], &base);
+        let lines = wrap(&text, &[], &base, width, width);
+        let paragraph_has_bidi = crate::text_metrics::bidi::BidiRuns::of(&text).is_some();
+        let automatic = lines
+            .iter()
+            .find(|(start, end)| {
+                !justification_geometry(
+                    &text,
+                    &measure,
+                    *start,
+                    *end,
+                    200.0,
+                    true,
+                    paragraph_has_bidi,
+                )
+                .gaps
+                .is_empty()
+            })
+            .copied()
+            .expect("the fixture has a soft-wrapped line with an internal word gap");
+        let expanded = justification_geometry(
+            &text,
+            &measure,
+            automatic.0,
+            automatic.1,
+            200.0,
+            true,
+            paragraph_has_bidi,
+        );
+        assert!((expanded.width - 200.0).abs() < 0.01);
+
+        let final_line = *lines.last().expect("a final PDF line");
+        let final_geometry = justification_geometry(
+            &text,
+            &measure,
+            final_line.0,
+            final_line.1,
+            200.0,
+            true,
+            paragraph_has_bidi,
+        );
+        assert!(
+            final_geometry.gaps.is_empty(),
+            "the final line stays natural"
+        );
+
+        let hard_break = "one two\nthree";
+        let hard_measure = block_measure(hard_break, &[], &base);
+        let hard_line = wrap(hard_break, &[], &base, 200.0, 200.0)[0];
+        let hard_geometry = justification_geometry(
+            hard_break,
+            &hard_measure,
+            hard_line.0,
+            hard_line.1,
+            200.0,
+            true,
+            false,
+        );
+        assert!(
+            hard_geometry.gaps.is_empty(),
+            "an explicit line break does not create a justification stretch"
+        );
+    }
+
+    #[test]
+    fn pdf_justification_defers_left_to_right_lines_in_mixed_paragraphs() {
+        let text = format!(
+            "אבג {}",
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(20)
+        );
+        let base = plain();
+        let measure = block_measure(&text, &[], &base);
+        let lines = wrap(&text, &[], &base, 200.0, 200.0);
+        let line = lines
+            .iter()
+            .find(|(start, end)| {
+                *end < text.len()
+                    && text[*start..*end].contains(' ')
+                    && !text[*start..*end]
+                        .chars()
+                        .any(|ch| ('\u{0590}'..='\u{08ff}').contains(&ch))
+            })
+            .expect("a left-to-right wrapped line follows the RTL word");
+        let geometry = justification_geometry(&text, &measure, line.0, line.1, 200.0, true, true);
+        assert!(geometry.deferred_bidi);
+        assert!(geometry.gaps.is_empty());
     }
 
     #[test]

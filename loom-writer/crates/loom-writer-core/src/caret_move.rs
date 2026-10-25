@@ -7,9 +7,9 @@
 //! alignment that carets, selections and pointer hits are computed from.
 
 use crate::text_metrics::bidi::visible_end;
+use crate::text_metrics::justification::block_line_geometry;
 use crate::{
-    text_advance, CaretAffinity, FlowLine, PageStyle, PageViewport, RichBlock, WriterDocument,
-    TABLE_BLOCK_KIND,
+    CaretAffinity, FlowLine, PageStyle, PageViewport, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
 };
 
 /// A caret movement by visible line.
@@ -193,12 +193,20 @@ fn caret_x(
     affinity: CaretAffinity,
 ) -> f32 {
     let font_size = style.font_size_for_kind(block.kind.as_str());
-    let local = (offset - line.global_start).min(line.end - line.start);
+    let local_offset = offset - line.global_start;
     if let Some(order) = block.visual_line(font_size, line.start..line.end) {
+        let local = local_offset.min(visible_len(block, line));
         return line_origin(style, block, line) + order.x_of(line.start + local, affinity);
     }
-    let text = &block.text.as_str()[line.start..line.start + local];
-    line_origin(style, block, line) + text_advance(text, line.start, &block.runs, font_size)
+    let (geometry, measure) = block_line_geometry(
+        block,
+        line.start..line.end,
+        font_size,
+        block.text_column_width(style),
+    );
+    let local = local_offset.min(geometry.interaction_end(block.text.as_str()) - line.start);
+    let at = line.start + local;
+    line_origin(style, block, line) + measure.advance(line.start, at) + geometry.extra_before(at)
 }
 
 /// Bytes of the line a caret may sit after: a soft wrap leaves its space
@@ -263,14 +271,14 @@ fn land(
             };
         }
     }
-    let local = crate::offset_at_x(
-        &block.text.as_str()[line.start..line.end],
-        line.start,
-        &block.runs,
-        font_size,
-        x - line_origin(style, block, line),
-    )
-    .min(visible_len(block, line));
+    let local = block
+        .line_offset_at_x_with_justification(
+            line.start..line.end,
+            font_size,
+            block.text_column_width(style),
+            x - line_origin(style, block, line),
+        )
+        .min(visible_len(block, line));
     let offset = line.global_start + local;
     CaretTarget {
         offset,

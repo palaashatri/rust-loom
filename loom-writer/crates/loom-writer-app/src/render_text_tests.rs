@@ -3,7 +3,7 @@
 //! the document and the screen, so what the user types is drawn as typed.
 
 use super::actions_tests::text_document;
-use super::projection::render_text::{row_text, Align};
+use super::projection::render_text::{row_text, row_text_with_spaces, Align};
 use super::*;
 use i_slint_backend_testing::ElementHandle;
 
@@ -698,4 +698,92 @@ fn dump_the_two_line_loomdoc_when_asked() {
     document.push(RichBlock::table_block(table_id, table));
     let bytes = loom_writer_core::save_document(&document).expect("save");
     std::fs::write(path, bytes).expect("write loomdoc");
+}
+
+#[test]
+fn mixed_style_row_places_the_next_word_after_a_justified_gap() {
+    let text = format!("one two {}", "x".repeat(20));
+    let mut block = RichBlock::new(1, "paragraph", &text);
+    block.style.alignment = loom_text::Alignment::Justify;
+    block.runs.push(loom_text::StyleRun {
+        start: 4,
+        end: 7,
+        style: loom_text::CharacterStyle {
+            weight: loom_text::FontWeight::Bold,
+            ..Default::default()
+        },
+    });
+
+    let first_two_words = loom_writer_core::text_advance("one two", 0, &block.runs, 12.0);
+    let all_words = loom_writer_core::text_advance(text.as_str(), 0, &block.runs, 12.0);
+    let width = first_two_words + (all_words - first_two_words) / 2.0;
+    let natural_prefix = loom_writer_core::text_advance("one ", 0, &block.runs, 12.0);
+    let expected_x = natural_prefix + (width - first_two_words);
+
+    let row = row_text(&block, 12.0, width, Align::Block);
+    let two = row
+        .segments
+        .iter()
+        .find(|segment| segment.text.as_str() == "two")
+        .expect("bold word on the first wrapped line");
+
+    assert!(
+        (two.x - expected_x).abs() < 0.1,
+        "next word should follow the expanded space: got {}, expected {expected_x}",
+        two.x
+    );
+}
+
+#[test]
+fn published_empty_geometry_keeps_nonjustified_rendering_unchanged() {
+    let mut block = RichBlock::new(1, "paragraph", "Plain marked text stays aligned");
+    block.runs.push(loom_text::StyleRun {
+        start: 6,
+        end: 12,
+        style: loom_text::CharacterStyle {
+            weight: loom_text::FontWeight::Bold,
+            underline: true,
+            ..Default::default()
+        },
+    });
+
+    let output = |row: &super::projection::render_text::RowText| {
+        (
+            row.positioned,
+            row.segments
+                .iter()
+                .map(|segment| {
+                    (
+                        segment.text.to_string(),
+                        segment.x,
+                        segment.y,
+                        segment.size,
+                        segment.weight,
+                        segment.italic,
+                        segment.underline,
+                        segment.strikethrough,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            row.rules
+                .iter()
+                .map(|rule| (rule.x, rule.y, rule.width, rule.height))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    for alignment in [
+        loom_text::Alignment::Left,
+        loom_text::Alignment::Center,
+        loom_text::Alignment::Right,
+    ] {
+        block.style.alignment = alignment;
+        let before = row_text(&block, 12.0, 240.0, Align::Block);
+        let projected = row_text_with_spaces(&block, 12.0, 240.0, Align::Block, Some(&[]));
+        assert_eq!(
+            output(&before),
+            output(&projected),
+            "empty shared geometry leaves {alignment:?} drawing unchanged"
+        );
+    }
 }

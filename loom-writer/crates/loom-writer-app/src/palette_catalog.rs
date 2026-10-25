@@ -320,6 +320,12 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             shortcut: "",
         },
         PaletteCommand {
+            action: PaletteAction::SetAlignment(3),
+            id: "writer.align.justify-all",
+            label: "Align All Justify",
+            shortcut: "",
+        },
+        PaletteCommand {
             action: PaletteAction::Command("insert.page_break"),
             id: "insert.page_break",
             label: "Insert Page Break",

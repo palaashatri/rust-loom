@@ -23,6 +23,7 @@ mod find_bar;
 mod font_picker;
 mod font_store;
 mod history;
+mod launch_position;
 mod list_keys;
 mod list_level_actions;
 mod local_menu;
@@ -31,6 +32,7 @@ mod multi_click;
 mod outline;
 mod palette_catalog;
 mod palette_wiring;
+mod paragraph_alignment;
 mod picture_actions;
 mod picture_drag;
 mod picture_paste;
@@ -82,7 +84,7 @@ use loom_writer_core::{
     floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
     WriterDocument,
 };
-use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
@@ -96,6 +98,7 @@ struct Args {
     palette: bool,
     journey: Option<String>,
     size: (u32, u32),
+    position: Option<(i32, i32)>,
     theme: String,
     /// True when `--theme` was given: it overrides the saved appearance.
     theme_explicit: bool,
@@ -132,6 +135,7 @@ where
         palette: false,
         journey: None,
         size: DEFAULT_SIZE,
+        position: None,
         theme: "light".to_string(),
         theme_explicit: false,
         rtl: false,
@@ -167,6 +171,10 @@ where
                     w.parse().map_err(|_| "bad --size width")?,
                     h.parse().map_err(|_| "bad --size height")?,
                 );
+            }
+            "--position" => {
+                let value = it.next().ok_or("--position needs X,Y")?;
+                args.position = Some(launch_position::parse(&value)?);
             }
             "--theme" => {
                 let t = it.next().ok_or("--theme needs a name")?;
@@ -766,37 +774,6 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Apply body paragraph style to selected blocks")
             .with_category("format")
             .with_order(71),
-        // Alignment — paragraph-level, enabled when at least one block exists
-        CommandSpec::new("writer.align.left", "Align Left")
-            .with_undo_label("Align Left")
-            .with_description("Align selected paragraphs to the left")
-            .with_category("format")
-            .with_order(80),
-        CommandSpec::new("writer.align.center", "Align Center")
-            .with_undo_label("Align Center")
-            .with_description("Center-align selected paragraphs")
-            .with_category("format")
-            .with_order(90),
-        CommandSpec::new("writer.align.right", "Align Right")
-            .with_undo_label("Align Right")
-            .with_description("Align selected paragraphs to the right")
-            .with_category("format")
-            .with_order(100),
-        CommandSpec::new("writer.align.left-all", "Align All Left")
-            .with_undo_label("Align Left")
-            .with_description("Align selected paragraphs to the left")
-            .with_category("format")
-            .with_order(81),
-        CommandSpec::new("writer.align.center-all", "Align All Center")
-            .with_undo_label("Align Center")
-            .with_description("Center-align selected paragraphs")
-            .with_category("format")
-            .with_order(91),
-        CommandSpec::new("writer.align.right-all", "Align All Right")
-            .with_undo_label("Align Right")
-            .with_description("Align selected paragraphs to the right")
-            .with_category("format")
-            .with_order(101),
         // Insert commands are defined in table_actions::table_command_specs().
         // Utility/palette/inspector — always enabled
         CommandSpec::new("app.palette", "Command Palette")
@@ -866,6 +843,7 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_shortcut("Ctrl+Shift+Z")
             .with_enabled(false),
     ];
+    catalog.extend(paragraph_alignment::command_specs());
     catalog.extend(appearance::command_specs());
     catalog.extend(table_actions::table_command_specs());
     catalog
@@ -964,6 +942,10 @@ fn sync_writer_registry_enablement(
         "writer.align.right-all",
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
+    }
+    let justify_available = paragraph_alignment::selection_can_be_justified(doc, doc.selection());
+    for id in ["writer.align.justify", "writer.align.justify-all"] {
+        registry.set_enabled(&CommandId::new(id), justify_available);
     }
     for id in [
         "file.new",
@@ -1336,6 +1318,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_list_style_index(formatting.list_style_index);
     app.set_heading_level(heading_level);
     app.set_text_alignment(text_alignment);
+    sync_justify_availability(app, doc);
     app.set_word_count(word_count.min(i32::MAX as usize) as i32);
     app.set_char_count(char_count.min(i32::MAX as usize) as i32);
     app.set_reading_time_mins(reading_time::minutes_for_words(word_count));
@@ -1392,6 +1375,12 @@ fn status_left_text(word_count: usize, char_count: usize, paragraph_count: usize
 /// recovery state; it is used by viewport and selection callbacks.
 fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
     publish_render_projection(app, compute_render_projection(app, doc, viewport));
+}
+
+fn sync_justify_availability(app: &WriterApp, document: &WriterDocument) {
+    app.global::<WriterAlignmentState>().set_justify_available(
+        paragraph_alignment::selection_can_be_justified(document, document.selection()),
+    );
 }
 
 /// Like [`refresh_writer_render_projection`] for the controller's own document:
@@ -1592,10 +1581,7 @@ fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
         loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
-        // The page text item has no justify mode.  Preserve an explicit
-        // unsupported sentinel so persisted Justify documents are not falsely
-        // projected as left-aligned paragraphs.
-        loom_text::Alignment::Justify => -1,
+        loom_text::Alignment::Justify => 3,
     }
 }
 
@@ -1655,10 +1641,7 @@ fn inspector_heading_level(doc: &WriterDocument, selection: &TextSelection) -> i
     }
 }
 
-/// Inspector alignment with mixed-state/unsupported sentinel. Uniform
-/// selections preserve `0..2` (Left/Center/Right); persisted Justify values
-/// return `-1` so the three-option inspector shows no active segment instead
-/// of falsely highlighting Left.
+/// Inspector alignment with `-1` reserved for mixed selections.
 fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
     let indices = loom_writer_core::selected_block_indices(doc, selection.clone());
     if indices.is_empty() {
@@ -1672,7 +1655,7 @@ fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
         loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
-        loom_text::Alignment::Justify => -1,
+        loom_text::Alignment::Justify => 3,
     };
     let first = align_index(&doc.blocks[indices[0]]);
     let uniform = indices
@@ -1733,6 +1716,7 @@ fn project_selection_event(
     app.set_is_underline(formatting.underline);
     app.set_heading_level(inspector_heading_level(document, &selection));
     app.set_text_alignment(inspector_alignment(document, &selection));
+    sync_justify_availability(app, document);
     table_actions::update_table_selection_properties(app, document, selection.anchor);
     let announcement = selection_announcement(document, &selection);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
@@ -2758,6 +2742,7 @@ fn wire_writer_shared_callbacks(
                     0 => "writer.align.left",
                     1 => "writer.align.center",
                     2 => "writer.align.right",
+                    3 => "writer.align.justify",
                     _ => {
                         app.set_status_right("Unsupported alignment option".into());
                         return;
@@ -2773,20 +2758,28 @@ fn wire_writer_shared_callbacks(
                 }
                 let selection = selection_from_app(&app);
                 let mut next = state.current.borrow().clone();
-                set_selection_alignment(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    align,
-                );
+                let announcement = if align == 3 {
+                    let result = paragraph_alignment::justify_selected_paragraphs(
+                        &mut next,
+                        selection.clone(),
+                    );
+                    paragraph_alignment::justification_announcement(result)
+                } else {
+                    set_selection_alignment(
+                        &mut next,
+                        DocumentSelection::range(selection.anchor, selection.focus),
+                        align,
+                    );
+                    let label = match align {
+                        1 => "Center",
+                        2 => "Right",
+                        _ => "Left",
+                    };
+                    format!("{label} alignment applied to selected paragraph(s)")
+                };
                 next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_writer_menu_if_present(&menu_service, &app, &state);
-                let label = match align {
-                    1 => "Center",
-                    2 => "Right",
-                    _ => "Left",
-                };
-                let announcement = format!("{label} alignment applied to selected paragraph(s)");
                 app.set_status_right(SharedString::from(announcement.clone()));
                 app.set_selection_announcement(SharedString::from(announcement));
             }
@@ -3823,7 +3816,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.set_palette_open(true);
     }
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
+    if let Some((x, y)) = args.position {
+        app.window().set_position(PhysicalPosition::new(x, y));
+    }
     app.show().map_err(|e| e.to_string())?;
+    if let Some((x, y)) = args.position {
+        let reported = app.window().position();
+        eprintln!(
+            "loom-writer launch-position requested=({x},{y}) slint-reported=({},{})",
+            reported.x, reported.y
+        );
+    }
     focus_page_at_launch(&app);
     let res = slint::run_event_loop().map_err(|e| e.to_string());
     if !document_is_dirty(&state) {
@@ -4585,6 +4588,8 @@ mod clipboard_text_tests;
 mod docx_save_tests;
 #[cfg(test)]
 mod inspector_startup_tests;
+#[cfg(test)]
+mod launch_position_tests;
 #[cfg(test)]
 mod list_keys_tests;
 #[cfg(test)]

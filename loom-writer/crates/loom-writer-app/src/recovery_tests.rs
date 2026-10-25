@@ -539,6 +539,7 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 palette: false,
                 journey: None,
                 size: DEFAULT_SIZE,
+                position: None,
                 theme: "light".into(),
                 theme_explicit: false,
                 rtl: false,

@@ -7,6 +7,7 @@ use loom_objects::table::{HorizontalAlign, Table, TextRun};
 use loom_text::{Alignment, CharacterStyle, FontWeight};
 
 use super::comments::{self, Anchor, CommentPlan};
+use super::inline_style::docx_rgb;
 use super::package::{
     DEFAULT_LINE_TWIPS, DEFAULT_SPACE_AFTER_TWIPS, SANS_FAMILY, STYLE_LIST, STYLE_QUOTE,
     STYLE_TABLE,
@@ -355,8 +356,15 @@ struct RunProps {
     underline: bool,
     strike: bool,
     vertical: Option<&'static str>,
+    color: Option<RunColor>,
     family: String,
     half_points: u32,
+}
+
+#[derive(PartialEq)]
+enum RunColor {
+    Automatic,
+    Rgb(String),
 }
 
 impl RunProps {
@@ -371,6 +379,7 @@ impl RunProps {
             underline: false,
             strike: false,
             vertical: None,
+            color: None,
             family: family_name(style.map_or("", |style| style.font_family.as_str())),
             half_points: half_points_of(kind_pt),
         };
@@ -386,12 +395,15 @@ impl RunProps {
         } else {
             None
         };
+        props.color = Some(match style.color.as_deref() {
+            None => RunColor::Automatic,
+            Some(color) => RunColor::Rgb(
+                docx_rgb(color).expect("inline colors are validated before DOCX body export"),
+            ),
+        });
         // A size set explicitly wins; the default size keeps the block kind's.
         let size = style.font_size;
-        if size.is_finite()
-            && (size - CharacterStyle::default().font_size).abs() > 0.01
-            && (1.0..=1638.0).contains(&size)
-        {
+        if size.is_finite() && style.has_own_size() && (1.0..=1638.0).contains(&size) {
             props.half_points = half_points_of(size);
         }
         props
@@ -404,6 +416,11 @@ impl RunProps {
             "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" \
              w:cs=\"{family}\"/>"
         ));
+        match &self.color {
+            Some(RunColor::Automatic) => out.push_str("<w:color w:val=\"auto\"/>"),
+            Some(RunColor::Rgb(rgb)) => out.push_str(&format!("<w:color w:val=\"{rgb}\"/>")),
+            None => {}
+        }
         if self.bold {
             out.push_str("<w:b/><w:bCs/>");
         }

@@ -5,6 +5,7 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { WriterShortcutScope } from "shortcut_scope.slint";
+import { WriterAlignmentState } from "alignment_state.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
@@ -14,6 +15,7 @@ import {
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 import { WriterOverlays } from "writer_overlays.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
+export { WriterAlignmentState }
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { FontPicker, FontPickerLine } from "font_picker.slint";
@@ -153,7 +155,7 @@ export component WriterApp inherits Window {
     in-out property <bool> is-strikethrough: false;
     in-out property <int> heading-level: 0;
     in-out property <int> font-size-pt: 11;
-    in-out property <int> text-alignment: 0;
+    in-out property <int> text-alignment <=> WriterAlignmentState.text-alignment;
     in-out property <int> line-spacing-index: 1;
     in property <int> word-count: 0;
     in property <int> char-count: 0;
@@ -530,7 +532,6 @@ export component WriterApp inherits Window {
                     is-strikethrough <=> root.is-strikethrough;
                     heading-level <=> root.heading-level;
                     font-size-pt <=> root.font-size-pt;
-                    text-alignment <=> root.text-alignment;
                     line-spacing-index <=> root.line-spacing-index;
                     page-paper-index <=> root.page-paper-index;
                     page-orientation-index <=> root.page-orientation-index;
@@ -612,7 +613,6 @@ export component WriterApp inherits Window {
             is-strikethrough <=> root.is-strikethrough;
             heading-level <=> root.heading-level;
             font-size-pt <=> root.font-size-pt;
-            text-alignment <=> root.text-alignment;
             line-spacing-index <=> root.line-spacing-index;
             page-paper-index <=> root.page-paper-index;
             page-orientation-index <=> root.page-orientation-index;
@@ -672,7 +672,6 @@ export component WriterApp inherits Window {
         is-italic: root.is-italic;
         is-underline: root.is-underline;
         is-strikethrough: root.is-strikethrough;
-        text-alignment: root.text-alignment;
         heading-level: root.heading-level;
         list-style-index: root.list-style-index;
         close-requested => { root.dismiss-toolbar-menu(); }

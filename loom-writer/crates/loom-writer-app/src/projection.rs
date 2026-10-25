@@ -15,11 +15,11 @@ use loom_writer_core::{
     DocumentFlow, PageRect, PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection,
     WriterDocument,
 };
-use slint::{ModelRc, SharedString, VecModel};
+use slint::SharedString;
 
 #[path = "render_text.rs"]
 pub(crate) mod render_text;
-use render_text::{row_text, Align};
+use render_text::{fragment_justification_spaces, render_row, Align, Frame, RowGeometry};
 
 /// Screens of height kept when the view height is not yet known.
 const PAGE_VIEW_FALLBACK_SCREENS: f32 = 2.0;
@@ -192,68 +192,6 @@ fn drawn_family(stored: &str, cache: &mut HashMap<String, String>) -> String {
         .clone()
 }
 
-/// Where a row sits on the page, in points from the content box.
-#[derive(Clone, Copy)]
-struct Frame {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-}
-
-impl Frame {
-    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
-
-/// One row of the page: the typed text of `block` ([`row_text`]) in `frame`.
-/// `align` says how the text sits across the frame's width.
-fn render_row(
-    block: &RichBlock,
-    frame: Frame,
-    marker: &str,
-    family: &str,
-    align: Align,
-) -> WriterRenderBlock {
-    let Frame {
-        x,
-        y,
-        width,
-        height,
-    } = frame;
-    let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
-    let font_size = PageStyle::default().font_size_for_kind(block.kind.as_str());
-    let text = row_text(block, font_size, width, align);
-    WriterRenderBlock {
-        segments: ModelRc::new(VecModel::from(text.segments)),
-        rules: ModelRc::new(VecModel::from(text.rules)),
-        positioned: text.positioned,
-        x,
-        y,
-        width,
-        height,
-        font_size,
-        font_family: SharedString::from(family),
-        alignment: writer_render_alignment(block.style.alignment.resolve(block.text.as_str())),
-        marker: SharedString::from(marker),
-        unsupported,
-        unsupported_label: if unsupported {
-            SharedString::from("Justify unavailable")
-        } else {
-            SharedString::default()
-        },
-        has_color: false,
-        color: slint::Color::from_argb_encoded(0),
-        table_cell: false,
-    }
-}
-
 /// Selection rectangles in the editor's content coordinates: relative to the
 /// first page's content box, unzoomed.
 pub(crate) fn ui_selection_rects(
@@ -294,7 +232,7 @@ fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlo
                 .max(loom_writer_core::line_pitch(&block.runs, font_size) * style.line_height);
             let marker = block.list_marker(numbers[index]);
             let frame = Frame::new(block.text_start_pt(style), y, column_width, height);
-            let row = render_row(block, frame, &marker, "", Align::Block);
+            let row = render_row(block, frame, &marker, "", Align::Block, None);
             y += height;
             row
         })
@@ -663,7 +601,8 @@ pub(crate) fn project(
                                 col_widths[c] - 12.0,
                                 row_height - 8.0,
                             );
-                            let mut row = render_row(&cell_block, frame, "", "", Align::Block);
+                            let mut row =
+                                render_row(&cell_block, frame, "", "", Align::Block, None);
                             row.table_cell = true;
                             // The style's own text colour (white on a dark
                             // header fill), not the page ink.
@@ -713,7 +652,7 @@ pub(crate) fn project(
                         },
                     });
                     let frame = Frame::new(12.0, y + 8.0, chart_w - 24.0, 24.0);
-                    rows.push(render_row(&title_block, frame, "", "", Align::Block));
+                    rows.push(render_row(&title_block, frame, "", "", Align::Block, None));
                     let summary_text = format!(
                         "[{:?} chart: {} categories, {} series]",
                         chart.chart_type,
@@ -722,24 +661,39 @@ pub(crate) fn project(
                     );
                     let summary_block = RichBlock::new(block.id, "paragraph", &summary_text);
                     let frame = Frame::new(12.0, y + 36.0, chart_w - 24.0, 20.0);
-                    rows.push(render_row(&summary_block, frame, "", "", Align::Block));
+                    rows.push(render_row(
+                        &summary_block,
+                        frame,
+                        "",
+                        "",
+                        Align::Block,
+                        None,
+                    ));
                 }
             }
             continue;
         }
 
         let segments = line_segments(block, line.start, line.end);
+        let (line_spaces, deferred_bidi) =
+            block.justification_spaces_for_line(line.start..line.end, font_size, column_width);
         if let [only] = segments.as_slice() {
             let family = drawn_family(&only.family, &mut families);
             // The layout measured this line; its text sits where the
             // layout's own highlight for it does.
             let measured = line.bounds.width / zoom;
+            let local_spaces = fragment_justification_spaces(&line_spaces, line.start..line.end);
             rows.push(render_row(
                 &fragment_block(block, line.start, line.end),
                 Frame::new(x, y, column_width, height),
                 &marker,
                 &family,
                 Align::Line(measured),
+                Some(RowGeometry {
+                    spaces: &local_spaces,
+                    unsupported: deferred_bidi,
+                    font_size,
+                }),
             ));
             continue;
         }
@@ -770,12 +724,18 @@ pub(crate) fn project(
             // content edge so a rounding difference never wraps the stretch.
             let width = (content_width - segment_x).max(segment_width) + 4.0;
             let family = drawn_family(&segment.family, &mut families);
+            let local_spaces = fragment_justification_spaces(&line_spaces, start..segment.end);
             let mut row = render_row(
                 &fragment_block(block, start, segment.end),
                 Frame::new(segment_x, y, width, height),
                 if drawn_any { "" } else { &marker },
                 &family,
                 Align::Start,
+                Some(RowGeometry {
+                    spaces: &local_spaces,
+                    unsupported: deferred_bidi && !drawn_any,
+                    font_size,
+                }),
             );
             row.alignment = writer_render_alignment(loom_text::Alignment::Left);
             if drawn_any {

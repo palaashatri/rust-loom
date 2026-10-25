@@ -476,6 +476,29 @@ fn alignment_lists_and_numbering_restart() {
 }
 
 #[test]
+fn justified_paragraph_alignment_round_trips_through_loomdoc_and_docx() {
+    let mut doc = WriterDocument::new("justify-roundtrip", "Justify round trip");
+    let mut paragraph = RichBlock::new(1, "paragraph", "one two three four");
+    paragraph.style.alignment = Alignment::Justify;
+    doc.blocks.push(paragraph);
+
+    let loomdoc = crate::save_document(&doc).expect("save .loomdoc");
+    let loaded = crate::load_document(&loomdoc).expect("load .loomdoc");
+    assert_eq!(loaded.blocks[0].style.alignment, Alignment::Justify);
+
+    let exported = export_docx(&doc).expect("export .docx");
+    let parts = parts(&exported);
+    let body = parse(&parts["word/document.xml"]);
+    let paragraph = body_paragraph(&body, "one two three four");
+    let justification = child(child(paragraph, "pPr").expect("paragraph properties"), "jc")
+        .expect("Word paragraph justification");
+    assert_eq!(w_attr(justification, "val"), Some("both"));
+
+    let imported = super::import_docx(&exported.bytes).expect("import exported .docx");
+    assert_eq!(imported.blocks[0].style.alignment, Alignment::Justify);
+}
+
+#[test]
 fn markdown_table_becomes_a_real_table_with_header_row() {
     let export = export_docx(&rich_document()).unwrap();
     let parts = parts(&export);

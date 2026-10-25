@@ -9,6 +9,7 @@
 mod body;
 mod comments;
 pub mod import;
+mod inline_style;
 mod package;
 mod xml;
 
@@ -33,6 +34,7 @@ pub struct DocxExport {
 
 /// Exports `doc` as a Word document.
 pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
+    validate_inline_colors(doc)?;
     let plan = CommentPlan::new(doc);
     let has_comments = plan.exported() > 0;
     let body = body::build(doc, &plan);
@@ -83,5 +85,20 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     })
 }
 
+fn validate_inline_colors(doc: &WriterDocument) -> Result<(), ArchiveError> {
+    for run in doc.blocks.iter().flat_map(|block| block.runs.iter()) {
+        if let Some(color) = run.style.color.as_deref() {
+            if inline_style::docx_rgb(color).is_none() {
+                return Err(ArchiveError::Corrupt(
+                    "invalid inline color; DOCX requires opaque #RRGGBB or #RRGGBBFF".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod inline_styles_tests;
 #[cfg(test)]
 mod tests;

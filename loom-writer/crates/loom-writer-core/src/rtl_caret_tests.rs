@@ -5,7 +5,7 @@
 //! drawn glyphs, not the logical advances.
 
 use super::*;
-use crate::{offset_at_x, DocumentFlow, TextSelection};
+use crate::{offset_at_x, text_advance, DocumentFlow, TextSelection};
 
 /// Alef then bet: two letters, two bytes each, right to left.
 const HEBREW: &str = "\u{5D0}\u{5D1}";

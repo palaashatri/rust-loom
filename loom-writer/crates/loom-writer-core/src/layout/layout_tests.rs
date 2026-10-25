@@ -7,6 +7,28 @@ use crate::{
     PageViewport, SelectionRect, TextSelection, VisibleRange, WriterDocument, PAGE_GAP_PT,
 };
 
+pub(super) fn reference_measure(
+    block: &crate::RichBlock,
+    font_size: f32,
+) -> crate::text_metrics::LineMeasure {
+    crate::text_metrics::LineMeasure::new(
+        block.text.as_str(),
+        0,
+        &block.runs,
+        font_size,
+        crate::text_metrics::Style::new(crate::is_heading_kind(block.kind.as_str()), false),
+        crate::text_metrics::Uncovered::Estimate,
+    )
+}
+
+fn reference_wrap_by_width(
+    block: &crate::RichBlock,
+    font_size: f32,
+    width: f32,
+) -> Vec<(usize, usize)> {
+    reference_measure(block, font_size).wrap(block.text.as_str(), width)
+}
+
 impl WriterDocument {
     /// Deterministically paginates text using conservative font metrics.
     ///
@@ -50,8 +72,7 @@ impl WriterDocument {
             // fragments that the renderer cannot fit on the page.
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let line_height = font_size * style.line_height;
-            let ranges =
-                crate::text_metrics::wrap_by_width(text, &block.runs, font_size, usable_width);
+            let ranges = reference_wrap_by_width(block, font_size, usable_width);
             let page_has_content = |pages: &Vec<DocumentPage>| {
                 pages.last().is_some_and(|page| !page.fragments.is_empty())
             };
@@ -65,13 +86,7 @@ impl WriterDocument {
                 if let Some(next) = self.blocks.get(block_index + 1) {
                     let next_size = style.font_size_for_kind(next.kind.as_str());
                     let next_line = next_size * style.line_height;
-                    let next_lines = crate::text_metrics::wrap_by_width(
-                        next.text.as_str(),
-                        &next.runs,
-                        next_size,
-                        usable_width,
-                    )
-                    .len();
+                    let next_lines = reference_wrap_by_width(next, next_size, usable_width).len();
                     let wanted = if next_lines >= 3 { 2 } else { 1 };
                     let mut probe = after;
                     let mut fitting = 0;
@@ -210,8 +225,7 @@ impl WriterDocument {
                 // The line's width is its place in the whole block's text.
                 let line_width = match block {
                     Some(block) => {
-                        crate::text_metrics::block_measure(block.text.as_str(), runs, font_size)
-                            .advance(source.start, source.end)
+                        reference_measure(block, font_size).advance(source.start, source.end)
                     }
                     None => crate::text_metrics::text_advance(
                         &source.text,
@@ -343,8 +357,7 @@ impl WriterDocument {
                 let font_size = style.font_size_for_kind(block.kind.as_str());
                 // A substring's width is its place in the whole block's text:
                 // kerning acts across the substring's edges.
-                let positions =
-                    crate::text_metrics::block_measure(block.text.as_str(), &block.runs, font_size);
+                let positions = reference_measure(block, font_size);
                 let advance =
                     |text: &str, start: usize| positions.advance(start, start + text.len()) * zoom;
                 let available_width =

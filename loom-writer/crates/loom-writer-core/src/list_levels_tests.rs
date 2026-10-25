@@ -285,14 +285,13 @@ fn markdown_indents_each_nested_item_two_spaces_per_level() {
     assert!(md.contains("1. Numbered\n  1. Sub\n"), "{md:?}");
 }
 
-/// The x position of the PDF text run drawn as `(text) Tj`, which the export
-/// writes after `x y Td`.
+/// The x position read from the PDF text run's text matrix.
 fn run_x(content: &str, text: &str) -> f32 {
-    let at = content
-        .find(&format!("({text}) Tj"))
-        .unwrap_or_else(|| panic!("{text:?} is drawn in {content:?}"));
-    let before: Vec<&str> = content[..at].split_whitespace().collect();
-    before[before.len() - 3].parse().expect("x coordinate")
+    drawn_runs(content)
+        .into_iter()
+        .find(|run| run.text == text)
+        .unwrap_or_else(|| panic!("{text:?} is drawn in {content:?}"))
+        .x
 }
 
 #[test]
@@ -338,26 +337,9 @@ fn pdf_draws_each_level_further_in_with_its_marker() {
     }
 }
 
-/// Every text run drawn in the page content as (x, text), in drawing order. Each
-/// run is written `x y Td (text) Tj`.
-fn drawn_runs(content: &str) -> Vec<(f32, String)> {
-    let mut runs = Vec::new();
-    let mut from = 0;
-    while let Some(found) = content[from..].find(" Td (") {
-        let at = from + found;
-        let mut words = content[..at].split_whitespace().rev();
-        let _y = words.next();
-        let x: f32 = words
-            .next()
-            .expect("x coordinate")
-            .parse()
-            .expect("x is a number");
-        let text_start = at + " Td (".len();
-        let text_end = text_start + content[text_start..].find(") Tj").expect("run ends");
-        runs.push((x, content[text_start..text_end].to_string()));
-        from = text_end;
-    }
-    runs
+/// Every supported PDF text run in drawing order.
+fn drawn_runs(content: &str) -> Vec<crate::export::test_support::DrawnTextRun> {
+    crate::export::test_support::parse_drawn_text_runs(content).expect("semantic text runs")
 }
 
 #[test]
@@ -378,8 +360,8 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
 
     let lines: Vec<f32> = runs
         .iter()
-        .filter(|(_, text)| text.starts_with("wrapping"))
-        .map(|(x, _)| *x)
+        .filter(|run| run.text.starts_with("wrapping"))
+        .map(|run| run.x)
         .collect();
     assert!(lines.len() > 1, "the item wraps: {runs:?}");
     for x in &lines {
@@ -390,8 +372,8 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
     }
     let nested_x = runs
         .iter()
-        .find(|(_, text)| text == "Nested")
-        .map(|(x, _)| *x)
+        .find(|run| run.text == "Nested")
+        .map(|run| run.x)
         .expect("the nested item is drawn");
     assert!(
         (nested_x - nested).abs() < 0.01,
@@ -405,11 +387,11 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
         ..Default::default()
     };
     for (glyph, start) in [("\u{2022}", first), ("1.", nested)] {
-        let (x, _) = runs
+        let run = runs
             .iter()
-            .find(|(_, text)| text == glyph)
+            .find(|run| run.text == glyph)
             .unwrap_or_else(|| panic!("{glyph:?} is drawn in {runs:?}"));
-        let right = x + crate::text_metrics::pdf_text_width(glyph, &body);
+        let right = run.x + crate::text_metrics::pdf_text_width(glyph, &body);
         assert!(
             (right - (start - 4.0)).abs() < 0.01,
             "{glyph:?} ends at {right}, 4 pt before {start}"

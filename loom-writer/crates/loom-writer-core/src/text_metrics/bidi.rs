@@ -13,8 +13,18 @@ use loom_fonts::{segment, visual_order, TextDirection, TextRun};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::measure::LineMeasure;
-use super::{block_measure, Style, Uncovered};
+use crate::layout::{block_bidi_runs, block_positions};
 use crate::{CaretAffinity, RichBlock};
+
+#[cfg(test)]
+thread_local! {
+    static PARAGRAPH_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn paragraph_scan_count() -> usize {
+    PARAGRAPH_SCANS.with(std::cell::Cell::get)
+}
 
 /// The bidi runs of a paragraph's text, or `None` from [`BidiRuns::of`] when no
 /// character can be right to left.
@@ -24,6 +34,8 @@ pub(crate) struct BidiRuns {
 
 impl BidiRuns {
     pub(crate) fn of(text: &str) -> Option<Self> {
+        #[cfg(test)]
+        PARAGRAPH_SCANS.with(|count| count.set(count.get() + 1));
         text.chars().any(may_be_right_to_left).then(|| Self {
             runs: segment(text, TextDirection::Auto),
         })
@@ -308,8 +320,10 @@ impl LineOrder {
 /// spaces a soft wrap leaves hanging past the edge are not drawn.
 pub(crate) fn visible_end(text: &str, line: Range<usize>) -> usize {
     let slice = &text[line.clone()];
-    if let Some(stripped) = slice.strip_suffix('\n') {
-        return line.start + stripped.len();
+    if let Some(last) = slice.chars().next_back() {
+        if matches!(last, '\n' | '\u{b}' | '\u{c}') {
+            return line.end - last.len_utf8();
+        }
     }
     if line.end >= text.len() {
         line.end
@@ -336,32 +350,16 @@ impl RichBlock {
     /// when the line is laid out left to right.
     pub(crate) fn visual_line(&self, font_size: f32, line: Range<usize>) -> Option<LineOrder> {
         let text = self.text.as_str();
-        let bidi = BidiRuns::of(text)?;
-        let measure = block_measure(text, &self.runs, font_size);
+        let bidi = block_bidi_runs(self)?;
+        let measure = block_positions(self, font_size);
         let visible = visible_end(text, line.clone());
-        LineOrder::build(&bidi, text, &measure, line.start..visible)
+        LineOrder::build(&bidi, text, measure.as_ref(), line.start..visible)
     }
 
     /// The offset, relative to `line.start`, of the caret nearest `x` points
     /// from the line's text origin. A right-to-left line is read in the order it
     /// is drawn in; any other line is measured in logical order, as before.
     pub fn line_offset_at_x(&self, font_size: f32, line: Range<usize>, x: f32) -> usize {
-        if let Some(stop) = self
-            .visual_line(font_size, line.clone())
-            .and_then(|order| order.stop_at(x))
-        {
-            return stop.offset - line.start;
-        }
-        let slice = &self.text.as_str()[line.clone()];
-        let visible = slice.trim_end_matches(['\n', '\u{b}', '\u{c}']).len();
-        LineMeasure::new(
-            slice,
-            line.start,
-            &self.runs,
-            font_size,
-            Style::default(),
-            Uncovered::Estimate,
-        )
-        .offset_at_x(x, visible)
+        self.line_offset_at_x_with_justification(line, font_size, 0.0, x)
     }
 }

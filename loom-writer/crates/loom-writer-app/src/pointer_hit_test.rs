@@ -300,7 +300,12 @@ fn writer_text_metric_offset(
         };
         let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
         // Relative to the line start, in the order the line is drawn in.
-        let local_byte = block.line_offset_at_x(font_size, line.start..line.end, local_x - line_x);
+        let local_byte = block.line_offset_at_x_with_justification(
+            line.start..line.end,
+            font_size,
+            column_width,
+            local_x - line_x,
+        );
         let offset = line.global_start + local_byte;
         if distance <= f32::EPSILON {
             return Some(offset);
@@ -322,6 +327,67 @@ mod table_pointer_geometry_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_after_an_expanded_justification_gap_hits_the_next_word() {
+        let mut document = WriterDocument::new("justified-hit", "Justified hit");
+        let text = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
+        let mut block = loom_writer_core::RichBlock::new(1, "paragraph", text);
+        block.style.alignment = loom_text::Alignment::Justify;
+        document.blocks.push(block);
+
+        let style = document.page.page_style();
+        let viewport = PageViewport {
+            width: style.width_pt,
+            height: style.height_pt,
+            zoom: 1.0,
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        };
+        let flow = document.flow(&style, viewport).expect("document flow");
+        let line = flow
+            .lines()
+            .iter()
+            .find(|line| {
+                !document.blocks[line.block_index]
+                    .justification_spaces_for_line(
+                        line.start..line.end,
+                        style.font_size_for_kind("paragraph"),
+                        document.blocks[line.block_index].text_column_width(&style),
+                    )
+                    .0
+                    .is_empty()
+            })
+            .expect("an automatic line with at least one expanded gap");
+        let block = &document.blocks[line.block_index];
+        let (spaces, deferred) = block.justification_spaces_for_line(
+            line.start..line.end,
+            style.font_size_for_kind("paragraph"),
+            block.text_column_width(&style),
+        );
+        assert!(!deferred, "left-to-right lines expand in the editor");
+        let (gap, own_extra) = &spaces[0];
+        let preceding_extra: f32 = spaces
+            .iter()
+            .take_while(|(range, _)| range.start < gap.start)
+            .map(|(_, extra)| extra)
+            .sum();
+        let within_line =
+            block.measured_advance(line.start, gap.end, style.font_size_for_kind("paragraph"))
+                + preceding_extra
+                + *own_extra;
+        let base_page = flow.page_bounds()[0];
+        let x = line.bounds.x - base_page.x - style.margin_left_pt + within_line;
+        let y = line.bounds.y - base_page.y - style.margin_top_pt + line.bounds.height / 2.0;
+
+        let hit = writer_text_metric_offset(&document, viewport, x, y)
+            .expect("pointer maps into the document");
+        assert_eq!(
+            hit,
+            line.global_start + gap.end - line.start,
+            "the hit uses the expanded gap width and lands before the following word"
+        );
+    }
 
     #[test]
     fn pointer_in_populated_cell_after_empty_cell_uses_painted_cell() {

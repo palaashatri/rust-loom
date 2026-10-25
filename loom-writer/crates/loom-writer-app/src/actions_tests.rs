@@ -463,10 +463,10 @@ fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
 }
 
 #[test]
-fn there_is_no_justify_control_and_persisted_justify_projection_is_indeterminate() {
+fn justify_control_applies_a_real_alignment_and_persists_it() {
     set_platform();
     let mut document = text_document("justify remains readable");
-    document.blocks[0].style.alignment = loom_text::Alignment::Justify;
+    document.blocks[0].style.alignment = loom_text::Alignment::Left;
     document.set_selection(TextSelection::range(0, 7));
     let dialogs: Rc<dyn FileDialogService> =
         Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
@@ -475,58 +475,94 @@ fn there_is_no_justify_control_and_persisted_justify_projection_is_indeterminate
     app.set_show_inspector(true);
     apply_state(&app, &state);
 
-    assert_eq!(app.get_text_alignment(), -1);
-    assert_eq!(
-        app.get_render_blocks()
-            .row_data(0)
-            .expect("render row")
-            .alignment,
-        -1,
-        "persisted Justify must not be projected as Left"
-    );
-    // No inert option: neither a command nor an inspector segment offers Justify.
     assert!(
         state
             .registry
             .lock()
             .unwrap()
             .get(&CommandId::new("writer.align.justify"))
-            .is_none(),
-        "Justify is not a command"
+            .is_some(),
+        "the working inspector option has a registered command"
     );
     let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
     assert!(
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Justify")
             .next()
-            .is_none(),
-        "the inspector shows no Justify segment"
-    );
-    assert!(
-        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Center")
-            .next()
             .is_some(),
-        "positive control: the other alignment segments are there"
+        "the inspector exposes the Justify segment"
     );
 
-    // A stray callback value changes nothing.
-    let before = state.current.borrow().clone();
     app.invoke_select_alignment(3);
+    assert_eq!(
+        state.current.borrow().blocks[0].style.alignment,
+        loom_text::Alignment::Justify
+    );
+    assert_eq!(app.get_text_alignment(), 3);
+    assert_eq!(
+        app.get_render_blocks()
+            .row_data(0)
+            .expect("render row")
+            .alignment,
+        3
+    );
+    assert!(app.get_status_right().contains("Justify alignment"));
+
+    let saved = loom_writer_core::save_document(&state.current.borrow())
+        .expect("serialize the justified document");
+    let loaded = loom_writer_core::load_document(&saved).expect("reload the justified document");
+    assert_eq!(
+        loaded.blocks[0].style.alignment,
+        loom_text::Alignment::Justify,
+        "the .loomdoc format preserves the chosen alignment"
+    );
+    app.invoke_undo();
+    assert_eq!(
+        state.current.borrow().blocks[0].style.alignment,
+        loom_text::Alignment::Left,
+        "one undo restores the prior alignment"
+    );
+    app.invoke_redo();
+    assert_eq!(
+        state.current.borrow().blocks[0].style.alignment,
+        loom_text::Alignment::Justify,
+        "redo reapplies justification"
+    );
+
+    // Values outside the four reachable alignments remain inert.
+    let before = state.current.borrow().clone();
+    app.invoke_select_alignment(4);
     assert_eq!(*state.current.borrow(), before);
     assert_eq!(app.get_status_right(), "Unsupported alignment option");
 }
 
 #[test]
-fn persisted_justify_projection_exposes_an_explicit_unsupported_indicator() {
+fn persisted_justify_projection_only_marks_deferred_bidi_lines_unsupported() {
     let mut document = text_document("justify remains readable");
     document.blocks[0].style.alignment = loom_text::Alignment::Justify;
     let (rows, _, _) = writer_render_projection(&document, PageViewport::default());
     let row = rows.first().expect("render row");
-    assert_eq!(row.alignment, -1);
+    assert_eq!(row.alignment, 3);
     assert!(
-        row.unsupported,
-        "persisted Justify must be visibly marked unsupported rather than rendered as Left"
+        !row.unsupported,
+        "left-to-right lines are justified by the renderer"
     );
-    assert_eq!(row.unsupported_label, "Justify unavailable");
+    assert_eq!(row.unsupported_label, "");
+}
+
+#[test]
+fn justified_rtl_line_keeps_the_deferred_bidi_notice() {
+    let text = "مرحبا بالعالم في مستند قابل للتحرير مع كلمات كثيرة لاختبار الالتفاف ".repeat(7);
+    let mut document = text_document(&text);
+    document.blocks[0].style.alignment = loom_text::Alignment::Justify;
+    let (rows, _, _) = writer_render_projection(&document, PageViewport::default());
+
+    assert!(
+        rows.iter().any(|row| row.unsupported),
+        "the editor labels wrapped bidi lines while its visual-space mapping is deferred"
+    );
+    assert!(rows
+        .iter()
+        .any(|row| row.unsupported_label == "Justify unavailable"));
 }
 
 #[test]

@@ -19,6 +19,7 @@
 
 pub(crate) mod bidi;
 mod faces;
+pub(crate) mod justification;
 mod measure;
 mod pdf;
 
@@ -26,6 +27,9 @@ mod pdf;
 mod family_tests;
 #[cfg(test)]
 mod kerning_tests;
+
+#[cfg(test)]
+mod justification_tests;
 
 use loom_text::{FontWeight, StyleRun};
 
@@ -62,6 +66,7 @@ pub fn line_pitch(runs: &[StyleRun], font_size: f32) -> f32 {
 }
 
 /// The measure of a whole block's text as the editor draws it.
+#[cfg(test)]
 pub(crate) fn block_measure(text: &str, runs: &[StyleRun], font_size: f32) -> LineMeasure {
     LineMeasure::new(
         text,

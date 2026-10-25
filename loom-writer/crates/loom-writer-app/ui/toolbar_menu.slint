@@ -1,5 +1,6 @@
 import { LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
+import { WriterAlignmentState } from "alignment_state.slint";
 
 /// The menu that opens under a toolbar item, with its click-away scrim and
 /// keyboard handling (Up/Down move, Return or Space run, Escape closes).
@@ -19,7 +20,7 @@ export component WriterToolbarMenu inherits Rectangle {
     in property <bool> is-italic: false;
     in property <bool> is-underline: false;
     in property <bool> is-strikethrough: false;
-    in property <int> text-alignment: 0;
+    in property <int> text-alignment: WriterAlignmentState.text-alignment;
     in property <int> heading-level: 0;
     in property <int> list-style-index: 0;
     callback command(string);
@@ -52,7 +53,7 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, enabled: true },
             { id: "insert.comment", label: "Comment", shortcut: "", checked: false, enabled: true },
         ]
-        : root.kind == 4 ? [
+        : root.kind == 4 ? (WriterAlignmentState.justify-available ? [
             { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
             { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
             { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
@@ -60,7 +61,16 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
             { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
             { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
-        ]
+            { id: "format.align_justify", label: "Justify", shortcut: "", checked: root.text-alignment == 3, enabled: true },
+        ] : [
+            { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
+            { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
+            { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
+            { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
+            { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
+            { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
+            { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
+        ])
         : root.kind == 5 ? [
             { id: "paragraph.body", label: "Body", shortcut: "", checked: root.heading-level == 0, enabled: true },
             { id: "paragraph.h1", label: "Heading 1", shortcut: "", checked: root.heading-level == 1, enabled: true },

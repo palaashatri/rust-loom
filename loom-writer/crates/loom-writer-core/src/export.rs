@@ -6,9 +6,18 @@
 
 use std::rc::Rc;
 
+#[path = "export_text_line.rs"]
+mod text_line;
+
+#[cfg(test)]
+#[path = "export_pdf_test_support.rs"]
+pub(crate) mod test_support;
+
 use crate::export_flow;
 use crate::export_table::{self, TableLayout};
-use crate::text_metrics::{is_bold_weight, pdf_text_width, InterShaper};
+use crate::text_metrics::bidi::BidiRuns;
+use crate::text_metrics::justification::LineGeometry;
+use crate::text_metrics::{pdf_text_width, InterShaper};
 use crate::{PageStyle, WriterDocument};
 
 /// Exports a document to a `.docx` archive Word opens directly; see
@@ -23,99 +32,6 @@ pub fn export_document_as_docx(
 /// The gap the editor leaves between a list marker and its text (4 px in
 /// `writer_components.slint`): the marker's right edge sits this far before the text.
 const LIST_MARKER_GAP_PT: f32 = 4.0;
-
-/// One laid-out line: an optional list marker drawn at `marker_x` in the room
-/// left of the text, then `text` at `x`. `text` is the block's bytes starting at
-/// `text_start` so character runs can be matched.
-struct StyledLine<'a> {
-    x: f32,
-    marker_x: f32,
-    y: f32,
-    marker: &'a str,
-    text: &'a str,
-    text_start: usize,
-    runs: &'a [loom_text::StyleRun],
-}
-
-/// Draw a line as consecutive segments, one per change of inline style, so
-/// bold, italic and underline survive the export instead of being flattened
-/// to the block's face.
-fn draw_styled_line(
-    pdf: &mut loom_pdf::PdfDocument,
-    page: loom_pdf::PageIndex,
-    line: &StyledLine<'_>,
-    base: &loom_pdf::TextStyle,
-) {
-    use loom_pdf::PathStyle;
-
-    if !line.marker.is_empty() {
-        pdf.draw_text(page, line.marker_x, line.y, line.marker, base);
-    }
-    let mut x = line.x;
-    let end = line.text_start + line.text.len();
-    let mut cuts = vec![0, line.text.len()];
-    for run in line.runs {
-        for edge in [run.start, run.end] {
-            if (line.text_start..=end).contains(&edge)
-                && line.text.is_char_boundary(edge - line.text_start)
-            {
-                cuts.push(edge - line.text_start);
-            }
-        }
-    }
-    cuts.sort_unstable();
-    cuts.dedup();
-    // One piece per stretch of one style. Adjacent runs that draw alike are
-    // one piece, because the editor shapes (and so kerns) them as one.
-    let mut pieces: Vec<(usize, usize, loom_pdf::TextStyle, bool, bool)> = Vec::new();
-    for pair in cuts.windows(2) {
-        let (from, to) = (pair[0], pair[1]);
-        let position = line.text_start + from;
-        let run = line
-            .runs
-            .iter()
-            .find(|run| run.start <= position && position < run.end);
-        let mut style = base.clone();
-        let (mut underline, mut strikethrough) = (false, false);
-        if let Some(run) = run {
-            style.bold |= is_bold_weight(run.style.weight);
-            style.italic |= run.style.italic;
-            style.size_pt = crate::run_size(&run.style, base.size_pt);
-            underline = run.style.underline;
-            strikethrough = run.style.strikethrough;
-        }
-        match pieces.last_mut() {
-            Some(last)
-                if last.1 == from
-                    && last.2.bold == style.bold
-                    && last.2.italic == style.italic
-                    && last.2.size_pt == style.size_pt
-                    && last.3 == underline
-                    && last.4 == strikethrough =>
-            {
-                last.1 = to;
-            }
-            _ => pieces.push((from, to, style, underline, strikethrough)),
-        }
-    }
-    for (from, to, style, underline, _) in pieces {
-        let piece = &line.text[from..to];
-        pdf.draw_text(page, x, line.y, piece, &style);
-        let width = pdf_text_width(piece, &style);
-        if underline && !piece.trim().is_empty() {
-            let rule_y = line.y - style.size_pt * 0.12;
-            pdf.draw_line(
-                page,
-                x,
-                rule_y,
-                x + width,
-                rule_y,
-                PathStyle::stroked(style.fill_rgb, (style.size_pt / 24.0).max(0.5)),
-            );
-        }
-        x += width;
-    }
-}
 
 /// How far a line of `width` moves right inside the text `column` for its
 /// alignment: centred and right-aligned lines move, the others stay at the margin.
@@ -136,6 +52,7 @@ enum LineContent {
         end: usize,
         marker: String,
         style: loom_pdf::TextStyle,
+        geometry: LineGeometry,
     },
     TableRow {
         layout: Rc<TableLayout>,
@@ -259,8 +176,21 @@ fn pdf_lines(
             * page_style.line_height
             * crate::layout::line_spacing_factor(block);
         let text_column = block.text_column_width(page_style);
+        let positions = export_flow::block_measure(text, &block.runs, &style);
+        let paragraph_has_bidi = block.style.alignment.resolve(text)
+            == loom_text::Alignment::Justify
+            && BidiRuns::of(text).is_some();
         let ranges = export_flow::wrap(text, &block.runs, &style, text_column, text_column);
         for (line_index, (start, end)) in ranges.into_iter().enumerate() {
+            let geometry = export_flow::justification_geometry(
+                text,
+                &positions,
+                start,
+                end,
+                text_column,
+                block.style.alignment.resolve(text) == loom_text::Alignment::Justify,
+                paragraph_has_bidi,
+            );
             lines.push(PdfLine {
                 block: index,
                 content: LineContent::Text {
@@ -272,6 +202,7 @@ fn pdf_lines(
                         String::new()
                     },
                     style: style.clone(),
+                    geometry,
                 },
                 gap: if line_index == 0 { gap } else { 0.0 },
                 height,
@@ -327,6 +258,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 end,
                 marker,
                 style,
+                geometry,
             } => {
                 let text = &block.text.as_str()[*start..*end];
                 break_pending = block.text.as_str()[*end..].starts_with('\u{c}');
@@ -343,7 +275,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 let marker_x = page_style.margin_left_pt + text_start
                     - LIST_MARKER_GAP_PT
                     - pdf_text_width(marker, style);
-                let text_line = StyledLine {
+                let styled_line = text_line::StyledLine {
                     x: page_style.margin_left_pt + text_start + shift,
                     marker_x,
                     y,
@@ -351,8 +283,9 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     text,
                     text_start: *start,
                     runs: &block.runs,
+                    geometry,
                 };
-                draw_styled_line(&mut pdf, page, &text_line, style);
+                text_line::draw_styled_line(&mut pdf, page, &styled_line, style);
             }
             LineContent::TableRow { layout, row } => {
                 let shift = align_shift(
@@ -730,12 +663,22 @@ mod tests {
 
         let pdf = export_pdf(&document);
         let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+        let runs = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
         assert!(
-            text.contains("/F2 ") && text.contains("Tf BT") && text.contains("(Caf\u{e9} menu)"),
+            runs.iter().any(|run| {
+                run.text == "Caf\u{e9} menu"
+                    && run.font == "/F2"
+                    && run.bold == Some(true)
+                    && (run.size - 24.0).abs() < 0.01
+            }),
             "heading is drawn in the bold face with its accent: {text}"
         );
         assert!(
-            text.contains("/F1 ") && text.contains("(It\u{2019}s a plain body line.)"),
+            runs.iter().any(|run| {
+                run.text == "It\u{2019}s a plain body line."
+                    && run.font == "/F1"
+                    && run.bold == Some(false)
+            }),
             "body keeps the regular face and the typographic apostrophe: {text}"
         );
         assert_eq!(
@@ -832,27 +775,24 @@ mod tests {
         assert!(pdf.contains("Line number 074"), "last line");
     }
 
-    /// Text x position of the line drawn as `(text) Tj`.
+    /// Text x position as read from the run's text matrix.
     fn line_x(pdf: &[u8], text: &str) -> f32 {
-        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
-        let at = content
-            .find(&format!(" Td ({text}) Tj"))
-            .unwrap_or_else(|| panic!("{text:?} is drawn"));
-        let before: Vec<&str> = content[..at].split_whitespace().collect();
-        before[before.len() - 2].parse().expect("x coordinate")
+        test_support::drawn_text_runs(pdf)
+            .expect("semantic text runs")
+            .into_iter()
+            .find(|run| run.text == text)
+            .unwrap_or_else(|| panic!("{text:?} is drawn"))
+            .x
     }
 
-    /// Text position (x, y) of the line drawn as `(text) Tj`.
+    /// Text position as read from the run's text matrix.
     fn text_position(pdf: &[u8], text: &str) -> (f32, f32) {
-        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
-        let at = content
-            .find(&format!(" Td ({text}) Tj"))
+        let run = test_support::drawn_text_runs(pdf)
+            .expect("semantic text runs")
+            .into_iter()
+            .find(|run| run.text == text)
             .unwrap_or_else(|| panic!("{text:?} is drawn"));
-        let before: Vec<&str> = content[..at].split_whitespace().collect();
-        (
-            before[before.len() - 2].parse().expect("x coordinate"),
-            before[before.len() - 1].parse().expect("y coordinate"),
-        )
+        (run.x, run.y)
     }
 
     #[test]
@@ -935,41 +875,6 @@ mod tests {
         );
     }
 
-    /// One text draw read back from the content stream.
-    struct Drawn {
-        x: f32,
-        size: f32,
-        bold: bool,
-        text: String,
-    }
-
-    /// Every `(text) Tj` in the page content, with its position and font.
-    fn drawn_text(pdf: &[u8]) -> Vec<Drawn> {
-        let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
-        let mut out = Vec::new();
-        let mut from = 0;
-        while let Some(found) = content[from..].find(" Td (") {
-            let at = from + found;
-            let tail = &content[at.saturating_sub(120)..at];
-            let words: Vec<&str> = tail.split_whitespace().collect();
-            // "... /F2 12.00 Tf BT 72.00 700.00 Td (text) Tj"
-            let n = words.len();
-            let x: f32 = words[n - 2].parse().expect("x");
-            let size: f32 = words[n - 5].parse().expect("size");
-            let font = words[n - 6];
-            let text_start = at + " Td (".len();
-            let text_end = text_start + content[text_start..].find(") Tj").expect("end");
-            out.push(Drawn {
-                x,
-                size,
-                bold: font == "/F2" || font == "/F4",
-                text: content[text_start..text_end].to_string(),
-            });
-            from = text_end;
-        }
-        out
-    }
-
     #[test]
     fn export_pdf_uses_the_document_model_sizes_for_headings_and_body() {
         let mut document = WriterDocument::new("sizes", "Sizes");
@@ -980,7 +885,7 @@ mod tests {
             "Body words",
         ));
         let pdf = export_pdf(&document);
-        let drawn = drawn_text(&pdf);
+        let drawn = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
         let size_of = |text: &str| {
             drawn
                 .iter()
@@ -999,7 +904,8 @@ mod tests {
                 .iter()
                 .find(|d| d.text == "Title")
                 .expect("title")
-                .bold,
+                .bold
+                == Some(true),
             "H1 is bold"
         );
     }
@@ -1028,14 +934,14 @@ mod tests {
         let style = document.page.page_style();
         let right = style.width_pt - style.margin_right_pt;
         let left = style.margin_left_pt;
-        let drawn = drawn_text(&pdf);
+        let drawn = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
         assert!(drawn.len() > 3, "the paragraph wraps onto several lines");
         for piece in &drawn {
             let width = crate::text_metrics::pdf_text_width(
                 &piece.text,
                 &loom_pdf::TextStyle {
                     size_pt: piece.size,
-                    bold: piece.bold,
+                    bold: piece.bold.expect("Inter bold resource"),
                     ..Default::default()
                 },
             );
@@ -1096,9 +1002,16 @@ mod tests {
         assert_eq!(exported, editor, "same lines, same breaks");
 
         // And at the size the editor draws them: every run is 11 pt.
-        let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
-        assert!(content.contains("/F1 11.00 Tf"), "{content}");
-        assert!(!content.contains("12.00 Tf"), "no 12 pt text");
+        let runs = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
+        assert!(
+            runs.iter()
+                .all(|run| run.font == "/F1" && (run.size - 11.0).abs() < 0.01),
+            "every body run uses regular Inter at 11 pt: {runs:?}"
+        );
+        assert!(
+            runs.iter().all(|run| (run.size - 12.0).abs() >= 0.01),
+            "no run uses 12 pt"
+        );
     }
 
     #[test]
@@ -1199,6 +1112,10 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "export_justification_tests.rs"]
+mod export_justification_tests;
 
 #[cfg(test)]
 mod pdf_dump_tests {

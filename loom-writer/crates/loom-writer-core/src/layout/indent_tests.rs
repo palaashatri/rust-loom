@@ -83,14 +83,14 @@ fn line_spacing_scales_the_line_box_and_the_default_is_unchanged() {
     assert!((ratio - 2.0 / 1.15).abs() < 0.001, "ratio {ratio}");
 }
 
-/// Text x position of the first line drawn as `(text) Tj`.
+/// Text x position as read from the run's text matrix.
 fn text_x(pdf: &[u8], text: &str) -> f32 {
-    let content = loom_pdf::inspect::readable_content(pdf).expect("readable PDF");
-    let at = content
-        .find(&format!(" Td ({text}) Tj"))
-        .unwrap_or_else(|| panic!("{text:?} is drawn"));
-    let before: Vec<&str> = content[..at].split_whitespace().collect();
-    before[before.len() - 2].parse().expect("x coordinate")
+    crate::export::test_support::drawn_text_runs(pdf)
+        .expect("semantic text runs")
+        .into_iter()
+        .find(|run| run.text == text)
+        .unwrap_or_else(|| panic!("{text:?} is drawn"))
+        .x
 }
 
 #[test]

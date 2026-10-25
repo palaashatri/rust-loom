@@ -1,8 +1,9 @@
 //! Cached and windowed layout against the original implementation in
 //! `layout_tests`, plus the cache and flooring shortcuts that make edits cheap.
 
+use super::selection::floor_in_blocks;
 use super::*;
-use crate::{grapheme_boundaries, CaretAffinity};
+use crate::{floor_grapheme_boundary, grapheme_boundaries, CaretAffinity};
 
 fn sample_document(blocks: usize) -> WriterDocument {
     let mut doc = WriterDocument::new("layout", "Layout");
@@ -199,6 +200,258 @@ fn an_edit_wraps_only_the_changed_block_and_counts_follow() {
     assert_eq!(words, edited.split_whitespace().count());
     assert_eq!(chars, edited.chars().count());
     assert_eq!(doc.reference_paginate(&style), doc.paginate(&style));
+}
+
+#[test]
+fn justified_mixed_paragraph_defers_every_wrapped_line_with_spaces() {
+    let text = format!(
+        "אבג {}",
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(20)
+    );
+    let mut document = WriterDocument::new("bidi-justify", "Bidi justification");
+    let mut paragraph = RichBlock::new(1, "paragraph", &text);
+    paragraph.style.alignment = loom_text::Alignment::Justify;
+    document.push(paragraph);
+
+    let style = document.page.page_style();
+    let viewport = viewport(1.0, 0.0);
+    let flow = document
+        .flow(&style, viewport)
+        .expect("mixed paragraph layout");
+    let font_size = style.font_size_for_kind("paragraph");
+    let width = document.blocks[0].text_column_width(&style);
+    let line = flow
+        .lines()
+        .iter()
+        .find(|line| {
+            let source = &text[line.start..line.end];
+            line.end < text.len()
+                && source.contains(' ')
+                && !source
+                    .chars()
+                    .any(|ch| ('\u{0590}'..='\u{08ff}').contains(&ch))
+        })
+        .expect("a later wrapped line contains only left-to-right words");
+
+    let (spaces, deferred) =
+        document.blocks[0].justification_spaces_for_line(line.start..line.end, font_size, width);
+    assert!(deferred, "RTL paragraph context applies to this whole line");
+    assert!(
+        spaces.is_empty(),
+        "the line stays at natural width until bidi spacing is supported"
+    );
+}
+
+#[test]
+fn cached_flow_measurements_are_reused_for_caret_selection_and_projection_geometry() {
+    let text = format!(
+        "אבג {}",
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(12)
+    );
+    let mut document = WriterDocument::new("cached-justify", "Cached justification");
+    let mut paragraph = RichBlock::new(1, "paragraph", &text);
+    paragraph.style.alignment = loom_text::Alignment::Justify;
+    document.push(paragraph);
+
+    let style = document.page.page_style();
+    let viewport = viewport(1.0, 0.0);
+    let flow = document.flow(&style, viewport).expect("initial layout");
+    let measure_builds = crate::text_metrics::justification::measure_build_count();
+    let bidi_scans = crate::text_metrics::bidi::paragraph_scan_count();
+    let block = &document.blocks[0];
+    let font_size = style.font_size_for_kind("paragraph");
+    let width = block.text_column_width(&style);
+
+    for line in flow.lines() {
+        block.justification_spaces_for_line(line.start..line.end, font_size, width);
+        block.line_offset_at_x_with_justification(line.start..line.end, font_size, width, 80.0);
+        block.measured_advance(line.start, line.end, font_size);
+    }
+    let first = flow.lines().first().expect("wrapped line");
+    flow.caret_rect(&document, &TextSelection::caret(first.global_start + 1))
+        .expect("caret geometry");
+    flow.selection_rects(
+        &document,
+        &TextSelection::range(first.global_start, first.global_start + 3),
+        0..flow.page_count(),
+    );
+    document.flow(&style, viewport).expect("cached relayout");
+
+    assert_eq!(
+        crate::text_metrics::justification::measure_build_count(),
+        measure_builds,
+        "caret, selection, projection line geometry, and unchanged flow reuse the cached measure"
+    );
+    assert_eq!(
+        crate::text_metrics::bidi::paragraph_scan_count(),
+        bidi_scans,
+        "mixed-paragraph bidi classification is reused after layout"
+    );
+}
+
+#[test]
+fn justified_selection_and_upstream_caret_do_not_include_hanging_break_spaces() {
+    let mut failures = Vec::new();
+    for line_break in ["\n", "\u{b}", "\u{c}"] {
+        let text = format!("前置{line_break}one two {}", "x".repeat(180));
+        let mut document = WriterDocument::new("hanging-space", "Hanging space");
+        let mut paragraph = RichBlock::new(1, "paragraph", &text);
+        paragraph.style.alignment = loom_text::Alignment::Justify;
+        document.push(paragraph);
+
+        let style = document.page.page_style();
+        let flow = document
+            .flow(&style, viewport(1.0, 0.0))
+            .expect("layout with an explicit line break");
+        let break_end = "前置".len() + line_break.len();
+        let line = flow
+            .lines()
+            .iter()
+            .find(|line| {
+                line.start >= break_end
+                    && line.end < text.len()
+                    && text[line.start..line.end].ends_with(' ')
+                    && text[line.start..line.end].contains("one two")
+            })
+            .expect("an automatic line ends with its hanging break space");
+        assert!(line.start > 0, "the source range has a UTF-8 nonzero start");
+        assert!(text.is_char_boundary(line.start));
+        assert!(text.is_char_boundary(line.end));
+
+        let global_end = line.global_start + line.end - line.start;
+        let selection = TextSelection::range(line.global_start, global_end);
+        let highlight = flow
+            .selection_rects(&document, &selection, 0..flow.page_count())
+            .into_iter()
+            .find(|rect| rect.start == line.start && rect.end == line.end)
+            .expect("selected wrapped line");
+        let mut caret = TextSelection::caret(global_end);
+        caret.affinity = CaretAffinity::Upstream;
+        let caret_rect = flow.caret_rect(&document, &caret).expect("upstream caret");
+        let right = line.bounds.x + line.bounds.width;
+
+        if !(highlight.rect.x + highlight.rect.width <= right + 0.1
+            && caret_rect.rect.x <= right + 0.1)
+        {
+            failures.push(format!(
+                "separator {line_break:?}: line end {right}, selection right {}, upstream caret x {}",
+                highlight.rect.x + highlight.rect.width,
+                caret_rect.rect.x,
+            ));
+        }
+
+        let hard_break_line = flow
+            .lines()
+            .iter()
+            .find(|line| text[line.start..line.end].ends_with(line_break))
+            .expect("layout keeps the explicit break on its preceding line");
+        let visible = crate::text_metrics::bidi::visible_end(
+            &text,
+            hard_break_line.start..hard_break_line.end,
+        );
+        if visible != hard_break_line.end - line_break.len() {
+            failures.push(format!(
+                "separator {line_break:?}: visible endpoint {visible}, expected {}",
+                hard_break_line.end - line_break.len(),
+            ));
+        }
+
+        let final_break = format!("final{line_break}");
+        let final_visible =
+            crate::text_metrics::bidi::visible_end(&final_break, 0..final_break.len());
+        if final_visible != "final".len() {
+            failures.push(format!(
+                "final separator {line_break:?}: visible endpoint {final_visible}, expected {}",
+                "final".len(),
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "justified geometry must stop at visible content:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn natural_wrapped_line_keeps_its_trailing_space_caret_stop() {
+    let text = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(12);
+    let mut document = WriterDocument::new("natural-hanging-space", "Natural hanging space");
+    document.push(RichBlock::new(1, "paragraph", &text));
+
+    let style = document.page.page_style();
+    let flow = document
+        .flow(&style, viewport(1.0, 0.0))
+        .expect("natural paragraph layout");
+    let line = flow
+        .lines()
+        .iter()
+        .find(|line| {
+            line.start > 0 && line.end < text.len() && text[line.start..line.end].ends_with(' ')
+        })
+        .expect("a noninitial automatic line with a hanging space");
+    assert!(text.is_char_boundary(line.start));
+    assert!(text.is_char_boundary(line.end));
+
+    let block = &document.blocks[line.block_index];
+    let font_size = style.font_size_for_kind(block.kind.as_str());
+    let width = block.text_column_width(&style);
+    let local_width = block.measured_advance(line.start, line.end, font_size);
+    let hit = block.line_offset_at_x_with_justification(
+        line.start..line.end,
+        font_size,
+        width,
+        local_width,
+    );
+    let global_end = line.global_start + line.end - line.start;
+    let selection = TextSelection::range(line.global_start, global_end);
+    let highlight = flow
+        .selection_rects(&document, &selection, 0..flow.page_count())
+        .into_iter()
+        .find(|rect| rect.start == line.start && rect.end == line.end)
+        .expect("selected natural line");
+    let mut caret = TextSelection::caret(global_end);
+    caret.affinity = CaretAffinity::Upstream;
+    let caret_rect = flow.caret_rect(&document, &caret).expect("upstream caret");
+    let right = line.bounds.x + line.bounds.width;
+    let mut failures = Vec::new();
+    if hit != line.end - line.start {
+        failures.push(format!(
+            "hit offset {hit}, expected trailing-space boundary {}",
+            line.end - line.start
+        ));
+    }
+
+    let mut previous = 0;
+    for step in 0..=32 {
+        let x = -8.0 + (local_width + 16.0) * step as f32 / 32.0;
+        let offset =
+            block.line_offset_at_x_with_justification(line.start..line.end, font_size, width, x);
+        if offset < previous {
+            failures.push(format!(
+                "natural hit offsets are nonmonotonic at x {x}: {offset} followed {previous}"
+            ));
+            break;
+        }
+        previous = offset;
+    }
+    if (highlight.rect.x + highlight.rect.width - right).abs() > 0.1 {
+        failures.push(format!(
+            "selection right {}, line right {right}",
+            highlight.rect.x + highlight.rect.width
+        ));
+    }
+    if (caret_rect.rect.x - right).abs() > 0.1 {
+        failures.push(format!(
+            "upstream caret x {}, line right {right}",
+            caret_rect.rect.x
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "natural hanging-space geometry:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

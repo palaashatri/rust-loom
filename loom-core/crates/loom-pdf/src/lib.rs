@@ -60,6 +60,7 @@ mod shaping_tests;
 #[cfg(test)]
 mod tests;
 mod text;
+pub mod text_lines;
 
 pub use fonts::{FallbackFont, FontFallback};
 pub use image::PdfImage;

@@ -21,6 +21,7 @@ pub(crate) fn dispatch(app: &WriterApp, id: &str) -> bool {
         "format.align_left" => app.invoke_select_alignment(0),
         "format.align_center" => app.invoke_select_alignment(1),
         "format.align_right" => app.invoke_select_alignment(2),
+        "format.align_justify" => app.invoke_select_alignment(3),
         "paragraph.body" => app.invoke_select_heading(0),
         "paragraph.h1" => app.invoke_select_heading(1),
         "paragraph.h2" => app.invoke_select_heading(2),
