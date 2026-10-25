@@ -19,7 +19,9 @@ The engineering constitution, project references, architecture contracts, eviden
 
 ## Future SLOPOS desktop integration (planned)
 
-Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaashatri/rust-slopos) while remaining a separate, cross-platform **Rust + Slint** project. A future versioned integration layer may provide SLOPOS launch/file associations, real global-menu commands, shared file dialogs/clipboard, accessibility, and theme-token mapping for the Classic/System 7 style or Loom Design Bible-inspired SLOPOS theme. Optional local SLOPOS Vision and AI desktop automation may interact through permissioned document actions.
+Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaashatri/rust-slopos) while remaining a separate, cross-platform **Rust + Slint** project. A future versioned integration layer may provide SLOPOS launch/file associations, real global-menu commands, shared file dialogs/clipboard, accessibility, and versioned theme-token and icon-role mapping for **SLOPOS Classic (System 7/Platinum)**, **Sinty-inspired SLOPOS Modern** and safe user themes, while independently respecting Dock/taskbar layout profiles. Optional local SLOPOS Vision and AI desktop automation may interact through permissioned document actions.
+
+The symbolic app-list icons in SLOPOS are pinned, licensed Lucide reference SVGs, not custom colorful Loom or Sinty app artwork. Loom keeps its original cross-platform Slint visual identity when SLOPOS is absent.
 
 **Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
 
