@@ -339,10 +339,10 @@ export component TemplateChooserModal inherits Rectangle {
                         // Category items
                         CategoryRow { label: "All Templates"; icon-name: "grid"; active: root.template-category == 0; clicked => { root.choose-template-category(0); } }
                         CategoryRow { label: "Basic"; icon-name: "document"; active: root.template-category == 1; clicked => { root.choose-template-category(1); } }
-                        CategoryRow { label: "Reports"; icon-name: "book"; active: root.template-category == 2; clicked => { root.choose-template-category(2); } }
+                        CategoryRow { label: "Reports"; icon-name: "chart"; active: root.template-category == 2; clicked => { root.choose-template-category(2); } }
                         CategoryRow { label: "Letters"; icon-name: "folder"; active: root.template-category == 3; clicked => { root.choose-template-category(3); } }
                         CategoryRow { label: "Curricula Vitae"; icon-name: "layers"; active: root.template-category == 4; clicked => { root.choose-template-category(4); } }
-                        CategoryRow { label: "Newsletters"; icon-name: "layout"; active: root.template-category == 5; clicked => { root.choose-template-category(5); } }
+                        CategoryRow { label: "Newsletters"; icon-name: "list"; active: root.template-category == 5; clicked => { root.choose-template-category(5); } }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
 

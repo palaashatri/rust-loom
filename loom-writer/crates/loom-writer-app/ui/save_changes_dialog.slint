@@ -1,6 +1,45 @@
 import { LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
+/// One dialog button. The shared LoomButton draws its box, focus and clicks. Its
+/// own label is left empty: that text would be a second element named like the
+/// button, and it is only one line tall, so the button's label would be drawn
+/// shorter than the button. Here the label is drawn at the button's full scaled
+/// height and the button is named once, by its accessible name.
+component SaveChangesButton inherits Rectangle {
+    in property <string> label;
+    in property <string> variant;
+    callback clicked;
+    public function grab-focus() { button.grab-focus(); }
+    out property <bool> has-focus: button.has-focus;
+
+    width: label-text.preferred-width + 2 * Theme.tokens.space.lg;
+    height: Theme.scaled-control-height;
+
+    button := LoomButton {
+        label: "";
+        accessible-name: root.label;
+        variant: root.variant;
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+    label-text := Text {
+        text: root.label;
+        width: parent.width;
+        height: parent.height;
+        font-size: Theme.type.body;
+        font-weight: 600;
+        color: root.variant == "primary" ? Theme.palette().accent-ink
+            : root.variant == "danger" ? Theme.palette().danger
+            : Theme.palette().ink;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+        accessible-label: "";
+    }
+}
+
 /// Save, Discard or Cancel before a document is replaced or the window closes.
 /// A modal: its FocusScope parents the three buttons so keys bubble to it, Tab
 /// cycles Cancel, Discard, Save without leaving, Escape cancels, and the
@@ -67,28 +106,22 @@ export component WriterSaveChangesDialog inherits FocusScope {
                 }
                 // The primary button sits at the reading end: right in LTR, left in RTL.
                 Rectangle {
-                    height: Theme.tokens.metrics.control-height;
-                    save-button := LoomButton {
+                    height: Theme.scaled-control-height;
+                    save-button := SaveChangesButton {
                         label: "Save";
                         variant: "primary";
-                        width: self.preferred-width;
-                        height: Theme.tokens.metrics.control-height;
                         x: Theme.rtl ? 0px : parent.width - self.width;
                         clicked => { root.save(); }
                     }
-                    discard-button := LoomButton {
+                    discard-button := SaveChangesButton {
                         label: "Discard";
                         variant: "danger";
-                        width: self.preferred-width;
-                        height: Theme.tokens.metrics.control-height;
                         x: Theme.rtl ? save-button.width + Theme.tokens.space.sm : save-button.x - Theme.tokens.space.sm - self.width;
                         clicked => { root.discard(); }
                     }
-                    cancel-button := LoomButton {
+                    cancel-button := SaveChangesButton {
                         label: "Cancel";
                         variant: "secondary";
-                        width: self.preferred-width;
-                        height: Theme.tokens.metrics.control-height;
                         x: Theme.rtl ? discard-button.x + discard-button.width + Theme.tokens.space.sm : discard-button.x - Theme.tokens.space.sm - self.width;
                         clicked => { root.cancel(); }
                     }

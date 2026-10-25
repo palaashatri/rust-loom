@@ -280,18 +280,20 @@ pub(crate) fn ui_selection_rects(
 /// Rows for every block when the page layout is unavailable: each block gets
 /// a conservative height from the content width, stacked in order.
 fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlock> {
-    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
     let numbers = doc.list_item_numbers();
     let mut y = 0.0_f32;
     doc.blocks
         .iter()
         .enumerate()
         .map(|(index, block)| {
+            // The same text column the page lays out, so a list marker sits in
+            // the room left of its text rather than off the content box.
+            let column_width = block.text_column_width(style);
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let height = writer_render_height_for_width(block, font_size, content_width)
+            let height = writer_render_height_for_width(block, font_size, column_width)
                 .max(font_size * style.line_height);
             let marker = block.list_marker(numbers[index]);
-            let frame = Frame::new(0.0, y, content_width, height);
+            let frame = Frame::new(block.text_start_pt(style), y, column_width, height);
             let row = render_row(block, frame, &marker, "", Align::Block);
             y += height;
             row
@@ -1064,3 +1066,7 @@ fn high_contrast_selection_border_color() -> slint::Color {
     // mid-luminance fills that cannot support a 7:1 monochrome boundary.
     slint::Color::from_argb_encoded(0xFF000000)
 }
+
+#[cfg(test)]
+#[path = "list_indent_tests.rs"]
+mod list_indent_tests;

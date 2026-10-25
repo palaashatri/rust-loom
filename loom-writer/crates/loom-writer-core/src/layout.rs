@@ -236,10 +236,15 @@ pub(crate) fn line_spacing_factor(block: &RichBlock) -> f32 {
     }
 }
 
+/// Room a list item keeps to the left of its text for its marker, in ems of the
+/// item's font. Three digits and the gap after them fit in it.
+const LIST_MARKER_ROOM_EMS: f32 = 2.5;
+
 impl RichBlock {
     /// Points the block's lines are indented from the left margin: its left
     /// indent plus its list level's indent, never negative and never so large
-    /// that the column closes.
+    /// that the column closes. The PDF export indents from this; the editor
+    /// also reserves [`Self::list_marker_room_pt`] for a list item's marker.
     pub fn left_indent_pt(&self, style: &PageStyle) -> f32 {
         let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
         let indent = if self.style.left_indent.is_finite() {
@@ -250,11 +255,31 @@ impl RichBlock {
         (indent + self.list_indent_pt()).clamp(0.0, (usable - 1.0).max(0.0))
     }
 
+    /// The room a list item keeps to the left of its text in the editor, for
+    /// its marker: the marker is drawn in that room, so the item's text starts
+    /// right of the body column. Other blocks keep no room.
+    pub fn list_marker_room_pt(&self, style: &PageStyle) -> f32 {
+        if crate::list_levels::is_list_kind(&self.kind) {
+            style.font_size_for_kind(self.kind.as_str()) * LIST_MARKER_ROOM_EMS
+        } else {
+            0.0
+        }
+    }
+
+    /// Points from the left margin to where the block's text starts in the
+    /// editor: its [`Self::left_indent_pt`] plus its marker room, never so large
+    /// that the column closes. Lines, the caret and the wrap all start here.
+    pub fn text_start_pt(&self, style: &PageStyle) -> f32 {
+        let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        (self.left_indent_pt(style) + self.list_marker_room_pt(style))
+            .clamp(0.0, (usable - 1.0).max(0.0))
+    }
+
     /// The width the block's lines wrap and align to: the text column less
-    /// its left indent.
+    /// its text start.
     pub fn text_column_width(&self, style: &PageStyle) -> f32 {
         let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
-        (usable - self.left_indent_pt(style)).max(1.0)
+        (usable - self.text_start_pt(style)).max(1.0)
     }
 }
 
@@ -433,7 +458,7 @@ impl WriterDocument {
                     * zoom;
                 let width = lines[at].bounds.width * zoom;
                 lines[at].bounds = PageRect {
-                    x: content_x + block.left_indent_pt(style) * zoom,
+                    x: content_x + block.text_start_pt(style) * zoom,
                     y: line_y,
                     width,
                     height: line_height,
@@ -957,6 +982,9 @@ mod layout_checks;
 
 #[cfg(test)]
 mod indent_tests;
+
+#[cfg(test)]
+mod list_indent_tests;
 
 #[cfg(test)]
 mod break_tests;

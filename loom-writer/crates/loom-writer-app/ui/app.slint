@@ -572,7 +572,7 @@ export component WriterApp inherits Window {
                 }
             }
 
-            WriterStatusBar {
+            status-bar := WriterStatusBar {
                 leading-text: root.status-left;
                 trailing-text: root.status-right;
             }
@@ -584,7 +584,7 @@ export component WriterApp inherits Window {
         x: 0px;
         y: action-toolbar.bottom-y;
         width: root.width;
-        height: root.height - action-toolbar.bottom-y;
+        height: root.height - action-toolbar.bottom-y - status-bar.height;
         background: transparent;
 
         Rectangle {
@@ -595,7 +595,7 @@ export component WriterApp inherits Window {
 
         compact-inspector := WriterInspector {
             shortcut-modifier: root.shortcut-modifier;
-            x: root.rtl ? 0px : max(0px, parent.width - 360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)));
+            x: root.rtl ? 0px : parent.width - self.width;
             y: 0px;
             width: min(360px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)), parent.width);
             height: parent.height;

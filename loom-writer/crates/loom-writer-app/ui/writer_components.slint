@@ -342,8 +342,9 @@ component WriterDocumentEditor inherits Rectangle {
             accessible-role: none;
         }
         for block in root.render-blocks : Text {
-            // List markers hang in the left page margin; the content column
-            // never shifts, keeping caret and selection geometry aligned.
+            // A list marker ends a small gap before its item's text, inside
+            // the room the layout reserves left of that text (text_start_pt).
+            // The text column is the layout's own, so caret and selection align.
             x: block.x * root.page-zoom - 4px * root.page-zoom - self.width;
             y: block.y * root.page-zoom;
             width: max(14px, block.marker.character-count * block.font-size * 0.62) * root.page-zoom;

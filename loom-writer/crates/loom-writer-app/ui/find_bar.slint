@@ -44,10 +44,13 @@ export component FindBarOverlay inherits Rectangle {
     in property <int> focus-tick: FindBar.focus-tick;
 
     width: 480px * max(1.0, Theme.text-scale);
-    // At large text the action buttons move to their own row instead of
-    // squeezing the field.
+    // At large text the field keeps the first row. The options and the Previous,
+    // Next and Done buttons share the row below it, and a replace row keeps its
+    // buttons beside its field, so the bar takes at most three rows.
     property <bool> stacked: Theme.text-scale > 1.25;
-    height: layout.preferred-height + 2 * Theme.tokens.space.sm;
+    // The layout's own padding is the bar's inset; at normal text the bar keeps
+    // its original extra step below it.
+    height: layout.preferred-height + (root.stacked ? 0px : 2 * Theme.tokens.space.sm);
     background: Theme.palette().surface-raised;
     border-width: 1px;
     border-color: Theme.palette().border-strong;
@@ -78,7 +81,8 @@ export component FindBarOverlay inherits Rectangle {
         }
 
     layout := VerticalLayout {
-        padding: Theme.tokens.space.sm;
+        // At large text every row sits a full step (8 px) in from the bar's edge.
+        padding: root.stacked ? Theme.tokens.space.md : Theme.tokens.space.sm;
         spacing: Theme.tokens.space.xs;
 
         // The field comes first at the reading start, then the match count and
@@ -137,23 +141,62 @@ export component FindBarOverlay inherits Rectangle {
                 cancelled => { FindBar.close(); }
             }
         }
+        // At large text the options and the Previous, Next and Done buttons share
+        // one row: the options at the reading start, the buttons at the end.
         if root.stacked && !Theme.rtl : HorizontalLayout {
-            spacing: Theme.tokens.space.xs;
-            alignment: end;
+            spacing: Theme.tokens.space.md;
+            LoomToggle {
+                label: "Match case";
+                horizontal-stretch: 0;
+                checked: FindBar.match-case;
+                toggled(value) => {
+                    FindBar.match-case = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+            LoomToggle {
+                label: "Whole word";
+                horizontal-stretch: 0;
+                checked: FindBar.whole-word;
+                toggled(value) => {
+                    FindBar.whole-word = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
             LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
             LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
             LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
         }
         if root.stacked && Theme.rtl : HorizontalLayout {
-            spacing: Theme.tokens.space.xs;
-            alignment: start;
+            spacing: Theme.tokens.space.md;
             LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
             LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
             LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
+            Rectangle { horizontal-stretch: 1; }
+            LoomToggle {
+                label: "Whole word";
+                horizontal-stretch: 0;
+                checked: FindBar.whole-word;
+                toggled(value) => {
+                    FindBar.whole-word = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
+            LoomToggle {
+                label: "Match case";
+                horizontal-stretch: 0;
+                checked: FindBar.match-case;
+                toggled(value) => {
+                    FindBar.match-case = value;
+                    FindBar.query-changed(FindBar.query);
+                }
+            }
         }
 
-        // The options mirror in right-to-left, like the buttons above.
-        if !Theme.rtl : HorizontalLayout {
+        // The options mirror in right-to-left, like the buttons above. At large
+        // text they sit in the action row instead.
+        if !root.stacked && !Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.md;
             LoomToggle {
                 label: "Match case";
@@ -172,7 +215,7 @@ export component FindBarOverlay inherits Rectangle {
                 }
             }
         }
-        if Theme.rtl : HorizontalLayout {
+        if !root.stacked && Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.md;
             LoomToggle {
                 label: "Whole word";
@@ -201,13 +244,13 @@ export component FindBarOverlay inherits Rectangle {
                 accepted(text) => { FindBar.replace-current(); }
                 cancelled => { FindBar.close(); }
             }
-            if !root.stacked : LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
-            if !root.stacked : LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
+            LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
+            LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
         }
         if FindBar.show-replace && Theme.rtl : HorizontalLayout {
             spacing: Theme.tokens.space.xs;
-            if !root.stacked : LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
-            if !root.stacked : LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
+            LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
+            LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
             LoomTextField {
                 label: "Replace with";
                 placeholder: "Replace with";
@@ -215,18 +258,6 @@ export component FindBarOverlay inherits Rectangle {
                 accepted(text) => { FindBar.replace-current(); }
                 cancelled => { FindBar.close(); }
             }
-        }
-        if FindBar.show-replace && root.stacked && !Theme.rtl : HorizontalLayout {
-            spacing: Theme.tokens.space.xs;
-            alignment: end;
-            LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
-            LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
-        }
-        if FindBar.show-replace && root.stacked && Theme.rtl : HorizontalLayout {
-            spacing: Theme.tokens.space.xs;
-            alignment: start;
-            LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
-            LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
         }
     }
     }

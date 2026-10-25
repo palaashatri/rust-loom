@@ -4534,6 +4534,8 @@ mod text_scale_tests;
 mod toolbar_tests;
 
 #[cfg(test)]
+mod dialog_chooser_tests;
+#[cfg(test)]
 mod dpi_surfaces_tests;
 #[cfg(test)]
 mod find_bar_placement_tests;

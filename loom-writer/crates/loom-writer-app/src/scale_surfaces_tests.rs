@@ -502,3 +502,78 @@ fn inspector_shortcut_hints_name_the_platform_modifier() {
         );
     }
 }
+
+/// The overflow glyph is the `Icon` drawn inside the "More actions" button. Its
+/// box is the glyph's box, so its size is what a user sees grow or not.
+fn overflow_glyph(app: &WriterApp) -> ElementHandle {
+    let button = ElementHandle::find_by_accessible_label(app, "More actions")
+        .find(|element| element.size().width > 0.0)
+        .expect("the toolbar has a More actions button");
+    button
+        .query_descendants()
+        .match_inherits("Icon")
+        .find_all()
+        .into_iter()
+        .next()
+        .expect("the More actions button draws a glyph")
+}
+
+#[test]
+fn the_overflow_glyph_grows_with_text_scale_and_stays_inside_the_toolbar() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    let mut glyph_heights = Vec::new();
+    for scale in [1.0f32, 2.0] {
+        let app = editor(width, height, scale);
+        let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+        let glyph = overflow_glyph(&app);
+        let toolbar = ElementHandle::find_by_element_type_name(&app, "WriterActionToolbar")
+            .next()
+            .expect("the toolbar is in the element tree");
+        let (top, bottom) = (
+            glyph.absolute_position().y,
+            glyph.absolute_position().y + glyph.size().height,
+        );
+        let toolbar_bottom = toolbar.absolute_position().y + toolbar.size().height;
+        assert!(
+            top >= toolbar.absolute_position().y && bottom <= toolbar_bottom,
+            "the overflow glyph at {top}..{bottom} at {scale}x leaves the toolbar ending at {toolbar_bottom}"
+        );
+        glyph_heights.push(glyph.size().height);
+    }
+    assert!(
+        glyph_heights[1] >= 1.5 * glyph_heights[0],
+        "the overflow glyph is {}px at 1.0x and {}px at 2.0x; it must grow with text scale",
+        glyph_heights[0],
+        glyph_heights[1]
+    );
+}
+
+#[test]
+fn the_compact_inspector_drawer_ends_above_the_status_bar_at_1024() {
+    let (width, height) = (1024.0f32, 720.0f32);
+    for scale in [1.0f32, 2.0] {
+        let app = editor(width, height, scale);
+        open_surface(&app, "inspector");
+        let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+        // Only the compact drawer has a width at 1024 px; the docked one is hidden.
+        // The drawer's own rectangle is as tall as this panel, so the panel's
+        // bottom is the drawer's bottom.
+        let drawer = ElementHandle::find_by_element_type_name(&app, "WriterInspector")
+            .find(|element| element.size().width > 0.0)
+            .expect("the compact inspector drawer is open");
+        let status = ElementHandle::find_by_element_type_name(&app, "WriterStatusBar")
+            .next()
+            .expect("the status bar is in the element tree");
+        let drawer_bottom = drawer.absolute_position().y + drawer.size().height;
+        let status_top = status.absolute_position().y;
+        let status_bottom = status_top + status.size().height;
+        assert!(
+            drawer_bottom <= status_top + 0.5,
+            "at {scale}x the drawer ends at {drawer_bottom} and covers the status bar at {status_top}"
+        );
+        assert!(
+            status_bottom <= height + 0.5,
+            "at {scale}x the status bar ends at {status_bottom}, below the {height} px window"
+        );
+    }
+}
