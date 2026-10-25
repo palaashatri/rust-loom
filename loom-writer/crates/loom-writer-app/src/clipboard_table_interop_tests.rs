@@ -661,3 +661,61 @@ fn pointer_reselecting_the_anchor_clears_table_range_when_caret_is_unchanged() {
             "reselecting the unchanged caret clears the stale range and refreshes its label; a collapsed caret copies nothing"
         );
 }
+
+#[test]
+fn a_styled_sheets_table_pasted_into_writer_keeps_bold_alignment_and_widths() {
+    use loom_clipboard::set_mock_clipboard_enabled;
+    set_mock_clipboard_enabled(true);
+    loom_test_support::capture::set_platform();
+    let dialogs = std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let mut doc = loom_writer_core::WriterDocument::new("test", "Test");
+    doc.replace_paragraphs("Intro");
+    let (app, state) = crate::actions_tests::test_state(doc, dialogs);
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+
+    let mut source_table = Table::new(2, 2);
+    source_table.set_cell_rich_text(0, 0, vec![loom_objects::TextRun::bold("Product")]);
+    source_table.set_cell_text(0, 1, "Q1");
+    source_table.set_cell_text(1, 0, "Widget");
+    source_table.set_cell_text(1, 1, "100");
+    source_table.columns[0].width_pt = 210.0;
+    source_table.cell_mut(1, 1).expect("cell").style_override =
+        Some(loom_objects::CellStyleOverride {
+            horizontal_align: Some(loom_objects::HorizontalAlign::Right),
+            ..Default::default()
+        });
+
+    write_clipboard(&ClipboardData::from_table(&source_table)).expect("write mock clipboard");
+    app.invoke_paste();
+
+    let doc = state.current.borrow();
+    let block = doc
+        .blocks
+        .iter()
+        .find(|b| b.kind == loom_writer_core::TABLE_BLOCK_KIND)
+        .expect("the paste inserts a table block");
+    let pasted = doc
+        .loom_table_from_block(block.id)
+        .expect("the table block keeps its typed cells");
+    let header_runs = &pasted.rows[0].cells[0].content.runs;
+    assert!(
+        header_runs
+            .iter()
+            .any(|run| run.bold && run.text == "Product"),
+        "bold on the pasted header cell survives: {header_runs:?}"
+    );
+    assert_eq!(
+        pasted.columns[0].width_pt, 210.0,
+        "the pasted column keeps its width"
+    );
+    assert_eq!(
+        pasted.rows[1].cells[1]
+            .style_override
+            .as_ref()
+            .and_then(|style| style.horizontal_align),
+        Some(loom_objects::HorizontalAlign::Right),
+        "the pasted cell keeps its right alignment"
+    );
+
+    set_mock_clipboard_enabled(false);
+}
