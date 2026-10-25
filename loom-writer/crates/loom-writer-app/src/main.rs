@@ -2410,7 +2410,7 @@ fn wire_writer_shared_callbacks(
                 let y = rect.rect.y - base.y - style.margin_top_pt * zoom
                     + rect.rect.height / 2.0
                     + step;
-                writer_pointer_offset_with_app(&app, &current, viewport, x, y)
+                pointer_hit_test::page_move_offset(&app, &current, viewport, step, x, y)
             };
             let Some(offset) = target else { return };
             let anchor = if extend {

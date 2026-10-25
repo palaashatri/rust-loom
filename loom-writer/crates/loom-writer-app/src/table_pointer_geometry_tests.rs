@@ -545,6 +545,103 @@ fn a_held_drag_below_the_visible_bottom_scrolls_the_page_to_keep_the_focus_visib
     );
 }
 
+/// The painted text of each cell must sit inside that cell's own rectangle, and a
+/// press on that painted text must select the cell. The presses above aim at
+/// centres computed from the published rectangles, so they cannot see a cell
+/// that is drawn somewhere other than the model places it. This test reads the
+/// rendered tree and presses on the painted text itself, through the pointer
+/// surface, at each display scale.
+#[test]
+fn a_press_on_each_painted_cell_text_selects_that_cell_at_every_scale() {
+    for scale in [1.0_f32, 1.5, 2.0] {
+        let (app, state) = rendered_window(table_document(3, 3), 1280, 800, scale, 0.0);
+        let rects = app.get_table_cell_rects();
+        for row in 0..3 {
+            for col in 0..3 {
+                let label = format!("r{row}c{col}");
+                let painted: Vec<_> =
+                    i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, &label)
+                        .collect();
+                assert_eq!(painted.len(), 1, "{label} is painted once at scale {scale}");
+                let text = painted[0].absolute_position();
+                let size = painted[0].size();
+                let centre = (text.x + size.width / 2.0, text.y + size.height / 2.0);
+                let (origin_x, origin_y) = fresh_document_origin(&app);
+                let rect = rects
+                    .row_data(row * 3 + col)
+                    .expect("one rectangle per cell");
+                let inside_x =
+                    centre.0 >= origin_x + rect.x && centre.0 < origin_x + rect.x + rect.width;
+                let inside_y =
+                    centre.1 >= origin_y + rect.y && centre.1 < origin_y + rect.y + rect.height;
+                assert!(
+                    inside_x && inside_y,
+                    "{label} at scale {scale}: its painted text centre is at {centre:?}, \
+                     outside its rectangle at origin ({origin_x}, {origin_y}) with \
+                     x {} y {} w {} h {}",
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height
+                );
+                dispatch_window_press(&app, centre);
+                assert_eq!(
+                    focused_cell(&state, 1),
+                    Some((row, col)),
+                    "a press on the painted {label} at scale {scale} selects that cell"
+                );
+            }
+        }
+    }
+}
+
+/// Page Down from a table cell moves the caret a screen down and keeps its column,
+/// as Down does. The landing point comes from the caret's flat-text x, which says
+/// nothing about the cell's column, so the caret can land in another column.
+#[test]
+fn page_down_from_a_table_cell_keeps_its_column() {
+    let mut table = WriterTable::new("page-down-column", 60, 3);
+    for row in 0..60 {
+        for col in 0..3 {
+            table.set(row, col, format!("r{row}c{col}"));
+        }
+    }
+    let mut document = WriterDocument::new("page-down-column", "Page down column");
+    document.blocks.push(loom_writer_core::markdown_table_block(
+        1,
+        &table.to_markdown(),
+    ));
+    let (app, state) = rendered_window(document, 1280, 800, 1.0, 0.0);
+    let start = state
+        .current
+        .borrow()
+        .table_cell_ranges(1)
+        .expect("the table has cell ranges")[1][2]
+        .0;
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::caret(start));
+    app.invoke_page_move(1, false);
+    let landed = focused_cell(&state, 1).expect("the caret is still in the table");
+    assert_eq!(
+        landed.1, 2,
+        "Page Down keeps the column; it landed in {landed:?}"
+    );
+    assert!(landed.0 > 1, "and moves down the table: {landed:?}");
+
+    app.invoke_page_move(-1, false);
+    let back = focused_cell(&state, 1).expect("the caret is still in the table");
+    assert_eq!(
+        back.1, 2,
+        "Page Up keeps the column too; it landed in {back:?}"
+    );
+    assert!(
+        back.0 < landed.0,
+        "and moves back up: {back:?} after {landed:?}"
+    );
+}
+
 /// Ctrl+End in a table lands the caret at the end of its last cell. The page
 /// must scroll that cell's painted row into view. The core line the table text
 /// is laid on is taller than the painted row, so a reveal measured from the core

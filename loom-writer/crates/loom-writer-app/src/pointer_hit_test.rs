@@ -49,6 +49,87 @@ pub(super) fn writer_pointer_offset_with_model(
     })
 }
 
+/// Page Up and Page Down: a caret in a table keeps its column and moves by the
+/// rows one screen covers; any other caret takes the pointer path at the point
+/// one screen away, `x` and `y` being that point in zoomed editor pixels.
+pub(super) fn page_move_offset(
+    app: &crate::WriterApp,
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    step: f32,
+    x: f32,
+    y: f32,
+) -> Option<usize> {
+    let table_rects = app.get_table_cell_rects();
+    let zoom = crate::normalize_page_zoom(viewport.zoom, 1.0);
+    table_cell_page_offset(doc, &table_rects, zoom, step)
+        .or_else(|| writer_pointer_offset_with_model(doc, viewport, x, y, &table_rects))
+}
+
+/// The offset one screen away from a caret in a table cell: the same column, as
+/// many rows as `step` (zoomed pixels) covers and at least one, clamped to the
+/// table. `None` when the caret is not in a table or its cell is not published.
+fn table_cell_page_offset(
+    doc: &WriterDocument,
+    table_rects: &ModelRc<WriterTableCellRect>,
+    zoom: f32,
+    step: f32,
+) -> Option<usize> {
+    let location = doc.table_cell_at_offset(doc.selection().focus)?;
+    let cell = caret_cell_rect(doc, table_rects)?;
+    let last_row = doc
+        .table_cell_ranges(location.block_id)?
+        .len()
+        .checked_sub(1)?;
+    let rows_away = ((step / zoom) / cell.height).round().abs().max(1.0) as i64;
+    let delta = if step < 0.0 { -rows_away } else { rows_away };
+    let target_row = (location.row as i64 + delta).clamp(0, last_row as i64) as usize;
+    cell_global_start(
+        doc,
+        location.block_index,
+        location.block_id,
+        target_row,
+        location.col,
+    )
+}
+
+/// The published rectangle of the cell the caret is in.
+fn caret_cell_rect(
+    doc: &WriterDocument,
+    table_rects: &ModelRc<WriterTableCellRect>,
+) -> Option<WriterTableCellRect> {
+    let location = doc.table_cell_at_offset(doc.selection().focus)?;
+    let wanted = i32::try_from(cell_global_start(
+        doc,
+        location.block_index,
+        location.block_id,
+        location.row,
+        location.col,
+    )?)
+    .ok()?;
+    (0..table_rects.row_count())
+        .filter_map(|index| table_rects.row_data(index))
+        .find(|rect| rect.table_cell && rect.caret_offset == wanted)
+}
+
+/// The document offset where a table cell's text starts.
+fn cell_global_start(
+    doc: &WriterDocument,
+    block_index: usize,
+    block_id: u64,
+    row: usize,
+    col: usize,
+) -> Option<usize> {
+    let block_start = doc
+        .blocks
+        .iter()
+        .take(block_index)
+        .map(|block| block.text.as_str().len() + 1)
+        .sum::<usize>();
+    let start = doc.table_cell_ranges(block_id)?.get(row)?.get(col)?.0;
+    Some(block_start + start)
+}
+
 fn writer_pointer_offset_with_rect_lookup(
     doc: &WriterDocument,
     viewport: PageViewport,
