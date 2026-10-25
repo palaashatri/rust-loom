@@ -320,6 +320,25 @@ pub struct WriterDocument {
 }
 
 impl WriterDocument {
+    /// Whether `other` holds the same content: everything except the selection.
+    /// Moving the caret alone is not a change to the document's content. The
+    /// fields are destructured, so a new field has to be considered here.
+    pub fn same_content_as(&self, other: &Self) -> bool {
+        let WriterDocument {
+            id,
+            title,
+            page,
+            comments,
+            blocks,
+            selection: _,
+        } = self;
+        *id == other.id
+            && *title == other.title
+            && *page == other.page
+            && *comments == other.comments
+            && *blocks == other.blocks
+    }
+
     /// Create a new empty document.
     pub fn new(id: impl Into<DocId>, title: impl Into<String>) -> Self {
         Self {

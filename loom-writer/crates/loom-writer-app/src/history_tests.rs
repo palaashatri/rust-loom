@@ -177,3 +177,35 @@ fn type_text(app: &WriterApp, text: &str) {
         tap(app, c.to_string());
     }
 }
+
+#[test]
+fn typing_in_a_table_cell_undoes_one_word_at_a_time() {
+    let s = launched("");
+    let mut doc = WriterDocument::new("table-undo", "Table");
+    let id = doc.next_id();
+    doc.push(loom_writer_core::markdown_table_block(
+        id,
+        "|  | B |\n| --- | --- |\n| C | D |",
+    ));
+    doc.set_selection(loom_writer_core::TextSelection::caret(0));
+    apply_document(&s.app, &doc);
+    *s.state.current.borrow_mut() = doc;
+    let cell = |s: &keyboard_flow_tests::Session| {
+        s.state
+            .current
+            .borrow()
+            .table_from_block(id)
+            .expect("the table")
+            .rows[0][0]
+            .clone()
+    };
+
+    type_text(&s.app, "hello world again");
+    assert_eq!(cell(&s), "hello world again");
+    ctrl(&s.app, "z");
+    assert_eq!(cell(&s), "hello world", "the last word is one undo step");
+    ctrl(&s.app, "z");
+    assert_eq!(cell(&s), "hello", "the space starts a new step");
+    ctrl(&s.app, "z");
+    assert_eq!(cell(&s), "", "the first word is its own step");
+}

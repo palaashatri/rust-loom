@@ -247,8 +247,10 @@ impl EditorHistory {
         self.redo.clear();
         let edit = single_block_edit(&before, &after);
         if let (HistoryKind::Typing, Some(edit), Some(last)) = (kind, edit, self.undo.last_mut()) {
+            // A caret move between keystrokes changes the selection but not the
+            // content, so it must not split a word into separate steps.
             if last.kind == HistoryKind::Typing
-                && last.after == before
+                && last.after.same_content_as(&before)
                 && now_ms.saturating_sub(last.last_edit_ms) <= TYPING_COALESCE_WINDOW_MS
                 && continues_typing(last.caret, &edit)
                 && !begins_a_word_group(&edit)
