@@ -128,6 +128,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             text-scale: Theme.text-scale;
             tooltip: "More actions: undo, redo, new, open, save and find";
             focus-request: root.request(8);
+            arrow(delta) => { root.step-focus(8, delta); }
             clicked => { root.toggle-menu(8, self.absolute-position.x); }
         }
     }
@@ -138,6 +139,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             text-scale: Theme.text-scale;
             tooltip: "More actions: undo, redo, new, open, save and find";
             focus-request: root.request(8);
+            arrow(delta) => { root.step-focus(8, delta); }
             clicked => { root.toggle-menu(8, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {

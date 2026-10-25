@@ -581,6 +581,26 @@ fn arrow_keys_move_between_toolbar_items_in_reading_order() {
     );
 }
 
+/// The More button is the last item in reading order, so Right stays on it and
+/// Left goes back to Document.
+#[test]
+fn left_from_the_more_button_returns_to_document() {
+    let s = launched("Hello");
+    press(&s.app, Key::F6);
+    for _ in 0..8 {
+        press(&s.app, Key::RightArrow);
+    }
+    assert_eq!(focus_name(&s.app), "Document");
+    press(&s.app, Key::RightArrow);
+    assert_eq!(focus_name(&s.app), "More actions");
+    press(&s.app, Key::LeftArrow);
+    assert_eq!(
+        focus_name(&s.app),
+        "Document",
+        "Left from More goes back to Document"
+    );
+}
+
 /// In right-to-left text the toolbar mirrors, so Left moves forward in reading
 /// order and Right moves back.
 #[test]

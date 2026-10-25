@@ -120,6 +120,8 @@ export component LoomIconButton inherits Rectangle {
     in property <bool> destructive: false;
     in property <float> text-scale: 1.0;
     callback clicked;
+    // Left (-1) and Right (+1); the key still bubbles, as in the toolbar item.
+    callback arrow(int);
     public function grab-focus() { focus.focus(); }
 
     width: Theme.tokens.metrics.control-height * max(1.0, root.text-scale);
@@ -153,6 +155,8 @@ export component LoomIconButton inherits Rectangle {
         enabled: root.enabled;
         key-pressed(event) => {
             if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            if (event.text == Key.LeftArrow) { root.arrow(-1); }
+            if (event.text == Key.RightArrow) { root.arrow(1); }
             return reject;
         }
     }
