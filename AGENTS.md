@@ -422,7 +422,31 @@ Before claiming a task is finished, an agent must:
 The goal is not to make CI green at any cost. The goal is to make Loom genuinely excellent while keeping the repository small enough, clear enough, and strict enough that the next agent cannot accidentally turn it back into a jungle.
 
 
-## current-truth
+## 15. Future interoperability goal — Loom as SLOPOS's creative suite
+
+**Status: FUTURE GOAL / NOT IMPLEMENTED / NOT AN ACTIVE WORKFLOW GATE.** This is an explicitly recorded long-term cross-project feature goal, not approval to edit currently locked Loom apps, advance the Sheets/Writer/Present acceptance workflow, modify architecture/toolkits, or claim SLOPOS integration. Loom remains a separate **Rust + Slint**, offline-first, cross-platform product for Windows, macOS and Linux with its own original visual identity. The linked [SLOPOS](https://github.com/palaashatri/rust-slopos) desktop is currently an unfinished **X11 + Openbox** Linux DE; its futuristic compositor and [PARAMA](https://github.com/palaashatri/parama) targets are separate proposed efforts.
+
+### Integration and product boundary
+
+- Make Loom **Writer, Sheets and Present** discoverable and usable as SLOPOS creative applications through an opt-in/versioned **Loom–SLOPOS desktop adapter**. Keep **Photo, Motion, Video, Studio and Encode** gated by Loom's own future roadmap and existing serial application rules; do not present those apps as ready merely because SLOPOS wants a suite.
+- Preserve Loom's engines, document formats, autosave/recovery, undo/history, Slint UI implementation, accessibility and builds for all supported hosts. Integration must not make SLOPOS or PARAMA mandatory dependencies, replace Loom's toolkit with GTK/Qt, or sacrifice non-SLOPOS platforms.
+- Interoperate with real SLOPOS services through a small, versioned capability interface: desktop entry/App ID and launcher, file associations/URI handoff, open/save and recent documents, shared file picker, clipboard/drag-drop, notifications, system share destinations, application lifecycle, global menus and their authoritative command IDs/enabled states, and accessibility surfaces. Prefer native Linux adapters already present rather than a second parallel action registry.
+- Support a future **SLOPOS-wide selected theme** through a reviewed theme-token bridge: SLOPOS Classic/System 7-inspired style or optional **Loom Design Bible-inspired modern theme**, with mapping of semantic colors, typography, spacing, component states and app chrome where Slint's renderer actually permits it. Preserve the canonical Loom design system elsewhere. Do not claim that SLOPOS-native GTK-based widgets can be dropped into Loom's Slint UI without an explicit port.
+- Expose permissioned, stable **document/action interfaces** to SLOPOS Intelligence (visible desktop automation) and local-first SLOPOS Vision (OCR, Copy Subject, visual lookup, dictation/writing tools) only when actually implemented and reviewed. Keep document-scoped consent, undo/review semantics, local-only default and no silent data export or hidden ML calls. GUI/screen automation is a fallback when authorized actions aren't available.
+- A later native PARAMA Loom target is **not** assumed here: that requires an independently proven PARAMA kernel, application runtime/ABI, compatible graphics/Slint backend, filesystem, font/input and system services. SLOPOS running on PARAMA does not imply Loom binary compatibility.
+
+### Future integration gates (do not enqueue during active application repair)
+
+| ID | Proposed acceptance |
+|---|---|
+| LOOM-SLOPOS-01 | Freeze versioned adapter capabilities; demonstrate fail-closed behavior on ordinary Linux without SLOPOS and correct no-op/fallback for unsupported services. |
+| LOOM-SLOPOS-02 | In a disposable graphical SLOPOS Linux VM, launch Writer/Sheets/Present, open/save/reopen real files, preserve undo/recovery, test clipboard and file handoff, and prove a real visible global-menu command round trip without dropping local menus on unsupported desktops. |
+| LOOM-SLOPOS-03 | Compare both SLOPOS-selected themes against documented semantic-token mappings with keyboard/accessibility and 1×/2× QA; prove theme changes do not alter exported document content or command behavior. |
+| LOOM-SLOPOS-04 | With explicit user consent, invoke a supported Loom document action from SLOPOS Intelligence or a local SLOPOS Vision tool; reject unauthorized access, confirm sensitive writes, and test offline/no-upload behavior. |
+
+Each gate requires a specifically approved future task packet, actual integration code, platform tests and evidence in this repository's **current-truth** discipline. Documentation-only entries are never product evidence; do not alter workflow contract locks or completion scores because of this section.
+
+## current-truth## current-truth
 
 <!-- CURRENT TRUTH START -->
 # Loom — Current Truth
