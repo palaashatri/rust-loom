@@ -144,6 +144,19 @@ pub struct CharacterStyle {
     pub color: Option<String>,
     /// Background color hex.
     pub background: Option<String>,
+    /// Whether the size was chosen for this run, so a run at the default size
+    /// keeps it instead of inheriting its block's size. Runs saved before this
+    /// flag existed carry no flag, and [`CharacterStyle::has_own_size`] still
+    /// reads a size other than the default as chosen.
+    pub explicit_size: bool,
+}
+
+impl CharacterStyle {
+    /// Whether the run draws at its own `font_size` rather than at the size of
+    /// the block it is in.
+    pub fn has_own_size(&self) -> bool {
+        self.explicit_size || (self.font_size - Self::default().font_size).abs() > f32::EPSILON
+    }
 }
 
 impl Default for CharacterStyle {
@@ -159,6 +172,7 @@ impl Default for CharacterStyle {
             subscript: false,
             color: Some("#000000FF".into()),
             background: None,
+            explicit_size: false,
         }
     }
 }

@@ -59,7 +59,7 @@ pub use tables::{
     TableArrowDirection, TableCellLocation, TableTextMap, INSERT_COLUMNS, INSERT_ROWS,
     TABLE_BLOCK_KIND, TABLE_CELL_SEPARATOR, TABLE_ROW_SEPARATOR,
 };
-pub use text_metrics::{offset_at_x, text_advance};
+pub use text_metrics::{line_pitch, offset_at_x, run_size, text_advance};
 
 /// Stable document id.
 pub type DocId = String;
@@ -1997,6 +1997,7 @@ fn parse_character_style(
                     style.background = value;
                 }
             }
+            "explicit_size" => parse_bool_value(value, &mut style.explicit_size),
             _ => {}
         }
     }
@@ -4751,6 +4752,7 @@ mod tests {
                     subscript: false,
                     color: Some("null".into()),
                     background: Some("#12345678".into()),
+                    explicit_size: false,
                 },
             },
             loom_text::StyleRun {
@@ -4767,6 +4769,7 @@ mod tests {
                     subscript: true,
                     color: None,
                     background: None,
+                    explicit_size: false,
                 },
             },
         ];
@@ -4777,6 +4780,40 @@ mod tests {
         assert!(json.contains("\"runs\""));
         let back = WriterDocument::from_content_json(&json).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn a_size_chosen_at_the_default_size_survives_save_and_reload() {
+        let mut d = WriterDocument::new("sized", "Sized");
+        let mut block = RichBlock::new(1, "paragraph", "Chosen 12 and inherited");
+        block.runs = vec![
+            loom_text::StyleRun {
+                start: 0,
+                end: "Chosen 12".len(),
+                style: loom_text::CharacterStyle {
+                    font_size: 12.0,
+                    explicit_size: true,
+                    ..Default::default()
+                },
+            },
+            loom_text::StyleRun {
+                start: "Chosen 12".len(),
+                end: block.text.len_bytes(),
+                style: loom_text::CharacterStyle::default(),
+            },
+        ];
+        d.push(block);
+
+        let back = WriterDocument::from_content_json(&d.to_content_json()).unwrap();
+        let runs = &back.blocks[0].runs;
+        assert!(
+            runs[0].style.explicit_size,
+            "the chosen size is kept on reload"
+        );
+        assert!(
+            !runs[1].style.explicit_size,
+            "an unchosen default run reloads as unchosen"
+        );
     }
 
     #[test]

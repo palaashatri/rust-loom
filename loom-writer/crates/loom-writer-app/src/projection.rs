@@ -291,7 +291,7 @@ fn fallback_rows(doc: &WriterDocument, style: &PageStyle) -> Vec<WriterRenderBlo
             let column_width = block.text_column_width(style);
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let height = writer_render_height_for_width(block, font_size, column_width)
-                .max(font_size * style.line_height);
+                .max(loom_writer_core::line_pitch(&block.runs, font_size) * style.line_height);
             let marker = block.list_marker(numbers[index]);
             let frame = Frame::new(block.text_start_pt(style), y, column_width, height);
             let row = render_row(block, frame, &marker, "", Align::Block);
@@ -473,7 +473,8 @@ pub(crate) fn project(
         let column_width = block.text_column_width(&style);
         let x = ((line.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
         let y = ((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
-        let height = (line.bounds.height / zoom).max(font_size * style.line_height);
+        let height = (line.bounds.height / zoom)
+            .max(loom_writer_core::line_pitch(&block.runs, font_size) * style.line_height);
 
         if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
             let width = line.bounds.width / zoom;

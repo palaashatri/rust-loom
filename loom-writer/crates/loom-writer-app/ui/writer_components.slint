@@ -16,6 +16,8 @@ export struct WriterTextSegment {
     /// Left edge and top from the row's own, for a positioned row.
     x: length,
     y: length,
+    /// The point size the segment is drawn at: its run's size, or the block's.
+    size: float,
     /// 700 for a bold run, else 400: the page measures weights below Bold as
     /// Regular, so it draws them that way too.
     weight: int,
@@ -381,7 +383,7 @@ component WriterDocumentEditor inherits Rectangle {
                     : parent.height;
                 text: segment.text;
                 font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
-                font-size: block.font-size * root.page-zoom;
+                font-size: segment.size * 1px * root.page-zoom;
                 font-weight: segment.weight;
                 font-italic: segment.italic;
                 color: parent.ink;

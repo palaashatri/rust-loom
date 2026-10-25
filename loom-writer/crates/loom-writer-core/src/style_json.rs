@@ -138,6 +138,10 @@ fn character_style_json(style: &loom_text::CharacterStyle) -> String {
     push_optional_json_string(&mut out, style.color.as_deref());
     out.push_str(",\"background\":");
     push_optional_json_string(&mut out, style.background.as_deref());
+    // Written only when set, so a run that inherits its size is saved as before.
+    if style.explicit_size {
+        out.push_str(",\"explicit_size\":true");
+    }
     out.push('}');
     out
 }

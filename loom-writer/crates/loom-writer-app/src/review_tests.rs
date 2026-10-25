@@ -473,6 +473,7 @@ fn closing_a_clean_document_does_not_prompt() {
 fn adjacent_runs_that_render_alike_merge_into_one_segment() {
     // Runs that differ only in font size or family (attributes the page does
     // not draw per run) are one look, so they are one segment and one rule.
+    // A size change is drawn, so it starts a segment of its own.
     let mut document = text_document("Write, format, and export.");
     set_selection_bold(&mut document, DocumentSelection::range(0, 13), true);
     set_selection_strikethrough(&mut document, DocumentSelection::range(0, 13), true);
@@ -480,8 +481,8 @@ fn adjacent_runs_that_render_alike_merge_into_one_segment() {
     first.end = 6;
     let mut second = document.blocks[0].runs[0].clone();
     second.start = 6;
-    second.style.font_size += 2.0;
-    document.blocks[0].runs = vec![first, second];
+    second.style.font_family = "Iosevka".into();
+    document.blocks[0].runs = vec![first.clone(), second.clone()];
 
     let row = row_text(&document.blocks[0], 12.0, 400.0, Align::Block);
     let texts: Vec<&str> = row.segments.iter().map(|s| s.text.as_str()).collect();
@@ -489,7 +490,7 @@ fn adjacent_runs_that_render_alike_merge_into_one_segment() {
     assert_eq!(
         texts,
         ["Write, format", ", and export."],
-        "runs that draw alike must merge into one segment"
+        "runs that differ only in family must merge into one segment"
     );
     assert!(row.segments[0].weight >= 700 && row.segments[0].strikethrough);
     assert_eq!(
@@ -497,6 +498,19 @@ fn adjacent_runs_that_render_alike_merge_into_one_segment() {
         1,
         "one strikethrough rule for the merged run"
     );
+
+    second.style.font_family = String::new();
+    second.style.font_size += 2.0;
+    document.blocks[0].runs = vec![first, second];
+    let row = row_text(&document.blocks[0], 12.0, 400.0, Align::Block);
+    let texts: Vec<&str> = row.segments.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        ["Write,", " format", ", and export."],
+        "a run at a different size is drawn as a segment of its own"
+    );
+    assert_eq!(row.segments[1].size, 14.0);
+    assert_eq!(row.rules.len(), 2, "each strikethrough keeps its own rule");
 }
 
 #[test]

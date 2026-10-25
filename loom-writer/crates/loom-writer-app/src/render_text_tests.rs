@@ -403,6 +403,30 @@ fn a_centred_or_right_aligned_row_is_shifted_by_its_own_width() {
 }
 
 #[test]
+fn a_larger_run_is_a_segment_drawn_at_its_own_size() {
+    let mut document = text_document("Write a large word here");
+    set_selection_font_size(&mut document, DocumentSelection::range(8, 13), 24.0);
+
+    let rows = rows_of(&document);
+    let segments: Vec<_> = rows[0].segments.iter().collect();
+
+    let large = segments
+        .iter()
+        .find(|segment| segment.text.as_str() == "large")
+        .expect("the larger word is a segment of its own");
+    assert_eq!(large.size, 24.0, "{large:?}");
+    let plain = segments
+        .iter()
+        .find(|segment| segment.text.as_str() == "Write a ")
+        .expect("the words before it are a segment of their own");
+    assert_eq!(
+        plain.size,
+        loom_writer_core::PageStyle::default().font_size_for_kind("paragraph"),
+        "text outside the chosen run keeps the block size: {plain:?}"
+    );
+}
+
+#[test]
 fn a_bold_word_draws_heavier_than_the_same_word_plain() {
     fn dark_pixels(document: &WriterDocument) -> usize {
         set_platform();
@@ -443,4 +467,33 @@ fn the_page_exposes_each_drawn_segment_to_assistive_technology() {
         let found = ElementHandle::find_by_accessible_label(&app, label).count();
         assert!(found >= 1, "no text exposed for segment {label:?}");
     }
+}
+
+#[test]
+fn enlarging_body_text_to_12_pt_reads_back_as_12_pt() {
+    let mut document = text_document("Body text here");
+    set_selection_font_size(&mut document, DocumentSelection::range(0, 4), 12.0);
+
+    let state = formatting_state_for_selection(&document, DocumentSelection::range(0, 4));
+    assert_eq!(
+        state.font_size_pt, 12,
+        "a chosen 12 pt inside 11 pt body text reads back as 12 pt: {state:?}"
+    );
+}
+
+#[test]
+fn dump_the_sized_page_when_asked() {
+    let Ok(dir) = std::env::var("LOOM_RENDER_TEXT_DUMP") else {
+        return;
+    };
+    set_platform();
+    let mut document = text_document("A small word, a LARGE word, and a huge heading in the body.");
+    set_selection_font_size(&mut document, DocumentSelection::range(16, 21), 24.0);
+    set_selection_font_size(&mut document, DocumentSelection::range(34, 38), 36.0);
+    let app = WriterApp::new().expect("create WriterApp");
+    apply_document(&app, &document);
+    let image = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    image
+        .save(format!("{dir}/sized-page.png"))
+        .expect("write png");
 }

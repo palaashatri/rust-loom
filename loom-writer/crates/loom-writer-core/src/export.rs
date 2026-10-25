@@ -80,6 +80,7 @@ fn draw_styled_line(
         if let Some(run) = run {
             style.bold |= is_bold_weight(run.style.weight);
             style.italic |= run.style.italic;
+            style.size_pt = crate::run_size(&run.style, base.size_pt);
             underline = run.style.underline;
             strikethrough = run.style.strikethrough;
         }
@@ -88,6 +89,7 @@ fn draw_styled_line(
                 if last.1 == from
                     && last.2.bold == style.bold
                     && last.2.italic == style.italic
+                    && last.2.size_pt == style.size_pt
                     && last.3 == underline
                     && last.4 == strikethrough =>
             {
@@ -259,8 +261,9 @@ fn pdf_lines(
         // left of the text, which every line wraps within, as on the page.
         let marker = block.list_marker(numbers[index]);
         let style = block_style(kind, body, page_style);
-        let height =
-            style.size_pt * page_style.line_height * crate::layout::line_spacing_factor(block);
+        let height = crate::line_pitch(&block.runs, style.size_pt)
+            * page_style.line_height
+            * crate::layout::line_spacing_factor(block);
         let text_column = block.text_column_width(page_style);
         let ranges = export_flow::wrap(text, &block.runs, &style, text_column, text_column);
         for (line_index, (start, end)) in ranges.into_iter().enumerate() {
@@ -637,6 +640,35 @@ mod tests {
                 "missing or duplicated {text}"
             );
         }
+    }
+
+    #[test]
+    fn export_pdf_draws_a_larger_run_at_its_own_size() {
+        use loom_text::{CharacterStyle, StyleRun};
+
+        let mut document = WriterDocument::new("export-size", "Size");
+        let mut block = RichBlock::new(document.next_id(), "paragraph", "Write a large word");
+        block.runs = vec![StyleRun {
+            start: 8,
+            end: 13,
+            style: CharacterStyle {
+                font_size: 24.0,
+                explicit_size: true,
+                ..Default::default()
+            },
+        }];
+        document.push(block);
+
+        let pdf = export_pdf(&document);
+        let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+        assert!(
+            text.contains("24.00 Tf") && text.contains("(large)"),
+            "the chosen run is drawn at 24 pt: {text}"
+        );
+        assert!(
+            text.contains("11.00 Tf"),
+            "the rest of the paragraph keeps the 11 pt body size: {text}"
+        );
     }
 
     #[test]

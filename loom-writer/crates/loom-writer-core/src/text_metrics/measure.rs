@@ -322,6 +322,14 @@ pub(super) fn advances(
     builder.out
 }
 
+/// The size the run covering block offset `position` draws at, or `size` where
+/// no run applies.
+fn size_at(runs: &[StyleRun], position: usize, size: f32) -> f32 {
+    runs.iter()
+        .find(|run| run.start <= position && position < run.end)
+        .map_or(size, |run| super::run_size(&run.style, size))
+}
+
 /// Where each grapheme of one text starts, in points from its start.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LineMeasure {
@@ -346,9 +354,11 @@ impl LineMeasure {
         let mut x = Vec::with_capacity(em.len() + 1);
         let mut sum = 0.0_f32;
         x.push(0.0);
-        for advance in em {
-            sum += advance;
-            x.push(sum * size);
+        // Each grapheme is advanced at the size of the run it starts in, so a
+        // larger run is wider and pushes the text after it along.
+        for (advance, start) in em.iter().zip(&starts) {
+            sum += advance * size_at(runs, text_start + *start as usize, size);
+            x.push(sum);
         }
         starts.push(text.len() as u32);
         Self { bounds: starts, x }

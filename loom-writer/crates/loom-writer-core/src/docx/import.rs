@@ -505,6 +505,8 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
         if let Some(val) = extract_attribute_value(&pr[sz_pos..], "w:val") {
             if let Ok(half_pts) = val.parse::<f32>() {
                 style.font_size = half_pts / 2.0;
+                // The file sets this size on the run, so it is the run's own.
+                style.explicit_size = true;
             }
         }
     }

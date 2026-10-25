@@ -371,6 +371,8 @@ pub fn set_selection_font_size(
     let clamped_size = size_pt.clamp(6.0, 72.0);
     mutate_selection_character_styles(document, selection, |style| {
         style.font_size = clamped_size;
+        // A size the user picks is the run's own, even when it equals the default.
+        style.explicit_size = true;
     });
 }
 
@@ -660,13 +662,13 @@ pub fn formatting_state_for_selection(
 
     // A run with no size of its own is drawn at its block kind's size (a heading
     // is larger than body), so that is the size the field must show.
-    let drawn_size = |kind: &str, run_size: f32| -> i32 {
-        if (run_size - CharacterStyle::default().font_size).abs() < f32::EPSILON {
+    let drawn_size = |kind: &str, style: &CharacterStyle| -> i32 {
+        if style.has_own_size() {
+            style.font_size as i32
+        } else {
             loom_writer_core::PageStyle::default()
                 .font_size_for_kind(kind)
                 .round() as i32
-        } else {
-            run_size as i32
         }
     };
     let font_size_pt = if spans.is_empty() {
@@ -675,16 +677,14 @@ pub fn formatting_state_for_selection(
             caret_style(document, selection.clone()),
             block_at_offset(document, start),
         ) {
-            (Some(style), Some(index)) => {
-                drawn_size(document.blocks[index].kind.as_str(), style.font_size)
-            }
+            (Some(style), Some(index)) => drawn_size(document.blocks[index].kind.as_str(), &style),
             (Some(style), None) => style.font_size as i32,
             _ => 11,
         }
     } else {
         let (first_block, first_start, _) = spans[0];
         let block = &document.blocks[first_block];
-        drawn_size(block.kind.as_str(), style_at(block, first_start).font_size).max(6)
+        drawn_size(block.kind.as_str(), &style_at(block, first_start)).max(6)
     };
 
     let line_spacing_index = selected_blocks

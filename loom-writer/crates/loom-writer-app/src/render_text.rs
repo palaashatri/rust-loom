@@ -15,10 +15,10 @@
 //! highlight agree. Line ends (a soft break, a page break) are not text; they
 //! end the line, and the layout already put what follows on the next row.
 //!
-//! Only weight (bold or not), slant, underline and strikethrough are drawn per
-//! run. A run's size, colour and superscript are neither measured by the page
-//! layout nor drawn, as before: drawing one without measuring it would move
-//! the caret off the glyphs.
+//! Weight (bold or not), slant, size, underline and strikethrough are drawn per
+//! run, and the page layout measures each run at the size it is drawn at, so
+//! the caret and the glyphs agree. Colour and superscript are not drawn yet.
+//! Glyphs of different sizes on one line share a baseline.
 
 use std::collections::BTreeSet;
 
@@ -39,6 +39,9 @@ const WRAPPED_LINE_EM: f32 = 1.25;
 /// is about 0.97 em down. The thickness has a floor so a small size still draws
 /// a visible line.
 const UNDERLINE_TOP_EM: f32 = 1.07;
+/// Where the baseline of a line of Inter sits, in em from the top of the line.
+/// Glyphs of different sizes on one line are placed so their baselines match.
+const BASELINE_EM: f32 = 0.97;
 const STRIKETHROUGH_TOP_EM: f32 = 0.62;
 const RULE_THICKNESS_EM: f32 = 0.07;
 const RULE_THICKNESS_MIN_PT: f32 = 0.6;
@@ -68,23 +71,36 @@ pub(crate) struct RowText {
     pub positioned: bool,
 }
 
-/// The attributes the page draws per run.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The attributes the page draws per run, and the size it draws them at.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Look {
     bold: bool,
     italic: bool,
     underline: bool,
     strikethrough: bool,
+    size: f32,
 }
 
 impl Look {
-    fn of(style: Option<&CharacterStyle>) -> Self {
-        style.map_or_else(Self::default, |style| Self {
-            bold: style.weight.numeric() >= FontWeight::Bold.numeric(),
-            italic: style.italic,
-            underline: style.underline,
-            strikethrough: style.strikethrough,
-        })
+    /// The look of a run inside a block whose own size is `block_size`; text
+    /// outside every run has the block's look.
+    fn of(style: Option<&CharacterStyle>, block_size: f32) -> Self {
+        match style {
+            Some(style) => Self {
+                bold: style.weight.numeric() >= FontWeight::Bold.numeric(),
+                italic: style.italic,
+                underline: style.underline,
+                strikethrough: style.strikethrough,
+                size: loom_writer_core::run_size(style, block_size),
+            },
+            None => Self {
+                bold: false,
+                italic: false,
+                underline: false,
+                strikethrough: false,
+                size: block_size,
+            },
+        }
     }
 }
 
@@ -137,8 +153,8 @@ impl Measure<'_> {
 }
 
 /// The block's text cut wherever its look changes. Runs that differ only in
-/// what the page does not draw (size, family, colour) share one piece.
-fn pieces(block: &RichBlock) -> Vec<Piece> {
+/// colour or family share one piece.
+fn pieces(block: &RichBlock, block_size: f32) -> Vec<Piece> {
     let text = block.text.as_str();
     let mut cuts = BTreeSet::from([0, text.len()]);
     for run in &block.runs {
@@ -155,6 +171,7 @@ fn pieces(block: &RichBlock) -> Vec<Piece> {
                 .iter()
                 .find(|run| run.start <= start && start < run.end)
                 .map(|run| &run.style),
+            block_size,
         );
         match pieces.last_mut() {
             Some(last) if last.look == look => last.end = end,
@@ -169,6 +186,7 @@ fn segment(text: String, look: Look, x: f32, y: f32) -> WriterTextSegment {
         text: text.into(),
         x,
         y,
+        size: look.size,
         weight: if look.bold { BOLD } else { REGULAR },
         italic: look.italic,
         underline: look.underline,
@@ -180,7 +198,7 @@ fn segment(text: String, look: Look, x: f32, y: f32) -> WriterTextSegment {
 /// `font_size`.
 pub(crate) fn row_text(block: &RichBlock, font_size: f32, width: f32, align: Align) -> RowText {
     let text = block.text.as_str();
-    let all = pieces(block);
+    let all = pieces(block, font_size);
     let shown: Vec<&Piece> = all
         .iter()
         .filter(|piece| has_drawn(&text[piece.start..piece.end]))
@@ -221,7 +239,15 @@ pub(crate) fn row_text(block: &RichBlock, font_size: f32, width: f32, align: Ali
             (_, Alignment::Right) => (width - line_width).max(0.0),
             _ => 0.0,
         };
-        let y = index as f32 * font_size * WRAPPED_LINE_EM;
+        // The tallest glyph on the line sets its height; smaller glyphs sit on
+        // the same baseline, so each one's top is lowered by its size gap.
+        let line_size = all
+            .iter()
+            .filter(|piece| piece.start.max(line_start) < piece.end.min(line_end))
+            .map(|piece| piece.look.size)
+            .fold(font_size, f32::max);
+        let line_top =
+            index as f32 * loom_writer_core::line_pitch(&block.runs, font_size) * WRAPPED_LINE_EM;
         for piece in &all {
             let (from, to) = (piece.start.max(line_start), piece.end.min(line_end));
             if from >= to {
@@ -232,11 +258,12 @@ pub(crate) fn row_text(block: &RichBlock, font_size: f32, width: f32, align: Ali
                 continue;
             }
             let x = shift + measure.width(line_start, from);
+            let y = line_top + (line_size - piece.look.size) * BASELINE_EM;
             segments.push(segment(words, piece.look, x, y));
             let inked = to.min(ink_end);
             if inked > from && (piece.look.underline || piece.look.strikethrough) {
                 let run_width = measure.width(from, inked);
-                let thickness = (font_size * RULE_THICKNESS_EM).max(RULE_THICKNESS_MIN_PT);
+                let thickness = (piece.look.size * RULE_THICKNESS_EM).max(RULE_THICKNESS_MIN_PT);
                 for (wanted, top_em) in [
                     (piece.look.underline, UNDERLINE_TOP_EM),
                     (piece.look.strikethrough, STRIKETHROUGH_TOP_EM),
@@ -244,7 +271,7 @@ pub(crate) fn row_text(block: &RichBlock, font_size: f32, width: f32, align: Ali
                     if wanted {
                         rules.push(WriterTextRule {
                             x,
-                            y: y + font_size * top_em,
+                            y: y + piece.look.size * top_em,
                             width: run_width,
                             height: thickness,
                         });

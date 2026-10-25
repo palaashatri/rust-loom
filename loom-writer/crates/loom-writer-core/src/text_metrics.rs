@@ -8,8 +8,9 @@
 //! ([`faces`] loads the faces once and remembers each distinct word's
 //! advances; [`measure`] lays pieces end to end). Weight is bold only where a
 //! character run asks for it (weight 700 and up, as the page markup renders
-//! it) and italic follows the run. A run's font size is not drawn per run, so
-//! it is not measured per run.
+//! it) and italic follows the run. A run's font size is measured at the run's
+//! own size (see [`run_size`]), so line breaks and carets match the glyphs drawn
+//! at that size.
 //!
 //! Characters the run's face lacks (CJK in Inter, emoji) are drawn by whatever
 //! font the window falls back to; their widths are estimates. The PDF export,
@@ -37,6 +38,27 @@ pub(crate) use pdf::{drawn_size, pdf_text_width, InterShaper};
 /// PDF export follows the same rule so both break lines identically.
 pub(crate) fn is_bold_weight(weight: FontWeight) -> bool {
     weight.numeric() >= FontWeight::Bold.numeric()
+}
+
+/// The size a run draws at inside a block whose own size is `block_size`. A run
+/// that chose no size of its own inherits the block's size; a run that did
+/// draws at its own size ([`loom_text::CharacterStyle::has_own_size`]). The
+/// formatting toolbar reports the same rule, so the page and the toolbar agree.
+pub fn run_size(style: &loom_text::CharacterStyle, block_size: f32) -> f32 {
+    if style.has_own_size() {
+        style.font_size
+    } else {
+        block_size
+    }
+}
+
+/// The size a line of a block is spaced at: the largest of the block's own size
+/// and the sizes its runs draw at, so a larger run has the line height it needs
+/// and the lines below it do not overlap it.
+pub fn line_pitch(runs: &[StyleRun], font_size: f32) -> f32 {
+    runs.iter()
+        .map(|run| run_size(&run.style, font_size))
+        .fold(font_size, f32::max)
 }
 
 /// The measure of a whole block's text as the editor draws it.
@@ -136,6 +158,77 @@ mod tests {
             .load(font.primary())
             .expect("face")
             .text_width(text, size)
+    }
+
+    fn sized_run(start: usize, end: usize, font_size: f32) -> StyleRun {
+        StyleRun {
+            start,
+            end,
+            style: CharacterStyle {
+                font_size,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn a_run_is_measured_at_its_own_size_and_the_rest_at_the_block_size() {
+        let big = text_advance("Hello", 0, &[sized_run(0, 5, 24.0)], 12.0);
+        assert!(
+            (big - shaped_in_one_piece("Hello", 24.0, false, false)).abs() < 1e-2,
+            "the run is shaped at 24 pt, not the block's 12 pt: {big}"
+        );
+        let rest = text_advance(" world", 5, &[sized_run(0, 5, 24.0)], 12.0);
+        assert!(
+            (rest - text_advance(" world", 5, &[], 12.0)).abs() < 1e-2,
+            "text outside the run keeps the block size"
+        );
+        let whole = text_advance("Hello world", 0, &[sized_run(0, 5, 24.0)], 12.0);
+        assert!(
+            (whole - (big + rest)).abs() < 1.0,
+            "the line is the sum of its pieces: {whole} vs {}",
+            big + rest
+        );
+    }
+
+    #[test]
+    fn a_run_at_the_default_size_inherits_the_block_size() {
+        let inherited = text_advance("Hello", 0, &[sized_run(0, 5, 12.0)], 24.0);
+        assert!(
+            (inherited - shaped_in_one_piece("Hello", 24.0, false, false)).abs() < 1e-2,
+            "a run at the default 12 pt draws at the 24 pt block size: {inherited}"
+        );
+    }
+
+    #[test]
+    fn a_line_is_spaced_for_its_largest_run_and_no_smaller() {
+        assert_eq!(super::line_pitch(&[], 11.0), 11.0);
+        assert_eq!(super::line_pitch(&[sized_run(0, 5, 12.0)], 11.0), 11.0);
+        assert_eq!(super::line_pitch(&[sized_run(0, 5, 24.0)], 11.0), 24.0);
+        assert_eq!(
+            super::line_pitch(&[sized_run(0, 2, 6.0), sized_run(2, 4, 18.0)], 11.0),
+            18.0,
+            "the largest run sets the pitch, a smaller one does not shrink it"
+        );
+    }
+
+    #[test]
+    fn a_run_marked_as_set_to_12_pt_keeps_that_size_inside_11_pt_text() {
+        let set = CharacterStyle {
+            font_size: 12.0,
+            explicit_size: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::run_size(&set, 11.0),
+            12.0,
+            "a size the user chose is kept even when it equals the default"
+        );
+        assert_eq!(
+            super::run_size(&CharacterStyle::default(), 11.0),
+            11.0,
+            "an unmarked default run still inherits the block size"
+        );
     }
 
     #[test]
