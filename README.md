@@ -59,6 +59,12 @@ Loom prefers **proven libraries with small adapters** over unnecessary engine re
 
 AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](AGENTS.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
 
+## SLOPOS and future PARAMA platform goals
+
+As an **originally authored suite**, Loom is a candidate for SLOPOS's optional first-party creative catalog after independently verified Linux GUI integration and licensing/packaging. Loom must remain **Rust + Slint** and cross-platform. On a future Pi Zero 2 W Linux session, small real Writer/Sheets/Present workflows should favor bounded memory, lazy work, cancellation and accurate file round-trips; **actual ARM64 device support has not been demonstrated**.
+
+**PARAMA is a conditional future native source target**, requiring a real Rust/Slint-compatible app runtime, SURYA graphics/input, filesystem/fonts and actual performance/QA. No present PARAMA binary, SDK or support is claimed. Forked Tricycle and texture-auto-upscaler are not SLOPOS first-party bundle candidates. See [AGENTS.md integration policy](AGENTS.md#first-party-distribution-edge-profiles-and-future-parama-target).
+
 ## Edge efficiency goal
 
 Loom aims for **responsive small-document workflows on a Raspberry Pi Zero 2 W** (AArch64 Cortex-A53, **512 MB RAM**) as a future low-end reference, while preserving fully featured workloads on capable systems. The GUI must stay interactive and allow progress/cancellation during slow disk/network/CPU work; large documents and demanding media/ML may require more memory and must fail safely with truthful explanations, never silently drop data. Memory, input p95, caches, startup and swapping must be instrumented on **actual hardware**.
