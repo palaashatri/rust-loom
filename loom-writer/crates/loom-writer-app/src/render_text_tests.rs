@@ -682,3 +682,20 @@ fn dump_the_two_line_cell_page_when_asked() {
         .save(format!("{dir}/two-line-cell.png"))
         .expect("write png");
 }
+
+#[test]
+fn dump_the_two_line_loomdoc_when_asked() {
+    let Ok(path) = std::env::var("LOOM_TWO_LINE_LOOMDOC") else {
+        return;
+    };
+    let mut document = WriterDocument::new("two-line-live", "Two line live");
+    let table_id = document.next_id();
+    let mut table = loom_objects::Table::new(2, 2);
+    table.set_cell_text(0, 0, "Region");
+    table.set_cell_text(0, 1, "Sessions");
+    table.set_cell_text(1, 0, "North\u{b}east");
+    table.set_cell_text(1, 1, "1,204");
+    document.push(RichBlock::table_block(table_id, table));
+    let bytes = loom_writer_core::save_document(&document).expect("save");
+    std::fs::write(path, bytes).expect("write loomdoc");
+}
