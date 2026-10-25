@@ -527,7 +527,7 @@ pub(crate) fn project(
                     };
                     let cols = table.col_count().max(1);
                     let num_rows = table.row_count();
-                    let col_widths = table_column_widths(&table, column_width);
+                    let col_widths = loom_writer_core::editor_column_widths(&table, column_width);
                     let col_starts = column_starts(&col_widths);
                     let row_height = table_row_height(&style);
                     let table_x = 0.0_f32;
@@ -891,25 +891,6 @@ pub(crate) fn project(
         stack_height,
         pages,
     }
-}
-
-/// Column widths on the page: the typed widths scaled to fill `total`, so a table
-/// of equal columns keeps the equal split.
-fn table_column_widths(table: &Table, total: f32) -> Vec<f32> {
-    let cols = table.col_count().max(1);
-    let typed: Vec<f32> = (0..cols)
-        .map(|column| {
-            table
-                .columns
-                .get(column)
-                .map_or(0.0, |col| col.width_pt.max(0.0))
-        })
-        .collect();
-    let sum: f32 = typed.iter().sum();
-    if sum <= 0.0 {
-        return vec![total / cols as f32; cols];
-    }
-    typed.iter().map(|width| total * width / sum).collect()
 }
 
 /// The left edge of each column, from the column widths.

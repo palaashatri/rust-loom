@@ -381,8 +381,8 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
     );
     assert_eq!(segments[1].text.as_str(), " heading");
     assert!(
-        segments[1].weight < 700 && !segments[1].italic && !segments[1].underline,
-        "the rest stays plain"
+        segments[1].weight >= 700 && !segments[1].italic && !segments[1].underline,
+        "a heading is bold throughout, and the rest has no italic or underline"
     );
     assert!(
         row.positioned,

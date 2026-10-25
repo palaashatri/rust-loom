@@ -43,6 +43,7 @@ pub use caret_move::{visual_caret_move, CaretTarget, VisualMove};
 pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
+pub use export_table::editor_column_widths;
 pub(crate) use images::OBJECT_CHAR;
 pub use images::*;
 pub use layout::{DocumentFlow, FlowLine};
@@ -4212,6 +4213,13 @@ pub fn writer_document_digest(blocks: &[RichBlock]) -> u64 {
         input.push_str(&format!("{}:{}\n", block.kind, block.text.as_str()));
     }
     fnv1a64(input.as_bytes())
+}
+
+/// Whether a block kind is a heading (`heading1` to `heading6`). The page and the
+/// PDF both draw headings in bold.
+pub fn is_heading_kind(kind: &str) -> bool {
+    kind.strip_prefix("heading")
+        .is_some_and(|level| matches!(level, "1" | "2" | "3" | "4" | "5" | "6"))
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 //! A row is as tall as its tallest wrapped cell.
 
 use loom_objects::table::{HorizontalAlign, Table};
+use loom_objects::{TableStyleCatalog, TableStyleOptions};
 use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
 use loom_text::{CharacterStyle, FontWeight, StyleRun};
 
@@ -14,12 +15,8 @@ use crate::text_metrics::pdf_text_width;
 const CELL_PAD_X_PT: f32 = 5.0;
 /// Space above a cell's first line and below its last line.
 const CELL_PAD_Y_PT: f32 = 3.0;
-/// Narrowest column, so an empty column of a new table is still drawn.
-const MIN_COLUMN_PT: f32 = 48.0;
 /// Colour of the cell rules.
 const RULE_RGB: (f32, f32, f32) = (0.55, 0.55, 0.55);
-/// Background of the header row.
-const HEADER_FILL_RGB: (f32, f32, f32) = (0.90, 0.90, 0.90);
 
 /// One cell's plain text with the bold and italic runs inside it, as byte
 /// ranges of that text.
@@ -59,24 +56,76 @@ impl Cell {
         }
         Self { text, runs }
     }
+}
 
-    /// The drawn width of the cell's longest whitespace-separated word.
-    fn longest_word(&self, style: &TextStyle) -> f32 {
-        let mut longest = 0.0f32;
-        let mut word_start: Option<usize> = None;
-        for (index, ch) in self.text.char_indices().chain([(self.text.len(), ' ')]) {
-            match (ch.is_whitespace(), word_start) {
-                (false, None) => word_start = Some(index),
-                (true, Some(start)) => {
-                    let word = &self.text[start..index];
-                    longest = longest.max(line_width("", word, &self.runs, style, start));
-                    word_start = None;
-                }
-                _ => {}
-            }
-        }
-        longest
+/// How one cell is drawn, as the table's style resolves it: its background,
+/// its text colour and whether its text is bold.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct CellFormat {
+    fill: Option<(f32, f32, f32)>,
+    text: Option<(f32, f32, f32)>,
+    bold: bool,
+}
+
+/// The format of the cell at `row`, `column`, resolved by the table's style the
+/// same way the editor resolves it.
+fn cell_format(table: &Table, row: usize, column: usize) -> CellFormat {
+    let style =
+        TableStyleCatalog::get(&table.style_id).unwrap_or_else(TableStyleCatalog::default_style);
+    let options = TableStyleOptions {
+        header_row: table.header_row,
+        total_row: table.total_row,
+        first_column: table.first_column,
+        last_column: table.last_column,
+        banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
+    };
+    let resolved = style.resolve_cell(
+        row,
+        column,
+        table.row_count(),
+        table.col_count(),
+        &options,
+        table.cell(row, column),
+    );
+    CellFormat {
+        fill: resolved.background_color.as_deref().and_then(hex_rgb),
+        text: resolved.text_color.as_deref().and_then(hex_rgb),
+        bold: resolved.bold,
     }
+}
+
+/// A `#RRGGBB` colour as the 0..1 components the PDF draws with.
+fn hex_rgb(hex: &str) -> Option<(f32, f32, f32)> {
+    let digits = hex.strip_prefix('#')?;
+    if digits.len() < 6 || !digits.is_char_boundary(6) {
+        return None;
+    }
+    let channel = |range: std::ops::Range<usize>| {
+        u8::from_str_radix(&digits[range], 16)
+            .ok()
+            .map(|value| f32::from(value) / 255.0)
+    };
+    Some((channel(0..2)?, channel(2..4)?, channel(4..6)?))
+}
+
+/// The column widths the editor draws a table with: its typed column widths
+/// scaled to fill `total`, or equal columns when no width is set.
+pub fn editor_column_widths(table: &Table, total: f32) -> Vec<f32> {
+    let cols = table.col_count().max(1);
+    let typed: Vec<f32> = (0..cols)
+        .map(|column| {
+            table
+                .columns
+                .get(column)
+                .map_or(0.0, |col| col.width_pt.max(0.0))
+        })
+        .collect();
+    let sum: f32 = typed.iter().sum();
+    if sum <= 0.0 {
+        return vec![total / cols as f32; cols];
+    }
+    typed.iter().map(|width| total * width / sum).collect()
 }
 
 /// One wrapped line of a cell: its text, the runs inside it (byte ranges of
@@ -108,9 +157,11 @@ impl Line {
     }
 }
 
-/// One row after wrapping: the lines of each cell and the row's height.
+/// One row after wrapping: the lines of each cell, each cell's format and the
+/// row's height.
 struct WrappedRow {
     cells: Vec<Vec<Line>>,
+    formats: Vec<CellFormat>,
     height: f32,
     header: bool,
 }
@@ -130,60 +181,41 @@ pub(crate) struct TableLayout {
 }
 
 impl TableLayout {
-    /// Sizes each column to its widest cell, fitting the table into `max_width`
-    /// (see `fit_columns`), and wraps each cell onto as many lines as its column
-    /// needs. `line_height` is the distance between the lines of one cell.
+    /// Sizes the columns as the editor does (see [`editor_column_widths`]), wraps
+    /// each cell onto as many lines as its column needs, and resolves each cell's
+    /// format from the table's style. `line_height` is the distance between the
+    /// lines of one cell.
     pub(crate) fn new(table: &Table, body: &TextStyle, max_width: f32, line_height: f32) -> Self {
         let columns = table.col_count();
         let header_row = table.header_row;
         let is_header = |index: usize| header_row && index == 0;
-        // A column wants its widest whole cell, but it can always narrow to its
-        // longest word, so words stay whole for as long as the table allows.
-        let mut natural = vec![MIN_COLUMN_PT; columns];
-        let mut shortest = vec![MIN_COLUMN_PT; columns];
-        let cells: Vec<Vec<Cell>> = (0..table.row_count())
-            .map(|row| {
-                (0..columns)
-                    .map(|column| Cell::of(table, row, column))
-                    .collect()
-            })
-            .collect();
-        for (index, row) in cells.iter().enumerate() {
-            let style = cell_style(body, is_header(index));
-            for (column, cell) in row.iter().enumerate() {
-                let whole = line_width("", &cell.text, &cell.runs, &style, 0);
-                natural[column] = natural[column].max(whole + 2.0 * CELL_PAD_X_PT);
-                let longest = cell.longest_word(&style) + 2.0 * CELL_PAD_X_PT;
-                shortest[column] = shortest[column].max(longest);
-            }
-        }
-        for (short, full) in shortest.iter_mut().zip(&natural) {
-            *short = short.min(*full);
-        }
-        let widths = fit_columns(&natural, &shortest, max_width);
+        let widths = editor_column_widths(table, max_width);
         let mut starts = Vec::with_capacity(columns);
         let mut width = 0.0;
         for column in &widths {
             starts.push(width);
             width += column;
         }
-        let rows = cells
-            .iter()
-            .enumerate()
-            .map(|(index, row)| {
-                let header = is_header(index);
-                let style = cell_style(body, header);
+        let rows = (0..table.row_count())
+            .map(|row| {
+                let header = is_header(row);
+                let formats: Vec<CellFormat> = (0..columns)
+                    .map(|column| cell_format(table, row, column))
+                    .collect();
                 let lines: Vec<Vec<Line>> = widths
                     .iter()
                     .enumerate()
                     .map(|(column, column_width)| {
+                        let cell = Cell::of(table, row, column);
+                        let style = cell_style(body, header || formats[column].bold);
                         let inner = (column_width - 2.0 * CELL_PAD_X_PT).max(1.0);
-                        wrap_cell(&row[column], &style, inner)
+                        wrap_cell(&cell, &style, inner)
                     })
                     .collect();
                 let count = lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
                 WrappedRow {
                     cells: lines,
+                    formats,
                     height: count as f32 * line_height + 2.0 * CELL_PAD_Y_PT,
                     header,
                 }
@@ -214,8 +246,8 @@ impl TableLayout {
     }
 }
 
-/// Draws row `index` of `layout` with its top-left corner at `origin`: the
-/// header fill, the wrapped text, then the rules. Every row gets its box rules,
+/// Draws row `index` of `layout` with its top-left corner at `origin`: the cell
+/// backgrounds, the wrapped text, then the rules. Every row gets its box rules,
 /// so an empty table still shows its grid; the first row also gets a top rule.
 pub(crate) fn draw_row(
     pdf: &mut PdfDocument,
@@ -228,13 +260,38 @@ pub(crate) fn draw_row(
     let (left, top) = origin;
     let bottom = top - row.height;
     let right = left + layout.width;
-    if row.header {
-        let fill = PathStyle::filled(HEADER_FILL_RGB);
-        pdf.draw_rect(page, left, bottom, layout.width, row.height, fill);
+    // One rectangle when the whole row shares a background, otherwise one per cell.
+    let shared = row
+        .formats
+        .windows(2)
+        .all(|pair| pair[0].fill == pair[1].fill);
+    if shared {
+        if let Some(fill) = row.formats.first().and_then(|format| format.fill) {
+            pdf.draw_rect(
+                page,
+                left,
+                bottom,
+                layout.width,
+                row.height,
+                PathStyle::filled(fill),
+            );
+        }
+    } else {
+        for (column, format) in row.formats.iter().enumerate() {
+            if let Some(fill) = format.fill {
+                let x = left + layout.starts[column];
+                let width = layout.widths[column];
+                pdf.draw_rect(page, x, bottom, width, row.height, PathStyle::filled(fill));
+            }
+        }
     }
-    let style = cell_style(&layout.body, row.header);
     let size = layout.body.size_pt;
     for (column, lines) in row.cells.iter().enumerate() {
+        let format = row.formats[column];
+        let mut style = cell_style(&layout.body, row.header || format.bold);
+        if let Some(text) = format.text {
+            style.fill_rgb = text;
+        }
         let inner = (layout.widths[column] - 2.0 * CELL_PAD_X_PT).max(1.0);
         let x = left + layout.starts[column] + CELL_PAD_X_PT;
         for (index, line) in lines.iter().enumerate() {
@@ -258,35 +315,6 @@ pub(crate) fn draw_row(
     if index == 0 {
         pdf.draw_line(page, left, top, right, top, rule);
     }
-}
-
-/// Column widths that add up to `max_width` when the table is wider than that.
-/// Each column keeps its longest word when the table can; the room left over is
-/// shared out in proportion to how much more each column wants. When even the
-/// longest words do not fit, the columns shrink together and their words break
-/// between characters.
-fn fit_columns(natural: &[f32], shortest: &[f32], max_width: f32) -> Vec<f32> {
-    let total: f32 = natural.iter().sum();
-    if total <= max_width {
-        return natural.to_vec();
-    }
-    let shortest_total: f32 = shortest.iter().sum();
-    if shortest_total >= max_width {
-        let scale = max_width / shortest_total;
-        return shortest.iter().map(|width| width * scale).collect();
-    }
-    let spare = max_width - shortest_total;
-    let wanted: f32 = natural
-        .iter()
-        .zip(shortest)
-        .map(|(full, short)| full - short)
-        .sum();
-    let share = if wanted > 0.0 { spare / wanted } else { 0.0 };
-    natural
-        .iter()
-        .zip(shortest)
-        .map(|(full, short)| short + (full - short) * share)
-        .collect()
 }
 
 /// Slack for float rounding, so a word that exactly fills its column stays whole.
@@ -537,6 +565,49 @@ mod tests {
         );
     }
 
+    /// Every colour set with `rg`, as (r, g, b), in the order the page draws them.
+    fn fill_colours(pdf: &[u8]) -> Vec<(f32, f32, f32)> {
+        content(pdf)
+            .lines()
+            .filter_map(|line| {
+                let t: Vec<&str> = line.split_whitespace().collect();
+                if t.len() < 4 || t[3] != "rg" {
+                    return None;
+                }
+                Some((t[0].parse().ok()?, t[1].parse().ok()?, t[2].parse().ok()?))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cells_take_the_fill_and_text_colour_of_the_table_style() {
+        let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
+        let style = loom_objects::TableStyleCatalog::get("table-style-medium-1")
+            .expect("the default style is in the catalogue");
+        let fill = super::hex_rgb(&style.header_row.background_color.expect("a filled header"))
+            .expect("a #RRGGBB header fill");
+        let colours = fill_colours(&pdf);
+        assert!(
+            colours.iter().any(|c| (c.0 - fill.0).abs() < 0.01
+                && (c.1 - fill.1).abs() < 0.01
+                && (c.2 - fill.2).abs() < 0.01),
+            "the header is filled with the style's colour {fill:?}: {colours:?}"
+        );
+    }
+
+    #[test]
+    fn the_table_spans_the_text_column_like_the_editor() {
+        let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
+        let page = crate::PageStyle::default();
+        let text_column = page.width_pt - page.margin_left_pt - page.margin_right_pt;
+        let columns = column_edges(&pdf);
+        let width = columns[columns.len() - 1] - columns[0];
+        assert!(
+            (width - text_column).abs() < 1.0,
+            "the table fills the {text_column} pt text column as the editor does, not {width} pt"
+        );
+    }
+
     #[test]
     fn the_header_row_has_a_filled_background_under_its_rules() {
         let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
@@ -635,20 +706,28 @@ mod tests {
     }
 
     #[test]
-    fn narrowing_a_table_gives_each_column_its_longest_word_first() {
-        // Natural widths 120 and 900; longest words 120 and 55. In 468 the
-        // first column must not be squeezed below its longest word.
-        let widths = super::fit_columns(&[120.0, 900.0], &[120.0, 55.0], 468.0);
+    fn columns_are_the_typed_widths_scaled_to_the_text_column() {
+        // The editor's rule: the typed proportions are kept and the table fills
+        // the text column, so a PDF table is the width the page shows.
+        let mut table = loom_objects::Table::new(2, 2);
+        table.columns[0].width_pt = 120.0;
+        table.columns[1].width_pt = 900.0;
+        let widths = super::editor_column_widths(&table, 468.0);
         assert!(
             (widths.iter().sum::<f32>() - 468.0).abs() < 0.01,
             "{widths:?}"
         );
-        assert!(widths[0] >= 120.0 - 0.01, "{widths:?}");
-        assert!(widths[1] >= 55.0, "{widths:?}");
-        // When even the longest words do not fit, the columns shrink together.
-        let squeezed = super::fit_columns(&[300.0, 300.0], &[250.0, 250.0], 400.0);
-        assert!((squeezed.iter().sum::<f32>() - 400.0).abs() < 0.01);
-        assert!((squeezed[0] - squeezed[1]).abs() < 0.01);
+        assert!(
+            (widths[1] / widths[0] - 7.5).abs() < 0.01,
+            "the typed proportions are kept: {widths:?}"
+        );
+        table.columns[0].width_pt = 0.0;
+        table.columns[1].width_pt = 0.0;
+        assert_eq!(
+            super::editor_column_widths(&table, 468.0),
+            vec![234.0, 234.0],
+            "unset widths split the column equally"
+        );
     }
 
     /// A document holding one stored table, given as its Markdown source.

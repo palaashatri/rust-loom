@@ -162,12 +162,6 @@ struct PdfLine {
     height: f32,
 }
 
-/// Whether `kind` is one of the heading block kinds.
-fn is_heading(kind: &str) -> bool {
-    kind.strip_prefix("heading")
-        .is_some_and(|level| matches!(level, "1" | "2" | "3" | "4" | "5" | "6"))
-}
-
 /// The style of a block's text: headings take the page style's size for their
 /// level (the size the editor draws them at) and are bold, as the DOCX export
 /// sets them; other blocks use the body style.
@@ -176,7 +170,7 @@ fn block_style(
     body: &loom_pdf::TextStyle,
     page_style: &PageStyle,
 ) -> loom_pdf::TextStyle {
-    if is_heading(kind) {
+    if crate::is_heading_kind(kind) {
         loom_pdf::TextStyle {
             size_pt: page_style.font_size_for_kind(kind),
             bold: true,
@@ -1203,5 +1197,44 @@ mod tests {
             content.contains(" l S"),
             "line chart must emit stroked line segments in Writer PDF"
         );
+    }
+}
+
+#[cfg(test)]
+mod pdf_dump_tests {
+    use super::export_pdf;
+    use crate::{RichBlock, WriterDocument};
+
+    /// Writes the PDF of a document with a heading, a sized word and a table, so
+    /// it can be rendered next to the same document in the editor.
+    #[test]
+    fn dump_the_pdf_when_asked() {
+        let Ok(dir) = std::env::var("LOOM_PDF_DUMP") else {
+            return;
+        };
+        let mut document = WriterDocument::new("dump", "Dump");
+        let heading = RichBlock::new(document.next_id(), "heading1", "Quarterly report");
+        document.push(heading);
+        let mut body = RichBlock::new(
+            document.next_id(),
+            "paragraph",
+            "A large word, a huge heading, and plain text.",
+        );
+        body.runs = vec![loom_text::StyleRun {
+            start: 2,
+            end: 7,
+            style: loom_text::CharacterStyle {
+                font_size: 24.0,
+                explicit_size: true,
+                ..Default::default()
+            },
+        }];
+        document.push(body);
+        let table_id = document.next_id();
+        document.push(crate::markdown_table_block(
+            table_id,
+            "| Region | Sessions | Change |\n| --- | --- | --- |\n| North | 1,204 | +8.1% |\n| South | 987 | +5.4% |",
+        ));
+        std::fs::write(format!("{dir}/dump.pdf"), export_pdf(&document)).expect("write pdf");
     }
 }

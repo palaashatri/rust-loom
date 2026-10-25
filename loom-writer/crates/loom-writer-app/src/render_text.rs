@@ -83,18 +83,19 @@ struct Look {
 
 impl Look {
     /// The look of a run inside a block whose own size is `block_size`; text
-    /// outside every run has the block's look.
-    fn of(style: Option<&CharacterStyle>, block_size: f32) -> Self {
+    /// outside every run has the block's look. A heading block is bold, as the
+    /// PDF draws it, and a run can add emphasis but not take it away.
+    fn of(style: Option<&CharacterStyle>, block_size: f32, heading: bool) -> Self {
         match style {
             Some(style) => Self {
-                bold: style.weight.numeric() >= FontWeight::Bold.numeric(),
+                bold: heading || style.weight.numeric() >= FontWeight::Bold.numeric(),
                 italic: style.italic,
                 underline: style.underline,
                 strikethrough: style.strikethrough,
                 size: loom_writer_core::run_size(style, block_size),
             },
             None => Self {
-                bold: false,
+                bold: heading,
                 italic: false,
                 underline: false,
                 strikethrough: false,
@@ -162,6 +163,7 @@ fn pieces(block: &RichBlock, block_size: f32) -> Vec<Piece> {
         cuts.insert(floor_boundary(text, run.end));
     }
     let cuts: Vec<usize> = cuts.into_iter().collect();
+    let heading = loom_writer_core::is_heading_kind(block.kind.as_str());
     let mut pieces: Vec<Piece> = Vec::new();
     for pair in cuts.windows(2) {
         let (start, end) = (pair[0], pair[1]);
@@ -172,6 +174,7 @@ fn pieces(block: &RichBlock, block_size: f32) -> Vec<Piece> {
                 .find(|run| run.start <= start && start < run.end)
                 .map(|run| &run.style),
             block_size,
+            heading,
         );
         match pieces.last_mut() {
             Some(last) if last.look == look => last.end = end,

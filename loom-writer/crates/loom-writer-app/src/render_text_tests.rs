@@ -239,19 +239,14 @@ fn segment_positions_are_the_ones_the_layout_highlights() {
     };
     let rows = rows_of(&document);
 
-    // Heading (centred): "Quarterly" bold, " Report" plain.
+    // Heading (centred): a heading is bold throughout, so its text is one look
+    // and the text item centres it, rather than the row placing its segments.
     let heading = &rows[0];
-    let segments: Vec<_> = heading.segments.iter().collect();
-    assert_eq!(texts(heading), ["Quarterly", " Report"]);
-    for (segment, from) in segments.iter().zip([0usize, 9]) {
-        let expected = highlight(from, from + 1);
-        assert!(
-            (heading.x + segment.x - expected).abs() < 0.05,
-            "{:?} starts at {} but the highlight starts at {expected}",
-            segment.text,
-            heading.x + segment.x
-        );
-    }
+    assert_eq!(texts(heading), ["Quarterly Report"]);
+    assert!(
+        !heading.positioned,
+        "a single-look heading is aligned by its text item"
+    );
     // Right-aligned line: "...with a " plain, "bold" bold, " word" plain.
     let right = rows
         .iter()
@@ -496,4 +491,60 @@ fn dump_the_sized_page_when_asked() {
     image
         .save(format!("{dir}/sized-page.png"))
         .expect("write png");
+}
+
+#[test]
+fn dump_the_pdf_comparison_page_when_asked() {
+    let Ok(dir) = std::env::var("LOOM_RENDER_TEXT_DUMP") else {
+        return;
+    };
+    set_platform();
+    let mut document = WriterDocument::new("dump", "Dump");
+    let heading = RichBlock::new(document.next_id(), "heading1", "Quarterly report");
+    document.push(heading);
+    let mut body = RichBlock::new(
+        document.next_id(),
+        "paragraph",
+        "A large word, a huge heading, and plain text.",
+    );
+    body.runs = vec![loom_text::StyleRun {
+        start: 2,
+        end: 7,
+        style: loom_text::CharacterStyle {
+            font_size: 24.0,
+            explicit_size: true,
+            ..Default::default()
+        },
+    }];
+    document.push(body);
+    let table_id = document.next_id();
+    document.push(loom_writer_core::markdown_table_block(
+        table_id,
+        "| Region | Sessions | Change |\n| --- | --- | --- |\n| North | 1,204 | +8.1% |\n| South | 987 | +5.4% |",
+    ));
+    let app = WriterApp::new().expect("create WriterApp");
+    apply_document(&app, &document);
+    let image = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    image
+        .save(format!("{dir}/comparison-editor.png"))
+        .expect("write png");
+}
+
+#[test]
+fn a_heading_row_is_bold_on_the_page_as_it_is_in_the_pdf() {
+    let mut document = WriterDocument::new("heading", "Heading");
+    document.push(RichBlock::new(
+        document.next_id(),
+        "heading1",
+        "Quarterly report",
+    ));
+    let rows = rows_of(&document);
+    let segment = rows[0]
+        .segments
+        .row_data(0)
+        .expect("the heading draws a segment");
+    assert!(
+        segment.weight >= 700,
+        "a heading is bold on the page, as the PDF draws it: {segment:?}"
+    );
 }
