@@ -158,6 +158,53 @@ fn ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top() {
     );
 }
 
+#[test]
+fn ctrl_home_returns_to_the_top_when_the_page_is_zoomed() {
+    let text = (1..=120)
+        .map(|n| format!("Paragraph {n} with enough words to wrap across a line of the page."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = launched(&text);
+    s.app.invoke_page_zoom_changed(1.5);
+    press_ctrl(&s.app, Key::End);
+    assert!(s.state.viewport.borrow().scroll_y > 0.0);
+    press_ctrl(&s.app, Key::Home);
+    assert_eq!(
+        focus(&s.state),
+        0,
+        "Ctrl+Home returns to the start when zoomed"
+    );
+    assert_eq!(
+        s.state.viewport.borrow().scroll_y,
+        0.0,
+        "and the zoomed page returns to the top margin"
+    );
+}
+
+#[test]
+fn ctrl_home_leaves_a_long_table_at_the_end_and_returns_to_the_top() {
+    let s = launched("Intro paragraph");
+    s.state
+        .current
+        .borrow_mut()
+        .insert_table_block(usize::MAX, 60, 3)
+        .expect("insert a long table");
+    apply_state(&s.app, &s.state);
+    s.app.invoke_focus_page();
+    press_ctrl(&s.app, Key::End);
+    assert!(
+        s.state.viewport.borrow().scroll_y > 0.0,
+        "Ctrl+End scrolls to the table"
+    );
+    press_ctrl(&s.app, Key::Home);
+    assert_eq!(
+        focus(&s.state),
+        0,
+        "Ctrl+Home leaves the table and returns to the start"
+    );
+    assert_eq!(s.state.viewport.borrow().scroll_y, 0.0);
+}
+
 fn session(blocks: Vec<RichBlock>) -> (WriterApp, Rc<GuiState>) {
     let mut document = WriterDocument::new("test", "Test");
     document.blocks = blocks;
