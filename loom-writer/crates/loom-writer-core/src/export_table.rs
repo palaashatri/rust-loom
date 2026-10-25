@@ -15,8 +15,8 @@ use crate::text_metrics::pdf_text_width;
 const CELL_PAD_X_PT: f32 = 5.0;
 /// Space above a cell's first line and below its last line.
 const CELL_PAD_Y_PT: f32 = 3.0;
-/// Colour of the cell rules.
-const RULE_RGB: (f32, f32, f32) = (0.55, 0.55, 0.55);
+/// Colour of the cell rules: the cell border the editor draws (#D0D0D0).
+const RULE_RGB: (f32, f32, f32) = (0.816, 0.816, 0.816);
 
 /// One cell's plain text with the bold and italic runs inside it, as byte
 /// ranges of that text.
@@ -562,6 +562,39 @@ mod tests {
         assert!(
             heights[1] > heights[0] * 1.5,
             "the wrapped row is taller than the one-line header: {heights:?}"
+        );
+    }
+
+    /// Every colour set with `RG`, as (r, g, b), in the order the page draws them.
+    fn stroke_colours(pdf: &[u8]) -> Vec<(f32, f32, f32)> {
+        let text = content(pdf);
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        tokens
+            .windows(4)
+            .filter(|window| window[3] == "RG")
+            .filter_map(|window| {
+                Some((
+                    window[0].parse().ok()?,
+                    window[1].parse().ok()?,
+                    window[2].parse().ok()?,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_cell_rules_are_drawn_in_the_editors_border_colour() {
+        // The editor draws every table cell border in #D0D0D0.
+        let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
+        let border = 0xD0 as f32 / 255.0;
+        let colours = stroke_colours(&pdf);
+        assert!(
+            colours.iter().any(|c| {
+                (c.0 - border).abs() < 0.01
+                    && (c.1 - border).abs() < 0.01
+                    && (c.2 - border).abs() < 0.01
+            }),
+            "the rules are the editor's #D0D0D0 border: {colours:?}"
         );
     }
 
