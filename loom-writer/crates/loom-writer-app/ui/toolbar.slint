@@ -42,6 +42,20 @@ export component WriterActionToolbar inherits LabeledToolbar {
     /// F6 from the page lands on the first toolbar item.
     public function focus-first() { root.ask-focus(1); }
 
+    /// The item after or before `code` in reading order: View, Zoom, Insert,
+    /// Text, Style, List, Export, Format, Document, More. Any other code stays put.
+    pure function reading-next(code: int) -> int {
+        return code == 1 ? 2 : code == 2 ? 3 : code == 3 ? 4 : code == 4 ? 5 : code == 5 ? 6 : code == 6 ? 7 : code == 7 ? 11 : code == 11 ? 12 : code == 12 ? 8 : code;
+    }
+    pure function reading-previous(code: int) -> int {
+        return code == 2 ? 1 : code == 3 ? 2 : code == 4 ? 3 : code == 5 ? 4 : code == 6 ? 5 : code == 7 ? 6 : code == 11 ? 7 : code == 12 ? 11 : code == 8 ? 12 : code;
+    }
+    /// Right (`delta` > 0) and Left move one item visually. In right-to-left text
+    /// reading order runs leftwards, so Right goes backwards through it.
+    function step-focus(code: int, delta: int) {
+        root.ask-focus((delta > 0) != Theme.rtl ? root.reading-next(code) : root.reading-previous(code));
+    }
+
     /// Return focus to the item that opened toolbar menu `kind` (the numbering
     /// of `menu-kind`), so closing a menu with Escape does not lose the place.
     public function focus-menu-trigger(kind: int) { root.ask-focus(kind); }
@@ -57,10 +71,12 @@ export component WriterActionToolbar inherits LabeledToolbar {
         spacing: 4px;
         LoomToolbarItem {
             icon: "view"; label: "View"; accessible-name: "View options"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            arrow(delta) => { root.step-focus(1, delta); }
             clicked => { root.toggle-menu(1, self.absolute-position.x); }
         }
         LoomToolbarItem {
             icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            arrow(delta) => { root.step-focus(2, delta); }
             clicked => { root.toggle-menu(2, self.absolute-position.x); }
         }
 
@@ -68,18 +84,22 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
         LoomToolbarItem {
             icon: "plus"; label: "Insert"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            arrow(delta) => { root.step-focus(3, delta); }
             clicked => { root.toggle-menu(3, self.absolute-position.x); }
         }
         LoomToolbarItem {
             icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            arrow(delta) => { root.step-focus(4, delta); }
             clicked => { root.toggle-menu(4, self.absolute-position.x); }
         }
         LoomToolbarItem {
             icon: "text"; label: "Style"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            arrow(delta) => { root.step-focus(5, delta); }
             clicked => { root.toggle-menu(5, self.absolute-position.x); }
         }
         LoomToolbarItem {
             icon: "list"; label: "List"; checked: root.menu-kind == 6; focus-request: root.request(6);
+            arrow(delta) => { root.step-focus(6, delta); }
             clicked => { root.toggle-menu(6, self.absolute-position.x); }
         }
 
@@ -87,18 +107,21 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
         LoomToolbarItem {
             icon: "export"; label: "Export"; checked: root.menu-kind == 7; focus-request: root.request(7);
+            arrow(delta) => { root.step-focus(7, delta); }
             clicked => { root.toggle-menu(7, self.absolute-position.x); }
         }
         LoomToolbarItem {
             icon: "format"; label: "Format"; accessible-name: "Format inspector";
             checked: root.inspector-visible && root.inspector-tab == 0;
             focus-request: root.request(11);
+            arrow(delta) => { root.step-focus(11, delta); }
             clicked => { root.show-inspector-tab(0); }
         }
         LoomToolbarItem {
             icon: "document"; label: "Document";
             checked: root.inspector-visible && root.inspector-tab == 1;
             focus-request: root.request(12);
+            arrow(delta) => { root.step-focus(12, delta); }
             clicked => { root.show-inspector-tab(1); }
         }
         LoomOverflowTrigger {
@@ -121,16 +144,19 @@ export component WriterActionToolbar inherits LabeledToolbar {
             icon: "document"; label: "Document";
             checked: root.inspector-visible && root.inspector-tab == 1;
             focus-request: root.request(12);
+            arrow(delta) => { root.step-focus(12, delta); }
             clicked => { root.show-inspector-tab(1); }
         }
         LoomToolbarItem {
             icon: "format"; label: "Format"; accessible-name: "Format inspector";
             checked: root.inspector-visible && root.inspector-tab == 0;
             focus-request: root.request(11);
+            arrow(delta) => { root.step-focus(11, delta); }
             clicked => { root.show-inspector-tab(0); }
         }
         LoomToolbarItem {
             icon: "export"; label: "Export"; checked: root.menu-kind == 7; focus-request: root.request(7);
+            arrow(delta) => { root.step-focus(7, delta); }
             clicked => { root.toggle-menu(7, self.absolute-position.x + self.width); }
         }
 
@@ -138,18 +164,22 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
         LoomToolbarItem {
             icon: "list"; label: "List"; checked: root.menu-kind == 6; focus-request: root.request(6);
+            arrow(delta) => { root.step-focus(6, delta); }
             clicked => { root.toggle-menu(6, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
             icon: "text"; label: "Style"; checked: root.menu-kind == 5; focus-request: root.request(5);
+            arrow(delta) => { root.step-focus(5, delta); }
             clicked => { root.toggle-menu(5, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
             icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            arrow(delta) => { root.step-focus(4, delta); }
             clicked => { root.toggle-menu(4, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
             icon: "plus"; label: "Insert"; checked: root.menu-kind == 3; focus-request: root.request(3);
+            arrow(delta) => { root.step-focus(3, delta); }
             clicked => { root.toggle-menu(3, self.absolute-position.x + self.width); }
         }
 
@@ -157,10 +187,12 @@ export component WriterActionToolbar inherits LabeledToolbar {
 
         LoomToolbarItem {
             icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            arrow(delta) => { root.step-focus(2, delta); }
             clicked => { root.toggle-menu(2, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
             icon: "view"; label: "View"; accessible-name: "View options"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            arrow(delta) => { root.step-focus(1, delta); }
             clicked => { root.toggle-menu(1, self.absolute-position.x + self.width); }
         }
     }

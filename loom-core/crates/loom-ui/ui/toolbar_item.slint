@@ -16,6 +16,9 @@ export component IconOverLabelToolbarItem inherits Rectangle {
     in property <bool> checked: false;
     property <color> on-tint: Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent;
     callback clicked;
+    // Left (-1) and Right (+1). The key still bubbles, so a host that does not
+    // connect this callback sees the same key as before.
+    callback arrow(int);
     public function focus-item() { focus.focus(); }
 
     min-width: max(48px, label-text.preferred-width + 16px);
@@ -58,6 +61,8 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         enabled: root.enabled;
         key-pressed(event) => {
             if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            if (event.text == Key.LeftArrow) { root.arrow(-1); }
+            if (event.text == Key.RightArrow) { root.arrow(1); }
             return reject;
         }
     }

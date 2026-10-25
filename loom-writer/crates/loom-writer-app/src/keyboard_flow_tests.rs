@@ -559,6 +559,47 @@ fn open_toolbar_menu(s: &Session, name: &str) {
     panic!("Tab never reached {name:?}");
 }
 
+/// Right and Left move between toolbar items in reading order, as in any toolbar,
+/// and stop at the first and last item instead of wrapping.
+#[test]
+fn arrow_keys_move_between_toolbar_items_in_reading_order() {
+    let s = launched("Hello");
+    press(&s.app, Key::F6);
+    assert_eq!(focus_name(&s.app), "View options");
+    press(&s.app, Key::RightArrow);
+    assert_eq!(focus_name(&s.app), "Zoom", "Right moves to the next item");
+    press(&s.app, Key::RightArrow);
+    assert_eq!(focus_name(&s.app), "Insert");
+    press(&s.app, Key::LeftArrow);
+    assert_eq!(focus_name(&s.app), "Zoom", "Left moves back");
+    press(&s.app, Key::LeftArrow);
+    press(&s.app, Key::LeftArrow);
+    assert_eq!(
+        focus_name(&s.app),
+        "View options",
+        "Left at the first item stays there"
+    );
+}
+
+/// In right-to-left text the toolbar mirrors, so Left moves forward in reading
+/// order and Right moves back.
+#[test]
+fn arrow_keys_follow_the_visual_direction_in_right_to_left_text() {
+    let s = launched("Hello");
+    s.app.set_rtl(true);
+    render(&s.app);
+    press(&s.app, Key::F6);
+    assert_eq!(focus_name(&s.app), "View options");
+    press(&s.app, Key::LeftArrow);
+    assert_eq!(
+        focus_name(&s.app),
+        "Zoom",
+        "Left moves forward in reading order in right-to-left text"
+    );
+    press(&s.app, Key::RightArrow);
+    assert_eq!(focus_name(&s.app), "View options", "Right moves back");
+}
+
 #[test]
 fn toolbar_is_reachable_in_order_and_every_menu_works_from_the_keyboard() {
     let s = launched("Hello");
