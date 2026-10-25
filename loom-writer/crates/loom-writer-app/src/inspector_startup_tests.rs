@@ -236,7 +236,7 @@ fn closing_the_docked_inspector_returns_focus_to_its_toolbar_tab() {
     let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render closed");
 
     assert!(
-        focus_is_on_element_labelled(&app, "Format"),
+        focus_is_on_element_labelled(&app, "Format inspector"),
         "closing the inspector must return focus to its Format tab"
     );
 }

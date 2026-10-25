@@ -56,7 +56,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
         horizontal-stretch: 1;
         spacing: 4px;
         LoomToolbarItem {
-            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            icon: "view"; label: "View"; accessible-name: "View options"; checked: root.menu-kind == 1; focus-request: root.request(1);
             clicked => { root.toggle-menu(1, self.absolute-position.x); }
         }
         LoomToolbarItem {
@@ -90,7 +90,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.toggle-menu(7, self.absolute-position.x); }
         }
         LoomToolbarItem {
-            icon: "format"; label: "Format";
+            icon: "format"; label: "Format"; accessible-name: "Format inspector";
             checked: root.inspector-visible && root.inspector-tab == 0;
             focus-request: root.request(11);
             clicked => { root.show-inspector-tab(0); }
@@ -124,7 +124,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.show-inspector-tab(1); }
         }
         LoomToolbarItem {
-            icon: "format"; label: "Format";
+            icon: "format"; label: "Format"; accessible-name: "Format inspector";
             checked: root.inspector-visible && root.inspector-tab == 0;
             focus-request: root.request(11);
             clicked => { root.show-inspector-tab(0); }
@@ -160,7 +160,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.toggle-menu(2, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
-            icon: "view"; label: "View"; checked: root.menu-kind == 1; focus-request: root.request(1);
+            icon: "view"; label: "View"; accessible-name: "View options"; checked: root.menu-kind == 1; focus-request: root.request(1);
             clicked => { root.toggle-menu(1, self.absolute-position.x + self.width); }
         }
     }

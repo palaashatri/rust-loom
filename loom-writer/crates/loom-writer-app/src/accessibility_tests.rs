@@ -5,9 +5,9 @@ use super::actions_tests::{test_state, text_document};
 use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 
-fn unnamed_interactive(app: &WriterApp) -> Vec<String> {
-    // Find the content root containing the full window tree.
-    let root = [
+/// The element that holds the whole window tree.
+fn window_root(app: &WriterApp) -> ElementHandle {
+    [
         "Rectangle",
         "WriterApp",
         "Window",
@@ -17,7 +17,11 @@ fn unnamed_interactive(app: &WriterApp) -> Vec<String> {
     .iter()
     .flat_map(|name| ElementHandle::find_by_element_type_name(app, name).collect::<Vec<_>>())
     .max_by_key(|candidate| candidate.query_descendants().find_all().len())
-    .expect("root element");
+    .expect("root element")
+}
+
+fn unnamed_interactive(app: &WriterApp) -> Vec<String> {
+    let root = window_root(app);
     let mut bad = Vec::new();
     for role in [
         AccessibleRole::Button,
@@ -73,6 +77,36 @@ fn every_interactive_element_in_the_writer_window_has_an_accessible_name() {
         let bad = unnamed_interactive(&app);
         assert!(bad.is_empty(), "unnamed at {w}x{h}: {bad:#?}");
     }
+}
+
+/// Two buttons on screen with the same name leave a screen reader user unable to
+/// tell them apart, so the name of each button in view must be unique.
+#[test]
+fn no_two_buttons_on_screen_share_an_accessible_name() {
+    let app = app_at(1280, 800);
+    let mut places: std::collections::BTreeMap<String, Vec<(f32, f32)>> = Default::default();
+    for el in window_root(&app)
+        .query_descendants()
+        .match_accessible_role(AccessibleRole::Button)
+        .find_all()
+    {
+        let name = el.accessible_label().unwrap_or_default().to_string();
+        let (pos, size) = (el.absolute_position(), el.size());
+        let on_screen = size.width > 0.0
+            && size.height > 0.0
+            && pos.x >= 0.0
+            && pos.y >= 0.0
+            && pos.x + size.width <= 1280.0
+            && pos.y + size.height <= 800.0;
+        if on_screen && !name.trim().is_empty() {
+            places.entry(name).or_default().push((pos.x, pos.y));
+        }
+    }
+    let duplicates: Vec<_> = places.iter().filter(|(_, at)| at.len() > 1).collect();
+    assert!(
+        duplicates.is_empty(),
+        "buttons on screen share a name: {duplicates:?}"
+    );
 }
 
 fn document_body(app: &WriterApp) -> ElementHandle {

@@ -108,9 +108,10 @@ fn select_all(app: &WriterApp, state: &GuiState) {
 #[test]
 fn every_toolbar_item_is_a_named_button_in_three_groups() {
     let (app, _state) = launched("Hello");
-    let left = ["View", "Zoom"].map(|l| toolbar_x(&app, l));
+    let left = ["View options", "Zoom"].map(|l| toolbar_x(&app, l));
     let centre = ["Insert", "Text", "Style", "List"].map(|l| toolbar_x(&app, l));
-    let right = ["Export", "Format", "Document", "More actions"].map(|l| toolbar_x(&app, l));
+    let right =
+        ["Export", "Format inspector", "Document", "More actions"].map(|l| toolbar_x(&app, l));
     assert!(left.windows(2).all(|w| w[0] < w[1]));
     assert!(centre.windows(2).all(|w| w[0] < w[1]));
     assert!(right.windows(2).all(|w| w[0] < w[1]));
@@ -143,11 +144,11 @@ fn format_and_document_buttons_switch_tabs_and_close_the_inspector() {
     assert!(app.get_show_inspector());
     assert_eq!(app.get_inspector_tab(), 1);
 
-    button(&app, "Format");
+    button(&app, "Format inspector");
     assert_eq!(app.get_inspector_tab(), 0);
     assert!(app.get_show_inspector());
 
-    button(&app, "Format");
+    button(&app, "Format inspector");
     assert!(!app.get_show_inspector(), "second press closes it");
 
     button(&app, "Document");
@@ -172,17 +173,17 @@ fn the_inspector_tab_strip_shows_the_matching_sections() {
 #[test]
 fn view_menu_toggles_inspector_and_outline_with_check_marks() {
     let (app, _state) = launched("Hello");
-    button(&app, "View");
+    button(&app, "View options");
     assert_eq!(app.get_toolbar_menu(), 1);
     row(&app, "Outline Navigator");
     assert!(app.get_show_navigator());
     assert_eq!(app.get_toolbar_menu(), 0, "choosing a row closes the menu");
 
-    button(&app, "View");
+    button(&app, "View options");
     row(&app, "Format Inspector");
     assert!(!app.get_show_inspector());
 
-    button(&app, "View");
+    button(&app, "View options");
     row(&app, "Format Inspector");
     assert!(app.get_show_inspector());
 }

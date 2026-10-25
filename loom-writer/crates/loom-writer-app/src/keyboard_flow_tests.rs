@@ -481,13 +481,13 @@ fn f6_cycles_page_toolbar_inspector_and_shift_f6_runs_it_backwards() {
     press(&s.app, Key::F6);
     assert_eq!(
         focus_name(&s.app),
-        "View",
+        "View options",
         "F6 from the page lands on the first toolbar item"
     );
     press(&s.app, Key::F6);
     assert_ne!(
         focus_name(&s.app),
-        "View",
+        "View options",
         "F6 from the toolbar goes to the inspector"
     );
     assert!(!same_focus(&focus_weak(&s.app), &page));
@@ -506,7 +506,7 @@ fn f6_cycles_page_toolbar_inspector_and_shift_f6_runs_it_backwards() {
     shift_key(&s.app, Key::F6);
     assert_eq!(
         focus_name(&s.app),
-        "View",
+        "View options",
         "Shift+F6 from the inspector goes to the toolbar"
     );
     shift_key(&s.app, Key::F6);
@@ -564,7 +564,7 @@ fn toolbar_is_reachable_in_order_and_every_menu_works_from_the_keyboard() {
     let s = launched("Hello");
     // F6 leaves the page for the toolbar's first item.
     press(&s.app, Key::F6);
-    assert_eq!(focus_name(&s.app), "View");
+    assert_eq!(focus_name(&s.app), "View options");
     let mut seen = vec![focus_name(&s.app)];
     for _ in 0..9 {
         tab(&s.app);
@@ -573,14 +573,14 @@ fn toolbar_is_reachable_in_order_and_every_menu_works_from_the_keyboard() {
     assert_eq!(
         seen,
         [
-            "View",
+            "View options",
             "Zoom",
             "Insert",
             "Text",
             "Style",
             "List",
             "Export",
-            "Format",
+            "Format inspector",
             "Document",
             "More actions"
         ]
@@ -984,14 +984,14 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
         assert_eq!(
             names(toolbar),
             [
-                "View",
+                "View options",
                 "Zoom",
                 "Insert",
                 "Text",
                 "Style",
                 "List",
                 "Export",
-                "Format",
+                "Format inspector",
                 "Document",
                 "More actions"
             ]

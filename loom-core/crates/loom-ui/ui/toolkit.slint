@@ -6,6 +6,7 @@
 
 import { Theme, ResponsivePolicy } from "theme.slint";
 import { Icon } from "icons.slint";
+import { IconOverLabelToolbarItem } from "toolbar_item.slint";
 
 /// Horizontal flow that follows the product's writing direction.
 ///
@@ -94,61 +95,8 @@ export component ToolbarGroup inherits Rectangle {
 
 export component ToolbarSpacer inherits Rectangle { horizontal-stretch: 1; background: transparent; }
 
-/// Canonical toolbar item (icon over label); `AppleToolbarItem` is its alias.
-export component IconOverLabelToolbarItem inherits Rectangle {
-    in property <string> icon: "generic";
-    in property <string> label: "";
-    in property <bool> enabled: true;
-    in property <bool> checked: false;
-    property <color> on-tint: Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent;
-    callback clicked;
-    public function focus-item() { focus.focus(); }
-
-    min-width: max(48px, label-text.preferred-width + 16px);
-    preferred-width: max(48px, label-text.preferred-width + 16px);
-    // The host owns the slot; compact hosts use the icon-only variant.
-    min-height: ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
-    max-height: ResponsivePolicy.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
-    border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
-    border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
-    background: !root.enabled ? transparent
-        : touch.pressed ? Theme.palette().surface-sunken
-        : root.checked ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
-        : transparent;
-    accessible-role: button;
-    accessible-label: root.label != "" ? root.label : root.icon;
-    accessible-action-default => { if (root.enabled) { root.clicked(); } }
-
-    VerticalLayout {
-        spacing: 2px; padding-top: 4px; padding-bottom: 4px; padding-left: 4px; padding-right: 4px;
-        alignment: center; cross-axis-alignment: center;
-        Icon {
-            size: 18px * max(1.0, Theme.text-scale); icon: root.icon;
-            tint: !root.enabled ? Theme.palette().ink-disabled
-                : root.checked ? root.on-tint : Theme.palette().ink;
-        }
-        label-text := Text {
-            text: root.label;
-            font-size: 10px * max(1.0, Theme.text-scale);
-            font-weight: root.checked ? 600 : 500;
-            color: !root.enabled ? Theme.palette().ink-disabled
-                : root.checked ? root.on-tint : Theme.palette().ink-secondary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-    focus := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
-            return reject;
-        }
-    }
-    touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
-}
+/// The canonical toolbar item lives in toolbar_item.slint and is re-exported here.
+export { IconOverLabelToolbarItem }
 
 /// Compatibility spelling for the former branded component. Geometry and
 /// behavior remain owned by IconOverLabelToolbarItem above.
