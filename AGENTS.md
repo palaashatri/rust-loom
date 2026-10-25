@@ -51,7 +51,7 @@ The product stack is locked to:
 
 - Rust stable for product logic and native hosts.
 - Slint for the application UI.
-- Original Loom visual identity and interaction language.
+- Original Loom visual identity and interaction language: layout, typography, iconography and behavior. The chrome palette is deliberately neutral (GOV-05).
 - Local-first/offline-capable workflows; no mandatory account, telemetry, hidden upload, or remote inference.
 - Cross-platform desktop targets: Linux x86-64, Windows x86-64 and macOS arm64. macOS x86-64 is a **sunsetting** target: it is kept while the Intel CI runner exists, gets fixes only, and is removed by fall 2027 or earlier by owner decision (§18). Windows arm64 and Linux aarch64 are planned targets (`NOT_STARTED`).
 - Commercially redistributable assets and dependencies only.
@@ -479,7 +479,7 @@ Loom is intended to be "safe to sell commercially" (§11). A commercial product 
 
 - Ship an SPDX or CycloneDX SBOM per artifact, and run a dependency advisory/license audit (for example `cargo deny`) in CI. This complements `assets.toml` for non-code assets.
 - Sign the release artifacts: Windows Authenticode, macOS Developer ID signing with notarization, and signed Linux packages. Use a signed update channel if auto-update is added.
-- Declare a support period, publish a vulnerability-reporting contact (inside `AGENTS.md`, which is the only allowed Markdown document), and define the 24-hour/72-hour CRA reporting path.
+- Declare a support period and define the 24-hour/72-hour CRA reporting path. Vulnerability reports already go through GitHub private vulnerability reporting, which is enabled for this repository (Security tab → Report a vulnerability).
 - Any future AI-assisted feature stays local-first (§1) and records each model's provenance and license. The owner reviews current EU AI Act transparency duties before shipping generated-content features. This is not legal advice.
 
 ## current-truth
@@ -664,7 +664,7 @@ A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formattin
 
 ### GOV-05 — Decide whether Loom's palette is an original identity
 
-**GOV · OPEN.** §1 promises an "original Loom visual identity", and the archived design-bible prose describes a warm palette with a terracotta accent. The canonical `loom-design-bible/tokens/loom.toml`, however, uses many values that equal colors from Apple's public web and Human Interface Guidelines palettes, for example `#F5F5F7`, `#1D1D1F`, `#0071E3` (light) and `#1C1C1E`, `#34C759` (dark). Color values are not artwork, so this is not an asset-license violation. It does contradict the identity claim and the bible's own language.
+**GOV · DECIDED (2026-10-25): keep the palette and reword the identity claims.** The palette is contrast-verified (UI-33) and its baselines are human-approved. Redesigning it would force a full re-review for little user value. Loom's identity is its layout, type, iconography and interaction language. Its chrome palette is deliberately neutral, so content stays dominant. Remaining work: the GOV-02 prose reconciliation drops the terracotta and "warm" claims. A future accent change goes through step 2 below. Original finding: §1 promises an "original Loom visual identity", and the archived design-bible prose describes a warm palette with a terracotta accent. The canonical `loom-design-bible/tokens/loom.toml`, however, uses many values that equal colors from Apple's public web and Human Interface Guidelines palettes, for example `#F5F5F7`, `#1D1D1F`, `#0071E3` (light) and `#1C1C1E`, `#34C759` (dark). Color values are not artwork, so this is not an asset-license violation. It does contradict the identity claim and the bible's own language.
 
 **Scope:** an owner decision, then `loom-design-bible/tokens/loom.toml`, `contracts/desktop-ui.toml`, `loom-core/crates/loom-ui/ui/theme.slint` and the design-bible prose (with GOV-02).
 
@@ -706,7 +706,7 @@ A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formattin
 
 1. Generate an SPDX or CycloneDX SBOM per artifact, and add a dependency advisory and license audit to CI.
 2. Sign the Windows and macOS artifacts (notarizing the macOS ones) and the Linux packages, keeping the credentials in CI secrets.
-3. Record the support period and the vulnerability-reporting contact here. Define how an actively exploited vulnerability is reported within 24 hours.
+3. Record the support period here. Vulnerability reports use GitHub private vulnerability reporting, which is enabled. Define how an actively exploited vulnerability is reported within 24 hours.
 
 **Done when:** a release candidate carries signatures, an SBOM and a stated support period, and the reporting path is written down. Until then, releases stay labelled as development previews.
 

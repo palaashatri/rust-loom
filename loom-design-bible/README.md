@@ -4,8 +4,9 @@ The authoritative visual, motion, interaction, and accessibility specification f
 the Loom creative suite (Writer, Sheets, Present, Photo, Motion, Video, Studio,
 Encode, and Loom Vision).
 
-Loom's design language in six words: **calm, precise, minimal, warm, professional,
-fast.** Everything in this repository exists to make that language unambiguous,
+Loom's design language in six words: **calm, precise, minimal, neutral, professional,
+fast.** The chrome palette is deliberately neutral so that the user's content
+carries the color (decision GOV-05). Everything in this repository exists to make that language unambiguous,
 testable, and consistent across every application in the suite.
 
 ## Repository role
@@ -92,9 +93,9 @@ authoritative and the prose is a known defect tracked as GOV-02 in
   `contracts/desktop-ui.toml` sets a 28 px minimum pointer target. Three
   handle targets are smaller than 24 px and need recorded exceptions or larger
   hit areas (GOV-06).
-* The "warm" language above and the current neutral, blue-accent token values
-  disagree. Whether the palette counts as an original Loom identity is an open
-  owner decision (GOV-05). Until it is made, the TOML values stay authoritative.
+* The palette stays as defined in `tokens/loom.toml` (GOV-05, decided
+  2026-10-25). Archived prose that describes a warm terracotta palette is
+  outdated and will be corrected under GOV-02.
 
 ## Contract integrity rules
 

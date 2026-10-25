@@ -3,10 +3,10 @@ name: Loom downloadable builds
 # Builds every Loom application for Linux, Windows, and macOS (Apple silicon and
 # Intel) and publishes unsigned archives that do not need a Loom installer.
 #
-#   - every source branch or tag push creates four platform artifacts (one archive each)
-#   - pushes to main refresh the rolling "nightly" pre-release
+#   - pushes to main (and a daily schedule) refresh the rolling "nightly" pre-release
 #   - a v* tag publishes a versioned release
 #   - workflow_dispatch builds the archives as workflow artifacts only
+#   Feature-branch pushes no longer build release archives; PR CI covers them.
 #
 # Signed installers (MSI, DMG, .deb) remain the job of the manual "Loom full
 # native matrix" workflow; this one exists so anyone can download and try the
@@ -14,6 +14,11 @@ name: Loom downloadable builds
 
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
+  schedule:
+    # Daily nightly; the publisher skips a candidate already at the nightly ref.
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -23,8 +28,34 @@ env:
   APPS: "writer sheets present"
 
 jobs:
+  gate:
+    name: decide whether to build
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          build=true
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            # A scheduled run only rebuilds when main moved past the nightly tag.
+            tag_sha="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/nightly" | jq -r '.sha // empty' || true)"
+            if [ "${tag_sha}" = "${GITHUB_SHA}" ]; then
+              echo "nightly already points at ${GITHUB_SHA}; nothing to build."
+              build=false
+            fi
+          fi
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+
   build:
     name: build (${{ matrix.label }})
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -203,7 +234,8 @@ jobs:
           case "$archive_file" in
             *.zip)
               archive_root="${archive_file%.zip}"
-              (cd "$smoke_root" && 7z x -y "$archive_path" > /dev/null)
+              # Extract without cd: "$archive_path" is relative to the checkout.
+              7z x -y -o"$smoke_root" "$archive_path" > /dev/null
               ;;
             *.tar.gz)
               archive_root="${archive_file%.tar.gz}"
@@ -238,7 +270,7 @@ jobs:
   publish:
     name: publish release
     needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     concurrency:
       group: loom-release-publish-${{ github.ref }}
       # Serialize mutable release operations without canceling any push's build.
