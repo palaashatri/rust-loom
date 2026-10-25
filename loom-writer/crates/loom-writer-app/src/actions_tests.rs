@@ -397,6 +397,7 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
 
 #[test]
 fn an_underline_read_from_a_docx_reaches_the_page_as_a_rule() {
+    set_platform();
     let app = WriterApp::new().expect("create WriterApp");
     let mut document = text_document("Plain underlined rest");
     set_selection_underline(&mut document, DocumentSelection::range(6, 16), true);
