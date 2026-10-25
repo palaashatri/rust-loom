@@ -928,3 +928,32 @@ fn docx_import_resolves_bullet_and_decimal_lists_from_numbering_xml() {
     assert_eq!(imported.blocks[1].kind, "list-bulleted");
     assert_eq!(imported.blocks[2].kind, "list-numbered");
 }
+
+#[test]
+fn a_complex_script_bold_tag_alone_does_not_make_latin_text_bold() {
+    // Word writes <w:bCs/> for bold in complex scripts. Without <w:b/> the Latin
+    // text of the run is not bold, and <w:u/> is still read as underline.
+    let mut archive = PackageArchive::new();
+    let doc_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:rPr><w:bCs/></w:rPr><w:t xml:space="preserve">Complex only </w:t></w:r>
+      <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>under</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    archive
+        .add("word/document.xml", doc_xml.as_bytes().to_vec())
+        .unwrap();
+    let imported = super::import_docx(&archive.to_bytes().unwrap()).expect("import succeeds");
+    let runs = &imported.blocks[0].runs;
+    assert!(
+        runs.iter().all(|run| run.style.weight.numeric() < 700),
+        "<w:bCs/> alone is complex-script bold, not Latin bold: {runs:?}"
+    );
+    assert!(
+        runs.iter().any(|run| run.style.underline),
+        "<w:u w:val=\"single\"/> is read as underline: {runs:?}"
+    );
+}

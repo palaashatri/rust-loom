@@ -529,20 +529,28 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
 
 fn tag_is_enabled(xml: &str, tag_name: &str) -> bool {
     let needle = format!("<{tag_name}");
-    if let Some(pos) = xml.find(&needle) {
-        let tag_close = match xml[pos..].find('>') {
-            Some(c) => pos + c,
-            None => return false,
-        };
-        let tag_str = &xml[pos..=tag_close];
-        if let Some(val) = extract_attribute_value(tag_str, "w:val") {
-            val != "0" && val != "false" && val != "none"
-        } else {
-            true
+    let mut from = 0;
+    while let Some(found) = xml[from..].find(&needle) {
+        let pos = from + found;
+        let end = pos + needle.len();
+        // `<w:b` also begins `<w:bCs/>`, a different property, so only the exact
+        // element name counts: it must end at whitespace, `/` or `>`.
+        if matches!(
+            xml[end..].chars().next(),
+            Some(' ' | '\t' | '\r' | '\n' | '/' | '>')
+        ) {
+            let Some(close) = xml[pos..].find('>') else {
+                return false;
+            };
+            let tag_str = &xml[pos..=pos + close];
+            return match extract_attribute_value(tag_str, "w:val") {
+                Some(val) => val != "0" && val != "false" && val != "none",
+                None => true,
+            };
         }
-    } else {
-        false
+        from = end;
     }
+    false
 }
 
 /// Parses text from `<w:t>`, `<w:tab/>`, `<w:br/>` inside a run.
