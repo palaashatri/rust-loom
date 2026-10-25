@@ -655,3 +655,30 @@ fn a_press_on_the_second_line_of_a_cell_places_the_caret_on_that_line() {
     .expect("a press inside the cell resolves to a document offset");
     assert_eq!(offset, 3, "the second line starts after the soft break");
 }
+
+#[test]
+fn dump_the_two_line_cell_page_when_asked() {
+    let Ok(dir) = std::env::var("LOOM_RENDER_TEXT_DUMP") else {
+        return;
+    };
+    set_platform();
+    let mut document = WriterDocument::new("two-line", "Two line");
+    let table_id = document.next_id();
+    let mut table = loom_objects::Table::new(2, 2);
+    table.set_cell_text(0, 0, "Region");
+    table.set_cell_text(0, 1, "Sessions");
+    table.set_cell_text(1, 0, "North\u{b}east");
+    table.set_cell_text(1, 1, "1,204");
+    document.push(RichBlock::table_block(table_id, table));
+    document.push(RichBlock::new(
+        document.next_id(),
+        "paragraph",
+        "The paragraph after the table starts below its last row.",
+    ));
+    let app = WriterApp::new().expect("create WriterApp");
+    apply_document(&app, &document);
+    let image = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+    image
+        .save(format!("{dir}/two-line-cell.png"))
+        .expect("write png");
+}
