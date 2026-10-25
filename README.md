@@ -23,7 +23,7 @@ Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaas
 
 **Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
 
-## Reusable interaction tooling## Reusable interaction tooling
+## Reusable interaction tooling
 
 - [Linux desktop input skill](.agents/skills/linux-desktop-input/SKILL.md) — guarded mouse and keyboard interaction for Linux desktop QA when native computer-use controls are unavailable.
 
@@ -50,6 +50,12 @@ cargo build --workspace --release
 ```
 
 The CI matrix additionally validates Linux x86-64, Windows x86-64, macOS arm64, and macOS x86-64 builds, native packages, functional journeys, keyboard palette journeys, UI productisation audits, and visual QA evidence.
+
+## Engineering discipline
+
+Loom prefers **proven libraries with small adapters** over unnecessary engine rewrites. Compatibility is established with real Writer/Sheets/Present files across the complete native GUI workflow—import, edit, save, reopen, export and failure/recovery—not by startup or fixture-only tests. Repeatable performance measurements include input latency, p50/p95, peak memory, hardware/OS, actual file workload and failures. Imported source, libraries, models, fonts and assets need component-level provenance and license review.
+
+AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](AGENTS.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
 
 ## Principles
 
