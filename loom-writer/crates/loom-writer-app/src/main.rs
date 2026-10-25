@@ -1499,6 +1499,16 @@ fn block_containing_offset(document: &WriterDocument, offset: usize) -> Option<&
     None
 }
 
+/// The status line for a comment on the whole block the caret sits in.
+fn whole_block_comment_status(kind: &str) -> &'static str {
+    match kind {
+        loom_writer_core::TABLE_BLOCK_KIND => "Comment added to the whole table",
+        loom_writer_core::IMAGE_BLOCK_KIND => "Comment added to the whole picture",
+        loom_writer_core::CHART_BLOCK_KIND => "Comment added to the whole chart",
+        _ => "Comment added to the whole paragraph; select text to anchor it to a phrase",
+    }
+}
+
 fn comment_selection_range(doc: &WriterDocument, comment_id: &str) -> Option<(usize, usize)> {
     let thread = doc
         .comments
@@ -3089,28 +3099,39 @@ fn wire_writer_shared_callbacks(
                 (selection.anchor, selection.focus)
             };
             let spans = selection_text_spans(&next, DocumentSelection::range(anchor, focus));
-            let result = match spans.first() {
+            let (result, added) = match spans.first() {
                 Some(&(block_index, start, end)) => {
                     let block_id = next.blocks[block_index].id;
-                    next.add_comment_thread(block_id, start, end, &body)
+                    // A thread holds one block, so a selection that reaches into a
+                    // later paragraph is anchored only in its first paragraph.
+                    let added = if spans.len() > 1 {
+                        "Comment added to the first paragraph of the selection; the rest is not covered"
+                    } else {
+                        "Comment added to the selected text"
+                    };
+                    (next.add_comment_thread(block_id, start, end, &body), added)
                 }
-                // A collapsed caret comments on the whole containing block.
+                // A collapsed caret comments on the whole containing block, and
+                // the status names that block, since the comment is not tied to a phrase.
                 None => {
-                    let (block_id, len_bytes) = {
+                    let (block_id, len_bytes, kind) = {
                         let document = &next;
                         match block_containing_offset(document, anchor) {
-                            Some(block) => (block.id, block.text.len_bytes()),
+                            Some(block) => (block.id, block.text.len_bytes(), block.kind.clone()),
                             None => return,
                         }
                     };
-                    next.add_comment_thread(block_id, 0, len_bytes, &body)
+                    (
+                        next.add_comment_thread(block_id, 0, len_bytes, &body),
+                        whole_block_comment_status(&kind),
+                    )
                 }
             };
             match result {
                 Ok(_) => {
                     app.set_comment_draft(SharedString::from(""));
                     apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                    app.set_status_right(SharedString::from("Comment added"));
+                    app.set_status_right(SharedString::from(added));
                 }
                 Err(error) => {
                     app.set_status_right(SharedString::from(format!("Comment failed: {error}")));

@@ -172,3 +172,119 @@ fn the_draft_stays_in_the_field_until_enter_adds_the_comment() {
         "the field is cleared once the comment is added"
     );
 }
+
+#[test]
+fn a_comment_with_a_bare_caret_says_it_covers_the_whole_paragraph() {
+    let s = launched("Hello world");
+    s.state
+        .current
+        .borrow_mut()
+        .set_selection(loom_writer_core::TextSelection::caret(2));
+    s.app.invoke_add_comment(SharedString::from("Check this"));
+    assert_eq!(
+        s.state.current.borrow().comments.len(),
+        1,
+        "the comment is still added to the paragraph"
+    );
+    assert_eq!(
+        s.app.get_status_right().to_string(),
+        "Comment added to the whole paragraph; select text to anchor it to a phrase",
+        "the status names the text the comment covers"
+    );
+}
+
+#[test]
+fn a_comment_on_selected_text_says_it_is_anchored_to_that_text() {
+    let s = launched("Hello world");
+    s.state
+        .current
+        .borrow_mut()
+        .set_selection(loom_writer_core::TextSelection::range(0, 5));
+    s.app.invoke_add_comment(SharedString::from("Check this"));
+    assert_eq!(s.state.current.borrow().comments.len(), 1);
+    assert_eq!(
+        s.app.get_status_right().to_string(),
+        "Comment added to the selected text",
+        "the status names the text the comment covers"
+    );
+}
+
+#[test]
+fn a_selection_across_paragraphs_says_only_its_first_paragraph_is_commented() {
+    let s = launched("Hello world\nSecond para");
+    s.state
+        .current
+        .borrow_mut()
+        .set_selection(loom_writer_core::TextSelection::range(6, 18));
+    s.app.invoke_add_comment(SharedString::from("Check this"));
+    let document = s.state.current.borrow();
+    assert_eq!(document.comments.len(), 1, "one thread is added");
+    let first = document.blocks[0].id;
+    let comment = &document.comments[0];
+    assert_eq!(
+        (comment.block_id, comment.start, comment.end),
+        (first, 6, 11),
+        "the thread covers 'world' in the first paragraph and nothing after it"
+    );
+    assert_eq!(
+        s.app.get_status_right().to_string(),
+        "Comment added to the first paragraph of the selection; the rest is not covered",
+        "the status says the rest of the selection is not commented"
+    );
+}
+
+#[test]
+fn a_comment_with_the_caret_in_a_table_names_the_table() {
+    let s = launched("Lead");
+    let table_id = {
+        let mut document = s.state.current.borrow_mut();
+        document.insert_table_block(0, 2, 2).expect("insert table");
+        let mut start = 0usize;
+        let mut caret = None;
+        let mut table_id = None;
+        for block in &document.blocks {
+            if block.kind == loom_writer_core::TABLE_BLOCK_KIND {
+                caret = Some(start);
+                table_id = Some(block.id);
+                break;
+            }
+            start += block.text.len_bytes() + 1;
+        }
+        document.set_selection(loom_writer_core::TextSelection::caret(
+            caret.expect("the table block is in the document"),
+        ));
+        table_id.expect("the table block has an id")
+    };
+    s.app.invoke_add_comment(SharedString::from("Check this"));
+    let document = s.state.current.borrow();
+    assert_eq!(
+        document.comments.len(),
+        1,
+        "the comment is added to the table"
+    );
+    assert_eq!(
+        document.comments[0].block_id, table_id,
+        "the thread is anchored to the table block"
+    );
+    assert_eq!(
+        s.app.get_status_right().to_string(),
+        "Comment added to the whole table",
+        "the status names the table rather than a paragraph"
+    );
+}
+
+#[test]
+fn whole_block_comment_status_names_the_kind_of_block_it_covers() {
+    assert_eq!(
+        crate::whole_block_comment_status(loom_writer_core::IMAGE_BLOCK_KIND),
+        "Comment added to the whole picture"
+    );
+    assert_eq!(
+        crate::whole_block_comment_status(loom_writer_core::CHART_BLOCK_KIND),
+        "Comment added to the whole chart"
+    );
+    assert_eq!(
+        crate::whole_block_comment_status("paragraph"),
+        "Comment added to the whole paragraph; select text to anchor it to a phrase"
+    );
+}
