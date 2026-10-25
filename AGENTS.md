@@ -422,6 +422,100 @@ Before claiming a task is finished, an agent must:
 The goal is not to make CI green at any cost. The goal is to make Loom genuinely excellent while keeping the repository small enough, clear enough, and strict enough that the next agent cannot accidentally turn it back into a jungle.
 
 
+## 15. Future interoperability goal — Loom as SLOPOS's creative suite
+
+**Status: FUTURE GOAL / NOT IMPLEMENTED / NOT AN ACTIVE WORKFLOW GATE.** This is an explicitly recorded long-term cross-project feature goal, not approval to edit currently locked Loom apps, advance the Sheets/Writer/Present acceptance workflow, modify architecture/toolkits, or claim SLOPOS integration. Loom remains a separate **Rust + Slint**, offline-first, cross-platform product for Windows, macOS and Linux with its own original visual identity. The linked [SLOPOS](https://github.com/palaashatri/rust-slopos) desktop is currently an unfinished **X11 + Openbox** Linux DE; its futuristic compositor and [PARAMA](https://github.com/palaashatri/parama) targets are separate proposed efforts.
+
+### Integration and product boundary
+
+- Make Loom **Writer, Sheets and Present** discoverable and usable as SLOPOS creative applications through an opt-in/versioned **Loom–SLOPOS desktop adapter**. Keep **Photo, Motion, Video, Studio and Encode** gated by Loom's own future roadmap and existing serial application rules; do not present those apps as ready merely because SLOPOS wants a suite.
+- Preserve Loom's engines, document formats, autosave/recovery, undo/history, Slint UI implementation, accessibility and builds for all supported hosts. Integration must not make SLOPOS or PARAMA mandatory dependencies, replace Loom's toolkit with GTK/Qt, or sacrifice non-SLOPOS platforms.
+- Interoperate with real SLOPOS services through a small, versioned capability interface: desktop entry/App ID and launcher, file associations/URI handoff, open/save and recent documents, shared file picker, clipboard/drag-drop, notifications, system share destinations, application lifecycle, global menus and their authoritative command IDs/enabled states, and accessibility surfaces. Prefer native Linux adapters already present rather than a second parallel action registry.
+- Support SLOPOS's future **Windows XP-class desktop personalization** through a narrow versioned Slint theme/chrome adapter, not a second hardcoded Loom skin: SLOPOS **Classic (System 7/Platinum)**, SLOPOS **Modern (Sinty-inspired)**, and user-installed declarative themes where semantic mappings are actually supported. Map colors, typography, spacing, focus, icon *roles*, chrome, light/dark/contrast and reduced motion without changing document art or app commands. SLOPOS desktop **layout profiles** (Dock versus taskbar, global menu versus local menu) remain separate from Loom's visual skin; export menus/actions through verified desktop services and preserve a functioning local menu on unsupported hosts. Loom Design Bible remains the independent canonical creative-app system elsewhere; any Loom-flavored SLOPOS community theme is optional. Do not claim direct reuse of SLOPOS's native UI widgets within Slint.
+- **Icon roles and source:** distinguish the SLOPOS 12-app *symbolic* Lucide SVG reference set at `rust-slopos/assets/icons/symbolic/` from future *original colorful app-brand* icons. Loom's branded Writer/Sheets/Present icons retain their own rights and identity, but may expose a SLOPOS icon-pack override and consistent 16–32 px action glyphs through a versioned adapter. Do not copy Sinty/Dock artwork; honor original upstream icon licenses and preserve system accessibility contrast.
+- Expose permissioned, stable **document/action interfaces** to SLOPOS Intelligence (visible desktop automation) and local-first SLOPOS Vision (OCR, Copy Subject, visual lookup, dictation/writing tools) only when actually implemented and reviewed. Keep document-scoped consent, undo/review semantics, local-only default and no silent data export or hidden ML calls. GUI/screen automation is a fallback when authorized actions aren't available.
+- A later native PARAMA Loom target is **not** assumed here: that requires an independently proven PARAMA kernel, application runtime/ABI, compatible graphics/Slint backend, filesystem, font/input and system services. SLOPOS running on PARAMA does not imply Loom binary compatibility.
+
+### Future integration gates (do not enqueue during active application repair)
+
+| ID | Proposed acceptance |
+|---|---|
+| LOOM-SLOPOS-01 | Freeze versioned adapter capabilities; demonstrate fail-closed behavior on ordinary Linux without SLOPOS and correct no-op/fallback for unsupported services. |
+| LOOM-SLOPOS-02 | In a disposable graphical SLOPOS Linux VM, launch Writer/Sheets/Present, open/save/reopen real files, preserve undo/recovery, test clipboard and file handoff, and prove a real visible global-menu command round trip without dropping local menus on unsupported desktops. |
+| LOOM-SLOPOS-03 | Compare SLOPOS Classic, Sinty-inspired Modern and one permitted community style against documented Slint semantic-token mappings, icon roles and high-contrast/keyboard/accessibility at 1×/2×; test independent Dock/taskbar layout selection, offline fallback, and confirm appearance changes never modify exported document content or command behavior. |
+| LOOM-SLOPOS-04 | With explicit user consent, invoke a supported Loom document action from SLOPOS Intelligence or a local SLOPOS Vision tool; reject unauthorized access, confirm sensitive writes, and test offline/no-upload behavior. |
+
+Each gate requires a specifically approved future task packet, actual integration code, platform tests and evidence in this repository's **current-truth** discipline. Documentation-only entries are never product evidence; do not alter workflow contract locks or completion scores because of this section.
+
+## 16. Engineering discipline — reuse, interoperability and real-workflow evidence
+
+**Effective only for tasks authorized by the current workflow.** Lessons from experimental compatibility runtimes such as Raven are engineering guidance, not a Raven dependency, new release gate, toolkit change or permission to work on locked Loom apps. Loom remains **Rust + Slint**, local-first and cross-platform under §§1–15. `loom-bootstrap/contracts/workflow.toml` and the marked current-truth section remain authoritative.
+
+### Prefer proven infrastructure behind stable interfaces
+
+1. Before rebuilding a document parser, codec, layout/text engine, native adapter, accessibility bridge or graphics subsystem, record the observed missing capability, upstream alternatives, version/support/security characteristics, portability, licensing, upgrade cost and why a **small replaceable adapter** is insufficient. Reuse proven libraries where they genuinely meet Loom's contracts and do not violate its technology lock.
+2. Preserve one authoritative document model, undo/redo, persistence/recovery engine, command identity and error path. No hidden format loss or app-local duplicate platform bridges. All imports are untrusted: cap uncompressed sizes, recursion, allocations, fonts/media dependencies and time, and report unsupported features rather than fabricating content.
+3. Keep Loom's original cross-platform identity independent of SLOPOS/PARAMA. Future interoperability (§15) should use versioned host adapters, not an unjustified Slint replacement or Linux-only architectural fork.
+
+### Test what actual users do
+
+Document claimed support in the **existing evidence and current-truth mechanisms**, by specific document producer/format version, app commit, host OS/architecture, toolchain/engine versions and fixtures. Avoid a new Markdown status ledger. For each claimed feature, independently verify:
+
+| Area | Minimum complete journey and failure coverage |
+|---|---|
+| Writer | Representative DOCX/ODT: import or create, edit real styled text/tables/images, save, exit, reopen, export, compare supported semantics/layout with source oracles |
+| Sheets | Real XLSX/ODS formulas, formatting, charts and performance-sized workbooks; edit/recalculate/sort/undo, save/reopen/export, test errors and crash/recovery |
+| Present | Real PPTX/ODP text/objects/charts where supported; edit slides, presenter actions, save/reopen/export, inspect visual and semantic fidelity |
+| Shared native UX | Native file dialogs, menus invoking real commands, clipboard, accessibility, keyboard focus, screen scaling, app launch and window lifecycle on every **claimed** platform |
+| Negative/recovery | Malformed/truncated documents, unsupported properties, disk-full, missing fonts/codecs, permission denied, interruption, restart and no silent data loss |
+
+Treat parser/fixture passes, actual GUI acceptance, producer-consumer round-trips, recovery and real-platform behavior as **different evidence levels**. A successful export command or attractive screenshot does not prove compatibility. Use LibreOffice and Microsoft Office as comparison oracles when legally available; list the versions actually tested.
+
+### Reproducibility, license and agent review
+
+- Compare release builds on pinned workloads, files, binaries, OS/renderer and hardware. Repeat runs; measure cold/warm startup, visible input responsiveness, frame/scroll latency, evaluation, file I/O, recovery durability, p50/p95, peak memory and failures separately. Never infer UI smoothness from a fast computational kernel or superiority from one cherry-picked workload.
+- Check source-file, library, model, asset, font and linked-artifact licenses with exact revisions, provenance and distribution obligations before using them. An upstream project's website license label is not enough for imported components; GPL/copy-left combinations need explicit review before changing MIT distribution expectations.
+- Coding agents must follow the **currently unlocked gate**, identify existing implementations and boundaries first, keep scoped diffs, preserve negative tests and produce handoffs with precise environment/commands, fixture hashes, observed outcomes, failures, resource data if affected, security/licensing impact, and remaining `NOT_RUN` work. Human review and existing acceptance requirements cannot be replaced by model assertions, generated dashboards or renamed failing tests.
+- These rules **do not unlock** SLOPOS integration, PARAMA ports or Photo/Motion/Video/Studio/Encode. A future task is not an active task.
+
+### First-party distribution, edge profiles and future PARAMA target
+
+**Roadmap goal only, not permission to bypass Loom's active serial application acceptance.** Loom is an independently authored Rust/Slint suite that may become a **first-party curated SLOPOS creative suite** after actual Linux application QA, compatibility, package/provenance and licensing checks. The core 512 MB Raspberry Pi Zero 2 W SLOPOS image **must not preload** Loom or require its runtime; separately install only supported configurations. Preserve standalone Windows/macOS/Linux deliverables and the same Loom design system; do not rewrite to GTK or declare native PARAMA support.
+
+- **SLOPOS Linux target:** real Writer/Sheets/Present GUI launches, menu bar command dispatch, drag/drop/clipboard, file associations, save/reopen, recovery, accessibility and theme/icon role bridges; validate in actual SLOPOS graphical session, not GNOME screenshots alone. SLOPOS integrates through versioned desktop adapter; core document models remain independent. Photo/Motion/Video/Studio/Encode retain Loom's own unlock gates.
+- **Edge resource contract (budgets and evidence IDs in §17):** on an actual Pi Zero 2 W (4× Cortex-A53/512 MB) after AArch64/Slint/native dependencies prove compatible, test a modest text document, small workbook and compact slide deck at 720p with measured process-tree PSS, peak RSS, `MemAvailable`, input-to-visible p95, idle CPU, cancellation under slow microSD and crash/data recovery. Stream/chunk work, cap caches and concurrency. Reject oversized documents **before OOM** with loss-aware errors; preserve data fidelity and undo. Do not claim large workbooks or local generative models fit 512 MB.
+- **PARAMA target:** far-future **native source port**, only after tested PARAMA user-mode process/runtime, memory/filesystem, SURYA surfaces/input/fonts/clipboard and a usable Rust/Slint rendering backend or a separately approved portability adapter. Native PARAMA support is not achieved by cross-compiling a Linux ELF, by PARAMA booting, or by a proposed Linux ABI personality. Document ABI and runtime gaps explicitly.
+- **Project ownership:** only original owner-authored apps with audited imported assets qualify for bundled first-party identity. Loom remains independently maintained. Exclude `palaashatri/tricycle` and `palaashatri/texture-auto-upscaler` (GitHub forked upstream projects); optional downstream dependencies are governed by licenses, not ownership claims.
+- **Shared services:** prefer mature, licensed platform adapters and efficient FFmpeg/PipeWire services where beneficial; avoid embedding duplicate transcoders, document indexers or always-on servers. SLOPOS Files metadata indexes should be optional, permissioned and disabled/bounded on edge machines. Learned design principles from Vinix/VitruvianOS are architectural only, not dependencies.
+- **Proof:** each app/platform declares status as `NOT_STARTED`, `BLOCKED`, `FUNCTIONAL_WITH_LIMITATIONS` or `ACCEPTED` based on **real** OS/app/runtime/hardware measurements. No new score or milestone may be inferred from roadmap text. No new plan/truth files: continue using `AGENTS.md` and existing workflow contracts.
+
+## 17. Edge-first efficiency: Raspberry Pi Zero 2 W reference
+
+**Future portability and quality goal; NOT currently supported, tested or an active application release gate.** Target the Raspberry Pi Zero 2 W's **four 1 GHz ARM Cortex-A53 cores and 512 MB shared LPDDR2 RAM** as the reference constrained machine for Loom's *small, useful desktop workflows*. Loom must remain native **Rust + Slint**, local-first and cross-platform. Existing Linux x86-64, Windows x86-64 and macOS CI/acceptance obligations, serial app locks, document correctness and provenance rules remain unchanged; **AArch64/Linux on this board is a future experimental target**, not a current release claim. Device reference: https://www.raspberrypi.com/documentation/computers/zero.html.
+
+### Nonnegotiable responsiveness and workload semantics
+
+- **Small document baseline:** launch an empty/minimal Writer document, enter/edit/search text, open/save/reopen a modest document; create and edit small Sheets workbooks with bounded formulas and limited visible cells; open/arrange and save a small Present deck. The interface must remain responsive during native file I/O and recalculation. **These are target workflows, not verified Pi capabilities.**
+- **Large workloads remain correct, not magically cheap:** one-million-cell workbooks, complicated DOCX/PPTX layouts, large images, video processing and generative models are not mandated to fit or complete rapidly inside 512 MB. Stream/import incrementally with size limits, chunked evaluation/virtualized grids, and spill-to-disk or safely reject before OOM when appropriate. The result must be semantically correct; unsupported documents get honest loss warnings/declines, not silent feature truncation.
+- **UI priorities:** keep a responsive main loop, bound active layout and repaint work to visible regions, preserve accessibility, limit thumbnails/page caches and generation/thread pools, avoid eager document duplication and wasteful full-workbook snapshots. Use asynchronous operations and backpressure; user input, cancellation, undo/recovery and progress must survive slow microSD storage.
+- **Capability negotiation:** no mandatory GPU, ML model, network, background transcoder or high-bandwidth compositor effects for core small-doc workflows. Optional acceleration/advanced-media work may be disabled by explicit user-visible edge profile, not secretly emulated or silently uploaded. Preserve visible modes in Loom's own Design Bible; SLOPOS theme/desktop integration (§15) must not inflate memory or require unrelated resident services.
+- **Build prerequisites:** investigate Slint renderer/runtime and OS support, allocator and linked libraries, target ABI (start AArch64; armhf only if every dependency and semantics support it), fonts/input/graphics and independent packaging. A Linux ARM VM, cross-compiled ELF or source inspection does not establish native Raspberry Pi usability.
+
+### Real-board resource acceptance (future, initially provisional)
+
+Run a clean Pi Zero 2 W with declared Raspberry Pi OS/Linux image, 32/64-bit ABI, GPU memory/CMA reservation, screen resolution (1280×720 first), microSD medium, services, physical temperature/clocks, network, swap/zram state and other competing processes. For repeated cold/warm trials record **PSS and peak RSS** per application/process tree, total `MemAvailable`, OOM/swap pressure, CPU/idle polling, visible keystroke/render latency p50/p95, frame pacing, start time, time-to-first-usable-document, read/write throughput and crash/recovery. Distinguish external I/O latency from time during which the *GUI stops responding*.
+
+**Initial quality hypothesis (not an accepted measured budget):** a single lightweight Loom app running alongside a documented minimal desktop should not cause OOM or sustained swap thrashing; local text insertion, selection and simple formula edits should target **p95 ≤150 ms** visible response on a warmed, otherwise idle 720p session; cancellation during slow import must restore responsiveness within a measured bounded period, with original document/recovery intact. Set actual memory caps **after measuring full OS + compositor baseline**, not by treating the device's 512 MB as available to one application. All existing million-cell and high-end platform gates stay distinct, and edge limitations never justify lowering correctness.
+
+| Future ID | Evidence required |
+|---|---|
+| LOOM-EDGE-01 | Toolchain/renderer/font/native-dialog/clipboard AArch64 feasibility, minimum dependency sizes and real-board baseline; preserve other host builds. |
+| LOOM-EDGE-02 | Writer small-doc and Sheets small-workbook end-to-end graphical workflows, memory/input traces, low-memory and slow-I/O recovery. |
+| LOOM-EDGE-03 | Present small-deck workflow, rendering/clipboard, tested edge lazy-loading and bounded caches; documented optional acceleration limits. |
+| LOOM-EDGE-04 | Repeat on actual SLOPOS Linux reference session and any later native PARAMA target only when those platforms exist; prove functionality separately, no transfer of results between environments. |
+
+**Task scheduling:** keep the current serial acceptance workflow and `current-truth` as source of truth. No agent may rewrite a rendering engine, change Slint, add a new application, modify active test thresholds or represent this design target as a pass merely to pursue low-memory optimization. Profile the approved workload first, record a measured bottleneck, then make a small independently validated change with correctness and host-platform regressions.
+
 ## current-truth
 
 <!-- CURRENT TRUTH START -->

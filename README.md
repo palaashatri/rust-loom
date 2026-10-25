@@ -17,6 +17,14 @@ The current honest product-parity estimate and application boundaries are kept i
 
 The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are consolidated in [`AGENTS.md`](AGENTS.md).
 
+## Future SLOPOS desktop integration (planned)
+
+Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaashatri/rust-slopos) while remaining a separate, cross-platform **Rust + Slint** project. A future versioned integration layer may provide SLOPOS launch/file associations, real global-menu commands, shared file dialogs/clipboard, accessibility, and versioned theme-token and icon-role mapping for **SLOPOS Classic (System 7/Platinum)**, **Sinty-inspired SLOPOS Modern** and safe user themes, while independently respecting Dock/taskbar layout profiles. Optional local SLOPOS Vision and AI desktop automation may interact through permissioned document actions.
+
+The symbolic app-list icons in SLOPOS are pinned, licensed Lucide reference SVGs, not custom colorful Loom or Sinty app artwork. Loom keeps its original cross-platform Slint visual identity when SLOPOS is absent.
+
+**Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
+
 ## Reusable interaction tooling
 
 - [Linux desktop input skill](.agents/skills/linux-desktop-input/SKILL.md) — guarded mouse and keyboard interaction for Linux desktop QA when native computer-use controls are unavailable.
@@ -44,6 +52,24 @@ cargo build --workspace --release
 ```
 
 The CI matrix additionally validates Linux x86-64, Windows x86-64, macOS arm64, and macOS x86-64 builds, native packages, functional journeys, keyboard palette journeys, UI productisation audits, and visual QA evidence.
+
+## Engineering discipline
+
+Loom prefers **proven libraries with small adapters** over unnecessary engine rewrites. Compatibility is established with real Writer/Sheets/Present files across the complete native GUI workflow—import, edit, save, reopen, export and failure/recovery—not by startup or fixture-only tests. Repeatable performance measurements include input latency, p50/p95, peak memory, hardware/OS, actual file workload and failures. Imported source, libraries, models, fonts and assets need component-level provenance and license review.
+
+AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](AGENTS.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
+
+## SLOPOS and future PARAMA platform goals
+
+As an **originally authored suite**, Loom is a candidate for SLOPOS's optional first-party creative catalog after independently verified Linux GUI integration and licensing/packaging. Loom must remain **Rust + Slint** and cross-platform. On a future Pi Zero 2 W Linux session, small real Writer/Sheets/Present workflows should favor bounded memory, lazy work, cancellation and accurate file round-trips; **actual ARM64 device support has not been demonstrated**.
+
+**PARAMA is a conditional future native source target**, requiring a real Rust/Slint-compatible app runtime, SURYA graphics/input, filesystem/fonts and actual performance/QA. No present PARAMA binary, SDK or support is claimed. Forked Tricycle and texture-auto-upscaler are not SLOPOS first-party bundle candidates. See [AGENTS.md integration policy](AGENTS.md#first-party-distribution-edge-profiles-and-future-parama-target).
+
+## Edge efficiency goal
+
+Loom aims for **responsive small-document workflows on a Raspberry Pi Zero 2 W** (AArch64 Cortex-A53, **512 MB RAM**) as a future low-end reference, while preserving fully featured workloads on capable systems. The GUI must stay interactive and allow progress/cancellation during slow disk/network/CPU work; large documents and demanding media/ML may require more memory and must fail safely with truthful explanations, never silently drop data. Memory, input p95, caches, startup and swapping must be instrumented on **actual hardware**.
+
+**AArch64 Pi Zero 2 W support is not implemented or verified.** Existing Rust/Slint, supported host-platform gates and sequential app development remain unchanged. See [AGENTS.md §17](AGENTS.md#17-edge-first-efficiency-raspberry-pi-zero-2-w-reference).
 
 ## Principles
 
