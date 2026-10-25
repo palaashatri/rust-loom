@@ -15,8 +15,9 @@ use crate::text_metrics::pdf_text_width;
 const CELL_PAD_X_PT: f32 = 5.0;
 /// Space above a cell's first line and below its last line.
 const CELL_PAD_Y_PT: f32 = 3.0;
-/// Colour of the cell rules: the cell border the editor draws (#D0D0D0).
-const RULE_RGB: (f32, f32, f32) = (0.816, 0.816, 0.816);
+/// Colour of the cell rules: the table line the editor draws (the theme's
+/// paper-muted token, #6E6E73 on the light theme).
+const RULE_RGB: (f32, f32, f32) = (0.431, 0.431, 0.451);
 
 /// One cell's plain text with the bold and italic runs inside it, as byte
 /// ranges of that text.
@@ -583,18 +584,23 @@ mod tests {
     }
 
     #[test]
-    fn the_cell_rules_are_drawn_in_the_editors_border_colour() {
-        // The editor draws every table cell border in #D0D0D0.
+    fn the_cell_rules_are_drawn_in_the_editors_line_colour() {
+        // The editor draws table lines in the theme's paper-muted token, #6E6E73
+        // on the light theme (the page's own table-line rule in writer_components).
         let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
-        let border = 0xD0 as f32 / 255.0;
+        let line = [
+            0x6E as f32 / 255.0,
+            0x6E as f32 / 255.0,
+            0x73 as f32 / 255.0,
+        ];
         let colours = stroke_colours(&pdf);
         assert!(
             colours.iter().any(|c| {
-                (c.0 - border).abs() < 0.01
-                    && (c.1 - border).abs() < 0.01
-                    && (c.2 - border).abs() < 0.01
+                (c.0 - line[0]).abs() < 0.01
+                    && (c.1 - line[1]).abs() < 0.01
+                    && (c.2 - line[2]).abs() < 0.01
             }),
-            "the rules are the editor's #D0D0D0 border: {colours:?}"
+            "the rules are the editor's #6E6E73 table line: {colours:?}"
         );
     }
 
