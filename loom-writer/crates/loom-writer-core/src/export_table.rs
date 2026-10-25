@@ -4,7 +4,7 @@
 //! A row is as tall as its tallest wrapped cell.
 
 use loom_objects::table::{HorizontalAlign, Table};
-use loom_objects::{TableStyleCatalog, TableStyleOptions};
+use loom_objects::{Border, BorderStyle, TableStyleCatalog, TableStyleOptions};
 use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
 use loom_text::{CharacterStyle, FontWeight, StyleRun};
 
@@ -59,13 +59,37 @@ impl Cell {
     }
 }
 
+/// One side of a cell as the table's style draws it: a colour and a width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Edge {
+    rgb: (f32, f32, f32),
+    width: f32,
+}
+
+/// The edge a style border sets, or `None` when the style leaves that side
+/// without a rule (no style, no width, or no readable colour).
+fn edge(border: Option<&Border>) -> Option<Edge> {
+    let border = border?;
+    if matches!(border.style, BorderStyle::None) || border.width_pt <= 0.0 {
+        return None;
+    }
+    Some(Edge {
+        rgb: hex_rgb(&border.color)?,
+        width: border.width_pt,
+    })
+}
+
 /// How one cell is drawn, as the table's style resolves it: its background,
-/// its text colour and whether its text is bold.
+/// its text colour, whether its text is bold, and its style borders.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct CellFormat {
     fill: Option<(f32, f32, f32)>,
     text: Option<(f32, f32, f32)>,
     bold: bool,
+    top: Option<Edge>,
+    bottom: Option<Edge>,
+    left: Option<Edge>,
+    right: Option<Edge>,
 }
 
 /// The format of the cell at `row`, `column`, resolved by the table's style the
@@ -93,6 +117,10 @@ fn cell_format(table: &Table, row: usize, column: usize) -> CellFormat {
         fill: resolved.background_color.as_deref().and_then(hex_rgb),
         text: resolved.text_color.as_deref().and_then(hex_rgb),
         bold: resolved.bold,
+        top: edge(resolved.borders.top.as_ref()),
+        bottom: edge(resolved.borders.bottom.as_ref()),
+        left: edge(resolved.borders.left.as_ref()),
+        right: edge(resolved.borders.right.as_ref()),
     }
 }
 
@@ -315,6 +343,22 @@ pub(crate) fn draw_row(
     pdf.draw_line(page, left, bottom, right, bottom, rule);
     if index == 0 {
         pdf.draw_line(page, left, top, right, top, rule);
+    }
+    // The table style's own borders are drawn over the grid, cell by cell.
+    for (column, format) in row.formats.iter().enumerate() {
+        let x0 = left + layout.starts[column];
+        let x1 = x0 + layout.widths[column];
+        for (edge, from, to) in [
+            (format.top, (x0, top), (x1, top)),
+            (format.bottom, (x0, bottom), (x1, bottom)),
+            (format.left, (x0, top), (x0, bottom)),
+            (format.right, (x1, top), (x1, bottom)),
+        ] {
+            if let Some(edge) = edge {
+                let style = PathStyle::stroked(edge.rgb, edge.width);
+                pdf.draw_line(page, from.0, from.1, to.0, to.1, style);
+            }
+        }
     }
 }
 
@@ -631,6 +675,26 @@ mod tests {
                 && (c.1 - fill.1).abs() < 0.01
                 && (c.2 - fill.2).abs() < 0.01),
             "the header is filled with the style's colour {fill:?}: {colours:?}"
+        );
+    }
+
+    #[test]
+    fn the_style_draws_the_header_bottom_border() {
+        // Medium 1, the default style, sets a 1.5 pt navy rule under its header.
+        let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
+        let navy = [
+            0x1B as f32 / 255.0,
+            0x36 as f32 / 255.0,
+            0x5D as f32 / 255.0,
+        ];
+        assert!(
+            stroke_colours(&pdf).iter().any(|c| {
+                (c.0 - navy[0]).abs() < 0.01
+                    && (c.1 - navy[1]).abs() < 0.01
+                    && (c.2 - navy[2]).abs() < 0.01
+            }),
+            "the header's style border is drawn: {:?}",
+            stroke_colours(&pdf)
         );
     }
 

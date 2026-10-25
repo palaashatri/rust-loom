@@ -548,3 +548,30 @@ fn a_heading_row_is_bold_on_the_page_as_it_is_in_the_pdf() {
         "a heading is bold on the page, as the PDF draws it: {segment:?}"
     );
 }
+
+#[test]
+fn the_style_border_reaches_the_table_cell_on_the_page() {
+    // Medium 1, the default style, sets a 1.5 pt navy rule under the header row.
+    let mut document = WriterDocument::new("style-border", "Style border");
+    let id = document.next_id();
+    document.push(loom_writer_core::markdown_table_block(
+        id,
+        "| A | B |\n| --- | --- |\n| C | D |",
+    ));
+    let projection = projection::project(&document, PageViewport::default(), None);
+    let header = projection
+        .table_cell_rects
+        .first()
+        .expect("a table cell rectangle");
+    assert!(
+        header.edge_bottom.visible,
+        "the header cell draws its style's bottom border: {:?}",
+        header.edge_bottom
+    );
+    assert_eq!(
+        header.edge_bottom.color,
+        slint::Color::from_rgb_u8(0x1B, 0x36, 0x5D),
+        "the border is the style's navy"
+    );
+    assert!((header.edge_bottom.width - 1.5).abs() < 0.01);
+}

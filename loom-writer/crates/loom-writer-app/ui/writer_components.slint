@@ -91,6 +91,13 @@ export struct WriterCommentRect {
     fill: color,
 }
 
+/// One side of a table cell that the table style sets a rule on.
+export struct WriterCellEdge {
+    visible: bool,
+    color: color,
+    width: length,
+}
+
 /// A table cell rectangle projected with borders and background fills.
 export struct WriterTableCellRect {
     x: length,
@@ -107,6 +114,11 @@ export struct WriterTableCellRect {
     table-cell: bool,
     /// Canonical editor byte offset for a table cell; -1 for non-cell shapes.
     caret-offset: int,
+    /// The table style's rule on each side of the cell, when it sets one.
+    edge-top: WriterCellEdge,
+    edge-bottom: WriterCellEdge,
+    edge-left: WriterCellEdge,
+    edge-right: WriterCellEdge,
 }
 
 /// An inline picture placed on the page stack.
@@ -288,6 +300,39 @@ component WriterDocumentEditor inherits Rectangle {
                     : cell.border-color;
             border-width: cell.border-width * root.page-zoom;
             accessible-role: none;
+            // The table style's own rules, drawn over the grid line on that side.
+            if cell.edge-top.visible : Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: cell.edge-top.width * root.page-zoom;
+                background: cell.edge-top.color;
+                accessible-role: none;
+            }
+            if cell.edge-bottom.visible : Rectangle {
+                x: 0px;
+                y: parent.height - self.height;
+                width: parent.width;
+                height: cell.edge-bottom.width * root.page-zoom;
+                background: cell.edge-bottom.color;
+                accessible-role: none;
+            }
+            if cell.edge-left.visible : Rectangle {
+                x: 0px;
+                y: 0px;
+                width: cell.edge-left.width * root.page-zoom;
+                height: parent.height;
+                background: cell.edge-left.color;
+                accessible-role: none;
+            }
+            if cell.edge-right.visible : Rectangle {
+                x: parent.width - self.width;
+                y: 0px;
+                width: cell.edge-right.width * root.page-zoom;
+                height: parent.height;
+                background: cell.edge-right.color;
+                accessible-role: none;
+            }
         }
         for cell in root.table-cell-rects : Rectangle {
             x: cell.x * root.page-zoom;

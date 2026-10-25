@@ -26,8 +26,8 @@ const PAGE_VIEW_FALLBACK_SCREENS: f32 = 2.0;
 
 use crate::{
     normalize_page_scroll, normalize_page_zoom, writer_render_alignment,
-    writer_render_height_for_width, WriterCommentRect, WriterRenderBlock, WriterSelectionRect,
-    WriterTableCellRect,
+    writer_render_height_for_width, WriterCellEdge, WriterCommentRect, WriterRenderBlock,
+    WriterSelectionRect, WriterTableCellRect,
 };
 
 /// Everything the page canvas shows for one document state.
@@ -594,8 +594,14 @@ pub(crate) fn project(
                             let cur_y = table_y + r as f32 * row_height;
                             for c in 0..cols {
                                 let cur_x = table_x + col_starts[c];
-                                let resolved = catalog_style
-                                    .resolve_cell(r, c, num_rows, cols, &options, None);
+                                let resolved = catalog_style.resolve_cell(
+                                    r,
+                                    c,
+                                    num_rows,
+                                    cols,
+                                    &options,
+                                    table.cell(r, c),
+                                );
                                 let has_bg = resolved.background_color.is_some();
                                 let bg_color = if let Some(hex) = &resolved.background_color {
                                     slint::Color::from_argb_encoded(parse_hex_color(hex))
@@ -617,6 +623,10 @@ pub(crate) fn project(
                                     selected: false,
                                     table_cell: true,
                                     caret_offset: cell_offsets[r * cols + c],
+                                    edge_top: cell_edge(resolved.borders.top.as_ref()),
+                                    edge_bottom: cell_edge(resolved.borders.bottom.as_ref()),
+                                    edge_left: cell_edge(resolved.borders.left.as_ref()),
+                                    edge_right: cell_edge(resolved.borders.right.as_ref()),
                                 });
                             }
                         }
@@ -685,6 +695,10 @@ pub(crate) fn project(
                         selected: false,
                         table_cell: false,
                         caret_offset: -1,
+                        edge_top: WriterCellEdge::default(),
+                        edge_bottom: WriterCellEdge::default(),
+                        edge_left: WriterCellEdge::default(),
+                        edge_right: WriterCellEdge::default(),
                     });
                     let mut title_block = RichBlock::new(block.id, "heading2", chart_title);
                     title_block.runs.push(loom_text::StyleRun {
@@ -1030,6 +1044,24 @@ pub(crate) fn table_row_view_span(
     let row = table_row_height(style);
     let view_top = (top + location.row as f32 * row) * zoom + style.margin_top_pt * zoom + base.y;
     Some((view_top, view_top + row * zoom))
+}
+
+/// The page's rule for one side of a table cell: the style's border when it sets
+/// a visible one, and nothing otherwise.
+fn cell_edge(border: Option<&loom_objects::Border>) -> WriterCellEdge {
+    match border {
+        Some(border)
+            if !matches!(border.style, loom_objects::BorderStyle::None)
+                && border.width_pt > 0.0 =>
+        {
+            WriterCellEdge {
+                visible: true,
+                color: slint::Color::from_argb_encoded(parse_hex_color(&border.color)),
+                width: border.width_pt,
+            }
+        }
+        _ => WriterCellEdge::default(),
+    }
 }
 
 fn parse_hex_color(hex: &str) -> u32 {
