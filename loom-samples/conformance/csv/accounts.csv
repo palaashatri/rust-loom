@@ -1,3 +1,0 @@
-Item,Amount,Kind
-Design,8000,chart
-Total,=SUM(B2:B3),formula

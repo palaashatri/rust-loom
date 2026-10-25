@@ -44,52 +44,8 @@ status = "NOT_STARTED"
 required = true
 rev = "local"
 
-[repos.loom-photo]
-status = "NOT_STARTED"
-required = true
-rev = "local"
-
-[repos.loom-motion]
-status = "NOT_STARTED"
-required = true
-rev = "local"
-
-[repos.loom-video]
-status = "NOT_STARTED"
-required = true
-rev = "local"
-
-[repos.loom-studio]
-status = "NOT_STARTED"
-required = true
-rev = "local"
-
-[repos.loom-encode]
-status = "NOT_STARTED"
-required = true
-rev = "local"
-
-[repos.loom-vision]
-status = "SCAFFOLDED"
-required = true
-rev = "local"
-
-[repos.loom-plugin-sdk]
-status = "SCAFFOLDED"
-required = true
-rev = "local"
-
 [repos.loom-design-bible]
 status = "SCAFFOLDED"
 required = true
 rev = "local"
 
-[repos.loom-spec]
-status = "SCAFFOLDED"
-required = true
-rev = "local"
-
-[repos.loom-samples]
-status = "NOT_STARTED"
-required = false
-rev = "local"

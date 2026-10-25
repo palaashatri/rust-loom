@@ -16,16 +16,11 @@ import sys
 import zipfile
 from pathlib import Path
 
-APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
+APPS = ("writer", "sheets", "present")
 EXTENSIONS = {
     "writer": ".loomdoc",
     "sheets": ".loomsheet",
     "present": ".loomdeck",
-    "photo": ".loomphoto",
-    "motion": ".loommotion",
-    "video": ".loomvideo",
-    "studio": ".loomstudio",
-    "encode": ".loomencode",
 }
 
 
@@ -216,96 +211,6 @@ def main() -> int:
             ["pdf", str(present), str(pdf)],
         ],
         ((pdf, b"%PDF", "Present PDF export"),),
-    )
-
-    photo = samples / "sample.loomphoto"
-    ppm = work / "photo.ppm"
-    journey(
-        "photo",
-        [
-            ["create", str(photo), "Native Photo", "640", "360"],
-            ["inspect", str(photo)],
-            ["render-demo", str(ppm), "320", "180"],
-        ],
-        ((ppm, b"P6\n", "Photo composite render"),),
-    )
-
-    motion = samples / "sample.loommotion"
-    journey(
-        "motion",
-        [
-            ["create", str(motion), "Native Motion"],
-            ["validate", str(motion)],
-            ["inspect", str(motion)],
-            ["frame", str(motion), "12"],
-        ],
-    )
-
-    video = samples / "sample.loomvideo"
-    edl = work / "video.edl"
-    journey(
-        "video",
-        [
-            ["create", str(video), "Native Video"],
-            ["edit-demo", str(video)],
-            ["inspect", str(video)],
-            ["plan", str(video)],
-            ["edl", str(video), str(edl)],
-        ],
-        ((edl, b"TITLE: Native Video", "Video EDL export"),),
-        (
-            (
-                1,
-                ("Edited video project: 3 clips, 1 marker, 1 caption",),
-                "Video persisted edit",
-            ),
-            (2, ("Timeline: 3 clips, 1 markers, 1 captions",), "Video inspection"),
-            (3, ("c-interview-b", "rate 1.500"), "Video render plan"),
-        ),
-    )
-
-    studio = samples / "sample.loomstudio"
-    sine = work / "sine.wav"
-    synth = work / "synth.wav"
-    journey(
-        "studio",
-        [
-            ["create", str(studio), "Native Song", "124"],
-            ["validate", str(studio)],
-            ["inspect", str(studio)],
-            ["sine", str(sine), "440", "0.25"],
-            ["synth", str(synth), "64", "0.25"],
-        ],
-        (
-            (sine, b"RIFF", "Studio oscillator WAV"),
-            (synth, b"RIFF", "Studio MIDI WAV"),
-        ),
-    )
-
-    encode = samples / "sample.loomencode"
-    journey(
-        "encode",
-        [
-            ["create", str(encode), "Native Delivery Queue"],
-            ["prepare-recovery-demo", str(encode)],
-            ["inspect", str(encode)],
-            ["recover", str(encode)],
-            ["inspect", str(encode)],
-        ],
-        stdout_expectations=(
-            (1, ("Prepared recovery demo: 3 jobs",), "Encode recovery setup"),
-            (
-                2,
-                ("Pending Jobs: 2", "Encoding { progress: 0.42 }"),
-                "Encode interrupted state",
-            ),
-            (3, ("requeued 1 interrupted job",), "Encode recovery"),
-            (
-                4,
-                ("Pending Jobs: 3", "Aggregate Progress: 0.000"),
-                "Encode recovered state",
-            ),
-        ),
     )
 
     report["passed"] = not failures

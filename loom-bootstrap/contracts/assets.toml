@@ -76,26 +76,8 @@ redistributable = true
 attribution_required = false
 
 [[allow]]
-glob = "loom-vision/crates/loom-vision-cli/fixtures/hello.png"
-origin = "Loom-generated test fixture"
-license = "Repository project license"
-commercial = true
-redistributable = true
-attribution_required = false
-
-[[allow]]
 glob = "loom-core/crates/loom-ui/baselines/foundation/*.png"
 origin = "Loom foundation accepted baseline capture"
-license = "Repository project license"
-commercial = true
-redistributable = true
-attribution_required = false
-
-# Test/conformance packages are repository-created fixtures. They are not
-# third-party templates or user-facing bundled creative assets.
-[[allow]]
-glob = "loom-samples/conformance/**"
-origin = "Loom-generated conformance fixture"
 license = "Repository project license"
 commercial = true
 redistributable = true
@@ -142,3 +124,4 @@ license = "SIL Open Font License 1.1"
 commercial = true
 redistributable = true
 attribution_required = true
+

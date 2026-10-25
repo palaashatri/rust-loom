@@ -13,11 +13,6 @@ repo_app() {
     loom-writer) printf '%s' writer ;;
     loom-sheets) printf '%s' sheets ;;
     loom-present) printf '%s' present ;;
-    loom-photo) printf '%s' photo ;;
-    loom-motion) printf '%s' motion ;;
-    loom-video) printf '%s' video ;;
-    loom-studio) printf '%s' studio ;;
-    loom-encode) printf '%s' encode ;;
     *) printf '%s' '' ;;
   esac
 }

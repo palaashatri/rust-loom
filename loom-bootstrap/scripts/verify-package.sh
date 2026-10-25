@@ -32,16 +32,7 @@ SUITE_DIRS=(
   loom-writer
   loom-sheets
   loom-present
-  loom-photo
-  loom-motion
-  loom-video
-  loom-studio
-  loom-encode
-  loom-vision
-  loom-plugin-sdk
   loom-design-bible
-  loom-spec
-  loom-samples
 )
 
 cleanup_path() {

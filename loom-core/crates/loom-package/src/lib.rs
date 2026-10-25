@@ -6,7 +6,7 @@
 //! corruption detection, and safety limits against archive bombs and
 //! malformed content.
 //!
-//! The format is documented in `docs/rfcs/RFC-0006` of `loom-spec`.
+//! The format's specification (RFC-0006) lives in the separate `loom-spec` repository.
 
 pub mod manifest;
 pub mod zip;

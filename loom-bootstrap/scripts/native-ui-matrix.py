@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
+APPS = ("writer", "sheets", "present")
 THEMES = ("light", "dark", "high-contrast")
 DEFAULT_SIZES = ("1024x720", "1440x900", "1920x1200")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -26,11 +26,6 @@ EXTENSIONS = {
     "writer": ".loomdoc",
     "sheets": ".loomsheet",
     "present": ".loomdeck",
-    "photo": ".loomphoto",
-    "motion": ".loommotion",
-    "video": ".loomvideo",
-    "studio": ".loomstudio",
-    "encode": ".loomencode",
 }
 
 
@@ -110,7 +105,6 @@ def find_sample(root: Path, app: str) -> Path | None:
     candidates: list[Path] = []
     for search_root in (
         root / "loom-bootstrap" / ".work" / "generated-samples",
-        root / "loom-samples",
         root / f"loom-{app}",
     ):
         if search_root.is_dir():

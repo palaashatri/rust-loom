@@ -11,11 +11,11 @@ if [ "${LOOM_SKIP_WORK_INIT:-0}" != "1" ]; then
   mkdir -p "$WORK/screenshots" "$WORK/diffs"
 fi
 
-# Cargo workspace repos that are part of the suite. Doc/spec/design/samples repos are
+# Cargo workspace repos that are part of the suite. Doc/design repos are
 # intentionally excluded (they are not cargo workspaces).
-REPOS="loom-core loom-writer loom-sheets loom-present loom-photo loom-motion loom-video loom-studio loom-encode loom-vision loom-plugin-sdk"
+REPOS="loom-core loom-writer loom-sheets loom-present"
 # Application repos expected to produce a binary named loom-<app>.
-APPS="writer sheets present photo motion video studio encode"
+APPS="writer sheets present"
 
 NAME="$(basename "$0")"
 log() { printf '[%s] %s\n' "$NAME" "$*"; }

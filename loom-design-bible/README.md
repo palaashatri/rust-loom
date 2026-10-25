@@ -88,7 +88,7 @@ They consume this contract.
 
 ## Related repositories
 
-* `loom-spec` — product scope and capability contracts (references this Bible).
 * `loom-core` — shared platform implementation, including the token generator.
-* `loom-plugin-sdk` — extension contract; visual and interaction rules apply to
-  plugins as they do to first-party UI.
+
+The product-scope specification (`loom-spec`) and the plugin SDK are not part of
+`main`; they remain on the `apps/later` branch.

@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  APPS: "writer sheets present photo motion video studio encode"
+  APPS: "writer sheets present"
 
 jobs:
   build:
@@ -152,17 +152,10 @@ jobs:
           =================================================
           Run an application directly after unpacking. The operating system must
           provide its normal desktop, graphics, font, and audio runtime libraries.
-          Loom Video requires FFmpeg and a sibling FFprobe executable.
-          Loom Encode additionally requires FFmpeg on PATH.
           Linux file dialogs require zenity or xdg-desktop-portal.
             loom-writer   word processor
             loom-sheets   spreadsheets
             loom-present  presentations
-            loom-photo    image editing
-            loom-motion   motion graphics
-            loom-video    video editing
-            loom-studio   audio
-            loom-encode   media transcoding (needs FFmpeg on PATH)
 
           macOS: the build is unsigned. After unpacking, remove the quarantine flag:
             xattr -dr com.apple.quarantine .

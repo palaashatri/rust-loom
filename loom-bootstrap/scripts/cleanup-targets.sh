@@ -17,7 +17,6 @@ Options:
 
 Default cleanup is limited to:
   - target/ under the Cargo repositories listed by scripts/lib.sh;
-  - loom-plugin-sdk/crates/loom-plugin-cli/target/ (fixture output);
   - .work/verify-extract/, .work/verify-target/, and .work/package-filelist.txt.
 
 The script never removes source files, logs, screenshots, reports, historical
@@ -88,14 +87,6 @@ is_allowed_path() {
     "$PARENT/loom-writer/target"|\
     "$PARENT/loom-sheets/target"|\
     "$PARENT/loom-present/target"|\
-    "$PARENT/loom-photo/target"|\
-    "$PARENT/loom-motion/target"|\
-    "$PARENT/loom-video/target"|\
-    "$PARENT/loom-studio/target"|\
-    "$PARENT/loom-encode/target"|\
-    "$PARENT/loom-vision/target"|\
-    "$PARENT/loom-plugin-sdk/target"|\
-    "$PARENT/loom-plugin-sdk/crates/loom-plugin-cli/target"|\
     "$WORK/verify-extract"|\
     "$WORK/verify-target"|\
     "$WORK/package-filelist.txt"|\
@@ -193,8 +184,7 @@ cleanup_repo_target() {
   local repo_dir="$PARENT/$repo"
 
   case "$repo" in
-    loom-core|loom-writer|loom-sheets|loom-present|loom-photo|loom-motion|\
-    loom-video|loom-studio|loom-encode|loom-vision|loom-plugin-sdk)
+    loom-core|loom-writer|loom-sheets|loom-present)
       ;;
     *)
       log "FAIL refusing unknown repository from REPOS: $repo"
@@ -225,21 +215,6 @@ fi
 for repo in $REPOS; do
   cleanup_repo_target "$repo"
 done
-
-# This nested target is documented fixture output, not an arbitrary recursive
-# search for target directories. Check every relevant container before removal.
-PLUGIN_ROOT="$PARENT/loom-plugin-sdk"
-PLUGIN_CRATES="$PLUGIN_ROOT/crates"
-PLUGIN_CLI="$PLUGIN_CRATES/loom-plugin-cli"
-if [ -d "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_CLI/Cargo.toml" ]; then
-  if [ -L "$PLUGIN_ROOT" ] || [ -L "$PLUGIN_CRATES" ] || [ -L "$PLUGIN_CLI" ]; then
-    log "SKIP plugin fixture target (a container is a symlink): $PLUGIN_CLI"
-  else
-    remove_path "plugin fixture target" "$PLUGIN_CLI/target" dir
-  fi
-else
-  log "SKIP plugin fixture target (fixture crate absent): $PLUGIN_CLI"
-fi
 
 remove_path "package verification extract" "$WORK/verify-extract" dir
 remove_path "package verification target" "$WORK/verify-target" dir

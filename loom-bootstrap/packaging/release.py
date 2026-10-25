@@ -25,36 +25,21 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, NoReturn
 
-APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
+APPS = ("writer", "sheets", "present")
 DISPLAY_NAMES = {
     "writer": "Loom Writer",
     "sheets": "Loom Sheets",
     "present": "Loom Present",
-    "photo": "Loom Photo",
-    "motion": "Loom Motion",
-    "video": "Loom Video",
-    "studio": "Loom Studio",
-    "encode": "Loom Encode",
 }
 DOCUMENT_TYPES = {
     "writer": ("loomdoc", "application/x-loom-writer", "Loom Writer Document"),
     "sheets": ("loomtable", "application/x-loom-sheets", "Loom Sheets Workbook"),
     "present": ("loomdeck", "application/x-loom-present", "Loom Present Deck"),
-    "photo": ("loomphoto", "application/x-loom-photo", "Loom Photo Project"),
-    "motion": ("loommotion", "application/x-loom-motion", "Loom Motion Composition"),
-    "video": ("loomvideo", "application/x-loom-video", "Loom Video Project"),
-    "studio": ("loomstudio", "application/x-loom-studio", "Loom Studio Project"),
-    "encode": ("loomencode", "application/x-loom-encode", "Loom Encode Queue"),
 }
 APP_CATEGORIES = {
     "writer": "public.app-category.productivity",
     "sheets": "public.app-category.productivity",
     "present": "public.app-category.productivity",
-    "photo": "public.app-category.graphics-design",
-    "motion": "public.app-category.video",
-    "video": "public.app-category.video",
-    "studio": "public.app-category.music",
-    "encode": "public.app-category.video",
 }
 
 

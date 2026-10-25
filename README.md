@@ -2,18 +2,13 @@
 
 Loom is an original, local-first creative software suite built with Rust and Slint.
 
-The repository currently contains eight functional-alpha desktop applications:
+The v1 scope on `main` is three desktop applications. Their acceptance status is in the [current-truth section](AGENTS.md#current-truth).
 
 - [**Loom Writer**](loom-writer/README.md) — Document composition with Apple Pages-class interface polish.
 - [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with Apple Numbers-class multi-sheet workbooks.
 - [**Loom Present**](loom-present/README.md) — Presentation design with Apple Keynote-class theme chooser and presenter sessions.
-- [**Loom Photo**](loom-photo/README.md) — Non-destructive layer and mask image editing.
-- [**Loom Motion**](loom-motion/README.md) — Motion graphics and keyframe animation.
-- [**Loom Video**](loom-video/README.md) — Non-linear video timeline editor.
-- [**Loom Studio**](loom-studio/README.md) — Multitrack audio workstation.
-- [**Loom Encode**](loom-encode/README.md) — Multi-destination batch media encoder.
 
-Shared workspaces provide package formats, runtime services, native desktop adapters (file dialogs, macOS & Linux global menu bars), history, recovery, jobs, UI components, interoperability foundations, Loom Vision contracts, and the plugin SDK.
+Shared workspaces provide package formats, document and text engines, recovery, native desktop adapters (file dialogs, macOS & Linux global menu bars), UI components, and interoperability foundations for these applications. The other five applications (Photo, Motion, Video, Studio, Encode) are locked and kept on the `apps/later` branch.
 
 ## Current status
 
