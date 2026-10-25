@@ -85,6 +85,17 @@ authoritative and the prose is a known defect tracked as GOV-02 in
 4. The area documents relevant to your subsystem
 5. [ANTI_PATTERNS.md](../docs/archive/AGENTS-ARCHIVE.md#source-loom-design-bible-anti-patterns-md) and [UX_ACCEPTANCE_CHECKLIST.md](../docs/archive/AGENTS-ARCHIVE.md#source-loom-design-bible-ux-acceptance-checklist-md) before claiming anything done
 
+## 2027 accessibility and identity notes
+
+* Accessibility review uses WCAG 2.2 AA as applied to software by EN 301 549
+  V4.1.1 ([AGENTS.md §18](../AGENTS.md#18-2027-readiness-baseline--platforms-accessibility-supply-chain-and-regulation)).
+  `contracts/desktop-ui.toml` sets a 28 px minimum pointer target. Three
+  handle targets are smaller than 24 px and need recorded exceptions or larger
+  hit areas (GOV-06).
+* The "warm" language above and the current neutral, blue-accent token values
+  disagree. Whether the palette counts as an original Loom identity is an open
+  owner decision (GOV-05). Until it is made, the TOML values stay authoritative.
+
 ## Contract integrity rules
 
 * `tokens/loom.toml` is the normative token source. [DESIGN_TOKENS.md](../docs/archive/AGENTS-ARCHIVE.md#source-loom-design-bible-design-tokens-md),
