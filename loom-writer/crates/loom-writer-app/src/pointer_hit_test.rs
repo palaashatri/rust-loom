@@ -194,13 +194,8 @@ fn writer_text_metric_offset(
             loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
         };
         let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
-        let local_byte = loom_writer_core::offset_at_x(
-            &block.text.as_str()[line.start..line.end],
-            line.start,
-            &block.runs,
-            font_size,
-            local_x - line_x,
-        );
+        // Relative to the line start, in the order the line is drawn in.
+        let local_byte = block.line_offset_at_x(font_size, line.start..line.end, local_x - line_x);
         let offset = line.global_start + local_byte;
         if distance <= f32::EPSILON {
             return Some(offset);

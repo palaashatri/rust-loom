@@ -97,6 +97,17 @@ export component WriterInspector inherits LoomPanel {
 
     width: 320px;
 
+    // A 1 px divider on the canvas-side edge in the shared border token: in light
+    // theme the panel and the canvas share one fill, so the edge needs its own line.
+    Rectangle {
+        x: Theme.rtl ? parent.width - self.width : 0px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.palette().border;
+        accessible-role: none;
+    }
+
     // Content scrolls; the panel never grows past the window height, so the
     // status bar below always stays fully visible.
     inspector-focus := FocusScope {
@@ -612,6 +623,13 @@ export component WriterInspector inherits LoomPanel {
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Paper Size";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
             LoomSegmentedControl {
                 items: ["A4", "US Letter"];
                 current <=> root.page-paper-index;
@@ -623,6 +641,13 @@ export component WriterInspector inherits LoomPanel {
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Orientation";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
             LoomSegmentedControl {
                 items: ["Portrait", "Landscape"];
                 current <=> root.page-orientation-index;
@@ -634,6 +659,13 @@ export component WriterInspector inherits LoomPanel {
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Margins";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
             LoomSegmentedControl {
                 items: ["Normal", "Narrow", "Wide"];
                 current <=> root.page-margins-index;

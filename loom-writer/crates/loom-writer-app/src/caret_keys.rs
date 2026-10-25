@@ -21,8 +21,10 @@ thread_local! {
     static GOAL_COLUMN: Cell<Option<(usize, f32)>> = const { Cell::new(None) };
 }
 
-/// Handles Up, Down, Home and End (Shift extends); returns whether the key was
-/// consumed. Ctrl and Alt combinations belong to the editor.
+/// Handles Up, Down, Home and End (Shift extends), and Left and Right inside
+/// right-to-left text; returns whether the key was consumed. Left and Right in
+/// left-to-right text, and a plain Left or Right over a selection, are left to
+/// the input. Ctrl and Alt combinations belong to the editor.
 pub(crate) fn handle(
     app: &WriterApp,
     state: &GuiState,
@@ -46,6 +48,10 @@ pub(crate) fn handle(
         VisualMove::LineStart
     } else if is(Key::End) {
         VisualMove::LineEnd
+    } else if is(Key::LeftArrow) {
+        VisualMove::Left
+    } else if is(Key::RightArrow) {
+        VisualMove::Right
     } else {
         return false;
     };
@@ -57,6 +63,13 @@ pub(crate) fn handle(
         let doc = state.current.borrow();
         let selection = doc.selection();
         if doc.table_cell_at_offset(selection.focus).is_some() {
+            return false;
+        }
+        // A plain Left or Right over a selection collapses it; the input does that.
+        if matches!(kind, VisualMove::Left | VisualMove::Right)
+            && !shift
+            && selection.anchor != selection.focus
+        {
             return false;
         }
         let hint = GOAL_COLUMN
@@ -93,3 +106,7 @@ pub(crate) fn handle(
     }
     true
 }
+
+#[cfg(test)]
+#[path = "rtl_caret_keys_tests.rs"]
+mod rtl_caret_keys_tests;

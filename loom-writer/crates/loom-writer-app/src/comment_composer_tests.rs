@@ -71,6 +71,11 @@ fn focus_name(app: &WriterApp) -> String {
 
 /// Reaches the Insert toolbar item with Tab, opens its menu and runs the row at
 /// `row` (Table is 0, Picture 1, Chart 2, Comment 3).
+/// Insert menu rows, top to bottom: Page Break, Line Break, Table, Picture,
+/// Chart from Clipboard, Comment. The menu highlight is moved with the arrow
+/// keys, so Comment is the sixth row.
+const INSERT_COMMENT_ROW: usize = 5;
+
 fn run_insert_row(app: &WriterApp, row: usize) {
     app.invoke_focus_page();
     press(app, Key::F6);
@@ -115,7 +120,7 @@ fn assert_caret_in_new_comment_field(app: &WriterApp) {
 #[test]
 fn insert_comment_from_the_menu_puts_the_caret_in_the_new_comment_field() {
     let s: Session = launched("Hello world");
-    run_insert_row(&s.app, 3);
+    run_insert_row(&s.app, INSERT_COMMENT_ROW);
     assert_caret_in_new_comment_field(&s.app);
     type_text(&s.app, "Note");
     assert_eq!(
@@ -130,7 +135,7 @@ fn insert_comment_with_the_inspector_closed_opens_it_on_the_new_comment_field() 
     let s = launched("Hello world");
     s.app.set_show_inspector(false);
     let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
-    run_insert_row(&s.app, 3);
+    run_insert_row(&s.app, INSERT_COMMENT_ROW);
     assert_caret_in_new_comment_field(&s.app);
     type_text(&s.app, "Note");
     assert_eq!(field_text(&s.app), "Note");
@@ -147,7 +152,7 @@ fn insert_comment_from_the_toolbar_command_path_focuses_the_field() {
 #[test]
 fn the_draft_stays_in_the_field_until_enter_adds_the_comment() {
     let s = launched("Hello world");
-    run_insert_row(&s.app, 3);
+    run_insert_row(&s.app, INSERT_COMMENT_ROW);
     type_text(&s.app, "Check this");
     let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
     assert_eq!(

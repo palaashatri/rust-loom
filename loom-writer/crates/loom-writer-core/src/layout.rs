@@ -20,6 +20,7 @@ use loom_text::StyleRun;
 mod placement;
 use placement::{Placer, Segment};
 
+use crate::text_metrics::bidi::{visible_end, BidiRuns, LineOrder};
 use crate::text_metrics::{block_measure, LineMeasure};
 use crate::{
     floor_grapheme_boundary, DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect,
@@ -697,6 +698,7 @@ fn rects_for_lines(
     let mut result = Vec::new();
     // The last block measured: a selection covers many lines of few blocks.
     let mut measured: Option<(usize, Rc<LineMeasure>)> = None;
+    let mut bidi_runs: Option<(usize, Option<Rc<BidiRuns>>)> = None;
     for at in lo..hi.max(lo) {
         let line = &lines[at];
         let block = &doc.blocks[line.block_index];
@@ -710,6 +712,20 @@ fn rects_for_lines(
                 positions
             }
         };
+        let bidi = match &bidi_runs {
+            Some((index, bidi)) if *index == line.block_index => bidi.clone(),
+            _ => {
+                let bidi = BidiRuns::of(block.text.as_str()).map(Rc::new);
+                bidi_runs = Some((line.block_index, bidi.clone()));
+                bidi
+            }
+        };
+        // A right-to-left line is highlighted and carets are placed in the order
+        // its glyphs are drawn in; every other line keeps its logical advances.
+        let order = bidi.as_deref().and_then(|bidi| {
+            let visible = visible_end(block.text.as_str(), line.start..line.end);
+            LineOrder::build(bidi, block.text.as_str(), &positions, line.start..visible)
+        });
         // Block byte offsets in, points out.
         let advance = |from: usize, to: usize| positions.advance(from, to) * zoom;
         let available_width = block.text_column_width(style) * zoom;
@@ -727,18 +743,35 @@ fn rects_for_lines(
             let local_end = overlap_end - global_start;
             let from = line.start + local_start.min(source.len());
             let to = line.start + local_end.min(source.len());
-            result.push(SelectionRect {
-                page_index: line.page,
-                block_id: block.id,
-                start: line.start + local_start,
-                end: line.start + local_end,
-                rect: PageRect {
-                    x: line_x + advance(line.start, from),
-                    y: line.bounds.y,
-                    width: advance(from, to),
-                    height: line.bounds.height,
-                },
-            });
+            if let Some(order) = &order {
+                for span in order.spans(from..to) {
+                    result.push(SelectionRect {
+                        page_index: line.page,
+                        block_id: block.id,
+                        start: span.start,
+                        end: span.end,
+                        rect: PageRect {
+                            x: line_x + span.left,
+                            y: line.bounds.y,
+                            width: span.right - span.left,
+                            height: line.bounds.height,
+                        },
+                    });
+                }
+            } else {
+                result.push(SelectionRect {
+                    page_index: line.page,
+                    block_id: block.id,
+                    start: line.start + local_start,
+                    end: line.start + local_end,
+                    rect: PageRect {
+                        x: line_x + advance(line.start, from),
+                        y: line.bounds.y,
+                        width: advance(from, to),
+                        height: line.bounds.height,
+                    },
+                });
+            }
         } else if selection_start == selection_end {
             let at_start = selection_start == global_start;
             let at_end = selection_start == global_end;
@@ -755,13 +788,17 @@ fn rects_for_lines(
                 let local = selection_start
                     .saturating_sub(global_start)
                     .min(source.len());
+                let caret_x = match &order {
+                    Some(order) => order.x_of(line.start + local, selection.affinity),
+                    None => advance(line.start, line.start + local),
+                };
                 result.push(SelectionRect {
                     page_index: line.page,
                     block_id: block.id,
                     start: line.start + local,
                     end: line.start + local,
                     rect: PageRect {
-                        x: line_x + advance(line.start, line.start + local),
+                        x: line_x + caret_x,
                         y: line.bounds.y,
                         width: 1.0,
                         height: line.bounds.height,

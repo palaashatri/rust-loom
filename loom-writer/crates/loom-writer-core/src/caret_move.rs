@@ -6,6 +6,7 @@
 //! moves use the document flow instead: the same wrapped lines, fonts and
 //! alignment that carets, selections and pointer hits are computed from.
 
+use crate::text_metrics::bidi::visible_end;
 use crate::{
     text_advance, CaretAffinity, FlowLine, PageStyle, PageViewport, RichBlock, WriterDocument,
     TABLE_BLOCK_KIND,
@@ -22,6 +23,12 @@ pub enum VisualMove {
     LineStart,
     /// The end of the visible line (before the space a soft wrap leaves).
     LineEnd,
+    /// One step toward the visual left. Only a line with right-to-left text has
+    /// visual steps; in any other line, or at its left edge, the move is `None`
+    /// and the caller keeps its logical move.
+    Left,
+    /// One step toward the visual right; see [`VisualMove::Left`].
+    Right,
 }
 
 /// Where a visual move lands.
@@ -48,6 +55,13 @@ pub fn visual_caret_move(
     kind: VisualMove,
     x_hint: Option<f32>,
 ) -> Option<CaretTarget> {
+    // Left and Right only need the layout inside right-to-left text: anywhere
+    // else they are the input's, and must not pay for a whole-document layout.
+    if matches!(kind, VisualMove::Left | VisualMove::Right)
+        && !block_may_be_right_to_left(doc, offset)
+    {
+        return None;
+    }
     let style = doc.page.page_style();
     let flow = doc
         .flow(
@@ -65,14 +79,29 @@ pub fn visual_caret_move(
     let current = line_at(lines, offset, affinity)?;
     let here = &lines[current];
     let here_block = &doc.blocks[here.block_index];
-    let own_x = || caret_x(&style, here_block, here, offset);
+    let own_x = || caret_x(&style, here_block, here, offset, affinity);
     match kind {
         VisualMove::LineStart => Some(CaretTarget {
             offset: here.global_start,
-            x: line_origin(&style, here_block, here),
+            x: caret_x(
+                &style,
+                here_block,
+                here,
+                here.global_start,
+                CaretAffinity::Downstream,
+            ),
             affinity: CaretAffinity::Downstream,
         }),
         VisualMove::LineEnd => Some(end_of(doc, &style, lines, current)),
+        VisualMove::Left | VisualMove::Right => visual_step(
+            doc,
+            &style,
+            lines,
+            current,
+            offset,
+            affinity,
+            kind == VisualMove::Right,
+        ),
         VisualMove::Up | VisualMove::Down => {
             let x = x_hint.unwrap_or_else(own_x);
             let target = if kind == VisualMove::Up {
@@ -95,6 +124,20 @@ pub fn visual_caret_move(
             }
         }
     }
+}
+
+/// Whether the block that holds editor `offset` can hold right-to-left text.
+/// Only the block's own text is scanned, so this costs no layout.
+fn block_may_be_right_to_left(doc: &WriterDocument, offset: usize) -> bool {
+    let mut start = 0;
+    for block in &doc.blocks {
+        let end = start + block.text.as_str().len();
+        if offset <= end {
+            return crate::text_metrics::bidi::BidiRuns::of(block.text.as_str()).is_some();
+        }
+        start = end + 1;
+    }
+    false
 }
 
 fn walkable(doc: &WriterDocument, line: &FlowLine) -> bool {
@@ -138,9 +181,20 @@ fn line_origin(style: &PageStyle, block: &RichBlock, line: &FlowLine) -> f32 {
     line.bounds.x + shift
 }
 
-fn caret_x(style: &PageStyle, block: &RichBlock, line: &FlowLine, offset: usize) -> f32 {
+/// The x of the caret at editor `offset` on `line`. A right-to-left line places
+/// it in the order its glyphs are drawn in; any other line by logical advance.
+fn caret_x(
+    style: &PageStyle,
+    block: &RichBlock,
+    line: &FlowLine,
+    offset: usize,
+    affinity: CaretAffinity,
+) -> f32 {
     let font_size = style.font_size_for_kind(block.kind.as_str());
     let local = (offset - line.global_start).min(line.end - line.start);
+    if let Some(order) = block.visual_line(font_size, line.start..line.end) {
+        return line_origin(style, block, line) + order.x_of(line.start + local, affinity);
+    }
     let text = &block.text.as_str()[line.start..line.start + local];
     line_origin(style, block, line) + text_advance(text, line.start, &block.runs, font_size)
 }
@@ -148,16 +202,7 @@ fn caret_x(style: &PageStyle, block: &RichBlock, line: &FlowLine, offset: usize)
 /// Bytes of the line a caret may sit after: a soft wrap leaves its space
 /// hanging past the visible text, and a hard break is never a caret position.
 fn visible_len(block: &RichBlock, line: &FlowLine) -> usize {
-    let slice = &block.text.as_str()[line.start..line.end];
-    let without_break = slice.strip_suffix('\n');
-    if let Some(text) = without_break {
-        return text.len();
-    }
-    if line.end >= block.text.as_str().len() {
-        slice.len()
-    } else {
-        slice.trim_end().len()
-    }
+    visible_end(block.text.as_str(), line.start..line.end) - line.start
 }
 
 /// Affinity for a caret at `offset` on line `index`: a caret at the very end
@@ -181,10 +226,11 @@ fn end_of(
     let line = &lines[index];
     let block = &doc.blocks[line.block_index];
     let offset = line.global_start + visible_len(block, line);
+    let affinity = affinity_on(lines, index, offset);
     CaretTarget {
         offset,
-        x: caret_x(style, block, line, offset),
-        affinity: affinity_on(lines, index, offset),
+        x: caret_x(style, block, line, offset, affinity),
+        affinity,
     }
 }
 
@@ -206,6 +252,15 @@ fn land(
         };
     }
     let font_size = style.font_size_for_kind(block.kind.as_str());
+    if let Some(order) = block.visual_line(font_size, line.start..line.end) {
+        if let Some(stop) = order.stop_at(x - line_origin(style, block, line)) {
+            return CaretTarget {
+                offset: line.global_start + (stop.offset - line.start),
+                x,
+                affinity: stop.affinity,
+            };
+        }
+    }
     let local = crate::offset_at_x(
         &block.text.as_str()[line.start..line.end],
         line.start,
@@ -220,6 +275,31 @@ fn land(
         x,
         affinity: affinity_on(lines, index, offset),
     }
+}
+
+/// One step toward the visual left (or right) in a line that holds
+/// right-to-left text, from the caret at `offset`. `None` in a left-to-right
+/// line and at the line's edge, where the caller's logical move applies.
+fn visual_step(
+    doc: &WriterDocument,
+    style: &PageStyle,
+    lines: &[FlowLine],
+    index: usize,
+    offset: usize,
+    affinity: CaretAffinity,
+    forward: bool,
+) -> Option<CaretTarget> {
+    let line = &lines[index];
+    let block = &doc.blocks[line.block_index];
+    let font_size = style.font_size_for_kind(block.kind.as_str());
+    let order = block.visual_line(font_size, line.start..line.end)?;
+    let at = line.start + offset.checked_sub(line.global_start)?;
+    let target = order.neighbour(at, affinity, forward)?;
+    Some(CaretTarget {
+        offset: line.global_start + (target.offset - line.start),
+        x: line_origin(style, block, line) + target.x,
+        affinity: target.affinity,
+    })
 }
 
 #[cfg(test)]
@@ -270,7 +350,7 @@ mod tests {
         let first = &lines[0];
         let at = first.global_start + 6;
         let style = doc.page.page_style();
-        let start_x = caret_x(&style, &doc.blocks[0], first, at);
+        let start_x = caret_x(&style, &doc.blocks[0], first, at, CaretAffinity::Downstream);
         let target = mv(&doc, at, VisualMove::Down, None);
         let second = &lines[1];
         assert!(
@@ -282,7 +362,15 @@ mod tests {
             second.end
         );
         assert!(
-            (caret_x(&style, &doc.blocks[0], second, target.offset) - start_x).abs() < 20.0,
+            (caret_x(
+                &style,
+                &doc.blocks[0],
+                second,
+                target.offset,
+                target.affinity
+            ) - start_x)
+                .abs()
+                < 20.0,
             "kept near x {start_x}"
         );
     }
@@ -375,3 +463,7 @@ mod tests {
         assert_eq!(up.offset, 2);
     }
 }
+
+#[cfg(test)]
+#[path = "rtl_caret_tests.rs"]
+mod rtl_caret_tests;

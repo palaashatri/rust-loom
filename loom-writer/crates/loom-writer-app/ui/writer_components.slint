@@ -182,6 +182,23 @@ component WriterDocumentEditor inherits Rectangle {
     in property <length> font-size: Theme.tokens.typography.body;
     in property <int> selection-anchor: 0;
     in property <int> selection-focus: 0;
+    // Approximate relative luminance of a colour (a square-law gamma stands in
+    // for the sRGB curve), from 0 (black) to 1 (white).
+    pure function luminance(c: color) -> float {
+        return (0.2126 * c.red * c.red + 0.7152 * c.green * c.green + 0.0722 * c.blue * c.blue) / 65025.0;
+    }
+    pure function contrast(a: float, b: float) -> float {
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05);
+    }
+    // The line between table cells, chosen against the fill it sits on: the soft
+    // page-muted grey where that reaches 3:1, else white on a dark fill, else ink.
+    pure function table-line(fill: float) -> color {
+        return root.contrast(root.luminance(Theme.palette().paper-muted), fill) >= 3.0
+            ? Theme.palette().paper-muted
+            : root.contrast(root.luminance(Theme.palette().paper), fill) >= 3.0
+                ? Theme.palette().paper
+                : Theme.palette().paper-ink;
+    }
     callback edited(string, int, int);
     callback selection-changed(int, int);
     callback pointer-pressed(length, length, bool);
@@ -251,14 +268,22 @@ component WriterDocumentEditor inherits Rectangle {
         for cell in root.table-cell-rects : Rectangle {
             x: cell.x * root.page-zoom;
             y: cell.y * root.page-zoom;
-            width: max(1px, cell.width * root.page-zoom);
-            height: max(1px, cell.height * root.page-zoom);
+            // A table cell draws its border inside its own box. Reaching one border
+            // width past the right and bottom edges puts each shared line where the
+            // neighbour's left or top border is, so every interior line is drawn once
+            // rather than as two adjacent borders.
+            width: max(1px, cell.width * root.page-zoom)
+                + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
+            height: max(1px, cell.height * root.page-zoom)
+                + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
             background: Theme.active-theme == "high-contrast" && cell.table-cell
                 ? Theme.palette().paper
                 : cell.has-bg ? cell.bg-color : transparent;
             border-color: Theme.active-theme == "high-contrast" && cell.table-cell
                 ? Theme.palette().paper-ink
-                : cell.border-color;
+                : cell.table-cell
+                    ? root.table-line(cell.has-bg ? root.luminance(cell.bg-color) : 1.0)
+                    : cell.border-color;
             border-width: cell.border-width * root.page-zoom;
             accessible-role: none;
         }
@@ -390,9 +415,14 @@ component WriterDocumentEditor inherits Rectangle {
             accessible-role: none;
         }
         for selection in root.selection-rects : Rectangle {
-            x: selection.x * root.page-zoom;
+            // A caret stands a fixed gap before its position, so the glyph there
+            // never touches it. The gap scales with the page.
+            property <length> mark-width: max(1px, selection.width * root.page-zoom);
+            x: selection.caret
+                ? selection.x * root.page-zoom - 2px * root.page-zoom - mark-width
+                : selection.x * root.page-zoom;
             y: selection.y * root.page-zoom;
-            width: max(1px, selection.width * root.page-zoom);
+            width: mark-width;
             height: max(1px, selection.height * root.page-zoom);
             background: Theme.active-theme == "high-contrast"
                 ? Theme.palette().paper-ink
@@ -596,6 +626,11 @@ export component WriterPageCanvas inherits Rectangle {
 
 /// App-local status surface using canonical LoomStatusBar.
 export component WriterStatusBar inherits LoomStatusBar {
+    // The shared bar is a fixed 28 px, which left the 2.0x caption 2 px of room
+    // below. Writer's bar grows to hold its own caption and never shrinks below
+    // the shared height.
+    min-height: max(Theme.tokens.metrics.status-height, Theme.type.caption * 1.6 + 2 * Theme.tokens.space.xs);
+    max-height: max(Theme.tokens.metrics.status-height, Theme.type.caption * 1.6 + 2 * Theme.tokens.space.xs);
     in property <string> leading-text: "";
     in property <string> trailing-text: "";
     // Right-to-left puts the leading status at the right edge.

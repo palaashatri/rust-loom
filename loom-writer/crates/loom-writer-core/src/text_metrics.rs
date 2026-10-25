@@ -16,6 +16,7 @@
 //! which draws every run in Inter, measures them at the advance it writes them
 //! with (see [`pdf`]).
 
+pub(crate) mod bidi;
 mod faces;
 mod measure;
 mod pdf;
@@ -67,7 +68,8 @@ pub fn text_advance(text: &str, text_start: usize, runs: &[StyleRun], font_size:
 
 /// The byte offset in `text` nearest to horizontal position `x` (points from
 /// the line's left edge). A trailing hard line break is never a valid caret
-/// position for a click past the end of the line.
+/// position for a click past the end of the line. Text that holds right-to-left
+/// characters is read in the order it is drawn in (see [`bidi`]).
 pub fn offset_at_x(
     text: &str,
     text_start: usize,
@@ -76,15 +78,18 @@ pub fn offset_at_x(
     x: f32,
 ) -> usize {
     let visible = text.trim_end_matches(['\n', '\u{b}', '\u{c}']).len();
-    LineMeasure::new(
+    let measure = LineMeasure::new(
         text,
         text_start,
         runs,
         font_size,
         Style::default(),
         Uncovered::Estimate,
-    )
-    .offset_at_x(x, visible)
+    );
+    if let Some(stop) = bidi::visual_stop_at(text, &measure, 0..visible, x) {
+        return stop.offset;
+    }
+    measure.offset_at_x(x, visible)
 }
 
 /// Split a block's text into the byte ranges of its lines so that each line

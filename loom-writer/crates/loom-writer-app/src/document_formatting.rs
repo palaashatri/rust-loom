@@ -750,7 +750,13 @@ pub fn set_selection_list_style(
         _ => "paragraph",
     };
     for block_index in selected_block_indices(document, selection) {
-        document.blocks[block_index].kind = kind.to_string();
+        let block = &mut document.blocks[block_index];
+        block.kind = kind.to_string();
+        // A paragraph draws no list level, so unlisting one forgets its level;
+        // listing it again starts at the top level instead of the old depth.
+        if kind == "paragraph" {
+            block.style.list_level = 0;
+        }
     }
 }
 
@@ -1079,5 +1085,33 @@ mod tests {
             FontChoice::Single("Sans".to_owned()),
             "text with no family of its own is the same family as Sans"
         );
+    }
+
+    #[test]
+    fn unlisting_an_item_forgets_its_level_so_listing_it_again_starts_at_the_top() {
+        let mut document = WriterDocument::new("unlist", "Unlist");
+        document.push(RichBlock::new(1, "list-bulleted", "nested item"));
+        document.blocks[0].style.list_level = 2;
+
+        set_selection_list_style(&mut document, DocumentSelection::caret(3), 0);
+        assert_eq!(document.blocks[0].kind, "paragraph");
+        set_selection_list_style(&mut document, DocumentSelection::caret(3), 1);
+
+        assert_eq!(document.blocks[0].kind, "list-bulleted");
+        assert_eq!(
+            document.blocks[0].style.list_level, 0,
+            "the level an item had before it was unlisted must not come back"
+        );
+        assert_eq!(document.blocks[0].effective_list_level(), 0);
+    }
+
+    #[test]
+    fn changing_the_list_kind_keeps_an_items_level() {
+        let mut document = WriterDocument::new("kind", "Kind");
+        document.push(RichBlock::new(1, "list-bulleted", "nested item"));
+        document.blocks[0].style.list_level = 2;
+        set_selection_list_style(&mut document, DocumentSelection::caret(3), 2);
+        assert_eq!(document.blocks[0].kind, "list-numbered");
+        assert_eq!(document.blocks[0].style.list_level, 2);
     }
 }

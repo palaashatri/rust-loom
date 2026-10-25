@@ -524,6 +524,57 @@ fn insert_menu_inserts_a_table_and_opens_the_comment_field() {
 }
 
 #[test]
+fn insert_menu_offers_page_and_line_breaks_with_their_shortcuts() {
+    let (app, _state) = launched("AB");
+    button(&app, "Insert");
+    render(&app);
+    let row_of = |label: &str| {
+        ElementHandle::find_by_accessible_label(&app, label)
+            .find(|e| e.accessible_role() == Some(AccessibleRole::ListItem))
+            .unwrap_or_else(|| panic!("the Insert menu offers {label:?}"))
+    };
+    assert_eq!(
+        row_of("Page Break").accessible_description().as_deref(),
+        Some("Ctrl+Enter")
+    );
+    assert_eq!(
+        row_of("Line Break").accessible_description().as_deref(),
+        Some("Shift+Enter")
+    );
+}
+
+#[test]
+fn insert_menu_page_and_line_break_rows_run_the_breaks_at_the_caret() {
+    let texts = |state: &GuiState| -> Vec<String> {
+        state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str().to_string())
+            .collect()
+    };
+
+    let (app, state) = launched("AB");
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::caret(1));
+    button(&app, "Insert");
+    row(&app, "Page Break");
+    assert_eq!(texts(&state), ["A\u{c}", "B"]);
+
+    let (app, state) = launched("AB");
+    state
+        .current
+        .borrow_mut()
+        .set_selection(TextSelection::caret(1));
+    button(&app, "Insert");
+    row(&app, "Line Break");
+    assert_eq!(texts(&state), ["A\u{b}B"]);
+}
+
+#[test]
 fn zoom_menu_changes_the_page_zoom() {
     let (app, state) = launched("Hello");
     button(&app, "Zoom");

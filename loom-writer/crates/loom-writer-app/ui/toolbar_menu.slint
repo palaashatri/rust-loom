@@ -45,6 +45,8 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "view.zoom_actual", label: "Actual Size", shortcut: "", checked: Math.abs(root.page-zoom - 1.0) < 0.01, enabled: true },
         ]
         : root.kind == 3 ? [
+            { id: "insert.page_break", label: "Page Break", shortcut: "Ctrl+Enter", checked: false, enabled: true },
+            { id: "insert.line_break", label: "Line Break", shortcut: "Shift+Enter", checked: false, enabled: true },
             { id: "insert.table", label: "Table", shortcut: "", checked: false, enabled: true },
             { id: "insert.image", label: "Picture...", shortcut: "", checked: false, enabled: true },
             { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, enabled: true },
