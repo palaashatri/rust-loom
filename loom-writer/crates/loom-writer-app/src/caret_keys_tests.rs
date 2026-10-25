@@ -124,6 +124,40 @@ fn end_and_home_stay_on_the_visible_line_and_shift_extends() {
     assert!(focus(&s.state) > first.global_start + visible);
 }
 
+fn press_ctrl(app: &WriterApp, key: Key) {
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: SharedString::from(Key::Control),
+    });
+    press(app, key);
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: SharedString::from(Key::Control),
+    });
+}
+
+#[test]
+fn ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top() {
+    let text = (1..=120)
+        .map(|n| format!("Paragraph {n} with enough words to wrap across a line of the page."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = launched(&text);
+    press_ctrl(&s.app, Key::End);
+    let end = s.state.current.borrow().editor_text().len();
+    assert_eq!(focus(&s.state), end, "Ctrl+End reaches the end of the text");
+    assert!(
+        s.state.viewport.borrow().scroll_y > 0.0,
+        "and the page scrolls down to it"
+    );
+
+    press_ctrl(&s.app, Key::Home);
+    assert_eq!(focus(&s.state), 0, "Ctrl+Home returns to the start");
+    assert_eq!(
+        s.state.viewport.borrow().scroll_y,
+        0.0,
+        "and the page returns to the top margin"
+    );
+}
+
 fn session(blocks: Vec<RichBlock>) -> (WriterApp, Rc<GuiState>) {
     let mut document = WriterDocument::new("test", "Test");
     document.blocks = blocks;
