@@ -17,7 +17,13 @@ The current honest product-parity estimate and application boundaries are kept i
 
 The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are consolidated in [`AGENTS.md`](AGENTS.md).
 
-## Reusable interaction tooling
+## Future SLOPOS desktop integration (planned)
+
+Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaashatri/rust-slopos) while remaining a separate, cross-platform **Rust + Slint** project. A future versioned integration layer may provide SLOPOS launch/file associations, real global-menu commands, shared file dialogs/clipboard, accessibility, and theme-token mapping for the Classic/System 7 style or Loom Design Bible-inspired SLOPOS theme. Optional local SLOPOS Vision and AI desktop automation may interact through permissioned document actions.
+
+**Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
+
+## Reusable interaction tooling## Reusable interaction tooling
 
 - [Linux desktop input skill](.agents/skills/linux-desktop-input/SKILL.md) — guarded mouse and keyboard interaction for Linux desktop QA when native computer-use controls are unavailable.
 
