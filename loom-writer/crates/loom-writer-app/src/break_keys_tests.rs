@@ -158,3 +158,32 @@ fn shift_enter_inside_a_table_cell_adds_a_soft_break_to_that_cell() {
         "the break stays in the table, no paragraph is added"
     );
 }
+
+#[test]
+fn enter_inside_a_table_cell_starts_a_new_line_in_that_cell_like_shift_enter() {
+    let mut doc = WriterDocument::new("t", "T");
+    let id = doc.next_id();
+    doc.push(loom_writer_core::markdown_table_block(
+        id,
+        "| ab | x |\n| --- | --- |\n| c | d |",
+    ));
+    let (app, state) = session(doc.blocks.clone());
+    caret(&state, 2);
+    assert!(
+        press(&app, false, false),
+        "Enter in a cell is handled here, so no paragraph break is typed into the table"
+    );
+    let cell = state
+        .current
+        .borrow()
+        .table_from_block(id)
+        .expect("the table")
+        .rows[0][0]
+        .clone();
+    assert_eq!(cell, "ab\u{b}", "Enter ends a line inside the cell");
+    assert_eq!(
+        state.current.borrow().blocks.len(),
+        1,
+        "Enter adds no paragraph and leaves the table intact"
+    );
+}

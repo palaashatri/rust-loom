@@ -2,7 +2,9 @@
 //! the text); Ctrl+Enter ends the page: the paragraph closes with a form feed
 //! and the text after the caret starts a new paragraph on the next page. Both
 //! are ordinary text edits, so Backspace and Delete remove them like any
-//! character and each insertion is one undo step.
+//! character and each insertion is one undo step. Enter with the caret in a
+//! table cell does what Shift+Enter does there: it starts a new line in that
+//! cell, because a table cell holds lines, not paragraphs.
 
 use loom_writer_core::TextSelection;
 use slint::SharedString;
@@ -31,10 +33,18 @@ pub(crate) fn handle(
     let soft = match (shift, ctrl) {
         (true, false) => true,
         (false, true) => false,
+        (false, false) if caret_in_table_cell(state) => true,
         _ => return false,
     };
     insert_break(app, state, soft);
     true
+}
+
+/// Whether the caret is a single point inside a table cell (not a selection).
+fn caret_in_table_cell(state: &GuiState) -> bool {
+    let current = state.current.borrow();
+    let selection = current.selection();
+    selection.anchor == selection.focus && current.table_cell_at_offset(selection.anchor).is_some()
 }
 
 /// Puts a line break (`soft`) or a page break at the selection, as one undo
