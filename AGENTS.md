@@ -446,7 +446,38 @@ The goal is not to make CI green at any cost. The goal is to make Loom genuinely
 
 Each gate requires a specifically approved future task packet, actual integration code, platform tests and evidence in this repository's **current-truth** discipline. Documentation-only entries are never product evidence; do not alter workflow contract locks or completion scores because of this section.
 
-## current-truth## current-truth
+## 16. Engineering discipline — reuse, interoperability and real-workflow evidence
+
+**Effective only for tasks authorized by the current workflow.** Lessons from experimental compatibility runtimes such as Raven are engineering guidance, not a Raven dependency, new release gate, toolkit change or permission to work on locked Loom apps. Loom remains **Rust + Slint**, local-first and cross-platform under §§1–15. `loom-bootstrap/contracts/workflow.toml` and the marked current-truth section remain authoritative.
+
+### Prefer proven infrastructure behind stable interfaces
+
+1. Before rebuilding a document parser, codec, layout/text engine, native adapter, accessibility bridge or graphics subsystem, record the observed missing capability, upstream alternatives, version/support/security characteristics, portability, licensing, upgrade cost and why a **small replaceable adapter** is insufficient. Reuse proven libraries where they genuinely meet Loom's contracts and do not violate its technology lock.
+2. Preserve one authoritative document model, undo/redo, persistence/recovery engine, command identity and error path. No hidden format loss or app-local duplicate platform bridges. All imports are untrusted: cap uncompressed sizes, recursion, allocations, fonts/media dependencies and time, and report unsupported features rather than fabricating content.
+3. Keep Loom's original cross-platform identity independent of SLOPOS/PARAMA. Future interoperability (§15) should use versioned host adapters, not an unjustified Slint replacement or Linux-only architectural fork.
+
+### Test what actual users do
+
+Document claimed support in the **existing evidence and current-truth mechanisms**, by specific document producer/format version, app commit, host OS/architecture, toolchain/engine versions and fixtures. Avoid a new Markdown status ledger. For each claimed feature, independently verify:
+
+| Area | Minimum complete journey and failure coverage |
+|---|---|
+| Writer | Representative DOCX/ODT: import or create, edit real styled text/tables/images, save, exit, reopen, export, compare supported semantics/layout with source oracles |
+| Sheets | Real XLSX/ODS formulas, formatting, charts and performance-sized workbooks; edit/recalculate/sort/undo, save/reopen/export, test errors and crash/recovery |
+| Present | Real PPTX/ODP text/objects/charts where supported; edit slides, presenter actions, save/reopen/export, inspect visual and semantic fidelity |
+| Shared native UX | Native file dialogs, menus invoking real commands, clipboard, accessibility, keyboard focus, screen scaling, app launch and window lifecycle on every **claimed** platform |
+| Negative/recovery | Malformed/truncated documents, unsupported properties, disk-full, missing fonts/codecs, permission denied, interruption, restart and no silent data loss |
+
+Treat parser/fixture passes, actual GUI acceptance, producer-consumer round-trips, recovery and real-platform behavior as **different evidence levels**. A successful export command or attractive screenshot does not prove compatibility. Use LibreOffice and Microsoft Office as comparison oracles when legally available; list the versions actually tested.
+
+### Reproducibility, license and agent review
+
+- Compare release builds on pinned workloads, files, binaries, OS/renderer and hardware. Repeat runs; measure cold/warm startup, visible input responsiveness, frame/scroll latency, evaluation, file I/O, recovery durability, p50/p95, peak memory and failures separately. Never infer UI smoothness from a fast computational kernel or superiority from one cherry-picked workload.
+- Check source-file, library, model, asset, font and linked-artifact licenses with exact revisions, provenance and distribution obligations before using them. An upstream project's website license label is not enough for imported components; GPL/copy-left combinations need explicit review before changing MIT distribution expectations.
+- Coding agents must follow the **currently unlocked gate**, identify existing implementations and boundaries first, keep scoped diffs, preserve negative tests and produce handoffs with precise environment/commands, fixture hashes, observed outcomes, failures, resource data if affected, security/licensing impact, and remaining `NOT_RUN` work. Human review and existing acceptance requirements cannot be replaced by model assertions, generated dashboards or renamed failing tests.
+- These rules **do not unlock** SLOPOS integration, PARAMA ports or Photo/Motion/Video/Studio/Encode. A future task is not an active task.
+
+## current-truth
 
 <!-- CURRENT TRUTH START -->
 # Loom — Current Truth
