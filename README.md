@@ -59,6 +59,12 @@ Loom prefers **proven libraries with small adapters** over unnecessary engine re
 
 AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](AGENTS.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
 
+## Edge efficiency goal
+
+Loom aims for **responsive small-document workflows on a Raspberry Pi Zero 2 W** (AArch64 Cortex-A53, **512 MB RAM**) as a future low-end reference, while preserving fully featured workloads on capable systems. The GUI must stay interactive and allow progress/cancellation during slow disk/network/CPU work; large documents and demanding media/ML may require more memory and must fail safely with truthful explanations, never silently drop data. Memory, input p95, caches, startup and swapping must be instrumented on **actual hardware**.
+
+**AArch64 Pi Zero 2 W support is not implemented or verified.** Existing Rust/Slint, supported host-platform gates and sequential app development remain unchanged. See [AGENTS.md §17](AGENTS.md#17-edge-first-efficiency-raspberry-pi-zero-2-w-reference).
+
 ## Principles
 
 - Local-first and offline-capable core workflows.
