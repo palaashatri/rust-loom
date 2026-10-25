@@ -396,6 +396,24 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
 }
 
 #[test]
+fn an_underline_read_from_a_docx_reaches_the_page_as_a_rule() {
+    let app = WriterApp::new().expect("create WriterApp");
+    let mut document = text_document("Plain underlined rest");
+    set_selection_underline(&mut document, DocumentSelection::range(6, 16), true);
+    let bytes = loom_writer_core::export_docx(&document)
+        .expect("export the document as DOCX")
+        .bytes;
+    let imported = loom_writer_core::import_docx(&bytes).expect("import the DOCX");
+
+    apply_document(&app, &imported);
+    let row = app.get_render_blocks().row_data(0).expect("render row");
+    assert!(
+        row.rules.row_count() >= 1,
+        "an underline read from a Word file is drawn as a rule on the page"
+    );
+}
+
+#[test]
 fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
     let mut document = text_document("layout-backed selection");
     document.set_selection(TextSelection::range(0, 6));
