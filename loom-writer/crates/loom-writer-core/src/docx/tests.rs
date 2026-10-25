@@ -957,3 +957,23 @@ fn a_complex_script_bold_tag_alone_does_not_make_latin_text_bold() {
         "<w:u w:val=\"single\"/> is read as underline: {runs:?}"
     );
 }
+
+#[test]
+fn a_soft_break_inside_a_table_cell_is_a_line_break_in_the_docx() {
+    let mut document = WriterDocument::new("cell-break", "Cell break");
+    let id = document.next_id();
+    let mut table = loom_objects::Table::new(1, 1);
+    table.set_cell_text(0, 0, "ab\u{b}cd");
+    document.push(RichBlock::table_block(id, table));
+    let export = export_docx(&document).unwrap();
+    let xml = &parts(&export)["word/document.xml"];
+    assert!(xml.contains("<w:br/>"), "the cell's line break is a w:br");
+    assert!(
+        !xml.contains('\u{b}'),
+        "the vertical tab itself is not written"
+    );
+    assert!(
+        xml.contains(">ab</w:t>") && xml.contains(">cd</w:t>"),
+        "both halves of the cell are written: {xml}"
+    );
+}

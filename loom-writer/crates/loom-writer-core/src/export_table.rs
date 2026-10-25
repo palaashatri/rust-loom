@@ -679,6 +679,27 @@ mod tests {
     }
 
     #[test]
+    fn a_soft_break_inside_a_table_cell_starts_a_new_line_in_the_pdf() {
+        let mut document = WriterDocument::new("cell-break", "Cell break");
+        let id = document.next_id();
+        let mut table = loom_objects::Table::new(1, 1);
+        table.set_cell_text(0, 0, "ab\u{b}cd");
+        document.push(crate::RichBlock::table_block(id, table));
+        let pdf = export_pdf(&document);
+        let runs = text_runs(&pdf);
+        let baseline = |word: &str| {
+            runs.iter()
+                .find(|run| run.2 == word)
+                .map(|run| run.1)
+                .unwrap_or_else(|| panic!("{word} is drawn: {runs:?}"))
+        };
+        assert!(
+            (baseline("ab") - baseline("cd")).abs() > 1.0,
+            "the second half sits on its own line below the first: {runs:?}"
+        );
+    }
+
+    #[test]
     fn the_style_draws_the_header_bottom_border() {
         // Medium 1, the default style, sets a 1.5 pt navy rule under its header.
         let pdf = export_pdf(&table_document(&[HEADER, SHORT]));
