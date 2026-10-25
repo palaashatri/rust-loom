@@ -54,7 +54,8 @@ pub(crate) fn table_html(table: &Table) -> String {
             let escaped = text
                 .replace('&', "&amp;")
                 .replace('<', "&lt;")
-                .replace('>', "&gt;");
+                .replace('>', "&gt;")
+                .replace('\u{b}', "<br>");
             out.push_str(&format!("<{tag}>{escaped}</{tag}>"));
         }
         out.push_str("</tr>\n");
@@ -76,8 +77,8 @@ fn column_alignment(table: &Table, column: usize) -> HorizontalAlign {
 }
 
 /// Writes a cell's runs as Markdown: a toggle of bold (`**`), italic (`*`) or both
-/// (`***`) where the style changes, and a literal asterisk as `\*`. Line breaks
-/// become spaces, since a cell is one line.
+/// (`***`) where the style changes, and a literal asterisk as `\*`. A soft line
+/// break becomes `<br>`, which Markdown tables accept; a newline becomes a space.
 fn cell_markup(runs: &[TextRun]) -> String {
     let (mut bold, mut italic) = (false, false);
     let mut out = String::new();
@@ -94,6 +95,7 @@ fn cell_markup(runs: &[TextRun]) -> String {
             match ch {
                 '*' => out.push_str("\\*"),
                 '\n' | '\r' => out.push(' '),
+                '\u{b}' => out.push_str("<br>"),
                 other => out.push(other),
             }
         }

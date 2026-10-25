@@ -76,7 +76,8 @@ fn writer_pointer_offset_with_rect_lookup(
         {
             let cell_offset = usize::try_from(rect.caret_offset).ok()?;
             return Some(
-                table_cell_pointer_offset(doc, cell_offset, &rect, local_x).unwrap_or(cell_offset),
+                table_cell_pointer_offset(doc, cell_offset, &rect, local_x, local_y)
+                    .unwrap_or(cell_offset),
             );
         }
     }
@@ -89,6 +90,7 @@ fn table_cell_pointer_offset(
     cell_offset: usize,
     rect: &WriterTableCellRect,
     local_x: f32,
+    local_y: f32,
 ) -> Option<usize> {
     let location = doc.table_cell_at_offset(cell_offset)?;
     let (display_text, source_offsets) =
@@ -112,10 +114,31 @@ fn table_cell_pointer_offset(
             None,
         )
         .bold;
+    let font_size = loom_writer_core::PageStyle::default().font_size_for_kind("paragraph");
+    // A soft break starts a new line of the cell; the pointer's line is the one
+    // whose pitch band it falls in, and its x is measured within that line.
+    let breaks: Vec<usize> = display_text
+        .match_indices('\u{b}')
+        .map(|(at, _)| at)
+        .collect();
+    let wanted = ((local_y - rect.y - 4.0) / (font_size * crate::projection::CELL_LINE_PITCH_EM))
+        .floor()
+        .max(0.0) as usize;
+    let line_index = wanted.min(breaks.len());
+    let line_start = if line_index == 0 {
+        0
+    } else {
+        breaks[line_index - 1] + 1
+    };
+    let line_end = breaks
+        .get(line_index)
+        .copied()
+        .unwrap_or(display_text.len());
+    let line = &display_text[line_start..line_end];
     let runs = if bold {
         vec![loom_text::StyleRun {
             start: 0,
-            end: display_text.len(),
+            end: line.len(),
             style: loom_text::CharacterStyle {
                 weight: loom_text::FontWeight::Bold,
                 ..Default::default()
@@ -124,9 +147,8 @@ fn table_cell_pointer_offset(
     } else {
         Vec::new()
     };
-    let font_size = loom_writer_core::PageStyle::default().font_size_for_kind("paragraph");
-    let display_byte =
-        loom_writer_core::offset_at_x(&display_text, 0, &runs, font_size, local_x - rect.x - 6.0);
+    let display_byte = line_start
+        + loom_writer_core::offset_at_x(line, 0, &runs, font_size, local_x - rect.x - 6.0);
     let source_byte = source_offsets.get(display_byte).copied()?;
     let block_start = doc
         .blocks

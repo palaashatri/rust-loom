@@ -60,6 +60,7 @@ pub use tables::{
     TableArrowDirection, TableCellLocation, TableTextMap, INSERT_COLUMNS, INSERT_ROWS,
     TABLE_BLOCK_KIND, TABLE_CELL_SEPARATOR, TABLE_ROW_SEPARATOR,
 };
+pub use tables::{table_line_count, table_row_height};
 pub use text_metrics::{line_pitch, offset_at_x, run_size, text_advance};
 
 /// Stable document id.

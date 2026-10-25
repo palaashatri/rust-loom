@@ -575,3 +575,83 @@ fn the_style_border_reaches_the_table_cell_on_the_page() {
     );
     assert!((header.edge_bottom.width - 1.5).abs() < 0.01);
 }
+
+#[test]
+fn a_table_row_grows_for_a_cell_with_a_line_break() {
+    let row_height = |markdown: &str| {
+        let mut document = WriterDocument::new("row-height", "Row height");
+        let id = document.next_id();
+        document.push(loom_writer_core::markdown_table_block(id, markdown));
+        let projection = projection::project(&document, PageViewport::default(), None);
+        projection
+            .table_cell_rects
+            .first()
+            .expect("a table cell rectangle")
+            .height
+    };
+    let one_line = row_height("| ab | x |\n| --- | --- |\n| c | d |");
+    let mut document = WriterDocument::new("row-height", "Row height");
+    let id = document.next_id();
+    let mut table = loom_objects::Table::new(1, 1);
+    table.set_cell_text(0, 0, "ab\u{b}cd");
+    document.push(RichBlock::table_block(id, table));
+    let projection = projection::project(&document, PageViewport::default(), None);
+    let two_lines = projection
+        .table_cell_rects
+        .first()
+        .expect("a table cell rectangle")
+        .height;
+    assert!(
+        two_lines > one_line + 10.0,
+        "a cell with a line break makes its row taller: {one_line} and {two_lines}"
+    );
+}
+
+#[test]
+fn a_caret_after_a_cell_line_break_sits_on_the_second_line() {
+    let caret_at = |offset: usize| {
+        let mut document = WriterDocument::new("caret-line", "Caret line");
+        let mut table = loom_objects::Table::new(1, 1);
+        table.set_cell_text(0, 0, "ab\u{b}cd");
+        document.push(RichBlock::table_block(document.next_id(), table));
+        document.set_selection(loom_writer_core::TextSelection::caret(offset));
+        let projection = projection::project(&document, PageViewport::default(), None);
+        projection
+            .selection_rects
+            .iter()
+            .find(|rect| rect.caret)
+            .map(|rect| rect.y)
+            .expect("the caret is drawn")
+    };
+    let first = caret_at(1);
+    let second = caret_at(5);
+    assert!(
+        second > first + 10.0,
+        "the caret after the break is on the second line: {first} and {second}"
+    );
+}
+
+#[test]
+fn a_press_on_the_second_line_of_a_cell_places_the_caret_on_that_line() {
+    let mut document = WriterDocument::new("press-line", "Press line");
+    let mut table = loom_objects::Table::new(1, 1);
+    table.set_cell_text(0, 0, "ab\u{b}cd");
+    document.push(RichBlock::table_block(document.next_id(), table));
+    let viewport = PageViewport::default();
+    let projection = projection::project(&document, viewport, None);
+    let cell = projection
+        .table_cell_rects
+        .first()
+        .expect("a table cell rectangle")
+        .clone();
+    // The second line's band starts one line pitch (11 pt * 1.25) below the first.
+    let second_line = cell.y + 4.0 + 11.0 * 1.25 + 4.0;
+    let offset = super::pointer_hit_test::writer_pointer_offset(
+        &document,
+        viewport,
+        cell.x + 8.0,
+        second_line,
+    )
+    .expect("a press inside the cell resolves to a document offset");
+    assert_eq!(offset, 3, "the second line starts after the soft break");
+}

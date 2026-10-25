@@ -39,6 +39,8 @@ pub(crate) fn test_block(id: u64, kind: &str, text: &str) -> RichBlock {
 #[cfg(test)]
 mod ops_tests;
 #[cfg(test)]
+mod row_height_tests;
+#[cfg(test)]
 mod typed_tests;
 
 pub use editing::apply_flat_text;
@@ -51,6 +53,26 @@ pub use store::{
 
 /// Block kind for table blocks.
 pub const TABLE_BLOCK_KIND: &str = "table";
+
+/// The number of lines the tallest cell of a table block takes: one, plus the
+/// most soft line breaks in any single cell. Every row of the table shares this
+/// height, so a cell with a line break makes the whole table's rows taller.
+pub fn table_line_count(text: &str) -> usize {
+    text.split(is_table_separator)
+        .map(|cell| cell.matches('\u{b}').count())
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+/// The height of one table row that holds `lines` lines in its tallest cell: a
+/// one-line row is the page's body line with cell padding (at least 24 pt), and
+/// each further line adds one body line.
+pub fn table_row_height(style: &crate::PageStyle, lines: usize) -> f32 {
+    let body_line = style.body_font_size_pt * style.line_height;
+    let one_line = (body_line + 8.0).max(24.0);
+    one_line + lines.saturating_sub(1) as f32 * body_line
+}
 
 /// Default geometry for a table inserted from the UI.
 pub const INSERT_ROWS: usize = 3;

@@ -51,9 +51,11 @@ pub(crate) fn insert_break(app: &WriterApp, state: &GuiState, soft: bool) {
         selection.anchor.max(selection.focus),
     );
     let mut next = state.current.borrow().clone();
-    if next.table_cell_at_offset(low).is_some() {
+    // A page break cannot sit inside a table cell. A line break can: it stays in
+    // that cell, which draws it on a new line.
+    if !soft && next.table_cell_at_offset(low).is_some() {
         app.set_status_right(SharedString::from(
-            "Line and page breaks cannot go inside a table cell",
+            "A page break cannot go inside a table cell",
         ));
         return;
     }

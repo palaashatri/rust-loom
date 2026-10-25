@@ -123,13 +123,38 @@ fn plain_enter_and_other_chords_are_left_to_the_editor() {
 }
 
 #[test]
-fn breaks_do_not_go_inside_a_table_cell() {
+fn a_page_break_does_not_go_inside_a_table_cell() {
     let mut doc = WriterDocument::new("t", "T");
     doc.insert_table_block(0, 2, 2).unwrap();
     let before = doc.editor_text();
     let (app, state) = session(doc.blocks.clone());
     caret(&state, 2);
-    assert!(press(&app, true, false));
     assert!(press(&app, false, true));
     assert_eq!(state.current.borrow().editor_text(), before);
+}
+
+#[test]
+fn shift_enter_inside_a_table_cell_adds_a_soft_break_to_that_cell() {
+    let mut doc = WriterDocument::new("t", "T");
+    let id = doc.next_id();
+    doc.push(loom_writer_core::markdown_table_block(
+        id,
+        "| ab | x |\n| --- | --- |\n| c | d |",
+    ));
+    let (app, state) = session(doc.blocks.clone());
+    caret(&state, 2);
+    assert!(press(&app, true, false));
+    let cell = state
+        .current
+        .borrow()
+        .table_from_block(id)
+        .expect("the table")
+        .rows[0][0]
+        .clone();
+    assert_eq!(cell, "ab\u{b}", "Shift+Enter ends a line inside the cell");
+    assert_eq!(
+        state.current.borrow().blocks.len(),
+        1,
+        "the break stays in the table, no paragraph is added"
+    );
 }

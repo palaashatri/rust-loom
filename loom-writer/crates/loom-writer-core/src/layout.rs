@@ -218,7 +218,7 @@ impl FlowLine {
 /// page draws and whatever follows the table starts below it.
 pub(crate) fn text_line_height(style: &PageStyle, block: &RichBlock) -> f32 {
     let base = if block.kind == crate::TABLE_BLOCK_KIND {
-        (style.body_font_size_pt * style.line_height + 8.0).max(24.0)
+        crate::table_row_height(style, crate::table_line_count(block.text.as_str()))
     } else {
         crate::line_pitch(&block.runs, style.font_size_for_kind(block.kind.as_str()))
             * style.line_height

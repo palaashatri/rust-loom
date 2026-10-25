@@ -529,7 +529,10 @@ pub(crate) fn project(
                     let num_rows = table.row_count();
                     let col_widths = loom_writer_core::editor_column_widths(&table, column_width);
                     let col_starts = column_starts(&col_widths);
-                    let row_height = table_row_height(&style);
+                    let row_height = loom_writer_core::table_row_height(
+                        &style,
+                        loom_writer_core::table_line_count(block.text.as_str()),
+                    );
                     let table_x = 0.0_f32;
                     let table_y =
                         block_top_y(&flow, line.block_index, &style, base_page).unwrap_or(y);
@@ -835,22 +838,30 @@ pub(crate) fn project(
                             .as_ref()
                             .and_then(|t| cell_text_block(loc.block_id, t, loc.row, loc.col, bold));
                         let lead = display_text.len() - display_text.trim_start().len();
-                        let (advance, text_width) = match &drawn {
+                        // A soft break starts a new line of the cell, so the caret is
+                        // measured within the line it sits on.
+                        let (advance, text_width, line_index) = match &drawn {
                             Some(block) => {
                                 let text = block.text.as_str();
                                 let cut = display_byte.saturating_sub(lead).min(text.len());
-                                let prefix = text.get(..cut).unwrap_or("");
+                                let line_index = text[..cut].matches('\u{b}').count();
+                                let line_start = text[..cut].rfind('\u{b}').map_or(0, |at| at + 1);
+                                let line_end =
+                                    text[cut..].find('\u{b}').map_or(text.len(), |at| cut + at);
+                                let line = &text[line_start..line_end];
+                                let line_runs = runs_between(&block.runs, line_start, line_end);
+                                let prefix = &text[line_start..cut];
                                 let advance = loom_writer_core::text_advance(
                                     prefix,
                                     0,
-                                    &runs_before(&block.runs, prefix.len()),
+                                    &runs_before(&line_runs, prefix.len()),
                                     font_size,
                                 );
                                 let width =
-                                    loom_writer_core::text_advance(text, 0, &block.runs, font_size);
-                                (advance, width)
+                                    loom_writer_core::text_advance(line, 0, &line_runs, font_size);
+                                (advance, width, line_index)
                             }
-                            None => (0.0, 0.0),
+                            None => (0.0, 0.0, 0),
                         };
                         let col_width = geometry.col_widths[loc.col];
                         let inner = col_width - 12.0;
@@ -863,14 +874,19 @@ pub(crate) fn project(
                             _ => 0.0,
                         };
                         let caret_x = geometry.col_starts[loc.col] + 6.0 + shift + advance;
-                        let caret_y = table_y + loc.row as f32 * row_height + 4.0;
+                        // Each line of the cell is one pitch below the one above it.
+                        let line_pitch = font_size * CELL_LINE_PITCH_EM;
+                        let caret_y = table_y
+                            + loc.row as f32 * row_height
+                            + 4.0
+                            + line_index as f32 * line_pitch;
                         let caret_color = resolved.and_then(|r| r.text_color);
                         selection_rects = vec![WriterSelectionRect {
                             page_index: 0,
                             x: caret_x,
                             y: caret_y,
                             width: 1.0,
-                            height: row_height - 8.0,
+                            height: row_height - 8.0 - line_index as f32 * line_pitch,
                             caret: true,
                             has_color: caret_color.is_some(),
                             color: slint::Color::from_argb_encoded(
@@ -938,6 +954,24 @@ fn column_alignment(table: &Table, column: usize) -> loom_text::Alignment {
 }
 
 /// The runs that cover the first `end` bytes of a text, cut at `end`.
+/// The distance between the lines of a table cell, in em of its text. The cell's
+/// text is drawn with the same pitch (see `render_text`'s wrapped-line spacing).
+pub(crate) const CELL_LINE_PITCH_EM: f32 = 1.25;
+
+/// The runs of a cell's text from byte `from` to `to`, shifted to start at 0.
+fn runs_between(runs: &[loom_text::StyleRun], from: usize, to: usize) -> Vec<loom_text::StyleRun> {
+    runs.iter()
+        .filter_map(|run| {
+            let (start, end) = (run.start.max(from), run.end.min(to));
+            (start < end).then(|| loom_text::StyleRun {
+                start: start - from,
+                end: end - from,
+                style: run.style.clone(),
+            })
+        })
+        .collect()
+}
+
 fn runs_before(runs: &[loom_text::StyleRun], end: usize) -> Vec<loom_text::StyleRun> {
     runs.iter()
         .filter_map(|run| {
@@ -1003,13 +1037,6 @@ pub(crate) fn cell_text_block(
     Some(block)
 }
 
-/// The height of one table row as the page paints it. The core layout reserves
-/// a taller band per table row for its Markdown text; the page draws rows at
-/// this pitch, so the caret and the reveal follow this height.
-pub(crate) fn table_row_height(style: &PageStyle) -> f32 {
-    (style.body_font_size_pt * style.line_height + 8.0).max(24.0)
-}
-
 /// The canvas y that a table block's rows are drawn from: the top of the
 /// block's first line in the whole flow. It does not depend on which pages are
 /// drawn, so the rows keep their place as the page scrolls past a page break.
@@ -1041,7 +1068,10 @@ pub(crate) fn table_row_view_span(
     let base = flow.page_bounds().first().copied()?;
     let top = block_top_y(flow, location.block_index, style, base)?;
     let zoom = flow.zoom().max(f32::EPSILON);
-    let row = table_row_height(style);
+    let row = loom_writer_core::table_row_height(
+        style,
+        loom_writer_core::table_line_count(doc.blocks[location.block_index].text.as_str()),
+    );
     let view_top = (top + location.row as f32 * row) * zoom + style.margin_top_pt * zoom + base.y;
     Some((view_top, view_top + row * zoom))
 }
