@@ -90,7 +90,7 @@ fn alignment_shift(alignment: Alignment, column: f32, width: f32) -> f32 {
     match alignment {
         Alignment::Center => ((column - width) / 2.0).max(0.0),
         Alignment::Right => (column - width).max(0.0),
-        Alignment::Left | Alignment::Justify => 0.0,
+        Alignment::Left | Alignment::Justify | Alignment::Start => 0.0,
     }
 }
 
@@ -194,7 +194,7 @@ fn begin_drag(
         style.height_pt - style.margin_top_pt - style.margin_bottom_pt,
     );
     let column = block.text_column_width(&style);
-    let alignment = block.style.alignment;
+    let alignment = block.style.alignment.resolve(block.text.as_str());
     let shown_width = rect.width.max(1.0);
     let drag = Drag {
         key: rect.key,

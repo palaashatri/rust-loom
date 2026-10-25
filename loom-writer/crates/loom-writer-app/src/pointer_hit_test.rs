@@ -188,10 +188,12 @@ fn writer_text_metric_offset(
         }
         // The column the line is aligned in: the text column less the indent.
         let column_width = block.text_column_width(&style);
-        let alignment_offset = match block.style.alignment {
+        let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
             loom_text::Alignment::Center => ((column_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (column_width - line.bounds.width).max(0.0),
-            loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+            loom_text::Alignment::Left
+            | loom_text::Alignment::Justify
+            | loom_text::Alignment::Start => 0.0,
         };
         let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
         // Relative to the line start, in the order the line is drawn in.

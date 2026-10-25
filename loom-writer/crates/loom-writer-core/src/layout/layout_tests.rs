@@ -349,14 +349,16 @@ impl WriterDocument {
                     |text: &str, start: usize| positions.advance(start, start + text.len()) * zoom;
                 let available_width =
                     (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
-                let alignment_offset = match block.style.alignment {
+                let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
                     loom_text::Alignment::Center => {
                         ((available_width - fragment.bounds.width) / 2.0).max(0.0)
                     }
                     loom_text::Alignment::Right => {
                         (available_width - fragment.bounds.width).max(0.0)
                     }
-                    loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+                    loom_text::Alignment::Left
+                    | loom_text::Alignment::Justify
+                    | loom_text::Alignment::Start => 0.0,
                 };
                 let fragment_x = fragment.bounds.x + alignment_offset;
                 let block_start = block_starts[block_index];

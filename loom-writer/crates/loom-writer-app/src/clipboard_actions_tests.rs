@@ -167,10 +167,12 @@ fn pointer_position_for_offset(
     let block = &document.blocks[line.block_index];
     let target_local_offset = line.start + target_offset - line.global_start;
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
-    let alignment_offset = match block.style.alignment {
+    let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
         loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
         loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
-        loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+        loom_text::Alignment::Left
+        | loom_text::Alignment::Justify
+        | loom_text::Alignment::Start => 0.0,
     };
     let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
     let line_y = line.bounds.y - base_page.y - style.margin_top_pt + line.bounds.height / 2.0;

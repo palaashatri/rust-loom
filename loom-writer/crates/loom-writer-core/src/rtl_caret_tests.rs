@@ -51,16 +51,17 @@ fn a_pointer_on_the_left_of_hebrew_text_lands_on_the_glyph_drawn_there() {
 #[test]
 fn the_caret_at_the_start_of_a_hebrew_line_sits_at_its_right_edge() {
     let doc = hebrew_doc(HEBREW);
-    let size = doc.page.page_style().font_size_for_kind("paragraph");
     let flow = flow_of(&doc);
     let line = flow.lines()[0].clone();
-    let width = text_advance(HEBREW, 0, &[], size);
     let caret = flow
         .caret_rect(&doc, &selection(0, 0, CaretAffinity::Downstream))
         .expect("a caret");
+    // A paragraph with no alignment set starts at its reading start (Start),
+    // which for Hebrew is the column's right edge; the caret at offset 0 sits there.
     assert!(
-        (caret.rect.x - (line.bounds.x + width)).abs() < 0.01,
-        "the start of right-to-left text is at its right edge {width}, got {}",
+        (caret.rect.x - (line.bounds.x + right_edge(&doc))).abs() < 0.01,
+        "the start of right-to-left text is at the column's right edge {}, got {}",
+        right_edge(&doc),
         caret.rect.x - line.bounds.x
     );
 }
@@ -70,7 +71,6 @@ fn selecting_the_first_hebrew_letter_highlights_the_glyph_drawn_on_the_right() {
     let doc = hebrew_doc(HEBREW);
     let size = doc.page.page_style().font_size_for_kind("paragraph");
     let flow = flow_of(&doc);
-    let line = flow.lines()[0].clone();
     let alef = text_advance(&HEBREW[..2], 0, &[], size);
     let bet = text_advance(&HEBREW[2..], 2, &[], size);
     let rects = flow.selection_rects(
@@ -80,10 +80,11 @@ fn selecting_the_first_hebrew_letter_highlights_the_glyph_drawn_on_the_right() {
     );
     assert_eq!(rects.len(), 1, "one highlight for alef: {rects:?}");
     let rect = rects[0].rect;
+    let drawn_left = origin(&doc);
     assert!(
-        (rect.x - (line.bounds.x + bet)).abs() < 0.01,
+        (rect.x - (drawn_left + bet)).abs() < 0.01,
         "alef is drawn after bet, at {bet}; highlight starts at {}",
-        rect.x - line.bounds.x
+        rect.x - drawn_left
     );
     assert!(
         (rect.width - alef).abs() < 0.01,
@@ -92,8 +93,20 @@ fn selecting_the_first_hebrew_letter_highlights_the_glyph_drawn_on_the_right() {
     );
 }
 
+/// Where the drawn Hebrew line starts: a paragraph with no alignment set starts
+/// at its reading start, so right-to-left text sits flush with the column's
+/// right edge and begins `text width` short of it.
 fn origin(doc: &WriterDocument) -> f32 {
-    flow_of(doc).lines()[0].bounds.x
+    let flow = flow_of(doc);
+    let size = doc.page.page_style().font_size_for_kind("paragraph");
+    let width = text_advance(HEBREW, 0, &[], size);
+    flow.lines()[0].bounds.x + right_edge(doc) - width
+}
+
+/// The right edge of the column the Hebrew line is aligned in, relative to the
+/// line's column origin.
+fn right_edge(doc: &WriterDocument) -> f32 {
+    doc.blocks[0].text_column_width(&doc.page.page_style())
 }
 
 #[test]

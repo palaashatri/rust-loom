@@ -18,6 +18,8 @@ mod charts;
 mod comments;
 pub mod docx;
 pub use docx::{import_docx, inspect_docx_unsupported};
+#[cfg(test)]
+mod alignment_start_tests;
 mod export;
 mod export_flow;
 mod export_table;
@@ -1600,11 +1602,17 @@ fn heading_level_for_kind(kind: &str) -> i32 {
 
 fn alignment_index(alignment: loom_text::Alignment) -> i32 {
     match alignment {
-        loom_text::Alignment::Left => 0,
+        loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
         loom_text::Alignment::Justify => 3,
     }
+}
+
+/// The toolbar index of a block's alignment as drawn: `Start` shows as the
+/// side its text starts on.
+fn resolved_alignment_index(block: &RichBlock) -> i32 {
+    alignment_index(block.style.alignment.resolve(block.text.as_str()))
 }
 
 fn caret_style(
@@ -1712,11 +1720,11 @@ pub fn formatting_state_for_selection(
         .unwrap_or(0);
     let alignment = selected_blocks
         .first()
-        .map(|i| alignment_index(document.blocks[*i].style.alignment))
+        .map(|i| resolved_alignment_index(&document.blocks[*i]))
         .filter(|first| {
             selected_blocks
                 .iter()
-                .all(|i| alignment_index(document.blocks[*i].style.alignment) == *first)
+                .all(|i| resolved_alignment_index(&document.blocks[*i]) == *first)
         })
         .unwrap_or(0);
     SelectionFormattingState {
@@ -1800,6 +1808,9 @@ fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>),
             }
         }
         let mut b = RichBlock::new(id, &kind, &text);
+        // A block saved without any alignment field keeps the meaning it always
+        // had, Left; only a block created in this version starts at Start.
+        b.style.alignment = loom_text::Alignment::Left;
         if let Some(alignment) = legacy_alignment {
             b.style.alignment = parse_alignment(&alignment);
         }
@@ -6216,9 +6227,10 @@ mod tests {
         set_selection_heading(&mut doc2, sel.clone(), 1);
         assert!(doc2.blocks.iter().all(|b| b.kind == "heading1"));
         set_selection_alignment(&mut doc2, TextSelection::caret(0), 2);
-        // caret only affects first block
+        // caret only affects first block; the untouched empty paragraph keeps the
+        // default of a new paragraph, Start (it was Left before Start existed).
         assert_eq!(doc2.blocks[0].style.alignment, loom_text::Alignment::Right);
-        assert_eq!(doc2.blocks[1].style.alignment, loom_text::Alignment::Left);
+        assert_eq!(doc2.blocks[1].style.alignment, loom_text::Alignment::Start);
 
         // UTF-8 reversed and mid-char flooring
         let mut utf = WriterDocument::new("w1-utf8", "UTF8");

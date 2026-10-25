@@ -173,10 +173,12 @@ fn line_at(lines: &[FlowLine], offset: usize, affinity: CaretAffinity) -> Option
 /// Points from the page's left edge to where the line's text begins.
 fn line_origin(style: &PageStyle, block: &RichBlock, line: &FlowLine) -> f32 {
     let column = block.text_column_width(style);
-    let shift = match block.style.alignment {
+    let shift = match block.style.alignment.resolve(block.text.as_str()) {
         loom_text::Alignment::Center => ((column - line.bounds.width) / 2.0).max(0.0),
         loom_text::Alignment::Right => (column - line.bounds.width).max(0.0),
-        loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+        loom_text::Alignment::Left
+        | loom_text::Alignment::Justify
+        | loom_text::Alignment::Start => 0.0,
     };
     line.bounds.x + shift
 }

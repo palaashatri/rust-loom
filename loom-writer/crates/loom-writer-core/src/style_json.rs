@@ -7,6 +7,7 @@ use loom_package::manifest::json as pkg_json;
 
 pub(crate) fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
     match alignment {
+        loom_text::Alignment::Start => "start",
         loom_text::Alignment::Left => "left",
         loom_text::Alignment::Center => "center",
         loom_text::Alignment::Right => "right",
@@ -16,6 +17,7 @@ pub(crate) fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
 
 pub(crate) fn parse_alignment(value: &str) -> loom_text::Alignment {
     match value {
+        "start" => loom_text::Alignment::Start,
         "center" => loom_text::Alignment::Center,
         "right" => loom_text::Alignment::Right,
         "justify" => loom_text::Alignment::Justify,

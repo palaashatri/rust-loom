@@ -43,6 +43,9 @@ impl FontWeight {
 /// Horizontal alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
+    /// The reading start: left for left-to-right text, right for right-to-left
+    /// text. See [`Alignment::resolve`].
+    Start,
     /// Left.
     Left,
     /// Centered.
@@ -51,6 +54,20 @@ pub enum Alignment {
     Right,
     /// Justified.
     Justify,
+}
+
+impl Alignment {
+    /// The alignment a paragraph whose text is `text` is drawn with. `Start`
+    /// resolves to `Right` when the text starts right-to-left and to `Left`
+    /// otherwise; every other alignment is returned unchanged. The result is
+    /// never `Start`, so every drawing and export path must resolve first.
+    pub fn resolve(self, text: &str) -> Alignment {
+        match self {
+            Alignment::Start if starts_rtl(text) => Alignment::Right,
+            Alignment::Start => Alignment::Left,
+            other => other,
+        }
+    }
 }
 
 /// Line breaking policy.
@@ -91,7 +108,7 @@ pub struct ParagraphStyle {
 impl Default for ParagraphStyle {
     fn default() -> Self {
         Self {
-            alignment: Alignment::Left,
+            alignment: Alignment::Start,
             space_before: 0.0,
             space_after: 8.0,
             line_spacing: 1.15,
@@ -369,16 +386,14 @@ pub fn bidi_class(c: char) -> BidiClass {
     }
 }
 
-/// Determine if a paragraph starts right-to-left.
+/// Determine if a paragraph starts right-to-left: its first strong character
+/// decides. Spaces, punctuation and digits are neutral or weak and do not.
 pub fn starts_rtl(s: &str) -> bool {
     for c in s.chars() {
-        let cls = bidi_class(c);
-        if matches!(cls, BidiClass::R | BidiClass::AL) {
-            return true;
+        if !c.is_alphabetic() {
+            continue;
         }
-        if matches!(cls, BidiClass::L) {
-            return false;
-        }
+        return matches!(bidi_class(c), BidiClass::R | BidiClass::AL);
     }
     false
 }
@@ -451,7 +466,7 @@ mod tests {
     #[test]
     fn paragraph_defaults() {
         let p = Paragraph::new();
-        assert_eq!(p.style.alignment, Alignment::Left);
+        assert_eq!(p.style.alignment, Alignment::Start);
         let cs = CharacterStyle::default();
         assert_eq!(cs.font_size, 12.0);
     }
@@ -519,6 +534,22 @@ mod tests {
         assert!(!starts_rtl("abc"));
         assert!(starts_rtl("\u{0627}long"));
         assert!(!starts_rtl("123"));
+    }
+
+    #[test]
+    fn start_resolves_by_the_first_strong_character() {
+        assert_eq!(Alignment::Start.resolve("abc"), Alignment::Left);
+        assert_eq!(Alignment::Start.resolve("\u{05D0}bc"), Alignment::Right);
+        // Leading spaces and punctuation are neutral and do not decide.
+        assert_eq!(Alignment::Start.resolve(" \u{05D0}"), Alignment::Right);
+        assert_eq!(Alignment::Start.resolve("(\u{0627})"), Alignment::Right);
+        assert_eq!(Alignment::Start.resolve("12 abc"), Alignment::Left);
+        assert_eq!(Alignment::Start.resolve(""), Alignment::Left);
+        // Explicit alignments keep their meaning whatever the text is.
+        assert_eq!(Alignment::Left.resolve("\u{05D0}"), Alignment::Left);
+        assert_eq!(Alignment::Right.resolve("abc"), Alignment::Right);
+        assert_eq!(Alignment::Center.resolve("\u{05D0}"), Alignment::Center);
+        assert_eq!(Alignment::Justify.resolve("abc"), Alignment::Justify);
     }
 
     #[test]

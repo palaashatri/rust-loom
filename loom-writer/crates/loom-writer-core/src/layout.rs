@@ -754,10 +754,12 @@ fn rects_for_lines(
         // Block byte offsets in, points out.
         let advance = |from: usize, to: usize| positions.advance(from, to) * zoom;
         let available_width = block.text_column_width(style) * zoom;
-        let alignment_offset = match block.style.alignment {
+        let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
             loom_text::Alignment::Center => ((available_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (available_width - line.bounds.width).max(0.0),
-            loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+            loom_text::Alignment::Left
+            | loom_text::Alignment::Justify
+            | loom_text::Alignment::Start => 0.0,
         };
         let line_x = line.bounds.x + alignment_offset;
         let (global_start, global_end) = (line.global_start, line.global_end());
@@ -988,3 +990,7 @@ mod list_indent_tests;
 
 #[cfg(test)]
 mod break_tests;
+
+#[cfg(test)]
+#[path = "rtl_paragraph_tests.rs"]
+mod rtl_paragraph_tests;

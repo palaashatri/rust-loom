@@ -215,7 +215,7 @@ pub(crate) fn row_text(block: &RichBlock, font_size: f32, width: f32, align: Ali
             Align::Line(measured) => measured,
             _ => measure.width(line_start, ink_end),
         };
-        let shift = match (align, block.style.alignment) {
+        let shift = match (align, block.style.alignment.resolve(text)) {
             (Align::Start, _) => 0.0,
             (_, Alignment::Center) => ((width - line_width) / 2.0).max(0.0),
             (_, Alignment::Right) => (width - line_width).max(0.0),

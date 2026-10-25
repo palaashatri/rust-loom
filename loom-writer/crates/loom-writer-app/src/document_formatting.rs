@@ -567,15 +567,14 @@ fn uniform_heading_level(document: &WriterDocument) -> i32 {
 
 #[allow(dead_code)]
 fn uniform_alignment(document: &WriterDocument) -> i32 {
-    let mut alignments = document
-        .blocks
-        .iter()
-        .map(|block| match block.style.alignment {
+    let mut alignments = document.blocks.iter().map(|block| {
+        match block.style.alignment.resolve(block.text.as_str()) {
             Alignment::Center => 1,
             Alignment::Right => 2,
             Alignment::Justify => 3,
-            Alignment::Left => 0,
-        });
+            Alignment::Left | Alignment::Start => 0,
+        }
+    });
     let Some(first) = alignments.next() else {
         return 0;
     };
@@ -651,11 +650,11 @@ pub fn formatting_state_for_selection(
         .unwrap_or(0);
     let alignment = selected_blocks
         .first()
-        .map(|index| alignment_index(document.blocks[*index].style.alignment))
+        .map(|index| alignment_index(&document.blocks[*index]))
         .filter(|first| {
             selected_blocks
                 .iter()
-                .all(|index| alignment_index(document.blocks[*index].style.alignment) == *first)
+                .all(|index| alignment_index(&document.blocks[*index]) == *first)
         })
         .unwrap_or(0);
 
@@ -769,9 +768,11 @@ fn heading_level_for_kind(kind: &str) -> i32 {
     }
 }
 
-fn alignment_index(alignment: Alignment) -> i32 {
-    match alignment {
-        Alignment::Left => 0,
+/// The toolbar index of a block's alignment as drawn: `Start` shows as the
+/// side its text starts on.
+fn alignment_index(block: &RichBlock) -> i32 {
+    match block.style.alignment.resolve(block.text.as_str()) {
+        Alignment::Left | Alignment::Start => 0,
         Alignment::Center => 1,
         Alignment::Right => 2,
         Alignment::Justify => 3,

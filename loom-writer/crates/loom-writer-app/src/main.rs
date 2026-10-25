@@ -1579,7 +1579,7 @@ fn writer_render_height_for_width(block: &RichBlock, font_size: f32, usable_widt
 
 fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
     match alignment {
-        loom_text::Alignment::Left => 0,
+        loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
         // The page text item has no justify mode.  Preserve an explicit
@@ -1654,16 +1654,20 @@ fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
     if indices.is_empty() {
         return 0;
     }
-    let align_index = |a: loom_text::Alignment| match a {
-        loom_text::Alignment::Left => 0,
+    let align_index = |block: &loom_writer_core::RichBlock| match block
+        .style
+        .alignment
+        .resolve(block.text.as_str())
+    {
+        loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
         loom_text::Alignment::Justify => -1,
     };
-    let first = align_index(doc.blocks[indices[0]].style.alignment);
+    let first = align_index(&doc.blocks[indices[0]]);
     let uniform = indices
         .iter()
-        .all(|i| align_index(doc.blocks[*i].style.alignment) == first);
+        .all(|i| align_index(&doc.blocks[*i]) == first);
     if uniform {
         first
     } else {

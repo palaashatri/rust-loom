@@ -338,7 +338,11 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 let text_start = block.text_start_pt(&page_style);
                 let text_column = block.text_column_width(&page_style);
                 let width = export_flow::line_width("", text, &block.runs, style, *start);
-                let shift = align_shift(block.style.alignment, text_column, width);
+                let shift = align_shift(
+                    block.style.alignment.resolve(block.text.as_str()),
+                    text_column,
+                    width,
+                );
                 let marker_x = page_style.margin_left_pt + text_start
                     - LIST_MARKER_GAP_PT
                     - pdf_text_width(marker, style);
@@ -354,7 +358,11 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 draw_styled_line(&mut pdf, page, &text_line, style);
             }
             LineContent::TableRow { layout, row } => {
-                let shift = align_shift(block.style.alignment, column, layout.width);
+                let shift = align_shift(
+                    block.style.alignment.resolve(block.text.as_str()),
+                    column,
+                    layout.width,
+                );
                 let origin = (page_style.margin_left_pt + indent + shift, y);
                 export_table::draw_row(&mut pdf, page, layout, *row, origin);
             }
@@ -363,12 +371,20 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                 width,
                 height,
             } => {
-                let shift = align_shift(block.style.alignment, column, *width);
+                let shift = align_shift(
+                    block.style.alignment.resolve(block.text.as_str()),
+                    column,
+                    *width,
+                );
                 let origin = (page_style.margin_left_pt + indent + shift, y);
                 draw_chart_card(&mut pdf, page, chart, origin, *width, *height);
             }
             LineContent::Picture { width, height } => {
-                let shift = align_shift(block.style.alignment, column, *width);
+                let shift = align_shift(
+                    block.style.alignment.resolve(block.text.as_str()),
+                    column,
+                    *width,
+                );
                 if let Some(image) = block.image.as_ref().and_then(|i| pdf_image(i).ok()) {
                     let id = pdf.add_image(image);
                     let x = page_style.margin_left_pt + indent + shift;

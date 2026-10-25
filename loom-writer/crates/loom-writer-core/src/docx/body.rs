@@ -210,7 +210,7 @@ fn picture_paragraph(
 ) -> String {
     let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
     let name = xml::attr(&image.name);
-    let alignment = match block.style.alignment {
+    let alignment = match block.style.alignment.resolve(block.text.as_str()) {
         loom_text::Alignment::Center => "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
         loom_text::Alignment::Right => "<w:pPr><w:jc w:val=\"right\"/></w:pPr>",
         _ => "",
@@ -331,8 +331,8 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
         out.push_str(&format!("<w:ind{indent}/>"));
     }
 
-    match style.alignment {
-        Alignment::Left => {}
+    match style.alignment.resolve(block.text.as_str()) {
+        Alignment::Left | Alignment::Start => {}
         Alignment::Center => out.push_str("<w:jc w:val=\"center\"/>"),
         Alignment::Right => out.push_str("<w:jc w:val=\"right\"/>"),
         Alignment::Justify => out.push_str("<w:jc w:val=\"both\"/>"),

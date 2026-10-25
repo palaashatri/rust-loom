@@ -240,7 +240,7 @@ fn render_row(
         height,
         font_size,
         font_family: SharedString::from(family),
-        alignment: writer_render_alignment(block.style.alignment),
+        alignment: writer_render_alignment(block.style.alignment.resolve(block.text.as_str())),
         marker: SharedString::from(marker),
         unsupported,
         unsupported_label: if unsupported {
@@ -477,7 +477,7 @@ pub(crate) fn project(
 
         if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
             let width = line.bounds.width / zoom;
-            let shift = match block.style.alignment {
+            let shift = match block.style.alignment.resolve(block.text.as_str()) {
                 loom_text::Alignment::Center => (column_width - width) / 2.0,
                 loom_text::Alignment::Right => column_width - width,
                 _ => 0.0,
