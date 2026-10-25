@@ -41,12 +41,17 @@ jobs:
           set -euo pipefail
           build=true
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
-            # A scheduled run only rebuilds when main moved past the nightly tag.
-            tag_sha="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+            # Skip only when the public (non-draft) nightly release already
+            # carries all four archives for this commit. Checking the tag alone
+            # would never retry a run that moved the tag but failed to publish.
+            published="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/nightly" | jq -r '.sha // empty' || true)"
-            if [ "${tag_sha}" = "${GITHUB_SHA}" ]; then
-              echo "nightly already points at ${GITHUB_SHA}; nothing to build."
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
+              | jq -r --arg sha "${GITHUB_SHA}" \
+                'if .draft then 0 else [.assets[].name | select(startswith("loom-nightly-" + $sha + "-"))] | length end' \
+              || echo 0)"
+            if [ "${published:-0}" -ge 4 ]; then
+              echo "nightly for ${GITHUB_SHA} is already published; nothing to build."
               build=false
             fi
           fi
