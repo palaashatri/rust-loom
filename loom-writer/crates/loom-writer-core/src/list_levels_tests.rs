@@ -306,24 +306,113 @@ fn pdf_draws_each_level_further_in_with_its_marker() {
     let pdf = crate::export_pdf(&doc);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     let margin = style.margin_left_pt;
-    // Each marker run starts at its level's indent; the item text follows it.
-    let top = run_x(&content, "\u{2022} ");
-    let nested = run_x(&content, "\u{25e6} ");
-    let deeper = run_x(&content, "\u{25aa} ");
+    // Each item's text starts at the shared text start: its level's indent plus
+    // the marker room, as the editor lays it out.
+    let text_start = |index: usize| margin + doc.blocks[index].text_start_pt(&style);
     assert!(
-        (top - margin).abs() < 0.01,
-        "top marker at the margin: {top}"
+        (run_x(&content, "Top") - text_start(0)).abs() < 0.01,
+        "top text starts at {}",
+        text_start(0)
     );
     assert!(
-        (nested - margin - 18.0).abs() < 0.01,
-        "nested marker: {nested}"
+        (run_x(&content, "Nested") - text_start(1)).abs() < 0.01,
+        "nested text starts at {}",
+        text_start(1)
     );
     assert!(
-        (deeper - margin - 36.0).abs() < 0.01,
-        "deeper marker: {deeper}"
+        (run_x(&content, "Deeper") - text_start(2)).abs() < 0.01,
+        "deeper text starts at {}",
+        text_start(2)
     );
+    // Each marker hangs in the room left of its text, its right edge 4 pt before it.
+    let body = loom_pdf::TextStyle {
+        size_pt: style.body_font_size_pt,
+        ..Default::default()
+    };
+    for (index, glyph) in ["\u{2022}", "\u{25e6}", "\u{25aa}"].into_iter().enumerate() {
+        let right = run_x(&content, glyph) + crate::text_metrics::pdf_text_width(glyph, &body);
+        assert!(
+            (right - (text_start(index) - 4.0)).abs() < 0.01,
+            "marker {glyph:?} ends at {right}"
+        );
+    }
+}
+
+/// Every text run drawn in the page content as (x, text), in drawing order. Each
+/// run is written `x y Td (text) Tj`.
+fn drawn_runs(content: &str) -> Vec<(f32, String)> {
+    let mut runs = Vec::new();
+    let mut from = 0;
+    while let Some(found) = content[from..].find(" Td (") {
+        let at = from + found;
+        let mut words = content[..at].split_whitespace().rev();
+        let _y = words.next();
+        let x: f32 = words
+            .next()
+            .expect("x coordinate")
+            .parse()
+            .expect("x is a number");
+        let text_start = at + " Td (".len();
+        let text_end = text_start + content[text_start..].find(") Tj").expect("run ends");
+        runs.push((x, content[text_start..text_end].to_string()));
+        from = text_end;
+    }
+    runs
+}
+
+#[test]
+fn a_list_lines_text_starts_where_the_editor_starts_it() {
+    let style = PageStyle::default();
+    // Long enough to wrap onto several lines, so the continuation lines are checked too.
+    let long = "wrapping ".repeat(60);
+    let doc = doc_of(vec![
+        block(1, "list-bulleted", &long, 0),
+        block(2, "list-numbered", "Nested", 1),
+    ]);
+    let pdf = crate::export_pdf(&doc);
+    let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+    let runs = drawn_runs(&content);
+    let margin = style.margin_left_pt;
+    let first = margin + doc.blocks[0].text_start_pt(&style);
+    let nested = margin + doc.blocks[1].text_start_pt(&style);
+
+    let lines: Vec<f32> = runs
+        .iter()
+        .filter(|(_, text)| text.starts_with("wrapping"))
+        .map(|(x, _)| *x)
+        .collect();
+    assert!(lines.len() > 1, "the item wraps: {runs:?}");
+    for x in &lines {
+        assert!(
+            (x - first).abs() < 0.01,
+            "a line starts at {x}, the editor's text start is {first}"
+        );
+    }
+    let nested_x = runs
+        .iter()
+        .find(|(_, text)| text == "Nested")
+        .map(|(x, _)| *x)
+        .expect("the nested item is drawn");
     assert!(
-        run_x(&content, "Nested") > nested,
-        "the text follows its marker"
+        (nested_x - nested).abs() < 0.01,
+        "nested text at {nested_x}, the editor's text start is {nested}"
     );
+
+    // The marker hangs in the room left of the text, its right edge 4 pt before it
+    // (the editor's 4 px gap in writer_components.slint).
+    let body = loom_pdf::TextStyle {
+        size_pt: style.body_font_size_pt,
+        ..Default::default()
+    };
+    for (glyph, start) in [("\u{2022}", first), ("1.", nested)] {
+        let (x, _) = runs
+            .iter()
+            .find(|(_, text)| text == glyph)
+            .unwrap_or_else(|| panic!("{glyph:?} is drawn in {runs:?}"));
+        let right = x + crate::text_metrics::pdf_text_width(glyph, &body);
+        assert!(
+            (right - (start - 4.0)).abs() < 0.01,
+            "{glyph:?} ends at {right}, 4 pt before {start}"
+        );
+    }
 }

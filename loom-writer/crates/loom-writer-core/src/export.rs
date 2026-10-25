@@ -20,10 +20,16 @@ pub fn export_document_as_docx(
     crate::docx::export_docx(doc).map(|export| export.bytes)
 }
 
-/// One laid-out line: an optional list marker, then `text`, which is the
-/// block's bytes starting at `text_start` so character runs can be matched.
+/// The gap the editor leaves between a list marker and its text (4 px in
+/// `writer_components.slint`): the marker's right edge sits this far before the text.
+const LIST_MARKER_GAP_PT: f32 = 4.0;
+
+/// One laid-out line: an optional list marker drawn at `marker_x` in the room
+/// left of the text, then `text` at `x`. `text` is the block's bytes starting at
+/// `text_start` so character runs can be matched.
 struct StyledLine<'a> {
     x: f32,
+    marker_x: f32,
     y: f32,
     marker: &'a str,
     text: &'a str,
@@ -42,11 +48,10 @@ fn draw_styled_line(
 ) {
     use loom_pdf::PathStyle;
 
-    let mut x = line.x;
     if !line.marker.is_empty() {
-        pdf.draw_text(page, x, line.y, line.marker, base);
-        x += pdf_text_width(line.marker, base);
+        pdf.draw_text(page, line.marker_x, line.y, line.marker, base);
     }
+    let mut x = line.x;
     let end = line.text_start + line.text.len();
     let mut cuts = vec![0, line.text.len()];
     for run in line.runs {
@@ -250,24 +255,14 @@ fn pdf_lines(
             }
         }
         // The marker is the one the editor draws for the item's level, so the
-        // PDF and the page show the same bullet or number.
-        let glyph = block.list_marker(numbers[index]);
-        let marker = if glyph.is_empty() {
-            glyph
-        } else {
-            format!("{glyph} ")
-        };
+        // PDF and the page show the same bullet or number. It hangs in the room
+        // left of the text, which every line wraps within, as on the page.
+        let marker = block.list_marker(numbers[index]);
         let style = block_style(kind, body, page_style);
         let height =
             style.size_pt * page_style.line_height * crate::layout::line_spacing_factor(block);
-        let marker_width = pdf_text_width(&marker, &style);
-        let ranges = export_flow::wrap(
-            text,
-            &block.runs,
-            &style,
-            (column - marker_width).max(0.0),
-            column,
-        );
+        let text_column = block.text_column_width(page_style);
+        let ranges = export_flow::wrap(text, &block.runs, &style, text_column, text_column);
         for (line_index, (start, end)) in ranges.into_iter().enumerate() {
             lines.push(PdfLine {
                 block: index,
@@ -338,10 +333,18 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             } => {
                 let text = &block.text.as_str()[*start..*end];
                 break_pending = block.text.as_str()[*end..].starts_with('\u{c}');
-                let width = export_flow::line_width(marker, text, &block.runs, style, *start);
-                let shift = align_shift(block.style.alignment, column, width);
+                // The text starts where the editor starts it, past a list item's
+                // marker room; the marker hangs in that room.
+                let text_start = block.text_start_pt(&page_style);
+                let text_column = block.text_column_width(&page_style);
+                let width = export_flow::line_width("", text, &block.runs, style, *start);
+                let shift = align_shift(block.style.alignment, text_column, width);
+                let marker_x = page_style.margin_left_pt + text_start
+                    - LIST_MARKER_GAP_PT
+                    - pdf_text_width(marker, style);
                 let text_line = StyledLine {
-                    x: page_style.margin_left_pt + indent + shift,
+                    x: page_style.margin_left_pt + text_start + shift,
+                    marker_x,
                     y,
                     marker,
                     text,
