@@ -24,7 +24,9 @@ export component LoomButton inherits Rectangle {
         : root.destructive ? Theme.palette().danger
         : Theme.palette().ink;
 
-    height: Theme.tokens.metrics.control-height;
+    // Scales with the body text, so a double-size label fits inside the button.
+    // At 1.0x this equals the control height.
+    height: Theme.scaled-control-height;
     measure := Text { visible: false; text: root.label; font-size: Theme.type.body; font-weight: 600; }
     min-width: max(Theme.tokens.metrics.control-height,
         measure.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
@@ -66,12 +68,16 @@ export component LoomButton inherits Rectangle {
             icon: root.icon;
             tint: root.foreground;
         }
+        // The button is the one element named by its label. Without this the
+        // text would be a second element with the same name.
         Text {
             text: root.label;
             font-size: Theme.type.body;
             font-weight: 600;
             color: root.foreground;
             vertical-alignment: center;
+            accessible-role: none;
+            accessible-label: "";
         }
         if Theme.rtl && root.icon != "" : Icon {
             size: Theme.tokens.metrics.icon-size;

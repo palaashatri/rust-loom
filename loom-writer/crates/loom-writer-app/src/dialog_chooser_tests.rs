@@ -165,3 +165,18 @@ fn save_changes_buttons_are_tall_enough_for_double_size_labels() {
         }
     }
 }
+
+#[test]
+fn each_save_changes_button_is_named_by_one_element() {
+    let (width, height) = (1280.0f32, 800.0f32);
+    let app = editor(width, height, 1.0);
+    open_surface(&app, "save-changes");
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+    for label in ["Save", "Discard", "Cancel"] {
+        let named = ElementHandle::find_by_accessible_label(&app, label).count();
+        assert_eq!(
+            named, 1,
+            "the {label} button is named by {named} elements; its label text must not repeat its name"
+        );
+    }
+}
