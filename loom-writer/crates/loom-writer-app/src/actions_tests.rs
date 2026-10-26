@@ -1297,6 +1297,11 @@ fn selection_projection_refreshes_font_size_from_the_active_paragraph() {
         body_start as i32,
         body_start as i32,
     ));
+    assert_eq!(
+        app.get_font_size_pt(),
+        11,
+        "the collapsed body caret follows the 11 pt paragraph"
+    );
     assert!(project_selection_event(
         &app,
         &mut document,
@@ -1311,6 +1316,75 @@ fn selection_projection_refreshes_font_size_from_the_active_paragraph() {
         11,
         "the font-size field follows the selected 11 pt body paragraph"
     );
+}
+
+#[test]
+fn selection_projection_refreshes_strikethrough_after_moving_to_plain_text() {
+    set_platform();
+    let app = WriterApp::new().expect("create WriterApp");
+    let mut document = text_document("strike plain");
+    set_selection_strikethrough(&mut document, DocumentSelection::range(0, 6), true);
+    document.set_selection(TextSelection::range(0, 6));
+    apply_document(&app, &document);
+
+    assert!(app.get_is_strikethrough(), "the first range is struck");
+    assert!(project_selection_event(&app, &mut document, 7, 12));
+
+    assert!(
+        !app.get_is_strikethrough(),
+        "the inspector follows the plain selected text"
+    );
+    assert!(project_selection_event(&app, &mut document, 0, 12));
+    assert!(
+        !app.get_is_strikethrough(),
+        "a mixed struck/plain range is not reported as fully struck"
+    );
+}
+
+#[test]
+fn selection_projection_refreshes_font_family_after_moving_between_families() {
+    set_platform();
+    let app = WriterApp::new().expect("create WriterApp");
+    let mut document = text_document("first second");
+    set_selection_font_family(&mut document, DocumentSelection::range(0, 5), "Georgia");
+    set_selection_font_family(&mut document, DocumentSelection::range(6, 12), "Garamond");
+    document.set_selection(TextSelection::range(0, 5));
+    apply_document(&app, &document);
+    let picker = app.global::<FontPicker>();
+
+    assert_eq!(picker.get_current().as_str(), "Georgia");
+    assert!(project_selection_event(&app, &mut document, 6, 12));
+
+    assert_eq!(
+        picker.get_current().as_str(),
+        "Garamond",
+        "the font field follows the newly selected text"
+    );
+    assert!(project_selection_event(&app, &mut document, 0, 12));
+    assert_eq!(picker.get_current().as_str(), "Mixed");
+}
+
+#[test]
+fn selection_projection_preserves_a_pending_family_at_a_collapsed_caret() {
+    set_platform();
+    typing_style::clear();
+    let app = WriterApp::new().expect("create WriterApp");
+    let mut document = text_document("plain");
+    document.set_selection(TextSelection::caret(0));
+    apply_document(&app, &document);
+    let picker = app.global::<FontPicker>();
+    assert_eq!(picker.get_current().as_str(), "Inter");
+
+    typing_style::set_family(5, "Garamond");
+    assert!(project_selection_event(&app, &mut document, 5, 5));
+
+    assert_eq!(picker.get_current().as_str(), "Garamond");
+    assert_eq!(
+        document.editor_text(),
+        "plain",
+        "selection does not apply formatting"
+    );
+    typing_style::clear();
 }
 
 #[test]

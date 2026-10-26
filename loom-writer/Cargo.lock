@@ -3216,6 +3216,7 @@ dependencies = [
  "loom-package",
  "loom-pdf",
  "loom-text",
+ "quick-xml",
  "roxmltree",
  "unicode-segmentation",
 ]

@@ -7,7 +7,7 @@
 use loom_package::zip::PackageArchive;
 use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphStyle, StyleRun};
 
-use super::inline_style::{property_tag, writer_color};
+use super::inline_style::{attribute_value, property_tag, property_tag_with_start, writer_color};
 use crate::{RichBlock, WriterDocument};
 
 /// Unescapes the five predefined XML entities in one left-to-right pass.
@@ -686,11 +686,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
 }
 
 fn extract_attribute_value(tag_snippet: &str, attr_name: &str) -> Option<String> {
-    let needle = format!("{attr_name}=\"");
-    let pos = tag_snippet.find(&needle)?;
-    let start = pos + needle.len();
-    let end = tag_snippet[start..].find('"')?;
-    Some(tag_snippet[start..start + end].to_string())
+    attribute_value(tag_snippet, attr_name)
 }
 
 fn extract_core_title(xml: &str) -> Option<String> {
@@ -712,19 +708,16 @@ fn extract_core_title(xml: &str) -> Option<String> {
 fn parse_rels(rels_xml: &str) -> std::collections::BTreeMap<String, String> {
     let mut map = std::collections::BTreeMap::new();
     let mut offset = 0;
-    while let Some(rel_pos) = rels_xml[offset..].find("<Relationship") {
-        let abs_start = offset + rel_pos;
-        let tag_end = rels_xml[abs_start..]
-            .find('>')
-            .unwrap_or(rels_xml.len() - abs_start);
-        let tag_str = &rels_xml[abs_start..abs_start + tag_end];
+    while let Some((rel_pos, tag_str)) =
+        property_tag_with_start(&rels_xml[offset..], "Relationship")
+    {
         if let (Some(id), Some(target)) = (
             extract_attribute_value(tag_str, "Id"),
             extract_attribute_value(tag_str, "Target"),
         ) {
             map.insert(id, target);
         }
-        offset = abs_start + tag_end;
+        offset += rel_pos + tag_str.len();
     }
     map
 }
