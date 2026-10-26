@@ -1714,6 +1714,7 @@ fn project_selection_event(
     app.set_is_bold(formatting.bold);
     app.set_is_italic(formatting.italic);
     app.set_is_underline(formatting.underline);
+    app.set_font_size_pt(formatting.font_size_pt);
     app.set_heading_level(inspector_heading_level(document, &selection));
     app.set_text_alignment(inspector_alignment(document, &selection));
     sync_justify_availability(app, document);

@@ -1275,6 +1275,45 @@ fn selection_change_is_first_class_without_history_or_block_mutation() {
 }
 
 #[test]
+fn selection_projection_refreshes_font_size_from_the_active_paragraph() {
+    set_platform();
+    let app = WriterApp::new().expect("create WriterApp");
+    let heading = "First section";
+    let body = "Select this body paragraph";
+    let mut document = WriterDocument::new("font-selection", "Font selection");
+    document.blocks.push(RichBlock::new(1, "heading1", heading));
+    let mut body_block = RichBlock::new(2, "paragraph", body);
+    body_block.style.alignment = loom_text::Alignment::Justify;
+    document.blocks.push(body_block);
+    document.set_selection(TextSelection::caret(0));
+    apply_document(&app, &document);
+
+    assert_eq!(app.get_font_size_pt(), 24, "H1 renders at 24 pt");
+    let body_start = heading.len() + 1;
+    let body_end = body_start + body.len();
+    assert!(project_selection_event(
+        &app,
+        &mut document,
+        body_start as i32,
+        body_start as i32,
+    ));
+    assert!(project_selection_event(
+        &app,
+        &mut document,
+        body_start as i32,
+        body_end as i32,
+    ));
+
+    assert_eq!(app.get_heading_level(), 0, "the inspector follows Body");
+    assert_eq!(app.get_text_alignment(), 3, "the inspector follows Justify");
+    assert_eq!(
+        app.get_font_size_pt(),
+        11,
+        "the font-size field follows the selected 11 pt body paragraph"
+    );
+}
+
+#[test]
 fn inspector_shows_mixed_heading_and_alignment_as_indeterminate() {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
