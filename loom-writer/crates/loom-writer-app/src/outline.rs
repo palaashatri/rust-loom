@@ -109,7 +109,7 @@ pub(crate) fn jump(app: &WriterApp, state: &GuiState, index: usize) {
         }
     }
     *state.viewport.borrow_mut() = viewport;
-    app.set_page_scroll_y(viewport.scroll_y);
+    app.set_scroll_y(viewport.scroll_y);
     apply_document_with_viewport(app, &snapshot, viewport);
     refresh_writer_registry(app, state);
     app.invoke_focus_page();

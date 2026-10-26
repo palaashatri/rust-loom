@@ -88,17 +88,37 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
 fn validate_inline_colors(doc: &WriterDocument) -> Result<(), ArchiveError> {
     for run in doc.blocks.iter().flat_map(|block| block.runs.iter()) {
         if let Some(color) = run.style.color.as_deref() {
-            if inline_style::docx_rgb(color).is_none() {
-                return Err(ArchiveError::Corrupt(
-                    "invalid inline color; DOCX requires opaque #RRGGBB or #RRGGBBFF".to_string(),
-                ));
+            validate_inline_color(color)?;
+        }
+    }
+    for cell in doc
+        .blocks
+        .iter()
+        .filter_map(|block| block.table.as_deref())
+        .flat_map(|table| table.rows.iter())
+        .flat_map(|row| row.cells.iter())
+    {
+        for run in &cell.content.runs {
+            if let Some(color) = run.color.as_deref() {
+                validate_inline_color(color)?;
             }
         }
     }
     Ok(())
 }
 
+fn validate_inline_color(color: &str) -> Result<(), ArchiveError> {
+    if inline_style::docx_rgb(color).is_none() {
+        return Err(ArchiveError::Corrupt(
+            "invalid inline color; DOCX requires opaque #RRGGBB or #RRGGBBFF".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod inline_styles_tests;
+#[cfg(test)]
+mod table_run_tests;
 #[cfg(test)]
 mod tests;

@@ -6,6 +6,11 @@ use super::actions_tests::text_document;
 use super::projection::render_text::{row_text, row_text_with_spaces, Align};
 use super::*;
 use i_slint_backend_testing::ElementHandle;
+use loom_text::{CharacterStyle, FontWeight, ParagraphDirection, StyleRun};
+use loom_writer_core::fonts::{
+    FallbackPolicy, FontCatalog, Paragraph, ScanConfig, StyledSpan, TextDirection,
+};
+use std::sync::Arc;
 
 fn rows_of(document: &WriterDocument) -> Vec<WriterRenderBlock> {
     projection::project(document, PageViewport::default(), None).rows
@@ -17,6 +22,154 @@ fn texts(row: &WriterRenderBlock) -> Vec<String> {
 
 fn drawn_text(rows: &[WriterRenderBlock]) -> String {
     rows.iter().flat_map(texts).collect()
+}
+
+struct ResetScriptCatalog;
+
+impl Drop for ResetScriptCatalog {
+    fn drop(&mut self) {
+        loom_writer_core::fonts::reset_font_catalog();
+    }
+}
+
+fn deterministic_script_catalog() -> Arc<FontCatalog> {
+    let mut config = ScanConfig::with_dirs(Vec::new());
+    config.policy = FallbackPolicy::new(["Noto Naskh Arabic", "Noto Sans Hebrew"]);
+    Arc::new(FontCatalog::scan(&config))
+}
+
+#[test]
+fn positioned_render_runs_follow_shaped_mixed_direction_geometry() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let catalog = deterministic_script_catalog();
+    loom_writer_core::fonts::install_font_catalog(catalog.clone());
+    let _reset = ResetScriptCatalog;
+
+    let text = "مرحبا office שלום";
+    let arabic_end = "مرحبا".len();
+    let latin_start = arabic_end + 1;
+    let latin_end = latin_start + "office".len();
+    let latin_size = 19.0;
+    let mut block = RichBlock::new(1, "paragraph", text);
+    block.style.direction = ParagraphDirection::RightToLeft;
+    block.style.alignment = loom_text::Alignment::Left;
+    block.runs.push(StyleRun {
+        start: latin_start,
+        end: latin_end,
+        style: CharacterStyle {
+            font_size: latin_size,
+            explicit_size: true,
+            weight: FontWeight::Bold,
+            color: Some("#CC3300FF".to_owned()),
+            ..CharacterStyle::default()
+        },
+    });
+
+    let regular = catalog.resolve("Inter", 400, false).expect("bundled Inter");
+    let bold = catalog
+        .resolve("Inter", 700, false)
+        .expect("bundled Inter Bold");
+    let base_size = PageStyle::default().body_font_size_pt;
+    let spans = [
+        StyledSpan::new(0..latin_start, &regular, base_size),
+        StyledSpan::new(latin_start..latin_end, &bold, latin_size),
+        StyledSpan::new(latin_end..text.len(), &regular, base_size),
+    ];
+    let paragraph = Paragraph::new(text, &spans, TextDirection::RightToLeft);
+    let shaped = catalog.layout_paragraph_line(&paragraph, 0..text.len());
+
+    let mut document = WriterDocument::new("mixed-render", "Mixed render");
+    document.blocks.push(block);
+    let page_style = document.page.page_style();
+    let visible_width = 260.0;
+    let projection = projection::project_with_viewport_scale(
+        &document,
+        PageViewport::default(),
+        visible_width,
+        Some(page_style.height_pt),
+        1.5,
+    );
+    let row = projection
+        .rows
+        .iter()
+        .find(|row| drawn_text(std::slice::from_ref(row)) == text)
+        .expect("the projected row keeps the logical paragraph text");
+    assert_eq!(
+        drawn_text(std::slice::from_ref(row)),
+        text,
+        "the editor retains the source string for input and accessibility"
+    );
+    assert!(
+        row.positioned,
+        "mixed style runs stay positioned as one line"
+    );
+    assert!(
+        row.glyph_tiles.row_count() > 0,
+        "the page paints shaped glyph tiles"
+    );
+    let painted = row.glyph_tiles.iter().any(|tile| {
+        tile.source
+            .to_rgba8()
+            .is_some_and(|pixels| pixels.as_bytes().chunks_exact(4).any(|pixel| pixel[3] != 0))
+    });
+    assert!(
+        painted,
+        "the Arabic, Latin and Hebrew glyphs have painted pixels"
+    );
+    let source_pixels: Vec<_> = row
+        .glyph_tiles
+        .iter()
+        .filter_map(|tile| tile.source.to_rgba8())
+        .flat_map(|pixels| {
+            pixels
+                .as_bytes()
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] != 0)
+                .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        source_pixels
+            .iter()
+            .any(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0),
+        "default document glyphs are painted with stable black ink"
+    );
+    assert!(
+        source_pixels
+            .iter()
+            .any(|pixel| pixel[0] > pixel[1] && pixel[3] != 0),
+        "explicit foreground colors remain in the same color-bearing image"
+    );
+    let visible_content_right = visible_width - page_style.margin_left_pt;
+    assert!(
+        row.glyph_tiles
+            .iter()
+            .all(|tile| tile.x + tile.width <= visible_content_right + 1.0),
+        "glyph images are clipped to the visible page canvas"
+    );
+    assert!(
+        !row.unsupported,
+        "the deterministic outline fonts rasterize"
+    );
+    let flowed = document
+        .flow(
+            &page_style,
+            projection::layout_viewport(&page_style, PageViewport::default()),
+        )
+        .expect("the projected document has core flow geometry");
+    let flow_line = flowed.lines().first().expect("one document line");
+    let writer_shape = flow_line
+        .shaped_line
+        .as_ref()
+        .expect("the app consumes the core shaped line");
+    for stop in shaped.caret_positions() {
+        assert!(
+            (writer_shape.caret_x(stop.offset, stop.affinity) - stop.x).abs() < 0.05,
+            "caret at source byte {} follows the independent paragraph shape",
+            stop.offset
+        );
+    }
 }
 
 /// A document that exercises every look the page can draw: a centred heading
@@ -605,6 +758,191 @@ fn a_table_row_grows_for_a_cell_with_a_line_break() {
         two_lines > one_line + 10.0,
         "a cell with a line break makes its row taller: {one_line} and {two_lines}"
     );
+}
+
+#[test]
+fn typed_table_rows_grow_for_wrapped_run_metrics_and_keep_asymmetric_heights() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let catalog = deterministic_script_catalog();
+    loom_writer_core::fonts::install_font_catalog(catalog);
+    let _reset = ResetScriptCatalog;
+
+    let large_text = "word ".repeat(12);
+    let mut table = loom_objects::Table::new(2, 1);
+    table.header_row = false;
+    table.set_cell_rich_text(
+        0,
+        0,
+        vec![loom_objects::table::TextRun {
+            text: large_text.clone(),
+            font_size_pt: Some(24.0),
+            ..loom_objects::table::TextRun::plain("")
+        }],
+    );
+    table.set_cell_text(1, 0, "short");
+    let mut document = WriterDocument::new("typed-row-height", "Typed row height");
+    document
+        .insert_table_object(0, &table)
+        .expect("insert typed table");
+
+    let projection = projection::project_with_viewport_scale(
+        &document,
+        PageViewport::default(),
+        1024.0,
+        Some(PageStyle::default().height_pt),
+        1.0,
+    );
+    assert_eq!(projection.table_cell_rects.len(), 2);
+    let large_height = projection.table_cell_rects[0].height;
+    let small_height = projection.table_cell_rects[1].height;
+    assert!(
+        large_height > small_height + 20.0,
+        "row height follows its large wrapped run while a short row stays compact: {large_height} vs {small_height}"
+    );
+    let large_row = projection
+        .rows
+        .iter()
+        .find(|row| drawn_text(std::slice::from_ref(row)) == large_text)
+        .expect("the large cell remains a logical text row");
+    assert!(
+        !large_row.unsupported,
+        "offered large-font wrapping fits the automatically measured row"
+    );
+    assert!(
+        large_row.glyph_tiles.row_count() > 0,
+        "the wrapped cell paints shaped glyphs rather than the short-row fallback"
+    );
+}
+
+#[test]
+fn typed_table_geometry_cache_invalidates_on_run_style_only_changes() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let catalog = deterministic_script_catalog();
+    loom_writer_core::fonts::install_font_catalog(catalog);
+    let _reset = ResetScriptCatalog;
+
+    let text = "word ".repeat(12);
+    let mut table = loom_objects::Table::new(1, 1);
+    table.header_row = false;
+    table.set_cell_rich_text(
+        0,
+        0,
+        vec![loom_objects::table::TextRun {
+            text: text.clone(),
+            font_size_pt: Some(24.0),
+            ..loom_objects::table::TextRun::plain("")
+        }],
+    );
+    let mut document = WriterDocument::new("typed-row-cache", "Typed row cache");
+    document
+        .insert_table_object(0, &table)
+        .expect("insert typed table");
+    let following_block_id = document.next_id();
+    document.push(RichBlock::new(
+        following_block_id,
+        "paragraph",
+        "after the table",
+    ));
+    let flat_text = document.blocks[0].text.as_str().to_owned();
+    let row_height = |document: &WriterDocument| {
+        projection::project(document, PageViewport::default(), None)
+            .table_cell_rects
+            .first()
+            .expect("one cell rectangle")
+            .height
+    };
+    let following_block_y = |document: &WriterDocument| {
+        let style = document.page.page_style();
+        document
+            .flow(&style, PageViewport::default())
+            .expect("the document flow is valid")
+            .lines()
+            .iter()
+            .find(|line| line.block_index == 1)
+            .expect("the paragraph after the table has a flow line")
+            .bounds
+            .y
+    };
+
+    let large_height = row_height(&document);
+    let large_following_y = following_block_y(&document);
+    let typed_table = document.blocks[0]
+        .table
+        .as_mut()
+        .expect("table block retains its typed table");
+    loom_objects::Table::set_cell_text(std::sync::Arc::make_mut(typed_table), 0, 0, text.clone());
+    assert_eq!(
+        document.blocks[0].text.as_str(),
+        flat_text,
+        "the style edit leaves the flat table text unchanged"
+    );
+    let default_height = row_height(&document);
+    let default_following_y = following_block_y(&document);
+    assert!(
+        large_height > default_height + 20.0,
+        "typed run size changes invalidate cached row geometry: {large_height} -> {default_height}"
+    );
+    assert!(
+        large_following_y > default_following_y + 20.0,
+        "DocumentFlow remeasures typed rows after a same-id, same-text run-style change: {large_following_y} -> {default_following_y}"
+    );
+}
+
+#[test]
+fn nonempty_table_shape_failure_is_warned_but_empty_softbreak_lines_are_valid() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let _reset = ResetScriptCatalog;
+    let mut table = loom_objects::Table::new(1, 1);
+    table.set_cell_text(0, 0, "word");
+    let mut document = WriterDocument::new("table-shape-warning", "Table shape warning");
+    document
+        .insert_table_object(0, &table)
+        .expect("insert typed table");
+
+    loom_writer_core::fonts::install_font_catalog(Arc::new(FontCatalog::empty(
+        FallbackPolicy::new(Vec::<String>::new()),
+    )));
+    let refused = projection::project_with_viewport_scale(
+        &document,
+        PageViewport::default(),
+        1024.0,
+        Some(PageStyle::default().height_pt),
+        1.0,
+    );
+    let refused_row = refused
+        .rows
+        .iter()
+        .find(|row| row.table_cell)
+        .expect("the failed cell remains visible as logical text");
+    assert!(refused_row.unsupported);
+    assert!(refused_row
+        .unsupported_label
+        .as_str()
+        .starts_with("Glyph rendering unavailable: could not shape nonempty table-cell text"));
+
+    loom_writer_core::fonts::install_font_catalog(deterministic_script_catalog());
+    let typed_table = document.blocks[0]
+        .table
+        .as_mut()
+        .expect("table block retains its typed table");
+    loom_objects::Table::set_cell_text(Arc::make_mut(typed_table), 0, 0, "word\u{b}");
+    let empty_line = projection::project_with_viewport_scale(
+        &document,
+        PageViewport::default(),
+        1024.0,
+        Some(PageStyle::default().height_pt),
+        1.0,
+    );
+    let empty_line_row = empty_line
+        .rows
+        .iter()
+        .find(|row| row.table_cell)
+        .expect("the cell with a trailing soft break is visible");
+    assert!(
+        !empty_line_row.unsupported,
+        "a legitimate empty visual line is not treated as failed nonempty shaping"
+    );
+    assert!(empty_line_row.glyph_tiles.row_count() > 0);
 }
 
 #[test]

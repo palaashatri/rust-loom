@@ -1,5 +1,5 @@
-//! Fixtures built from the bundled Inter faces only, so no test depends on
-//! the fonts installed on the machine running it.
+//! These font fixtures use bundled Inter bytes, so they do not depend on the
+//! fonts installed on the machine running the tests.
 
 // Every test crate (and the `measure` example) compiles this module but uses
 // only the helpers it needs; the rest would otherwise warn as dead code.

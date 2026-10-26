@@ -90,7 +90,11 @@ fn write_writer_interop_fixtures() {
         "the anchored comment is exported"
     );
     std::fs::write(dir.join("writer.docx"), &docx.bytes).unwrap();
-    std::fs::write(dir.join("writer.pdf"), export_pdf(&doc)).unwrap();
+    std::fs::write(
+        dir.join("writer.pdf"),
+        export_pdf(&doc).expect("valid PDF fixture"),
+    )
+    .unwrap();
     std::fs::write(dir.join("writer.md"), doc.to_markdown().as_bytes()).unwrap();
 }
 

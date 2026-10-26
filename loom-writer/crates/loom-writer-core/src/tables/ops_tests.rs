@@ -149,7 +149,7 @@ fn typing_in_a_table_cell_keeps_the_table_one_block() {
         "other cells are untouched"
     );
 
-    let pdf = crate::export_pdf(&document);
+    let pdf = crate::export::test_support::export_valid_pdf(&document);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     assert!(!content.contains('|'), "no pipe characters are printed");
     assert!(
@@ -480,6 +480,42 @@ fn bold_on_selected_text_inside_one_cell_changes_only_that_text() {
     );
     assert_eq!(document.table_text_has(1..4, is_bold), Some(true));
     assert_eq!(document.table_text_has(0..5, is_bold), Some(false));
+}
+
+#[test]
+fn restyling_table_text_preserves_strike_and_script_run_boundaries() {
+    for (name, feature) in [("strikethrough", 0), ("superscript", 1), ("subscript", 2)] {
+        let first = TextRun::plain("A");
+        let mut second = TextRun::plain("B");
+        match feature {
+            0 => second.strikethrough = true,
+            1 => second.superscript = true,
+            _ => second.subscript = true,
+        }
+        let has_feature = |run: &TextRun| match feature {
+            0 => run.strikethrough,
+            1 => run.superscript,
+            _ => run.subscript,
+        };
+        let mut table = Table::new(1, 1);
+        table.set_cell_rich_text(0, 0, vec![first, second]);
+        let mut document = WriterDocument::new("typed-table-style", "Typed table style");
+        document.blocks.push(RichBlock::table_block(3, table));
+
+        assert_eq!(
+            document.set_table_text_runs(0..2, |run| run.underline = true),
+            Ok(true),
+            "underline both runs while retaining the {name} distinction"
+        );
+
+        let table = table_of(&document, 3);
+        let runs = &table.cell(0, 0).expect("cell").content.runs;
+        assert_eq!(runs.len(), 2, "the {name} boundary must remain separate");
+        assert_eq!((runs[0].text.as_str(), runs[1].text.as_str()), ("A", "B"));
+        assert!(runs.iter().all(|run| run.underline));
+        assert!(!has_feature(&runs[0]), "A should remain without {name}");
+        assert!(has_feature(&runs[1]), "B should keep {name}");
+    }
 }
 
 #[test]

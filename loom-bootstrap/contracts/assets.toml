@@ -125,3 +125,29 @@ commercial = true
 redistributable = true
 attribution_required = true
 
+# Optional deterministic Writer fallbacks, copied byte-for-byte from the
+# pinned Noto revision. Both font folders use that revision's root LICENSE.
+[[allow]]
+glob = "loom-core/crates/loom-fonts/assets/fonts/NotoNaskhArabic-Regular.ttf"
+origin = "notofonts/noto-fonts@ffebf8c1ee449e544955a7e813c54f9b73848eac:hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf (SHA-256 2F4B88E6EE50FA82C617E2D1D4BA18281CB1C6CD71C3AF3EC64970C23995DB4B)"
+license = "SIL Open Font License 1.1 (loom-core/crates/loom-fonts/assets/fonts/Noto-OFL.txt; pinned repository root LICENSE)"
+commercial = true
+redistributable = true
+attribution_required = true
+
+[[allow]]
+glob = "loom-core/crates/loom-fonts/assets/fonts/NotoSansHebrew-Regular.ttf"
+origin = "notofonts/noto-fonts@ffebf8c1ee449e544955a7e813c54f9b73848eac:hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf (SHA-256 A7FA16FFFB27BEDB060A0866267C29E9859AEB9C21CC33F5B3AAF6EB062ECA85)"
+license = "SIL Open Font License 1.1 (loom-core/crates/loom-fonts/assets/fonts/Noto-OFL.txt; pinned repository root LICENSE)"
+commercial = true
+redistributable = true
+attribution_required = true
+
+[[allow]]
+glob = "loom-core/crates/loom-fonts/assets/fonts/Noto-OFL.txt"
+origin = "notofonts/noto-fonts@ffebf8c1ee449e544955a7e813c54f9b73848eac root LICENSE"
+license = "SIL Open Font License 1.1"
+commercial = true
+redistributable = true
+attribution_required = true
+

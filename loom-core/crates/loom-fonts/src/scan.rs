@@ -119,7 +119,7 @@ impl Default for ScanLimits {
 pub struct ScanConfig {
     /// Directories searched recursively, highest priority first.
     pub dirs: Vec<PathBuf>,
-    /// Add the bundled Inter faces ahead of everything else.
+    /// Add every feature-selected bundled face ahead of scanned files.
     pub include_bundled: bool,
     /// Scan bounds.
     pub limits: ScanLimits,

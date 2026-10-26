@@ -3,61 +3,24 @@
 //! separator row, so a table reads as a table rather than as Markdown source.
 //! A row is as tall as its tallest wrapped cell.
 
-use loom_objects::table::{HorizontalAlign, Table};
+use loom_objects::table::Table;
 use loom_objects::{Border, BorderStyle, TableStyleCatalog, TableStyleOptions};
-use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle};
-use loom_text::{CharacterStyle, FontWeight, StyleRun};
+use loom_pdf::{PageIndex, PathStyle, PdfDocument};
 
-use crate::export_flow::{self, line_width};
-use crate::text_metrics::pdf_text_width;
+use crate::export::shaped_export::{self, FontRegistry};
+use crate::{
+    measure_table_row_geometry, shape_table_cell_geometry, table_cell_rich_block, RichBlock,
+    WriterError, WriterShapedVisualLine, TABLE_CELL_BASE_FONT_SIZE_PT,
+    TABLE_CELL_HORIZONTAL_INSET_PT, TABLE_CELL_VERTICAL_INSET_PT,
+};
 
 /// Space between a cell's text and each of its column rules.
-const CELL_PAD_X_PT: f32 = 5.0;
+const CELL_PAD_X_PT: f32 = TABLE_CELL_HORIZONTAL_INSET_PT;
 /// Space above a cell's first line and below its last line.
-const CELL_PAD_Y_PT: f32 = 3.0;
+const CELL_PAD_Y_PT: f32 = TABLE_CELL_VERTICAL_INSET_PT;
 /// Colour of the cell rules: the table line the editor draws (the theme's
 /// paper-muted token, #6E6E73 on the light theme).
 const RULE_RGB: (f32, f32, f32) = (0.431, 0.431, 0.451);
-
-/// One cell's plain text with the bold and italic runs inside it, as byte
-/// ranges of that text.
-struct Cell {
-    text: String,
-    runs: Vec<StyleRun>,
-}
-
-impl Cell {
-    /// The cell at row `row`, column `column`.
-    fn of(table: &Table, row: usize, column: usize) -> Self {
-        let mut text = String::new();
-        let mut runs = Vec::new();
-        for piece in table
-            .cell(row, column)
-            .map_or(&[][..], |cell| cell.content.runs.as_slice())
-        {
-            let start = text.len();
-            text.push_str(&piece.text);
-            if piece.bold || piece.italic || piece.underline {
-                let style = CharacterStyle {
-                    weight: if piece.bold {
-                        FontWeight::Bold
-                    } else {
-                        FontWeight::Regular
-                    },
-                    italic: piece.italic,
-                    underline: piece.underline,
-                    ..CharacterStyle::default()
-                };
-                runs.push(StyleRun {
-                    start,
-                    end: text.len(),
-                    style,
-                });
-            }
-        }
-        Self { text, runs }
-    }
-}
 
 /// One side of a cell as the table's style draws it: a colour and a width.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -157,111 +120,109 @@ pub fn editor_column_widths(table: &Table, total: f32) -> Vec<f32> {
     typed.iter().map(|width| total * width / sum).collect()
 }
 
-/// One wrapped line of a cell: its text, the runs inside it (byte ranges of
-/// that text) and its drawn width.
+/// One cell line's already-shaped geometry and reserved height.
 struct Line {
-    text: String,
-    runs: Vec<StyleRun>,
-    width: f32,
+    shaped: Option<WriterShapedVisualLine>,
+    height: f32,
 }
 
-impl Line {
-    /// The part of `cell` from `start` to `end`, with its runs made relative to it.
-    fn of(cell: &Cell, start: usize, end: usize, style: &TextStyle) -> Self {
-        let text = cell.text[start..end].to_string();
-        let runs: Vec<StyleRun> = cell
-            .runs
-            .iter()
-            .filter_map(|run| {
-                let (from, to) = (run.start.max(start), run.end.min(end));
-                (from < to).then(|| StyleRun {
-                    start: from - start,
-                    end: to - start,
-                    style: run.style.clone(),
-                })
-            })
-            .collect();
-        let width = line_width("", &text, &runs, style, 0);
-        Self { text, runs, width }
-    }
+struct CellLines {
+    block: RichBlock,
+    lines: Vec<Line>,
 }
 
 /// One row after wrapping: the lines of each cell, each cell's format and the
 /// row's height.
 struct WrappedRow {
-    cells: Vec<Vec<Line>>,
+    cells: Vec<CellLines>,
     formats: Vec<CellFormat>,
     height: f32,
-    header: bool,
 }
 
 /// Column positions and wrapped rows of one table, shared by its rows.
 pub(crate) struct TableLayout {
     starts: Vec<f32>,
     widths: Vec<f32>,
-    alignments: Vec<HorizontalAlign>,
     /// The table's width, from its left edge to the end of its last column.
     pub(crate) width: f32,
-    /// The body style the cells are set in.
-    body: TextStyle,
-    /// The distance between the baselines of a cell's lines.
-    line_height: f32,
     rows: Vec<WrappedRow>,
 }
 
 impl TableLayout {
     /// Sizes the columns as the editor does (see [`editor_column_widths`]), wraps
     /// each cell onto as many lines as its column needs, and resolves each cell's
-    /// format from the table's style. `line_height` is the distance between the
-    /// lines of one cell.
-    pub(crate) fn new(table: &Table, body: &TextStyle, max_width: f32, line_height: f32) -> Self {
+    /// format from the table's style. Text uses the same shaped runs as the page.
+    pub(crate) fn new(table: &Table, max_width: f32) -> Result<Self, WriterError> {
         let columns = table.col_count();
         let header_row = table.header_row;
         let is_header = |index: usize| header_row && index == 0;
         let widths = editor_column_widths(table, max_width);
+        let row_geometry =
+            measure_table_row_geometry(table, max_width, TABLE_CELL_BASE_FONT_SIZE_PT).map_err(
+                |error| WriterError::Invalid(format!("PDF export table geometry: {error}")),
+            )?;
         let mut starts = Vec::with_capacity(columns);
         let mut width = 0.0;
         for column in &widths {
             starts.push(width);
             width += column;
         }
-        let rows = (0..table.row_count())
-            .map(|row| {
+        let rows: Vec<WrappedRow> = (0..table.row_count())
+            .map(|row| -> Result<WrappedRow, WriterError> {
                 let header = is_header(row);
                 let formats: Vec<CellFormat> = (0..columns)
                     .map(|column| cell_format(table, row, column))
                     .collect();
-                let lines: Vec<Vec<Line>> = widths
+                let cells: Vec<CellLines> = widths
                     .iter()
                     .enumerate()
-                    .map(|(column, column_width)| {
-                        let cell = Cell::of(table, row, column);
-                        let style = cell_style(body, header || formats[column].bold);
+                    .map(|(column, column_width)| -> Result<CellLines, WriterError> {
+                        let base_color = formats[column].text.map(rgb_hex);
+                        let block = table_cell_rich_block(
+                            0,
+                            table,
+                            row,
+                            column,
+                            TABLE_CELL_BASE_FONT_SIZE_PT,
+                            header || formats[column].bold,
+                            base_color.as_deref(),
+                        )
+                        .unwrap_or_else(|| RichBlock::new(0, "paragraph", ""));
                         let inner = (column_width - 2.0 * CELL_PAD_X_PT).max(1.0);
-                        wrap_cell(&cell, &style, inner)
+                        let geometry =
+                            shape_table_cell_geometry(&block, TABLE_CELL_BASE_FONT_SIZE_PT, inner)
+                                .map_err(|error| {
+                                    WriterError::Invalid(format!(
+                                        "PDF export table cell {row},{column}: {error}"
+                                    ))
+                                })?;
+                        let lines = geometry
+                            .lines()
+                            .iter()
+                            .map(|line| Line {
+                                shaped: line.shaped().cloned(),
+                                height: line.pitch_pt(),
+                            })
+                            .collect();
+                        Ok(CellLines { block, lines })
                     })
-                    .collect();
-                let count = lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
-                WrappedRow {
-                    cells: lines,
+                    .collect::<Result<_, _>>()?;
+                let height = row_geometry.row_height_pt(row).ok_or_else(|| {
+                    WriterError::Invalid(format!("PDF export table geometry omitted row {row}"))
+                })?;
+                Ok(WrappedRow {
+                    cells,
                     formats,
-                    height: count as f32 * line_height + 2.0 * CELL_PAD_Y_PT,
-                    header,
-                }
+                    height,
+                })
             })
-            .collect();
-        let alignments = (0..columns)
-            .map(|column| column_alignment(table, column))
-            .collect();
-        Self {
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             starts,
             widths,
-            alignments,
             width,
-            body: body.clone(),
-            line_height,
             rows,
-        }
+        })
     }
 
     /// How many rows the table has, header included.
@@ -280,11 +241,12 @@ impl TableLayout {
 /// so an empty table still shows its grid; the first row also gets a top rule.
 pub(crate) fn draw_row(
     pdf: &mut PdfDocument,
+    fonts: &mut FontRegistry,
     page: PageIndex,
     layout: &TableLayout,
     index: usize,
     origin: (f32, f32),
-) {
+) -> Result<(), WriterError> {
     let row = &layout.rows[index];
     let (left, top) = origin;
     let bottom = top - row.height;
@@ -314,24 +276,24 @@ pub(crate) fn draw_row(
             }
         }
     }
-    let size = layout.body.size_pt;
-    for (column, lines) in row.cells.iter().enumerate() {
-        let format = row.formats[column];
-        let mut style = cell_style(&layout.body, row.header || format.bold);
-        if let Some(text) = format.text {
-            style.fill_rgb = text;
-        }
-        let inner = (layout.widths[column] - 2.0 * CELL_PAD_X_PT).max(1.0);
+    for (column, cell) in row.cells.iter().enumerate() {
         let x = left + layout.starts[column] + CELL_PAD_X_PT;
-        for (index, line) in lines.iter().enumerate() {
-            if line.text.is_empty() {
-                continue;
+        let mut line_top = top - CELL_PAD_Y_PT;
+        for line in &cell.lines {
+            if let Some(shaped) = &line.shaped {
+                let context = format!("table cell {index},{column}");
+                shaped_export::draw_line(
+                    pdf,
+                    fonts,
+                    page,
+                    &context,
+                    cell.block.text.as_str(),
+                    line_top,
+                    x,
+                    shaped,
+                )?;
             }
-            // The first baseline sits one em below the top padding; each later
-            // line is one line height lower.
-            let baseline = top - CELL_PAD_Y_PT - size - index as f32 * layout.line_height;
-            let shift = align_shift(layout.alignments[column], inner, line.width);
-            draw_line(pdf, page, (x + shift, baseline), line, &style);
+            line_top -= line.height;
         }
     }
     let rule = PathStyle::stroked(RULE_RGB, 0.5);
@@ -360,108 +322,29 @@ pub(crate) fn draw_row(
             }
         }
     }
+    Ok(())
 }
 
-/// Slack for float rounding, so a word that exactly fills its column stays whole.
-const WRAP_SLACK_PT: f32 = 0.05;
-
-/// The lines a cell's text takes in `inner` points, wrapped as the paragraphs of
-/// the PDF wrap: words stay whole where they fit, a word wider than the column
-/// breaks between characters, every character is kept, and an empty cell still
-/// takes one line. The runs are measured in their faces.
-fn wrap_cell(cell: &Cell, style: &TextStyle, inner: f32) -> Vec<Line> {
-    let width = inner + WRAP_SLACK_PT;
-    export_flow::wrap(&cell.text, &cell.runs, style, width, width)
-        .into_iter()
-        .map(|(start, end)| Line::of(cell, start, end, style))
-        .collect()
-}
-
-/// How far a line of `width` moves right inside a cell's `inner` width for the
-/// column's alignment. Left-aligned lines stay at the padding.
-fn align_shift(alignment: HorizontalAlign, inner: f32, width: f32) -> f32 {
-    match alignment {
-        HorizontalAlign::Center => (inner - width) / 2.0,
-        HorizontalAlign::Right => inner - width,
-        _ => 0.0,
-    }
-    .max(0.0)
-}
-
-/// Draws one line as pieces, one per stretch of one style, so bold and italic
-/// runs are set in their own faces. `origin` is the line's left edge and baseline.
-fn draw_line(
-    pdf: &mut PdfDocument,
-    page: PageIndex,
-    origin: (f32, f32),
-    line: &Line,
-    base: &TextStyle,
-) {
-    let (mut x, baseline) = origin;
-    let mut cuts = vec![0, line.text.len()];
-    for run in &line.runs {
-        cuts.extend([run.start, run.end]);
-    }
-    cuts.sort_unstable();
-    cuts.dedup();
-    for pair in cuts.windows(2) {
-        let (from, to) = (pair[0], pair[1]);
-        let mut style = base.clone();
-        let mut underline = false;
-        if let Some(run) = line
-            .runs
-            .iter()
-            .find(|run| run.start <= from && from < run.end)
-        {
-            style.bold |= run.style.weight.numeric() >= FontWeight::Bold.numeric();
-            style.italic |= run.style.italic;
-            underline = run.style.underline;
-        }
-        let piece = &line.text[from..to];
-        pdf.draw_text(page, x, baseline, piece, &style);
-        let width = pdf_text_width(piece, &style);
-        // An underlined run gets the same rule the paragraphs draw under it.
-        if underline && !piece.trim().is_empty() {
-            let rule_y = baseline - style.size_pt * 0.12;
-            pdf.draw_line(
-                page,
-                x,
-                rule_y,
-                x + width,
-                rule_y,
-                PathStyle::stroked(style.fill_rgb, (style.size_pt / 24.0).max(0.5)),
-            );
-        }
-        x += width;
-    }
-}
-
-/// The body style, in bold for a header cell.
-/// The alignment of a column: the first explicit alignment set on its cells.
-fn column_alignment(table: &Table, column: usize) -> HorizontalAlign {
-    (0..table.row_count())
-        .find_map(|row| {
-            table
-                .cell(row, column)
-                .and_then(|cell| cell.style_override.as_ref())
-                .and_then(|style| style.horizontal_align)
-        })
-        .unwrap_or_default()
-}
-
-fn cell_style(body: &TextStyle, header: bool) -> TextStyle {
-    TextStyle {
-        bold: body.bold || header,
-        ..body.clone()
-    }
+fn rgb_hex(color: (f32, f32, f32)) -> String {
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        channel(color.0),
+        channel(color.1),
+        channel(color.2)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::CELL_PAD_X_PT;
     use crate::text_metrics::pdf_text_width;
-    use crate::{export_pdf, WriterDocument, WriterTable};
+    use crate::{export_pdf as export_pdf_result, WriterDocument, WriterTable};
     use loom_pdf::TextStyle;
+
+    fn export_pdf(document: &WriterDocument) -> Vec<u8> {
+        export_pdf_result(document).expect("valid PDF fixture")
+    }
 
     const HEADER: &[&str] = &["Quarter", "Notes", "Owner"];
     const LONG: &[&str] = &[
@@ -476,18 +359,12 @@ mod tests {
         loom_pdf::inspect::readable_content(pdf).expect("readable PDF")
     }
 
-    /// Each drawn text run as (x, baseline y, text, bold), from `BT x y Td (text) Tj ET`.
+    /// Each drawn text run as (x, baseline y, text, bold), from the shaped-PDF semantic reader.
     fn text_runs(pdf: &[u8]) -> Vec<(f32, f32, String, bool)> {
-        content(pdf)
-            .lines()
-            .filter_map(|line| {
-                let at = line.find(" Td (")?;
-                let mut numbers = line[..at].rsplit(' ');
-                let y: f32 = numbers.next()?.parse().ok()?;
-                let x: f32 = numbers.next()?.parse().ok()?;
-                let text = &line[at + " Td (".len()..line.rfind(") Tj")?];
-                Some((x, y, text.to_string(), line.contains("/F2 ")))
-            })
+        crate::export::test_support::drawn_text_runs(pdf)
+            .expect("read positioned text runs")
+            .into_iter()
+            .map(|run| (run.x, run.y, run.text, run.bold.unwrap_or(false)))
             .collect()
     }
 
@@ -497,14 +374,18 @@ mod tests {
             .lines()
             .filter_map(|line| {
                 let t: Vec<&str> = line.split_whitespace().collect();
-                if t.len() != 13 || t[3] != "RG" || t[8] != "m" || t[11] != "l" {
+                let stroke = t.iter().position(|token| *token == "RG")?;
+                let move_to = t.iter().position(|token| *token == "m")?;
+                let line_to = t.iter().position(|token| *token == "l")?;
+                if t.get(line_to + 1) != Some(&"S") || move_to < stroke + 4 || line_to < move_to + 3
+                {
                     return None;
                 }
                 Some((
-                    t[6].parse().ok()?,
-                    t[7].parse().ok()?,
-                    t[9].parse().ok()?,
-                    t[10].parse().ok()?,
+                    t.get(move_to - 2)?.parse().ok()?,
+                    t.get(move_to - 1)?.parse().ok()?,
+                    t.get(line_to - 2)?.parse().ok()?,
+                    t.get(line_to - 1)?.parse().ok()?,
                 ))
             })
             .collect()
@@ -877,11 +758,13 @@ mod tests {
             "a bold cell run is drawn in the bold face"
         );
         let printed = content(&pdf);
+        let semantic_runs =
+            crate::export::test_support::drawn_text_runs(&pdf).expect("read semantic text runs");
         assert!(
-            printed
-                .lines()
-                .any(|line| line.contains("/F3 ") && line.contains("(Note) Tj")),
-            "an italic cell run is drawn in the oblique face: {printed}"
+            semantic_runs
+                .iter()
+                .any(|run| run.text == "Note" && run.font == "/F3"),
+            "an italic cell run is drawn in the oblique face: {semantic_runs:?}; {printed}"
         );
         assert!(
             !printed.contains('*') && !printed.contains('|'),

@@ -27,6 +27,27 @@ fn styled(f: impl FnOnce(&mut CharacterStyle)) -> CharacterStyle {
     style
 }
 
+fn rewrite_document_xml(export: &DocxExport, rewrite: impl FnOnce(&str) -> String) -> Vec<u8> {
+    let archive = PackageArchive::from_bytes(&export.bytes).expect("read DOCX package");
+    let document_xml = std::str::from_utf8(
+        archive
+            .get("word/document.xml")
+            .expect("document part exists"),
+    )
+    .expect("document XML is UTF-8");
+    let rewritten = rewrite(document_xml);
+    let mut fixture = PackageArchive::new();
+    for path in archive.paths() {
+        let data = if path == "word/document.xml" {
+            rewritten.as_bytes().to_vec()
+        } else {
+            archive.get(path).expect("part exists").to_vec()
+        };
+        fixture.add(path, data).expect("copy package part");
+    }
+    fixture.to_bytes().expect("write fixture package")
+}
+
 /// A document touching every feature the export claims to carry.
 pub(super) fn rich_document() -> WriterDocument {
     let mut doc = WriterDocument::new("rich", "Quarterly <Report> & Notes");
@@ -496,6 +517,148 @@ fn justified_paragraph_alignment_round_trips_through_loomdoc_and_docx() {
 
     let imported = super::import_docx(&exported.bytes).expect("import exported .docx");
     assert_eq!(imported.blocks[0].style.alignment, Alignment::Justify);
+}
+
+#[test]
+fn docx_bidi_and_logical_start_alignment_survive_import_export() {
+    let mut doc = WriterDocument::new("bidi-roundtrip", "BiDi round trip");
+    let mut paragraph = RichBlock::new(1, "paragraph", "שלום world");
+    paragraph.style.alignment = Alignment::Center;
+    doc.blocks.push(paragraph);
+
+    let exported = export_docx(&doc).expect("export seed .docx");
+    let fixture = rewrite_document_xml(&exported, |xml| {
+        xml.replace(
+            "<w:jc w:val=\"center\"/>",
+            "<!-- </w:pPr> --><w:bidi/><w:jc w:val=\"start\"/>",
+        )
+    });
+    let imported = super::import_docx(&fixture).expect("import DOCX bidi paragraph");
+    let roundtrip = export_docx(&imported).expect("re-export DOCX bidi paragraph");
+    let output = parts(&roundtrip);
+    let body = parse(&output["word/document.xml"]);
+    let paragraph = body_paragraph(&body, "שלום world");
+    let properties = child(paragraph, "pPr").expect("paragraph properties");
+    assert!(
+        child(properties, "bidi").is_some(),
+        "direct w:bidi direction must survive DOCX import/export"
+    );
+    assert_eq!(
+        w_attr(child(properties, "jc").expect("logical alignment"), "val"),
+        Some("start"),
+        "logical start must not be flattened to a physical left/right edge"
+    );
+    assert_eq!(imported.blocks[0].style.alignment, Alignment::Start);
+    assert_eq!(
+        imported.blocks[0].style.direction,
+        loom_text::ParagraphDirection::RightToLeft
+    );
+}
+
+#[test]
+fn docx_start_end_left_and_right_alignments_round_trip_exactly() {
+    for (value, expected) in [
+        ("start", Alignment::Start),
+        ("end", Alignment::End),
+        ("left", Alignment::Left),
+        ("right", Alignment::Right),
+    ] {
+        let mut doc = WriterDocument::new("alignment", "Alignment");
+        doc.blocks
+            .push(RichBlock::new(1, "paragraph", "Alignment sample"));
+        doc.blocks[0].style.alignment = Alignment::Center;
+        let exported = export_docx(&doc).expect("export seed");
+        let fixture = rewrite_document_xml(&exported, |xml| {
+            xml.replace(
+                "<w:jc w:val=\"center\"/>",
+                &format!("<w:jc w:val=\"{value}\"/>"),
+            )
+        });
+        let imported = super::import_docx(&fixture).expect("import alignment fixture");
+        assert_eq!(imported.blocks[0].style.alignment, expected, "{value}");
+        let roundtrip = export_docx(&imported).expect("re-export alignment");
+        let output = parts(&roundtrip);
+        let body = parse(&output["word/document.xml"]);
+        let paragraph = body_paragraph(&body, "Alignment sample");
+        let jc = child(child(paragraph, "pPr").expect("paragraph properties"), "jc")
+            .expect("alignment value");
+        assert_eq!(w_attr(jc, "val"), Some(value), "{value}");
+    }
+}
+
+#[test]
+fn docx_bidi_on_off_tokens_round_trip_to_canonical_direction() {
+    for (attribute, expected) in [
+        ("", loom_text::ParagraphDirection::RightToLeft),
+        (
+            " w:val=\"true\"",
+            loom_text::ParagraphDirection::RightToLeft,
+        ),
+        (" w:val=\"1\"", loom_text::ParagraphDirection::RightToLeft),
+        (" w:val=\"on\"", loom_text::ParagraphDirection::RightToLeft),
+        (
+            " w:val=\"false\"",
+            loom_text::ParagraphDirection::LeftToRight,
+        ),
+        (" w:val=\"0\"", loom_text::ParagraphDirection::LeftToRight),
+        (" w:val=\"off\"", loom_text::ParagraphDirection::LeftToRight),
+    ] {
+        let mut doc = WriterDocument::new("direction", "Direction");
+        let mut paragraph = RichBlock::new(1, "paragraph", "Direction sample");
+        paragraph.style.alignment = Alignment::Center;
+        doc.blocks.push(paragraph);
+        let exported = export_docx(&doc).expect("export seed");
+        let fixture = rewrite_document_xml(&exported, |xml| {
+            xml.replace(
+                "<w:jc w:val=\"center\"/>",
+                &format!("<w:bidi{attribute}/><w:jc w:val=\"center\"/>"),
+            )
+        });
+        let imported = super::import_docx(&fixture).expect("import direction fixture");
+        assert_eq!(imported.blocks[0].style.direction, expected, "{attribute}");
+        let roundtrip = export_docx(&imported).expect("re-export direction");
+        let output = parts(&roundtrip);
+        let body = parse(&output["word/document.xml"]);
+        let paragraph = body_paragraph(&body, "Direction sample");
+        let properties = child(paragraph, "pPr").expect("paragraph properties");
+        match expected {
+            loom_text::ParagraphDirection::RightToLeft => {
+                assert!(child(properties, "bidi").is_some(), "{attribute}");
+            }
+            loom_text::ParagraphDirection::LeftToRight => {
+                let bidi = child(properties, "bidi").expect("explicit LTR property");
+                assert_eq!(w_attr(bidi, "val"), Some("0"), "{attribute}");
+            }
+            loom_text::ParagraphDirection::Auto => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn docx_paragraph_without_bidi_property_remains_auto() {
+    let mut doc = WriterDocument::new("direction", "Direction");
+    doc.blocks
+        .push(RichBlock::new(1, "paragraph", "Automatic direction"));
+    doc.blocks[0].style.alignment = Alignment::Center;
+    let exported = export_docx(&doc).expect("export seed");
+    let fixture = rewrite_document_xml(&exported, |xml| xml.to_string());
+    let imported = super::import_docx(&fixture).expect("import automatic direction");
+    assert_eq!(
+        imported.blocks[0].style.direction,
+        loom_text::ParagraphDirection::Auto
+    );
+    let roundtrip = export_docx(&imported).expect("re-export automatic direction");
+    let output = parts(&roundtrip);
+    let body = parse(&output["word/document.xml"]);
+    let paragraph = body_paragraph(&body, "Automatic direction");
+    assert!(
+        child(
+            child(paragraph, "pPr").expect("paragraph properties"),
+            "bidi"
+        )
+        .is_none(),
+        "automatic direction must be represented by omitting w:bidi"
+    );
 }
 
 #[test]

@@ -40,8 +40,10 @@ pub(crate) fn block_bidi_runs(block: &RichBlock) -> Option<Rc<BidiRuns>> {
             .borrow()
             .blocks
             .get(&block.id)
-            .filter(|hit| hit.text == text && hit.kind == block.kind)
+            .filter(|hit| {
+                hit.text == text && hit.kind == block.kind && hit.direction == block.style.direction
+            })
             .map(|hit| hit.bidi_runs.clone())
     });
-    cached.unwrap_or_else(|| BidiRuns::of(text).map(Rc::new))
+    cached.unwrap_or_else(|| BidiRuns::with_direction(text, block.style.direction).map(Rc::new))
 }

@@ -1,6 +1,6 @@
 use crate::TextSelection;
 use crate::{RichBlock, WriterDocument};
-use loom_text::{Alignment, CharacterStyle, FontWeight, StyleRun};
+use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphDirection, StyleRun};
 
 fn bold() -> CharacterStyle {
     CharacterStyle {
@@ -93,11 +93,16 @@ fn enter_in_a_paragraph_keeps_alignment_and_runs_on_the_right_characters() {
 fn enter_at_the_end_of_a_heading_starts_a_normal_paragraph() {
     let mut heading = block(1, "heading1", "Title");
     heading.style.alignment = Alignment::Center;
+    heading.style.direction = ParagraphDirection::RightToLeft;
     let mut doc = doc_of(vec![heading, block(2, "paragraph", "Body")]);
     type_at(&mut doc, 5, "\n");
     assert_eq!(texts(&doc), ["Title", "", "Body"]);
     assert_eq!(kinds(&doc), ["heading1", "paragraph", "paragraph"]);
     assert_eq!(doc.blocks[1].style.alignment, Alignment::Center);
+    assert_eq!(
+        doc.blocks[1].style.direction,
+        ParagraphDirection::RightToLeft
+    );
     assert_eq!(doc.blocks[0].id, 1);
     assert_eq!(doc.blocks[2].id, 2);
 }

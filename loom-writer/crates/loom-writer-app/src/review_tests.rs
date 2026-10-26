@@ -205,7 +205,7 @@ fn navigating_to_comment_selects_the_anchor_and_opens_the_compact_inspector() {
         "a comment on a later page scrolls into view"
     );
     assert_eq!(
-        app.get_page_scroll_y(),
+        app.get_scroll_y(),
         state.viewport.borrow().scroll_y,
         "the visible page and controller share the same scroll position"
     );
@@ -916,7 +916,7 @@ fn the_page_scrolls_to_keep_the_caret_in_view() {
         "the end of a 120-paragraph document is far down, got {scrolled}"
     );
     assert_eq!(
-        app.get_page_scroll_y(),
+        app.get_scroll_y(),
         scrolled,
         "the view is told the same offset"
     );

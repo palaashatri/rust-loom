@@ -1,8 +1,9 @@
 //! Shared byte-offset geometry for justified lines.
 //!
 //! Only automatic wraps with internal ASCII-space gaps are expanded. The
-//! source range stays in logical UTF-8 offsets; caret, selection, pointer and
-//! drawing code add the same expansion at those offsets.
+//! legacy advance-only path defers bidi expansion; the shaped path distributes
+//! gaps over actual visual glyph positions. Source ranges stay in logical UTF-8
+//! offsets so caret, selection, pointer and drawing code share the expansion.
 
 use std::ops::Range;
 use std::rc::Rc;
@@ -166,10 +167,42 @@ fn eligible_spaces(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
     gaps
 }
 
-/// Justification spaces for an original block line, including whether the
-/// current line needs the deferred-bidi notice. App fragments call this on the
-/// unsplit block so a copied fragment cannot turn a wrapped line into a final
-/// line.
+/// Expand eligible spaces in a shaped line, including mixed-direction lines.
+///
+/// The caller supplies the authoritative shaped width. Unlike the legacy
+/// estimate path above, this helper does not defer bidi paragraphs: the
+/// returned byte ranges are applied to shaped glyph clusters in visual order.
+pub(crate) fn shaped_line_gaps(
+    text: &str,
+    range: Range<usize>,
+    natural_width: f32,
+    available_width: f32,
+    requested: bool,
+) -> Vec<(Range<usize>, f32)> {
+    if !requested || !is_automatic_line(text, &range) {
+        return Vec::new();
+    }
+    let visible_end = visible_end(text, range.clone());
+    let candidates = eligible_spaces(text, range.start..visible_end);
+    if candidates.is_empty()
+        || !natural_width.is_finite()
+        || !available_width.is_finite()
+        || available_width <= natural_width
+    {
+        return Vec::new();
+    }
+    let extra = (available_width - natural_width) / candidates.len() as f32;
+    if !extra.is_finite() || extra <= 0.0 {
+        return Vec::new();
+    }
+    candidates.into_iter().map(|range| (range, extra)).collect()
+}
+
+/// Legacy metric-path justification spaces for an original block line,
+/// including whether the current line needs the deferred-bidi notice. App
+/// fragments call this on the unsplit block so a copied fragment cannot turn
+/// a wrapped line into a final line. Shaped rendering consumes gaps from its
+/// visual glyph geometry instead.
 pub fn paragraph_line_spaces(
     block: &RichBlock,
     line: Range<usize>,
@@ -185,17 +218,19 @@ pub fn paragraph_line_spaces(
 }
 
 impl RichBlock {
-    /// Whether this paragraph's justification geometry is deferred because
-    /// the current M2 implementation does not distribute bidi visual runs.
+    /// Whether justification is deferred in the legacy unshaped metric path
+    /// because the block contains bidi text. The canonical shaped path handles
+    /// bidi glyph positions and does not use this result as a limitation.
     /// The query shares the same paragraph bidi cache used by line layout.
     pub fn justification_deferred_for_bidi(&self) -> bool {
         crate::layout::block_bidi_runs(self).is_some()
     }
 
-    /// Expansion ranges for a source line, in this block's byte offsets, plus
-    /// whether justification is deferred because the block contains RTL text.
+    /// Legacy expansion ranges for a source line, in this block's byte
+    /// offsets, plus whether bidi expansion is deferred by the estimate path.
     /// The input range must refer to this original block, not a rendered line
-    /// fragment, so final-line eligibility remains correct.
+    /// fragment, so final-line eligibility remains correct. Shaped consumers
+    /// use the gaps attached to the canonical visual line.
     pub fn justification_spaces_for_line(
         &self,
         line: Range<usize>,
@@ -205,9 +240,9 @@ impl RichBlock {
         paragraph_line_spaces(self, line, font_size, available_width)
     }
 
-    /// The caret byte nearest `x` in a line, using expanded gaps when this
-    /// left-to-right line is justified. Right-to-left lines retain their
-    /// existing bidi visual order.
+    /// The caret byte nearest `x` in a line, using shaped geometry when
+    /// available. The legacy estimate fallback keeps its existing bidi visual
+    /// order without distributing RTL justification gaps.
     pub fn line_offset_at_x_with_justification(
         &self,
         line: Range<usize>,
@@ -221,13 +256,26 @@ impl RichBlock {
     /// Shaped width for a block range using the face the page draws for the
     /// block and its inline runs, including run-specific sizes.
     pub fn measured_advance(&self, start: usize, end: usize, font_size: f32) -> f32 {
-        block_positions(self, font_size).advance(start, end)
+        crate::layout::shape_text_line(
+            self.text.as_str(),
+            &self.runs,
+            font_size,
+            self.kind.as_str(),
+            self.style.direction,
+            Alignment::Left,
+            start..end,
+            f32::MAX / 4.0,
+        )
+        .map_or_else(
+            || block_positions(self, font_size).advance(start, end),
+            |line| line.natural_width_pt(),
+        )
     }
 }
 
-/// The nearest caret byte for an original block line, in its expanded visual
-/// geometry when the line is left-to-right. Right-to-left lines retain their
-/// existing visual-order mapping until bidi spacing is integrated.
+/// The nearest caret byte for an original block line, using shaped visual
+/// geometry when available. The fallback estimate path does not distribute
+/// bidi gaps and retains its visual-order mapping.
 pub fn paragraph_line_offset_at_x(
     block: &RichBlock,
     line: Range<usize>,
@@ -235,6 +283,13 @@ pub fn paragraph_line_offset_at_x(
     available_width: f32,
     x: f32,
 ) -> usize {
+    if let Some(shaped) =
+        crate::layout::shape_block_line(block, line.clone(), font_size, available_width)
+    {
+        return shaped
+            .hit_test(x + shaped.alignment_shift_pt())
+            .map_or(0, |stop| stop.offset.saturating_sub(line.start));
+    }
     if let Some(stop) = block
         .visual_line(font_size, line.clone())
         .and_then(|order| order.stop_at(x))

@@ -133,7 +133,11 @@ fn block_may_be_right_to_left(doc: &WriterDocument, offset: usize) -> bool {
     for block in &doc.blocks {
         let end = start + block.text.as_str().len();
         if offset <= end {
-            return crate::text_metrics::bidi::BidiRuns::of(block.text.as_str()).is_some();
+            return crate::text_metrics::bidi::BidiRuns::with_direction(
+                block.text.as_str(),
+                block.style.direction,
+            )
+            .is_some();
         }
         start = end + 1;
     }
@@ -172,10 +176,24 @@ fn line_at(lines: &[FlowLine], offset: usize, affinity: CaretAffinity) -> Option
 
 /// Points from the page's left edge to where the line's text begins.
 fn line_origin(style: &PageStyle, block: &RichBlock, line: &FlowLine) -> f32 {
+    if line.shaped_line.is_some() {
+        return line.bounds.x;
+    }
     let column = block.text_column_width(style);
-    let shift = match block.style.alignment.resolve(block.text.as_str()) {
+    let resolved = block
+        .style
+        .alignment
+        .resolve_with_direction(block.text.as_str(), block.style.direction);
+    let paragraph_start = loom_text::Alignment::Start
+        .resolve_with_direction(block.text.as_str(), block.style.direction);
+    let shift = match resolved {
         loom_text::Alignment::Center => ((column - line.bounds.width) / 2.0).max(0.0),
-        loom_text::Alignment::Right => (column - line.bounds.width).max(0.0),
+        loom_text::Alignment::End | loom_text::Alignment::Right => {
+            (column - line.bounds.width).max(0.0)
+        }
+        loom_text::Alignment::Justify if paragraph_start == loom_text::Alignment::Right => {
+            (column - line.bounds.width).max(0.0)
+        }
         loom_text::Alignment::Left
         | loom_text::Alignment::Justify
         | loom_text::Alignment::Start => 0.0,
@@ -194,6 +212,14 @@ fn caret_x(
 ) -> f32 {
     let font_size = style.font_size_for_kind(block.kind.as_str());
     let local_offset = offset - line.global_start;
+    if let Some(shaped) = &line.shaped_line {
+        let affinity = match affinity {
+            CaretAffinity::Downstream => loom_fonts::Affinity::Leading,
+            CaretAffinity::Upstream => loom_fonts::Affinity::Trailing,
+        };
+        let at = line.start + local_offset.min(visible_len(block, line));
+        return line.bounds.x + shaped.caret_x(at, affinity);
+    }
     if let Some(order) = block.visual_line(font_size, line.start..line.end) {
         let local = local_offset.min(visible_len(block, line));
         return line_origin(style, block, line) + order.x_of(line.start + local, affinity);
@@ -262,6 +288,18 @@ fn land(
         };
     }
     let font_size = style.font_size_for_kind(block.kind.as_str());
+    if let Some(shaped) = &line.shaped_line {
+        if let Some(stop) = shaped.hit_test(x - line.bounds.x) {
+            return CaretTarget {
+                offset: line.global_start + stop.offset.saturating_sub(line.start),
+                x,
+                affinity: match stop.affinity {
+                    loom_fonts::Affinity::Leading => CaretAffinity::Downstream,
+                    loom_fonts::Affinity::Trailing => CaretAffinity::Upstream,
+                },
+            };
+        }
+    }
     if let Some(order) = block.visual_line(font_size, line.start..line.end) {
         if let Some(stop) = order.stop_at(x - line_origin(style, block, line)) {
             return CaretTarget {
@@ -302,6 +340,22 @@ fn visual_step(
     let line = &lines[index];
     let block = &doc.blocks[line.block_index];
     let font_size = style.font_size_for_kind(block.kind.as_str());
+    if let Some(shaped) = &line.shaped_line {
+        let at = line.start + offset.checked_sub(line.global_start)?;
+        let affinity = match affinity {
+            CaretAffinity::Downstream => loom_fonts::Affinity::Leading,
+            CaretAffinity::Upstream => loom_fonts::Affinity::Trailing,
+        };
+        let target = shaped.visual_neighbor(at, affinity, forward)?;
+        return Some(CaretTarget {
+            offset: line.global_start + target.offset.saturating_sub(line.start),
+            x: line.bounds.x + target.x_pt,
+            affinity: match target.affinity {
+                loom_fonts::Affinity::Leading => CaretAffinity::Downstream,
+                loom_fonts::Affinity::Trailing => CaretAffinity::Upstream,
+            },
+        });
+    }
     let order = block.visual_line(font_size, line.start..line.end)?;
     let at = line.start + offset.checked_sub(line.global_start)?;
     let target = order.neighbour(at, affinity, forward)?;

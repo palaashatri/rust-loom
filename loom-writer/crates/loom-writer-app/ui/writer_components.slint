@@ -35,10 +35,21 @@ export struct WriterTextRule {
     height: length,
 }
 
+/// One viewport-clipped tile of glyphs painted from the core's shaped IDs.
+/// Coordinates and dimensions are in page points; the canvas applies zoom.
+export struct WriterGlyphTile {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    source: image,
+}
+
 /// A rendered paragraph projected from the Writer document model.
 export struct WriterRenderBlock {
     segments: [WriterTextSegment],
     rules: [WriterTextRule],
+    glyph-tiles: [WriterGlyphTile],
     /// False: one segment that the text item aligns and wraps itself. True:
     /// each segment sits at its own `x`/`y` and the row is not wrapped again.
     positioned: bool,
@@ -414,6 +425,15 @@ component WriterDocumentEditor inherits Rectangle {
             property <color> ink: Theme.active-theme == "high-contrast" && block.table-cell
                 ? Theme.palette().paper-ink
                 : block.has-color ? block.color : Theme.palette().paper-ink;
+            for tile in block.glyph-tiles : Image {
+                x: tile.x * root.page-zoom;
+                y: tile.y * root.page-zoom;
+                width: tile.width * root.page-zoom;
+                height: tile.height * root.page-zoom;
+                source: tile.source;
+                image-fit: fill;
+                accessible-role: none;
+            }
             // One Text per typed segment. A row of plain text is one segment
             // that the Text aligns and wraps itself; a row with several looks
             // or with rules is positioned segment by segment from Rust.
@@ -427,6 +447,7 @@ component WriterDocumentEditor inherits Rectangle {
                     ? max(block.font-size * 1.4, block.height - segment.y) * root.page-zoom
                     : parent.height;
                 text: segment.text;
+                visible: block.glyph-tiles.length == 0;
                 font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
                 font-size: segment.size * 1px * root.page-zoom;
                 font-weight: segment.weight;
@@ -545,10 +566,13 @@ export component WriterPageCanvas inherits Rectangle {
     in-out property <length> page-scroll-y: 0px;
     // Height of the visible page area, so the controller can keep the caret in view.
     in-out property <length> view-height: 0px;
+    // Width of the visible page area, used to clip rasterized glyph tiles.
+    out property <length> view-width: page-scroll.width;
     // The Flickable's offsets are negative when scrolled; the controller works
     // with the positive distance scrolled, so the sign flips at this boundary.
     private property <length> native-x;
     private property <length> native-y;
+    private property <length> measured-width: page-scroll.width;
     private property <length> measured-height: page-scroll.height;
     in property <int> page-count: 1;
     // Only the sheets near the viewport are drawn; a long document would
@@ -577,6 +601,7 @@ export component WriterPageCanvas inherits Rectangle {
     forward-focus: document-editor;
 
     init => { root.view-height = page-scroll.height; }
+    changed measured-width => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
     changed measured-height => { root.view-height = root.measured-height; }
     changed native-x => { root.page-scroll-x = -root.native-x; }
     changed native-y => { root.page-scroll-y = -root.native-y; }

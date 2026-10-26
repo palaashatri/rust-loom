@@ -4,6 +4,7 @@
 
 use super::writer_pointer_offset_with_model;
 use crate::projection;
+use loom_fonts::Affinity;
 use loom_writer_core::{
     PageStyle, PageViewport, RichBlock, TextSelection, WriterDocument, WriterTable,
 };
@@ -17,6 +18,14 @@ const VISIBLE_BOTTOM: f32 = 700.0;
 /// Height of the window the drag test renders into: a point below it is below
 /// anything the window shows.
 const WINDOW_HEIGHT: f32 = 800.0;
+
+struct ResetTestFontCatalog;
+
+impl Drop for ResetTestFontCatalog {
+    fn drop(&mut self) {
+        loom_writer_core::fonts::reset_font_catalog();
+    }
+}
 
 /// A table block with `rows` by `cols` cells, each holding its own position
 /// as text, so a wrong hit is visible in the failure message.
@@ -93,6 +102,73 @@ fn dispatch_window_press(app: &crate::WriterApp, point: (f32, f32)) {
             position,
             button: slint::platform::PointerEventButton::Left,
         });
+}
+
+/// Find the center of real nontransparent pixels in the shaped glyph tiles for
+/// one table cell and map it back through the tile, row, page zoom, and current
+/// editor origin. This remains a visual-paint probe when the logical Slint
+/// Text segments are hidden to avoid independent reshaping.
+fn painted_cell_ink_center(app: &crate::WriterApp, label: &str, zoom: f32) -> (f32, f32) {
+    let render_blocks = app.get_render_blocks();
+    let row = render_blocks
+        .iter()
+        .find(|row| {
+            row.table_cell
+                && row
+                    .segments
+                    .iter()
+                    .map(|segment| segment.text.to_string())
+                    .collect::<String>()
+                    == label
+        })
+        .unwrap_or_else(|| panic!("the logical render row for {label} is present"));
+    let mut ink = None::<(f32, f32, f32, f32)>;
+    for tile in row.glyph_tiles.iter() {
+        let Some(pixels) = tile.source.to_rgba8() else {
+            continue;
+        };
+        let width = pixels.width();
+        let height = pixels.height();
+        if width == 0 || height == 0 {
+            continue;
+        }
+        let mut tile_ink = None::<(u32, u32, u32, u32)>;
+        for (index, pixel) in pixels.as_bytes().chunks_exact(4).enumerate() {
+            if pixel[3] == 0 {
+                continue;
+            }
+            let x = (index % width as usize) as u32;
+            let y = (index / width as usize) as u32;
+            tile_ink = Some(match tile_ink {
+                Some((left, top, right, bottom)) => {
+                    (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                }
+                None => (x, y, x, y),
+            });
+        }
+        if let Some((left, top, right, bottom)) = tile_ink {
+            let page_left = row.x + tile.x + left as f32 / width as f32 * tile.width;
+            let page_top = row.y + tile.y + top as f32 / height as f32 * tile.height;
+            let page_right = row.x + tile.x + (right + 1) as f32 / width as f32 * tile.width;
+            let page_bottom = row.y + tile.y + (bottom + 1) as f32 / height as f32 * tile.height;
+            ink = Some(match ink {
+                Some((left, top, right, bottom)) => (
+                    left.min(page_left),
+                    top.min(page_top),
+                    right.max(page_right),
+                    bottom.max(page_bottom),
+                ),
+                None => (page_left, page_top, page_right, page_bottom),
+            });
+        }
+    }
+    let (left, top, right, bottom) =
+        ink.unwrap_or_else(|| panic!("the shaped tiles for {label} contain ink"));
+    let origin = fresh_document_origin(app);
+    (
+        origin.0 + (left + right) / 2.0 * zoom,
+        origin.1 + (top + bottom) / 2.0 * zoom,
+    )
 }
 
 fn dispatch_press_only(app: &crate::WriterApp, point: (f32, f32)) {
@@ -179,6 +255,263 @@ fn assert_each_cell_centre_hits_its_own_cell(rows: usize, cols: usize) {
 #[test]
 fn every_cell_centre_of_a_three_by_three_table_hits_that_cell() {
     assert_each_cell_centre_hits_its_own_cell(3, 3);
+}
+
+#[test]
+fn typed_table_projection_text_caret_and_hit_follow_rows_across_page_breaks() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let _reset = ResetTestFontCatalog;
+    let mut config = loom_writer_core::fonts::ScanConfig::with_dirs(Vec::new());
+    config.policy = loom_writer_core::fonts::FallbackPolicy::new(["Inter"]);
+    loom_writer_core::fonts::install_font_catalog(std::sync::Arc::new(
+        loom_writer_core::fonts::FontCatalog::scan(&config),
+    ));
+
+    let (rows, cols) = (40, 2);
+    let mut table = loom_objects::table::Table::new(rows, cols);
+    for row in 0..rows {
+        for col in 0..cols {
+            table.set_cell_text(row, col, "x");
+        }
+    }
+    let mut document = WriterDocument::new("table-page-boundary", "Table page boundary");
+    let table_id = document
+        .insert_table_object(0, &table)
+        .expect("insert the typed table");
+    let style = document.page.page_style();
+    let viewport = PageViewport::default();
+    let flow = document
+        .flow(&style, projection::layout_viewport(&style, viewport))
+        .expect("the table flows over multiple pages");
+    let flow_rows: Vec<_> = flow
+        .lines()
+        .iter()
+        .filter(|line| line.block_index == 0)
+        .collect();
+    assert_eq!(flow_rows.len(), rows, "one flow line is reserved per row");
+    let second_page_row = flow_rows
+        .iter()
+        .position(|line| line.page > 0)
+        .expect("the tall table crosses a page boundary");
+
+    let projection = projection::project(&document, viewport, None);
+    let first_page = flow
+        .page_bounds()
+        .first()
+        .copied()
+        .expect("flow has its first page");
+    let zoom = flow.zoom();
+    let cell_ranges = document
+        .table_cell_ranges(table_id)
+        .expect("typed cells have source ranges");
+    for row_index in 0..rows {
+        let flow_line = flow_rows[row_index];
+        let expected_y = (flow_line.bounds.y - first_page.y - style.margin_top_pt * zoom) / zoom;
+        let rect = &projection.table_cell_rects[row_index * cols];
+        assert!(
+            (rect.y - expected_y).abs() < 0.05,
+            "cell row {row_index} rectangle y {} follows its flow row y {expected_y}",
+            rect.y
+        );
+        assert!(
+            (rect.height - flow_line.bounds.height / zoom).abs() < 0.05,
+            "cell row {row_index} rectangle height matches its flow row"
+        );
+        let text_row = projection
+            .rows
+            .iter()
+            .filter(|row| row.table_cell)
+            .nth(row_index * cols)
+            .expect("the projected text row exists");
+        assert!(
+            (text_row.y - (expected_y + 4.0)).abs() < 0.05,
+            "cell row {row_index} glyph top follows its flow row"
+        );
+        let cell_offset = cell_ranges[row_index][0].0;
+        let (caret_top, caret_bottom) =
+            projection::table_row_view_span(&document, &style, &flow, cell_offset)
+                .expect("caret geometry uses the table row span");
+        assert!(
+            (caret_top - flow_line.bounds.y).abs() < 0.05
+                && (caret_bottom - (flow_line.bounds.y + flow_line.bounds.height)).abs() < 0.05,
+            "caret span for row {row_index} follows its paginated flow bounds"
+        );
+    }
+
+    let flow_line = flow_rows[second_page_row];
+    let rect = &projection.table_cell_rects[second_page_row * cols];
+    let expected_y = (flow_line.bounds.y - first_page.y - style.margin_top_pt * zoom) / zoom;
+    let cell_ranges = document
+        .table_cell_ranges(table_id)
+        .expect("typed cells have source ranges");
+    let model = ModelRc::new(VecModel::from(projection.table_cell_rects.clone()));
+    let hit = super::writer_pointer_offset_with_model(
+        &document,
+        viewport,
+        rect.x + 7.0,
+        expected_y + flow_line.bounds.height / 2.0,
+        &model,
+    )
+    .expect("pointer on the second-page row finds document text");
+    let location = document
+        .table_cell_at_offset(hit)
+        .expect("pointer hit resolves to a table cell");
+    assert_eq!(
+        (location.row, location.col),
+        (second_page_row, 0),
+        "pointer hit at the paginated glyph row selects the matching cell"
+    );
+    assert_eq!(cell_ranges[second_page_row][0].0, location.cell_start);
+}
+
+#[test]
+fn mixed_script_table_cell_pointer_uses_the_painted_shaped_run_positions() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let latin_start = "مرحبا ".len();
+    let mut table = loom_objects::table::Table::new(1, 1);
+    table.set_cell_rich_text(
+        0,
+        0,
+        vec![
+            loom_objects::table::TextRun::plain("مرحبا "),
+            loom_objects::table::TextRun {
+                text: "office".to_owned(),
+                bold: true,
+                font_size_pt: Some(18.0),
+                color: Some("#CC3300FF".to_owned()),
+                ..loom_objects::table::TextRun::plain("")
+            },
+            loom_objects::table::TextRun::plain(" שלום"),
+        ],
+    );
+    let mut document = WriterDocument::new("mixed-cell-hit", "Mixed cell hit");
+    let table_id = document
+        .insert_table_object(0, &table)
+        .expect("insert typed table");
+    let cell = document
+        .table_cell_at_offset(0)
+        .expect("the first table cell has an editor offset");
+    let viewport = PageViewport::default();
+    let projection = projection::project(&document, viewport, Some(PageStyle::default().height_pt));
+    let rect = projection
+        .table_cell_rects
+        .first()
+        .cloned()
+        .expect("one projected cell rectangle");
+    let model = ModelRc::new(VecModel::from(projection.table_cell_rects.clone()));
+    let table_style = loom_objects::TableStyleCatalog::get(&table.style_id)
+        .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
+    let style_options = loom_objects::TableStyleOptions {
+        header_row: table.header_row,
+        banded_rows: table.banded_rows,
+        first_column: table.first_column,
+        ..Default::default()
+    };
+    let cell_style = table_style.resolve_cell(
+        0,
+        0,
+        table.row_count(),
+        table.col_count(),
+        &style_options,
+        None,
+    );
+    let cell_block = loom_writer_core::table_cell_rich_block(
+        table_id,
+        &table,
+        0,
+        0,
+        12.0,
+        cell_style.bold,
+        cell_style.text_color.as_deref(),
+    )
+    .expect("cell text converts to its shared rich block");
+    let lines = loom_writer_core::shape_wrapped_block_lines(&cell_block, 12.0, rect.width - 12.0)
+        .expect("mixed-direction cell text has shaped lines");
+    let line_index = lines
+        .iter()
+        .position(|(range, _)| range.start <= latin_start + 3 && latin_start + 3 <= range.end)
+        .expect("the Latin run belongs to one visual line");
+    let (line_range, line) = &lines[line_index];
+    let line = line.as_ref().expect("the visual line has glyph geometry");
+    let target = latin_start + 3;
+    let x = rect.x + 6.0 + line.caret_x(target, Affinity::Leading);
+    let max_line_height = lines
+        .iter()
+        .filter_map(|(_, line)| line.as_ref())
+        .map(|line| line.ascent_pt() + line.descent_pt() + line.line_gap_pt())
+        .reduce(f32::max)
+        .unwrap_or(0.0);
+    let line_pitch = (loom_writer_core::line_pitch(&cell_block.runs, 12.0)
+        * loom_writer_core::TABLE_CELL_LINE_PITCH_EM)
+        .max(max_line_height);
+    let y = rect.y + 4.0 + (line_index as f32 + 0.5) * line_pitch;
+    let hit = writer_pointer_offset_with_model(&document, viewport, x, y, &model)
+        .expect("the shaped cell hit resolves to a document offset");
+    let expected_local = line
+        .hit_test(x - rect.x - 6.0)
+        .expect("the point has a shaped caret stop")
+        .offset;
+    assert_eq!(
+        expected_local, target,
+        "the chosen point hits its caret stop"
+    );
+    assert!(line_range.contains(&expected_local) || expected_local == line_range.end);
+    assert_eq!(
+        hit,
+        cell.cell_start + expected_local,
+        "the pointer maps exact mixed-script glyph geometry back into table text"
+    );
+}
+
+#[test]
+fn leading_cell_whitespace_pointer_uses_the_original_cell_byte_offset() {
+    let _serial = loom_writer_core::test_fonts::serial();
+    let mut table = loom_objects::Table::new(1, 1);
+    table.set_cell_text(0, 0, "  office  ");
+    let mut document = WriterDocument::new("leading-cell-space", "Leading cell space");
+    document
+        .insert_table_object(0, &table)
+        .expect("insert typed table");
+    let cell = document
+        .table_cell_at_offset(0)
+        .expect("the first table cell has an editor offset");
+    let viewport = PageViewport::default();
+    let projection = projection::project(&document, viewport, Some(PageStyle::default().height_pt));
+    let rect = projection
+        .table_cell_rects
+        .first()
+        .cloned()
+        .expect("one projected cell rectangle");
+    let model = ModelRc::new(VecModel::from(projection.table_cell_rects.clone()));
+    let typed_table = document
+        .loom_table_from_block(cell.block_id)
+        .expect("typed table remains available");
+    let cell_block = loom_writer_core::table_cell_rich_block(
+        cell.block_id,
+        &typed_table,
+        cell.row,
+        cell.col,
+        12.0,
+        false,
+        None,
+    )
+    .expect("whitespace is retained in the cell geometry");
+    assert_eq!(cell_block.text.as_str(), "  office  ");
+    let lines = loom_writer_core::shape_wrapped_block_lines(&cell_block, 12.0, rect.width - 12.0)
+        .expect("the cell has shaped line geometry");
+    let (range, line) = lines.first().expect("one visual line");
+    let line = line.as_ref().expect("the visual line has glyph geometry");
+    let local_target = 2;
+    let x = rect.x + 6.0 + line.caret_x(local_target, Affinity::Leading);
+    let y = rect.y + 4.0 + 7.5;
+    let hit = writer_pointer_offset_with_model(&document, viewport, x, y, &model)
+        .expect("a shaped cell hit resolves to a document offset");
+    assert_eq!(range.start, 0);
+    assert_eq!(
+        hit,
+        cell.cell_start + local_target,
+        "leading whitespace is represented once in the source byte map"
+    );
 }
 
 #[test]
@@ -279,22 +612,34 @@ fn long_table_presses_on_visible_cells_select_the_pressed_cell() {
     let (app, state) = rendered_window(document, 1280, 800, 1.0, 0.0);
     let rects = app.get_table_cell_rects();
 
-    let targets = [
-        (0, 0),
-        (0, 5),
-        (4, 0),
-        (9, 14),
-        (10, 0),
-        (10, 1),
-        (20, 3),
-        (50, 10),
-        (9, 16),
-        (30, 2),
-    ];
+    let origin = fresh_document_origin(&app);
+    let targets: Vec<_> = (0..rows)
+        .filter_map(|row| {
+            // Vary the column for each visible row so the long-table probe
+            // exercises horizontal and vertical hit geometry.
+            let col = (row * 7) % cols;
+            let rect = rects
+                .row_data(row * cols + col)
+                .expect("one published rectangle per cell");
+            let point = (
+                origin.0 + rect.x + rect.width / 2.0,
+                origin.1 + rect.y + rect.height / 2.0,
+            );
+            ((VISIBLE_TOP..VISIBLE_BOTTOM).contains(&point.1) && (0.0..1280.0).contains(&point.0))
+                .then_some((row, col))
+        })
+        .take(5)
+        .collect();
+    assert!(
+        targets.len() >= 5,
+        "at least five actual row/column centers are visible in the long-table viewport ({})",
+        targets.len()
+    );
     let mut checked = 0usize;
     let mut failures = Vec::new();
     for (row, col) in targets {
-        let rect = rects
+        let rect = app
+            .get_table_cell_rects()
             .row_data(row * cols + col)
             .expect("one published rectangle per cell");
         let origin = fresh_document_origin(&app);
@@ -580,8 +925,9 @@ fn a_press_on_each_painted_cell_text_selects_that_cell_at_every_zoom() {
     }
 }
 
-/// For each cell of a 3x3 table on the rendered page: its painted text must lie
-/// inside its rectangle at `zoom`, and a press on that text must select the cell.
+/// For each cell of a 3x3 table on the rendered page: alpha-bearing pixels in
+/// its shaped glyph tiles must lie inside its rectangle at `zoom`, and a press
+/// on those painted pixels must select the cell.
 fn assert_painted_cells_select_themselves(
     app: &crate::WriterApp,
     state: &crate::GuiState,
@@ -592,13 +938,7 @@ fn assert_painted_cells_select_themselves(
     for row in 0..3 {
         for col in 0..3 {
             let label = format!("r{row}c{col}");
-            let painted: Vec<_> =
-                i_slint_backend_testing::ElementHandle::find_by_accessible_label(app, &label)
-                    .collect();
-            assert_eq!(painted.len(), 1, "{label} is painted once at {condition}");
-            let text = painted[0].absolute_position();
-            let size = painted[0].size();
-            let centre = (text.x + size.width / 2.0, text.y + size.height / 2.0);
+            let centre = painted_cell_ink_center(app, &label, zoom);
             let (origin_x, origin_y) = fresh_document_origin(app);
             let rect = rects
                 .row_data(row * 3 + col)
@@ -607,14 +947,14 @@ fn assert_painted_cells_select_themselves(
             let (right, bottom) = (left + rect.width * zoom, top + rect.height * zoom);
             assert!(
                 centre.0 >= left && centre.0 < right && centre.1 >= top && centre.1 < bottom,
-                "{label} at {condition}: its painted text centre is at {centre:?}, \
+                "{label} at {condition}: its painted glyph-ink centre is at {centre:?}, \
                  outside its rectangle {left}..{right} by {top}..{bottom}"
             );
             dispatch_window_press(app, centre);
             assert_eq!(
                 focused_cell(state, 1),
                 Some((row, col)),
-                "a press on the painted {label} at {condition} selects that cell"
+                "a press on actual rasterized ink for {label} at {condition} selects that cell"
             );
         }
     }

@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use loom_objects::table::{HorizontalAlign, Table, TextRun};
-use loom_text::{Alignment, CharacterStyle, FontWeight};
+use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphDirection, ParagraphStyle};
 
 use super::comments::{self, Anchor, CommentPlan};
 use super::inline_style::docx_rgb;
@@ -13,7 +13,10 @@ use super::package::{
     STYLE_TABLE,
 };
 use super::xml::{self, R_NS, W_NS, XML_DECLARATION};
-use crate::{PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument, TABLE_BLOCK_KIND};
+use crate::{
+    PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
+    TABLE_CELL_BASE_FONT_SIZE_PT,
+};
 
 /// The body part plus what the numbering part needs to know about it.
 pub(super) struct Body {
@@ -162,7 +165,7 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
                 let rid = format!("rIdChart{chart_idx}");
                 let chart_xml = loom_objects::chart_ooxml::chart_to_c_chart_xml(&chart);
                 charts.push((chart_idx, chart_xml));
-                xml.push_str(&chart_xml_paragraph(&rid, chart_idx));
+                xml.push_str(&chart_xml_paragraph(&rid, chart_idx, block));
                 previous_numbered = false;
                 continue;
             }
@@ -211,20 +214,17 @@ fn picture_paragraph(
 ) -> String {
     let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
     let name = xml::attr(&image.name);
-    let alignment = match block.style.alignment.resolve(block.text.as_str()) {
-        loom_text::Alignment::Center => "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        loom_text::Alignment::Right => "<w:pPr><w:jc w:val=\"right\"/></w:pPr>",
-        _ => "",
-    };
+    let alignment = paragraph_properties(block, None);
     format!(
         "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
         id = 1000 + index
     )
 }
 
-fn chart_xml_paragraph(rid: &str, chart_id: usize) -> String {
+fn chart_xml_paragraph(rid: &str, chart_id: usize, block: &RichBlock) -> String {
+    let properties = paragraph_properties(block, None);
     format!(
-        "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\
+        "<w:p>{properties}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\
          <wp:extent cx=\"5486400\" cy=\"3200400\"/>\
          <wp:docPr id=\"{chart_id}\" name=\"Chart {chart_id}\"/>\
          <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\
@@ -280,6 +280,10 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
         ));
     }
 
+    if let Some(direction) = bidi_property(style) {
+        out.push_str(direction);
+    }
+
     let mut spacing = String::new();
     let before = twips(style.space_before).max(0);
     if before != 0 {
@@ -332,17 +336,30 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
         out.push_str(&format!("<w:ind{indent}/>"));
     }
 
-    match style.alignment.resolve(block.text.as_str()) {
-        Alignment::Left | Alignment::Start => {}
-        Alignment::Center => out.push_str("<w:jc w:val=\"center\"/>"),
-        Alignment::Right => out.push_str("<w:jc w:val=\"right\"/>"),
-        Alignment::Justify => out.push_str("<w:jc w:val=\"both\"/>"),
-    }
+    out.push_str(&format!(
+        "<w:jc w:val=\"{}\"/>",
+        match style.alignment {
+            Alignment::Start => "start",
+            Alignment::End => "end",
+            Alignment::Left => "left",
+            Alignment::Center => "center",
+            Alignment::Right => "right",
+            Alignment::Justify => "both",
+        }
+    ));
 
     if out.is_empty() {
         out
     } else {
         format!("<w:pPr>{out}</w:pPr>")
+    }
+}
+
+fn bidi_property(style: &ParagraphStyle) -> Option<&'static str> {
+    match style.direction {
+        ParagraphDirection::Auto => None,
+        ParagraphDirection::LeftToRight => Some("<w:bidi w:val=\"0\"/>"),
+        ParagraphDirection::RightToLeft => Some("<w:bidi/>"),
     }
 }
 
@@ -533,13 +550,22 @@ fn cell_paragraph(alignment: Option<&HorizontalAlign>) -> &'static str {
 /// `bold` is the cell's own bold, from the header row or the table style.
 fn push_cell_runs(out: &mut String, runs: &[TextRun], bold: bool) {
     for piece in runs {
-        let mut props = RunProps::of(
-            None,
-            bold || piece.bold,
-            CharacterStyle::default().font_size,
-        );
-        props.italic = piece.italic;
-        props.underline = piece.underline;
+        let mut style = CharacterStyle::default();
+        style.weight = if piece.bold {
+            FontWeight::Bold
+        } else {
+            FontWeight::Regular
+        };
+        style.italic = piece.italic;
+        style.underline = piece.underline;
+        style.strikethrough = piece.strikethrough;
+        style.superscript = piece.superscript;
+        style.subscript = piece.subscript;
+        style.font_family = piece.font_family.clone().unwrap_or_default();
+        style.font_size = piece.font_size_pt.unwrap_or(TABLE_CELL_BASE_FONT_SIZE_PT);
+        style.explicit_size = piece.font_size_pt.is_some();
+        style.color = piece.color.clone();
+        let props = RunProps::of(Some(&style), bold, TABLE_CELL_BASE_FONT_SIZE_PT);
         push_run(out, &props, &piece.text);
     }
 }

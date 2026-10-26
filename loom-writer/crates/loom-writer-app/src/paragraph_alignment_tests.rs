@@ -193,34 +193,139 @@ fn mixed_text_and_table_selection_justifies_only_the_text_paragraph() {
 }
 
 #[test]
-fn rtl_only_selection_does_not_offer_or_apply_justify_before_bidi_support() {
+fn rtl_justify_is_available_in_inspector_and_palette_and_undoable() {
     let text = "مرحبا بالعالم في مستند قابل للتحرير مع كلمات كثيرة لاختبار الالتفاف ".repeat(8);
-    let mut document = WriterDocument::new("justify-rtl", "Justify RTL");
-    document.blocks.push(RichBlock::new(1, "paragraph", &text));
-    document.blocks[0].style.alignment = loom_text::Alignment::Justify;
+    let mut document = WriterDocument::new("justify-rtl-command", "RTL Justify Command");
+    let mut paragraph = RichBlock::new(1, "paragraph", &text);
+    paragraph.style.direction = loom_text::ParagraphDirection::RightToLeft;
+    paragraph.style.alignment = loom_text::Alignment::Left;
+    document.blocks.push(paragraph);
     document.set_selection(TextSelection::range(0, text.len()));
 
     let (app, state) = app_with_document(document);
     assert!(
-        writer_render_projection(&state.current.borrow(), PageViewport::default())
-            .0
-            .iter()
-            .any(|row| row.unsupported_label == "Justify unavailable"),
-        "the imported/current RTL paragraph is one whose M2 geometry defers justification"
+        state
+            .registry
+            .lock()
+            .expect("command registry")
+            .get(&CommandId::new("writer.align.justify"))
+            .is_some_and(|spec| spec.enabled),
+        "a selected RTL paragraph with shaped justification must enable the real command"
     );
-    assert_justify_not_offered(&app, &state, "RTL paragraph");
 
-    let before = state.current.borrow().clone();
-    app.invoke_select_alignment(3);
-    assert_eq!(*state.current.borrow(), before);
+    app.set_show_inspector(true);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render RTL inspector");
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Justify")
+            .filter(|element| element.accessible_role() == Some(AccessibleRole::Button))
+            .count(),
+        1,
+        "the inspector exposes its enabled Justify segment for the selected RTL paragraph"
+    );
+
+    let palette_ids = query_live_palette(&app, &state, "justify");
+    let justify_index = palette_ids
+        .iter()
+        .position(|id| id == "writer.align.justify-all")
+        .expect("the actual palette query includes Align All Justify");
+    app.invoke_palette_invoked(justify_index as i32);
+
+    {
+        let current = state.current.borrow();
+        assert_eq!(
+            current.blocks[0].style.alignment,
+            loom_text::Alignment::Justify,
+            "accepting the production palette command applies justification"
+        );
+        assert_eq!(
+            current.blocks[0].style.direction,
+            loom_text::ParagraphDirection::RightToLeft,
+            "justifying the paragraph preserves its RTL direction"
+        );
+        assert_eq!(
+            app.get_status_right().as_str(),
+            "Justify alignment applied to 1 paragraph"
+        );
+    }
+    let rendered = app.get_render_blocks();
     assert!(
-        !app.get_status_right().contains("Justify alignment applied"),
-        "the app must not announce a visual effect that M2 cannot render for this RTL paragraph"
+        (0..rendered.row_count())
+            .filter_map(|index| rendered.row_data(index))
+            .any(|row| row.alignment == 3 && row.glyph_tiles.row_count() > 0 && !row.unsupported),
+        "the RTL paragraph has a painted, supported Justify projection"
+    );
+
+    app.invoke_undo();
+    let current = state.current.borrow();
+    assert_eq!(
+        current.blocks[0].style.alignment,
+        loom_text::Alignment::Left
+    );
+    assert_eq!(
+        current.blocks[0].style.direction,
+        loom_text::ParagraphDirection::RightToLeft
     );
 }
 
 #[test]
-fn mixed_ltr_rtl_selection_reports_applied_and_skipped_paragraph_counts() {
+fn rtl_only_selection_is_justified_with_shaped_geometry() {
+    let text = "مرحبا بالعالم في مستند قابل للتحرير مع كلمات كثيرة لاختبار الالتفاف ".repeat(8);
+    let mut document = WriterDocument::new("justify-rtl", "Justify RTL");
+    let mut paragraph = RichBlock::new(1, "paragraph", &text);
+    paragraph.style.direction = loom_text::ParagraphDirection::RightToLeft;
+    paragraph.style.alignment = loom_text::Alignment::Center;
+    document.blocks.push(paragraph);
+    document.set_selection(TextSelection::range(0, text.len()));
+
+    let (app, state) = app_with_document(document);
+    assert!(
+        state
+            .registry
+            .lock()
+            .expect("command registry")
+            .get(&CommandId::new("writer.align.justify"))
+            .is_some_and(|spec| spec.enabled),
+        "a selected RTL text paragraph enables Justify"
+    );
+    let mut candidate = state.current.borrow().clone();
+    let selection = candidate.selection();
+    assert_eq!(
+        super::justify_selected_paragraphs(&mut candidate, selection),
+        super::JustificationResult {
+            applied_paragraphs: 1,
+            skipped_unsupported_items: 0,
+        }
+    );
+    assert_eq!(
+        candidate.blocks[0].style.alignment,
+        loom_text::Alignment::Justify
+    );
+
+    app.invoke_select_alignment(3);
+    assert_eq!(
+        state.current.borrow().blocks[0].style.alignment,
+        loom_text::Alignment::Justify
+    );
+    assert_eq!(
+        state.current.borrow().blocks[0].style.direction,
+        loom_text::ParagraphDirection::RightToLeft
+    );
+    let rendered = app.get_render_blocks();
+    assert!(
+        (0..rendered.row_count())
+            .filter_map(|index| rendered.row_data(index))
+            .any(|row| row.alignment == 3 && row.glyph_tiles.row_count() > 0 && !row.unsupported),
+        "the RTL paragraph is shaped and painted without an unavailable warning"
+    );
+    assert!(
+        app.get_status_right()
+            .contains("Justify alignment applied to 1 paragraph"),
+        "the applied RTL formatting is announced truthfully"
+    );
+}
+
+#[test]
+fn mixed_ltr_rtl_selection_justifies_both_paragraphs() {
     let mut document = WriterDocument::new("justify-mixed-directions", "Mixed directions");
     document.blocks.push(RichBlock::new(
         1,
@@ -228,6 +333,7 @@ fn mixed_ltr_rtl_selection_reports_applied_and_skipped_paragraph_counts() {
         "The left-to-right paragraph is selected with this one.",
     ));
     let mut rtl = RichBlock::new(2, "paragraph", "مرحبا بالعالم في المستند المحدد");
+    rtl.style.direction = loom_text::ParagraphDirection::RightToLeft;
     rtl.style.alignment = loom_text::Alignment::Center;
     document.blocks.push(rtl);
     document.set_selection(TextSelection::range(0, document.editor_text().len()));
@@ -239,8 +345,8 @@ fn mixed_ltr_rtl_selection_reports_applied_and_skipped_paragraph_counts() {
     assert_eq!(
         result,
         super::JustificationResult {
-            applied_paragraphs: 1,
-            skipped_unsupported_items: 1,
+            applied_paragraphs: 2,
+            skipped_unsupported_items: 0,
         }
     );
     app.invoke_select_alignment(3);
@@ -252,19 +358,20 @@ fn mixed_ltr_rtl_selection_reports_applied_and_skipped_paragraph_counts() {
     );
     assert_eq!(
         current.blocks[1].style.alignment,
-        loom_text::Alignment::Center
+        loom_text::Alignment::Justify
     );
     assert_eq!(
         app.get_status_right().as_str(),
-        "Justify alignment applied to 1 paragraph; skipped 1 unsupported item"
+        "Justify alignment applied to 2 paragraphs"
     );
 }
 
 #[test]
-fn imported_rtl_justify_is_preserved_but_not_offered_without_bidi_geometry() {
+fn imported_rtl_justify_is_preserved_and_available_with_shaped_geometry() {
     let text = "مرحبا بالعالم في مستند قابل للتحرير مع كلمات كثيرة لاختبار الالتفاف ".repeat(8);
     let mut source = WriterDocument::new("docx-rtl-justify", "DOCX RTL Justify");
     let mut paragraph = RichBlock::new(1, "paragraph", &text);
+    paragraph.style.direction = loom_text::ParagraphDirection::RightToLeft;
     paragraph.style.alignment = loom_text::Alignment::Justify;
     source.blocks.push(paragraph);
 
@@ -274,7 +381,10 @@ fn imported_rtl_justify_is_preserved_but_not_offered_without_bidi_geometry() {
         imported.blocks[0].style.alignment,
         loom_text::Alignment::Justify
     );
-    assert!(imported.blocks[0].justification_deferred_for_bidi());
+    assert_eq!(
+        imported.blocks[0].style.direction,
+        loom_text::ParagraphDirection::RightToLeft
+    );
 
     let (app, state) = app_with_document(imported);
     assert_eq!(
@@ -283,11 +393,19 @@ fn imported_rtl_justify_is_preserved_but_not_offered_without_bidi_geometry() {
         "app projection must preserve the imported paragraph style"
     );
     assert!(
-        writer_render_projection(&state.current.borrow(), PageViewport::default())
-            .0
-            .iter()
-            .any(|row| row.unsupported_label == "Justify unavailable"),
-        "an imported bidi paragraph must keep Justify but show the honest unavailable status"
+        state
+            .registry
+            .lock()
+            .expect("command registry")
+            .get(&CommandId::new("writer.align.justify"))
+            .is_some_and(|spec| spec.enabled),
+        "the imported RTL paragraph keeps Justify available"
     );
-    assert_justify_not_offered(&app, &state, "imported RTL DOCX paragraph");
+    let rendered = app.get_render_blocks();
+    assert!(
+        (0..rendered.row_count())
+            .filter_map(|index| rendered.row_data(index))
+            .any(|row| row.alignment == 3 && row.glyph_tiles.row_count() > 0 && !row.unsupported),
+        "the imported RTL Justify paragraph has a painted shaped projection"
+    );
 }

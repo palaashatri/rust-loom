@@ -27,6 +27,8 @@ pub(super) struct Segment<'a> {
     pub(super) block_start: usize,
     pub(super) lines: &'a [WrappedLine],
     pub(super) line_height: f32,
+    /// Optional per-line reserved heights, used for typed table rows.
+    pub(super) line_heights: Option<&'a [f32]>,
     /// Width of every line when the block is a picture.
     pub(super) fixed_width: Option<f32>,
     /// Whether widow and orphan control applies (text, not pictures or tables).
@@ -88,7 +90,20 @@ impl Placer {
                 self.next_page();
             }
             let remaining = total - done;
-            let mut take = self.fit(segment.line_height, remaining);
+            let mut take = 0;
+            let mut projected = self.used;
+            while take < remaining {
+                let height = segment
+                    .line_heights
+                    .and_then(|heights| heights.get(done + take))
+                    .copied()
+                    .unwrap_or(segment.line_height);
+                if projected + height > self.usable + f32::EPSILON {
+                    break;
+                }
+                projected += height;
+                take += 1;
+            }
             if take < remaining && segment.controlled && total >= 3 {
                 if remaining - take == 1 {
                     take = take.saturating_sub(1);
@@ -107,7 +122,12 @@ impl Placer {
                 }
                 take = 1;
             }
-            for line in &segment.lines[done..done + take] {
+            for (local, line) in segment.lines[done..done + take].iter().enumerate() {
+                let height = segment
+                    .line_heights
+                    .and_then(|heights| heights.get(done + local))
+                    .copied()
+                    .unwrap_or(segment.line_height);
                 self.lines.push(FlowLine {
                     block_index: segment.block_index,
                     start: line.start,
@@ -118,10 +138,11 @@ impl Placer {
                         x: 0.0,
                         y: 0.0,
                         width: segment.fixed_width.unwrap_or(line.advance_pt),
-                        height: 0.0,
+                        height,
                     },
+                    shaped_line: line.shaped_line.clone(),
                 });
-                self.used += segment.line_height;
+                self.used += height;
             }
             done += take;
             if done < total {

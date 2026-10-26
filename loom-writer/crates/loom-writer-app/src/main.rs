@@ -22,7 +22,9 @@ mod file_title;
 mod find_bar;
 mod font_picker;
 mod font_store;
+mod formatting_actions;
 mod history;
+mod inline_formatting;
 mod launch_position;
 mod list_keys;
 mod list_level_actions;
@@ -51,6 +53,7 @@ mod view_state;
 mod window_chrome;
 
 use history::{EditorHistory, HistoryKind};
+use paragraph_alignment::writer_render_alignment;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -61,12 +64,14 @@ use toolbar_commands::apply_layout_breakpoints;
 #[cfg(test)]
 use toolbar_commands::{layout_breakpoints, ResponsiveToolbarState};
 
+#[cfg(test)]
+use document_formatting::set_selection_strikethrough;
 use document_formatting::{
     formatting_state_for_selection, indent_selection, selection_text_spans,
     set_selection_alignment, set_selection_bold, set_selection_font_family,
     set_selection_font_size, set_selection_heading, set_selection_italic,
-    set_selection_line_spacing, set_selection_list_style, set_selection_strikethrough,
-    set_selection_underline, DocumentSelection,
+    set_selection_line_spacing, set_selection_list_style, set_selection_underline,
+    DocumentSelection,
 };
 use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
@@ -461,22 +466,17 @@ fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
         .map_err(|error| format!("atomic write {}: {error}", path.display()))
 }
 
-/// The status line after a PDF export. The PDF embeds only Inter, so a
-/// document set in other families says so once, naming them.
-fn pdf_export_message(path: &Path, doc: &WriterDocument) -> String {
-    let mut message = format!("Exported {}", path.display());
-    if let Some(note) = loom_writer_core::fonts::pdf_substitution_note(doc) {
-        message.push_str(". ");
-        message.push_str(&note);
-    }
-    message
+/// The status line after a successful PDF export.
+fn pdf_export_message(path: &Path, _doc: &WriterDocument) -> String {
+    format!("Exported {}", path.display())
 }
 
 fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
     if path.as_os_str().is_empty() || path.file_name().is_none() {
         return Err("PDF destination is empty".into());
     }
-    let bytes = loom_writer_core::export_pdf(doc);
+    let bytes =
+        loom_writer_core::export_pdf(doc).map_err(|error| format!("PDF export: {error}"))?;
     if bytes.is_empty() {
         return Err("PDF export produced no bytes".into());
     }
@@ -512,6 +512,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
             picture_actions::dispatch(app, id);
         }
         id if list_level_actions::dispatch(app, id) => {}
+        id if formatting_actions::dispatch(app, id) => {}
         "table.insert_row_above" | "writer.table.insert_row_above" => {
             app.invoke_table_action("insert-row-above".into())
         }
@@ -844,6 +845,7 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_enabled(false),
     ];
     catalog.extend(paragraph_alignment::command_specs());
+    catalog.extend(formatting_actions::command_specs());
     catalog.extend(appearance::command_specs());
     catalog.extend(table_actions::table_command_specs());
     catalog
@@ -947,6 +949,7 @@ fn sync_writer_registry_enablement(
     for id in ["writer.align.justify", "writer.align.justify-all"] {
         registry.set_enabled(&CommandId::new(id), justify_available);
     }
+    formatting_actions::sync_registry_enablement(registry, doc);
     for id in [
         "file.new",
         "file.open",
@@ -1272,24 +1275,12 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     // A picture is not a paragraph.
     let block_count = doc.blocks.iter().filter(|block| !block.is_image()).count();
     let selection = doc.selection();
-    let formatting = formatting_state_for_selection(
-        doc,
-        DocumentSelection::range(selection.anchor, selection.focus),
-    );
     let announcement = selection_announcement(doc, &selection);
-    // Toolbar inline styles derive from `formatting_state_for_selection` which
-    // uses `caret_style` for a collapsed caret (the exact style a subsequent
-    // insertion will inherit) and requires every character in a range to match
-    // for `bold`/`italic`/`underline` to appear checked — mixed is unchecked.
-    // Heading/alignment use the mixed sentinel `-1` so the inspector shows
-    // indeterminate rather than falsely highlighting Body/Left.
-    let heading_level = inspector_heading_level(doc, &selection);
-    let text_alignment = inspector_alignment(doc, &selection);
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
-    table_actions::update_table_selection_properties(app, doc, selection.anchor);
+    formatting_actions::project_document_controls(app, doc);
     refresh_writer_render_projection(app, doc, viewport);
     outline::publish(app, doc);
     app.set_page_paper_index(match doc.page.paper {
@@ -1308,17 +1299,6 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
         _ => 0,
     });
     app.set_selection_announcement(SharedString::from(announcement.clone()));
-    app.set_is_bold(formatting.bold);
-    app.set_is_italic(formatting.italic);
-    app.set_is_underline(formatting.underline);
-    app.set_is_strikethrough(formatting.strikethrough);
-    font_picker::publish_current(app, doc);
-    app.set_font_size_pt(formatting.font_size_pt);
-    app.set_line_spacing_index(formatting.line_spacing_index);
-    app.set_list_style_index(formatting.list_style_index);
-    app.set_heading_level(heading_level);
-    app.set_text_alignment(text_alignment);
-    sync_justify_availability(app, doc);
     app.set_word_count(word_count.min(i32::MAX as usize) as i32);
     app.set_char_count(char_count.min(i32::MAX as usize) as i32);
     app.set_reading_time_mins(reading_time::minutes_for_words(word_count));
@@ -1377,12 +1357,6 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
     publish_render_projection(app, compute_render_projection(app, doc, viewport));
 }
 
-fn sync_justify_availability(app: &WriterApp, document: &WriterDocument) {
-    app.global::<WriterAlignmentState>().set_justify_available(
-        paragraph_alignment::selection_can_be_justified(document, document.selection()),
-    );
-}
-
 /// Like [`refresh_writer_render_projection`] for the controller's own document:
 /// the projection is computed under the borrow and published after it is
 /// released, because setting properties can call back into the controller.
@@ -1406,7 +1380,13 @@ fn compute_render_projection(
     viewport: PageViewport,
 ) -> ComputedProjection {
     ComputedProjection {
-        projection: projection::project(doc, viewport, Some(app.get_page_view_height())),
+        projection: projection::project_with_viewport_scale(
+            doc,
+            viewport,
+            app.get_view_width(),
+            Some(app.get_page_view_height()),
+            app.window().scale_factor(),
+        ),
         page_style: doc.page.page_style(),
         match_rects: find_bar::match_rects(app, doc),
         picture_selected: picture_actions::picture_key(doc),
@@ -1576,15 +1556,6 @@ fn writer_render_height_for_width(block: &RichBlock, font_size: f32, usable_widt
     font_size * (line_count as f32 * 1.35 + 0.25)
 }
 
-fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
-    match alignment {
-        loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
-        loom_text::Alignment::Center => 1,
-        loom_text::Alignment::Right => 2,
-        loom_text::Alignment::Justify => 3,
-    }
-}
-
 fn selection_from_app(app: &WriterApp) -> TextSelection {
     TextSelection::range(
         app.get_selection_anchor().max(0) as usize,
@@ -1613,61 +1584,6 @@ fn selection_announcement(doc: &WriterDocument, selection: &TextSelection) -> St
 
 /// Inspector heading level with mixed-state sentinel.
 ///
-/// `formatting_state_for_selection().heading_level` returns `0` for both a
-/// uniform body paragraph and for a mixed selection, so the inspector cannot
-/// distinguish the two from that value alone. This helper inspects the
-/// authoritative `selected_block_indices` and returns `-1` for a genuinely
-/// mixed heading selection (no segment highlighted → indeterminate), preserving
-/// `0..3` for uniform cases. A single-block selection never reports mixed.
-fn inspector_heading_level(doc: &WriterDocument, selection: &TextSelection) -> i32 {
-    let indices = loom_writer_core::selected_block_indices(doc, selection.clone());
-    if indices.is_empty() {
-        return 0;
-    }
-    let level_for = |kind: &str| match kind {
-        "heading1" => 1,
-        "heading2" => 2,
-        "heading3" => 3,
-        _ => 0,
-    };
-    let first = level_for(doc.blocks[indices[0]].kind.as_str());
-    let uniform = indices
-        .iter()
-        .all(|i| level_for(doc.blocks[*i].kind.as_str()) == first);
-    if uniform {
-        first
-    } else {
-        -1
-    }
-}
-
-/// Inspector alignment with `-1` reserved for mixed selections.
-fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
-    let indices = loom_writer_core::selected_block_indices(doc, selection.clone());
-    if indices.is_empty() {
-        return 0;
-    }
-    let align_index = |block: &loom_writer_core::RichBlock| match block
-        .style
-        .alignment
-        .resolve(block.text.as_str())
-    {
-        loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
-        loom_text::Alignment::Center => 1,
-        loom_text::Alignment::Right => 2,
-        loom_text::Alignment::Justify => 3,
-    };
-    let first = align_index(&doc.blocks[indices[0]]);
-    let uniform = indices
-        .iter()
-        .all(|i| align_index(&doc.blocks[*i]) == first);
-    if uniform {
-        first
-    } else {
-        -1
-    }
-}
-
 /// Project one editor selection event into the authoritative document and all
 /// selection-derived UI state. Keyboard, pointer, and accessibility actions
 /// all arrive through the same callback path. This is the *only* place that
@@ -1702,25 +1618,7 @@ fn project_selection_event(
 
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
-    // Toolbar B/I/U checked state derives from `formatting_state_for_selection`:
-    // — for a collapsed caret it uses `caret_style` (the style the next typed
-    //   character will inherit), not a no-op;
-    // — for a range it is true only when every character in the range carries
-    //   that style (mixed → unchecked, per AGENTS.md 4.2).
-    let formatting = formatting_state_for_selection(
-        document,
-        DocumentSelection::range(selection.anchor, selection.focus),
-    );
-    app.set_is_bold(formatting.bold);
-    app.set_is_italic(formatting.italic);
-    app.set_is_underline(formatting.underline);
-    app.set_is_strikethrough(formatting.strikethrough);
-    font_picker::publish_current(app, document);
-    app.set_font_size_pt(formatting.font_size_pt);
-    app.set_heading_level(inspector_heading_level(document, &selection));
-    app.set_text_alignment(inspector_alignment(document, &selection));
-    sync_justify_availability(app, document);
-    table_actions::update_table_selection_properties(app, document, selection.anchor);
+    formatting_actions::project_document_controls(app, document);
     let announcement = selection_announcement(document, &selection);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_status_right(SharedString::from(announcement));
@@ -1731,8 +1629,8 @@ fn project_selection_event(
             width: document.page.page_style().width_pt,
             height: document.page.page_style().height_pt,
             zoom: app.get_page_zoom(),
-            scroll_x: app.get_page_scroll_x(),
-            scroll_y: app.get_page_scroll_y(),
+            scroll_x: app.get_scroll_x(),
+            scroll_y: app.get_scroll_y(),
         },
     );
     true
@@ -1773,7 +1671,7 @@ fn reveal_caret(app: &WriterApp, state: &GuiState) {
         return;
     }
     state.viewport.borrow_mut().scroll_y = next;
-    app.set_page_scroll_y(next);
+    app.set_scroll_y(next);
     refresh_render_projection_of(app, state);
 }
 
@@ -1838,8 +1736,8 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));
     app.set_page_zoom(viewport.zoom);
-    app.set_page_scroll_x(viewport.scroll_x);
-    app.set_page_scroll_y(viewport.scroll_y);
+    app.set_scroll_x(viewport.scroll_x);
+    app.set_scroll_y(viewport.scroll_y);
     {
         let history = state.history.borrow();
         app.set_can_undo(!history.undo.is_empty());
@@ -1911,17 +1809,75 @@ fn apply_pending_typing_style(
         typing_style::retain_at(typed_end);
         return;
     }
+    let text_range = DocumentSelection::range(caret, typed_end);
+    let table_range = text_range.clone();
     if let Some(family) = &style.family {
-        set_selection_font_family(document, DocumentSelection::range(caret, typed_end), family);
+        set_selection_font_family(document, text_range.clone(), family);
+        table_actions::table_format_actions::set_selection_font_family(
+            document,
+            table_range.clone(),
+            family,
+        );
     }
     if let Some(on) = style.bold {
-        set_selection_bold(document, DocumentSelection::range(caret, typed_end), on);
+        set_selection_bold(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_emphasis(
+            document,
+            table_range.clone(),
+            table_actions::table_format_actions::Emphasis::Bold,
+            on,
+        );
     }
     if let Some(on) = style.italic {
-        set_selection_italic(document, DocumentSelection::range(caret, typed_end), on);
+        set_selection_italic(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_emphasis(
+            document,
+            table_range.clone(),
+            table_actions::table_format_actions::Emphasis::Italic,
+            on,
+        );
     }
     if let Some(on) = style.underline {
-        set_selection_underline(document, DocumentSelection::range(caret, typed_end), on);
+        set_selection_underline(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_emphasis(
+            document,
+            table_range.clone(),
+            table_actions::table_format_actions::Emphasis::Underline,
+            on,
+        );
+    }
+    if let Some(on) = style.strikethrough {
+        inline_formatting::set_selection_strikethrough(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_emphasis(
+            document,
+            table_range.clone(),
+            table_actions::table_format_actions::Emphasis::Strikethrough,
+            on,
+        );
+    }
+    if let Some(on) = style.superscript {
+        inline_formatting::set_selection_superscript(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_superscript(
+            document,
+            table_range.clone(),
+            on,
+        );
+    }
+    if let Some(on) = style.subscript {
+        inline_formatting::set_selection_subscript(document, text_range.clone(), on);
+        table_actions::table_format_actions::set_selection_subscript(
+            document,
+            table_range.clone(),
+            on,
+        );
+    }
+    if let Some(color) = &style.color {
+        inline_formatting::set_selection_foreground_color(document, text_range, color);
+        table_actions::table_format_actions::set_selection_foreground_color(
+            document,
+            table_range,
+            color,
+        );
     }
     typing_style::store(typing_style::PendingStyle {
         caret: typed_end,
@@ -2267,6 +2223,41 @@ fn continue_pending_replacement(
     }
 }
 
+fn wire_font_size_callbacks(app: &WriterApp, state: &Rc<GuiState>) {
+    let app_ref = app.as_weak();
+    let increase_state = state.clone();
+    app.on_increase_font_size(move || {
+        let Some(app) = app_ref.upgrade() else { return };
+        let size = (app.get_font_size_pt() + 1).min(144) as f32;
+        apply_selected_font_size(&app, &increase_state, size);
+    });
+
+    let app_ref = app.as_weak();
+    let decrease_state = state.clone();
+    app.on_decrease_font_size(move || {
+        let Some(app) = app_ref.upgrade() else { return };
+        let size = (app.get_font_size_pt() - 1).max(6) as f32;
+        apply_selected_font_size(&app, &decrease_state, size);
+    });
+}
+
+fn apply_selected_font_size(app: &WriterApp, state: &GuiState, size: f32) {
+    let mut next = state.current.borrow().clone();
+    let selection = next.selection();
+    set_selection_font_size(
+        &mut next,
+        DocumentSelection::range(selection.anchor, selection.focus),
+        size,
+    );
+    table_actions::table_format_actions::set_selection_font_size(
+        &mut next,
+        selection.clone(),
+        size,
+    );
+    next.set_selection(selection);
+    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+}
+
 /// Register callbacks shared by the native GUI and deterministic journey.
 /// `menu_service` is optional so headless runs exercise the exact same
 /// document, history, selection, and file-operation paths without requiring a
@@ -2283,6 +2274,8 @@ fn wire_writer_shared_callbacks(
     font_picker::wire(app, state);
     view_state::wire(app, state, menu_service.clone());
     table_actions::wire(app, state);
+    formatting_actions::wire(app, state);
+    wire_font_size_callbacks(app, state);
     clipboard_actions::wire(app, state);
     docx_actions::wire(app, state, &menu_service);
     picture_actions::wire(app, state);
@@ -2826,11 +2819,11 @@ fn wire_writer_shared_callbacks(
                 // Flickable normally clamps these values itself. The explicit
                 // rebinding also keeps headless/property-driven updates from
                 // leaving the controller with a negative or NaN offset.
-                if (app.get_page_scroll_x() - next_x).abs() > f32::EPSILON {
-                    app.set_page_scroll_x(next_x);
+                if (app.get_scroll_x() - next_x).abs() > f32::EPSILON {
+                    app.set_scroll_x(next_x);
                 }
-                if (app.get_page_scroll_y() - next_y).abs() > f32::EPSILON {
-                    app.set_page_scroll_y(next_y);
+                if (app.get_scroll_y() - next_y).abs() > f32::EPSILON {
+                    app.set_scroll_y(next_y);
                 }
                 refresh_render_projection_of(&app, &state);
             }
@@ -3175,8 +3168,8 @@ fn wire_writer_shared_callbacks(
             drop(current);
 
             app.set_show_inspector(true);
-            app.set_page_scroll_x(viewport.scroll_x);
-            app.set_page_scroll_y(viewport.scroll_y);
+            app.set_scroll_x(viewport.scroll_x);
+            app.set_scroll_y(viewport.scroll_y);
             apply_document_with_viewport(&app, &current_snapshot, viewport);
             refresh_writer_registry(&app, &state);
             let registry = state.registry.lock().unwrap();
@@ -3675,72 +3668,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     wire_writer_inspector_toggle(&app, &state, Some(menu_service.clone()));
-
-    // ── Strikethrough ──────────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        app.on_toggle_strikethrough(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            let enabled = app.get_is_strikethrough();
-            let selection = selection_from_app(&app);
-            if selection.is_collapsed() {
-                app.set_status_right("Select text to apply strikethrough".into());
-                return;
-            }
-            let mut next = state.current.borrow().clone();
-            set_selection_strikethrough(
-                &mut next,
-                DocumentSelection::range(selection.anchor, selection.focus),
-                !enabled,
-            );
-            next.set_selection(selection);
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-            let msg = if enabled {
-                "Strikethrough removed"
-            } else {
-                "Strikethrough applied"
-            };
-            app.set_status_right(SharedString::from(msg));
-            app.set_selection_announcement(SharedString::from(msg));
-        });
-    }
-
-    // ── Font size ──────────────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        app.on_increase_font_size(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            let current_size = app.get_font_size_pt();
-            let mut next = state.current.borrow().clone();
-            let sel = next.selection();
-            set_selection_font_size(
-                &mut next,
-                DocumentSelection::range(sel.anchor, sel.focus),
-                (current_size + 1).min(144) as f32,
-            );
-            next.set_selection(sel);
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        app.on_decrease_font_size(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            let current_size = app.get_font_size_pt();
-            let mut next = state.current.borrow().clone();
-            let sel = next.selection();
-            set_selection_font_size(
-                &mut next,
-                DocumentSelection::range(sel.anchor, sel.focus),
-                (current_size - 1).max(6) as f32,
-            );
-            next.set_selection(sel);
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-        });
-    }
 
     // ── Indent / outdent ──────────────────────────────────────────────────
     {

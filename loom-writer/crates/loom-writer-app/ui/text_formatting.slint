@@ -1,0 +1,478 @@
+import { LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { FontPicker, WriterFontField, WriterFontList } from "font_picker.slint";
+import { WriterFormatState } from "alignment_state.slint";
+import { WriterTableInspector } from "table_inspector.slint";
+
+export component WriterFormatTab inherits VerticalLayout {
+    in-out property <bool> is-table-selected: false;
+    in-out property <string> table-style-id: "table-style-medium-1";
+    in-out property <bool> table-header-row: true;
+    in-out property <bool> table-banded-rows: true;
+    in-out property <bool> table-first-column: false;
+    in-out property <int> heading-level: 0;
+    in-out property <int> font-size-pt: 11;
+    in-out property <int> text-alignment: 0;
+    in-out property <int> line-spacing-index: 1;
+    in-out property <int> list-style-index: 0;
+    in property <bool> is-bold: false;
+    in property <bool> is-italic: false;
+    in property <bool> is-underline: false;
+    in property <bool> is-strikethrough: false;
+    in property <string> shortcut-modifier: "Ctrl";
+    callback set-table-style(string);
+    callback toggle-table-option(string);
+    callback table-action(string);
+    callback select-heading(int);
+    callback increase-font-size;
+    callback decrease-font-size;
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback toggle-strikethrough;
+    callback select-alignment(int);
+    callback indent-text;
+    callback outdent-text;
+    callback select-line-spacing(int);
+    callback select-list-style(int);
+            spacing: Theme.tokens.space.md;
+
+            if root.is-table-selected : WriterTableInspector {
+                current-style-id <=> root.table-style-id;
+                header-row <=> root.table-header-row;
+                banded-rows <=> root.table-banded-rows;
+                first-column <=> root.table-first-column;
+                set-table-style(id) => { root.set-table-style(id); }
+                toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                table-action(act) => { root.table-action(act); }
+            }
+
+        LoomSectionHeader { title: "Paragraph Style"; }
+
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+            Text {
+                text: "Paragraph Direction";
+                font-size: Theme.type.body;
+                color: Theme.palette().ink;
+            }
+            Rectangle {
+                height: Theme.scaled-control-height;
+                accessible-role: radio-group;
+                accessible-label: "Paragraph Direction";
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        width: parent.width / 3;
+                        label: "Automatic";
+                        variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
+                        selected: WriterFormatState.paragraph-direction == 0;
+                        enabled: WriterFormatState.paragraph-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.paragraph-direction == 0;
+                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
+                        clicked => { WriterFormatState.select-direction(0); }
+                    }
+                    LoomButton {
+                        width: parent.width / 3;
+                        label: "Left to Right";
+                        variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
+                        selected: WriterFormatState.paragraph-direction == 1;
+                        enabled: WriterFormatState.paragraph-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.paragraph-direction == 1;
+                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
+                        clicked => { WriterFormatState.select-direction(1); }
+                    }
+                    LoomButton {
+                        width: parent.width / 3;
+                        label: "Right to Left";
+                        variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
+                        selected: WriterFormatState.paragraph-direction == 2;
+                        enabled: WriterFormatState.paragraph-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.paragraph-direction == 2;
+                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
+                        clicked => { WriterFormatState.select-direction(2); }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+        heading-control := LoomSegmentedControl {
+            items: ["Body", "H1", "H2", "H3"];
+            current <=> root.heading-level;
+            label: "Heading Style";
+            selected(idx) => { root.select-heading(idx); }
+        }
+        }
+
+        LoomSectionHeader { title: "Font & Size"; }
+
+        // The font family fills the row; the size stepper sits at the reading end.
+        VerticalLayout {
+            horizontal-stretch: 1;
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+        Rectangle {
+            height: max(32px, Theme.scaled-control-height);
+            WriterFontField {
+                x: Theme.rtl ? font-stepper.width + Theme.tokens.space.sm : 0px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - font-stepper.width - Theme.tokens.space.sm;
+            }
+
+            // Font size stepper
+            font-stepper := Rectangle {
+                x: Theme.rtl ? 0px : parent.width - self.width;
+                y: (parent.height - self.height) / 2;
+                // Grows with text scale so its two icon buttons and the size fit.
+                width: 104px * max(1.0, Theme.text-scale);
+                height: Theme.scaled-control-height;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                background: Theme.palette().surface-raised;
+
+                if !Theme.rtl : HorizontalLayout {
+                    spacing: 2px;
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    cross-axis-alignment: center;
+
+                    LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "minus";
+                        label: "Smaller";
+                        tooltip: "Decrease font size";
+                        clicked => { root.decrease-font-size(); }
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.font-size-pt + " pt";
+                        font-size: Theme.type.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "plus";
+                        label: "Larger";
+                        tooltip: "Increase font size";
+                        clicked => { root.increase-font-size(); }
+                    }
+                }
+                if Theme.rtl : HorizontalLayout {
+                    spacing: 2px;
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    cross-axis-alignment: center;
+
+                    LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "plus";
+                        label: "Larger";
+                        tooltip: "Increase font size";
+                        clicked => { root.increase-font-size(); }
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.font-size-pt + " pt";
+                        font-size: Theme.type.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "minus";
+                        label: "Smaller";
+                        tooltip: "Decrease font size";
+                        clicked => { root.decrease-font-size(); }
+                    }
+                }
+            }
+        }
+        // The open list takes the room under the row; the panel scrolls.
+        if FontPicker.open : WriterFontList { }
+        }
+
+        // Character styles row, from the reading-start edge: Bold sits at the
+        // left in LTR and at the right in RTL.
+        if !Theme.rtl : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: start;
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "bold";
+                label: "Bold";
+                tooltip: "Bold (" + root.shortcut-modifier + "+B)";
+                selected: root.is-bold;
+                clicked => { root.toggle-bold(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "italic";
+                label: "Italic";
+                tooltip: "Italic (" + root.shortcut-modifier + "+I)";
+                selected: root.is-italic;
+                clicked => { root.toggle-italic(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "underline";
+                label: "Underline";
+                tooltip: "Underline (" + root.shortcut-modifier + "+U)";
+                selected: root.is-underline;
+                clicked => { root.toggle-underline(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "strikethrough";
+                label: "Strikethrough";
+                tooltip: "Strikethrough";
+                selected: root.is-strikethrough;
+                clicked => { root.toggle-strikethrough(); }
+            }
+        }
+        if Theme.rtl : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: end;
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "strikethrough";
+                label: "Strikethrough";
+                tooltip: "Strikethrough";
+                selected: root.is-strikethrough;
+                clicked => { root.toggle-strikethrough(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "underline";
+                label: "Underline";
+                tooltip: "Underline (" + root.shortcut-modifier + "+U)";
+                selected: root.is-underline;
+                clicked => { root.toggle-underline(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "italic";
+                label: "Italic";
+                tooltip: "Italic (" + root.shortcut-modifier + "+I)";
+                selected: root.is-italic;
+                clicked => { root.toggle-italic(); }
+            }
+            LoomIconButton {
+                text-scale: Theme.text-scale;
+                icon: "bold";
+                label: "Bold";
+                tooltip: "Bold (" + root.shortcut-modifier + "+B)";
+                selected: root.is-bold;
+                clicked => { root.toggle-bold(); }
+            }
+        }
+
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+            LoomButton {
+                width: parent.width;
+                label: "Text Color";
+                enabled: WriterFormatState.color-formatting-available;
+                accessible-description: WriterFormatState.foreground-color-mixed
+                    ? "Foreground color is mixed across the selection"
+                    : WriterFormatState.foreground-color != ""
+                        ? "Foreground color " + WriterFormatState.foreground-color
+                        : "Choose foreground color";
+                clicked => { WriterFormatState.open-foreground-color(); }
+            }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                LoomButton {
+                    width: parent.width / 2;
+                    label: "Superscript";
+                    selected: WriterFormatState.superscript-selected;
+                    variant: WriterFormatState.superscript-selected ? "secondary" : "ghost";
+                    enabled: WriterFormatState.inline-formatting-available;
+                    accessible-checkable: true;
+                    accessible-checked: WriterFormatState.superscript-selected;
+                    accessible-description: WriterFormatState.superscript-mixed
+                        ? "Superscript is mixed across the selection"
+                        : "Toggle superscript";
+                    clicked => { WriterFormatState.toggle-superscript(); }
+                }
+                LoomButton {
+                    width: parent.width / 2;
+                    label: "Subscript";
+                    selected: WriterFormatState.subscript-selected;
+                    variant: WriterFormatState.subscript-selected ? "secondary" : "ghost";
+                    enabled: WriterFormatState.inline-formatting-available;
+                    accessible-checkable: true;
+                    accessible-checked: WriterFormatState.subscript-selected;
+                    accessible-description: WriterFormatState.subscript-mixed
+                        ? "Subscript is mixed across the selection"
+                        : "Toggle subscript";
+                    clicked => { WriterFormatState.toggle-subscript(); }
+                }
+            }
+        }
+
+        LoomSectionHeader { title: "Alignment & Spacing"; }
+
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+            Text {
+                text: "Logical Alignment";
+                font-size: Theme.type.body;
+                color: Theme.palette().ink;
+            }
+            Rectangle {
+                height: Theme.scaled-control-height;
+                accessible-role: radio-group;
+                accessible-label: "Logical Alignment";
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        width: parent.width / 2;
+                        label: "Start";
+                        variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
+                        selected: WriterFormatState.logical-alignment == 0;
+                        enabled: WriterFormatState.paragraph-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.logical-alignment == 0;
+                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
+                        clicked => { WriterFormatState.select-logical-alignment(0); }
+                    }
+                    LoomButton {
+                        width: parent.width / 2;
+                        label: "End";
+                        variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
+                        selected: WriterFormatState.logical-alignment == 1;
+                        enabled: WriterFormatState.paragraph-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.logical-alignment == 1;
+                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
+                        clicked => { WriterFormatState.select-logical-alignment(1); }
+                    }
+                }
+            }
+        }
+
+        // Alignment fills the row; the two indent buttons sit at the reading end.
+        // One layout holds both, so the buttons can never be placed past the row.
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                height: Theme.scaled-control-height;
+                if !Theme.rtl : LoomSegmentedControl {
+                    horizontal-stretch: 1;
+                    items: WriterFormatState.justify-available
+                        ? ["Left", "Center", "Right", "Justify"]
+                        : ["Left", "Center", "Right"];
+                    current <=> root.text-alignment;
+                    label: "Text Alignment";
+                    selected(idx) => { root.select-alignment(idx); }
+                }
+                indent-pair := HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    if !Theme.rtl : LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "outdent";
+                        label: "Outdent";
+                        tooltip: "Decrease Indent";
+                        clicked => { root.outdent-text(); }
+                    }
+                    if !Theme.rtl : LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "indent";
+                        label: "Indent";
+                        tooltip: "Increase Indent";
+                        clicked => { root.indent-text(); }
+                    }
+                    if Theme.rtl : LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "indent";
+                        label: "Indent";
+                        tooltip: "Increase Indent";
+                        clicked => { root.indent-text(); }
+                    }
+                    if Theme.rtl : LoomIconButton {
+                        text-scale: Theme.text-scale;
+                        icon: "outdent";
+                        label: "Outdent";
+                        tooltip: "Decrease Indent";
+                        clicked => { root.outdent-text(); }
+                    }
+                }
+                if Theme.rtl : LoomSegmentedControl {
+                    horizontal-stretch: 1;
+                    items: WriterFormatState.justify-available
+                        ? ["Left", "Center", "Right", "Justify"]
+                        : ["Left", "Center", "Right"];
+                    current <=> root.text-alignment;
+                    label: "Text Alignment";
+                    selected(idx) => { root.select-alignment(idx); }
+                }
+            }
+        }
+
+        // The caption sits at the reading-start edge, the choices fill the rest.
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+        // Line spacing: the label sits above the strip, and the strip ends where the
+        // alignment strip above ends, so the two rows share their far edge.
+        Text {
+            text: "Line Spacing";
+            font-size: Theme.type.body;
+            color: Theme.palette().ink;
+            horizontal-alignment: Theme.rtl ? right : left;
+        }
+
+        Rectangle {
+            height: Theme.scaled-control-height;
+            LoomSegmentedControl {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                items: ["1.0", "1.15", "1.5", "2.0"];
+                current <=> root.line-spacing-index;
+                label: "Line Spacing";
+                selected(idx) => { root.select-line-spacing(idx); }
+            }
+        }
+        }
+
+        LoomSectionHeader { title: "Lists"; }
+
+        VerticalLayout {
+            padding-left: Theme.tokens.space.xl;
+            padding-right: Theme.tokens.space.xl;
+        LoomSegmentedControl {
+            items: ["None", "Bulleted", "Numbered"];
+            current <=> root.list-style-index;
+            label: "List Style";
+            selected(idx) => { root.select-list-style(idx); }
+        }
+        }
+}

@@ -18,9 +18,11 @@ use loom_writer_core::WriterDocument;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::document_formatting::{
-    selection_font_family, set_selection_font_family, DocumentSelection, FontChoice,
+    block_at_offset, selection_font_family, selection_text_spans, set_selection_font_family,
+    DocumentSelection, FontChoice,
 };
 use crate::font_store::{self, FontStore};
+use crate::inline_formatting::is_text_paragraph;
 use crate::{apply_with_history, typing_style, FontPicker, FontPickerLine, GuiState, WriterApp};
 
 /// Lines of the list shown at once (headings count).
@@ -303,12 +305,7 @@ pub(crate) fn publish_current(app: &WriterApp, document: &WriterDocument) {
         None
     };
     let choice = pending.map_or_else(
-        || {
-            selection_font_family(
-                document,
-                DocumentSelection::range(selection.anchor, selection.focus),
-            )
-        },
+        || selection_font_choice(document, selection),
         FontChoice::Single,
     );
     let global = app.global::<FontPicker>();
@@ -344,13 +341,60 @@ fn current_family(document: &WriterDocument) -> String {
             return family;
         }
     }
-    match selection_font_family(
-        document,
-        DocumentSelection::range(selection.anchor, selection.focus),
-    ) {
+    match selection_font_choice(document, selection) {
         FontChoice::Single(name) => name,
         FontChoice::Mixed => String::new(),
     }
+}
+
+fn selection_font_choice(
+    document: &WriterDocument,
+    selection: loom_writer_core::TextSelection,
+) -> FontChoice {
+    let range = DocumentSelection::range(selection.anchor, selection.focus);
+    let text_choice = selection_has_text(document, selection.clone())
+        .then(|| selection_font_family(document, range));
+    let table_styles =
+        crate::table_actions::table_format_actions::selected_character_styles(document, selection);
+    let table_choice = table_styles.first().map(|first| {
+        if table_styles
+            .iter()
+            .skip(1)
+            .all(|style| fonts::same_family(&first.font_family, &style.font_family))
+        {
+            FontChoice::Single(first.font_family.clone())
+        } else {
+            FontChoice::Mixed
+        }
+    });
+
+    match (text_choice, table_choice) {
+        (Some(FontChoice::Single(text)), Some(FontChoice::Single(table)))
+            if fonts::same_family(&text, &table) =>
+        {
+            FontChoice::Single(text)
+        }
+        (Some(_), Some(_)) => FontChoice::Mixed,
+        (Some(choice), None) | (None, Some(choice)) => choice,
+        (None, None) => FontChoice::Single(String::new()),
+    }
+}
+
+fn selection_has_text(
+    document: &WriterDocument,
+    selection: loom_writer_core::TextSelection,
+) -> bool {
+    if selection.is_collapsed() {
+        return block_at_offset(document, selection.focus)
+            .and_then(|index| document.blocks.get(index))
+            .is_some_and(is_text_paragraph);
+    }
+    selection_text_spans(
+        document,
+        DocumentSelection::range(selection.anchor, selection.focus),
+    )
+    .into_iter()
+    .any(|(index, _, _)| is_text_paragraph(&document.blocks[index]))
 }
 
 fn open(app: &WriterApp, state: &GuiState, query: &str) {
@@ -416,6 +460,11 @@ pub(crate) fn apply_family(app: &WriterApp, state: &Rc<GuiState>, family: &str) 
         set_selection_font_family(
             &mut next,
             DocumentSelection::range(selection.anchor, selection.focus),
+            family,
+        );
+        crate::table_actions::table_format_actions::set_selection_font_family(
+            &mut next,
+            selection.clone(),
             family,
         );
         next.set_selection(selection);

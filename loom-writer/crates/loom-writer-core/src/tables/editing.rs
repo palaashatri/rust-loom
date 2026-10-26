@@ -269,6 +269,9 @@ fn same_style(a: &TextRun, b: &TextRun) -> bool {
     a.bold == b.bold
         && a.italic == b.italic
         && a.underline == b.underline
+        && a.strikethrough == b.strikethrough
+        && a.superscript == b.superscript
+        && a.subscript == b.subscript
         && a.font_size_pt == b.font_size_pt
         && a.font_family == b.font_family
         && a.color == b.color

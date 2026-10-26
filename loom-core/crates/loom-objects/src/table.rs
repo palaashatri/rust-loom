@@ -417,6 +417,12 @@ pub struct TextRun {
     pub italic: bool,
     #[serde(default)]
     pub underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strikethrough: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub superscript: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub subscript: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size_pt: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -433,6 +439,9 @@ impl TextRun {
             bold: false,
             italic: false,
             underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
             font_size_pt: None,
             font_family: None,
             color: None,
@@ -446,11 +455,18 @@ impl TextRun {
             bold: true,
             italic: false,
             underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
             font_size_pt: None,
             font_family: None,
             color: None,
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// Explicit style overrides applied directly to an individual cell.
@@ -658,5 +674,34 @@ mod tests {
 
         assert_eq!(table, parsed);
         assert_eq!(parsed.schema_version, TABLE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn text_run_decoration_flags_survive_table_json_round_trip() {
+        let mut table = Table::new(1, 1);
+        table.set_cell_rich_text(0, 0, vec![TextRun::plain("styled")]);
+
+        let old_json = table.to_json().expect("serialize legacy plain run");
+        let old_value: serde_json::Value =
+            serde_json::from_str(&old_json).expect("parse legacy table JSON");
+        let old_run = &old_value["rows"][0]["cells"][0]["content"]["runs"][0];
+        assert!(old_run.get("strikethrough").is_none());
+        assert!(old_run.get("superscript").is_none());
+        assert!(old_run.get("subscript").is_none());
+
+        let mut decorated: serde_json::Value = old_value;
+        let run = &mut decorated["rows"][0]["cells"][0]["content"]["runs"][0];
+        run["strikethrough"] = true.into();
+        run["superscript"] = true.into();
+        run["subscript"] = true.into();
+
+        let loaded = Table::from_json(&decorated.to_string()).expect("load decorated run");
+        let serialized = loaded.to_json().expect("serialize decorated run");
+        let round_trip: serde_json::Value =
+            serde_json::from_str(&serialized).expect("parse round-trip table JSON");
+        let round_trip_run = &round_trip["rows"][0]["cells"][0]["content"]["runs"][0];
+        assert_eq!(round_trip_run["strikethrough"], true);
+        assert_eq!(round_trip_run["superscript"], true);
+        assert_eq!(round_trip_run["subscript"], true);
     }
 }

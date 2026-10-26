@@ -243,6 +243,45 @@ fn justified_mixed_paragraph_defers_every_wrapped_line_with_spaces() {
 }
 
 #[test]
+fn fallback_caret_keeps_explicit_rtl_justification_alignment() {
+    let _serial = crate::test_fonts::serial();
+    let mut block = crate::RichBlock::new(89, "paragraph", "Latin");
+    block.style.direction = loom_text::ParagraphDirection::RightToLeft;
+    block.style.alignment = loom_text::Alignment::Justify;
+    let mut doc = WriterDocument::new("rtl-fallback-caret", "RTL fallback caret");
+    doc.blocks.push(block);
+    let mut style = doc.page.page_style();
+    style.width_pt = 300.0;
+    style.margin_left_pt = 0.0;
+    style.margin_right_pt = 0.0;
+    style.body_font_size_pt = 16.0;
+    let mut flow = doc.flow(&style, viewport(1.0, 0.0)).unwrap();
+    let line = flow.lines().first().expect("one line is laid out");
+    let shaped = line
+        .shaped_line
+        .as_ref()
+        .expect("the valid paragraph first has shaped geometry");
+    let expected_x = line.bounds.x + shaped.caret_x(line.start, loom_fonts::Affinity::Leading);
+    let selection = TextSelection::caret(line.global_start);
+    let shaped_caret = flow
+        .caret_rect(&doc, &selection)
+        .expect("the shaped line has a caret");
+    assert!((shaped_caret.rect.x - expected_x).abs() < 0.05);
+
+    // Simulate a valid flow whose transient shaping result was unavailable;
+    // exercise the actual fallback branch without changing document content.
+    flow.lines[0].shaped_line = None;
+    let fallback_caret = flow
+        .caret_rect(&doc, &selection)
+        .expect("the fallback line still has a caret");
+    assert!(
+        (fallback_caret.rect.x - expected_x).abs() < 0.05,
+        "fallback caret x {} should preserve the shaped explicit-RTL position {expected_x}",
+        fallback_caret.rect.x
+    );
+}
+
+#[test]
 fn cached_flow_measurements_are_reused_for_caret_selection_and_projection_geometry() {
     let text = format!(
         "אבג {}",

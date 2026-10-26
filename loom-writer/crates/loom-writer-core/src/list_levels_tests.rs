@@ -302,7 +302,7 @@ fn pdf_draws_each_level_further_in_with_its_marker() {
         block(2, "list-bulleted", "Nested", 1),
         block(3, "list-bulleted", "Deeper", 2),
     ]);
-    let pdf = crate::export_pdf(&doc);
+    let pdf = crate::export::test_support::export_valid_pdf(&doc);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     let margin = style.margin_left_pt;
     // Each item's text starts at the shared text start: its level's indent plus
@@ -351,7 +351,7 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
         block(1, "list-bulleted", &long, 0),
         block(2, "list-numbered", "Nested", 1),
     ]);
-    let pdf = crate::export_pdf(&doc);
+    let pdf = crate::export::test_support::export_valid_pdf(&doc);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     let runs = drawn_runs(&content);
     let margin = style.margin_left_pt;

@@ -347,7 +347,8 @@ fn a_long_document_of_varied_words_is_measured_within_budget() {
 
 #[test]
 fn the_pdf_spaces_runs_by_the_widths_it_wraps_with() {
-    use crate::{export_pdf, RichBlock, WriterDocument};
+    use crate::export::test_support::export_valid_pdf as export_pdf;
+    use crate::{RichBlock, WriterDocument};
 
     let mut document = WriterDocument::new("kerned", "Kerned");
     for text in SAMPLES.iter().take(3) {

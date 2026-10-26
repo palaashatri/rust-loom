@@ -14,15 +14,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use loom_text::StyleRun;
 
 mod metrics;
 mod placement;
 mod selection;
+mod shaped_line;
 pub(crate) use metrics::{block_bidi_runs, block_positions};
 use placement::{Placer, Segment};
 use selection::{floor_in_blocks, rects_for_lines};
+pub use shaped_line::shape_wrapped_block_lines;
+pub(crate) use shaped_line::{parse_rgba, shape_block_line, shape_block_lines};
+pub use shaped_line::{
+    shape_text_line, WriterCaretStop, WriterPaintedRun, WriterSelectionSpan, WriterShapedVisualLine,
+};
 
 use crate::text_metrics::bidi::BidiRuns;
 use crate::text_metrics::justification::{line_geometry_with_measure, measure_block};
@@ -32,11 +39,12 @@ use crate::{
     RichBlock, SelectionRect, TextSelection, VisibleRange, WriterDocument, PAGE_GAP_PT,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct WrappedLine {
     start: usize,
     end: usize,
     advance_pt: f32,
+    shaped_line: Option<Arc<WriterShapedVisualLine>>,
 }
 
 struct CachedBlock {
@@ -48,6 +56,8 @@ struct CachedBlock {
     kind: String,
     text: String,
     runs: Vec<StyleRun>,
+    direction: loom_text::ParagraphDirection,
+    alignment: loom_text::Alignment,
     /// Where every grapheme of the text sits, independent of the wrap width.
     measure: Rc<LineMeasure>,
     /// Paragraph bidi levels, shared by every wrapped line of this block.
@@ -55,6 +65,7 @@ struct CachedBlock {
     lines: Rc<[WrappedLine]>,
     words: usize,
     chars: usize,
+    line_height_pt: f32,
     seen: u64,
 }
 
@@ -65,6 +76,7 @@ struct BlockInfo {
     words: usize,
     chars: usize,
     graphemes: usize,
+    line_height_pt: f32,
 }
 
 #[derive(Default)]
@@ -96,6 +108,8 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                 && hit.text == text
                 && hit.runs == block.runs
                 && hit.kind == block.kind
+                && hit.direction == block.style.direction
+                && hit.alignment == block.style.alignment
             {
                 if hit.width_bits == width_bits {
                     hit.seen = generation;
@@ -104,6 +118,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                         words: hit.words,
                         chars: hit.chars,
                         graphemes: hit.graphemes,
+                        line_height_pt: hit.line_height_pt,
                     };
                 }
                 reusable = Some(hit.measure.clone());
@@ -113,21 +128,49 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
         #[cfg(test)]
         WRAP_MISSES.with(|misses| misses.set(misses.get() + 1));
         let measure = reusable.unwrap_or_else(|| Rc::new(measure_block(block, font_size)));
-        let bidi_runs = reusable_bidi.unwrap_or_else(|| BidiRuns::of(text).map(Rc::new));
+        let bidi_runs = reusable_bidi
+            .unwrap_or_else(|| BidiRuns::with_direction(text, block.style.direction).map(Rc::new));
         // A table is one line per row: its cells are drawn in columns, not wrapped.
-        let spans: Vec<(usize, usize)> = if block.kind == crate::TABLE_BLOCK_KIND {
-            crate::tables::table_row_spans(text)
-        } else {
-            measure.wrap(text, width).into_iter().collect()
-        };
-        let lines: Rc<[WrappedLine]> = spans
+        let measured_lines: Vec<((usize, usize), Option<WriterShapedVisualLine>)> =
+            if block.kind == crate::TABLE_BLOCK_KIND {
+                crate::tables::table_row_spans(text)
+                    .into_iter()
+                    .map(|span| (span, None))
+                    .collect()
+            } else if let Some(shaped) = shape_wrapped_block_lines(block, font_size, width) {
+                shaped
+                    .into_iter()
+                    .map(|(range, line)| ((range.start, range.end), line))
+                    .collect()
+            } else {
+                let spans: Vec<(usize, usize)> = measure.wrap(text, width).into_iter().collect();
+                let line_ranges: Vec<_> = spans.iter().map(|(start, end)| *start..*end).collect();
+                shape_block_lines(block, &line_ranges, font_size, width)
+                    .into_iter()
+                    .zip(spans)
+                    .map(|(line, span)| (span, line))
+                    .collect()
+            };
+        let lines: Vec<WrappedLine> = measured_lines
             .into_iter()
-            .map(|(start, end)| WrappedLine {
-                start,
-                end,
-                advance_pt: measure.advance(start, end),
+            .map(|((start, end), shaped_line)| {
+                let shaped_line = shaped_line.map(Arc::new);
+                WrappedLine {
+                    start,
+                    end,
+                    advance_pt: shaped_line
+                        .as_ref()
+                        .map_or_else(|| measure.advance(start, end), |line| line.width_pt()),
+                    shaped_line,
+                }
             })
             .collect();
+        let line_height_pt = lines
+            .iter()
+            .filter_map(|line| line.shaped_line.as_deref())
+            .map(|line| line.ascent_pt() + line.descent_pt() + line.line_gap_pt())
+            .fold(0.0, f32::max);
+        let lines: Rc<[WrappedLine]> = lines.into();
         let (mut words, mut chars) = (0, 0);
         crate::tables::for_each_counted_text(block, |part| {
             words += part.split_whitespace().count();
@@ -143,12 +186,15 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                 kind: block.kind.clone(),
                 text: text.to_string(),
                 runs: block.runs.clone(),
+                direction: block.style.direction,
+                alignment: block.style.alignment,
                 measure,
                 bidi_runs,
                 lines: lines.clone(),
                 words,
                 chars,
                 graphemes,
+                line_height_pt,
                 seen: generation,
             },
         );
@@ -157,6 +203,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
             words,
             chars,
             graphemes,
+            line_height_pt,
         }
     })
 }
@@ -192,6 +239,8 @@ pub struct FlowLine {
     pub page: usize,
     /// Line bounds in viewport coordinates.
     pub bounds: PageRect,
+    /// Shared shaped line geometry and paint runs, if all faces were resolved.
+    pub shaped_line: Option<Arc<WriterShapedVisualLine>>,
 }
 
 impl FlowLine {
@@ -317,8 +366,29 @@ impl WriterDocument {
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let picture = block.object_display_size(usable_width, usable_height);
-            let line_height = picture.map_or(text_line_height(style, block), |(_, h)| h);
             let info = wrapped(block, font_size, block.text_column_width(style));
+            // Typed table cells may wrap and carry larger run metrics than the
+            // table's flat editor text can express. Keep one reserved height
+            // per typed row, falling back only when shaping itself is refused;
+            // the projection reports that refusal visibly.
+            let table_row_heights = if block.kind == crate::TABLE_BLOCK_KIND {
+                block.typed_table().and_then(|table| {
+                    crate::measure_table_row_geometry(
+                        table,
+                        block.text_column_width(style),
+                        crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+                    )
+                    .ok()
+                    .filter(|geometry| geometry.row_heights_pt().len() == info.lines.len())
+                    .map(|geometry| geometry.row_heights_pt().to_vec())
+                })
+            } else {
+                None
+            };
+            let line_height = picture.map_or_else(
+                || text_line_height(style, block).max(info.line_height_pt),
+                |(_, h)| h,
+            );
             if block.kind.starts_with("heading") && placer.has_content() {
                 // A heading never ends a page without the start of its text.
                 let own = info.lines.len() as f32 * line_height;
@@ -346,11 +416,15 @@ impl WriterDocument {
             for (index, line) in info.lines.iter().enumerate() {
                 let breaks = text[line.start..line.end].ends_with('\u{c}');
                 if breaks || index + 1 == info.lines.len() {
+                    let line_heights = table_row_heights
+                        .as_ref()
+                        .map(|heights| &heights[segment_start..=index]);
                     placer.place(&Segment {
                         block_index,
                         block_start,
                         lines: &info.lines[segment_start..=index],
                         line_height,
+                        line_heights,
                         fixed_width: picture.map(|(w, _)| w),
                         controlled,
                         break_after: breaks,
@@ -440,11 +514,27 @@ impl WriterDocument {
             let mut line_y = page_y + style.margin_top_pt * zoom;
             for at in range.clone() {
                 let block = &self.blocks[lines[at].block_index];
+                let line = &lines[at];
+                let shaped_height = line.shaped_line.as_ref().map_or(0.0, |shaped| {
+                    shaped.ascent_pt() + shaped.descent_pt() + shaped.line_gap_pt()
+                });
+                let reserved_height_pt = line.bounds.height;
                 let line_height = block
                     .object_display_size(usable_width, usable_height)
-                    .map_or(text_line_height(style, block), |(_, h)| h)
+                    .map_or_else(
+                        || {
+                            let base_height = if block.kind == crate::TABLE_BLOCK_KIND
+                                && block.typed_table().is_some()
+                            {
+                                reserved_height_pt
+                            } else {
+                                reserved_height_pt.max(text_line_height(style, block))
+                            };
+                            base_height.max(shaped_height)
+                        },
+                        |(_, h)| h,
+                    )
                     * zoom;
-                let line = &lines[at];
                 let geometry = line_geometry_with_measure(
                     block,
                     line.start..line.end,
@@ -453,11 +543,16 @@ impl WriterDocument {
                     block.style.alignment.resolve(block.text.as_str())
                         == loom_text::Alignment::Justify,
                 );
-                let width = if geometry.gaps.is_empty() {
-                    line.bounds.width * zoom
-                } else {
-                    geometry.width * zoom
-                };
+                let width = line.shaped_line.as_ref().map_or_else(
+                    || {
+                        if geometry.gaps.is_empty() {
+                            line.bounds.width * zoom
+                        } else {
+                            geometry.width * zoom
+                        }
+                    },
+                    |shaped| shaped.width_pt() * zoom,
+                );
                 lines[at].bounds = PageRect {
                     x: content_x + block.text_start_pt(style) * zoom,
                     y: line_y,
@@ -593,6 +688,13 @@ impl WriterDocument {
                     global_start: block_starts[block_index] + source.start,
                     page: page.index,
                     bounds: fragment.bounds,
+                    shaped_line: shape_block_line(
+                        &self.blocks[block_index],
+                        source.start..source.end,
+                        style.font_size_for_kind(self.blocks[block_index].kind.as_str()),
+                        self.blocks[block_index].text_column_width(style),
+                    )
+                    .map(Arc::new),
                 });
             }
         }

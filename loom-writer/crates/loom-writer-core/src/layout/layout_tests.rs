@@ -366,7 +366,7 @@ impl WriterDocument {
                     loom_text::Alignment::Center => {
                         ((available_width - fragment.bounds.width) / 2.0).max(0.0)
                     }
-                    loom_text::Alignment::Right => {
+                    loom_text::Alignment::End | loom_text::Alignment::Right => {
                         (available_width - fragment.bounds.width).max(0.0)
                     }
                     loom_text::Alignment::Left

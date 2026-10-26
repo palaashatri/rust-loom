@@ -4,8 +4,11 @@
 //! inline character formatting (bold, italic, underline, strikethrough, fonts),
 //! tables (`<w:tbl>`), and document core properties (title).
 
+use loom_objects::table::TextRun;
 use loom_package::zip::PackageArchive;
-use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphStyle, StyleRun};
+use loom_text::{
+    Alignment, CharacterStyle, FontWeight, ParagraphDirection, ParagraphStyle, StyleRun,
+};
 
 use super::inline_style::{attribute_value, property_tag, property_tag_with_start, writer_color};
 use crate::{RichBlock, WriterDocument};
@@ -297,12 +300,40 @@ fn parse_picture(p_xml: &str, id: u64, archive: &PackageArchive) -> Option<RichB
     let text = crate::images::picture_text(id as u32);
     let mut block = RichBlock::new(id, crate::IMAGE_BLOCK_KIND, &text);
     block.image = Some(image);
-    if p_xml.contains("<w:jc w:val=\"center\"") {
-        block.style.alignment = loom_text::Alignment::Center;
-    } else if p_xml.contains("<w:jc w:val=\"right\"") {
-        block.style.alignment = loom_text::Alignment::Right;
-    }
+    block.style = paragraph_style_from_docx(p_xml);
     Some(block)
+}
+
+fn paragraph_style_from_docx(p_xml: &str) -> ParagraphStyle {
+    let mut style = ParagraphStyle::default();
+    // These exact QName tags are paragraph properties in WordprocessingML.
+    // Search the complete paragraph with the event reader, so comments or
+    // quoted attribute text cannot truncate `<w:pPr>` before its properties.
+    if let Some(tag) = property_tag(p_xml, "w:jc") {
+        if let Some(value) = attribute_value(tag, "w:val") {
+            style.alignment = match value.to_ascii_lowercase().as_str() {
+                "start" => Alignment::Start,
+                "end" => Alignment::End,
+                "left" => Alignment::Left,
+                "center" => Alignment::Center,
+                "right" => Alignment::Right,
+                "both" => Alignment::Justify,
+                _ => style.alignment,
+            };
+        }
+    }
+    if let Some(tag) = property_tag(p_xml, "w:bidi") {
+        style.direction = match attribute_value(tag, "w:val")
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            None | Some("true" | "1" | "on") => ParagraphDirection::RightToLeft,
+            Some("false" | "0" | "off") => ParagraphDirection::LeftToRight,
+            Some(_) => ParagraphDirection::Auto,
+        };
+    }
+    style
 }
 
 /// Parses a single `<w:p>...</w:p>` block.
@@ -355,7 +386,8 @@ fn parse_paragraph(
                             ) {
                                 if let Ok(json) = chart.to_json() {
                                     let text = crate::images::picture_text(id as u32);
-                                    let block = RichBlock::chart_block(id, &text, json);
+                                    let mut block = RichBlock::chart_block(id, &text, json);
+                                    block.style = paragraph_style_from_docx(p_xml);
                                     return Some((Some(block), next_cursor));
                                 }
                             }
@@ -410,18 +442,7 @@ fn parse_paragraph(
         }
     }
 
-    // Paragraph alignment
-    let mut paragraph_style = ParagraphStyle::default();
-    if let Some(jc_start) = p_xml.find("<w:jc") {
-        if let Some(jc_val) = extract_attribute_value(&p_xml[jc_start..], "w:val") {
-            match jc_val.to_ascii_lowercase().as_str() {
-                "center" => paragraph_style.alignment = Alignment::Center,
-                "right" => paragraph_style.alignment = Alignment::Right,
-                "both" => paragraph_style.alignment = Alignment::Justify,
-                _ => {}
-            }
-        }
-    }
+    let mut paragraph_style = paragraph_style_from_docx(p_xml);
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
     if crate::list_levels::is_list_kind(&kind) {
@@ -618,7 +639,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
     let tbl_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
 
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut rows: Vec<Vec<Vec<TextRun>>> = Vec::new();
     let mut header_row = false;
     let mut tr_cursor = 0usize;
 
@@ -635,7 +656,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
             header_row = true;
         }
 
-        let mut row_cells: Vec<String> = Vec::new();
+        let mut row_cells: Vec<Vec<TextRun>> = Vec::new();
         let mut tc_cursor = 0usize;
         while let Some(tc_rel) = find_tag_start(&tr_xml[tc_cursor..], "w:tc") {
             let tc_start = tc_cursor + tc_rel;
@@ -646,13 +667,16 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
             let tc_xml = &tr_xml[tc_start..tc_start + tc_close_rel + "</w:tc>".len()];
             tc_cursor = tc_start + tc_close_rel + "</w:tc>".len();
 
-            let mut cell_paragraphs = Vec::new();
+            let mut cell_runs = Vec::new();
             let mut p_cursor = 0usize;
             while let Some(p_rel) = find_tag_start(&tc_xml[p_cursor..], "w:p") {
                 let p_start = p_cursor + p_rel;
                 if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0, None) {
                     if let Some(block) = block_opt {
-                        cell_paragraphs.push(block.text.as_str().to_string());
+                        if !cell_runs.is_empty() {
+                            cell_runs.push(TextRun::plain(" "));
+                        }
+                        cell_runs.extend(paragraph_text_runs(&block));
                     }
                     p_cursor = next_p;
                 } else {
@@ -660,8 +684,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
                 }
             }
 
-            let cell_text = cell_paragraphs.join(" ").trim().to_string();
-            row_cells.push(cell_text);
+            row_cells.push(trim_text_runs(cell_runs));
         }
 
         if !row_cells.is_empty() {
@@ -678,11 +701,72 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
     table.id = format!("tbl-{id}");
     table.header_row = header_row;
     for (row, cells) in rows.iter().enumerate() {
-        for (column, text) in cells.iter().enumerate() {
-            table.set_cell_text(row, column, text);
+        for (column, runs) in cells.iter().enumerate() {
+            if runs.is_empty() {
+                table.set_cell_text(row, column, "");
+            } else {
+                table.set_cell_rich_text(row, column, runs.clone());
+            }
         }
     }
     Some((RichBlock::table_block(id, table), next_cursor))
+}
+
+fn paragraph_text_runs(block: &RichBlock) -> Vec<TextRun> {
+    let text = block.text.as_str();
+    let mut out = Vec::with_capacity(block.runs.len() * 2 + 1);
+    let mut cursor = 0;
+    for run in &block.runs {
+        let start = run.start.max(cursor).min(text.len());
+        let end = run.end.min(text.len());
+        if start > cursor {
+            out.push(TextRun::plain(&text[cursor..start]));
+        }
+        if end > start {
+            let style = &run.style;
+            let mut piece = TextRun::plain(&text[start..end]);
+            piece.bold = style.weight.numeric() >= FontWeight::Bold.numeric();
+            piece.italic = style.italic;
+            piece.underline = style.underline;
+            piece.strikethrough = style.strikethrough;
+            piece.superscript = style.superscript;
+            piece.subscript = style.subscript;
+            piece.font_size_pt = style.has_own_size().then_some(style.font_size);
+            piece.font_family = (!style.font_family.is_empty()).then(|| style.font_family.clone());
+            piece.color = style.color.clone();
+            out.push(piece);
+            cursor = end;
+        }
+    }
+    if cursor < text.len() {
+        out.push(TextRun::plain(&text[cursor..]));
+    }
+    out
+}
+
+fn trim_text_runs(runs: Vec<TextRun>) -> Vec<TextRun> {
+    let text: String = runs.iter().map(|run| run.text.as_str()).collect();
+    let start = text.len() - text.trim_start().len();
+    let end = text.trim_end().len();
+    if start >= end {
+        return Vec::new();
+    }
+
+    let mut out = Vec::with_capacity(runs.len());
+    let mut offset = 0;
+    for run in runs {
+        let run_start = offset;
+        let run_end = run_start + run.text.len();
+        offset = run_end;
+        let from = start.saturating_sub(run_start).min(run.text.len());
+        let to = end.saturating_sub(run_start).min(run.text.len());
+        if from < to {
+            let mut piece = run;
+            piece.text = piece.text[from..to].to_owned();
+            out.push(piece);
+        }
+    }
+    out
 }
 
 fn extract_attribute_value(tag_snippet: &str, attr_name: &str) -> Option<String> {

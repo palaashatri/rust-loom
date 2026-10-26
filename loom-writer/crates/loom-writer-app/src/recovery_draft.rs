@@ -137,6 +137,10 @@ pub(crate) fn kept_entries(root: &Path) -> Vec<PathBuf> {
     entries
 }
 
+#[cfg(test)]
+#[path = "m3_persistence_tests.rs"]
+mod m3_persistence_tests;
+
 /// The payload one kept entry holds, if it holds one.
 pub(crate) fn read_kept(entry: &Path) -> Result<Option<Vec<u8>>, String> {
     let mut store = SnapshotRecovery::open_at(entry).map_err(|error| error.to_string())?;

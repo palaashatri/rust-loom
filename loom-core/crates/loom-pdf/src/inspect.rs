@@ -38,8 +38,87 @@ pub struct EmbeddedFont {
     pub program: Vec<u8>,
     /// Glyphs the `ToUnicode` CMap names.
     pub mapped_glyphs: usize,
+    /// The `ToUnicode` text mapped to each two-byte character code.
+    pub to_unicode: BTreeMap<u16, String>,
     /// The `/W` widths, in glyph-id order, in 1/1000 em.
     pub widths: Vec<f32>,
+}
+
+/// One single-glyph `Tj` operation positioned with an absolute text matrix.
+/// This intentionally reads the writer's shaped-glyph form, not arbitrary PDF
+/// text-state advances or strings containing multiple CIDs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlyphDraw {
+    /// Page font resource used for the glyph.
+    pub resource: String,
+    /// Two-byte character code written by the content stream.
+    pub cid: u16,
+    /// Absolute text-matrix origin in PDF user-space points.
+    pub x: f32,
+    /// Absolute text-matrix baseline in PDF user-space points.
+    pub y: f32,
+}
+
+/// Reads the absolute one-glyph `Tm`/`Tj` operations written by
+/// [`crate::PdfDocument::draw_shaped_text_line`]. It rejects ordinary multi-
+/// glyph `Tj` strings because their per-glyph positions depend on text state.
+pub fn positioned_glyph_draws(pdf: &[u8]) -> Result<Vec<GlyphDraw>, String> {
+    let document = Document::parse(pdf)?;
+    let mut draws = Vec::new();
+    for page in document.pages()? {
+        let content = String::from_utf8_lossy(&document.stream(page.contents)?).into_owned();
+        let tokens: Vec<&str> = content.split_whitespace().collect();
+        let mut resource = String::new();
+        let mut position = None;
+        for (index, token) in tokens.iter().copied().enumerate() {
+            if token == "Tf" {
+                resource = tokens
+                    .get(index.saturating_sub(2))
+                    .and_then(|name| name.strip_prefix('/'))
+                    .ok_or("bad font resource before Tf")?
+                    .to_string();
+            } else if token == "Tm" {
+                let start = index
+                    .checked_sub(6)
+                    .ok_or("text matrix has fewer than six values")?;
+                let matrix = &tokens[start..index];
+                let values: Vec<f32> = matrix
+                    .iter()
+                    .map(|value| value.parse::<f32>().map_err(|_| "bad text matrix value"))
+                    .collect::<Result<_, _>>()?;
+                if values.iter().any(|value| !value.is_finite()) {
+                    return Err("text matrix has a non-finite value".into());
+                }
+                position = Some((values[4], values[5]));
+            } else if token == "Tj" {
+                let Some(hex) = index
+                    .checked_sub(1)
+                    .and_then(|previous| tokens.get(previous))
+                    .and_then(|value| value.strip_prefix('<'))
+                    .and_then(|value| value.strip_suffix('>'))
+                else {
+                    continue;
+                };
+                if hex.len() != 4 {
+                    return Err(
+                        "positioned glyph reader requires exactly one two-byte CID per Tj".into(),
+                    );
+                }
+                let cid = u16::from_str_radix(hex, 16).map_err(|_| "bad two-byte CID")?;
+                let (x, y) = position.ok_or("glyph Tj has no preceding absolute text matrix")?;
+                if resource.is_empty() {
+                    return Err("glyph Tj has no selected font resource".into());
+                }
+                draws.push(GlyphDraw {
+                    resource: resource.clone(),
+                    cid,
+                    x,
+                    y,
+                });
+            }
+        }
+    }
+    Ok(draws)
 }
 
 /// The characters shown on each page; text runs from different `BT`..`ET`
@@ -414,6 +493,7 @@ impl<'a> Document<'a> {
             inflated_program_bytes: program.len(),
             program,
             mapped_glyphs: cmap.len(),
+            to_unicode: cmap.into_iter().collect(),
             widths,
         })
     }
@@ -481,7 +561,7 @@ impl<'a> Document<'a> {
         // `/ActualText <FEFF..>` seen, waiting for its `BDC`; then the text
         // that replaces the glyphs shown until `EMC`.
         let mut announced: Option<String> = None;
-        let mut replacement: Option<String> = None;
+        let mut replacement: Option<(String, bool)> = None;
         let mut expect_actual = false;
         // Inside a `[ ... ] TJ` array: the text its glyph strings show. The
         // spacing numbers are dropped and the array reads as the one literal
@@ -506,8 +586,14 @@ impl<'a> Document<'a> {
                         .filter(|t| !t.starts_with('<'))
                     {
                         let shown = decode_glyphs(hex, cmaps.get(font.as_str()), &font)?;
-                        let shown = replacement.take().unwrap_or(shown);
-                        run.push_str(&shown);
+                        if let Some((actual, inserted)) = replacement.as_mut() {
+                            if !*inserted {
+                                run.push_str(actual);
+                                *inserted = true;
+                            }
+                        } else {
+                            run.push_str(&shown);
+                        }
                         shown_in_array.push_str(&shown);
                     }
                     continue;
@@ -525,9 +611,13 @@ impl<'a> Document<'a> {
                 } else if token == "ET" && !run.is_empty() {
                     lines.push(std::mem::take(&mut run));
                 } else if token == "BDC" {
-                    replacement = announced.take();
+                    replacement = announced.take().map(|actual| (actual, false));
                 } else if token == "EMC" {
-                    replacement = None;
+                    if let Some((actual, inserted)) = replacement.take() {
+                        if !inserted {
+                            run.push_str(&actual);
+                        }
+                    }
                 }
                 let hex = token
                     .strip_prefix('<')
@@ -542,8 +632,14 @@ impl<'a> Document<'a> {
                     }
                     Some(hex) => {
                         let shown = decode_glyphs(hex, cmaps.get(font.as_str()), &font)?;
-                        let shown = replacement.take().unwrap_or(shown);
-                        run.push_str(&shown);
+                        if let Some((actual, inserted)) = replacement.as_mut() {
+                            if !*inserted {
+                                run.push_str(actual);
+                                *inserted = true;
+                            }
+                        } else {
+                            run.push_str(&shown);
+                        }
                         tokens.push(format!("({})", escape_literal(&shown)));
                     }
                     None => tokens.push(token.to_string()),

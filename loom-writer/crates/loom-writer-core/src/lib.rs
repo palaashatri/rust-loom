@@ -20,6 +20,8 @@ pub mod docx;
 pub use docx::{import_docx, inspect_docx_unsupported};
 #[cfg(test)]
 mod alignment_start_tests;
+#[cfg(test)]
+mod direction_tests;
 mod export;
 mod export_flow;
 mod export_table;
@@ -34,6 +36,8 @@ mod paragraph_match;
 mod replace;
 mod search;
 mod style_json;
+mod table_geometry;
+mod table_text;
 mod tables;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_fonts;
@@ -46,15 +50,24 @@ pub use export::{export_document_as_docx, export_pdf};
 pub use export_table::editor_column_widths;
 pub(crate) use images::OBJECT_CHAR;
 pub use images::*;
-pub use layout::{DocumentFlow, FlowLine};
+pub use layout::{
+    shape_text_line, shape_wrapped_block_lines, DocumentFlow, FlowLine, WriterCaretStop,
+    WriterPaintedRun, WriterSelectionSpan, WriterShapedVisualLine,
+};
 pub use loom_objects;
 pub use page_setup::PageSetup;
 use paragraph_match::{exact_paragraph_matches, metadata_matches};
 pub use replace::FindOptions;
 use style_json::{
-    alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, parse_line_break,
-    runs_json, selection_json,
+    alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, runs_json,
+    selection_json,
 };
+pub use table_geometry::{
+    measure_table_row_geometry, shape_table_cell_geometry, TableCellGeometry,
+    TableCellLineGeometry, TableGeometryError, TableRowGeometry, TABLE_CELL_HORIZONTAL_INSET_PT,
+    TABLE_CELL_LINE_PITCH_EM, TABLE_CELL_VERTICAL_INSET_PT, TABLE_ROW_MIN_HEIGHT_PT,
+};
+pub use table_text::{table_cell_rich_block, text_runs_rich_block, TABLE_CELL_BASE_FONT_SIZE_PT};
 pub use tables::{
     apply_flat_text, flat_table_text, is_table_separator, markdown_table_block,
     TableArrowDirection, TableCellLocation, TableTextMap, INSERT_COLUMNS, INSERT_ROWS,
@@ -67,9 +80,10 @@ pub use text_metrics::{line_pitch, offset_at_x, run_size, text_advance};
 pub type DocId = String;
 
 /// The version of the document content JSON this build writes. Format 2 stores
-/// tables as typed objects; format 1 (no `format` key) stored them as Markdown
-/// text, which is migrated on load. A higher number is refused.
-pub const WRITER_CONTENT_FORMAT: u32 = 2;
+/// tables as typed objects; format 1 migrated Markdown tables. Format 3 adds
+/// paragraph direction while retaining defaults for older content. Higher
+/// numbers are refused.
+pub const WRITER_CONTENT_FORMAT: u32 = 3;
 
 /// A single rich-text block (paragraph or heading) in the document.
 #[derive(Debug, Clone, PartialEq)]
@@ -614,10 +628,14 @@ impl WriterDocument {
             s.push_str(",\"text\":");
             s.push_str(&pkg_json::escape(b.text.as_str()));
             s.push_str(",\"align\":");
-            s.push_str(&pkg_json::escape(alignment_name(b.style.alignment)));
-            // Keep the legacy alignment field above so older readers can open
-            // documents written by this version. The nested style and runs
-            // fields carry the complete rich-text model for newer readers.
+            s.push_str(&pkg_json::escape(alignment_name(
+                b.style
+                    .alignment
+                    .resolve_with_direction(b.text.as_str(), b.style.direction),
+            )));
+            // The legacy field carries a physical fallback for older readers;
+            // nested style retains logical alignment and paragraph direction.
+            // Runs carry complete character styling for newer readers.
             s.push_str(",\"style\":");
             s.push_str(&paragraph_style_json(&b.style));
             s.push_str(",\"runs\":");
@@ -1625,7 +1643,7 @@ fn alignment_index(alignment: loom_text::Alignment) -> i32 {
     match alignment {
         loom_text::Alignment::Left | loom_text::Alignment::Start => 0,
         loom_text::Alignment::Center => 1,
-        loom_text::Alignment::Right => 2,
+        loom_text::Alignment::End | loom_text::Alignment::Right => 2,
         loom_text::Alignment::Justify => 3,
     }
 }
@@ -1836,7 +1854,7 @@ fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>),
             b.style.alignment = parse_alignment(&alignment);
         }
         if let Some(raw) = style_raw {
-            b.style = parse_paragraph_style(&raw, b.style)?;
+            b.style = style_json::parse_paragraph_style(&raw, b.style)?;
         }
         if let Some(raw) = runs_raw {
             b.runs = parse_runs(&raw)?;
@@ -1864,7 +1882,7 @@ fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>),
                         "table {id} has editor text but no table"
                     )));
                 }
-                // Format 1: Markdown text, migrated once. The next save writes format 2.
+                // Format 1: Markdown text, migrated once on load.
                 None => {
                     let migrated = tables::migrate(&text, id);
                     legacy_block.old_len = text.len();
@@ -1893,34 +1911,6 @@ fn parse_image(raw: &str) -> Result<Option<InlineImage>, WriterError> {
         }
     }
     Ok(images::image_from_fields(&name, width, height, &data))
-}
-
-fn parse_paragraph_style(
-    raw: &str,
-    mut style: loom_text::ParagraphStyle,
-) -> Result<loom_text::ParagraphStyle, WriterError> {
-    let fields = ContentParser::new(raw).parse()?;
-    for (key, value) in &fields {
-        match key.as_str() {
-            "alignment" | "align" => {
-                style.alignment = parse_alignment(&json_value_text(value));
-            }
-            "space_before" => parse_f32_value(value, &mut style.space_before),
-            "space_after" => parse_f32_value(value, &mut style.space_after),
-            "line_spacing" => parse_f32_value(value, &mut style.line_spacing),
-            "left_indent" => parse_f32_value(value, &mut style.left_indent),
-            "right_indent" => parse_f32_value(value, &mut style.right_indent),
-            "first_line_indent" => parse_f32_value(value, &mut style.first_line_indent),
-            "break_rule" => {
-                style.break_rule = parse_line_break(&json_value_text(value));
-            }
-            "list_level" => {
-                style.list_level = list_levels::parse_list_level(&json_value_text(value));
-            }
-            _ => {}
-        }
-    }
-    Ok(style)
 }
 
 fn parse_runs(raw: &str) -> Result<Vec<loom_text::StyleRun>, WriterError> {
@@ -4756,6 +4746,7 @@ mod tests {
         let mut block = RichBlock::new(7, "heading2", "Café 🌿");
         block.style = loom_text::ParagraphStyle {
             alignment: loom_text::Alignment::Justify,
+            direction: loom_text::ParagraphDirection::Auto,
             space_before: 2.5,
             space_after: 11.25,
             line_spacing: 1.4,
@@ -4770,7 +4761,7 @@ mod tests {
                 start: 0,
                 end: "Café".len(),
                 style: loom_text::CharacterStyle {
-                    font_family: "Iosevka Null".into(),
+                    font_family: "null".into(),
                     font_size: 17.5,
                     weight: loom_text::FontWeight::Black,
                     italic: true,
@@ -4778,7 +4769,7 @@ mod tests {
                     strikethrough: true,
                     superscript: true,
                     subscript: false,
-                    color: Some("null".into()),
+                    color: Some("#12345678".into()),
                     background: Some("#12345678".into()),
                     explicit_size: false,
                 },
@@ -6143,7 +6134,8 @@ mod tests {
                 style: loom_text::CharacterStyle {
                     weight: loom_text::FontWeight::Bold,
                     italic: true,
-                    color: Some("null".into()),
+                    color: Some("#44556680".into()),
+                    font_family: "null".into(),
                     ..Default::default()
                 },
             },

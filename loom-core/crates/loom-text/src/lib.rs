@@ -6,6 +6,10 @@
 //! wrapping decisions via grapheme / width tables, and a document line model)
 //! so it compiles anywhere without external fonts or platform bindings.
 
+mod direction;
+
+pub use direction::ParagraphDirection;
+
 /// Character style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontWeight {
@@ -48,6 +52,9 @@ pub enum Alignment {
     Start,
     /// Left.
     Left,
+    /// The reading end: right for left-to-right text, left for right-to-left
+    /// text. See [`Alignment::resolve_with_direction`].
+    End,
     /// Centered.
     Center,
     /// Right.
@@ -57,14 +64,28 @@ pub enum Alignment {
 }
 
 impl Alignment {
-    /// The alignment a paragraph whose text is `text` is drawn with. `Start`
-    /// resolves to `Right` when the text starts right-to-left and to `Left`
-    /// otherwise; every other alignment is returned unchanged. The result is
-    /// never `Start`, so every drawing and export path must resolve first.
+    /// The alignment a paragraph whose text is `text` is drawn with. Logical
+    /// `Start` and `End` resolve to opposite physical edges according to the
+    /// automatic paragraph direction; physical alignments remain unchanged.
+    /// The result is never `Start` or `End`, so drawing paths should resolve
+    /// logical values before positioning text.
     pub fn resolve(self, text: &str) -> Alignment {
+        self.resolve_with_direction(text, ParagraphDirection::Auto)
+    }
+
+    /// Resolve logical start/end using an explicit or automatic paragraph
+    /// direction. Physical alignments keep their physical meaning.
+    pub fn resolve_with_direction(self, text: &str, direction: ParagraphDirection) -> Alignment {
+        let rtl = match direction {
+            ParagraphDirection::Auto => starts_rtl(text),
+            ParagraphDirection::LeftToRight => false,
+            ParagraphDirection::RightToLeft => true,
+        };
         match self {
-            Alignment::Start if starts_rtl(text) => Alignment::Right,
+            Alignment::Start if rtl => Alignment::Right,
             Alignment::Start => Alignment::Left,
+            Alignment::End if rtl => Alignment::Left,
+            Alignment::End => Alignment::Right,
             other => other,
         }
     }
@@ -86,6 +107,8 @@ pub enum LineBreakRule {
 pub struct ParagraphStyle {
     /// Horizontal alignment.
     pub alignment: Alignment,
+    /// Requested paragraph text direction.
+    pub direction: ParagraphDirection,
     /// Space before in points.
     pub space_before: f32,
     /// Space after in points.
@@ -109,6 +132,7 @@ impl Default for ParagraphStyle {
     fn default() -> Self {
         Self {
             alignment: Alignment::Start,
+            direction: ParagraphDirection::Auto,
             space_before: 0.0,
             space_after: 8.0,
             line_spacing: 1.15,
@@ -170,7 +194,10 @@ impl Default for CharacterStyle {
             strikethrough: false,
             superscript: false,
             subscript: false,
-            color: Some("#000000FF".into()),
+            // Default document ink is explicit black and remains stable when
+            // the application theme changes. `None` is reserved for imported
+            // or explicitly automatic color.
+            color: Some("#000000FF".to_owned()),
             background: None,
             explicit_size: false,
         }
@@ -564,6 +591,44 @@ mod tests {
         assert_eq!(Alignment::Right.resolve("abc"), Alignment::Right);
         assert_eq!(Alignment::Center.resolve("\u{05D0}"), Alignment::Center);
         assert_eq!(Alignment::Justify.resolve("abc"), Alignment::Justify);
+    }
+
+    #[test]
+    fn logical_end_and_explicit_direction_resolve_to_the_reading_edge() {
+        assert_eq!(
+            Alignment::End.resolve_with_direction("Latin", ParagraphDirection::Auto),
+            Alignment::Right
+        );
+        assert_eq!(
+            Alignment::End.resolve_with_direction("עברית", ParagraphDirection::Auto),
+            Alignment::Left
+        );
+        assert_eq!(
+            Alignment::Start.resolve_with_direction("עברית", ParagraphDirection::LeftToRight),
+            Alignment::Left
+        );
+        assert_eq!(
+            Alignment::Start.resolve_with_direction("Latin", ParagraphDirection::RightToLeft),
+            Alignment::Right
+        );
+        assert_eq!(
+            Alignment::End.resolve_with_direction("עברית", ParagraphDirection::LeftToRight),
+            Alignment::Right
+        );
+        assert_eq!(
+            Alignment::End.resolve_with_direction("Latin", ParagraphDirection::RightToLeft),
+            Alignment::Left
+        );
+        assert_eq!(
+            Alignment::Left.resolve_with_direction("עברית", ParagraphDirection::RightToLeft),
+            Alignment::Left,
+            "physical left remains physical left"
+        );
+        assert_eq!(
+            Alignment::Right.resolve_with_direction("Latin", ParagraphDirection::LeftToRight),
+            Alignment::Right,
+            "physical right remains physical right"
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 loom-writer-core = { path = "../loom-writer-core" }
+loom-fonts = { workspace = true }
 loom-command = { path = "../../../loom-core/crates/loom-command" }
 loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
 loom-production = { path = "../../../loom-core/crates/loom-production" }

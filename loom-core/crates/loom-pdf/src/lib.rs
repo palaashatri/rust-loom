@@ -51,6 +51,9 @@
 mod compose_data;
 mod embed;
 mod fonts;
+mod glyph;
+#[cfg(test)]
+mod glyph_tests;
 mod image;
 #[cfg(any(test, feature = "test-support"))]
 pub mod inspect;
@@ -63,10 +66,14 @@ mod text;
 pub mod text_lines;
 
 pub use fonts::{FallbackFont, FontFallback};
+pub use glyph::{
+    PdfFontId, PdfFontProgram, PositionedRunDecoration, PositionedRunPaint, PositionedShapedRun,
+    StyledPositionedShapedRun,
+};
 pub use image::PdfImage;
 pub use shaping::{ClusterAdvance, RunShaper};
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use embed::{deflate, stream_object, FaceSlot};
@@ -141,6 +148,8 @@ struct Page {
     ops: Vec<String>,
     /// Indexes of the document images this page draws.
     images: Vec<usize>,
+    /// Non-opaque alpha states used by this page, in deterministic order.
+    alpha_states: BTreeSet<u8>,
 }
 
 /// A handle to a page being built.
@@ -170,6 +179,8 @@ pub struct PdfDocument {
     pages: Vec<Page>,
     creation_date: String,
     images: Vec<PdfImage>,
+    /// Registered owned font programs available to positioned glyph runs.
+    font_programs: Vec<fonts::Font>,
     /// Fonts used so far, in first-use order. Inter faces take `F1`..`F4`
     /// (regular, bold, italic, bold italic); fallback faces follow.
     faces: Vec<FaceSlot>,
@@ -257,6 +268,7 @@ impl PdfDocument {
             height_pt,
             ops: Vec::new(),
             images: Vec::new(),
+            alpha_states: BTreeSet::new(),
         });
         PageIndex(self.pages.len() - 1)
     }
@@ -267,7 +279,7 @@ impl PdfDocument {
 
     /// The slot of bundled face `index`, creating it on first use.
     fn inter_slot(&mut self, index: usize) -> usize {
-        let name = fonts::inter(index).name;
+        let name = fonts::inter(index).name.as_str();
         if let Some(at) = self.faces.iter().position(|s| s.font_name() == name) {
             return at;
         }
@@ -280,7 +292,11 @@ impl PdfDocument {
 
     /// The slot of an accepted fallback face, creating it on first use.
     fn fallback_slot(&mut self, font: fonts::Font) -> usize {
-        if let Some(at) = self.faces.iter().position(|s| s.font_name() == font.name) {
+        if let Some(at) = self
+            .faces
+            .iter()
+            .position(|s| s.font_name() == font.name.as_str())
+        {
             return at;
         }
         let custom = self
@@ -409,7 +425,7 @@ impl PdfDocument {
             if self.run_shaper.is_some() {
                 let nominal = match resolved {
                     Resolved::One(slot)
-                        if self.faces[slot].font_name() == inter.name
+                        if self.faces[slot].font_name() == inter.name.as_str()
                             && inter.glyph(ch).is_some() =>
                     {
                         Some(inter.to_1000(inter.char_advance_units(ch) as f32))
@@ -668,6 +684,15 @@ impl PdfDocument {
             font_refs.push(next);
             next += 5 + usize::from(subset.is_none());
         }
+        let used_alpha: BTreeSet<u8> = pages
+            .iter()
+            .flat_map(|page| page.alpha_states.iter().copied())
+            .collect();
+        let mut alpha_refs = BTreeMap::new();
+        for alpha in used_alpha {
+            alpha_refs.insert(alpha, next);
+            next += 1;
+        }
         let font_resources = if self.faces.is_empty() {
             String::new()
         } else {
@@ -693,10 +718,24 @@ impl PdfDocument {
                     .collect();
                 format!(" /XObject << {} >>", list.join(" "))
             };
+            let graphics_states: Vec<String> = p
+                .alpha_states
+                .iter()
+                .filter_map(|alpha| {
+                    alpha_refs
+                        .get(alpha)
+                        .map(|reference| format!("/GS{alpha} {reference} 0 R"))
+                })
+                .collect();
+            let extgstates = if graphics_states.is_empty() {
+                String::new()
+            } else {
+                format!(" /ExtGState << {} >>", graphics_states.join(" "))
+            };
             objects.push(
                 format!(
                     "<< /Type /Page /Parent {pages_ref} 0 R /MediaBox [0 0 {:.2} {:.2}] \
-                     /Resources <<{font_resources}{xobjects} >> /Contents {} 0 R >>",
+                     /Resources <<{font_resources}{xobjects}{extgstates} >> /Contents {} 0 R >>",
                     p.width_pt,
                     p.height_pt,
                     stream_ref(i)
@@ -738,6 +777,12 @@ impl PdfDocument {
         objects.extend(masks);
         for ((face, first), subset) in self.faces.iter().zip(&font_refs).zip(subsets) {
             objects.extend(face.objects_with(*first, subset));
+        }
+        for alpha in alpha_refs.keys() {
+            let value = f32::from(*alpha) / 255.0;
+            objects.push(
+                format!("<< /Type /ExtGState /ca {:.3} /CA {:.3} >>", value, value).into_bytes(),
+            );
         }
 
         // Assemble with an xref table.

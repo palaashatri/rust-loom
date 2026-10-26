@@ -884,7 +884,7 @@ mod tests {
         }
 
         // 3. PDF export
-        let pdf_bytes = loom_writer_core::export_pdf(&doc);
+        let pdf_bytes = loom_writer_core::export_pdf(&doc).expect("export table editing PDF");
         let pdf_readable = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
         for word in &test_words {
             assert!(

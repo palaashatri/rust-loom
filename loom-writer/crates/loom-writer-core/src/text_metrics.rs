@@ -30,12 +30,14 @@ mod kerning_tests;
 
 #[cfg(test)]
 mod justification_tests;
+#[cfg(test)]
+mod shaped_geometry_tests;
 
 use loom_text::{FontWeight, StyleRun};
 
 pub(crate) use faces::Style;
 pub(crate) use measure::{LineMeasure, Uncovered};
-pub(crate) use pdf::{drawn_size, pdf_text_width, InterShaper};
+pub(crate) use pdf::{drawn_size, pdf_text_width};
 
 /// Whether a character weight draws in the bold face: the editor's page markup
 /// renders weights from Bold (700) up in bold and the rest in regular, and the

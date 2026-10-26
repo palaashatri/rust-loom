@@ -176,61 +176,59 @@ fn table_cell_pointer_offset(
     let location = doc.table_cell_at_offset(cell_offset)?;
     let (display_text, source_offsets) =
         doc.table_cell_display_map(location.block_id, location.row, location.col)?;
-    let table = doc.table_from_block(location.block_id)?;
+    let table = doc.blocks.get(location.block_index)?.typed_table()?;
     let catalog_style = loom_objects::TableStyleCatalog::get(&table.style_id)
         .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
     let options = loom_objects::TableStyleOptions {
         header_row: table.header_row,
+        total_row: table.total_row,
+        last_column: table.last_column,
         banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
         first_column: table.first_column,
         ..Default::default()
     };
-    let bold = catalog_style
-        .resolve_cell(
-            location.row,
-            location.col,
-            table.rows.len(),
-            table.columns(),
-            &options,
-            None,
-        )
-        .bold;
-    let font_size = loom_writer_core::PageStyle::default().font_size_for_kind("paragraph");
-    // A soft break starts a new line of the cell; the pointer's line is the one
-    // whose pitch band it falls in, and its x is measured within that line.
-    let breaks: Vec<usize> = display_text
-        .match_indices('\u{b}')
-        .map(|(at, _)| at)
-        .collect();
-    let wanted = ((local_y - rect.y - 4.0) / (font_size * crate::projection::CELL_LINE_PITCH_EM))
-        .floor()
-        .max(0.0) as usize;
-    let line_index = wanted.min(breaks.len());
-    let line_start = if line_index == 0 {
-        0
-    } else {
-        breaks[line_index - 1] + 1
-    };
-    let line_end = breaks
-        .get(line_index)
-        .copied()
-        .unwrap_or(display_text.len());
-    let line = &display_text[line_start..line_end];
-    let runs = if bold {
-        vec![loom_text::StyleRun {
-            start: 0,
-            end: line.len(),
-            style: loom_text::CharacterStyle {
-                weight: loom_text::FontWeight::Bold,
-                ..Default::default()
-            },
-        }]
-    } else {
-        Vec::new()
-    };
-    let display_byte = line_start
-        + loom_writer_core::offset_at_x(line, 0, &runs, font_size, local_x - rect.x - 6.0);
-    let source_byte = source_offsets.get(display_byte).copied()?;
+    let resolved = catalog_style.resolve_cell(
+        location.row,
+        location.col,
+        table.row_count(),
+        table.col_count(),
+        &options,
+        table.cell(location.row, location.col),
+    );
+    let font_size = loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT;
+    let block = loom_writer_core::table_cell_rich_block(
+        location.block_id,
+        &table,
+        location.row,
+        location.col,
+        font_size,
+        resolved.bold,
+        resolved.text_color.as_deref(),
+    )?;
+    let available_width = (rect.width - 12.0).max(1.0);
+    let geometry =
+        loom_writer_core::shape_table_cell_geometry(&block, font_size, available_width).ok()?;
+    if geometry.lines().is_empty() {
+        return Some(cell_offset);
+    }
+    let mut line_top = 0.0;
+    let local_line_y = (local_y - rect.y - 4.0).max(0.0);
+    let mut selected_line = geometry.lines().last()?;
+    for line in geometry.lines() {
+        selected_line = line;
+        if local_line_y < line_top + line.pitch_pt() {
+            break;
+        }
+        line_top += line.pitch_pt();
+    }
+    let local_byte = selected_line
+        .shaped()
+        .and_then(|line| line.hit_test(local_x - rect.x - 6.0))
+        .map(|stop| stop.offset)
+        .unwrap_or_else(|| selected_line.source_range().start)
+        .min(display_text.len());
+    let source_byte = source_offsets.get(local_byte).copied()?;
     let block_start = doc
         .blocks
         .iter()
@@ -291,14 +289,37 @@ fn writer_text_metric_offset(
         }
         // The column the line is aligned in: the text column less the indent.
         let column_width = block.text_column_width(&style);
-        let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
+        let column_x = line.bounds.x - base_page.x - style.margin_left_pt;
+        if let Some(shaped) = &line.shaped_line {
+            let local_byte = shaped
+                .hit_test(local_x - column_x)
+                .map(|stop| stop.offset.saturating_sub(line.start))
+                .unwrap_or(0);
+            let offset = line.global_start + local_byte;
+            if distance <= f32::EPSILON {
+                return Some(offset);
+            }
+            nearest = Some((distance, offset));
+            continue;
+        }
+        let resolved_alignment = block
+            .style
+            .alignment
+            .resolve_with_direction(block.text.as_str(), block.style.direction);
+        let paragraph_start = loom_text::Alignment::Start
+            .resolve_with_direction(block.text.as_str(), block.style.direction);
+        let alignment_offset = match resolved_alignment {
             loom_text::Alignment::Center => ((column_width - line.bounds.width) / 2.0).max(0.0),
             loom_text::Alignment::Right => (column_width - line.bounds.width).max(0.0),
+            loom_text::Alignment::Justify if paragraph_start == loom_text::Alignment::Right => {
+                (column_width - line.bounds.width).max(0.0)
+            }
             loom_text::Alignment::Left
             | loom_text::Alignment::Justify
-            | loom_text::Alignment::Start => 0.0,
+            | loom_text::Alignment::Start
+            | loom_text::Alignment::End => 0.0,
         };
-        let line_x = line.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
+        let line_x = column_x + alignment_offset;
         // Relative to the line start, in the order the line is drawn in.
         let local_byte = block.line_offset_at_x_with_justification(
             line.start..line.end,

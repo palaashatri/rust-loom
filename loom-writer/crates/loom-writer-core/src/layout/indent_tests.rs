@@ -1,6 +1,7 @@
 //! Left indent and line spacing of a paragraph must change the page the
 //! editor draws, the caret that follows it, and the PDF export.
 
+use crate::export::test_support::export_valid_pdf;
 use crate::{PageStyle, PageViewport, RichBlock, TextSelection, WriterDocument};
 
 fn viewport() -> PageViewport {
@@ -105,8 +106,8 @@ fn pdf_draws_an_indented_paragraph_further_in() {
         .blocks
         .push(RichBlock::new(1, "paragraph", "Indented line"));
 
-    let plain_x = text_x(&crate::export::export_pdf(&plain), "Indented line");
-    let indented_x = text_x(&crate::export::export_pdf(&indented), "Indented line");
+    let plain_x = text_x(&export_valid_pdf(&plain), "Indented line");
+    let indented_x = text_x(&export_valid_pdf(&indented), "Indented line");
     assert!(
         (plain_x - style.margin_left_pt).abs() < 0.01,
         "plain text starts at the margin: {plain_x}"

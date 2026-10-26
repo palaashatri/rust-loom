@@ -5,7 +5,7 @@ use std::path::PathBuf;
 /// Where a face's bytes come from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FaceSource {
-    /// A face compiled into the binary (the Inter faces `loom-ui` ships).
+    /// A face compiled into the binary by an enabled bundled-font feature.
     Bundled(&'static str),
     /// A font file on disk.
     File(PathBuf),

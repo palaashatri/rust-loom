@@ -4,11 +4,15 @@
 
 use crate::TextSelection;
 use loom_package::manifest::json as pkg_json;
+use loom_text::ParagraphDirection;
+
+use super::{json_value_text, parse_f32_value, ContentParser, WriterError};
 
 pub(crate) fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
     match alignment {
         loom_text::Alignment::Start => "start",
         loom_text::Alignment::Left => "left",
+        loom_text::Alignment::End => "end",
         loom_text::Alignment::Center => "center",
         loom_text::Alignment::Right => "right",
         loom_text::Alignment::Justify => "justify",
@@ -18,10 +22,29 @@ pub(crate) fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
 pub(crate) fn parse_alignment(value: &str) -> loom_text::Alignment {
     match value {
         "start" => loom_text::Alignment::Start,
+        "end" => loom_text::Alignment::End,
+        "left" => loom_text::Alignment::Left,
         "center" => loom_text::Alignment::Center,
         "right" => loom_text::Alignment::Right,
         "justify" => loom_text::Alignment::Justify,
         _ => loom_text::Alignment::Left,
+    }
+}
+
+fn direction_name(direction: ParagraphDirection) -> &'static str {
+    match direction {
+        ParagraphDirection::Auto => "auto",
+        ParagraphDirection::LeftToRight => "ltr",
+        ParagraphDirection::RightToLeft => "rtl",
+    }
+}
+
+fn parse_direction(value: &str) -> Option<ParagraphDirection> {
+    match value {
+        "auto" => Some(ParagraphDirection::Auto),
+        "ltr" => Some(ParagraphDirection::LeftToRight),
+        "rtl" => Some(ParagraphDirection::RightToLeft),
+        _ => None,
     }
 }
 
@@ -94,6 +117,8 @@ fn push_optional_json_string(out: &mut String, value: Option<&str>) {
 pub(crate) fn paragraph_style_json(style: &loom_text::ParagraphStyle) -> String {
     let mut out = String::from("{\"alignment\":");
     out.push_str(&pkg_json::escape(alignment_name(style.alignment)));
+    out.push_str(",\"direction\":");
+    out.push_str(&pkg_json::escape(direction_name(style.direction)));
     out.push_str(",\"space_before\":");
     out.push_str(&json_f32(style.space_before));
     out.push_str(",\"space_after\":");
@@ -115,6 +140,38 @@ pub(crate) fn paragraph_style_json(style: &loom_text::ParagraphStyle) -> String 
     }
     out.push('}');
     out
+}
+
+pub(crate) fn parse_paragraph_style(
+    raw: &str,
+    mut style: loom_text::ParagraphStyle,
+) -> Result<loom_text::ParagraphStyle, WriterError> {
+    let fields = ContentParser::new(raw).parse()?;
+    for (key, value) in &fields {
+        match key.as_str() {
+            "alignment" | "align" => {
+                style.alignment = parse_alignment(&json_value_text(value));
+            }
+            "direction" => {
+                style.direction = parse_direction(&json_value_text(value))
+                    .ok_or_else(|| WriterError::Invalid("unknown paragraph direction".into()))?;
+            }
+            "space_before" => parse_f32_value(value, &mut style.space_before),
+            "space_after" => parse_f32_value(value, &mut style.space_after),
+            "line_spacing" => parse_f32_value(value, &mut style.line_spacing),
+            "left_indent" => parse_f32_value(value, &mut style.left_indent),
+            "right_indent" => parse_f32_value(value, &mut style.right_indent),
+            "first_line_indent" => parse_f32_value(value, &mut style.first_line_indent),
+            "break_rule" => {
+                style.break_rule = parse_line_break(&json_value_text(value));
+            }
+            "list_level" => {
+                style.list_level = super::list_levels::parse_list_level(&json_value_text(value));
+            }
+            _ => {}
+        }
+    }
+    Ok(style)
 }
 
 fn character_style_json(style: &loom_text::CharacterStyle) -> String {
@@ -176,3 +233,7 @@ pub(crate) fn selection_json(selection: &TextSelection) -> String {
         pkg_json::escape(affinity)
     )
 }
+
+#[cfg(test)]
+#[path = "native_style_validation_tests.rs"]
+mod native_style_validation_tests;

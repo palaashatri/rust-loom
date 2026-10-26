@@ -8,6 +8,12 @@
 
 use loom_pdf::inspect;
 
+/// Exports a valid test fixture, keeping fallible production errors explicit
+/// while avoiding repetitive `expect` calls at established success assertions.
+pub(crate) fn export_valid_pdf(document: &crate::WriterDocument) -> Vec<u8> {
+    crate::export_pdf(document).expect("valid PDF fixture")
+}
+
 /// A text run whose starting point and font state are known from the supported
 /// Loom text operators.
 #[derive(Clone, Debug, PartialEq)]
@@ -28,38 +34,78 @@ struct TextRunState {
     size: Option<f32>,
     line_x: f32,
     line_y: f32,
+    pending: Option<PendingTextRun>,
     position_known: bool,
     page_transform_known: bool,
 }
 
+struct PendingTextRun {
+    text: String,
+    x: f32,
+    y: f32,
+    font: String,
+    size: f32,
+}
+
 impl TextRunState {
-    fn push_run(&self, runs: &mut Vec<DrawnTextRun>, text: String) -> Result<(), String> {
+    fn validate_position(&self) -> Result<(), String> {
         if !self.in_text {
             return Err("text-showing operator outside BT/ET".into());
         }
         if !self.position_known || !self.page_transform_known {
             return Err("text run uses an unsupported or advanced position matrix".into());
         }
-        let font = self
-            .font
+        self.font
             .as_deref()
             .ok_or_else(|| "text run has no preceding Tf font".to_owned())?;
-        let size = self
-            .size
+        self.size
             .ok_or_else(|| "text run has no preceding Tf size".to_owned())?;
-        runs.push(DrawnTextRun {
-            text,
-            x: self.line_x,
-            y: self.line_y,
-            font: font.to_owned(),
+        Ok(())
+    }
+
+    fn append_text(&mut self, runs: &mut Vec<DrawnTextRun>, text: String) -> Result<(), String> {
+        self.validate_position()?;
+        let font = self.font.as_deref().expect("validated font").to_owned();
+        let size = self.size.expect("validated size");
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.font != font || pending.size != size)
+        {
+            self.flush_run(runs);
+        }
+        let (x, y) = (self.line_x, self.line_y);
+        let pending = self.pending.get_or_insert_with(|| PendingTextRun {
+            text: String::new(),
+            x,
+            y,
+            font,
             size,
-            bold: match font {
+        });
+        pending.text.push_str(&text);
+        self.position_known = false;
+        Ok(())
+    }
+
+    fn flush_run(&mut self, runs: &mut Vec<DrawnTextRun>) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        if pending.text.is_empty() {
+            return;
+        }
+        runs.push(DrawnTextRun {
+            text: pending.text,
+            x: pending.x,
+            y: pending.y,
+            bold: match pending.font.as_str() {
                 "/F1" | "/F3" => Some(false),
                 "/F2" | "/F4" => Some(true),
                 _ => None,
             },
+            font: pending.font,
+            size: pending.size,
         });
-        Ok(())
     }
 }
 
@@ -79,8 +125,19 @@ pub(crate) fn parse_drawn_text_runs(content: &str) -> Result<Vec<DrawnTextRun>, 
         ..TextRunState::default()
     };
     let mut transform_stack = Vec::new();
+    let mut announced: Option<String> = None;
+    let mut replacement: Option<(String, bool)> = None;
+    let mut expect_actual = false;
 
     while let Some(token) = lexer.next()? {
+        match &token {
+            Token::Name(name) if name == "/ActualText" => expect_actual = true,
+            Token::Literal(text) if expect_actual => {
+                announced = Some(text.clone());
+                expect_actual = false;
+            }
+            _ => {}
+        }
         let Token::Word(operator) = &token else {
             operands.push(token);
             continue;
@@ -94,10 +151,12 @@ pub(crate) fn parse_drawn_text_runs(content: &str) -> Result<Vec<DrawnTextRun>, 
                 text_state.position_known = true;
             }
             "ET" => {
+                text_state.flush_run(&mut runs);
                 text_state.in_text = false;
                 text_state.position_known = false;
             }
             "Tf" => {
+                text_state.flush_run(&mut runs);
                 let name = operands.iter().rev().find_map(|token| match token {
                     Token::Name(name) => Some(name.clone()),
                     _ => None,
@@ -138,19 +197,27 @@ pub(crate) fn parse_drawn_text_runs(content: &str) -> Result<Vec<DrawnTextRun>, 
                     _ => None,
                 });
                 if let Some(text) = text {
-                    text_state.push_run(&mut runs, text)?;
+                    text_state.validate_position()?;
+                    if let Some(logical) = replacement_text(&mut replacement, text) {
+                        text_state.append_text(&mut runs, logical)?;
+                    } else {
+                        text_state.position_known = false;
+                    }
                     // Advancing by a text run needs font glyph widths and any
-                    // TJ adjustments. Wait for a fresh Tm/Td before reporting
-                    // another run's origin.
-                    text_state.position_known = false;
+                    // TJ adjustments. A fresh absolute Tm is needed before the
+                    // next glyph's position can be reported.
                 }
             }
             "TJ" => {
                 if let Some(text) = array_text(&operands) {
-                    text_state.push_run(&mut runs, text)?;
+                    text_state.validate_position()?;
+                    if let Some(logical) = replacement_text(&mut replacement, text) {
+                        text_state.append_text(&mut runs, logical)?;
+                    } else {
+                        text_state.position_known = false;
+                    }
                     // The array's numeric spacing operands are intentionally
                     // not interpreted as glyph-position measurements.
-                    text_state.position_known = false;
                 }
             }
             "T*" => text_state.position_known = false,
@@ -174,6 +241,16 @@ pub(crate) fn parse_drawn_text_runs(content: &str) -> Result<Vec<DrawnTextRun>, 
                 // can restore the saved state we track here.
                 text_state.page_transform_known &= identity;
             }
+            "BDC" => replacement = announced.take().map(|actual| (actual, false)),
+            "EMC" => {
+                if let Some((actual, inserted)) = replacement.take() {
+                    if !inserted {
+                        if let Some(pending) = text_state.pending.as_mut() {
+                            pending.text.push_str(&actual);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -183,6 +260,17 @@ pub(crate) fn parse_drawn_text_runs(content: &str) -> Result<Vec<DrawnTextRun>, 
     }
 
     Ok(runs)
+}
+
+fn replacement_text(replacement: &mut Option<(String, bool)>, shown: String) -> Option<String> {
+    match replacement {
+        Some((actual, inserted)) if !*inserted => {
+            *inserted = true;
+            Some(actual.clone())
+        }
+        Some(_) => None,
+        None => Some(shown),
+    }
 }
 
 fn last_numbers<const N: usize>(operands: &[Token]) -> Option<[f32; N]> {
@@ -531,6 +619,20 @@ mod tests {
             assert_eq!(run.bold, Some(true));
         }
         inspect::verify(&bytes).expect("regression PDF is structurally valid");
+    }
+
+    #[test]
+    fn reader_groups_positioned_glyphs_and_applies_actualtext_once() {
+        let content = concat!(
+            "BT /F1 12 Tf ",
+            "/Span << /ActualText (fi) >> BDC ",
+            "1 0 0 1 10 20 Tm (f) Tj ",
+            "1 0 0 1 16 20 Tm (i) Tj EMC ET",
+        );
+        let runs = parse_drawn_text_runs(content).expect("read shaped glyph run");
+        assert_eq!(runs.len(), 1, "glyphs in one Tf segment form one run");
+        assert_eq!(runs[0].text, "fi", "ActualText is applied once per span");
+        assert_eq!((runs[0].x, runs[0].y), (10.0, 20.0));
     }
 
     #[test]

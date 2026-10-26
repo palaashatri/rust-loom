@@ -169,7 +169,7 @@ fn rects_for_matches(
     } else {
         style.height_pt * 2.0
     };
-    let scroll = normalize_page_scroll(app.get_page_scroll_y()) / zoom;
+    let scroll = normalize_page_scroll(app.get_scroll_y()) / zoom;
     let pages = flow.visible_pages(scroll - span, scroll + 2.0 * span);
     let Some((window_start, window_end)) = flow.editor_span(pages.clone()) else {
         return Vec::new();

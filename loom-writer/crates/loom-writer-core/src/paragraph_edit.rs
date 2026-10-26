@@ -144,6 +144,7 @@ pub(crate) fn rebuild(
             block.kind = "paragraph".to_string();
             block.style = ParagraphStyle {
                 alignment: source.style.alignment,
+                direction: source.style.direction,
                 ..ParagraphStyle::default()
             };
         }

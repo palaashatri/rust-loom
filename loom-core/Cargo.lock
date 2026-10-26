@@ -2935,6 +2935,7 @@ version = "0.1.0"
 dependencies = [
  "harfrust",
  "skrifa 0.42.1",
+ "tiny-skia 0.11.4",
  "unicode-bidi",
  "unicode-linebreak",
  "unicode-script",

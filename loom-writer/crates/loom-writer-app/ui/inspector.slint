@@ -4,9 +4,8 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { FontPicker, WriterFontField, WriterFontList } from "font_picker.slint";
-import { WriterAlignmentState } from "alignment_state.slint";
-import { WriterTableInspector } from "table_inspector.slint";
+import { WriterFormatState } from "alignment_state.slint";
+import { WriterFormatTab } from "text_formatting.slint";
 
 /// One anchored comment thread shown in the format inspector.
 export struct WriterCommentEntry {
@@ -26,7 +25,7 @@ export component WriterInspector inherits LoomPanel {
     in property <string> shortcut-modifier: "Ctrl";
     in-out property <int> heading-level: 0;
     in-out property <int> font-size-pt: 11;
-    in-out property <int> text-alignment <=> WriterAlignmentState.text-alignment;
+    in-out property <int> text-alignment <=> WriterFormatState.text-alignment;
     in-out property <int> line-spacing-index: 1;
     in-out property <int> page-paper-index: 0;
     in-out property <int> page-orientation-index: 0;
@@ -171,313 +170,38 @@ export component WriterInspector inherits LoomPanel {
             padding-bottom: Theme.tokens.space.md;
             alignment: start;
 
-            if root.inspector-tab == 0 : VerticalLayout {
-                spacing: Theme.tokens.space.md;
-
-                if root.is-table-selected : WriterTableInspector {
-                    current-style-id <=> root.table-style-id;
-                    header-row <=> root.table-header-row;
-                    banded-rows <=> root.table-banded-rows;
-                    first-column <=> root.table-first-column;
-                    set-table-style(id) => { root.set-table-style(id); }
-                    toggle-table-option(opt) => { root.toggle-table-option(opt); }
-                    table-action(act) => { root.table-action(act); }
-                }
-
-            LoomSectionHeader { title: "Paragraph Style"; }
-
-            VerticalLayout {
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-            heading-control := LoomSegmentedControl {
-                items: ["Body", "H1", "H2", "H3"];
-                current <=> root.heading-level;
-                label: "Heading Style";
-                selected(idx) => { root.select-heading(idx); }
+            if root.inspector-tab == 0 : WriterFormatTab {
+                is-table-selected <=> root.is-table-selected;
+                table-style-id <=> root.table-style-id;
+                table-header-row <=> root.table-header-row;
+                table-banded-rows <=> root.table-banded-rows;
+                table-first-column <=> root.table-first-column;
+                heading-level <=> root.heading-level;
+                font-size-pt <=> root.font-size-pt;
+                text-alignment <=> root.text-alignment;
+                line-spacing-index <=> root.line-spacing-index;
+                list-style-index <=> root.list-style-index;
+                is-bold: root.is-bold;
+                is-italic: root.is-italic;
+                is-underline: root.is-underline;
+                is-strikethrough: root.is-strikethrough;
+                shortcut-modifier: root.shortcut-modifier;
+                set-table-style(id) => { root.set-table-style(id); }
+                toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                table-action(act) => { root.table-action(act); }
+                select-heading(idx) => { root.select-heading(idx); }
+                increase-font-size => { root.increase-font-size(); }
+                decrease-font-size => { root.decrease-font-size(); }
+                toggle-bold => { root.toggle-bold(); }
+                toggle-italic => { root.toggle-italic(); }
+                toggle-underline => { root.toggle-underline(); }
+                toggle-strikethrough => { root.toggle-strikethrough(); }
+                select-alignment(idx) => { root.select-alignment(idx); }
+                indent-text => { root.indent-text(); }
+                outdent-text => { root.outdent-text(); }
+                select-line-spacing(idx) => { root.select-line-spacing(idx); }
+                select-list-style(idx) => { root.select-list-style(idx); }
             }
-            }
-
-            LoomSectionHeader { title: "Font & Size"; }
-
-            // The font family fills the row; the size stepper sits at the reading end.
-            VerticalLayout {
-                horizontal-stretch: 1;
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-            Rectangle {
-                height: max(32px, Theme.scaled-control-height);
-                WriterFontField {
-                    x: Theme.rtl ? font-stepper.width + Theme.tokens.space.sm : 0px;
-                    y: (parent.height - self.height) / 2;
-                    width: parent.width - font-stepper.width - Theme.tokens.space.sm;
-                }
-
-                // Font size stepper
-                font-stepper := Rectangle {
-                    x: Theme.rtl ? 0px : parent.width - self.width;
-                    y: (parent.height - self.height) / 2;
-                    // Grows with text scale so its two icon buttons and the size fit.
-                    width: 104px * max(1.0, Theme.text-scale);
-                    height: Theme.scaled-control-height;
-                    border-radius: Theme.tokens.metrics.radius-medium;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
-                    background: Theme.palette().surface-raised;
-
-                    if !Theme.rtl : HorizontalLayout {
-                        spacing: 2px;
-                        padding-left: 4px;
-                        padding-right: 4px;
-                        cross-axis-alignment: center;
-
-                        LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "minus";
-                            label: "Smaller";
-                            tooltip: "Decrease font size";
-                            clicked => { root.decrease-font-size(); }
-                        }
-
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.font-size-pt + " pt";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "plus";
-                            label: "Larger";
-                            tooltip: "Increase font size";
-                            clicked => { root.increase-font-size(); }
-                        }
-                    }
-                    if Theme.rtl : HorizontalLayout {
-                        spacing: 2px;
-                        padding-left: 4px;
-                        padding-right: 4px;
-                        cross-axis-alignment: center;
-
-                        LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "plus";
-                            label: "Larger";
-                            tooltip: "Increase font size";
-                            clicked => { root.increase-font-size(); }
-                        }
-
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.font-size-pt + " pt";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "minus";
-                            label: "Smaller";
-                            tooltip: "Decrease font size";
-                            clicked => { root.decrease-font-size(); }
-                        }
-                    }
-                }
-            }
-            // The open list takes the room under the row; the panel scrolls.
-            if FontPicker.open : WriterFontList { }
-            }
-
-            // Character styles row, from the reading-start edge: Bold sits at the
-            // left in LTR and at the right in RTL.
-            if !Theme.rtl : HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                alignment: start;
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "bold";
-                    label: "Bold";
-                    tooltip: "Bold (" + root.shortcut-modifier + "+B)";
-                    selected: root.is-bold;
-                    clicked => { root.toggle-bold(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "italic";
-                    label: "Italic";
-                    tooltip: "Italic (" + root.shortcut-modifier + "+I)";
-                    selected: root.is-italic;
-                    clicked => { root.toggle-italic(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "underline";
-                    label: "Underline";
-                    tooltip: "Underline (" + root.shortcut-modifier + "+U)";
-                    selected: root.is-underline;
-                    clicked => { root.toggle-underline(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "strikethrough";
-                    label: "Strikethrough";
-                    tooltip: "Strikethrough";
-                    selected: root.is-strikethrough;
-                    clicked => { root.toggle-strikethrough(); }
-                }
-            }
-            if Theme.rtl : HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                alignment: end;
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "strikethrough";
-                    label: "Strikethrough";
-                    tooltip: "Strikethrough";
-                    selected: root.is-strikethrough;
-                    clicked => { root.toggle-strikethrough(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "underline";
-                    label: "Underline";
-                    tooltip: "Underline (" + root.shortcut-modifier + "+U)";
-                    selected: root.is-underline;
-                    clicked => { root.toggle-underline(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "italic";
-                    label: "Italic";
-                    tooltip: "Italic (" + root.shortcut-modifier + "+I)";
-                    selected: root.is-italic;
-                    clicked => { root.toggle-italic(); }
-                }
-                LoomIconButton {
-                    text-scale: Theme.text-scale;
-                    icon: "bold";
-                    label: "Bold";
-                    tooltip: "Bold (" + root.shortcut-modifier + "+B)";
-                    selected: root.is-bold;
-                    clicked => { root.toggle-bold(); }
-                }
-            }
-
-            LoomSectionHeader { title: "Alignment & Spacing"; }
-
-            // Alignment fills the row; the two indent buttons sit at the reading end.
-            // One layout holds both, so the buttons can never be placed past the row.
-            VerticalLayout {
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    height: Theme.scaled-control-height;
-                    if !Theme.rtl : LoomSegmentedControl {
-                        horizontal-stretch: 1;
-                        items: WriterAlignmentState.justify-available
-                            ? ["Left", "Center", "Right", "Justify"]
-                            : ["Left", "Center", "Right"];
-                        current <=> root.text-alignment;
-                        label: "Text Alignment";
-                        selected(idx) => { root.select-alignment(idx); }
-                    }
-                    indent-pair := HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        if !Theme.rtl : LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "outdent";
-                            label: "Outdent";
-                            tooltip: "Decrease Indent";
-                            clicked => { root.outdent-text(); }
-                        }
-                        if !Theme.rtl : LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "indent";
-                            label: "Indent";
-                            tooltip: "Increase Indent";
-                            clicked => { root.indent-text(); }
-                        }
-                        if Theme.rtl : LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "indent";
-                            label: "Indent";
-                            tooltip: "Increase Indent";
-                            clicked => { root.indent-text(); }
-                        }
-                        if Theme.rtl : LoomIconButton {
-                            text-scale: Theme.text-scale;
-                            icon: "outdent";
-                            label: "Outdent";
-                            tooltip: "Decrease Indent";
-                            clicked => { root.outdent-text(); }
-                        }
-                    }
-                    if Theme.rtl : LoomSegmentedControl {
-                        horizontal-stretch: 1;
-                        items: WriterAlignmentState.justify-available
-                            ? ["Left", "Center", "Right", "Justify"]
-                            : ["Left", "Center", "Right"];
-                        current <=> root.text-alignment;
-                        label: "Text Alignment";
-                        selected(idx) => { root.select-alignment(idx); }
-                    }
-                }
-            }
-
-            // The caption sits at the reading-start edge, the choices fill the rest.
-            VerticalLayout {
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-            // Line spacing: the label sits above the strip, and the strip ends where the
-            // alignment strip above ends, so the two rows share their far edge.
-            Text {
-                text: "Line Spacing";
-                font-size: Theme.type.body;
-                color: Theme.palette().ink;
-                horizontal-alignment: Theme.rtl ? right : left;
-            }
-
-            Rectangle {
-                height: Theme.scaled-control-height;
-                LoomSegmentedControl {
-                    x: 0px;
-                    y: 0px;
-                    width: parent.width;
-                    items: ["1.0", "1.15", "1.5", "2.0"];
-                    current <=> root.line-spacing-index;
-                    label: "Line Spacing";
-                    selected(idx) => { root.select-line-spacing(idx); }
-                }
-            }
-            }
-
-            LoomSectionHeader { title: "Lists"; }
-
-            VerticalLayout {
-                padding-left: Theme.tokens.space.xl;
-                padding-right: Theme.tokens.space.xl;
-            LoomSegmentedControl {
-                items: ["None", "Bulleted", "Numbered"];
-                current <=> root.list-style-index;
-                label: "List Style";
-                selected(idx) => { root.select-list-style(idx); }
-            }
-            }
-            }
-
             if root.inspector-tab == 1 : VerticalLayout {
                 spacing: Theme.tokens.space.md;
                 property <bool> focus-pending: root.comment-focus-pending;

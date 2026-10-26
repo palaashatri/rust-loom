@@ -169,7 +169,9 @@ fn pointer_position_for_offset(
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
     let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
         loom_text::Alignment::Center => ((content_width - line.bounds.width) / 2.0).max(0.0),
-        loom_text::Alignment::Right => (content_width - line.bounds.width).max(0.0),
+        loom_text::Alignment::Right | loom_text::Alignment::End => {
+            (content_width - line.bounds.width).max(0.0)
+        }
         loom_text::Alignment::Left
         | loom_text::Alignment::Justify
         | loom_text::Alignment::Start => 0.0,

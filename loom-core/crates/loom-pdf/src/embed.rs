@@ -4,8 +4,10 @@
 //! as CIDs under `Identity-H`, so no `CIDToGIDMap` is needed. A `ToUnicode` CMap
 //! lets viewers copy and search the text, and `/W` carries the exact advances.
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::Write as _;
+use std::sync::Arc;
 
 use subsetter::GlyphRemapper;
 
@@ -23,6 +25,7 @@ pub(crate) struct FaceSlot {
     /// entry; a different character drawn with the same glyph (U+2126 and
     /// U+03A9 share one in Inter) is wrapped in `/ActualText` where it is shown.
     chars: Vec<Option<char>>,
+    clusters: Vec<Option<Arc<str>>>,
 }
 
 impl FaceSlot {
@@ -32,11 +35,16 @@ impl FaceSlot {
             font,
             remapper: GlyphRemapper::new(),
             chars: vec![None],
+            clusters: vec![None],
         }
     }
 
     pub(crate) fn font_name(&self) -> &str {
-        self.font.name
+        &self.font.name
+    }
+
+    pub(crate) fn same_program(&self, font: &Font) -> bool {
+        self.font.same_program(font)
     }
 
     /// The glyph id to write for `ch`, registering it for the subset. A
@@ -46,8 +54,30 @@ impl FaceSlot {
         let new = self.remapper.remap(original);
         if usize::from(new) == self.chars.len() {
             self.chars.push(Some(ch));
+            self.clusters.push(None);
         }
         new
+    }
+
+    pub(crate) fn encode_cluster_glyph(&mut self, glyph: u16, text: &Arc<str>) -> u16 {
+        let new = self.remapper.remap(glyph);
+        if usize::from(new) == self.chars.len() {
+            self.chars.push(None);
+            self.clusters.push(Some(Arc::clone(text)));
+        }
+        new
+    }
+
+    pub(crate) fn can_encode_glyphs(&self, glyphs: &[u16]) -> bool {
+        let mut additions = HashSet::new();
+        for glyph in glyphs {
+            if self.remapper.get(*glyph).is_none() {
+                additions.insert(*glyph);
+            }
+        }
+        usize::from(self.remapper.num_gids())
+            .checked_add(additions.len())
+            .is_some_and(|count| count <= usize::from(u16::MAX))
     }
 
     /// The character the `ToUnicode` map gives glyph `gid`: the first character
@@ -58,7 +88,10 @@ impl FaceSlot {
 
     /// The subset font program, or `None` if the subsetter rejects the font.
     pub(crate) fn subset(&self) -> Option<Vec<u8>> {
-        subsetter::subset(self.font.data, 0, &self.remapper).ok()
+        if !self.font.subsetting_allowed() {
+            return None;
+        }
+        subsetter::subset(self.font.data(), self.font.index(), &self.remapper).ok()
     }
 
     /// The objects of this face: `Type0`, `CIDFontType2`, `FontDescriptor`,
@@ -74,7 +107,7 @@ impl FaceSlot {
             .map(|gid| trim_number(self.font.to_1000(f32::from(self.font.advance_units(*gid)))))
             .collect();
         let whole_font = subset.is_none();
-        let program = subset.unwrap_or_else(|| self.font.data.to_vec());
+        let program = subset.unwrap_or_else(|| self.font.data().to_vec());
         let packed = deflate(&program);
 
         let (descendant, descriptor, file, to_unicode) =
@@ -116,7 +149,7 @@ impl FaceSlot {
     }
 
     fn descriptor(&self, base_font: &str, file: usize) -> String {
-        let face = self.font.face();
+        let face = self.font.face_for_embedding();
         let scale = |v: i16| trim_number(self.font.to_1000(f32::from(v)));
         let bbox = face.global_bounding_box();
         let ascent = face.ascender();
@@ -139,13 +172,19 @@ impl FaceSlot {
         )
     }
 
-    /// The `ToUnicode` CMap: new glyph id to the character it was drawn for.
+    /// The `ToUnicode` CMap: new glyph id to the character or shaped cluster.
     fn to_unicode_cmap(&self) -> String {
-        let pairs: Vec<(usize, char)> = self
+        let pairs: Vec<(usize, String)> = self
             .chars
             .iter()
             .enumerate()
-            .filter_map(|(gid, ch)| ch.map(|c| (gid, c)))
+            .filter_map(|(gid, ch)| {
+                self.clusters
+                    .get(gid)
+                    .and_then(Option::as_ref)
+                    .map(|text| (gid, text.to_string()))
+                    .or_else(|| ch.map(|ch| (gid, ch.to_string())))
+            })
             .collect();
         let mut cmap = String::from(
             "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
@@ -155,11 +194,9 @@ impl FaceSlot {
         );
         for block in pairs.chunks(100) {
             let _ = writeln!(cmap, "{} beginbfchar", block.len());
-            for (gid, ch) in block {
-                let mut units = [0u16; 2];
-                let hex: String = ch
-                    .encode_utf16(&mut units)
-                    .iter()
+            for (gid, text) in block {
+                let hex: String = text
+                    .encode_utf16()
                     .map(|unit| format!("{unit:04X}"))
                     .collect();
                 let _ = writeln!(cmap, "<{gid:04X}> <{hex}>");

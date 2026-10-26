@@ -99,8 +99,7 @@ pub fn selection_text_spans(
     spans
 }
 
-#[allow(dead_code)]
-fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
+pub(crate) fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
     if document.blocks.is_empty() {
         return None;
     }
@@ -136,8 +135,7 @@ pub fn selected_block_indices(
     (first.min(last)..=first.max(last)).collect()
 }
 
-#[allow(dead_code)]
-fn style_at(block: &RichBlock, byte_offset: usize) -> CharacterStyle {
+pub(crate) fn style_at(block: &RichBlock, byte_offset: usize) -> CharacterStyle {
     block
         .runs
         .iter()
@@ -164,8 +162,7 @@ fn coalesce_runs(runs: Vec<StyleRun>) -> Vec<StyleRun> {
     result
 }
 
-#[allow(dead_code)]
-fn mutate_character_range(
+pub(crate) fn mutate_character_range(
     block: &mut RichBlock,
     start: usize,
     end: usize,
@@ -212,6 +209,9 @@ fn mutate_selection_character_styles(
 ) {
     let spans = selection_text_spans(document, selection.clone());
     for (block_index, start, end) in spans {
+        if !crate::inline_formatting::is_text_paragraph(&document.blocks[block_index]) {
+            continue;
+        }
         mutate_character_range(
             &mut document.blocks[block_index],
             start,
@@ -339,6 +339,9 @@ pub fn selection_font_family(
     let mut found: Option<String> = None;
     for (block_index, start, end) in spans {
         let block = &document.blocks[block_index];
+        if !crate::inline_formatting::is_text_paragraph(block) {
+            continue;
+        }
         let mut boundaries = BTreeSet::from([start, end]);
         for run in &block.runs {
             if run.start < end && run.end > start {
@@ -572,7 +575,7 @@ fn uniform_alignment(document: &WriterDocument) -> i32 {
     let mut alignments = document.blocks.iter().map(|block| {
         match block.style.alignment.resolve(block.text.as_str()) {
             Alignment::Center => 1,
-            Alignment::Right => 2,
+            Alignment::Right | Alignment::End => 2,
             Alignment::Justify => 3,
             Alignment::Left | Alignment::Start => 0,
         }
@@ -774,12 +777,15 @@ fn alignment_index(block: &RichBlock) -> i32 {
     match block.style.alignment.resolve(block.text.as_str()) {
         Alignment::Left | Alignment::Start => 0,
         Alignment::Center => 1,
-        Alignment::Right => 2,
+        Alignment::Right | Alignment::End => 2,
         Alignment::Justify => 3,
     }
 }
 
-fn caret_style(document: &WriterDocument, selection: DocumentSelection) -> Option<CharacterStyle> {
+pub(crate) fn caret_style(
+    document: &WriterDocument,
+    selection: DocumentSelection,
+) -> Option<CharacterStyle> {
     let (start, _) = normalized_selection(document, selection);
     let block_index = block_at_offset(document, start)?;
     let block = &document.blocks[block_index];
@@ -1116,3 +1122,7 @@ mod tests {
         assert_eq!(document.blocks[0].style.list_level, 2);
     }
 }
+
+#[cfg(test)]
+#[path = "m3_formatting_tests.rs"]
+mod m3_formatting_tests;

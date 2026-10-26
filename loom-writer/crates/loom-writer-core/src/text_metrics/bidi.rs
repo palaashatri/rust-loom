@@ -10,6 +10,7 @@
 use std::ops::Range;
 
 use loom_fonts::{segment, visual_order, TextDirection, TextRun};
+use loom_text::ParagraphDirection;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::measure::LineMeasure;
@@ -34,10 +35,21 @@ pub(crate) struct BidiRuns {
 
 impl BidiRuns {
     pub(crate) fn of(text: &str) -> Option<Self> {
+        Self::with_direction(text, ParagraphDirection::Auto)
+    }
+
+    pub(crate) fn with_direction(text: &str, direction: ParagraphDirection) -> Option<Self> {
         #[cfg(test)]
         PARAGRAPH_SCANS.with(|count| count.set(count.get() + 1));
         text.chars().any(may_be_right_to_left).then(|| Self {
-            runs: segment(text, TextDirection::Auto),
+            runs: segment(
+                text,
+                match direction {
+                    ParagraphDirection::Auto => TextDirection::Auto,
+                    ParagraphDirection::LeftToRight => TextDirection::LeftToRight,
+                    ParagraphDirection::RightToLeft => TextDirection::RightToLeft,
+                },
+            ),
         })
     }
 
@@ -320,8 +332,11 @@ impl LineOrder {
 /// spaces a soft wrap leaves hanging past the edge are not drawn.
 pub(crate) fn visible_end(text: &str, line: Range<usize>) -> usize {
     let slice = &text[line.clone()];
+    if slice.ends_with("\r\n") {
+        return line.end - "\r\n".len();
+    }
     if let Some(last) = slice.chars().next_back() {
-        if matches!(last, '\n' | '\u{b}' | '\u{c}') {
+        if matches!(last, '\r' | '\n' | '\u{b}' | '\u{c}') {
             return line.end - last.len_utf8();
         }
     }

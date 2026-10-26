@@ -6,19 +6,16 @@
 
 use std::rc::Rc;
 
-#[path = "export_text_line.rs"]
-mod text_line;
+#[path = "export_shaped.rs"]
+pub(crate) mod shaped_export;
 
 #[cfg(test)]
 #[path = "export_pdf_test_support.rs"]
 pub(crate) mod test_support;
 
-use crate::export_flow;
 use crate::export_table::{self, TableLayout};
-use crate::text_metrics::bidi::BidiRuns;
-use crate::text_metrics::justification::LineGeometry;
-use crate::text_metrics::{pdf_text_width, InterShaper};
-use crate::{PageStyle, WriterDocument};
+use crate::text_metrics::pdf_text_width;
+use crate::{PageStyle, RichBlock, WriterDocument, WriterError, WriterShapedVisualLine};
 
 /// Exports a document to a `.docx` archive Word opens directly; see
 /// [`crate::export_docx`] for what is carried over. Round-trips through
@@ -38,7 +35,7 @@ const LIST_MARKER_GAP_PT: f32 = 4.0;
 fn align_shift(alignment: loom_text::Alignment, column: f32, width: f32) -> f32 {
     match alignment {
         loom_text::Alignment::Center => (column - width) / 2.0,
-        loom_text::Alignment::Right => column - width,
+        loom_text::Alignment::End | loom_text::Alignment::Right => column - width,
         _ => 0.0,
     }
     .max(0.0)
@@ -48,11 +45,10 @@ fn align_shift(alignment: loom_text::Alignment, column: f32, width: f32) -> f32 
 /// table block.
 enum LineContent {
     Text {
-        start: usize,
-        end: usize,
         marker: String,
         style: loom_pdf::TextStyle,
-        geometry: LineGeometry,
+        shaped: Option<WriterShapedVisualLine>,
+        page_break_after: bool,
     },
     TableRow {
         layout: Rc<TableLayout>,
@@ -104,7 +100,7 @@ fn pdf_lines(
     page_style: &PageStyle,
     body: &loom_pdf::TextStyle,
     column: f32,
-) -> Vec<PdfLine> {
+) -> Result<Vec<PdfLine>, WriterError> {
     let mut lines = Vec::new();
     let numbers = doc.list_item_numbers();
     let block_gap = body.size_pt * page_style.line_height;
@@ -118,12 +114,11 @@ fn pdf_lines(
         if kind == crate::TABLE_BLOCK_KIND {
             // Row heights depend on the wrapped cells, so the table is laid out
             // here, where pagination needs the heights.
-            let line_height = body.size_pt * page_style.line_height;
             let table = block
                 .typed_table()
                 .cloned()
                 .unwrap_or_else(|| loom_objects::Table::new(1, 1));
-            let layout = Rc::new(TableLayout::new(&table, body, column, line_height));
+            let layout = Rc::new(TableLayout::new(&table, column)?);
             for row in 0..layout.row_count() {
                 lines.push(PdfLine {
                     block: index,
@@ -172,81 +167,92 @@ fn pdf_lines(
         // left of the text, which every line wraps within, as on the page.
         let marker = block.list_marker(numbers[index]);
         let style = block_style(kind, body, page_style);
-        let height = crate::line_pitch(&block.runs, style.size_pt)
+        let base_height = crate::line_pitch(&block.runs, style.size_pt)
             * page_style.line_height
             * crate::layout::line_spacing_factor(block);
         let text_column = block.text_column_width(page_style);
-        let positions = export_flow::block_measure(text, &block.runs, &style);
-        let paragraph_has_bidi = block.style.alignment.resolve(text)
-            == loom_text::Alignment::Justify
-            && BidiRuns::of(text).is_some();
-        let ranges = export_flow::wrap(text, &block.runs, &style, text_column, text_column);
-        for (line_index, (start, end)) in ranges.into_iter().enumerate() {
-            let geometry = export_flow::justification_geometry(
-                text,
-                &positions,
-                start,
-                end,
-                text_column,
-                block.style.alignment.resolve(text) == loom_text::Alignment::Justify,
-                paragraph_has_bidi,
-            );
+        let mut shaped_lines = crate::shape_wrapped_block_lines(block, style.size_pt, text_column)
+            .ok_or_else(|| {
+                WriterError::Invalid(format!("PDF export could not shape text in block {index}"))
+            })?;
+        if text.ends_with(['\n', '\u{b}', '\u{c}'])
+            && shaped_lines
+                .last()
+                .is_some_and(|(range, shaped)| range.is_empty() && shaped.is_none())
+        {
+            shaped_lines.pop();
+        }
+        for (line_index, (range, shaped)) in shaped_lines.into_iter().enumerate() {
+            if !range.is_empty() && shaped.is_none() {
+                return Err(WriterError::Invalid(format!(
+                    "PDF export could not shape text in block {index}"
+                )));
+            }
+            let shaped_height = shaped.as_ref().map_or(0.0, |line| {
+                line.ascent_pt() + line.descent_pt() + line.line_gap_pt()
+            });
+            let height = base_height.max(shaped_height);
+            let page_break_after = text
+                .get(range.clone())
+                .is_some_and(|line_text| line_text.ends_with('\u{c}'));
             lines.push(PdfLine {
                 block: index,
                 content: LineContent::Text {
-                    start,
-                    end,
                     marker: if line_index == 0 {
                         marker.clone()
                     } else {
                         String::new()
                     },
                     style: style.clone(),
-                    geometry,
+                    shaped,
+                    page_break_after,
                 },
                 gap: if line_index == 0 { gap } else { 0.0 },
                 height,
             });
         }
     }
-    lines
+    Ok(lines)
 }
 
 /// Render the document to a PDF. Lines are wrapped with the widths the PDF
 /// draws with, so no line or appended run passes the right margin; headings
 /// take the document model's sizes; pages break by line height within the
 /// margins. Output is byte-for-byte deterministic for the same document.
-pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
+pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
     use loom_pdf::{PdfDocument, TextStyle};
     let page_style = doc.page.page_style();
-    let mut pdf = PdfDocument::new();
-    // Runs are spaced as the editor shapes them (kerning), the way lines were
-    // measured and wrapped, so a line that fits on the page fits in the file.
-    pdf.set_run_shaper(std::sync::Arc::new(InterShaper));
-    // The editor draws body text at the page style's size, so the PDF sets it
-    // at that size too and wraps at the same places.
     let body = TextStyle {
         size_pt: page_style.body_font_size_pt,
-        fill_rgb: (0.15, 0.13, 0.11),
+        fill_rgb: (0.0, 0.0, 0.0),
         ..Default::default()
     };
     let column =
         (page_style.width_pt - page_style.margin_left_pt - page_style.margin_right_pt).max(0.0);
+    let lines = pdf_lines(doc, &page_style, &body, column)?;
+    let mut pdf = PdfDocument::new();
     let top = page_style.height_pt - page_style.margin_top_pt;
-    let mut page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+    let mut page = pdf
+        .try_add_page(page_style.width_pt, page_style.height_pt)
+        .map_err(|error| WriterError::Invalid(format!("PDF export: {error}")))?;
+    let mut fonts = shaped_export::FontRegistry::default();
     let mut y = top;
 
     // A page break (form feed) ends its line; the next line starts a page.
     let mut break_pending = false;
-    for line in pdf_lines(doc, &page_style, &body, column) {
+    for line in lines {
         if std::mem::take(&mut break_pending) {
-            page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+            page = pdf
+                .try_add_page(page_style.width_pt, page_style.height_pt)
+                .map_err(|error| WriterError::Invalid(format!("PDF export: {error}")))?;
             y = top;
         } else {
             y -= line.gap;
         }
         if y - line.height < page_style.margin_bottom_pt && y < top {
-            page = pdf.add_page(page_style.width_pt, page_style.height_pt);
+            page = pdf
+                .try_add_page(page_style.width_pt, page_style.height_pt)
+                .map_err(|error| WriterError::Invalid(format!("PDF export: {error}")))?;
             y = top;
         }
         let block = &doc.blocks[line.block];
@@ -254,38 +260,79 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
         let column = column - indent;
         match &line.content {
             LineContent::Text {
-                start,
-                end,
                 marker,
                 style,
-                geometry,
+                shaped,
+                page_break_after,
             } => {
-                let text = &block.text.as_str()[*start..*end];
-                break_pending = block.text.as_str()[*end..].starts_with('\u{c}');
-                // The text starts where the editor starts it, past a list item's
-                // marker room; the marker hangs in that room.
+                break_pending = *page_break_after;
                 let text_start = block.text_start_pt(&page_style);
-                let text_column = block.text_column_width(&page_style);
-                let width = export_flow::line_width("", text, &block.runs, style, *start);
-                let shift = align_shift(
-                    block.style.alignment.resolve(block.text.as_str()),
-                    text_column,
-                    width,
-                );
                 let marker_x = page_style.margin_left_pt + text_start
                     - LIST_MARKER_GAP_PT
                     - pdf_text_width(marker, style);
-                let styled_line = text_line::StyledLine {
-                    x: page_style.margin_left_pt + text_start + shift,
-                    marker_x,
-                    y,
-                    marker,
-                    text,
-                    text_start: *start,
-                    runs: &block.runs,
-                    geometry,
+                let marker_shape = if marker.is_empty() {
+                    None
+                } else {
+                    let marker_text = format!("{marker} ");
+                    let marker_width = pdf_text_width(&marker_text, style) + 1.0;
+                    let marker_block = RichBlock::new(0, "paragraph", &marker_text);
+                    let shaped_marker = crate::shape_wrapped_block_lines(
+                        &marker_block,
+                        style.size_pt,
+                        marker_width,
+                    )
+                    .and_then(|mut lines| {
+                        (lines.len() == 1)
+                            .then(|| lines.pop().and_then(|(_, shaped)| shaped))
+                            .flatten()
+                    })
+                    .ok_or_else(|| {
+                        WriterError::Invalid(format!(
+                            "PDF export could not shape list marker in block {}",
+                            line.block
+                        ))
+                    })?;
+                    Some((marker_text, shaped_marker))
                 };
-                text_line::draw_styled_line(&mut pdf, page, &styled_line, style);
+                if let Some(shaped) = shaped {
+                    let context = format!("block {}", line.block);
+                    if let Some((marker_text, marker_line)) = marker_shape.as_ref() {
+                        shaped_export::draw_line_with_prefix(
+                            &mut pdf,
+                            &mut fonts,
+                            page,
+                            &context,
+                            Some((marker_text, marker_line, marker_x)),
+                            block.text.as_str(),
+                            y,
+                            page_style.margin_left_pt + text_start,
+                            shaped,
+                        )?;
+                    } else {
+                        shaped_export::draw_line(
+                            &mut pdf,
+                            &mut fonts,
+                            page,
+                            &context,
+                            block.text.as_str(),
+                            y,
+                            page_style.margin_left_pt + text_start,
+                            shaped,
+                        )?;
+                    }
+                } else if let Some((marker_text, marker_line)) = marker_shape.as_ref() {
+                    let context = format!("block {} list marker", line.block);
+                    shaped_export::draw_line(
+                        &mut pdf,
+                        &mut fonts,
+                        page,
+                        &context,
+                        marker_text,
+                        y,
+                        marker_x,
+                        marker_line,
+                    )?;
+                }
             }
             LineContent::TableRow { layout, row } => {
                 let shift = align_shift(
@@ -294,7 +341,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     layout.width,
                 );
                 let origin = (page_style.margin_left_pt + indent + shift, y);
-                export_table::draw_row(&mut pdf, page, layout, *row, origin);
+                export_table::draw_row(&mut pdf, &mut fonts, page, layout, *row, origin)?;
             }
             LineContent::Chart {
                 chart,
@@ -315,21 +362,43 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     column,
                     *width,
                 );
-                if let Some(image) = block.image.as_ref().and_then(|i| pdf_image(i).ok()) {
-                    let id = pdf.add_image(image);
-                    let x = page_style.margin_left_pt + indent + shift;
-                    pdf.draw_image_with_transform(
-                        page,
-                        id,
-                        (*width, *height),
-                        [1.0, 0.0, 0.0, -1.0, x, y],
-                    );
-                }
+                let image = block.image.as_ref().ok_or_else(|| {
+                    WriterError::Invalid(format!(
+                        "PDF export image block {} has no image payload",
+                        line.block
+                    ))
+                })?;
+                let image = pdf_image(image).map_err(|error| {
+                    WriterError::Invalid(format!(
+                        "PDF export image block {} ({}): {}",
+                        line.block,
+                        bounded_diagnostic(&image.name, 64),
+                        bounded_diagnostic(&error, 160),
+                    ))
+                })?;
+                let id = pdf.add_image(image);
+                let x = page_style.margin_left_pt + indent + shift;
+                pdf.draw_image_with_transform(
+                    page,
+                    id,
+                    (*width, *height),
+                    [1.0, 0.0, 0.0, -1.0, x, y],
+                );
             }
         }
         y -= line.height;
     }
-    pdf.serialize()
+    Ok(pdf.serialize())
+}
+
+fn bounded_diagnostic(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let bounded: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{bounded}…")
+    } else {
+        bounded
+    }
 }
 
 /// A picture as a PDF image: decoded, shrunk to at most 1,600 pixels on a
@@ -541,6 +610,10 @@ mod tests {
     use super::*;
     use crate::{PageSetup, RichBlock, WriterDocument};
 
+    fn export_valid(document: &WriterDocument) -> Vec<u8> {
+        export_pdf(document).expect("valid PDF fixture")
+    }
+
     #[test]
     fn export_pdf_emits_every_paginated_fragment() {
         let mut document = WriterDocument::new("export-test", "Export test");
@@ -557,7 +630,7 @@ mod tests {
             .expect("valid page layout");
         assert!(expected_pages.len() > 1, "fixture must span multiple pages");
 
-        let pdf_bytes = export_pdf(&document);
+        let pdf_bytes = export_valid(&document);
         let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
         for index in 0..80 {
             let text = format!("unique-paragraph-{index:03}");
@@ -586,7 +659,7 @@ mod tests {
         }];
         document.push(block);
 
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(
             text.contains("24.00 Tf") && text.contains("(large)"),
@@ -625,7 +698,7 @@ mod tests {
         ];
         document.push(block);
 
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(text.contains("(one )"), "leading plain run: {text}");
         assert!(
@@ -661,7 +734,7 @@ mod tests {
             "It\u{2019}s a plain body line.",
         ));
 
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let text = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         let runs = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
         assert!(
@@ -706,7 +779,7 @@ mod tests {
             "paragraph",
             "\u{395}\u{3bb}\u{3bb}\u{3b7}\u{3bd}\u{3b9}\u{3ba}\u{3ac} \u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}",
         ));
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         assert_eq!(
             loom_pdf::inspect::page_text(&pdf).expect("page text"),
             ["\u{395}\u{3bb}\u{3bb}\u{3b7}\u{3bd}\u{3b9}\u{3ba}\u{3ac} \u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}"]
@@ -718,7 +791,7 @@ mod tests {
         let mut document = WriterDocument::new("title-test", "Untitled");
         document.push(RichBlock::new(document.next_id(), "paragraph", "Hello"));
 
-        let pdf_bytes = export_pdf(&document);
+        let pdf_bytes = export_valid(&document);
         let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
 
         // The PDF should contain "Hello" exactly once
@@ -752,7 +825,7 @@ mod tests {
             ));
         }
 
-        let pdf_bytes = export_pdf(&document);
+        let pdf_bytes = export_valid(&document);
         let pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
 
         // "My Document" should not appear at all (title not in body)
@@ -802,7 +875,7 @@ mod tests {
             document.next_id(),
             "| Name | Qty |\n| --- | --- |\n| Ada | 3 |\n| Grace | 12 |",
         ));
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(!content.contains('|'), "no pipe characters are printed");
         assert!(!content.contains("---"), "the separator row is not printed");
@@ -846,7 +919,7 @@ mod tests {
             document.push(block);
         }
         let style = document.page.page_style();
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
 
         let column = style.width_pt - style.margin_left_pt - style.margin_right_pt;
         // The body is drawn at the page style's body size, which is the size
@@ -884,7 +957,7 @@ mod tests {
             "paragraph",
             "Body words",
         ));
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let drawn = test_support::drawn_text_runs(&pdf).expect("semantic text runs");
         let size_of = |text: &str| {
             drawn
@@ -930,7 +1003,7 @@ mod tests {
             },
         });
         document.push(block);
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let style = document.page.page_style();
         let right = style.width_pt - style.margin_right_pt;
         let left = style.margin_left_pt;
@@ -989,7 +1062,7 @@ mod tests {
         assert!(editor.len() > 6, "the sample wraps: {editor:?}");
 
         // PDF: one drawn run per line, in reading order.
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let exported: Vec<String> = loom_pdf::inspect::page_text(&pdf)
             .expect("page text")
             .iter()
@@ -1032,7 +1105,7 @@ mod tests {
             run(8, 13, FontWeight::Bold),
         ];
         document.push(block);
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let faces: Vec<String> = loom_pdf::inspect::embedded_fonts(&pdf)
             .expect("fonts")
             .into_iter()
@@ -1057,7 +1130,7 @@ mod tests {
         document
             .insert_table_block(usize::MAX, 2, 3)
             .expect("insert");
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         // Each rule is "x y m x2 y2 l S"; a vertical rule has equal x values.
         let mut vertical_x: Vec<i64> = Vec::new();
@@ -1100,7 +1173,7 @@ mod tests {
         line.add_series("Users", vec![10.0, 25.0, 40.0], None);
         document.insert_chart_block(usize::MAX, line).expect("line");
 
-        let pdf = export_pdf(&document);
+        let pdf = export_valid(&document);
         let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
         assert!(
             content.contains(r"Eng \(60%\)") && content.contains(r"Design \(40%\)"),
@@ -1118,8 +1191,20 @@ mod tests {
 mod export_justification_tests;
 
 #[cfg(test)]
+#[path = "export_shaped_tests.rs"]
+mod export_shaped_tests;
+
+#[cfg(test)]
+#[path = "export_image_error_tests.rs"]
+mod export_image_error_tests;
+
+#[cfg(test)]
+#[path = "export_style_tests.rs"]
+mod export_style_tests;
+
+#[cfg(test)]
 mod pdf_dump_tests {
-    use super::export_pdf;
+    use crate::export::test_support::export_valid_pdf as export_valid;
     use crate::{RichBlock, WriterDocument};
 
     /// Writes the PDF of a document with a heading, a sized word and a table, so
@@ -1152,6 +1237,6 @@ mod pdf_dump_tests {
             table_id,
             "| Region | Sessions | Change |\n| --- | --- | --- |\n| North | 1,204 | +8.1% |\n| South | 987 | +5.4% |",
         ));
-        std::fs::write(format!("{dir}/dump.pdf"), export_pdf(&document)).expect("write pdf");
+        std::fs::write(format!("{dir}/dump.pdf"), export_valid(&document)).expect("write pdf");
     }
 }

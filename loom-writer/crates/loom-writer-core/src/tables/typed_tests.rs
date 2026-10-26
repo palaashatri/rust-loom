@@ -359,7 +359,7 @@ fn exports_read_the_typed_table() {
         markdown.contains(":---:"),
         "the centred column is marked: {markdown}"
     );
-    let pdf = crate::export_pdf(&document);
+    let pdf = crate::export::test_support::export_valid_pdf(&document);
     let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
     assert!(
         content.contains("Head"),

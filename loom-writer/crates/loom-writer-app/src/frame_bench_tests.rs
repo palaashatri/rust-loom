@@ -201,7 +201,7 @@ fn bench_size(pages: usize, mode: &str) {
 
     // PDF export.
     let t = Instant::now();
-    let pdf = loom_writer_core::export_pdf(&current);
+    let pdf = loom_writer_core::export_pdf(&current).expect("export frame benchmark PDF");
     let pdf_ms = ms(t);
     let _ = std::fs::remove_dir_all(&dir);
 

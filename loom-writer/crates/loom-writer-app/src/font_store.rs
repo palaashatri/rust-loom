@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use loom_writer_core::fonts::{scan_system_fonts, FontCatalog, ScanConfig, ScanLimits};
+use loom_writer_core::fonts::{
+    scan_system_fonts, writer_scan_config, FontCatalog, ScanConfig, ScanLimits,
+};
 
 /// Most recently used families kept.
 pub(crate) const MAX_RECENTS: usize = 8;
@@ -157,7 +159,7 @@ pub(crate) fn scan_in_background(
 
 /// The scan configuration of the running system, with the picker's limits.
 pub(crate) fn system_scan_config() -> ScanConfig {
-    let mut config = ScanConfig::system();
+    let mut config = writer_scan_config(ScanConfig::system());
     config.limits = scan_limits();
     config
 }
@@ -255,5 +257,21 @@ mod tests {
         let limits = scan_limits();
         assert!(limits.max_duration.is_some());
         assert!(limits.max_files <= 20_000 && limits.max_entries <= 200_000);
+    }
+
+    #[test]
+    fn writer_system_scan_prioritizes_bundled_script_fallbacks_and_keeps_platform_fallbacks() {
+        let config = system_scan_config();
+        let policy = config.policy.families();
+        assert_eq!(
+            &policy[..2],
+            ["Noto Naskh Arabic", "Noto Sans Hebrew"],
+            "Writer must use the same deterministic bundled script faces on every host"
+        );
+        assert_eq!(
+            &policy[2..],
+            loom_writer_core::fonts::FallbackPolicy::platform_default().families(),
+            "the system's remaining fallbacks still follow the bundled script faces"
+        );
     }
 }

@@ -115,8 +115,9 @@ impl FontCatalog {
         Self::build(Vec::new(), policy, ScanReport::default())
     }
 
-    /// A catalogue holding only the bundled Inter faces. Instant, and the
-    /// right placeholder while a system scan runs on another thread.
+    /// A catalogue holding only the faces selected by the bundled features.
+    /// Instant, and the right placeholder while a system scan runs on another
+    /// thread.
     pub fn bundled_only() -> Self {
         let mut config = ScanConfig::with_dirs(Vec::new());
         config.include_bundled = true;

@@ -1,6 +1,6 @@
 import { LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
-import { WriterAlignmentState } from "alignment_state.slint";
+import { WriterFormatState } from "alignment_state.slint";
 
 /// The menu that opens under a toolbar item, with its click-away scrim and
 /// keyboard handling (Up/Down move, Return or Space run, Escape closes).
@@ -20,7 +20,7 @@ export component WriterToolbarMenu inherits Rectangle {
     in property <bool> is-italic: false;
     in property <bool> is-underline: false;
     in property <bool> is-strikethrough: false;
-    in property <int> text-alignment: WriterAlignmentState.text-alignment;
+    in property <int> text-alignment: WriterFormatState.text-alignment;
     in property <int> heading-level: 0;
     in property <int> list-style-index: 0;
     callback command(string);
@@ -53,11 +53,14 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, enabled: true },
             { id: "insert.comment", label: "Comment", shortcut: "", checked: false, enabled: true },
         ]
-        : root.kind == 4 ? (WriterAlignmentState.justify-available ? [
+        : root.kind == 4 ? (WriterFormatState.justify-available ? [
             { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
             { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
             { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
             { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
+            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, enabled: WriterFormatState.color-formatting-available },
+            { id: "writer.style.superscript", label: "Superscript", shortcut: "", checked: WriterFormatState.superscript-selected, enabled: WriterFormatState.inline-formatting-available },
+            { id: "writer.style.subscript", label: "Subscript", shortcut: "", checked: WriterFormatState.subscript-selected, enabled: WriterFormatState.inline-formatting-available },
             { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
             { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
             { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
@@ -67,6 +70,9 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
             { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
             { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
+            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, enabled: WriterFormatState.color-formatting-available },
+            { id: "writer.style.superscript", label: "Superscript", shortcut: "", checked: WriterFormatState.superscript-selected, enabled: WriterFormatState.inline-formatting-available },
+            { id: "writer.style.subscript", label: "Subscript", shortcut: "", checked: WriterFormatState.subscript-selected, enabled: WriterFormatState.inline-formatting-available },
             { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
             { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
             { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
@@ -76,6 +82,11 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "paragraph.h1", label: "Heading 1", shortcut: "", checked: root.heading-level == 1, enabled: true },
             { id: "paragraph.h2", label: "Heading 2", shortcut: "", checked: root.heading-level == 2, enabled: true },
             { id: "paragraph.h3", label: "Heading 3", shortcut: "", checked: root.heading-level == 3, enabled: true },
+            { id: "writer.direction.auto", label: "Automatic Direction", shortcut: "", checked: WriterFormatState.paragraph-direction == 0, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.direction.ltr", label: "Left to Right", shortcut: "", checked: WriterFormatState.paragraph-direction == 1, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.direction.rtl", label: "Right to Left", shortcut: "", checked: WriterFormatState.paragraph-direction == 2, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.align.start", label: "Align Start", shortcut: "", checked: WriterFormatState.logical-alignment == 0, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.align.end", label: "Align End", shortcut: "", checked: WriterFormatState.logical-alignment == 1, enabled: WriterFormatState.paragraph-formatting-available },
         ]
         : root.kind == 6 ? [
             { id: "list.none", label: "No List", shortcut: "", checked: root.list-style-index == 0, enabled: true },

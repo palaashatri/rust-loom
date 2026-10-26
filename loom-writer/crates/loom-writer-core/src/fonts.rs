@@ -20,13 +20,41 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
-pub use loom_fonts::{Availability, FontCatalog, ScanCache, ScanConfig, ScanLimits, ScanReport};
+pub use loom_fonts::{
+    Affinity, Availability, FallbackPolicy, FontCatalog, Paragraph, ScanCache, ScanConfig,
+    ScanLimits, ScanReport, StyledSpan, TextDirection,
+};
 
 use crate::WriterDocument;
 
 /// The family text with no family of its own is set in: the bundled face the
 /// window shell draws documents with.
 pub const DEFAULT_FAMILY: &str = "Inter";
+
+/// The Writer-specific fallback order: bundled script faces first, then the
+/// running platform's general fallback families. Requested run families still
+/// remain primary; this order applies only when a face lacks a character.
+pub fn writer_fallback_policy() -> FallbackPolicy {
+    let mut families = vec![
+        "Noto Naskh Arabic".to_owned(),
+        "Noto Sans Hebrew".to_owned(),
+    ];
+    families.extend(
+        FallbackPolicy::platform_default()
+            .families()
+            .iter()
+            .cloned(),
+    );
+    FallbackPolicy::new(families)
+}
+
+/// Applies Writer's deterministic script fallbacks to a system or fixture
+/// scan configuration while retaining its directories, limits and bundle
+/// selection.
+pub fn writer_scan_config(mut config: ScanConfig) -> ScanConfig {
+    config.policy = writer_fallback_policy();
+    config
+}
 
 static CATALOG: RwLock<Option<Arc<FontCatalog>>> = RwLock::new(None);
 static EPOCH: AtomicU64 = AtomicU64::new(0);
@@ -38,7 +66,10 @@ pub fn font_catalog() -> Arc<FontCatalog> {
     }
     static BUNDLED: OnceLock<Arc<FontCatalog>> = OnceLock::new();
     BUNDLED
-        .get_or_init(|| Arc::new(FontCatalog::bundled_only()))
+        .get_or_init(|| {
+            let config = writer_scan_config(ScanConfig::with_dirs(Vec::new()));
+            Arc::new(FontCatalog::scan(&config))
+        })
         .clone()
 }
 
@@ -350,5 +381,41 @@ mod tests {
             second.report().cache_hits > 0,
             "the second scan reads no file"
         );
+    }
+
+    #[test]
+    fn bundled_writer_catalog_prefers_noto_script_fallback_before_platform_fallbacks() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                reset_font_catalog();
+            }
+        }
+
+        let _serial = test_fonts::serial();
+        reset_font_catalog();
+        let _reset = Reset;
+        let catalog = font_catalog();
+        let policy = catalog.policy().families();
+        assert_eq!(
+            &policy[..2],
+            ["Noto Naskh Arabic", "Noto Sans Hebrew"],
+            "bundled Writer rendering must choose deterministic script faces first"
+        );
+        assert_eq!(
+            &policy[2..],
+            FallbackPolicy::platform_default().families(),
+            "platform fallback remains available after bundled script faces"
+        );
+
+        let inter = catalog.resolve("Inter", 400, false).expect("bundled Inter");
+        let chain: Vec<_> = inter
+            .chain
+            .iter()
+            .filter_map(|face| catalog.face(*face).map(|info| info.family.as_str()))
+            .collect();
+        assert_eq!(chain.first().copied(), Some("Inter"));
+        assert_eq!(chain.get(1).copied(), Some("Noto Naskh Arabic"));
+        assert_eq!(chain.get(2).copied(), Some("Noto Sans Hebrew"));
     }
 }

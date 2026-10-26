@@ -186,7 +186,7 @@ fn test_deep_audit_export_pipelines_pdf_and_markdown() {
     );
 
     // PDF export
-    let pdf_bytes = loom_writer_core::export_pdf(&doc);
+    let pdf_bytes = loom_writer_core::export_pdf(&doc).expect("export audit fixture PDF");
     assert!(!pdf_bytes.is_empty());
     assert!(pdf_bytes.starts_with(b"%PDF-"));
 }

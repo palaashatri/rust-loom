@@ -1,12 +1,12 @@
-//! The Inter faces that `loom-ui` ships (SIL OFL 1.1, see
-//! `loom-ui/ui/fonts/Inter-LICENSE.txt`).
+//! Bundled Inter faces and opt-in Noto script fallbacks.
 //!
 //! The bytes are the same files the Slint shell registers, so a measurement
 //! made here describes the glyphs the page actually draws. They are included
 //! by path rather than copied so the repository holds one copy. The faces a
 //! document is set in (`bundled-inter-text`) and the two intermediate weights
 //! (`bundled-inter-weights`) are separate features, so a binary pays for the
-//! faces it uses.
+//! faces it uses. Noto Arabic and Hebrew are selected by
+//! `bundled-script-fallback` and licensed by `assets/fonts/Noto-OFL.txt`.
 
 /// One bundled face: its file name and bytes.
 pub type BundledFace = (&'static str, &'static [u8]);
@@ -42,10 +42,19 @@ const FACES: &[BundledFace] = &[
         "Inter-BoldItalic.ttf",
         include_bytes!("../../loom-ui/ui/fonts/Inter-BoldItalic.ttf"),
     ),
+    #[cfg(feature = "bundled-script-fallback")]
+    (
+        "NotoNaskhArabic-Regular.ttf",
+        include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf"),
+    ),
+    #[cfg(feature = "bundled-script-fallback")]
+    (
+        "NotoSansHebrew-Regular.ttf",
+        include_bytes!("../assets/fonts/NotoSansHebrew-Regular.ttf"),
+    ),
 ];
 
-/// Every bundled face the enabled features select: six with `bundled-inter`,
-/// four with `bundled-inter-text` alone, none with neither.
+/// Every bundled face selected by the enabled features.
 pub fn bundled_faces() -> &'static [BundledFace] {
     FACES
 }

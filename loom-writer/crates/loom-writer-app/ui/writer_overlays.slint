@@ -7,6 +7,8 @@ import { DocxImportWarningDialog } from "docx_import_warning.slint";
 import { WriterPaletteHost } from "palette_host.slint";
 import { PictureAltDialog } from "writer_components.slint";
 import { Theme } from "theme.slint";
+import { WriterTextColorDialog } from "writer_text_color_dialog.slint";
+import { WriterFormatState } from "alignment_state.slint";
 
 /// Dialogs, the in-window menu popup, the command palette, the find bar and the
 /// frameless-window resize edges, stacked above the page in the same order as
@@ -71,6 +73,10 @@ export component WriterOverlays inherits Rectangle {
     }
 
 PictureAltDialog {}
+    if WriterFormatState.color-dialog-open : WriterTextColorDialog {
+        width: root.width;
+        height: root.height;
+    }
     if root.save-changes-open : WriterSaveChangesDialog {
         width: root.width;
         height: root.height;

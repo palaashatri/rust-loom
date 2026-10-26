@@ -2,7 +2,8 @@
 //! storage in the table block, read-back into a `loom_objects::Table`, and the
 //! DOCX and PDF exports must not show the storage markers as text.
 
-use crate::{export_docx, export_pdf, RichBlock, WriterDocument, WriterTable, TABLE_BLOCK_KIND};
+use crate::export::test_support::export_valid_pdf as export_pdf;
+use crate::{export_docx, RichBlock, WriterDocument, WriterTable, TABLE_BLOCK_KIND};
 use loom_objects::table::{CellStyleOverride, HorizontalAlign, Table, TextRun};
 use loom_package::zip::PackageArchive;
 

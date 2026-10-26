@@ -5,8 +5,9 @@
 
 use std::ops::Range;
 
+use loom_text::{CharacterStyle, FontWeight};
 use loom_writer_core::loom_objects::table::{HorizontalAlign, TextRun};
-use loom_writer_core::{TextSelection, WriterDocument};
+use loom_writer_core::{TextSelection, WriterDocument, TABLE_CELL_BASE_FONT_SIZE_PT};
 use slint::SharedString;
 
 use crate::table_actions::{get_table_cell_selection_range, TableCellRange};
@@ -18,6 +19,7 @@ pub(crate) enum Emphasis {
     Bold,
     Italic,
     Underline,
+    Strikethrough,
 }
 
 impl Emphasis {
@@ -36,6 +38,7 @@ impl Emphasis {
             Self::Bold => run.bold,
             Self::Italic => run.italic,
             Self::Underline => run.underline,
+            Self::Strikethrough => run.strikethrough,
         }
     }
 
@@ -44,6 +47,7 @@ impl Emphasis {
             Self::Bold => run.bold = on,
             Self::Italic => run.italic = on,
             Self::Underline => run.underline = on,
+            Self::Strikethrough => run.strikethrough = on,
         }
     }
 
@@ -52,6 +56,7 @@ impl Emphasis {
             Self::Bold => "Bold",
             Self::Italic => "Italic",
             Self::Underline => "Underline",
+            Self::Strikethrough => "Strikethrough",
         }
     }
 }
@@ -94,6 +99,269 @@ fn emphasis_target(doc: &WriterDocument, selection: &TextSelection) -> Option<Ta
     let range = selection.anchor.min(selection.focus)..selection.anchor.max(selection.focus);
     doc.table_block_id_for_range(range.clone())
         .map(|_| Target::Text { range })
+}
+
+pub(crate) fn can_format_selection(doc: &WriterDocument, selection: TextSelection) -> bool {
+    if get_table_cell_selection_range()
+        .is_some_and(|range| doc.loom_table_from_block(range.block_id).is_some())
+    {
+        return true;
+    }
+    if selection.is_collapsed() {
+        doc.table_cell_at_offset(selection.focus).is_some()
+    } else {
+        let start = selection.anchor.min(selection.focus);
+        let end = selection.anchor.max(selection.focus);
+        let mut block_start = 0usize;
+        doc.blocks.iter().any(|block| {
+            let block_end = block_start + block.text.len_bytes();
+            let overlaps = block.typed_table().is_some() && start < block_end && end > block_start;
+            block_start = block_end + 1;
+            overlaps
+        })
+    }
+}
+
+pub(crate) fn selection_is_table_only(doc: &WriterDocument, selection: TextSelection) -> bool {
+    if get_table_cell_selection_range()
+        .is_some_and(|range| doc.loom_table_from_block(range.block_id).is_some())
+    {
+        return true;
+    }
+    if selection.is_collapsed() {
+        doc.table_cell_at_offset(selection.focus).is_some()
+    } else {
+        doc.table_block_id_for_range(
+            selection.anchor.min(selection.focus)..selection.anchor.max(selection.focus),
+        )
+        .is_some()
+    }
+}
+
+fn mutate_target(
+    document: &mut WriterDocument,
+    selection: &TextSelection,
+    change: impl Fn(&mut TextRun),
+) -> bool {
+    match emphasis_target(document, selection) {
+        Some(Target::Cells {
+            block_id,
+            rows,
+            columns,
+        }) => document
+            .set_table_cells_runs(block_id, rows, columns, change)
+            .is_ok(),
+        Some(Target::Text { range }) => {
+            document.set_table_text_runs(range, change).unwrap_or(false)
+        }
+        None if !selection.is_collapsed() => {
+            mutate_selected_table_blocks(document, selection, &change)
+        }
+        None => false,
+    }
+}
+
+fn mutate_selected_table_blocks(
+    document: &mut WriterDocument,
+    selection: &TextSelection,
+    change: &impl Fn(&mut TextRun),
+) -> bool {
+    let start = selection.anchor.min(selection.focus);
+    let end = selection.anchor.max(selection.focus);
+    let mut block_start = 0usize;
+    let mut segments = Vec::new();
+    for block in &document.blocks {
+        let block_end = block_start + block.text.len_bytes();
+        if block.typed_table().is_some() {
+            let part_start = start.max(block_start);
+            let part_end = end.min(block_end);
+            if part_start < part_end {
+                segments.push(part_start..part_end);
+            }
+        }
+        block_start = block_end + 1;
+    }
+    segments.into_iter().fold(false, |changed, range| {
+        document.set_table_text_runs(range, change).unwrap_or(false) || changed
+    })
+}
+
+pub(crate) fn set_selection_superscript(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    enabled: bool,
+) -> bool {
+    mutate_target(document, &selection, |run| {
+        run.superscript = enabled;
+        if enabled {
+            run.subscript = false;
+        }
+    })
+}
+
+pub(crate) fn set_selection_emphasis(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    emphasis: Emphasis,
+    enabled: bool,
+) -> bool {
+    mutate_target(document, &selection, |run| emphasis.set(run, enabled))
+}
+
+pub(crate) fn set_selection_subscript(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    enabled: bool,
+) -> bool {
+    mutate_target(document, &selection, |run| {
+        run.subscript = enabled;
+        if enabled {
+            run.superscript = false;
+        }
+    })
+}
+
+pub(crate) fn set_selection_font_family(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    family: &str,
+) -> bool {
+    let family = family.trim();
+    mutate_target(document, &selection, |run| {
+        run.font_family = (!family.is_empty()).then(|| family.to_owned());
+    })
+}
+
+pub(crate) fn set_selection_font_size(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    size_pt: f32,
+) -> bool {
+    let size_pt = size_pt.clamp(6.0, 72.0);
+    mutate_target(document, &selection, |run| {
+        run.font_size_pt = Some(size_pt);
+    })
+}
+
+pub(crate) fn set_selection_foreground_color(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    color: &str,
+) -> bool {
+    mutate_target(document, &selection, |run| {
+        run.color = Some(color.to_owned());
+    })
+}
+
+/// Character styles stored on the table runs covered by the active cell range
+/// or text selection. A collapsed table caret reports the run under it.
+pub(crate) fn selected_character_styles(
+    document: &WriterDocument,
+    selection: TextSelection,
+) -> Vec<CharacterStyle> {
+    if let Some(range) = get_table_cell_selection_range() {
+        let Some(table) = document.loom_table_from_block(range.block_id) else {
+            return Vec::new();
+        };
+        let mut styles = Vec::new();
+        for row in range.start_row.min(range.end_row)..=range.start_row.max(range.end_row) {
+            for column in range.start_col.min(range.end_col)..=range.start_col.max(range.end_col) {
+                if let Some(cell) = table.cell(row, column).filter(|cell| !cell.is_covered) {
+                    styles.extend(cell.content.runs.iter().map(character_style));
+                }
+            }
+        }
+        return styles;
+    }
+
+    if selection.is_collapsed() {
+        let Some(location) = document.table_cell_at_offset(selection.focus) else {
+            return Vec::new();
+        };
+        let Some(table) = document.loom_table_from_block(location.block_id) else {
+            return Vec::new();
+        };
+        let Some(cell) = table.cell(location.row, location.col) else {
+            return Vec::new();
+        };
+        let at = selection.focus.saturating_sub(location.cell_start);
+        let mut cursor = 0usize;
+        if let Some(run) = cell.content.runs.iter().find(|run| {
+            let end = cursor + run.text.len();
+            let contains = cursor <= at.saturating_sub(1) && at.saturating_sub(1) < end;
+            cursor = end;
+            contains
+        }) {
+            return vec![character_style(run)];
+        }
+        return cell
+            .content
+            .runs
+            .first()
+            .map(character_style)
+            .into_iter()
+            .collect();
+    }
+
+    let start = selection.anchor.min(selection.focus);
+    let end = selection.anchor.max(selection.focus);
+    let mut styles = Vec::new();
+    let mut block_start = 0usize;
+    for block in &document.blocks {
+        let block_end = block_start + block.text.len_bytes();
+        if let Some(table) = block.typed_table() {
+            let part_start = start.max(block_start);
+            let part_end = end.min(block_end);
+            if part_start < part_end {
+                let ranges = document.table_cell_ranges(block.id).unwrap_or_default();
+                for (row, cells) in ranges.iter().enumerate() {
+                    for (column, &(cell_start, cell_end)) in cells.iter().enumerate() {
+                        let Some(cell) = table.cell(row, column).filter(|cell| !cell.is_covered)
+                        else {
+                            continue;
+                        };
+                        let cell_start = block_start + cell_start;
+                        let cell_end = block_start + cell_end;
+                        let local_start = part_start.max(cell_start).saturating_sub(cell_start);
+                        let local_end = part_end.min(cell_end).saturating_sub(cell_start);
+                        if local_start >= local_end {
+                            continue;
+                        }
+                        let mut cursor = 0usize;
+                        for run in &cell.content.runs {
+                            let run_start = cursor;
+                            let run_end = cursor + run.text.len();
+                            if run_start < local_end && run_end > local_start {
+                                styles.push(character_style(run));
+                            }
+                            cursor = run_end;
+                        }
+                    }
+                }
+            }
+        }
+        block_start = block_end + 1;
+    }
+    styles
+}
+
+fn character_style(run: &TextRun) -> CharacterStyle {
+    let mut style = CharacterStyle::default();
+    style.weight = if run.bold {
+        FontWeight::Bold
+    } else {
+        FontWeight::Regular
+    };
+    style.italic = run.italic;
+    style.underline = run.underline;
+    style.strikethrough = run.strikethrough;
+    style.superscript = run.superscript;
+    style.subscript = run.subscript;
+    style.font_size = run.font_size_pt.unwrap_or(TABLE_CELL_BASE_FONT_SIZE_PT);
+    style.explicit_size = run.font_size_pt.is_some();
+    style.font_family = run.font_family.clone().unwrap_or_default();
+    style.color = run.color.clone();
+    style
 }
 
 /// Shows a message in the status line and announces it to assistive technology.

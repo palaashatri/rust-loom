@@ -1,4 +1,4 @@
-use super::export_pdf;
+use crate::export::test_support::export_valid_pdf as export_pdf;
 use crate::{RichBlock, WriterDocument};
 
 #[test]

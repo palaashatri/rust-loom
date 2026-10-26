@@ -210,14 +210,14 @@ fn a_picture_exports_as_a_word_drawing_with_its_bytes_in_the_package() {
 fn a_picture_exports_to_pdf_as_an_image_between_its_paragraphs() {
     let mut doc = document_with_text();
     doc.insert_image_block(6, picture(100, 50, 77)).unwrap();
-    let with_image = crate::export_pdf(&doc);
+    let with_image = crate::export::test_support::export_valid_pdf(&doc);
     let text = String::from_utf8_lossy(&with_image);
     assert!(
         text.contains("/Subtype /Image"),
         "an image object is written"
     );
     assert!(text.contains("/Width 100 /Height 50"));
-    let without = crate::export_pdf(&document_with_text());
+    let without = crate::export::test_support::export_valid_pdf(&document_with_text());
     assert!(!String::from_utf8_lossy(&without).contains("/Subtype /Image"));
     assert!(with_image.len() > without.len());
 }

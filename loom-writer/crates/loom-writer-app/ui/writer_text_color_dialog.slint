@@ -1,0 +1,101 @@
+import { LoomButton, LoomTextField } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { WriterFormatState } from "alignment_state.slint";
+
+/// Accessible foreground-color editor. Rust validates the value before it
+/// mutates the document, and keeps this dialog open when the input is invalid.
+export component WriterTextColorDialog inherits FocusScope {
+    init => { color-field.focus-input(); }
+
+    key-pressed(event) => {
+        if (event.text == Key.Escape) {
+            WriterFormatState.cancel-foreground-color();
+            return accept;
+        }
+        if (event.text == Key.Tab || event.text == Key.Backtab) {
+            if (event.text == Key.Backtab || event.modifiers.shift) {
+                if (apply-button.has-focus) { color-field.focus-input(); }
+                else if (cancel-button.has-focus) { apply-button.grab-focus(); }
+                else { cancel-button.grab-focus(); }
+            } else {
+                if (color-field.focused) { apply-button.grab-focus(); }
+                else if (apply-button.has-focus) { cancel-button.grab-focus(); }
+                else { color-field.focus-input(); }
+            }
+            return accept;
+        }
+        return reject;
+    }
+
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+        TouchArea { clicked => { color-field.focus-input(); } }
+
+        Rectangle {
+            width: min(460px * max(1.0, Theme.text-scale), root.width - 48px);
+            height: min(layout.preferred-height, root.height - 48px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            layout := VerticalLayout {
+                padding: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.md;
+
+                Text {
+                    text: "Text Color";
+                    font-size: Theme.type.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
+                Text {
+                    text: "Enter a hexadecimal color as #RRGGBB or #RRGGBBAA.";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink-secondary;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    wrap: word-wrap;
+                }
+                color-field := LoomTextField {
+                    label: "Foreground color";
+                    placeholder: "#RRGGBB";
+                    value <=> WriterFormatState.color-input;
+                    edited(_) => { WriterFormatState.clear-foreground-color-error(); }
+                    accepted(_) => { WriterFormatState.apply-foreground-color(); }
+                    cancelled => { WriterFormatState.cancel-foreground-color(); }
+                }
+                if WriterFormatState.color-error != "" : Text {
+                    text: WriterFormatState.color-error;
+                    color: Theme.palette().danger;
+                    font-size: Theme.type.caption;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: WriterFormatState.color-error;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    apply-button := LoomButton {
+                        label: "Apply Color";
+                        variant: "primary";
+                        x: Theme.rtl ? cancel-button.width + Theme.tokens.space.sm : parent.width - self.width;
+                        clicked => { WriterFormatState.apply-foreground-color(); }
+                    }
+                    cancel-button := LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        x: Theme.rtl ? 0px : apply-button.x - Theme.tokens.space.sm - self.width;
+                        clicked => { WriterFormatState.cancel-foreground-color(); }
+                    }
+                }
+            }
+        }
+    }
+}

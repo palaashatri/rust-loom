@@ -468,7 +468,7 @@ fn a_line_with_two_families_is_drawn_as_rows_placed_by_the_measurement() {
 }
 
 #[test]
-fn a_pdf_export_says_once_which_families_it_drew_in_inter() {
+fn a_pdf_export_status_does_not_claim_unverified_font_substitution() {
     let directory =
         std::env::temp_dir().join(format!("loom-writer-pdf-note-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
@@ -486,12 +486,7 @@ fn a_pdf_export_says_once_which_families_it_drew_in_inter() {
     app.invoke_export_pdf();
     let status = app.get_status_left().to_string();
     assert!(path.is_file(), "the PDF was written: {status}");
-    assert!(
-        status
-            .ends_with("PDF export used Inter for Georgia, Garamond (embedding not supported yet)"),
-        "{status}"
-    );
-    assert_eq!(status.matches("PDF export used Inter").count(), 1);
+    assert_eq!(status, format!("Exported {}", path.display()));
 
     // A document in the document font gets no note.
     assert_eq!(

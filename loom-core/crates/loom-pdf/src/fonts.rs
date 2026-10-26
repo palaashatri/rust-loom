@@ -7,7 +7,7 @@
 //! one copy per binary serves the font catalogue and the PDF writer.
 
 use std::fmt::Debug;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use ttf_parser::Face;
 
@@ -71,13 +71,33 @@ pub trait FontFallback: Debug + Send + Sync {
     fn font_for(&self, ch: char, bold: bool, italic: bool) -> Option<FallbackFont>;
 }
 
-/// A parsed font with its metrics cached for fast per-character lookups.
+/// Font bytes either remain borrowed from a binary or are shared by Arc.
+#[derive(Clone)]
+enum FontBytes {
+    Static(&'static [u8]),
+    Owned(Arc<[u8]>),
+}
+
+impl FontBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Static(bytes) => bytes,
+            Self::Owned(bytes) => bytes,
+        }
+    }
+}
+
+/// A parsed font with cached metrics. Owned faces reparse a borrowed Face on
+/// demand so the Arc owns the bytes without a self-referential lifetime.
 #[derive(Clone)]
 pub(crate) struct Font {
-    pub(crate) name: &'static str,
-    pub(crate) data: &'static [u8],
-    face: Face<'static>,
+    pub(crate) name: String,
+    data: FontBytes,
+    index: u32,
+    face_static: Option<Face<'static>>,
     units_per_em: f32,
+    number_of_glyphs: u16,
+    subsetting_allowed: bool,
     /// Glyph id for ASCII 0..128 (`0` when the face has none).
     ascii_gid: [u16; 128],
     /// Advance in font units for each of those glyphs.
@@ -86,34 +106,95 @@ pub(crate) struct Font {
 }
 
 impl Font {
-    /// Parse `data`; `None` when it is not a usable font.
+    /// Parse a borrowed binary face; `None` when it is not usable.
     pub(crate) fn new(name: &'static str, data: &'static [u8]) -> Option<Self> {
-        let face = Face::parse(data, 0).ok()?;
+        Self::from_static(name, data).ok()
+    }
+
+    fn from_static(name: &'static str, data: &'static [u8]) -> Result<Self, String> {
+        if !valid_postscript_name(name) {
+            return Err("font name is not a safe PostScript name".into());
+        }
+        let face =
+            Face::parse(data, 0).map_err(|error| format!("font face does not parse: {error}"))?;
+        let subsetting_allowed = validate_face(data, 0, &face)?;
         let units_per_em = f32::from(face.units_per_em());
         if units_per_em <= 0.0 {
-            return None;
+            return Err("font face has zero units per em".into());
         }
-        let advance = |gid: u16| {
-            face.glyph_hor_advance(ttf_parser::GlyphId(gid))
-                .unwrap_or(0)
-        };
-        let mut ascii_gid = [0u16; 128];
-        let mut ascii_advance = [0u16; 128];
-        for code in 0..128u8 {
-            let gid = face.glyph_index(char::from(code)).map_or(0, |g| g.0);
-            ascii_gid[usize::from(code)] = gid;
-            ascii_advance[usize::from(code)] = advance(gid);
-        }
-        let notdef_advance = advance(0);
-        Some(Self {
-            name,
-            data,
-            face,
+        let (ascii_gid, ascii_advance, notdef_advance) = cached_metrics(&face);
+        let number_of_glyphs = face.number_of_glyphs();
+        Ok(Self {
+            name: name.to_owned(),
+            data: FontBytes::Static(data),
+            index: 0,
+            face_static: Some(face),
             units_per_em,
+            number_of_glyphs,
+            subsetting_allowed,
             ascii_gid,
             ascii_advance,
             notdef_advance,
         })
+    }
+
+    /// Parse and own an indexed font face without leaking or copying its bytes.
+    pub(crate) fn from_owned(data: Arc<[u8]>, index: u32) -> Result<Self, String> {
+        validate_font_file_size(data.len())?;
+        let face = Face::parse(&data, index)
+            .map_err(|error| format!("font face {index} does not parse: {error}"))?;
+        let subsetting_allowed = validate_face(&data, index, &face)?;
+        let name = postscript_name(&face)
+            .ok_or_else(|| "font face has no valid PostScript name".to_string())?;
+        let units_per_em = f32::from(face.units_per_em());
+        if units_per_em <= 0.0 {
+            return Err("font face has zero units per em".into());
+        }
+        let (ascii_gid, ascii_advance, notdef_advance) = cached_metrics(&face);
+        let number_of_glyphs = face.number_of_glyphs();
+        Ok(Self {
+            name,
+            data: FontBytes::Owned(data),
+            index,
+            face_static: None,
+            units_per_em,
+            number_of_glyphs,
+            subsetting_allowed,
+            ascii_gid,
+            ascii_advance,
+            notdef_advance,
+        })
+    }
+
+    pub(crate) fn data(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+
+    pub(crate) fn index(&self) -> u32 {
+        self.index
+    }
+
+    pub(crate) fn subsetting_allowed(&self) -> bool {
+        self.subsetting_allowed
+    }
+
+    pub(crate) fn number_of_glyphs(&self) -> u16 {
+        self.number_of_glyphs
+    }
+
+    pub(crate) fn same_program(&self, other: &Self) -> bool {
+        self.index == other.index && self.data() == other.data()
+    }
+
+    pub(crate) fn same_program_bytes(&self, data: &[u8], index: u32) -> bool {
+        self.index == index && self.data() == data
+    }
+
+    fn face(&self) -> Face<'_> {
+        match &self.face_static {
+            Some(face) => face.clone(),
+            None => Face::parse(self.data(), self.index).expect("validated owned font face"),
+        }
     }
 
     /// The glyph this face draws for `ch`; `None` when its cmap has no entry.
@@ -122,7 +203,7 @@ impl Font {
             let gid = self.ascii_gid[ch as usize];
             return (gid != 0).then_some(gid);
         }
-        self.face.glyph_index(ch).map(|g| g.0).filter(|g| *g != 0)
+        self.face().glyph_index(ch).map(|g| g.0).filter(|g| *g != 0)
     }
 
     /// Horizontal advance of glyph `gid` in font units.
@@ -130,15 +211,12 @@ impl Font {
         if gid == 0 {
             return self.notdef_advance;
         }
-        self.face
+        self.face()
             .glyph_hor_advance(ttf_parser::GlyphId(gid))
             .unwrap_or(self.notdef_advance)
     }
 
     /// Advance of `ch` in font units, notdef when the face lacks the glyph.
-    /// Characters that are not drawn (see [`crate::text::is_not_drawn`]) take
-    /// no space, and a character drawn as its plain expansion (a ligature code
-    /// point shown as `fi`, say) takes the expansion's width.
     pub(crate) fn char_advance_units(&self, ch: char) -> u32 {
         if is_not_drawn(ch) {
             return 0;
@@ -158,8 +236,6 @@ impl Font {
         }
     }
 
-    /// The plain characters `ch` is drawn as when this face has no glyph for
-    /// it, provided the face covers all of them.
     pub(crate) fn expansion(&self, ch: char) -> Option<([char; 3], usize)> {
         let (chars, len) = compat_expansion(ch)?;
         chars[..len]
@@ -168,8 +244,6 @@ impl Font {
             .then_some((chars, len))
     }
 
-    /// Whether this face draws `ch` exactly, so a width measured from it is
-    /// the width that is drawn: a glyph, an expansion, or no drawing at all.
     pub(crate) fn measures_exactly(&self, ch: char) -> bool {
         is_not_drawn(ch) || self.glyph(ch).is_some() || self.expansion(ch).is_some()
     }
@@ -178,14 +252,107 @@ impl Font {
         self.units_per_em
     }
 
-    /// Scale a value in font units to the 1000-unit glyph space PDF uses.
     pub(crate) fn to_1000(&self, units: f32) -> f32 {
         units * 1000.0 / self.units_per_em
     }
 
-    pub(crate) fn face(&self) -> &Face<'static> {
-        &self.face
+    pub(crate) fn face_for_embedding(&self) -> Face<'_> {
+        self.face()
     }
+}
+
+/// Refuse an oversized font before callers copy borrowed bytes into owned storage.
+pub(crate) fn validate_font_file_size(byte_len: usize) -> Result<(), String> {
+    if u64::try_from(byte_len).unwrap_or(u64::MAX) > loom_fonts::MAX_FONT_FILE_BYTES {
+        return Err(format!(
+            "font file is {byte_len} bytes; limit is {} bytes",
+            loom_fonts::MAX_FONT_FILE_BYTES
+        ));
+    }
+    Ok(())
+}
+
+fn cached_metrics(face: &Face<'_>) -> ([u16; 128], [u16; 128], u16) {
+    let advance = |gid: u16| {
+        face.glyph_hor_advance(ttf_parser::GlyphId(gid))
+            .unwrap_or(0)
+    };
+    let mut ascii_gid = [0u16; 128];
+    let mut ascii_advance = [0u16; 128];
+    for code in 0..128u8 {
+        let gid = face.glyph_index(char::from(code)).map_or(0, |g| g.0);
+        ascii_gid[usize::from(code)] = gid;
+        ascii_advance[usize::from(code)] = advance(gid);
+    }
+    (ascii_gid, ascii_advance, advance(0))
+}
+
+fn validate_face(data: &[u8], index: u32, face: &Face<'_>) -> Result<bool, String> {
+    let tables = face.tables();
+    if data.starts_with(b"OTTO") || tables.glyf.is_none() || tables.cff.is_some() {
+        return Err(
+            "CFF/PostScript font outlines are unsupported; TrueType glyf outlines are required"
+                .into(),
+        );
+    }
+    if face
+        .raw_face()
+        .table(ttf_parser::Tag::from_bytes(b"CFF2"))
+        .is_some()
+    {
+        return Err("CFF2 font outlines are unsupported".into());
+    }
+    if face
+        .raw_face()
+        .table(ttf_parser::Tag::from_bytes(b"fvar"))
+        .is_some()
+    {
+        return Err(
+            "variable font instances are unsupported; select a static instance first".into(),
+        );
+    }
+    let raw_os2 = face.raw_face().table(ttf_parser::Tag::from_bytes(b"OS/2"));
+    let subsetting_allowed = match (raw_os2, tables.os2) {
+        (None, None) => true,
+        (Some(_), None) => {
+            return Err("font has a malformed OS/2 embedding-permission table".into())
+        }
+        (Some(_), Some(os2)) => {
+            if os2.permissions() == Some(ttf_parser::os2::Permissions::Restricted) {
+                return Err("font embedding is restricted by OS/2 fsType".into());
+            }
+            if os2.permissions().is_none() {
+                return Err("font has invalid OS/2 embedding permissions".into());
+            }
+            if !os2.is_outline_embedding_allowed() {
+                return Err("font permits bitmap embedding only, not TrueType outlines".into());
+            }
+            os2.is_subsetting_allowed()
+        }
+        (None, Some(_)) => return Err("font OS/2 table was not present in the source bytes".into()),
+    };
+    if data.starts_with(b"ttcf") && !subsetting_allowed {
+        return Err(format!(
+            "font collection face {index} forbids subsetting and cannot be embedded as a standalone FontFile2"
+        ));
+    }
+    Ok(subsetting_allowed)
+}
+
+fn postscript_name(face: &Face<'_>) -> Option<String> {
+    face.names()
+        .into_iter()
+        .find(|name| name.name_id == ttf_parser::name_id::POST_SCRIPT_NAME && name.is_unicode())
+        .and_then(|name| name.to_string())
+        .filter(|name| valid_postscript_name(name))
+}
+
+fn valid_postscript_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 127
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 /// Index of the Inter face a style selects (0 regular, 1 bold, 2 italic,
@@ -230,16 +397,8 @@ pub(crate) fn validate_fallback(face: FallbackFont) -> Result<Font, String> {
             "fallback font {name:?} is a font collection (.ttc); supply one TrueType face"
         ));
     }
-    let font = Font::new(name, face.data)
-        .ok_or_else(|| format!("fallback font {name:?} is not a usable TrueType font"))?;
-    let tables = font.face().tables();
-    if face.data.starts_with(b"OTTO") || tables.glyf.is_none() || tables.cff.is_some() {
-        return Err(format!(
-            "fallback font {name:?} has CFF/PostScript outlines; only TrueType (glyf) \
-             faces can be embedded"
-        ));
-    }
-    Ok(font)
+    Font::from_static(name, face.data)
+        .map_err(|reason| format!("fallback font {name:?} is not a usable TrueType font: {reason}"))
 }
 
 /// Whether [`crate::text_width_pt`] measures `ch` exactly as it is drawn: the

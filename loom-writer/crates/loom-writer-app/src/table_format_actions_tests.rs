@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use loom_writer_core::loom_objects::table::{HorizontalAlign, Table, TextRun};
 use loom_writer_core::{PageViewport, RichBlock, TextSelection, WriterDocument};
+use slint::ComponentHandle;
 
 use crate::actions_tests::test_state;
 use crate::projection;
@@ -13,6 +14,9 @@ use crate::table_actions::{self, table_format_actions, TableCellRange};
 use crate::{writer_render_alignment, GuiState, WriterApp};
 
 const BLOCK: u64 = 42;
+const PENDING_TABLE_SCRIPT_RECOVERY_MODE: &str = "LOOM_WRITER_TABLE_SCRIPT_RECOVERY_TEST";
+const PENDING_TABLE_SCRIPT_RECOVERY_TEST: &str =
+    "table_actions::table_format_actions::tests::pending_table_script_formats_only_new_text_and_survives_save_undo_and_recovery";
 
 /// A paragraph and a table of `rows` x `columns` filled from `texts`, row by
 /// row. The table block is `BLOCK`.
@@ -319,6 +323,525 @@ fn a_cell_is_drawn_from_its_typed_runs_and_plain_cells_carry_none() {
 
     let plain = projection::cell_text_block(BLOCK, &table, 0, 0, false).expect("text");
     assert!(plain.runs.is_empty(), "plain cells carry no style runs");
+}
+
+#[test]
+fn font_family_choice_styles_typed_table_runs_and_is_undoable() {
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let start = cell_start(&state, 0, 0);
+    select(&state, start, start + "Cell text".len());
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+
+    crate::font_picker::apply_family(&app, &state, "Serif");
+
+    let document = state.current.borrow();
+    let table = document.loom_table_from_block(BLOCK).expect("table");
+    let cell = table.cell(0, 0).expect("cell");
+    assert_eq!(cell.content.text(), "Cell text");
+    assert_eq!(
+        cell.content.runs[0].font_family.as_deref(),
+        Some("Serif"),
+        "font family belongs to the typed cell run, not the table block's unused paragraph runs"
+    );
+    assert!(document.blocks[1].runs.is_empty());
+    drop(document);
+
+    app.invoke_undo();
+    let undone = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .expect("table");
+    assert_eq!(undone.cell(0, 0).unwrap().content.runs[0].font_family, None);
+    app.invoke_redo();
+    let redone = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .expect("table");
+    assert_eq!(
+        redone.cell(0, 0).unwrap().content.runs[0]
+            .font_family
+            .as_deref(),
+        Some("Serif")
+    );
+}
+
+#[test]
+fn font_size_choice_styles_typed_table_runs_and_is_undoable() {
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let start = cell_start(&state, 0, 0);
+    select(&state, start, start + "Cell text".len());
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+    assert_eq!(app.get_font_size_pt(), 12, "table text inherits 12 pt");
+
+    app.invoke_increase_font_size();
+    assert_eq!(
+        app.get_font_size_pt(),
+        13,
+        "the size control reflects the cell run"
+    );
+
+    let document = state.current.borrow();
+    let table = document.loom_table_from_block(BLOCK).expect("table");
+    assert_eq!(
+        table.cell(0, 0).unwrap().content.runs[0].font_size_pt,
+        Some(13.0),
+        "font size belongs to the typed cell run"
+    );
+    assert!(document.blocks[1].runs.is_empty());
+    drop(document);
+
+    app.invoke_undo();
+    let undone = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .expect("table");
+    assert_eq!(
+        undone.cell(0, 0).unwrap().content.runs[0].font_size_pt,
+        None
+    );
+    app.invoke_redo();
+    let redone = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .expect("table");
+    assert_eq!(
+        redone.cell(0, 0).unwrap().content.runs[0].font_size_pt,
+        Some(13.0)
+    );
+}
+
+#[test]
+fn selected_table_scripts_are_undoable_saved_and_recovery_recorded() {
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let start = cell_start(&state, 0, 0);
+    select(&state, start, start + "Cell text".len());
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+    let format = app.global::<crate::WriterFormatState>();
+    let writes_before = crate::recovery::WRITES.with(|writes| writes.get());
+
+    format.invoke_toggle_superscript();
+    let superscript = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs[0]
+        .clone();
+    assert!(superscript.superscript);
+    assert!(!superscript.subscript);
+    assert!(
+        crate::recovery::WRITES.with(|writes| writes.get()) > writes_before,
+        "a selected table script edit must be recorded for recovery"
+    );
+    let saved = loom_writer_core::save_document(&state.current.borrow()).expect("save document");
+    let restored = loom_writer_core::load_document(&saved).expect("reload document");
+    assert!(
+        restored
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs[0]
+            .superscript
+    );
+
+    app.invoke_undo();
+    let undone = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs[0]
+        .clone();
+    assert!(!undone.superscript && !undone.subscript);
+    app.invoke_redo();
+    format.invoke_toggle_subscript();
+    let subscript = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs[0]
+        .clone();
+    assert!(!subscript.superscript);
+    assert!(subscript.subscript);
+    app.invoke_undo();
+    let restored_super = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs[0]
+        .clone();
+    assert!(restored_super.superscript && !restored_super.subscript);
+}
+
+#[test]
+fn pending_table_script_formats_only_new_text_and_survives_save_undo_and_recovery() {
+    if std::env::var_os(PENDING_TABLE_SCRIPT_RECOVERY_MODE).is_none() {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "loom-writer-table-script-recovery-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create isolated table-script recovery root");
+        let state_home = root.join("state");
+        let state_home_env = if cfg!(windows) {
+            "LOCALAPPDATA"
+        } else if cfg!(target_os = "macos") {
+            "HOME"
+        } else {
+            "XDG_STATE_HOME"
+        };
+        let output = std::process::Command::new(
+            std::env::current_exe().expect("current app test executable"),
+        )
+        .args([
+            "--exact",
+            PENDING_TABLE_SCRIPT_RECOVERY_TEST,
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(PENDING_TABLE_SCRIPT_RECOVERY_MODE, "child")
+        .env(state_home_env, &state_home)
+        .output()
+        .expect("run isolated table-script recovery child");
+        let cleanup = std::fs::remove_dir_all(&root);
+        assert!(
+            output.status.success(),
+            "isolated recovery child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        cleanup.expect("remove isolated table-script recovery root");
+        return;
+    }
+
+    crate::typing_style::clear();
+    assert!(crate::recovery::initialize_editing_session(None)
+        .expect("initialize isolated table-script recovery")
+        .draft
+        .is_none());
+    let recovery_worker = crate::recovery::DeferredWriteTestHarness::install();
+    let (app, state) = app_with_table(1, 1, &["AB"]);
+    let before = state.current.borrow().editor_text();
+    let caret = offset_in_cell(&state.current.borrow(), 0, 0, 2);
+    place_caret(&state, caret);
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+    let writes_before = crate::recovery::WRITES.with(|writes| writes.get());
+    app.global::<crate::WriterFormatState>()
+        .invoke_toggle_superscript();
+
+    let mut typed = before.clone();
+    typed.insert(caret, 'X');
+    app.invoke_document_edited(typed.into(), (caret + 1) as i32, (caret + 1) as i32);
+
+    let document = state.current.borrow();
+    let table = document.loom_table_from_block(BLOCK).unwrap();
+    let cell = table.cell(0, 0).unwrap();
+    assert_eq!(cell.content.text(), "ABX");
+    assert!(!cell.content.runs[0].superscript);
+    let inserted = cell
+        .content
+        .runs
+        .iter()
+        .find(|run| run.text.contains('X'))
+        .expect("new script run");
+    assert_eq!(inserted.text, "X");
+    assert!(inserted.superscript && !inserted.subscript);
+    let saved = loom_writer_core::save_document(&document).expect("save document");
+    let restored = loom_writer_core::load_document(&saved).expect("reload document");
+    assert!(restored
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs
+        .iter()
+        .any(|run| run.text == "X" && run.superscript));
+    assert!(crate::recovery::DEFERRED.with(crate::recovery::DeferredWrite::is_stale));
+    drop(document);
+    crate::flush_deferred_recovery(&app, &state);
+    assert_eq!(
+        recovery_worker
+            .started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("deferred table-script recovery serializer starts"),
+        0
+    );
+    recovery_worker.release_first();
+    recovery_worker
+        .completed
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("deferred table-script recovery serializer completes")();
+    let recovered = crate::recovery::initialize_editing_session(None)
+        .expect("reopen isolated recovery draft")
+        .draft
+        .expect("table script is restored from recovery")
+        .document;
+    assert!(
+        recovered
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs
+            .iter()
+            .any(|run| run.text == "X" && run.superscript),
+        "the recovered canonical table run keeps the pending script style"
+    );
+    assert!(
+        crate::recovery::WRITES.with(|writes| writes.get()) > writes_before,
+        "typed table script text must enter the production recovery write path"
+    );
+    crate::recovery::discard_document_recovery().expect("clear isolated recovery draft");
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().editor_text(), before);
+    app.invoke_redo();
+    assert!(state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs
+        .iter()
+        .any(|run| run.text == "X" && run.superscript));
+    crate::typing_style::clear();
+}
+
+#[test]
+fn strikethrough_action_formats_typed_table_runs_and_is_undoable() {
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let start = cell_start(&state, 0, 0);
+    select(&state, start, start + "Cell text".len());
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+    let writes_before = crate::recovery::WRITES.with(|writes| writes.get());
+
+    app.invoke_toggle_strikethrough();
+    let run = state
+        .current
+        .borrow()
+        .loom_table_from_block(BLOCK)
+        .unwrap()
+        .cell(0, 0)
+        .unwrap()
+        .content
+        .runs[0]
+        .clone();
+    assert!(run.strikethrough);
+    assert!(
+        crate::recovery::WRITES.with(|writes| writes.get()) > writes_before,
+        "a selected table strike edit must be recorded for recovery"
+    );
+    let saved = loom_writer_core::save_document(&state.current.borrow()).expect("save document");
+    let restored = loom_writer_core::load_document(&saved).expect("reload document");
+    assert!(
+        restored
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs[0]
+            .strikethrough
+    );
+
+    app.invoke_undo();
+    assert!(
+        !state
+            .current
+            .borrow()
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs[0]
+            .strikethrough
+    );
+    app.invoke_redo();
+    assert!(
+        state
+            .current
+            .borrow()
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs[0]
+            .strikethrough
+    );
+}
+
+#[test]
+fn pending_font_family_at_a_table_caret_styles_only_new_text() {
+    crate::typing_style::clear();
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let caret = offset_in_cell(&state.current.borrow(), 0, 0, "Cell text".len());
+    place_caret(&state, caret);
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+
+    crate::font_picker::apply_family(&app, &state, "Serif");
+    let before = state.current.borrow().editor_text();
+    let mut typed = before.clone();
+    typed.insert(caret, 'X');
+    app.invoke_document_edited(typed.into(), (caret + 1) as i32, (caret + 1) as i32);
+
+    let document = state.current.borrow();
+    let table = document.loom_table_from_block(BLOCK).expect("table");
+    let cell = table.cell(0, 0).expect("cell");
+    assert_eq!(cell.content.text(), "Cell textX");
+    let inserted = cell
+        .content
+        .runs
+        .iter()
+        .find(|run| run.text.contains('X'))
+        .expect("inserted run");
+    assert_eq!(inserted.text, "X");
+    assert_eq!(inserted.font_family.as_deref(), Some("Serif"));
+    assert!(cell.content.runs[0].font_family.is_none());
+    let saved = loom_writer_core::save_document(&document).expect("save document");
+    let reloaded = loom_writer_core::load_document(&saved).expect("reload document");
+    assert_eq!(
+        reloaded
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text.contains('X'))
+            .unwrap()
+            .font_family
+            .as_deref(),
+        Some("Serif")
+    );
+    drop(document);
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().editor_text(), before);
+    app.invoke_redo();
+    assert_eq!(
+        state
+            .current
+            .borrow()
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text.contains('X'))
+            .unwrap()
+            .font_family
+            .as_deref(),
+        Some("Serif")
+    );
+    crate::typing_style::clear();
+}
+
+#[test]
+fn pending_foreground_color_at_a_table_caret_styles_only_new_text() {
+    crate::typing_style::clear();
+    let (app, state) = app_with_table(1, 1, &["Cell text"]);
+    let caret = offset_in_cell(&state.current.borrow(), 0, 0, "Cell text".len());
+    place_caret(&state, caret);
+    crate::wire_writer_shared_callbacks(&app, &state, None);
+    crate::apply_state(&app, &state);
+    let global = app.global::<crate::WriterFormatState>();
+    global.invoke_open_foreground_color();
+    global.set_color_input("#336699".into());
+    global.invoke_apply_foreground_color();
+
+    let before = state.current.borrow().editor_text();
+    let mut typed = before.clone();
+    typed.insert(caret, 'X');
+    app.invoke_document_edited(typed.into(), (caret + 1) as i32, (caret + 1) as i32);
+
+    let document = state.current.borrow();
+    let table = document.loom_table_from_block(BLOCK).expect("table");
+    let cell = table.cell(0, 0).expect("cell");
+    let inserted = cell
+        .content
+        .runs
+        .iter()
+        .find(|run| run.text.contains('X'))
+        .expect("inserted run");
+    assert_eq!(inserted.text, "X");
+    assert_eq!(inserted.color.as_deref(), Some("#336699FF"));
+    assert!(cell.content.runs[0].color.is_none());
+    let saved = loom_writer_core::save_document(&document).expect("save document");
+    let reloaded = loom_writer_core::load_document(&saved).expect("reload document");
+    assert_eq!(
+        reloaded
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text.contains('X'))
+            .unwrap()
+            .color
+            .as_deref(),
+        Some("#336699FF")
+    );
+    drop(document);
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().editor_text(), before);
+    app.invoke_redo();
+    assert_eq!(
+        state
+            .current
+            .borrow()
+            .loom_table_from_block(BLOCK)
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text.contains('X'))
+            .unwrap()
+            .color
+            .as_deref(),
+        Some("#336699FF")
+    );
+    crate::typing_style::clear();
 }
 
 #[test]

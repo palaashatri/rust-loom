@@ -11,11 +11,11 @@ default = ["bundled-inter"]
 # Embeds the Inter faces that loom-ui already ships so the catalogue is never
 # empty and measurement matches what the shell draws.
 #
-# The faces must be embedded once per binary. An application whose shell
-# already embeds Inter (Slint `import` of the same files) depends on this
-# crate with `default-features = false`; an application that registers fonts
-# with the shell from `loom_fonts::bundled_faces()` must keep this feature on
-# and must not let the shell embed them a second time.
+# Each face should be embedded once per binary. An application whose shell
+# already embeds Inter (Slint `import` of the same files) depends on this crate
+# with `default-features = false`; an application that registers bundled fonts
+# from `loom_fonts::bundled_faces()` enables the corresponding bundle features
+# and must not let the shell embed those same files a second time.
 #
 # `bundled-inter` is both groups. An application that only needs the four faces
 # a document is set in (Writer, and the PDF writer it embeds) asks for
@@ -27,6 +27,10 @@ bundled-inter = ["bundled-inter-text", "bundled-inter-weights"]
 bundled-inter-text = []
 # Medium and SemiBold.
 bundled-inter-weights = []
+# Arabic and Hebrew static faces for deterministic script fallback.
+bundled-script-fallback = []
+# Draw already-shaped glyph outlines to bounded premultiplied RGBA tiles.
+glyph-raster = ["dep:tiny-skia"]
 
 [dependencies]
 # skrifa and harfrust share read-fonts 0.39 (both are already pulled in by
@@ -38,3 +42,5 @@ unicode-bidi = "0.3"
 unicode-linebreak = "0.1"
 unicode-script = "0.5"
 unicode-segmentation = "1"
+# The renderer needs path rasterization, not PNG encoding or decoding.
+tiny-skia = { version = "=0.11.4", default-features = false, features = ["std"], optional = true }

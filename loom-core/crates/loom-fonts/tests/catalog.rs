@@ -19,10 +19,21 @@ fn bundled() -> FontCatalog {
     FontCatalog::scan(&config(Vec::new()))
 }
 
+fn bundled_family_names() -> Vec<&'static str> {
+    #[cfg(feature = "bundled-script-fallback")]
+    {
+        vec!["Inter", "Noto Naskh Arabic", "Noto Sans Hebrew"]
+    }
+    #[cfg(not(feature = "bundled-script-fallback"))]
+    {
+        vec!["Inter"]
+    }
+}
+
 #[test]
 fn bundled_catalog_lists_inter_with_its_six_faces() {
     let catalog = bundled();
-    assert_eq!(catalog.families(), ["Inter"]);
+    assert_eq!(catalog.families(), bundled_family_names());
     let faces = catalog.faces("Inter");
     let shape: Vec<(u16, bool)> = faces.iter().map(|(_, f)| (f.weight, f.italic)).collect();
     assert_eq!(
@@ -57,7 +68,7 @@ fn legacy_style_linked_names_resolve_to_the_same_family() {
     assert_eq!(medium[0].1.weight, 500);
     assert_eq!(
         catalog.families().len(),
-        1,
+        bundled_family_names().len(),
         "no separate 'Inter Medium' row"
     );
     let resolved = catalog.resolve("Inter Medium", 400, false).unwrap();
@@ -84,7 +95,11 @@ fn an_injected_directory_adds_families_sorted_and_deterministically() {
     fs::write(nested.join("c.ttf"), rename_family(&regular, "Mango")).unwrap();
 
     let catalog = FontCatalog::scan(&config(vec![dir.path().to_owned()]));
-    assert_eq!(catalog.families(), ["Alpha", "Inter", "Mango", "Zebra"]);
+    let mut expected_families = vec!["Alpha", "Inter", "Mango", "Zebra"];
+    #[cfg(feature = "bundled-script-fallback")]
+    expected_families.extend(["Noto Naskh Arabic", "Noto Sans Hebrew"]);
+    expected_families.sort_unstable();
+    assert_eq!(catalog.families(), expected_families);
     let again = FontCatalog::scan(&config(vec![dir.path().to_owned()]));
     assert_eq!(catalog.families(), again.families());
     let order = |c: &FontCatalog| -> Vec<String> {
@@ -185,7 +200,7 @@ fn damaged_and_foreign_files_are_reported_not_fatal() {
 #[test]
 fn a_missing_directory_is_not_an_error() {
     let catalog = FontCatalog::scan(&config(vec!["/definitely/not/here".into()]));
-    assert_eq!(catalog.families(), ["Inter"]);
+    assert_eq!(catalog.families(), bundled_family_names());
     assert!(!catalog.report().truncated);
 }
 
@@ -428,9 +443,14 @@ fn scanning_two_hundred_fonts_is_bounded_and_complete() {
     assert_eq!(report.files_seen, 200);
     assert_eq!(report.files_parsed, 200);
     assert!(report.issues.is_empty() && !report.truncated);
-    // 200 renamed faces in 34 families plus the six bundled Inter faces.
-    assert_eq!(catalog.face_count(), 206);
-    assert_eq!(catalog.families().len(), 35);
+    // 200 renamed faces in 34 families plus bundled faces selected by features.
+    let bundled_faces = 6 + if cfg!(feature = "bundled-script-fallback") {
+        2
+    } else {
+        0
+    };
+    assert_eq!(catalog.face_count(), 200 + bundled_faces);
+    assert_eq!(catalog.families().len(), 34 + bundled_family_names().len());
     // Generous enough for a loaded CI machine and a debug build; the point is
     // that only table headers are read, not the 78 MiB of glyph data.
     assert!(elapsed < Duration::from_secs(10), "scan took {elapsed:?}");
@@ -439,7 +459,7 @@ fn scanning_two_hundred_fonts_is_bounded_and_complete() {
 #[test]
 fn bundled_only_is_complete_without_touching_the_disk() {
     let catalog = FontCatalog::bundled_only();
-    assert_eq!(catalog.families(), ["Inter"]);
+    assert_eq!(catalog.families(), bundled_family_names());
     assert_eq!(catalog.report().files_seen, 0);
     assert!(catalog.resolve("Inter", 400, false).is_ok());
 }

@@ -63,6 +63,65 @@ pub(super) fn rects_for_lines(
         let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let source = &block.text.as_str()[line.start..line.end];
+        if let Some(shaped) = &line.shaped_line {
+            let (global_start, global_end) = (line.global_start, line.global_end());
+            let overlap_start = selection_start.max(global_start);
+            let overlap_end = selection_end.min(global_end);
+            if overlap_start < overlap_end {
+                let from = line.start + (overlap_start - global_start).min(source.len());
+                let to = line.start + (overlap_end - global_start).min(source.len());
+                for span in shaped.selection_spans(from..to) {
+                    result.push(SelectionRect {
+                        page_index: line.page,
+                        block_id: block.id,
+                        start: span.source_range.start,
+                        end: span.source_range.end,
+                        rect: PageRect {
+                            x: line.bounds.x + span.x_pt * zoom,
+                            y: line.bounds.y,
+                            width: span.width_pt * zoom,
+                            height: line.bounds.height,
+                        },
+                    });
+                }
+            } else if selection_start == selection_end {
+                let at_start = selection_start == global_start;
+                let at_end = selection_start == global_end;
+                let strictly_inside =
+                    selection_start > global_start && selection_start < global_end;
+                let has_previous_boundary = at > 0 && lines[at - 1].global_end() == global_start;
+                let is_last_line = at + 1 == lines.len();
+                let use_line = strictly_inside
+                    || (at_start
+                        && (!has_previous_boundary
+                            || selection.affinity == crate::CaretAffinity::Downstream))
+                    || (at_end
+                        && (selection.affinity == crate::CaretAffinity::Upstream || is_last_line));
+                if use_line {
+                    let local = selection_start
+                        .saturating_sub(global_start)
+                        .min(source.len());
+                    let offset = line.start + local;
+                    let affinity = match selection.affinity {
+                        crate::CaretAffinity::Downstream => loom_fonts::Affinity::Leading,
+                        crate::CaretAffinity::Upstream => loom_fonts::Affinity::Trailing,
+                    };
+                    result.push(SelectionRect {
+                        page_index: line.page,
+                        block_id: block.id,
+                        start: offset,
+                        end: offset,
+                        rect: PageRect {
+                            x: line.bounds.x + shaped.caret_x(offset, affinity) * zoom,
+                            y: line.bounds.y,
+                            width: 1.0,
+                            height: line.bounds.height,
+                        },
+                    });
+                }
+            }
+            continue;
+        }
         let positions = match &measured {
             Some((index, positions)) if *index == line.block_index => positions.clone(),
             _ => {
@@ -88,7 +147,11 @@ pub(super) fn rects_for_lines(
             line.start..line.end,
             &positions,
             block.text_column_width(style),
-            block.style.alignment.resolve(block.text.as_str()) == loom_text::Alignment::Justify,
+            block
+                .style
+                .alignment
+                .resolve_with_direction(block.text.as_str(), block.style.direction)
+                == loom_text::Alignment::Justify,
         );
         let interaction_end = if order.is_some() {
             geometry.visible_end
@@ -99,9 +162,20 @@ pub(super) fn rects_for_lines(
             (positions.advance(from, to) + geometry.extra_between(from, to)) * zoom
         };
         let available_width = block.text_column_width(style) * zoom;
-        let alignment_offset = match block.style.alignment.resolve(block.text.as_str()) {
+        let resolved_alignment = block
+            .style
+            .alignment
+            .resolve_with_direction(block.text.as_str(), block.style.direction);
+        let paragraph_start = loom_text::Alignment::Start
+            .resolve_with_direction(block.text.as_str(), block.style.direction);
+        let alignment_offset = match resolved_alignment {
             loom_text::Alignment::Center => ((available_width - line.bounds.width) / 2.0).max(0.0),
-            loom_text::Alignment::Right => (available_width - line.bounds.width).max(0.0),
+            loom_text::Alignment::End | loom_text::Alignment::Right => {
+                (available_width - line.bounds.width).max(0.0)
+            }
+            loom_text::Alignment::Justify if paragraph_start == loom_text::Alignment::Right => {
+                (available_width - line.bounds.width).max(0.0)
+            }
             loom_text::Alignment::Left
             | loom_text::Alignment::Justify
             | loom_text::Alignment::Start => 0.0,

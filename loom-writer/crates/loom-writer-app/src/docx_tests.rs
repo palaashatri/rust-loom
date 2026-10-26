@@ -216,7 +216,7 @@ fn test_insert_chart_renders_and_exports_docx_and_pdf() {
     assert_eq!(reimported_chart.categories, vec!["Q1", "Q2", "Q3", "Q4"]);
 
     // Verify PDF export contains chart title and text
-    let pdf_bytes = export_pdf(&current);
+    let pdf_bytes = export_pdf(&current).expect("export imported DOCX fixture to PDF");
     let readable_pdf = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
     assert!(
         readable_pdf.contains("Quarterly Performance"),

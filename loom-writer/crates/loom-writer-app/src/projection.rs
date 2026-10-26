@@ -10,16 +10,19 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use loom_writer_core::fonts;
-use loom_writer_core::loom_objects::table::{HorizontalAlign, Table};
+use loom_writer_core::loom_objects::table::Table;
 use loom_writer_core::{
     DocumentFlow, PageRect, PageStyle, PageViewport, RichBlock, SelectionRect, TextSelection,
     WriterDocument,
 };
-use slint::SharedString;
+use slint::{Model, SharedString};
 
 #[path = "render_text.rs"]
 pub(crate) mod render_text;
-use render_text::{fragment_justification_spaces, render_row, Align, Frame, RowGeometry};
+use render_text::{
+    fragment_justification_spaces, render_row, set_shaped_block_glyphs, set_shaped_glyphs, Align,
+    Frame, RasterClip, RowGeometry,
+};
 
 /// Screens of height kept when the view height is not yet known.
 const PAGE_VIEW_FALLBACK_SCREENS: f32 = 2.0;
@@ -51,7 +54,8 @@ struct TableGeometry {
     col_starts: Vec<f32>,
     col_widths: Vec<f32>,
     rows: usize,
-    row_height: f32,
+    row_tops: Vec<f32>,
+    row_heights: Vec<f32>,
 }
 
 /// One picture to draw: where it sits and what it shows.
@@ -348,6 +352,48 @@ pub(crate) fn project(
     viewport: PageViewport,
     view_height: Option<f32>,
 ) -> Projection {
+    project_inner(doc, viewport, view_height, None, None)
+}
+
+/// Project the document and rasterize shaped glyphs at the active window
+/// scale. `device_scale_factor` is supplied by Slint; the viewport zoom is
+/// combined with it only at the raster boundary, while core geometry remains
+/// in page points.
+pub(crate) fn project_with_scale(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    view_height: Option<f32>,
+    device_scale_factor: f32,
+) -> Projection {
+    project_inner(doc, viewport, view_height, None, Some(device_scale_factor))
+}
+
+/// Project and rasterize only the part visible in the page canvas. The width
+/// and height are logical pixels reported by the canvas; the device scale is
+/// applied only to physical glyph pixels.
+pub(crate) fn project_with_viewport_scale(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    view_width: f32,
+    view_height: Option<f32>,
+    device_scale_factor: f32,
+) -> Projection {
+    project_inner(
+        doc,
+        viewport,
+        view_height,
+        Some(view_width),
+        Some(device_scale_factor),
+    )
+}
+
+fn project_inner(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    view_height: Option<f32>,
+    raster_view_width: Option<f32>,
+    raster_device_scale: Option<f32>,
+) -> Projection {
     let style = doc.page.page_style();
     let Ok(flow) = doc.flow(&style, layout_viewport(&style, viewport)) else {
         let mut selection_rects = Vec::new();
@@ -375,6 +421,7 @@ pub(crate) fn project(
         };
     };
     let zoom = flow.zoom().max(f32::EPSILON);
+    let pixels_per_point = zoom * raster_device_scale.unwrap_or(1.0);
     let bounds = flow.page_bounds();
     let base_page = bounds[0];
     let stack_height = match (bounds.first(), bounds.last()) {
@@ -387,6 +434,18 @@ pub(crate) fn project(
     };
 
     let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
+    let raster_clip = RasterClip {
+        left: ((-base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
+        top: ((-base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
+        right: ((raster_view_width.unwrap_or(viewport.width)
+            - base_page.x
+            - style.margin_left_pt * zoom)
+            / zoom)
+            .min(content_width),
+        bottom: view_height.map_or(f32::MAX, |height| {
+            ((height - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0)
+        }),
+    };
     let numbers = doc.list_item_numbers();
     let selection = doc.selection();
     let selected_table_range =
@@ -416,7 +475,11 @@ pub(crate) fn project(
 
         if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
             let width = line.bounds.width / zoom;
-            let shift = match block.style.alignment.resolve(block.text.as_str()) {
+            let shift = match block
+                .style
+                .alignment
+                .resolve_with_direction(block.text.as_str(), block.style.direction)
+            {
                 loom_text::Alignment::Center => (column_width - width) / 2.0,
                 loom_text::Alignment::Right => column_width - width,
                 _ => 0.0,
@@ -432,9 +495,10 @@ pub(crate) fn project(
             continue;
         }
 
-        #[derive(Clone, PartialEq, Eq)]
+        #[derive(Clone, PartialEq)]
         struct TableLayoutKey {
             block_id: u64,
+            typed_table: Table,
             style_id: String,
             header_row: bool,
             banded_rows: bool,
@@ -443,7 +507,8 @@ pub(crate) fn project(
             cols: usize,
             cell_offsets: Vec<i32>,
             col_widths_bits: Vec<u32>,
-            row_height_bits: u32,
+            row_tops_bits: Vec<u32>,
+            row_heights_bits: Vec<u32>,
             table_y_bits: u32,
         }
 
@@ -454,12 +519,15 @@ pub(crate) fn project(
 
         if block.kind == loom_writer_core::TABLE_BLOCK_KIND {
             if seen_table_blocks.insert(block.id) {
-                if let Some(table) = doc.loom_table_from_block(block.id) {
+                if let Some(table) = doc.blocks[line.block_index].typed_table() {
                     let catalog_style = loom_objects::TableStyleCatalog::get(&table.style_id)
                         .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
                     let options = loom_objects::TableStyleOptions {
                         header_row: table.header_row,
+                        total_row: table.total_row,
+                        last_column: table.last_column,
                         banded_rows: table.banded_rows,
+                        banded_columns: table.banded_columns,
                         first_column: table.first_column,
                         ..Default::default()
                     };
@@ -467,13 +535,62 @@ pub(crate) fn project(
                     let num_rows = table.row_count();
                     let col_widths = loom_writer_core::editor_column_widths(&table, column_width);
                     let col_starts = column_starts(&col_widths);
-                    let row_height = loom_writer_core::table_row_height(
-                        &style,
-                        loom_writer_core::table_line_count(block.text.as_str()),
+                    let measurement = loom_writer_core::measure_table_row_geometry(
+                        table,
+                        column_width,
+                        loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                     );
+                    let (mut row_heights, mut measurement_error) = match measurement {
+                        Ok(measured) if measured.row_heights_pt().len() == num_rows => {
+                            (measured.row_heights_pt().to_vec(), None)
+                        }
+                        Ok(_) => (
+                            vec![
+                                loom_writer_core::table_row_height(
+                                    &style,
+                                    loom_writer_core::table_line_count(block.text.as_str()),
+                                );
+                                num_rows
+                            ],
+                            Some("typed table row count does not match its editor text".to_owned()),
+                        ),
+                        Err(error) => (
+                            vec![
+                                loom_writer_core::table_row_height(
+                                    &style,
+                                    loom_writer_core::table_line_count(block.text.as_str()),
+                                );
+                                num_rows
+                            ],
+                            Some(format!("Table geometry unavailable: {error}")),
+                        ),
+                    };
                     let table_x = 0.0_f32;
                     let table_y =
                         block_top_y(&flow, line.block_index, &style, base_page).unwrap_or(y);
+                    let row_tops = if let Some((tops, heights)) =
+                        flow_table_row_geometry(&flow, line.block_index, num_rows)
+                    {
+                        // DocumentFlow owns pagination and reserved row boxes;
+                        // screen paint, hit testing, and carets use those exact
+                        // per-row positions, including page gaps.
+                        row_heights = heights;
+                        tops
+                    } else {
+                        if measurement_error.is_none() {
+                            measurement_error = Some(
+                                "Table geometry unavailable: flow row bounds do not match typed rows"
+                                    .to_owned(),
+                            );
+                        }
+                        let mut tops = Vec::with_capacity(num_rows);
+                        let mut table_height = 0.0;
+                        for row_height in &row_heights {
+                            tops.push(table_height);
+                            table_height += row_height;
+                        }
+                        tops
+                    };
                     let block_start = doc.blocks[..line.block_index]
                         .iter()
                         .map(|previous| previous.text.as_str().len() + 1)
@@ -499,12 +616,14 @@ pub(crate) fn project(
                             col_starts: col_starts.clone(),
                             col_widths: col_widths.clone(),
                             rows: num_rows,
-                            row_height,
+                            row_tops: row_tops.clone(),
+                            row_heights: row_heights.clone(),
                         },
                     );
 
                     let cache_key = TableLayoutKey {
                         block_id: block.id,
+                        typed_table: table.clone(),
                         style_id: table.style_id.clone(),
                         header_row: table.header_row,
                         banded_rows: table.banded_rows,
@@ -513,7 +632,11 @@ pub(crate) fn project(
                         cols,
                         cell_offsets: cell_offsets.clone(),
                         col_widths_bits: col_widths.iter().map(|w| w.to_bits()).collect(),
-                        row_height_bits: row_height.to_bits(),
+                        row_tops_bits: row_tops.iter().map(|top| top.to_bits()).collect(),
+                        row_heights_bits: row_heights
+                            .iter()
+                            .map(|height| height.to_bits())
+                            .collect(),
                         table_y_bits: table_y.to_bits(),
                     };
 
@@ -532,7 +655,8 @@ pub(crate) fn project(
                     } else {
                         let mut new_rects = Vec::with_capacity(num_rows * cols);
                         for r in 0..num_rows {
-                            let cur_y = table_y + r as f32 * row_height;
+                            let cur_y = table_y + row_tops[r];
+                            let row_height = row_heights[r];
                             for c in 0..cols {
                                 let cur_x = table_x + col_starts[c];
                                 let resolved = catalog_style.resolve_cell(
@@ -586,13 +710,25 @@ pub(crate) fn project(
                     // Each cell is drawn from its typed runs, in its column's
                     // alignment and width; the style supplies header bold.
                     for r in 0..num_rows {
-                        let cur_y = table_y + r as f32 * row_height;
+                        let cur_y = table_y + row_tops[r];
+                        let row_height = row_heights[r];
                         for c in 0..cols {
-                            let resolved =
-                                catalog_style.resolve_cell(r, c, num_rows, cols, &options, None);
-                            let Some(cell_block) =
-                                cell_text_block(block.id, &table, r, c, resolved.bold)
-                            else {
+                            let resolved = catalog_style.resolve_cell(
+                                r,
+                                c,
+                                num_rows,
+                                cols,
+                                &options,
+                                table.cell(r, c),
+                            );
+                            let Some(cell_block) = cell_text_block_with_color(
+                                block.id,
+                                &table,
+                                r,
+                                c,
+                                resolved.bold,
+                                resolved.text_color.as_deref(),
+                            ) else {
                                 continue;
                             };
                             let frame = Frame::new(
@@ -601,14 +737,43 @@ pub(crate) fn project(
                                 col_widths[c] - 12.0,
                                 row_height - 8.0,
                             );
-                            let mut row =
-                                render_row(&cell_block, frame, "", "", Align::Block, None);
+                            let mut row = render_row(
+                                &cell_block,
+                                frame,
+                                "",
+                                "",
+                                Align::Block,
+                                Some(RowGeometry {
+                                    spaces: &[],
+                                    unsupported: false,
+                                    font_size: 12.0,
+                                }),
+                            );
                             row.table_cell = true;
                             // The style's own text colour (white on a dark
                             // header fill), not the page ink.
                             if let Some(hex) = &resolved.text_color {
                                 row.has_color = true;
                                 row.color = slint::Color::from_argb_encoded(parse_hex_color(hex));
+                            }
+                            if let Some(message) = &measurement_error {
+                                row.unsupported = true;
+                                row.unsupported_label = SharedString::from(message.as_str());
+                            }
+                            if raster_device_scale.is_some() {
+                                if let Err(error) = set_shaped_block_glyphs(
+                                    &mut row,
+                                    &cell_block,
+                                    frame,
+                                    loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
+                                    pixels_per_point,
+                                    raster_clip,
+                                ) {
+                                    row.unsupported = true;
+                                    row.unsupported_label = SharedString::from(format!(
+                                        "Glyph rendering unavailable: {error}"
+                                    ));
+                                }
                             }
                             rows.push(row);
                         }
@@ -677,13 +842,35 @@ pub(crate) fn project(
         let segments = line_segments(block, line.start, line.end);
         let (line_spaces, deferred_bidi) =
             block.justification_spaces_for_line(line.start..line.end, font_size, column_width);
+        let mut shaped_error = None;
+        if raster_device_scale.is_some() {
+            if let Some(shaped) = line.shaped_line.as_deref() {
+                let frame = Frame::new(x, y, column_width, height);
+                let mut row = render_row(
+                    &fragment_block(block, line.start, line.end),
+                    frame,
+                    &marker,
+                    "",
+                    Align::Line(line.bounds.width / zoom),
+                    None,
+                );
+                match set_shaped_glyphs(&mut row, shaped, frame, pixels_per_point, raster_clip) {
+                    Ok(()) if row.glyph_tiles.row_count() > 0 => {
+                        rows.push(row);
+                        continue;
+                    }
+                    Ok(()) => {}
+                    Err(error) => shaped_error = Some(error),
+                }
+            }
+        }
         if let [only] = segments.as_slice() {
             let family = drawn_family(&only.family, &mut families);
             // The layout measured this line; its text sits where the
             // layout's own highlight for it does.
             let measured = line.bounds.width / zoom;
             let local_spaces = fragment_justification_spaces(&line_spaces, line.start..line.end);
-            rows.push(render_row(
+            let mut row = render_row(
                 &fragment_block(block, line.start, line.end),
                 Frame::new(x, y, column_width, height),
                 &marker,
@@ -694,7 +881,13 @@ pub(crate) fn project(
                     unsupported: deferred_bidi,
                     font_size,
                 }),
-            ));
+            );
+            if let Some(error) = shaped_error {
+                row.unsupported = true;
+                row.unsupported_label =
+                    SharedString::from(format!("Glyph rendering unavailable: {error}"));
+            }
+            rows.push(row);
             continue;
         }
         // Several families on one line: the page draws each stretch as its
@@ -737,6 +930,13 @@ pub(crate) fn project(
                     font_size,
                 }),
             );
+            if !drawn_any {
+                if let Some(error) = shaped_error.as_ref() {
+                    row.unsupported = true;
+                    row.unsupported_label =
+                        SharedString::from(format!("Glyph rendering unavailable: {error}"));
+                }
+            }
             row.alignment = writer_render_alignment(loom_text::Alignment::Left);
             if drawn_any {
                 row.unsupported = false;
@@ -752,13 +952,14 @@ pub(crate) fn project(
     if doc.selection().is_collapsed() {
         if let Some(loc) = doc.table_cell_at_offset(doc.selection().focus) {
             if let Some(geometry) = table_block_positions.get(&loc.block_id) {
-                let (table_y, row_height) = (geometry.table_y, geometry.row_height);
+                let row_top = geometry.row_tops.get(loc.row).copied();
+                let row_height = geometry.row_heights.get(loc.row).copied();
                 if loc.row < geometry.rows && loc.col < geometry.col_starts.len() {
-                    if let Some((display_text, source_offsets)) =
-                        doc.table_cell_display_map(loc.block_id, loc.row, loc.col)
-                    {
-                        // The caret follows the same trimmed, unescaped text the
-                        // table renderer paints inside the cell.
+                    if let (Some(row_top), Some(row_height), Some((display_text, source_offsets))) = (
+                        row_top,
+                        row_height,
+                        doc.table_cell_display_map(loc.block_id, loc.row, loc.col),
+                    ) {
                         let block_start = doc
                             .blocks
                             .iter()
@@ -771,13 +972,19 @@ pub(crate) fn project(
                             &source_offsets,
                             source_byte,
                         );
-                        let typed = doc.loom_table_from_block(loc.block_id);
-                        let resolved = doc.table_from_block(loc.block_id).map(|t| {
+                        let typed = doc
+                            .blocks
+                            .get(loc.block_index)
+                            .and_then(RichBlock::typed_table);
+                        let resolved = typed.map(|t| {
                             let style_def = loom_objects::TableStyleCatalog::get(&t.style_id)
                                 .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
                             let options = loom_objects::TableStyleOptions {
                                 header_row: t.header_row,
+                                total_row: t.total_row,
+                                last_column: t.last_column,
                                 banded_rows: t.banded_rows,
+                                banded_columns: t.banded_columns,
                                 first_column: t.first_column,
                                 ..Default::default()
                             };
@@ -787,72 +994,75 @@ pub(crate) fn project(
                                 geometry.rows,
                                 geometry.col_starts.len(),
                                 &options,
-                                None,
+                                t.cell(loc.row, loc.col),
                             )
                         });
-                        // The caret sits in the text the page draws: trimmed, with
-                        // the cell's runs, shifted by its column's alignment.
-                        let font_size = PageStyle::default().font_size_for_kind("paragraph");
+                        let font_size = loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT;
                         let bold = resolved.as_ref().is_some_and(|r| r.bold);
-                        let drawn = typed
-                            .as_ref()
-                            .and_then(|t| cell_text_block(loc.block_id, t, loc.row, loc.col, bold));
-                        let lead = display_text.len() - display_text.trim_start().len();
-                        // A soft break starts a new line of the cell, so the caret is
-                        // measured within the line it sits on.
-                        let (advance, text_width, line_index) = match &drawn {
-                            Some(block) => {
-                                let text = block.text.as_str();
-                                let cut = display_byte.saturating_sub(lead).min(text.len());
-                                let line_index = text[..cut].matches('\u{b}').count();
-                                let line_start = text[..cut].rfind('\u{b}').map_or(0, |at| at + 1);
-                                let line_end =
-                                    text[cut..].find('\u{b}').map_or(text.len(), |at| cut + at);
-                                let line = &text[line_start..line_end];
-                                let line_runs = runs_between(&block.runs, line_start, line_end);
-                                let prefix = &text[line_start..cut];
-                                let advance = loom_writer_core::text_advance(
-                                    prefix,
-                                    0,
-                                    &runs_before(&line_runs, prefix.len()),
-                                    font_size,
-                                );
-                                let width =
-                                    loom_writer_core::text_advance(line, 0, &line_runs, font_size);
-                                (advance, width, line_index)
-                            }
-                            None => (0.0, 0.0, 0),
-                        };
+                        let drawn = typed.as_ref().and_then(|t| {
+                            cell_text_block_with_color(
+                                loc.block_id,
+                                t,
+                                loc.row,
+                                loc.col,
+                                bold,
+                                resolved
+                                    .as_ref()
+                                    .and_then(|style| style.text_color.as_deref()),
+                            )
+                        });
                         let col_width = geometry.col_widths[loc.col];
-                        let inner = col_width - 12.0;
-                        let shift = match typed
-                            .as_ref()
-                            .map_or(loom_text::Alignment::Left, |t| column_alignment(t, loc.col))
-                        {
-                            loom_text::Alignment::Center => ((inner - text_width) / 2.0).max(0.0),
-                            loom_text::Alignment::Right => (inner - text_width).max(0.0),
-                            _ => 0.0,
-                        };
-                        let caret_x = geometry.col_starts[loc.col] + 6.0 + shift + advance;
-                        // Each line of the cell is one pitch below the one above it.
-                        let line_pitch = font_size * CELL_LINE_PITCH_EM;
-                        let caret_y = table_y
-                            + loc.row as f32 * row_height
-                            + 4.0
-                            + line_index as f32 * line_pitch;
-                        let caret_color = resolved.and_then(|r| r.text_color);
-                        selection_rects = vec![WriterSelectionRect {
-                            page_index: 0,
-                            x: caret_x,
-                            y: caret_y,
-                            width: 1.0,
-                            height: row_height - 8.0 - line_index as f32 * line_pitch,
-                            caret: true,
-                            has_color: caret_color.is_some(),
-                            color: slint::Color::from_argb_encoded(
-                                caret_color.as_deref().map_or(0, parse_hex_color),
-                            ),
-                        }];
+                        if let Some(block) = drawn.as_ref() {
+                            let inner = (col_width - 12.0).max(1.0);
+                            if let Ok(cell_geometry) =
+                                loom_writer_core::shape_table_cell_geometry(block, font_size, inner)
+                            {
+                                let offset = display_byte.min(block.text.as_str().len());
+                                let caret_line = cell_geometry
+                                    .lines()
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(_, line)| {
+                                        let range = line.source_range();
+                                        range.start <= offset && offset < range.end
+                                    })
+                                    .or_else(|| {
+                                        (offset == block.text.as_str().len())
+                                            .then(|| cell_geometry.lines().len().checked_sub(1))
+                                            .flatten()
+                                            .map(|index| (index, &cell_geometry.lines()[index]))
+                                    });
+                                if let Some((line_index, line)) = caret_line {
+                                    if let Some(shaped) = line.shaped() {
+                                        let source_range = line.source_range();
+                                        let source_offset =
+                                            offset.clamp(source_range.start, source_range.end);
+                                        let line_top = cell_geometry.lines()[..line_index]
+                                            .iter()
+                                            .map(|line| line.pitch_pt())
+                                            .sum::<f32>();
+                                        let caret_color = resolved.and_then(|r| r.text_color);
+                                        selection_rects = vec![WriterSelectionRect {
+                                            page_index: 0,
+                                            x: geometry.col_starts[loc.col]
+                                                + 6.0
+                                                + shaped.caret_x(
+                                                    source_offset,
+                                                    loom_fonts::Affinity::Leading,
+                                                ),
+                                            y: geometry.table_y + row_top + 4.0 + line_top,
+                                            width: 1.0,
+                                            height: (row_height - 8.0 - line_top).max(1.0),
+                                            caret: true,
+                                            has_color: caret_color.is_some(),
+                                            color: slint::Color::from_argb_encoded(
+                                                caret_color.as_deref().map_or(0, parse_hex_color),
+                                            ),
+                                        }];
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -896,59 +1106,9 @@ fn column_starts(widths: &[f32]) -> Vec<f32> {
         .collect()
 }
 
-/// The alignment of a column as the exporters read it: the first explicit
-/// alignment set on its cells, else left.
-fn column_alignment(table: &Table, column: usize) -> loom_text::Alignment {
-    let explicit = (0..table.row_count()).find_map(|row| {
-        table
-            .cell(row, column)
-            .and_then(|cell| cell.style_override.as_ref())
-            .and_then(|style| style.horizontal_align)
-    });
-    match explicit.unwrap_or_default() {
-        HorizontalAlign::Left => loom_text::Alignment::Left,
-        HorizontalAlign::Center => loom_text::Alignment::Center,
-        HorizontalAlign::Right => loom_text::Alignment::Right,
-        HorizontalAlign::Justify => loom_text::Alignment::Justify,
-    }
-}
-
-/// The runs that cover the first `end` bytes of a text, cut at `end`.
-/// The distance between the lines of a table cell, in em of its text. The cell's
-/// text is drawn with the same pitch (see `render_text`'s wrapped-line spacing).
-pub(crate) const CELL_LINE_PITCH_EM: f32 = 1.25;
-
-/// The runs of a cell's text from byte `from` to `to`, shifted to start at 0.
-fn runs_between(runs: &[loom_text::StyleRun], from: usize, to: usize) -> Vec<loom_text::StyleRun> {
-    runs.iter()
-        .filter_map(|run| {
-            let (start, end) = (run.start.max(from), run.end.min(to));
-            (start < end).then(|| loom_text::StyleRun {
-                start: start - from,
-                end: end - from,
-                style: run.style.clone(),
-            })
-        })
-        .collect()
-}
-
-fn runs_before(runs: &[loom_text::StyleRun], end: usize) -> Vec<loom_text::StyleRun> {
-    runs.iter()
-        .filter_map(|run| {
-            let cut = run.end.min(end);
-            (run.start < cut).then(|| loom_text::StyleRun {
-                start: run.start,
-                end: cut,
-                style: run.style.clone(),
-            })
-        })
-        .collect()
-}
-
 /// The text of one table cell as a block the page draws: its typed runs with
-/// their bold, italic and underline, its column's alignment and, when `bold`,
-/// bold throughout. Surrounding spaces are trimmed, as the page always trimmed
-/// them. `None` for an empty cell.
+/// all supported inline attributes, its column's alignment and, when `bold`,
+/// bold throughout. `None` for an empty cell.
 pub(crate) fn cell_text_block(
     block_id: u64,
     table: &Table,
@@ -956,45 +1116,26 @@ pub(crate) fn cell_text_block(
     column: usize,
     bold: bool,
 ) -> Option<RichBlock> {
-    let cell = table.cell(row, column)?;
-    let full: String = cell
-        .content
-        .runs
-        .iter()
-        .map(|run| run.text.as_str())
-        .collect();
-    let lead = full.len() - full.trim_start().len();
-    let trimmed = full.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut block = RichBlock::new(block_id, "paragraph", trimmed);
-    block.style.alignment = column_alignment(table, column);
-    let visible = lead..lead + trimmed.len();
-    let mut offset = 0;
-    for run in &cell.content.runs {
-        let (start, end) = (offset, offset + run.text.len());
-        offset = end;
-        let (from, to) = (start.max(visible.start), end.min(visible.end));
-        if from >= to || !(bold || run.bold || run.italic || run.underline) {
-            continue;
-        }
-        block.runs.push(loom_text::StyleRun {
-            start: from - lead,
-            end: to - lead,
-            style: loom_text::CharacterStyle {
-                weight: if bold || run.bold {
-                    loom_text::FontWeight::Bold
-                } else {
-                    loom_text::FontWeight::Regular
-                },
-                italic: run.italic,
-                underline: run.underline,
-                ..Default::default()
-            },
-        });
-    }
-    Some(block)
+    cell_text_block_with_color(block_id, table, row, column, bold, None)
+}
+
+pub(crate) fn cell_text_block_with_color(
+    block_id: u64,
+    table: &Table,
+    row: usize,
+    column: usize,
+    bold: bool,
+    base_color: Option<&str>,
+) -> Option<RichBlock> {
+    loom_writer_core::table_cell_rich_block(
+        block_id,
+        table,
+        row,
+        column,
+        loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
+        bold,
+        base_color,
+    )
 }
 
 /// The canvas y that a table block's rows are drawn from: the top of the
@@ -1015,25 +1156,68 @@ fn block_top_y(
     Some(((line.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0))
 }
 
+/// Per-row positions relative to the table's first flow row, in page points.
+/// The flow already includes every page gap and the row heights reserved by
+/// core layout, so projections do not reconstruct pagination by summing rows.
+fn flow_table_row_geometry(
+    flow: &DocumentFlow,
+    block_index: usize,
+    row_count: usize,
+) -> Option<(Vec<f32>, Vec<f32>)> {
+    if row_count == 0 {
+        return None;
+    }
+    let rows: Vec<_> = flow
+        .lines()
+        .iter()
+        .filter(|line| line.block_index == block_index)
+        .collect();
+    if rows.len() != row_count {
+        return None;
+    }
+    let origin_y = rows.first()?.bounds.y;
+    let zoom = flow.zoom().max(f32::EPSILON);
+    let mut tops = Vec::with_capacity(row_count);
+    let mut heights = Vec::with_capacity(row_count);
+    for row in rows {
+        if !row.bounds.y.is_finite() || !row.bounds.height.is_finite() || row.bounds.height <= 0.0 {
+            return None;
+        }
+        tops.push((row.bounds.y - origin_y) / zoom);
+        heights.push(row.bounds.height / zoom);
+    }
+    if tops.iter().any(|top| !top.is_finite() || *top < 0.0)
+        || heights
+            .iter()
+            .any(|height| !height.is_finite() || *height <= 0.0)
+        || tops.windows(2).any(|pair| pair[1] < pair[0])
+    {
+        return None;
+    }
+    Some((tops, heights))
+}
+
 /// The top and bottom, in viewport coordinates (the frame `DocumentFlow`
 /// reports for lines), of the painted table row that holds `offset`. `None`
 /// when `offset` is not in a table, so the caller measures the core line.
 pub(crate) fn table_row_view_span(
     doc: &WriterDocument,
-    style: &PageStyle,
+    _style: &PageStyle,
     flow: &DocumentFlow,
     offset: usize,
 ) -> Option<(f32, f32)> {
     let location = doc.table_cell_at_offset(offset)?;
+    let block = doc.blocks.get(location.block_index)?;
+    let table = block.typed_table()?;
+    let (row_tops, row_heights) =
+        flow_table_row_geometry(flow, location.block_index, table.row_count())?;
+    let row_top = *row_tops.get(location.row)?;
+    let row_height = *row_heights.get(location.row)?;
     let base = flow.page_bounds().first().copied()?;
-    let top = block_top_y(flow, location.block_index, style, base)?;
+    let top = block_top_y(flow, location.block_index, _style, base)?;
     let zoom = flow.zoom().max(f32::EPSILON);
-    let row = loom_writer_core::table_row_height(
-        style,
-        loom_writer_core::table_line_count(doc.blocks[location.block_index].text.as_str()),
-    );
-    let view_top = (top + location.row as f32 * row) * zoom + style.margin_top_pt * zoom + base.y;
-    Some((view_top, view_top + row * zoom))
+    let view_top = (top + row_top) * zoom + _style.margin_top_pt * zoom + base.y;
+    Some((view_top, view_top + row_height * zoom))
 }
 
 /// The page's rule for one side of a table cell: the style's border when it sets

@@ -16,6 +16,10 @@ pub(crate) struct PendingStyle {
     pub(crate) bold: Option<bool>,
     pub(crate) italic: Option<bool>,
     pub(crate) underline: Option<bool>,
+    pub(crate) strikethrough: Option<bool>,
+    pub(crate) superscript: Option<bool>,
+    pub(crate) subscript: Option<bool>,
+    pub(crate) color: Option<String>,
     /// The font family as the document stores it (empty: the document font).
     pub(crate) family: Option<String>,
 }
@@ -26,6 +30,10 @@ impl PendingStyle {
         self.bold.is_none()
             && self.italic.is_none()
             && self.underline.is_none()
+            && self.strikethrough.is_none()
+            && self.superscript.is_none()
+            && self.subscript.is_none()
+            && self.color.is_none()
             && self.family.is_none()
     }
 }
@@ -68,6 +76,46 @@ pub(crate) fn set_family(caret: usize, family: &str) {
     let mut pending = at(caret);
     pending.family = Some(family.to_owned());
     store(pending);
+}
+
+pub(crate) fn set_foreground_color(caret: usize, color: &str) {
+    let mut pending = at(caret);
+    pending.color = Some(color.to_owned());
+    store(pending);
+}
+
+pub(crate) fn toggle_superscript(
+    caret: usize,
+    enabled_at_caret: bool,
+    subscript_at_caret: bool,
+) -> PendingStyle {
+    let mut pending = at(caret);
+    let enabled = !pending.superscript.unwrap_or(enabled_at_caret);
+    pending.superscript = Some(enabled);
+    if enabled {
+        pending.subscript = Some(false);
+    } else if pending.subscript.is_none() && subscript_at_caret {
+        pending.subscript = Some(true);
+    }
+    store(pending.clone());
+    pending
+}
+
+pub(crate) fn toggle_subscript(
+    caret: usize,
+    enabled_at_caret: bool,
+    superscript_at_caret: bool,
+) -> PendingStyle {
+    let mut pending = at(caret);
+    let enabled = !pending.subscript.unwrap_or(enabled_at_caret);
+    pending.subscript = Some(enabled);
+    if enabled {
+        pending.superscript = Some(false);
+    } else if pending.superscript.is_none() && superscript_at_caret {
+        pending.superscript = Some(true);
+    }
+    store(pending.clone());
+    pending
 }
 
 /// Store the pending style. It applies to text typed at its caret.

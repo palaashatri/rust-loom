@@ -337,3 +337,28 @@ impl EditorHistory {
         }
     }
 }
+
+#[cfg(test)]
+mod retained_byte_overflow_tests {
+    use super::*;
+
+    #[test]
+    fn retained_byte_total_saturates_instead_of_overflowing() {
+        let mut history = EditorHistory::with_budget(8, usize::MAX);
+        let before = WriterDocument::new("saturation", "Before");
+        let mut after = before.clone();
+        after.title = "After".to_owned();
+        history.undo.push(HistoryEntry {
+            before: before.clone(),
+            after: before.clone(),
+            kind: HistoryKind::DocumentAction,
+            last_edit_ms: 0,
+            caret: None,
+            bytes: usize::MAX,
+        });
+
+        history.record(before, after, HistoryKind::DocumentAction, 1);
+
+        assert_eq!(history.total_bytes(), usize::MAX);
+    }
+}

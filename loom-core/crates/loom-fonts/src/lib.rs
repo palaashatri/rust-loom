@@ -1,7 +1,8 @@
 //! Font catalogue, fallback resolution, shaping and text metrics for Loom.
 //!
 //! This crate is the foundation for a real font picker and for font-aware
-//! text measurement in Writer. It has no UI dependency and does no drawing.
+//! text measurement in Writer. It has no UI dependency; the optional
+//! [`raster`] feature paints existing shaped glyph IDs into bounded image tiles.
 //!
 //! * [`FontCatalog`] enumerates installed and bundled faces (reading only the
 //!   small name and style tables), removes duplicates, and answers
@@ -45,6 +46,8 @@ mod info;
 mod layout;
 mod linebreak;
 mod paragraph;
+#[cfg(feature = "glyph-raster")]
+pub mod raster;
 mod resolve;
 mod scan;
 mod segment;

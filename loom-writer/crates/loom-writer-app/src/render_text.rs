@@ -7,36 +7,32 @@
 //! just that character, and nothing the user typed can change how the rest of
 //! the line is drawn.
 //!
-//! Most rows are one look from end to end. Those stay a single segment that the
-//! text item aligns and wraps itself, exactly as before. A row with several
-//! looks, or with an underline or strikethrough, is positioned here instead:
-//! each segment gets the horizontal offset the page layout measures for it
-//! (`loom-fonts` through [`text_advance`]), so glyphs, caret and selection
-//! highlight agree. Line ends (a soft break, a page break) are not text; they
-//! end the line, and the layout already put what follows on the next row.
-//!
-//! Weight (bold or not), slant, size, underline and strikethrough are drawn per
-//! run, and the page layout measures each run at the size it is drawn at, so
-//! the caret and the glyphs agree. Colour and superscript are not drawn yet.
-//! Glyphs of different sizes on one line share a baseline.
+//! The live canvas paints shaped glyph tiles, keeping contextual glyphs and
+//! visual positions aligned with the layout's caret and selection geometry.
+//! Logical Slint text remains available to accessibility and as a visible,
+//! warned fallback if shaping or bounded rasterization fails.
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::ops::Range;
 
+use loom_fonts::raster::{
+    rasterize_glyph_tile, RasterError, RasterLimits, RasterRun, RasterTileBounds,
+    HARD_MAX_TILE_DIMENSION,
+};
 use loom_text::{Alignment, CharacterStyle, FontWeight};
-use loom_writer_core::{PageStyle, RichBlock};
+use loom_writer_core::{PageStyle, RichBlock, WriterShapedVisualLine};
 use slint::{ModelRc, SharedString, VecModel};
 
-use crate::{writer_render_alignment, WriterRenderBlock, WriterTextRule, WriterTextSegment};
+use crate::{
+    writer_render_alignment, WriterGlyphTile, WriterRenderBlock, WriterTextRule, WriterTextSegment,
+};
 
 /// Weight of a bold run. Slint's font weight is a number; the page measures
 /// weights below Bold as Regular, so a segment is only ever these two.
 const BOLD: i32 = 700;
 const REGULAR: i32 = 400;
 
-/// Line pitch, in em, of text this module wraps itself. The page layout owns
-/// the pitch of ordinary lines; this is only for table cells and the fallback.
-const WRAPPED_LINE_EM: f32 = 1.25;
 /// Where the rules sit, in em from the top of a line of Inter, whose baseline
 /// is about 0.97 em down. The thickness has a floor so a small size still draws
 /// a visible line.
@@ -50,6 +46,12 @@ const RULE_THICKNESS_MIN_PT: f32 = 0.6;
 /// A line this much wider than its row, in points, is wrapped; narrower
 /// differences are rounding between two measurements of the same text.
 const FIT_SLACK_PT: f32 = 0.5;
+/// App tiles are smaller than the rasterizer's hard ceiling so very wide or
+/// tall visible text is split into bounded images instead of being discarded.
+const GLYPH_TILE_EDGE: u32 = 1024;
+const MAX_GLYPH_TILE_REGIONS_PER_LINE: usize = 64;
+const MAX_GLYPH_TILE_IMAGES_PER_LINE: usize = MAX_GLYPH_TILE_REGIONS_PER_LINE * 2;
+const MAX_GLYPH_RUNS_PER_LINE: usize = 4096;
 
 /// How the text of a row sits across the row.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,6 +83,50 @@ pub(super) struct RowGeometry<'a> {
     pub(super) spaces: &'a [(Range<usize>, f32)],
     pub(super) unsupported: bool,
     pub(super) font_size: f32,
+}
+
+/// Visible page-content rectangle in page points. Projection clips glyph
+/// images to the active viewport before allocating any tile buffers.
+#[derive(Clone, Copy)]
+pub(super) struct RasterClip {
+    pub(super) left: f32,
+    pub(super) top: f32,
+    pub(super) right: f32,
+    pub(super) bottom: f32,
+}
+
+#[derive(Debug)]
+pub(super) enum GlyphPaintError {
+    Raster(RasterError),
+    CellGeometry(loom_writer_core::TableGeometryError),
+    RunLimitExceeded { count: usize, limit: usize },
+    LineBoxTooShort { required: f32, available: f32 },
+}
+
+impl fmt::Display for GlyphPaintError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Raster(error) => fmt::Display::fmt(error, formatter),
+            Self::CellGeometry(error) => fmt::Display::fmt(error, formatter),
+            Self::RunLimitExceeded { count, limit } => write!(
+                formatter,
+                "line has {count} styled runs; the visible painter limit is {limit}"
+            ),
+            Self::LineBoxTooShort {
+                required,
+                available,
+            } => write!(
+                formatter,
+                "cell text needs {required:.1} pt of height; its row provides {available:.1} pt"
+            ),
+        }
+    }
+}
+
+impl From<RasterError> for GlyphPaintError {
+    fn from(error: RasterError) -> Self {
+        Self::Raster(error)
+    }
 }
 
 impl Frame {
@@ -129,6 +175,7 @@ pub(super) fn render_row(
     WriterRenderBlock {
         segments: ModelRc::new(VecModel::from(text.segments)),
         rules: ModelRc::new(VecModel::from(text.rules)),
+        glyph_tiles: ModelRc::new(VecModel::from(Vec::<WriterGlyphTile>::new())),
         positioned: text.positioned,
         x,
         y,
@@ -136,7 +183,12 @@ pub(super) fn render_row(
         height,
         font_size,
         font_family: SharedString::from(family),
-        alignment: writer_render_alignment(block.style.alignment.resolve(block.text.as_str())),
+        alignment: writer_render_alignment(
+            block
+                .style
+                .alignment
+                .resolve_with_direction(block.text.as_str(), block.style.direction),
+        ),
         marker: SharedString::from(marker),
         unsupported,
         unsupported_label: if unsupported {
@@ -148,6 +200,341 @@ pub(super) fn render_row(
         color: slint::Color::from_argb_encoded(0),
         table_cell: false,
     }
+}
+
+/// Rasterize the exact shaped glyphs already attached to a core line. Tile
+/// positions are relative to the row frame and remain in page points; Slint
+/// applies page zoom and the window's device scale when it displays them.
+pub(super) fn set_shaped_glyphs(
+    row: &mut WriterRenderBlock,
+    shaped: &WriterShapedVisualLine,
+    frame: Frame,
+    pixels_per_point: f32,
+    clip: RasterClip,
+) -> Result<(), GlyphPaintError> {
+    let tiles = rasterize_shaped_tiles(shaped, frame, pixels_per_point, clip)?;
+    row.glyph_tiles = ModelRc::new(VecModel::from(tiles));
+    Ok(())
+}
+
+/// Shape and rasterize every wrapped visual line in a table cell using the
+/// same core face resolution and per-run style pipeline as document lines.
+pub(super) fn set_shaped_block_glyphs(
+    row: &mut WriterRenderBlock,
+    block: &RichBlock,
+    frame: Frame,
+    font_size: f32,
+    pixels_per_point: f32,
+    clip: RasterClip,
+) -> Result<(), GlyphPaintError> {
+    if frame.x >= clip.right
+        || frame.x + frame.width <= clip.left
+        || frame.y >= clip.bottom
+        || frame.y + frame.height <= clip.top
+    {
+        return Ok(());
+    }
+    let geometry = loom_writer_core::shape_table_cell_geometry(block, font_size, frame.width)
+        .map_err(GlyphPaintError::CellGeometry)?;
+    let required_height = geometry.content_height_pt();
+    if required_height > frame.height + f32::EPSILON {
+        return Err(GlyphPaintError::LineBoxTooShort {
+            required: required_height,
+            available: frame.height,
+        });
+    }
+    let mut tiles = Vec::new();
+    let mut line_y = frame.y;
+    for line in geometry.lines() {
+        if let Some(shaped) = line.shaped() {
+            let line_frame = Frame::new(frame.x, line_y, frame.width, line.pitch_pt());
+            tiles.extend(rasterize_shaped_tiles(
+                shaped,
+                line_frame,
+                pixels_per_point,
+                clip,
+            )?);
+        }
+        line_y += line.pitch_pt();
+    }
+    row.glyph_tiles = ModelRc::new(VecModel::from(tiles));
+    Ok(())
+}
+
+fn rasterize_shaped_tiles(
+    shaped: &WriterShapedVisualLine,
+    frame: Frame,
+    pixels_per_point: f32,
+    clip: RasterClip,
+) -> Result<Vec<WriterGlyphTile>, GlyphPaintError> {
+    if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return Err(RasterError::InvalidRunGeometry.into());
+    }
+    let left = frame.x.max(clip.left);
+    let top = frame.y.max(clip.top);
+    let right = (frame.x + frame.width).min(clip.right);
+    let bottom = (frame.y + frame.height).min(clip.bottom);
+    if !(left < right && top < bottom) {
+        return Ok(Vec::new());
+    }
+
+    let scale = f64::from(pixels_per_point);
+    let pixel_bounds = RasterTileBounds {
+        origin_x_px: pixel_edge(f64::from(left) * scale, false)?,
+        origin_y_px: pixel_edge(f64::from(top) * scale, false)?,
+        width_px: u32::try_from(
+            pixel_edge(f64::from(right) * scale, true)?
+                .checked_sub(pixel_edge(f64::from(left) * scale, false)?)
+                .ok_or(RasterError::InvalidRunGeometry)?,
+        )
+        .map_err(|_| RasterError::InvalidRunGeometry)?,
+        height_px: u32::try_from(
+            pixel_edge(f64::from(bottom) * scale, true)?
+                .checked_sub(pixel_edge(f64::from(top) * scale, false)?)
+                .ok_or(RasterError::InvalidRunGeometry)?,
+        )
+        .map_err(|_| RasterError::InvalidRunGeometry)?,
+    };
+    if pixel_bounds.width_px == 0 || pixel_bounds.height_px == 0 {
+        return Err(RasterError::InvalidLimitsOrBounds.into());
+    }
+    let tile_edge = GLYPH_TILE_EDGE.min(HARD_MAX_TILE_DIMENSION);
+    let tile_columns = pixel_bounds.width_px.div_ceil(tile_edge) as usize;
+    let tile_rows = pixel_bounds.height_px.div_ceil(tile_edge) as usize;
+    let tile_count = tile_columns
+        .checked_mul(tile_rows)
+        .ok_or(RasterError::TileLimitExceeded)?;
+    if tile_count > MAX_GLYPH_TILE_REGIONS_PER_LINE {
+        return Err(RasterError::TileLimitExceeded.into());
+    }
+
+    let painted_runs = shaped.painted_runs();
+    if painted_runs.len() > MAX_GLYPH_RUNS_PER_LINE {
+        return Err(GlyphPaintError::RunLimitExceeded {
+            count: painted_runs.len(),
+            limit: MAX_GLYPH_RUNS_PER_LINE,
+        });
+    }
+    let mut raster_runs = Vec::new();
+    raster_runs
+        .try_reserve_exact(painted_runs.len())
+        .map_err(|_| RasterError::TileAllocationFailed)?;
+    for run in painted_runs {
+        let raster_run = RasterRun {
+            face: &run.face,
+            shaped: &run.shaped,
+            font_size_units: run.size_pt,
+            pixels_per_unit: pixels_per_point,
+            origin_x_px: f64::from(frame.x + run.x_pt) * scale,
+            baseline_y_px: f64::from(frame.y + shaped.ascent_pt() - run.baseline_shift_pt) * scale,
+            variations: &run.variations,
+            synthetic_bold: run.synthetic_bold,
+            synthetic_italic: run.synthetic_italic,
+            color: run.rgba,
+        };
+        raster_runs.push(raster_run);
+    }
+    let tile_image_capacity = tile_count.min(MAX_GLYPH_TILE_IMAGES_PER_LINE);
+    let mut tiles = Vec::new();
+    tiles
+        .try_reserve_exact(tile_image_capacity)
+        .map_err(|_| RasterError::TileAllocationFailed)?;
+    for row_index in 0..tile_rows {
+        for column_index in 0..tile_columns {
+            let origin_x_px = pixel_bounds.origin_x_px + i64::from(column_index as u32 * tile_edge);
+            let origin_y_px = pixel_bounds.origin_y_px + i64::from(row_index as u32 * tile_edge);
+            let bounds = RasterTileBounds {
+                origin_x_px,
+                origin_y_px,
+                width_px: tile_edge.min(pixel_bounds.width_px - column_index as u32 * tile_edge),
+                height_px: tile_edge.min(pixel_bounds.height_px - row_index as u32 * tile_edge),
+            };
+            let byte_len = tile_byte_len(bounds)?;
+            let mut pixels = Vec::new();
+            pixels
+                .try_reserve_exact(byte_len)
+                .map_err(|_| RasterError::TileAllocationFailed)?;
+            pixels.resize(byte_len, 0);
+            paint_run_backgrounds(&mut pixels, bounds, shaped, frame, pixels_per_point);
+            let glyphs = rasterize_glyph_tile(&raster_runs, bounds, RasterLimits::default())?;
+            composite_premultiplied(&mut pixels, &glyphs.rgba_premultiplied)?;
+            drop(glyphs);
+            paint_run_decorations(&mut pixels, bounds, shaped, frame, pixels_per_point);
+            push_glyph_tile(&mut tiles, bounds, frame, scale, pixels_per_point, pixels);
+        }
+    }
+    Ok(tiles)
+}
+
+fn push_glyph_tile(
+    tiles: &mut Vec<WriterGlyphTile>,
+    bounds: RasterTileBounds,
+    frame: Frame,
+    scale: f64,
+    pixels_per_point: f32,
+    pixels: Vec<u8>,
+) {
+    if !pixels.iter().any(|channel| *channel != 0) {
+        return;
+    }
+    let buffer: slint::SharedPixelBuffer<slint::Rgba8Pixel> =
+        slint::SharedPixelBuffer::clone_from_slice(&pixels, bounds.width_px, bounds.height_px);
+    let source = slint::Image::from_rgba8_premultiplied(buffer);
+    tiles.push(WriterGlyphTile {
+        x: (bounds.origin_x_px as f64 / scale - f64::from(frame.x)) as f32,
+        y: (bounds.origin_y_px as f64 / scale - f64::from(frame.y)) as f32,
+        width: bounds.width_px as f32 / pixels_per_point,
+        height: bounds.height_px as f32 / pixels_per_point,
+        source,
+    });
+}
+
+fn pixel_edge(value: f64, round_up: bool) -> Result<i64, RasterError> {
+    if !value.is_finite() || value.abs() > 1.0e12 {
+        return Err(RasterError::InvalidRunGeometry);
+    }
+    Ok(if round_up {
+        value.ceil() as i64
+    } else {
+        value.floor() as i64
+    })
+}
+
+fn tile_byte_len(bounds: RasterTileBounds) -> Result<usize, RasterError> {
+    usize::try_from(bounds.width_px)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(bounds.height_px)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(RasterError::TileAllocationFailed)
+}
+
+fn paint_run_backgrounds(
+    pixels: &mut [u8],
+    bounds: RasterTileBounds,
+    shaped: &WriterShapedVisualLine,
+    frame: Frame,
+    pixels_per_point: f32,
+) {
+    for run in shaped.painted_runs() {
+        let Some(color) = run.background_rgba else {
+            continue;
+        };
+        let baseline = frame.y + shaped.ascent_pt() - run.baseline_shift_pt;
+        fill_rect(
+            pixels,
+            bounds,
+            f64::from(frame.x + run.x_pt) * f64::from(pixels_per_point),
+            f64::from(baseline - run.ascent_pt) * f64::from(pixels_per_point),
+            f64::from(frame.x + run.x_pt + run.shaped.width) * f64::from(pixels_per_point),
+            f64::from(baseline + run.descent_pt) * f64::from(pixels_per_point),
+            color,
+        );
+    }
+}
+
+fn paint_run_decorations(
+    pixels: &mut [u8],
+    bounds: RasterTileBounds,
+    shaped: &WriterShapedVisualLine,
+    frame: Frame,
+    pixels_per_point: f32,
+) {
+    for run in shaped.painted_runs() {
+        let baseline = frame.y + shaped.ascent_pt() - run.baseline_shift_pt;
+        for (enabled, metric, fallback_offset, fallback_thickness) in [
+            (
+                run.underline,
+                run.underline_metric,
+                -run.size_pt * 0.12,
+                run.size_pt * 0.06,
+            ),
+            (
+                run.strikethrough,
+                run.strikeout_metric,
+                run.size_pt * 0.30,
+                run.size_pt * 0.06,
+            ),
+        ] {
+            if !enabled {
+                continue;
+            }
+            let offset = metric.map_or(fallback_offset, |value| value.offset);
+            let thickness = metric
+                .map_or(fallback_thickness, |value| value.thickness)
+                .max(0.25);
+            let top = baseline - offset;
+            fill_rect(
+                pixels,
+                bounds,
+                f64::from(frame.x + run.x_pt) * f64::from(pixels_per_point),
+                f64::from(top) * f64::from(pixels_per_point),
+                f64::from(frame.x + run.x_pt + run.shaped.width) * f64::from(pixels_per_point),
+                f64::from(top + thickness) * f64::from(pixels_per_point),
+                run.rgba,
+            );
+        }
+    }
+}
+
+fn fill_rect(
+    pixels: &mut [u8],
+    bounds: RasterTileBounds,
+    left_px: f64,
+    top_px: f64,
+    right_px: f64,
+    bottom_px: f64,
+    color: [u8; 4],
+) {
+    if color[3] == 0 {
+        return;
+    }
+    let left =
+        (left_px.floor() as i64 - bounds.origin_x_px).clamp(0, i64::from(bounds.width_px)) as u32;
+    let top =
+        (top_px.floor() as i64 - bounds.origin_y_px).clamp(0, i64::from(bounds.height_px)) as u32;
+    let right =
+        (right_px.ceil() as i64 - bounds.origin_x_px).clamp(0, i64::from(bounds.width_px)) as u32;
+    let bottom =
+        (bottom_px.ceil() as i64 - bounds.origin_y_px).clamp(0, i64::from(bounds.height_px)) as u32;
+    for y in top..bottom {
+        for x in left..right {
+            let index = ((y as usize * bounds.width_px as usize) + x as usize) * 4;
+            blend_straight_over(&mut pixels[index..index + 4], color);
+        }
+    }
+}
+
+fn blend_straight_over(destination: &mut [u8], source: [u8; 4]) {
+    let alpha = u16::from(source[3]);
+    let inverse = 255 - alpha;
+    for channel in 0..3 {
+        let premultiplied = (u16::from(source[channel]) * alpha + 127) / 255;
+        destination[channel] = (premultiplied
+            + (u16::from(destination[channel]) * inverse + 127) / 255)
+            .min(255) as u8;
+    }
+    destination[3] = (alpha + (u16::from(destination[3]) * inverse + 127) / 255).min(255) as u8;
+}
+
+fn composite_premultiplied(destination: &mut [u8], source: &[u8]) -> Result<(), RasterError> {
+    if destination.len() != source.len() || destination.len() % 4 != 0 {
+        return Err(RasterError::TileAllocationFailed);
+    }
+    for (target, glyph) in destination.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+        let inverse = 255 - u16::from(glyph[3]);
+        for channel in 0..3 {
+            target[channel] = (u16::from(glyph[channel])
+                + (u16::from(target[channel]) * inverse + 127) / 255)
+                .min(255) as u8;
+        }
+        target[3] =
+            (u16::from(glyph[3]) + (u16::from(target[3]) * inverse + 127) / 255).min(255) as u8;
+    }
+    Ok(())
 }
 
 /// What a row draws.
@@ -327,8 +714,12 @@ pub(crate) fn row_text_with_spaces(
         .iter()
         .any(|piece| piece.look.underline || piece.look.strikethrough);
     let broken_inside = text.trim_end_matches(is_line_end).contains(is_line_end);
-    let justified_block_row =
-        align == Align::Block && block.style.alignment.resolve(text) == Alignment::Justify;
+    let resolved_alignment = block
+        .style
+        .alignment
+        .resolve_with_direction(text, block.style.direction);
+    let paragraph_start = Alignment::Start.resolve_with_direction(text, block.style.direction);
+    let justified_block_row = align == Align::Block && resolved_alignment == Alignment::Justify;
     let positioned_spaces = supplied_spaces.is_some_and(|spaces| !spaces.is_empty());
     if shown.len() <= 1
         && !decorated
@@ -372,10 +763,15 @@ pub(crate) fn row_text_with_spaces(
             Align::Line(measured) => measured,
             _ => measure.width(line_start, ink_end),
         };
-        let shift = match (align, block.style.alignment.resolve(text)) {
+        let shift = match (align, resolved_alignment) {
             (Align::Start, _) => 0.0,
             (_, Alignment::Center) => ((width - line_width) / 2.0).max(0.0),
             (_, Alignment::Right) => (width - line_width).max(0.0),
+            (Align::Block | Align::Line(_), Alignment::Justify)
+                if spaces.is_empty() && paragraph_start == Alignment::Right =>
+            {
+                (width - line_width).max(0.0)
+            }
             _ => 0.0,
         };
         // The tallest glyph on the line sets its height; smaller glyphs sit on
@@ -385,8 +781,9 @@ pub(crate) fn row_text_with_spaces(
             .filter(|piece| piece.start.max(line_start) < piece.end.min(line_end))
             .map(|piece| piece.look.size)
             .fold(font_size, f32::max);
-        let line_top =
-            index as f32 * loom_writer_core::line_pitch(&block.runs, font_size) * WRAPPED_LINE_EM;
+        let line_top = index as f32
+            * loom_writer_core::line_pitch(&block.runs, font_size)
+            * loom_writer_core::TABLE_CELL_LINE_PITCH_EM;
         let draw_line = LineDraw {
             measure: &measure,
             text,
@@ -557,4 +954,51 @@ fn wrap(measure: &Measure, width: f32, start: usize, end: usize) -> Vec<(usize, 
         lines.push((start, end));
     }
     lines
+}
+
+#[cfg(test)]
+mod shaped_raster_tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_cell_text_reports_a_visible_error_when_its_row_is_too_short() {
+        let _serial = loom_writer_core::test_fonts::serial();
+        let block = RichBlock::new(
+            1,
+            "paragraph",
+            "alpha beta gamma delta epsilon zeta eta theta",
+        );
+        let available_width = 42.0;
+        let geometry = loom_writer_core::shape_table_cell_geometry(&block, 12.0, available_width)
+            .expect("the bundled Writer fonts shape the cell text");
+        assert!(
+            geometry.lines().len() > 1,
+            "the narrow cell width forces wrapping"
+        );
+        let required_height = geometry.content_height_pt();
+        let frame_height = required_height - 0.5;
+        let frame = Frame::new(0.0, 0.0, available_width, frame_height);
+        let mut row = render_row(&block, frame, "", "", Align::Block, None);
+        let error = set_shaped_block_glyphs(
+            &mut row,
+            &block,
+            frame,
+            12.0,
+            1.0,
+            RasterClip {
+                left: 0.0,
+                top: 0.0,
+                right: 100.0,
+                bottom: 100.0,
+            },
+        )
+        .expect_err("the cell must not silently clip lines that do not fit");
+        assert!(matches!(
+            error,
+            GlyphPaintError::LineBoxTooShort {
+                required,
+                available
+            } if required > available
+        ));
+    }
 }
