@@ -91,10 +91,10 @@ its default light/dark run is not the full design-bible matrix.
 |------|---------|
 | `.work/` | logs, screenshots, diffs (gitignored) |
 | `../visual-qa-report.txt` | latest visual QA report |
-| [Visual QA process and matrix gaps](../AGENTS.md#source-loom-design-bible-visual-qa-md) | review rules and open coverage gaps |
+| [Visual QA process and matrix gaps](../docs/archive/AGENTS-ARCHIVE.md#source-loom-design-bible-visual-qa-md) | review rules and open coverage gaps |
 | `../.work/VERIFICATION_REPORT.txt` | per-repo status stub |
 | `../Loom-Complete.zip` | packaged suite |
 | `../Loom-Complete.zip.sha256` | its checksum |
 
-See [BOOTSTRAP.md](../AGENTS.md#source-loom-bootstrap-bootstrap-md) for the full procedure and
+See [BOOTSTRAP.md](../docs/archive/AGENTS-ARCHIVE.md#source-loom-bootstrap-bootstrap-md) for the full procedure and
 [COMPATIBILITY.toml](COMPATIBILITY.toml) for the cross-suite contract.
