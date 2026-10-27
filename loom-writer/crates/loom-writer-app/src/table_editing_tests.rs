@@ -406,17 +406,28 @@ mod tests {
     fn the_caret_follows_typed_text_inside_a_table_cell_and_takes_the_cells_colour() {
         let (app, state) = make_test_app();
         app.invoke_insert_table_size(2, 2);
-        let caret_x = |app: &WriterApp| {
+        let caret_style = |app: &WriterApp| {
             app.get_selection_rects()
                 .iter()
                 .find(|r| r.caret)
-                .map(|r| (r.x, r.has_color))
+                .map(|r| {
+                    (
+                        r.x,
+                        r.has_color,
+                        (r.color.red(), r.color.green(), r.color.blue()),
+                    )
+                })
                 .expect("a caret")
         };
-        let (empty_x, header_coloured) = caret_x(&app);
+        let (empty_x, header_coloured, header_rgb) = caret_style(&app);
         assert!(
             header_coloured,
             "a header cell's caret uses the cell's light text colour"
+        );
+        assert_eq!(
+            header_rgb,
+            (255, 255, 255),
+            "the empty header-cell caret uses the table style's white text colour"
         );
 
         let text = state.current.borrow().editor_text();
@@ -425,7 +436,7 @@ mod tests {
         typed.insert_str(at, "Region");
         let caret = (at + 6) as i32;
         app.invoke_document_edited(typed.into(), caret, caret);
-        let (after_x, _) = caret_x(&app);
+        let (after_x, _, _) = caret_style(&app);
         assert!(
             after_x > empty_x + 20.0,
             "caret must move right with six typed letters: {empty_x} -> {after_x}"
@@ -889,7 +900,7 @@ mod tests {
         for word in &test_words {
             assert!(
                 pdf_readable.contains(word),
-                "PDF export must contain word '{word}'"
+                "PDF export must contain word '{word}'; extracted text: {pdf_readable:?}"
             );
         }
     }

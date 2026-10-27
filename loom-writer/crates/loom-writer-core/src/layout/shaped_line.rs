@@ -474,8 +474,8 @@ fn shaped_wrap_ranges(
         paragraph,
         &mut ranges,
     )?;
-    if segment_start == text.len() {
-        // A final explicit break leaves a real empty visual line after it.
+    if segment_start == text.len() && !text.ends_with('\u{c}') {
+        // Line breaks leave an empty visual line; page breaks advance to another page.
         ranges.push(text.len()..text.len());
     }
     if ranges.is_empty() {
@@ -995,7 +995,7 @@ fn expansion_at(x_pt: f32, expansions: &[GlyphExpansion]) -> f32 {
 
 pub(crate) fn parse_rgba(value: Option<&str>) -> Option<[u8; 4]> {
     let hex = value?.strip_prefix('#')?;
-    if hex.len() != 6 && hex.len() != 8 {
+    if (hex.len() != 6 && hex.len() != 8) || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
     let channel = |at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok();

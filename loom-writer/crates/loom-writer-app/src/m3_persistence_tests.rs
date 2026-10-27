@@ -110,6 +110,11 @@ fn history_byte_budget_keeps_the_newest_styled_undo_step() {
 fn source_less_recovery_only_treats_default_blank_documents_as_clean() {
     let blank = WriterDocument::new("blank", "Untitled");
     assert!(draft(blank.clone()).is_clean_against_source());
+    let mut template_blank = blank.clone();
+    template_blank.title = "Untitled Document".into();
+    assert!(draft(template_blank.clone()).is_clean_against_source());
+    template_blank.push(RichBlock::new(1, "paragraph", ""));
+    assert!(draft(template_blank).is_clean_against_source());
 
     let mut empty_paragraph = blank.clone();
     empty_paragraph.push(RichBlock::new(1, "paragraph", ""));
@@ -131,6 +136,78 @@ fn source_less_recovery_only_treats_default_blank_documents_as_clean() {
         !draft(page_only).is_clean_against_source(),
         "page setup changes must keep an otherwise empty draft"
     );
+}
+
+#[test]
+fn source_less_recovery_keeps_whitespace_only_text() {
+    let mut document = WriterDocument::new("whitespace", "Untitled");
+    document.push(RichBlock::new(1, "paragraph", " \t"));
+    assert!(
+        !draft(document).is_clean_against_source(),
+        "spaces and tabs in an unsaved draft are document content"
+    );
+}
+
+#[test]
+fn source_less_recovery_keeps_multiple_empty_paragraphs() {
+    let mut document = WriterDocument::new("paragraphs", "Untitled");
+    document.push(RichBlock::new(1, "paragraph", ""));
+    document.push(RichBlock::new(2, "paragraph", ""));
+    assert!(
+        !draft(document).is_clean_against_source(),
+        "additional empty paragraphs are document structure"
+    );
+}
+
+#[test]
+fn source_less_recovery_keeps_a_named_empty_document() {
+    let document = WriterDocument::new("named", "My document");
+    assert!(
+        !draft(document).is_clean_against_source(),
+        "a custom title is meaningful document content"
+    );
+}
+
+#[test]
+fn file_backed_recovery_compares_the_saved_document_content() {
+    let root = isolated_root();
+    std::fs::create_dir_all(&root).expect("create isolated state root");
+    let path = root.join("saved.loomdoc");
+    let mut document = WriterDocument::new("saved", "Saved");
+    document.push(RichBlock::new(1, "paragraph", "A"));
+    std::fs::write(
+        &path,
+        loom_writer_core::save_document(&document).expect("save"),
+    )
+    .expect("write saved document");
+
+    let mut recovered = RecoveredDraft {
+        document,
+        source: Some(path.clone()),
+    };
+    assert!(recovered.is_clean_against_source());
+    recovered.document.set_selection(TextSelection::caret(1));
+    assert!(
+        recovered.is_clean_against_source(),
+        "selection is view state"
+    );
+    recovered.document.id = "other".into();
+    assert!(
+        !recovered.is_clean_against_source(),
+        "a different document ID is content"
+    );
+    recovered.document.id = "saved".into();
+    recovered.document.blocks[0].style.direction = ParagraphDirection::RightToLeft;
+    assert!(
+        !recovered.is_clean_against_source(),
+        "formatting is content"
+    );
+    std::fs::remove_file(&path).expect("remove source");
+    assert!(
+        !recovered.is_clean_against_source(),
+        "a missing source cannot prove a draft clean"
+    );
+    std::fs::remove_dir_all(root).expect("remove isolated state root");
 }
 
 fn draft(document: WriterDocument) -> RecoveredDraft {

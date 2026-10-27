@@ -3,7 +3,7 @@
 
 This validator treats release-manifest.json as an assertion to verify, not as
 proof. It hashes the produced artifact, inspects the native container, checks
-all eight Loom applications and their document registrations, and emits a
+all packaged Loom applications and their document registrations, and emits a
 machine-readable report on both success and failure.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,33 @@ except Exception as exc:  # pragma: no cover - startup contract
 APPS = tuple(release.APPS)
 DISPLAY_NAMES = dict(release.DISPLAY_NAMES)
 DOCUMENT_TYPES = dict(release.DOCUMENT_TYPES)
+
+
+def validate_icon(path: Path, app: str, suffix: str) -> None:
+    """Reject missing or substituted artwork in an extracted native package."""
+    original = release.icon_path(Path(release.__file__).resolve().parents[2], app, suffix)
+    if not path.is_file() or path.read_bytes() != original.read_bytes():
+        raise RuntimeError(f"application icon missing or changed for loom-{app}: {path}")
+
+
+def validate_shortcut_icons(source: str, extracted: Path) -> None:
+    """Verify shortcut icon indices and original payloads emitted by WiX -x."""
+    elements = list(ET.fromstring(source).iter())
+    icons = {
+        item.get("Id"): item for item in elements
+        if item.tag.rsplit("}", 1)[-1] == "Icon"
+    }
+    for app in APPS:
+        shortcut = next((item for item in elements if item.get("Id") == f"Shortcut_{app}"), None)
+        expected = f"Icon_{app}.ico"
+        if (shortcut is None or shortcut.get("Icon") != expected
+                or shortcut.get("IconIndex") != "0" or expected not in icons):
+            raise RuntimeError(f"MSI shortcut application icon missing for loom-{app}")
+        path = Path(icons[expected].get("SourceFile", ""))
+        # Our absolute -x argument makes WiX emit absolute extracted Icon paths.
+        if not path.is_absolute() or not path.resolve().is_relative_to(extracted.resolve()):
+            raise RuntimeError(f"MSI application icon path outside extraction for loom-{app}")
+        validate_icon(path, app, "ico")
 
 
 def sha256_file(path: Path) -> str:
@@ -154,8 +182,13 @@ def validate_linux(artifact: Path, architecture: str, assertions: list[str]) -> 
             desktop = root / "usr" / "share" / "applications" / f"loom-{app}.desktop"
             text = desktop.read_text(encoding="utf-8")
             extension, mime, _ = DOCUMENT_TYPES[app]
-            if f"Exec=loom-{app} %F" not in text or f"MimeType={mime};" not in text:
+            if any(value not in text.splitlines() for value in (
+                f"Exec=loom-{app} %F", f"MimeType={mime};", f"Icon=loom-{app}",
+            )):
                 raise RuntimeError(f"desktop registration is incomplete for loom-{app}")
+            validate_icon(
+                root / f"usr/share/icons/hicolor/512x512/apps/loom-{app}.png", app, "512.png",
+            )
             if extension not in DOCUMENT_TYPES[app][0]:
                 raise RuntimeError(f"internal document metadata mismatch for {app}")
 
@@ -169,9 +202,10 @@ def validate_linux(artifact: Path, architecture: str, assertions: list[str]) -> 
     assertions.extend(
         [
             "Debian control architecture verified",
-            "all eight packaged executables are executable ELF files of the requested architecture",
-            "all eight desktop Exec and MIME registrations verified",
+            "all packaged executables are executable ELF files of the requested architecture",
+            "all packaged desktop Exec and MIME registrations verified",
             "shared MIME extension registrations verified",
+            "application PNG artwork and desktop icon registrations verified",
         ]
     )
 
@@ -203,6 +237,7 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
         extracted = temp / "decompiled"
         run([wix, "msi", "decompile", str(artifact), "-o", str(wxs), "-x", str(extracted)])
         source = wxs.read_text(encoding="utf-8", errors="replace")
+        validate_shortcut_icons(source, extracted)
         for app in APPS:
             extension, _mime, _ = DOCUMENT_TYPES[app]
             required = [
@@ -237,7 +272,8 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
             "WiX MSI validation passed",
             "MSI decompilation verified all application/file-association/open-command metadata",
             "MSI administrative extraction succeeded",
-            "all eight extracted PE executables match the requested architecture",
+            "MSI shortcut icon declarations, indices and original ICO payloads verified",
+            "all packaged PE executables match the requested architecture",
         ]
     )
 
@@ -278,6 +314,9 @@ def validate_macos(artifact: Path, architecture: str, assertions: list[str]) -> 
                 raise RuntimeError(f"Mach-O architecture mismatch for {app}: {archs}")
             if info.get("CFBundleIdentifier") != f"org.loom.{app}":
                 raise RuntimeError(f"bundle identifier mismatch for {app}")
+            if info.get("CFBundleIconFile") != f"loom-{app}.icns":
+                raise RuntimeError(f"bundle application icon declaration missing for {app}")
+            validate_icon(bundle / "Contents/Resources" / f"loom-{app}.icns", app, "icns")
 
             extension, mime, _ = DOCUMENT_TYPES[app]
             doc_types = json.dumps(info.get("CFBundleDocumentTypes", []), sort_keys=True)
@@ -292,9 +331,10 @@ def validate_macos(artifact: Path, architecture: str, assertions: list[str]) -> 
     assertions.extend(
         [
             "DMG mounted read-only and exposes /Applications install link",
-            "all eight app bundles contain executable Mach-O files of the requested architecture",
-            "all eight bundle identifiers verified",
-            "all eight document type and exported UTI registrations verified",
+            "all packaged app bundles contain executable Mach-O files of the requested architecture",
+            "all packaged bundle identifiers verified",
+            "application ICNS artwork and bundle icon declarations verified",
+            "all packaged document type and exported UTI registrations verified",
         ]
     )
 

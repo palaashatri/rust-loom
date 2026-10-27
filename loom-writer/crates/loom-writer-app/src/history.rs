@@ -11,7 +11,7 @@
 //! straight after a word starts a new step, and so do Enter, a caret jump and a
 //! pause longer than [`TYPING_COALESCE_WINDOW_MS`].
 
-use std::mem::size_of_val;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use loom_writer_core::{RichBlock, WriterDocument};
@@ -142,72 +142,170 @@ fn begins_a_word_group(edit: &BlockEdit) -> bool {
     )
 }
 
-/// Bytes that a pair of documents keeps alive. Each document's strings, comments
-/// and block records are copied, so they are counted in full. A block's text and
-/// picture or chart payload is counted once, unless the other document holds the
-/// same allocation for the block at the same position, which is how an edit that
-/// leaves a block alone shares it. A block moved to another position is counted
-/// again, so the figure errs high rather than low.
+/// Estimate the storage retained by one before/after history entry.
+/// Shared payloads at the same block position are counted once.
 pub(crate) fn retained_bytes(before: &WriterDocument, after: &WriterDocument) -> usize {
     let overhead = |document: &WriterDocument| {
-        let comments: usize = document
-            .comments
-            .iter()
-            .map(|thread| {
-                thread.id.len() + thread.author.len() + thread.body.len() + size_of_val(thread)
-            })
-            .sum();
-        document.id.len() + document.title.len() + comments
+        let WriterDocument {
+            id,
+            title,
+            page: _,
+            comments,
+            blocks,
+            selection: _,
+        } = document;
+        sum_bytes([
+            id.capacity(),
+            title.capacity(),
+            vec_bytes(blocks),
+            vec_bytes(comments),
+            sum_bytes(comments.iter().map(|thread| {
+                sum_bytes([
+                    thread.id.capacity(),
+                    thread.author.capacity(),
+                    thread.body.capacity(),
+                ])
+            })),
+            sum_bytes(blocks.iter().map(block_record_bytes)),
+        ])
     };
-    overhead(before)
-        + overhead(after)
-        + before.blocks.iter().map(block_record_bytes).sum::<usize>()
-        + after.blocks.iter().map(block_record_bytes).sum::<usize>()
-        + before
-            .blocks
-            .iter()
-            .map(|block| payload_bytes(block, None))
-            .sum::<usize>()
-        + after
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| payload_bytes(block, before.blocks.get(index)))
-            .sum::<usize>()
+    // shortcut: allocator metadata is excluded; measure RSS if exact usage is needed.
+    sum_bytes([
+        size_of::<HistoryEntry>(),
+        overhead(before),
+        overhead(after),
+        sum_bytes(before.blocks.iter().map(|block| payload_bytes(block, None))),
+        sum_bytes(
+            after
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(index, block)| payload_bytes(block, before.blocks.get(index))),
+        ),
+    ])
 }
 
-/// A block record: the struct itself, its kind string and its style runs.
+/// Owned allocations in a block record; its struct is counted in the block vector.
 fn block_record_bytes(block: &RichBlock) -> usize {
-    size_of_val(block) + block.kind.capacity() + size_of_val(block.runs.as_slice())
+    sum_bytes([
+        block.kind.capacity(),
+        vec_bytes(&block.runs),
+        sum_bytes(block.runs.iter().map(|run| {
+            sum_bytes([
+                run.style.font_family.capacity(),
+                optional_string_bytes(run.style.color.as_ref()),
+                optional_string_bytes(run.style.background.as_ref()),
+            ])
+        })),
+        block
+            .image
+            .as_ref()
+            .map_or(0, |image| image.name.capacity()),
+    ])
 }
 
-/// The text, picture and chart bytes of `block` that `prior` (the same block
-/// before the edit, if any) does not already hold.
+/// Payload bytes not already held by the corresponding prior block.
 fn payload_bytes(block: &RichBlock, prior: Option<&RichBlock>) -> usize {
     let prior = prior.filter(|prior| prior.id == block.id);
-    let mut total = 0;
     let same_text =
         prior.is_some_and(|prior| prior.text.as_str().as_ptr() == block.text.as_str().as_ptr());
-    if !same_text {
-        total += block.text.len_bytes();
-    }
-    if let Some(image) = &block.image {
+    let text = if same_text {
+        0
+    } else {
+        sum_bytes([ARC_HEADER_BYTES, block.text.len_bytes()])
+    };
+    let image = block.image.as_ref().map_or(0, |image| {
         let shared = prior
             .and_then(|prior| prior.image.as_ref())
             .is_some_and(|old| Arc::ptr_eq(&old.bytes, &image.bytes));
-        if !shared {
-            total += image.bytes.len();
+        if shared {
+            0
+        } else {
+            sum_bytes([
+                ARC_HEADER_BYTES,
+                size_of::<Vec<u8>>(),
+                image.bytes.capacity(),
+            ])
         }
-    }
-    if let Some(chart) = &block.chart {
+    });
+    let chart = block.chart.as_ref().map_or(0, |chart| {
         let shared = prior
             .and_then(|prior| prior.chart.as_ref())
             .is_some_and(|old| Arc::ptr_eq(old, chart));
-        if !shared {
-            total += chart.len();
+        if shared {
+            0
+        } else {
+            sum_bytes([ARC_HEADER_BYTES, size_of::<String>(), chart.capacity()])
         }
-    }
-    total
+    });
+    let table = block.table.as_ref().map_or(0, |table| {
+        let shared = prior
+            .and_then(|prior| prior.table.as_ref())
+            .is_some_and(|old| Arc::ptr_eq(old, table));
+        if shared {
+            0
+        } else {
+            table_bytes(table)
+        }
+    });
+    sum_bytes([text, image, chart, table])
+}
+
+const ARC_HEADER_BYTES: usize = 2 * size_of::<usize>();
+
+fn sum_bytes(bytes: impl IntoIterator<Item = usize>) -> usize {
+    bytes.into_iter().fold(0, usize::saturating_add)
+}
+
+fn vec_bytes<T>(values: &Vec<T>) -> usize {
+    values.capacity().saturating_mul(size_of::<T>())
+}
+
+fn optional_string_bytes(value: Option<&String>) -> usize {
+    value.map_or(0, String::capacity)
+}
+
+fn table_bytes(table: &loom_objects::Table) -> usize {
+    sum_bytes([
+        ARC_HEADER_BYTES,
+        size_of::<loom_objects::Table>(),
+        table.id.capacity(),
+        optional_string_bytes(table.name.as_ref()),
+        table.style_id.capacity(),
+        vec_bytes(&table.columns),
+        vec_bytes(&table.rows),
+        sum_bytes(table.rows.iter().map(|row| {
+            sum_bytes([
+                vec_bytes(&row.cells),
+                sum_bytes(row.cells.iter().map(|cell| {
+                    let style = cell.style_override.as_ref().map_or(0, |style| {
+                        sum_bytes([
+                            optional_string_bytes(style.background_color.as_ref()),
+                            style.borders.as_ref().map_or(0, |borders| {
+                                sum_bytes(
+                                    [&borders.top, &borders.bottom, &borders.left, &borders.right]
+                                        .into_iter()
+                                        .flatten()
+                                        .map(|border| border.color.capacity()),
+                                )
+                            }),
+                        ])
+                    });
+                    sum_bytes([
+                        vec_bytes(&cell.content.runs),
+                        sum_bytes(cell.content.runs.iter().map(|run| {
+                            sum_bytes([
+                                run.text.capacity(),
+                                optional_string_bytes(run.font_family.as_ref()),
+                                optional_string_bytes(run.color.as_ref()),
+                            ])
+                        })),
+                        style,
+                    ])
+                })),
+            ])
+        })),
+    ])
 }
 
 #[derive(Debug)]
@@ -313,7 +411,7 @@ impl EditorHistory {
     }
 
     fn entry_count(&self) -> usize {
-        self.undo.len() + self.redo.len()
+        self.undo.len().saturating_add(self.redo.len())
     }
 
     #[cfg(test)]
@@ -324,7 +422,10 @@ impl EditorHistory {
     /// Drops the oldest undo entries, then the oldest redo entries, until the
     /// budget holds. The newest undo entry is kept even above the budget.
     fn recalculate_and_trim(&mut self) {
-        self.total_bytes = self.undo.iter().chain(&self.redo).map(|e| e.bytes).sum();
+        let total = |undo: &[HistoryEntry], redo: &[HistoryEntry]| {
+            sum_bytes(undo.iter().chain(redo).map(|entry| entry.bytes))
+        };
+        self.total_bytes = total(&self.undo, &self.redo);
         while self.entry_count() > self.max_entries || self.total_bytes > self.max_bytes {
             if self.undo.len() > 1 {
                 self.undo.remove(0);
@@ -333,7 +434,7 @@ impl EditorHistory {
             } else {
                 break;
             }
-            self.total_bytes = self.undo.iter().chain(&self.redo).map(|e| e.bytes).sum();
+            self.total_bytes = total(&self.undo, &self.redo);
         }
     }
 }

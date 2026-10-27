@@ -23,11 +23,10 @@ export { Palette as WidgetPalette } from "std-widgets.slint";
 export { WriterTableCellRect, WriterPageImage, PageImages, PictureAlt } from "writer_components.slint";
 
 export component WriterApp inherits Window {
-    // Set from the document's name and unsaved state, as Sheets does.
+    icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-writer.png");
     in-out property <string> window-title: "Loom Writer";
     title: root.window-title;
     default-font-family: Theme.ui-font-family;
-    // Windows/Linux share menu and title row; macOS keeps native frame.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;

@@ -1252,10 +1252,14 @@ fn selection_change_is_first_class_without_history_or_block_mutation() {
     // History must remain empty: selection changes never push history.
     assert_eq!(history.undo_len(), 0);
     assert_eq!(doc_for_selection.selected_text(), "second");
-    // Inspector and toolbar follow selection: first block is plain paragraph so
-    // heading should be uniform body (0) and alignment uniform left (0).
+    // The default paragraph uses logical Start; it is separate from physical
+    // Left and remains selected in its own inspector control.
     assert_eq!(app2.get_heading_level(), 0);
-    assert_eq!(app2.get_text_alignment(), 0);
+    assert_eq!(app2.get_text_alignment(), -1);
+    assert_eq!(
+        app2.global::<WriterFormatState>().get_logical_alignment(),
+        0
+    );
     assert_eq!(app2.get_selection_announcement(), "Selected 6 characters");
     // Collapsed vs range enablement via registry is selection-derived.
     let mut reg = build_writer_registry();

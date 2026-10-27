@@ -1,0 +1,83 @@
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/import.rs:343:
+     id: u64,
+     archive: Option<&PackageArchive>,
+ ) -> Result<Option<(Option<RichBlock>, usize)>, String> {
+-    let Some(tag_open_end) = xml[start..].find('>') else { return Ok(None); };
++    let Some(tag_open_end) = xml[start..].find('>') else {
++        return Ok(None);
++    };
+     let tag_open_end = tag_open_end + start + 1;
+     let tag_str = &xml[start..tag_open_end];
+     if tag_str.ends_with("/>") {
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/import.rs:351:
+     }
+ 
+     let close_tag = "</w:p>";
+-    let Some(end_rel) = xml[start..].find(close_tag) else { return Ok(None); };
++    let Some(end_rel) = xml[start..].find(close_tag) else {
++        return Ok(None);
++    };
+     let p_xml = &xml[start..start + end_rel + close_tag.len()];
+     let next_cursor = start + end_rel + close_tag.len();
+ 
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/import.rs:538:
+         if val == "auto" {
+             style.color = None;
+         } else {
+-            style.color = Some(
+-                writer_color(&val)
+-                    .ok_or_else(|| "DOCX color value must be six hexadecimal digits".to_string())?,
+-            );
++            style.color =
++                Some(writer_color(&val).ok_or_else(|| {
++                    "DOCX color value must be six hexadecimal digits".to_string()
++                })?);
+         }
+     }
+     if let Some(fonts_tag) = property_tag(pr, "w:rFonts") {
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/import.rs:638:
+ /// Parses a table `<w:tbl>...</w:tbl>`.
+ fn parse_table(xml: &str, start: usize, id: u64) -> Result<Option<(RichBlock, usize)>, String> {
+     let close_tag = "</w:tbl>";
+-    let Some(end_rel) = xml[start..].find(close_tag) else { return Ok(None); };
++    let Some(end_rel) = xml[start..].find(close_tag) else {
++        return Ok(None);
++    };
+     let tbl_xml = &xml[start..start + end_rel + close_tag.len()];
+     let next_cursor = start + end_rel + close_tag.len();
+ 
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/inline_styles_tests.rs:163:
+ 
+ #[test]
+ fn malformed_docx_color_is_reported_instead_of_dropped() {
+-    for color_property in [
+-        r#"<w:color w:val="not-a-color"/>"#,
+-        "<w:color/>",
+-    ] {
++    for color_property in [r#"<w:color w:val="not-a-color"/>"#, "<w:color/>"] {
+         let body = plain_run_paragraph("styled", color_property);
+         let xml = format!(
+             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n         <w:document xmlns:w=\"{W}\"><w:body>{body}</w:body></w:document>"
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/docx/inline_styles_tests.rs:186:
+ 
+ #[test]
+ fn malformed_table_cell_color_is_reported_instead_of_dropped() {
+-    let paragraph = plain_run_paragraph(
+-        "styled",
+-        r#"<w:color w:val="not-a-color"/>"#,
+-    );
++    let paragraph = plain_run_paragraph("styled", r#"<w:color w:val="not-a-color"/>"#);
+     let xml = format!(
+         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n         <w:document xmlns:w=\"{W}\"><w:body><w:tbl><w:tr><w:tc>{paragraph}</w:tc></w:tr></w:tbl></w:body></w:document>"
+     );
+Diff in /Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core/src/layout/shaped_line.rs:995:
+ 
+ pub(crate) fn parse_rgba(value: Option<&str>) -> Option<[u8; 4]> {
+     let hex = value?.strip_prefix('#')?;
+-    if (hex.len() != 6 && hex.len() != 8)
+-        || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+-    {
++    if (hex.len() != 6 && hex.len() != 8) || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+         return None;
+     }
+     let channel = |at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok();

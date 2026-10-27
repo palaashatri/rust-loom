@@ -221,6 +221,8 @@ fn pdf_lines(
 /// margins. Output is byte-for-byte deterministic for the same document.
 pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
     use loom_pdf::{PdfDocument, TextStyle};
+    crate::style_json::validate_native_text_colors(doc)
+        .map_err(|error| WriterError::Invalid(error.into()))?;
     let page_style = doc.page.page_style();
     let body = TextStyle {
         size_pt: page_style.body_font_size_pt,
@@ -640,6 +642,57 @@ mod tests {
                 "missing or duplicated {text}"
             );
         }
+    }
+
+    #[test]
+    fn export_pdf_keeps_paragraph_text_when_a_table_follows() {
+        let introduction = "Introduction paragraph with unique words Alpha Beta Gamma.";
+        let conclusion = "Conclusion paragraph with Delta Epsilon Zeta.";
+
+        let mut paragraph_only = WriterDocument::new("table-text-loss", "Table text loss");
+        paragraph_only.replace_paragraphs(introduction);
+        paragraph_only
+            .blocks
+            .push(RichBlock::new(99, "paragraph", conclusion));
+        let paragraph_text = loom_pdf::inspect::readable_content(&export_valid(&paragraph_only))
+            .expect("readable paragraph-only PDF");
+        assert!(
+            paragraph_text.contains("Alpha"),
+            "paragraph-only PDF is the readable baseline: {paragraph_text:?}"
+        );
+
+        let mut paragraph_with_table = WriterDocument::new("table-text-loss", "Table text loss");
+        paragraph_with_table.replace_paragraphs(introduction);
+        let table_id = paragraph_with_table
+            .insert_table_block(usize::MAX, 2, 2)
+            .expect("insert table after introduction");
+        let mut table = paragraph_with_table
+            .table_from_block(table_id)
+            .expect("inserted table is typed");
+        table.set(0, 0, "CellOneOne");
+        table.set(0, 1, "CellOneTwo");
+        table.set(1, 0, "CellTwoOne");
+        table.set(1, 1, "CellTwoTwo");
+        paragraph_with_table
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == table_id)
+            .expect("inserted table block")
+            .set_table(table.to_loom_table());
+        paragraph_with_table
+            .blocks
+            .push(RichBlock::new(99, "paragraph", conclusion));
+
+        let table_text = loom_pdf::inspect::readable_content(&export_valid(&paragraph_with_table))
+            .expect("readable paragraph-plus-table PDF");
+        assert!(
+            table_text.contains("Alpha"),
+            "adding a table must not drop preceding paragraph text: {table_text:?}"
+        );
+        assert!(
+            table_text.contains("CellOneOne") && table_text.contains("Delta"),
+            "the PDF should also retain table cells and the following paragraph: {table_text:?}"
+        );
     }
 
     #[test]

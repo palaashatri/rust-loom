@@ -1,0 +1,13 @@
+# Minimal fixture from installed Ubuntu hicolor-icon-theme 0.17-2 index.theme.
+# Retain the package's Applications section; 1024x1024/apps is not indexed.
+[Icon Theme]
+Name=Hicolor
+Directories=512x512/apps
+
+[512x512/apps]
+MinSize=64
+Size=512
+MaxSize=512
+Context=Applications
+Type=Scalable
+

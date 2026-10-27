@@ -21,6 +21,7 @@ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { PresenterWindow, ThumbRows, ObjectPart, ObjectParts, ElementInk } from "presenter.slint";
 
 export component PresentApp inherits Window {
+    icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-present.png");
     in property <string> os-window-title: "Loom Present";
     title: root.os-window-title;
     default-font-family: Theme.ui-font-family;
@@ -45,7 +46,6 @@ export component PresentApp inherits Window {
     preferred-height: 800px;
     background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
 
-    /// Right inspector; open by default where the window is wide enough.
     in-out property <bool> show-inspector: false;
     in-out property <bool> show-navigator: true;
     in-out property <bool> view-menu-open: false;
@@ -53,7 +53,6 @@ export component PresentApp inherits Window {
     in-out property <int> zoom-index: 0;
     property <length> menu-x: 0px;
     property <float> zoom-factor: root.zoom-index == 1 ? 0.75 : root.zoom-index == 2 ? 0.5 : 1.0;
-    /// Pane toggles changed; the menu bar re-reads their checked state.
     callback view-state-changed;
     changed show-inspector => { root.view-state-changed(); }
     changed show-navigator => { root.view-state-changed(); }

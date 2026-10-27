@@ -1,0 +1,19 @@
+   Compiling loom-writer-core v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.63s
+     Running unittests src/lib.rs (target/debug/deps/loom_writer_core-71911d5e22c3f632)
+
+running 1 test
+test docx::inline_styles_tests::malformed_docx_color_is_reported_instead_of_dropped ... 
+thread 'docx::inline_styles_tests::malformed_docx_color_is_reported_instead_of_dropped' (3901172) panicked at crates/loom-writer-core/src/docx/inline_styles_tests.rs:177:9:
+malformed Word color must not be silently dropped
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    docx::inline_styles_tests::malformed_docx_color_is_reported_instead_of_dropped
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 453 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p loom-writer-core --lib`

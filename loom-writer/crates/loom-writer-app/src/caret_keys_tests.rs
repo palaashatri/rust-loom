@@ -124,13 +124,18 @@ fn end_and_home_stay_on_the_visible_line_and_shift_extends() {
     assert!(focus(&s.state) > first.global_start + visible);
 }
 
-fn press_ctrl(app: &WriterApp, key: Key) {
+fn press_document_edge(app: &WriterApp, key: Key) {
+    let (modifier, key) = match key {
+        Key::End if cfg!(target_os = "macos") => (Key::Meta, Key::DownArrow),
+        Key::Home if cfg!(target_os = "macos") => (Key::Meta, Key::UpArrow),
+        key => (Key::Control, key),
+    };
     app.window().dispatch_event(WindowEvent::KeyPressed {
-        text: SharedString::from(Key::Control),
+        text: SharedString::from(modifier),
     });
     press(app, key);
     app.window().dispatch_event(WindowEvent::KeyReleased {
-        text: SharedString::from(Key::Control),
+        text: SharedString::from(modifier),
     });
 }
 
@@ -141,7 +146,7 @@ fn ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top() {
         .collect::<Vec<_>>()
         .join("\n");
     let s = launched(&text);
-    press_ctrl(&s.app, Key::End);
+    press_document_edge(&s.app, Key::End);
     let end = s.state.current.borrow().editor_text().len();
     assert_eq!(focus(&s.state), end, "Ctrl+End reaches the end of the text");
     assert!(
@@ -149,7 +154,7 @@ fn ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top() {
         "and the page scrolls down to it"
     );
 
-    press_ctrl(&s.app, Key::Home);
+    press_document_edge(&s.app, Key::Home);
     assert_eq!(focus(&s.state), 0, "Ctrl+Home returns to the start");
     assert_eq!(
         s.state.viewport.borrow().scroll_y,
@@ -166,9 +171,9 @@ fn ctrl_home_returns_to_the_top_when_the_page_is_zoomed() {
         .join("\n");
     let s = launched(&text);
     s.app.invoke_page_zoom_changed(1.5);
-    press_ctrl(&s.app, Key::End);
+    press_document_edge(&s.app, Key::End);
     assert!(s.state.viewport.borrow().scroll_y > 0.0);
-    press_ctrl(&s.app, Key::Home);
+    press_document_edge(&s.app, Key::Home);
     assert_eq!(
         focus(&s.state),
         0,
@@ -191,12 +196,12 @@ fn ctrl_home_leaves_a_long_table_at_the_end_and_returns_to_the_top() {
         .expect("insert a long table");
     apply_state(&s.app, &s.state);
     s.app.invoke_focus_page();
-    press_ctrl(&s.app, Key::End);
+    press_document_edge(&s.app, Key::End);
     assert!(
         s.state.viewport.borrow().scroll_y > 0.0,
         "Ctrl+End scrolls to the table"
     );
-    press_ctrl(&s.app, Key::Home);
+    press_document_edge(&s.app, Key::Home);
     assert_eq!(
         focus(&s.state),
         0,

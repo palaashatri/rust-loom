@@ -102,6 +102,7 @@ impl WriterDocument {
         if table.row_count() == 0 || table.col_count() == 0 {
             return Err("table geometry must be non-empty".into());
         }
+        crate::style_json::validate_table_text_colors(table).map_err(str::to_owned)?;
         let id = self.next_table_block_id();
         let mut table = table.clone();
         table.ensure_grid_consistency();

@@ -1,0 +1,25 @@
+   Compiling loom-writer-core v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.09s
+     Running unittests src/lib.rs (target/debug/deps/loom_writer_core-71911d5e22c3f632)
+
+running 17 tests
+test docx::inline_styles_tests::automatic_color_round_trips_and_unstyled_runs_stay_unstyled ... ok
+test docx::inline_styles_tests::commented_inline_property_does_not_create_a_style_run ... ok
+test docx::inline_styles_tests::explicit_default_size_overrides_heading_size_in_export ... ok
+test docx::inline_styles_tests::imported_superscript_and_subscript_vertical_alignment_are_preserved ... ok
+test docx::inline_styles_tests::inline_attributes_accept_xml_whitespace_quotes_and_order ... ok
+test docx::inline_styles_tests::inline_property_tags_are_exact_and_attributes_do_not_leak_from_siblings ... ok
+test docx::inline_styles_tests::invalid_color_diagnostics_stay_concise_for_oversized_metadata ... ok
+test docx::inline_styles_tests::literal_entity_looking_font_family_round_trips_without_double_unescape ... ok
+test docx::inline_styles_tests::malformed_docx_color_is_reported_instead_of_dropped ... ok
+test docx::inline_styles_tests::malformed_duplicate_attribute_is_ignored ... ok
+test docx::inline_styles_tests::malformed_opening_attribute_fragment_fails_closed ... ok
+test docx::inline_styles_tests::malformed_or_translucent_colors_fail_export_without_changing_the_source ... ok
+test docx::inline_styles_tests::malformed_table_cell_color_is_reported_instead_of_dropped ... ok
+test docx::inline_styles_tests::nested_chart_relation_ignores_foreign_prefix_decoy ... ok
+test docx::inline_styles_tests::nested_picture_description_ignores_foreign_prefix_decoy ... ok
+test docx::inline_styles_tests::opaque_rgb_colors_survive_export_and_import ... ok
+test docx::inline_styles_tests::relationship_tag_slice_respects_quoted_greater_than ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 438 filtered out; finished in 0.02s
+

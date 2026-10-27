@@ -162,6 +162,42 @@ fn malformed_or_translucent_colors_fail_export_without_changing_the_source() {
 }
 
 #[test]
+fn malformed_docx_color_is_reported_instead_of_dropped() {
+    let body = plain_run_paragraph("styled", r#"<w:color w:val="not-a-color"/>"#);
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n         <w:document xmlns:w=\"{W}\"><w:body>{body}</w:body></w:document>"
+    );
+    let mut archive = PackageArchive::new();
+    archive
+        .add("word/document.xml", xml.into_bytes())
+        .expect("add document part");
+    let bytes = archive.to_bytes().expect("package test document");
+
+    let Err(error) = import_docx(&bytes) else {
+        panic!("malformed Word color must not be silently dropped");
+    };
+    assert!(error.to_ascii_lowercase().contains("color"), "{error}");
+}
+
+#[test]
+fn malformed_table_cell_color_is_reported_instead_of_dropped() {
+    let paragraph = plain_run_paragraph("styled", r#"<w:color w:val="not-a-color"/>"#);
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n         <w:document xmlns:w=\"{W}\"><w:body><w:tbl><w:tr><w:tc>{paragraph}</w:tc></w:tr></w:tbl></w:body></w:document>"
+    );
+    let mut archive = PackageArchive::new();
+    archive
+        .add("word/document.xml", xml.into_bytes())
+        .expect("add document part");
+    let bytes = archive.to_bytes().expect("package test document");
+
+    let Err(error) = import_docx(&bytes) else {
+        panic!("malformed table-cell Word color must not be silently dropped");
+    };
+    assert!(error.to_ascii_lowercase().contains("color"), "{error}");
+}
+
+#[test]
 fn invalid_color_diagnostics_stay_concise_for_oversized_metadata() {
     let long_color = format!("#{}", "g".repeat(16 * 1024));
     let mut messages = Vec::new();

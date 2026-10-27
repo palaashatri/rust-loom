@@ -1,0 +1,3 @@
+#!/bin/sh
+export LOOM_CONFIG_DIR='/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/state/writer/config'
+exec '/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer' --size 1280x800 --theme light > '/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/native-writer.log' 2>&1

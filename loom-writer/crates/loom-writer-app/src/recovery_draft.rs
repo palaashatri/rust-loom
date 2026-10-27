@@ -60,16 +60,31 @@ impl RecoveredDraft {
             Some(path) => {
                 if let Ok(bytes) = std::fs::read(path) {
                     if let Ok(on_disk) = loom_writer_core::load_document(&bytes) {
-                        return self.document.title == on_disk.title
-                            && self.document.page == on_disk.page
-                            && self.document.comments == on_disk.comments
-                            && self.document.blocks == on_disk.blocks;
+                        return self.document.same_content_as(&on_disk);
                     }
                 }
                 false
             }
             None => {
-                self.document.editor_text().trim().is_empty() && self.document.comments.is_empty()
+                let WriterDocument {
+                    id: _,
+                    title,
+                    page,
+                    comments,
+                    blocks,
+                    selection: _,
+                } = &self.document;
+                let empty_blocks = match blocks.as_slice() {
+                    [] => true,
+                    [block] => {
+                        *block == loom_writer_core::RichBlock::new(block.id, "paragraph", "")
+                    }
+                    _ => false,
+                };
+                matches!(title.as_str(), "Untitled" | "Untitled Document")
+                    && *page == Default::default()
+                    && comments.is_empty()
+                    && empty_blocks
             }
         }
     }

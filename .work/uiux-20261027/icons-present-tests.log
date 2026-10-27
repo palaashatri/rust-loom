@@ -1,0 +1,509 @@
+   Compiling loom-pdf v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-pdf)
+warning: loom-ui@0.1.0: warning: Exported component 'ButtonsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:21
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:48
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                                ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ChoiceSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:52
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                    ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DataSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:35
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                   ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FieldsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:37
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                     ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'GallerySection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'NavigationSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:67
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                                   ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverlaysSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:18
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RowsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'AppHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:551:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 551 | export component AppHeader inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: warning: Exported component 'AppleToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasBackdrop' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:655:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 655 | export component CanvasBackdrop inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CollapsiblePanel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:311:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 311 | export component CollapsiblePanel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CommandPalette' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:717:30
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 717 | export { CommandPaletteItem, CommandPalette, CommandPaletteTestWindow } from "command_palette.slint";
+warning: loom-ui@0.1.0:     |                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ContextToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DirectionalLayout' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'EmptyState' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:403:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 403 | export component EmptyState inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Field' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FormulaBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Hairline' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:617:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 617 | export component Hairline inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:82:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  82 | export component IconButton inherits IconOnlyToolbarItem { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOnlyToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOverLabelToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:58
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                                          ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'LabeledToolbar' doesn't inherit Window. This is deprecated
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'MetricChip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:676:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 676 | export component MetricChip inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ModalDialog' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:204:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 204 | export component ModalDialog inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Overflow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverflowMenuButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PaneTabs' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:667:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 667 | export component PaneTabs inherits TabStrip {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Panel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:428:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 428 | export component Panel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PanelHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:66
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PrimaryButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:86:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  86 | export component PrimaryButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PropertyRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RailButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:593:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 593 | export component RailButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RangeSlider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SearchField' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SegmentedControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SheetTabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:31
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SidebarSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:79
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                               ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Slider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:107:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 107 | export component Slider inherits RangeSlider { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:25
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                         ^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusPill' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:496:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 496 | export component StatusPill inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Switch' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:110:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 110 | export component Switch inherits Toggle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:116:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 116 | export component TabControl inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TitleChrome' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toggle' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:54
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                      ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:78:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  78 | export component ToolButton inherits ToolbarButton { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:24
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                        ^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarGroup' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarIconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:77
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                                             ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarOverflowButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarSpacer' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:47
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolkitStatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:15
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |               ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TransportButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:697:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 697 | export component TransportButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:634:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 634 | export component WorkspaceRow inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:631:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 631 | export component WorkspaceToolbar inherits Toolbar { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+   Compiling i-slint-backend-testing v1.17.1
+   Compiling loom-production v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-production)
+   Compiling loom-present-core v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-present/crates/loom-present-core)
+   Compiling loom-present-app v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-present/crates/loom-present-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.99s
+     Running unittests src/main.rs (target/debug/deps/loom_present-e4d1d952601af75d)
+
+running 291 tests
+test accessibility_tests::an_empty_title_is_named_empty_and_a_filled_one_by_its_text ... ok
+test accessibility_tests::every_button_on_the_slide_and_its_thumbnail_has_a_name ... ok
+test accessibility_tests::no_text_or_button_in_the_window_is_left_unnamed ... ok
+test accessibility_tests::tabbing_to_an_object_makes_it_the_focused_selected_element ... ok
+test accessibility_tests::the_element_text_field_exists_only_while_an_element_is_selected ... ok
+test accessibility_tests::the_selected_text_field_exposes_the_element_text ... ok
+test appearance_tests::a_corrupt_settings_file_falls_back_to_system ... ok
+test appearance_tests::a_fresh_install_follows_the_system_and_falls_back_to_light ... ok
+test appearance_tests::a_settings_directory_that_cannot_be_written_keeps_the_switch_and_says_so ... ok
+test appearance_tests::choosing_an_appearance_recolors_the_chrome_exactly_as_the_theme_flag_does ... ok
+test appearance_tests::menu_check_marks_follow_the_setting_and_state_is_announced_to_assistive_technology ... ok
+test appearance_tests::system_follows_the_operating_system_while_it_is_chosen ... ok
+test appearance_tests::the_choice_is_remembered_by_the_next_app_instance ... ok
+test appearance_tests::the_command_palette_lists_and_runs_every_appearance ... ok
+test appearance_tests::the_presenter_window_follows_the_choice_live ... ok
+test appearance_tests::the_theme_flag_overrides_the_saved_choice_and_does_not_overwrite_it ... ok
+test appearance_tests::the_toolbar_view_menu_offers_the_same_choices ... ok
+test appearance_tests::the_view_menu_works_from_the_keyboard ... ok
+test audit_tests::test_deep_audit_macos_global_menu_bar_command_projection ... ok
+test audit_tests::test_deep_audit_persistence_roundtrip ... ok
+test audit_tests::test_deep_audit_pptx_and_pdf_export ... ok
+test audit_tests::test_deep_audit_presenter_mode_and_aspect_ratios ... ok
+test audit_tests::test_deep_audit_scene_graph_and_structure ... ok
+test audit_tests::test_deep_audit_selection_and_marquee ... ok
+test audit_tests::test_deep_audit_speaker_notes_and_search ... ok
+test audit_tests::test_deep_audit_undo_redo_history_invariants ... ok
+test clipboard_actions::tests::test_present_copy_table_writes_multiformat_for_sheets ... ok
+test clipboard_actions::tests::test_present_paste_chart_inserts_chart_element ... ok
+test clipboard_actions::tests::test_present_paste_sheets_range_inserts_table_element ... ok
+test deck_guard::tests::a_letter_is_typed_but_control_and_navigation_keys_are_not ... ok
+test deck_guard_tests::a_blank_deck_has_the_placeholders_of_the_layout_its_control_names ... ok
+test deck_guard_tests::a_typed_letter_with_an_object_selected_says_how_to_edit_it ... ok
+test deck_guard_tests::closing_while_a_replacement_question_is_open_asks_the_close_question ... ok
+test deck_guard_tests::enter_and_f2_edit_the_selected_object_again_after_escape ... ok
+test deck_guard_tests::every_way_of_replacing_a_dirty_deck_asks_first ... ok
+test deck_guard_tests::moving_between_slides_does_not_mark_a_saved_deck_edited ... ok
+test deck_guard_tests::the_status_names_the_same_button_the_dialog_shows ... ok
+test desktop_tests::a_blank_deck_prompts_for_a_title_without_saving_the_prompt ... ok
+test desktop_tests::a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not ... ok
+test desktop_tests::a_transition_only_change_marks_the_deck_edited_until_saved ... ok
+test desktop_tests::cancelled_pointer_gestures_restore_geometry_selection_and_history ... ok
+test desktop_tests::closing_a_dirty_deck_asks_before_the_window_goes_away ... ok
+test desktop_tests::compact_stage_render_is_safe_for_short_windows ... ok
+test desktop_tests::dialog_requests_use_current_directory_and_expected_extensions ... ok
+test desktop_tests::empty_slide_keeps_inspector_truthful ... ok
+test desktop_tests::expanding_past_overflow_breakpoint_closes_menu ... ok
+test desktop_tests::focused_canvas_arrow_key_nudges_selected_element ... ok
+test desktop_tests::mid_transition_frames_are_dimmed_for_dissolve_and_shifted_for_push ... ok
+test desktop_tests::new_presentation_is_blank_and_single_slide ... ok
+test desktop_tests::no_op_rotation_gesture_does_not_leave_history ... ok
+test desktop_tests::notes_edit_refreshes_undo_menu_state ... ok
+test desktop_tests::optional_inspector_and_notes_drawer_are_closed_by_default ... ok
+test desktop_tests::present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundary ... ok
+test desktop_tests::present_menu_disables_inspector_when_window_cannot_show_it ... ok
+test desktop_tests::present_menu_disables_unhandled_controller_commands ... ok
+test desktop_tests::present_menu_projection_derives_live_session_and_window_state ... ok
+test desktop_tests::presentation_path_round_trip_preserves_document ... ok
+test desktop_tests::presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits ... ok
+test desktop_tests::presenter_view_follows_the_deck_and_drives_navigation ... ok
+test desktop_tests::preview_mode_rejects_pointer_edits_and_modified_canvas_arrows ... ok
+test desktop_tests::refresh_clears_inspector_when_domain_selection_is_empty ... ok
+test desktop_tests::refresh_projects_selected_element_into_canvas_and_inspector ... ok
+test desktop_tests::reopening_a_deck_selects_its_first_slide_so_the_slideshow_starts_there ... ok
+test desktop_tests::responsive_policy_transition_probes_are_exact ... ok
+test desktop_tests::selecting_a_slide_thumbnail_does_not_panic_on_the_session_borrow ... ok
+test desktop_tests::shift_marquee_adds_to_existing_domain_selection ... ok
+test desktop_tests::slideshow_keys_navigate_and_escape_exits ... ok
+test desktop_tests::slideshow_plays_the_arrival_slides_transition_and_the_editor_never_animates ... ok
+test desktop_tests::successful_save_clears_the_edited_status ... ok
+test desktop_tests::the_file_menu_keeps_new_from_sample_with_new_and_groups_the_exports_apart ... ok
+test desktop_tests::the_save_prompt_says_closing_only_when_the_window_is_closing ... ok
+test desktop_tests::undo_and_redo_shortcuts_reach_the_session ... ok
+test desktop_tests::widening_window_preserves_palette_focus ... ok
+test dpi_surfaces_tests::every_surface_keeps_its_logical_layout_at_real_scale_factors ... ok
+test dpi_surfaces_tests::pictures_are_decoded_for_the_display_density ... ok
+test dpi_surfaces_tests::scale_factor_is_independent_of_text_scale ... ok
+test dpi_surfaces_tests::the_presenter_window_keeps_its_layout_at_real_scale_factors ... ok
+test element_names::tests::an_object_without_text_says_so_and_one_with_text_gives_it ... ok
+test element_names::tests::the_selected_object_is_announced_first ... ok
+test element_style_tests::a_circle_fills_as_an_ellipse_and_a_picture_offers_no_text_controls ... ok
+test element_style_tests::a_larger_size_is_one_undoable_step_and_draws_the_text_at_that_size ... ok
+test element_style_tests::a_style_change_rewrites_the_slide_thumbnail ... ok
+test element_style_tests::a_style_survives_saving_and_reopening_the_deck ... ok
+test element_style_tests::an_impossible_or_unreadable_entry_changes_nothing_and_the_field_shows_the_real_value ... ok
+test element_style_tests::bold_italic_alignment_and_colours_apply_to_every_selected_object ... ok
+test element_style_tests::the_keyboard_and_the_palette_reach_the_same_style_controls ... ok
+test element_style_tests::typed_position_size_and_rotation_move_the_selected_object_as_undoable_steps ... ok
+test export_pptx_tests::cancelling_or_failing_the_export_is_reported_and_writes_nothing ... ok
+test export_pptx_tests::export_command_writes_a_real_pptx_through_the_save_dialog ... ok
+test export_pptx_tests::menu_palette_and_command_dispatch_all_reach_the_export ... ok
+test file_title::tests::saving_renames_the_window_and_close_prompt_without_touching_the_deck ... ok
+test file_title::tests::the_os_window_title_names_the_deck_and_marks_unsaved_work ... ok
+test file_title::tests::title_bar_dirty_marker_follows_unsaved_edits ... ok
+test focus_tests::arrow_keys_nudge_the_selection_at_launch_without_a_click ... ok
+test focus_tests::closing_the_palette_returns_focus_to_the_slide_editor ... ok
+test focus_tests::delete_and_ctrl_z_reach_the_slide_at_launch_without_a_click ... ok
+test frame_bench_tests::present_frame_bench_100_slides ... ok
+test frame_bench_tests::present_frame_bench_20_slides ... ok
+test frame_bench_tests::present_frame_bench_20x10_table ... ok
+test frame_bench_tests::present_frame_bench_300_slides ... ok
+test frame_bench_tests::present_refresh_stage_profile ... ok
+test import_warning_tests::failed_import_callbacks_show_one_current_error_above_losses_and_preserve_state ... ok
+test import_warning_tests::long_import_error_scrolls_to_tail_without_moving_footer_at_small_scaled_size ... ok
+test keyboard_flow_tests::a_click_selects_one_object_and_shift_click_adds_another ... ok
+test keyboard_flow_tests::a_typed_letter_closes_an_open_menu_instead_of_going_into_it ... ok
+test keyboard_flow_tests::add_slide_edit_text_navigate_save_and_present_without_a_pointer ... ok
+test keyboard_flow_tests::after_a_slide_is_chosen_from_the_strip_tab_reaches_its_first_object ... ok
+test keyboard_flow_tests::alt_letters_open_every_menu_and_arrows_walk_them ... ok
+test keyboard_flow_tests::alt_letters_open_menus_while_editing_slide_text_without_typing_into_it ... ok
+test keyboard_flow_tests::cancel_keeps_the_warning_open_when_quarantine_verification_fails ... ok
+test keyboard_flow_tests::cancel_stays_open_after_import_checkpoint_failure_until_visible_deck_is_recoverable ... ok
+test keyboard_flow_tests::cancelling_a_startup_import_then_closing_preserves_recovery_bytes ... ok
+test keyboard_flow_tests::cancelling_a_startup_import_then_editing_preserves_recovery_bytes ... ok
+test keyboard_flow_tests::closing_with_a_startup_import_warning_preserves_recovery_bytes ... ok
+test keyboard_flow_tests::compact_overflow_menu_opens_runs_a_command_and_escape_returns_to_the_editor ... ok
+test keyboard_flow_tests::continue_keeps_candidate_and_session_when_recovery_quarantine_fails ... ok
+test keyboard_flow_tests::continuing_a_startup_import_quarantines_recovery_before_replacement ... ok
+test keyboard_flow_tests::ctrl_k_palette_runs_a_command_and_escape_closes_it_returning_focus ... ok
+test keyboard_flow_tests::ctrl_shift_n_from_the_toolbar_moves_focus_to_the_new_slide ... ok
+test keyboard_flow_tests::escape_from_the_toolbar_returns_focus_to_the_slide ... ok
+test keyboard_flow_tests::f10_opens_and_closes_the_first_menu_and_enter_runs_a_row ... ok
+test keyboard_flow_tests::f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back ... ok
+test keyboard_flow_tests::import_warning_blocks_queued_and_direct_new_open_commands ... ok
+test keyboard_flow_tests::inspector_tab_buttons_and_toolbar_commands_run_from_the_keyboard ... ok
+test keyboard_flow_tests::menu_keys_do_nothing_while_a_modal_owns_the_keyboard ... ok
+test keyboard_flow_tests::normal_cancel_stays_open_if_recovery_service_is_unusable ... ok
+test keyboard_flow_tests::save_changes_traps_tab_defaults_to_save_and_escape_cancels ... ok
+test keyboard_flow_tests::slide_reorder_table_and_chart_insertion_and_pptx_warning_work_from_the_keyboard ... ok
+test keyboard_flow_tests::speaker_notes_drawer_is_reachable_editable_and_closable_without_a_pointer ... ok
+test keyboard_flow_tests::tab_order_is_logical_named_visible_and_free_of_traps ... ok
+test keyboard_flow_tests::tab_reaches_each_slide_object_in_order_then_leaves_the_slide ... ok
+test keyboard_flow_tests::template_chooser_is_keyboard_complete_and_traps_tab ... ok
+test keyboard_flow_tests::the_palette_ranks_word_starts_above_plain_substrings ... ok
+test keyboard_flow_tests::the_primary_button_names_what_it_does_when_replacing_and_when_closing ... ok
+test keyboard_flow_tests::toolbar_items_are_reachable_in_order_and_view_zoom_menus_work_by_keyboard ... ok
+test layout_bounds_tests::inspector_headings_start_on_the_left_edge_of_the_controls ... ok
+test layout_bounds_tests::the_palette_hint_names_its_keys_in_words ... ok
+test layout_bounds_tests::the_presenter_shows_the_current_slide_first_and_largest_at_every_size ... ok
+test miniature_tests::a_thumbnail_at_two_times_text_is_one_frame_on_the_slide_edge ... ok
+test miniature_tests::a_thumbnail_body_draws_one_bar_per_line_its_text_would_take ... ok
+test miniature_tests::a_thumbnail_is_the_slide_drawn_small ... ok
+test miniature_tests::an_empty_placeholder_draws_nothing_in_its_thumbnail ... ok
+test miniature_tests::the_slide_number_grows_with_text_scale ... ok
+test miniature_tests::the_title_wraps_onto_the_same_lines_in_the_editor_at_any_size_and_in_the_slideshow ... ok
+test model_sync::tests::a_different_length_gets_a_new_model ... ok
+test model_sync::tests::a_model_that_is_not_a_vec_model_is_replaced ... ok
+test model_sync::tests::same_length_updates_rows_in_place_and_keeps_the_model ... ok
+test object_parts::tests::a_table_becomes_one_part_per_visible_cell_covering_the_element ... ok
+test object_parts::tests::line_area_and_scatter_charts_draw_points_not_columns ... ok
+test object_parts::tests::pie_charts_draw_a_circular_disc_and_slice_legend_not_columns ... ok
+test object_parts::tests::the_edit_target_is_the_active_cell_with_that_cells_own_text ... ok
+test picture_tests::a_fresh_start_is_a_blank_deck_and_the_sample_stays_reachable ... ok
+test picture_tests::cancelled_missing_and_corrupt_files_change_nothing_and_say_why ... ok
+test picture_tests::delete_key_removes_the_picture_and_undo_redo_restore_it ... ok
+test picture_tests::insert_image_places_selects_and_draws_the_picture ... ok
+test picture_tests::pdf_and_pptx_exports_through_the_app_include_the_picture ... ok
+test picture_tests::pictures_survive_save_and_reopen_after_the_source_is_deleted ... ok
+test picture_tests::resizing_a_picture_keeps_its_aspect_and_undo_redo_round_trips ... ok
+test picture_tests::slide_strip_thumbnails_draw_the_real_slide_and_follow_edits ... ok
+test pptx_import::tests::an_inspection_error_is_the_same_fatal_package_error_as_import ... ok
+test pptx_save_tests::save_after_opening_a_pptx_asks_for_a_loom_file_and_leaves_the_pptx_alone ... ok
+test pptx_save_tests::the_suggested_name_for_a_powerpoint_file_is_a_loom_name ... ok
+test presenter::tests::elapsed_time_formats_as_minutes_then_hours ... ok
+test presenter::tests::the_clock_pauses_resumes_and_resets ... ok
+test presenter_thumbs::tests::next_index_stops_at_the_last_slide ... ok
+test presenter_thumbs::tests::rows_mirror_the_slide_elements ... ok
+test recovery_close_tests::close_discard_stays_open_and_retry_recovers_after_clear_and_reopen_fail ... ok
+test recovery_close_tests::close_failure_save_as_writes_visible_deck_and_allows_close ... ok
+test recovery_deferred::recovery_deferred_tests::a_dropped_apps_completion_cannot_write_into_the_next_apps_recovery_store ... ok
+test recovery_deferred::recovery_deferred_tests::a_late_completion_after_accepted_discard_cannot_restore_the_discarded_deck ... ok
+test recovery_deferred::recovery_deferred_tests::a_late_completion_after_accepted_open_cannot_restore_the_old_deck ... ok
+test recovery_deferred::recovery_deferred_tests::a_late_completion_after_sample_replacement_cannot_restore_the_old_deck ... ok
+test recovery_deferred::recovery_deferred_tests::a_late_completion_after_template_replacement_cannot_restore_the_old_deck ... ok
+test recovery_deferred::recovery_deferred_tests::a_persistent_recovery_failure_gets_one_retry_then_waits_for_a_new_edit ... ok
+test recovery_deferred::recovery_deferred_tests::accepted_replacement_arms_new_recovery_work_after_cancelling_the_old_retry ... ok
+test recovery_deferred::recovery_deferred_tests::appearance_choice_does_not_hide_a_recovery_append_error ... ok
+test recovery_deferred::recovery_deferred_tests::append_failure_keeps_the_latest_draft_pending_and_the_reason_visible ... ok
+test recovery_deferred::recovery_deferred_tests::automatic_retry_reopens_recovery_service_after_clear_succeeded_but_reopen_failed ... ok
+test recovery_deferred::recovery_deferred_tests::cancelling_open_preserves_the_current_in_flight_draft ... ok
+test recovery_deferred::recovery_deferred_tests::deferred_writes_are_single_flight_and_recover_the_newest_edit ... ok
+test recovery_deferred::recovery_deferred_tests::explicit_retry_reports_latest_reopen_error_and_keeps_retry_actionable ... ok
+test recovery_deferred::recovery_deferred_tests::failed_clear_reopens_the_latest_dirty_visible_deck_before_retry ... ok
+test recovery_deferred::recovery_deferred_tests::failed_open_preserves_the_current_in_flight_draft ... ok
+test recovery_deferred::recovery_deferred_tests::failed_recovery_clear_keeps_new_retryable_and_preserves_the_current_draft ... ok
+test recovery_deferred::recovery_deferred_tests::failed_reset_and_visible_checkpoint_keep_the_combined_error_retryable ... ok
+test recovery_deferred::recovery_deferred_tests::invalidation_during_held_serialization_cannot_overwrite_a_new_checkpoint ... ok
+test recovery_deferred::recovery_deferred_tests::missing_recovery_service_is_reported_as_a_write_failure ... ok
+test recovery_deferred::recovery_deferred_tests::rejected_event_loop_dispatch_keeps_recovery_pending_and_retryable ... ok
+test recovery_deferred::recovery_deferred_tests::reordered_completions_cannot_publish_an_older_snapshot ... ok
+test recovery_deferred::recovery_deferred_tests::save_as_notice_action_reuses_save_flow_and_retry_persists_the_latest_deck ... ok
+test recovery_deferred::recovery_deferred_tests::serialization_failure_is_reported_and_kept_pending_for_retry ... ok
+test recovery_deferred::recovery_deferred_tests::warning_free_pptx_open_clears_the_previous_recovery_draft ... ok
+test recovery_deferred::tests::a_draft_built_before_an_invalidation_is_dropped ... ok
+test recovery_draft::tests::a_cut_short_header_is_an_error_and_never_a_guessed_path ... ok
+test recovery_draft::tests::a_draft_keeps_its_file_path_and_its_package ... ok
+test recovery_draft::tests::an_untitled_draft_has_no_source_and_older_packages_read_as_untitled ... ok
+test rtl_tests::every_surface_is_the_mirror_image_in_right_to_left ... ok
+test scale_surfaces_tests::dialogs_menus_and_drawers_fit_at_every_text_scale ... 

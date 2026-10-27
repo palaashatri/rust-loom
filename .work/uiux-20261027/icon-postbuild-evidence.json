@@ -1,0 +1,53 @@
+[
+  {
+    "app": "writer",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-postbuild-writer.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "binary_sha256": "2682a56e14470f29b34e353437f2656cde695a7d39ebd8197530ba11fe6c0bf2",
+    "capture_sha256": "35e9014ff8fda68e0856347ed8edb13971881cf4ea68bdf3e90b4708d8b41ac0",
+    "generated_file": "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/build/loom-writer-app-750dec7f838c07a4/out/app.rs",
+    "embedded_icon_evidence": "f . window_adapter . get () . cloned () }\n         }\n     static SLINT_EMBEDDED_RESOURCE_0 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/app-icons/loom-writer.png\") ;\n     static SLINT_EMBEDDED_RESOURCE_1 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/c"
+  },
+  {
+    "app": "sheets",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-postbuild-sheets.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "binary_sha256": "dcf3673f46894e7b1b0c72bc3b2ee760de5ab097f04d1de0a82d7e0fa811a8d3",
+    "capture_sha256": "9acda7513179648d8c8e9a30e1632ad5998bbe750582b029000bfca849a4927b",
+    "generated_file": "/Users/palaashatri/Code/personal/rust-loom/loom-sheets/target/debug/build/loom-sheets-app-e63cc95faeb45d0e/out/app.rs",
+    "embedded_icon_evidence": "f . window_adapter . get () . cloned () }\n         }\n     static SLINT_EMBEDDED_RESOURCE_0 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png\") ;\n     static SLINT_EMBEDDED_RESOURCE_1 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/c"
+  },
+  {
+    "app": "present",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-postbuild-present.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "binary_sha256": "3001c7e515af51d151c4c82f57c27c84db9d1a91eb8034586a31a07b7a7de0cc",
+    "capture_sha256": "ff96b16d15bb809e92a265d20d37cc1f6f6e5b3b8d36e8caa32d6c80d0dec3e0",
+    "generated_file": "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/build/loom-present-app-460392e9b25cbca5/out/app.rs",
+    "embedded_icon_evidence": "ll=\\\"white\\\" fill-opacity=\\\"0.5442\\\" />\\n</svg>\\n\" ;\n     static SLINT_EMBEDDED_RESOURCE_4 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/app-icons/loom-present.png\") ;\n     static SLINT_EMBEDDED_RESOURCE_5 : & 'static [u8] = :: core :: include_bytes ! (\"/Users/palaashatri/Code/personal/rust-loom/loom-core/"
+  }
+]

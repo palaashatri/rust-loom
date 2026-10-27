@@ -1,0 +1,89 @@
+{
+  "binary_sha256": "286f956e49645883758c05d94f0ab6f74878ffd0b7e4a1da7c600ed2e0a0e52d",
+  "captures": [
+    {
+      "size": "1280x800",
+      "theme": "light",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1280x800-light.png",
+        "--size",
+        "1280x800",
+        "--theme",
+        "light"
+      ]
+    },
+    {
+      "size": "1280x800",
+      "theme": "dark",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1280x800-dark.png",
+        "--size",
+        "1280x800",
+        "--theme",
+        "dark"
+      ]
+    },
+    {
+      "size": "1280x800",
+      "theme": "high-contrast",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1280x800-high-contrast.png",
+        "--size",
+        "1280x800",
+        "--theme",
+        "high-contrast"
+      ]
+    },
+    {
+      "size": "1920x1200",
+      "theme": "light",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1920x1200-light.png",
+        "--size",
+        "1920x1200",
+        "--theme",
+        "light"
+      ]
+    },
+    {
+      "size": "1920x1200",
+      "theme": "dark",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1920x1200-dark.png",
+        "--size",
+        "1920x1200",
+        "--theme",
+        "dark"
+      ]
+    },
+    {
+      "size": "1920x1200",
+      "theme": "high-contrast",
+      "exit_code": 0,
+      "command": [
+        "/Users/palaashatri/Code/personal/rust-loom/loom-writer/target/debug/loom-writer",
+        "--screenshot",
+        "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/recheck-writer-1920x1200-high-contrast.png",
+        "--size",
+        "1920x1200",
+        "--theme",
+        "high-contrast"
+      ]
+    }
+  ]
+}

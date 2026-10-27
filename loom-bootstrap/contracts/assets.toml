@@ -9,6 +9,15 @@ editorial_only_forbidden = true
 scraped_proprietary_assets_forbidden = true
 prefer_original_or_generated = true
 
+# Original suite artwork and mechanical platform encodings share one provenance record.
+[[allow]]
+glob = "loom-core/crates/loom-ui/ui/app-icons/*"
+origin = "Original Loom application artwork generated with image_gen on 2026-10-27; prompts and encoding record in app-icons/provenance.json and encoding-manifest.json"
+license = "MIT OR Apache-2.0 (repository project license)"
+commercial = true
+redistributable = true
+attribution_required = false
+
 # Project-generated screenshots are evidence, not shipped third-party artwork.
 [[allow]]
 glob = "loom-*/docs/screenshot.png"

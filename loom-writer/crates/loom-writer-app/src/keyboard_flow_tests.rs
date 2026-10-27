@@ -1078,9 +1078,14 @@ fn type_format_find_and_save_without_a_pointer() {
     );
 
     // Select the last word with Ctrl+Shift+Left, then format it with shortcuts.
+    let word_selection_modifier = if cfg!(target_os = "macos") {
+        Key::Alt
+    } else {
+        Key::Control
+    };
     chord(
         &s.app,
-        &[Key::Control, Key::Shift],
+        &[word_selection_modifier, Key::Shift],
         &String::from(char::from(Key::LeftArrow)),
     );
     assert_eq!(selected_text(&s.state), "world");

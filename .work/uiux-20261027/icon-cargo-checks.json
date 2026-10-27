@@ -1,0 +1,136 @@
+[
+  {
+    "app": "writer",
+    "check": "build",
+    "command": [
+      "cargo",
+      "build",
+      "-p",
+      "loom-writer-app",
+      "--locked",
+      "--offline"
+    ],
+    "exit_code": 0,
+    "seconds": 47.45,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-writer-build.log"
+  },
+  {
+    "app": "writer",
+    "check": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "-p",
+      "loom-writer-app",
+      "--all-targets",
+      "--locked",
+      "--offline",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 101,
+    "seconds": 8.36,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-writer-clippy.log"
+  },
+  {
+    "app": "writer",
+    "check": "tests",
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "loom-writer-app",
+      "--locked",
+      "--offline",
+      "--",
+      "--test-threads=1"
+    ],
+    "timeout_seconds": 900,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-writer-tests.log"
+  },
+  {
+    "app": "sheets",
+    "check": "build",
+    "command": [
+      "cargo",
+      "build",
+      "-p",
+      "loom-sheets-app",
+      "--locked",
+      "--offline"
+    ],
+    "exit_code": 0,
+    "seconds": 34.6,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-sheets-build.log"
+  },
+  {
+    "app": "sheets",
+    "check": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "-p",
+      "loom-sheets-app",
+      "--all-targets",
+      "--locked",
+      "--offline",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 0,
+    "seconds": 24.13,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-sheets-clippy.log"
+  },
+  {
+    "app": "sheets",
+    "check": "tests",
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "loom-sheets-app",
+      "--locked",
+      "--offline",
+      "--",
+      "--test-threads=1"
+    ],
+    "timeout_seconds": 900,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-sheets-tests.log"
+  },
+  {
+    "app": "present",
+    "check": "build",
+    "command": [
+      "cargo",
+      "build",
+      "-p",
+      "loom-present-app",
+      "--locked",
+      "--offline"
+    ],
+    "exit_code": 0,
+    "seconds": 38.72,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-present-build.log"
+  },
+  {
+    "app": "present",
+    "check": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "-p",
+      "loom-present-app",
+      "--all-targets",
+      "--locked",
+      "--offline",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 0,
+    "seconds": 25.82,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-present-clippy.log"
+  }
+]

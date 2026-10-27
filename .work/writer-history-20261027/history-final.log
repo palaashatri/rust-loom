@@ -1,0 +1,415 @@
+warning: loom-ui@0.1.0: warning: Exported component 'ButtonsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:21
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:48
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                                ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ChoiceSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:52
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                    ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DataSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:35
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                   ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FieldsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:37
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                     ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'GallerySection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'NavigationSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:67
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                                   ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverlaysSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:18
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RowsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'AppHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:551:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 551 | export component AppHeader inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: warning: Exported component 'AppleToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasBackdrop' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:655:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 655 | export component CanvasBackdrop inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CollapsiblePanel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:311:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 311 | export component CollapsiblePanel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CommandPalette' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:717:30
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 717 | export { CommandPaletteItem, CommandPalette, CommandPaletteTestWindow } from "command_palette.slint";
+warning: loom-ui@0.1.0:     |                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ContextToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DirectionalLayout' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'EmptyState' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:403:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 403 | export component EmptyState inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Field' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FormulaBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Hairline' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:617:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 617 | export component Hairline inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:82:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  82 | export component IconButton inherits IconOnlyToolbarItem { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOnlyToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOverLabelToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:58
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                                          ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'LabeledToolbar' doesn't inherit Window. This is deprecated
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'MetricChip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:676:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 676 | export component MetricChip inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ModalDialog' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:204:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 204 | export component ModalDialog inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Overflow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverflowMenuButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PaneTabs' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:667:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 667 | export component PaneTabs inherits TabStrip {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Panel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:428:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 428 | export component Panel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PanelHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:66
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PrimaryButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:86:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  86 | export component PrimaryButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PropertyRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RailButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:593:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 593 | export component RailButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RangeSlider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SearchField' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SegmentedControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SheetTabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:31
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SidebarSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:79
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                               ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Slider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:107:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 107 | export component Slider inherits RangeSlider { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:25
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                         ^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusPill' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:496:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 496 | export component StatusPill inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Switch' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:110:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 110 | export component Switch inherits Toggle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:116:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 116 | export component TabControl inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TitleChrome' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toggle' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:54
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                      ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:78:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  78 | export component ToolButton inherits ToolbarButton { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:24
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                        ^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarGroup' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarIconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:77
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                                             ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarOverflowButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarSpacer' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:47
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolkitStatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:15
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |               ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TransportButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:697:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 697 | export component TransportButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:634:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 634 | export component WorkspaceRow inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:631:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 631 | export component WorkspaceToolbar inherits Toolbar { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: unused import: `parse_rgba`
+  --> crates/loom-writer-core/src/layout.rs:29:30
+   |
+29 | pub(crate) use shaped_line::{parse_rgba, shape_block_line, shape_block_lines};
+   |                              ^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `measure` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:17:4
+   |
+17 | fn measure(text: &str, text_start: usize, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+   |    ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `block_measure` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:30:15
+   |
+30 | pub(crate) fn block_measure(text: &str, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+   |               ^^^^^^^^^^^^^
+
+warning: function `justification_geometry` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:34:15
+   |
+34 | pub(crate) fn justification_geometry(
+   |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `line_width` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:55:15
+   |
+55 | pub(crate) fn line_width(
+   |               ^^^^^^^^^^
+
+warning: function `wrap` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:77:15
+   |
+77 | pub(crate) fn wrap(
+   |               ^^^^
+
+warning: function `wrap_segment` is never used
+   --> crates/loom-writer-core/src/export_flow.rs:102:4
+    |
+102 | fn wrap_segment(
+    |    ^^^^^^^^^^^^
+
+warning: method `graphemes` is never used
+   --> crates/loom-writer-core/src/text_metrics/measure.rs:393:19
+    |
+342 | impl LineMeasure {
+    | ---------------- method in this implementation
+...
+393 |     pub(crate) fn graphemes<'t>(&self, text: &'t str) -> Vec<(usize, &'t str, f32)> {
+    |                   ^^^^^^^^^
+
+warning: `loom-writer-core` (lib) generated 8 warnings (run `cargo fix --lib -p loom-writer-core` to apply 1 suggestion)
+   Compiling loom-writer-app v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-app)
+warning: function `project_with_scale` is never used
+   --> crates/loom-writer-app/src/projection.rs:362:15
+    |
+362 | pub(crate) fn project_with_scale(
+    |               ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom-writer-app` (bin "loom-writer" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 39.87s
+     Running unittests src/main.rs (target/debug/deps/loom_writer-99dacea92078c6eb)
+
+running 27 tests
+test actions_tests::failed_pdf_export_preserves_document_and_history ... ok
+test actions_tests::history_budget_evicts_oldest_entries ... ok
+test actions_tests::history_byte_budget_evicts_old_entries_and_keeps_the_newest ... ok
+test actions_tests::open_panel_cancellation_preserves_document_and_history ... ok
+test actions_tests::save_panel_cancellation_preserves_document_and_history ... ok
+test actions_tests::selection_change_is_first_class_without_history_or_block_mutation ... 
+thread 'actions_tests::selection_change_is_first_class_without_history_or_block_mutation' (3689422) panicked at crates/loom-writer-app/src/actions_tests.rs:1258:5:
+assertion `left == right` failed
+  left: -1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test actions_tests::writer_registry_honest_enablement_transitions_with_document_and_history ... ok
+test clipboard_actions::tests::cut_tests::cut_preserves_selection_and_history_when_clipboard_write_fails ... ok
+test clipboard_actions::tests::cut_tests::failed_virtual_table_range_cut_preserves_cells_range_history_and_clipboard ... ok
+test history::retained_byte_overflow_tests::retained_byte_total_saturates_instead_of_overflowing ... ok
+test history_tests::a_400_page_document_keeps_at_least_twenty_undo_steps ... 400-page history: 20 entries retain 56946350 bytes (budget 268435456 bytes)
+ok
+test history_tests::a_pause_longer_than_the_coalescing_window_starts_a_new_step ... ok
+test history_tests::an_edit_larger_than_the_budget_stays_undoable ... ok
+test history_tests::an_in_place_edit_adds_only_the_changed_text_to_its_entry ... ok
+test history_tests::enter_and_a_caret_jump_each_start_a_new_undo_step ... ok
+test history_tests::history_charges_nested_table_allocations_and_shares_the_same_table ... ok
+test history_tests::history_charges_owned_style_capacity_in_both_snapshots ... ok
+test history_tests::history_charges_picture_name_and_shared_picture_bytes ... ok
+test history_tests::punctuation_after_a_word_starts_a_new_undo_step ... ok
+test history_tests::typing_a_sentence_undoes_one_word_at_a_time ... ok
+test history_tests::typing_in_a_table_cell_undoes_one_word_at_a_time ... ok
+test picture_drag_tests::a_press_and_release_on_a_handle_without_moving_adds_no_history ... ok
+test projection_tests::history_sizes_are_measured_once_per_entry ... ok
+test recovery_draft::m3_persistence_tests::history_byte_budget_keeps_the_newest_styled_undo_step ... ok
+test recovery_draft::m3_persistence_tests::history_counts_a_shared_typed_table_once_and_distinct_tables_twice ... ok
+test recovery_draft::m3_persistence_tests::history_retained_bytes_include_character_style_string_storage ... ok
+test toolbar_tests::same_table_context_mutation_refreshes_native_and_window_history_menu_state ... ok
+
+failures:
+
+failures:
+    actions_tests::selection_change_is_first_class_without_history_or_block_mutation
+
+test result: FAILED. 26 passed; 1 failed; 0 ignored; 0 measured; 562 filtered out; finished in 14.95s
+
+error: test failed, to rerun pass `-p loom-writer-app --bin loom-writer`

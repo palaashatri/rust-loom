@@ -7,6 +7,7 @@ export { ThumbRows, ObjectPart, ObjectParts, ElementInk } from "present_componen
 // separate window so it can sit on a second display while the slideshow fills
 // the audience screen; on one display it is simply a rehearsal view.
 export component PresenterWindow inherits Window {
+    icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-present.png");
     title: "Presenter View";
     default-font-family: Theme.ui-font-family;
     min-width: 640px;

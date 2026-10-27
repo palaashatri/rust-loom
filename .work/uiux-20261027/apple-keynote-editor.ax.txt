@@ -1,0 +1,2 @@
+There has been no change in the accessibility tree for Window: "Untitled".
+The focused UI element is 42 layout area Description: Slide, Help: Format, move, and resize items within the Slide

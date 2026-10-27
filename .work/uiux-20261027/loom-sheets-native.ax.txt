@@ -1,0 +1,179 @@
+Window: "audit-chart.loomtable", App: Loom Sheets Audit.
+0 standard window audit-chart.loomtable, Secondary Actions: Raise
+	1 container
+		2 button View
+			3 text (settable) View
+		4 button Zoom
+			5 text (settable) Zoom
+		6 button Add Sheet
+			7 text (settable) Add Sheet
+		8 button Chart
+			9 text (settable) Chart
+		10 button Table
+			11 text (settable) Table
+		12 button Text
+			13 text (settable) Text
+		14 button Shape
+			15 text (settable) Shape
+		16 button Image
+			17 text (settable) Image
+		18 button Export
+			19 text (settable) Export
+		20 button Format
+			21 text (settable) Format
+		22 button Organize
+			23 text (settable) Organize
+		24 button More actions
+		25 button Add sheet, Help: Add a worksheet to this workbook.
+		26 tab (settable, boolean) Tabs, Value: off
+			27 tab (settable, boolean) Sheet 1, Value: off
+				28 text (settable) Sheet 1
+		29 unknown
+			30 text field (settable) Name box, Help: Type a cell address such as D50 or B2:C3 and press Enter, Value: F13:G15
+		31 text (settable) fx
+		32 unknown
+			33 text field (settable) Formula bar, Help: Edit the selected cell's value or formula. Enter commits, Escape cancels, Value: Month
+		34 button Commit formula, Help: Apply the formula bar entry to the selected cell.
+		35 button Cancel formula edit, Help: Discard formula bar changes and keep the current cell value.
+		36 button Fill down
+		37 container Sheet 1 worksheet grid, Help: F13:G15 selected; value: Month; formula: Month
+			38 table Sheet 1 table, Help: F13:G15 selected; value: Month; formula: Month
+				39 container Sheet 1 cell canvas
+					40 text (settable) F13, value Month
+					41 button Selected cell fill handle
+					42 text (settable) G13, value Sales (€)
+					43 text (settable) F14, value Jan
+					44 text (settable) G14, value 10
+					45 text (settable) F15, value Feb
+					46 text (settable) G15, value 20
+					47 text (settable) Sales (€)
+					48 button Table select handle
+					49 text (settable) Column A
+					50 text (settable) Column B
+					51 text (settable) Column C
+					52 text (settable) Column D
+					53 text (settable) Column E
+					54 text (settable) Column F
+					55 text (settable) Column G
+					56 text (settable) Column H
+					57 text (settable) Column I
+					58 text (settable) Column J
+					59 text (settable) Column K
+					60 text (settable) Column L
+					61 text (settable) Row 1
+					62 text (settable) Row 2
+					63 text (settable) Row 3
+					64 text (settable) Row 4
+					65 text (settable) Row 5
+					66 text (settable) Row 6
+					67 text (settable) Row 7
+					68 text (settable) Row 8
+					69 text (settable) Row 9
+					70 text (settable) Row 10
+					71 text (settable) Row 11
+					72 text (settable) Row 12
+					73 text (settable) Row 13
+					74 text (settable) Row 14
+					75 text (settable) Row 15
+					76 text (settable) Row 16
+					77 text (settable) Row 17
+					78 text (settable) Row 18
+					79 text (settable) Row 19
+					80 text (settable) Row 20
+					81 text (settable) Row 21
+					82 text (settable) Row 22
+					83 text (settable) Row 23
+					84 text (settable) Row 24
+					85 text (settable) Row 25
+					86 text (settable) Row 26
+					87 text (settable) Row 27
+					88 slider (settable, float) Vertical sheet scroll, Value: -0
+					89 slider (settable, float) Horizontal sheet scroll, Value: -0
+		90 list Worksheet objects, Help: F6 or the command palette selects worksheet objects. Tab and Shift+Tab browse; M moves; R resizes; arrows preview; Enter commits; Escape cancels or returns to the sheet.
+		91 text (settable) Sheet 1 Chart
+		92 button Bar
+		93 button Hide chart panel, Help: Hide the chart preview and keep the chart in the worksheet.
+		94 text (settable) Source: F13:G15 · Series: Sales · Unit: €
+		95 text (settable) To change source: select two columns including headers, then Insert Chart.
+		96 text (settable) 10
+		97 text (settable) Jan
+		98 text (settable) 20
+		99 text (settable) Feb
+		100 list Sheet 1 Chart chart data, Help: Bar chart. Source range F13:G15. Series Sales. Unit €. Point 1 of 2. Category: Jan. Series: Sales. Value: 10. Unit: €. Use Left and Right to inspect points, Home and End to jump, Tab then Page Up or Page Down to scroll long point details, and F6 or Escape to return to the worksheet.
+			101 text (selectable, settable, float) Jan, Help: Point 1 of 2. Category: Jan. Series: Sales. Value: 10. Unit: €., Value: 10
+				102 text (settable) Point 1 of 2
+				103 text (settable) Jan
+				104 text (settable) Sales: 10 €
+				105 text (settable) Left/Right: points · Home/End: jump · Tab then PgUp/PgDn: scroll details · Escape: grid
+		106 container Inspector, F13:G15 selection, ID: loom-sheets-inspector-focus-root
+			107 text (settable) F13:G15 selection
+			108 button Close
+			109 unknown
+				110 text field (settable) Search
+				111 text (settable) Search properties…
+			112 tab (settable, boolean) Tabs, Value: off
+				113 tab (settable, boolean) Organize, Value: off
+					114 text (settable) Organize
+				115 tab (settable, boolean) Format, Value: off
+					116 text (settable) Format
+			117 text (settable) Cell
+			118 text (settable) Selection
+			119 text (settable) F13:G15
+				120 text (settable) F13:G15
+			121 text (settable) Value
+			122 text (settable) Month
+				123 text (settable) Month
+			124 text (settable) Formula
+			125 text (settable) No formula
+				126 text (settable) No formula
+			127 text (settable) Font Style
+			128 button Toggle bold formatting (Cell inspector), Help: Turn bold formatting on or off for selected cells in the Cell inspector.
+			129 button Toggle italic formatting (Cell inspector), Help: Turn italic formatting on or off for selected cells in the Cell inspector.
+			130 button Toggle underline formatting (Cell inspector), Help: Turn underline formatting on or off for selected cells in the Cell inspector.
+			131 text (settable) Font size
+			132 text (settable) Font size in points
+				133 text (settable) 14
+			134 button Decrease selected cell font size, Help: Reduce the font size of selected cells by one step.
+			135 button Increase selected cell font size, Help: Increase the font size of selected cells by one step.
+			136 text (settable) Text colour
+			137 button Text red
+			138 button Text orange
+			139 button Text green
+			140 button Text blue
+			141 button Text purple
+			142 button Text gray
+			143 button Text black
+			144 button Automatic text colour
+			145 switch (settable, boolean) Wrap text, Value: off
+				146 text (settable) Wrap text
+			147 text (settable) Borders & Fill
+			148 switch (settable, boolean) Border, Value: off
+				149 text (settable) Border
+			150 text (settable) Fill
+			151 button Fill red
+			152 button Fill orange
+			153 button Fill yellow
+			154 button Fill green
+			155 button Fill blue
+			156 button Fill purple
+			157 button Fill gray
+			158 button No fill
+			159 text (settable) Data Format
+		160 slider (settable, float) Inspector scroll, Value: -0
+		161 text (settable) Saved /Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/audit-chart.loomtable
+		162 text (settable) 6 cells · 0 formulas
+		163 text (settable) SUM: 30.00  AVG: 15.00  COUNT: 2
+	164 close button
+	165 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	166 minimize button
+	167 text audit-chart.loomtable
+168 menu bar
+	169 Loom Sheets Audit
+	170 File
+	171 Edit
+	172 View
+	173 Table
+	174 Window
+	175 Help
+
+The focused UI element is 37 container Sheet 1 worksheet grid, Help: F13:G15 selected; value: Month; formula: Month

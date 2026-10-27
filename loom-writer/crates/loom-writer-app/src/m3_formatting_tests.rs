@@ -419,3 +419,180 @@ fn format_inspector_exposes_real_foreground_and_script_actions() {
         );
     }
 }
+
+struct ColorTestDirectory(std::path::PathBuf);
+
+impl ColorTestDirectory {
+    fn new(tag: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "loom-writer-native-color-{tag}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).expect("create isolated color-test directory");
+        Self(path)
+    }
+}
+
+impl Drop for ColorTestDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn document_with_invalid_native_color() -> WriterDocument {
+    let mut document = text_document("original");
+    document.blocks[0].runs.push(loom_text::StyleRun {
+        start: 0,
+        end: 8,
+        style: loom_text::CharacterStyle {
+            color: Some("not-a-color".into()),
+            ..Default::default()
+        },
+    });
+    document
+}
+
+fn unchecked_native_package(document: &WriterDocument) -> Vec<u8> {
+    use loom_package::manifest::{
+        json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+    };
+    use loom_package::zip::{self, PackageArchive};
+
+    let content = document.to_content_json();
+    let mut archive = PackageArchive::new();
+    archive
+        .add("content/document.json", content.as_bytes().to_vec())
+        .unwrap();
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Writer,
+        id: document.id.clone(),
+        title: document.title.clone(),
+        app_version: "test".into(),
+        entries: vec![ManifestEntry {
+            path: "content/document.json".into(),
+            mime: MimeType::parse("application/vnd.loom.document-content").unwrap(),
+            size: content.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(content.as_bytes())),
+        }],
+    };
+    archive
+        .add("manifest.json", json::write(&manifest).into_bytes())
+        .unwrap();
+    archive.to_bytes().unwrap()
+}
+
+#[test]
+fn native_color_open_refuses_bad_file_without_replacing_the_document() {
+    let directory = ColorTestDirectory::new("open");
+    let path = directory.0.join("invalid.loomdoc");
+    std::fs::write(
+        &path,
+        unchecked_native_package(&document_with_invalid_native_color()),
+    )
+    .unwrap();
+    let original = text_document("Keep the current document");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([Some(path)], []));
+    let (app, state) = test_state(original.clone(), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    apply_state(&app, &state);
+
+    app.invoke_open_doc();
+
+    assert_eq!(*state.current.borrow(), original);
+    assert_eq!(state.history.borrow().undo_len(), 0);
+    assert!(app.get_status_left().as_str().contains("Open failed"));
+    assert!(app
+        .get_status_left()
+        .as_str()
+        .to_ascii_lowercase()
+        .contains("color"));
+}
+
+#[test]
+fn native_color_save_refuses_bad_content_without_overwriting_the_file() {
+    let directory = ColorTestDirectory::new("save");
+    let path = directory.0.join("existing.loomdoc");
+    let previous = b"existing file contents";
+    std::fs::write(&path, previous).unwrap();
+    let (app, state) = session(document_with_invalid_native_color());
+    *state.save_path.borrow_mut() = Some(path.clone());
+    let before = state.current.borrow().clone();
+
+    app.invoke_save_doc();
+
+    assert_eq!(std::fs::read(&path).unwrap(), previous);
+    assert_eq!(*state.current.borrow(), before);
+    assert!(app.get_status_left().as_str().contains("Save failed"));
+    assert!(app
+        .get_status_left()
+        .as_str()
+        .to_ascii_lowercase()
+        .contains("color"));
+}
+
+struct NativeColorClipboardGuard;
+
+impl Drop for NativeColorClipboardGuard {
+    fn drop(&mut self) {
+        loom_clipboard::set_mock_clipboard_enabled(false);
+    }
+}
+
+fn colored_clipboard_table(color: &str) -> loom_objects::Table {
+    let mut table = loom_objects::Table::new(1, 1);
+    let mut run = loom_objects::table::TextRun::plain("pasted");
+    run.color = Some(color.into());
+    table.set_cell_rich_text(0, 0, vec![run]);
+    table
+}
+
+#[test]
+fn native_color_paste_refuses_bad_private_table_without_replacing_selection() {
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    let _clipboard = NativeColorClipboardGuard;
+    let mut document = text_document("Keep selected text");
+    document.set_selection(TextSelection::range(0, 4));
+    let (app, state) = session(document.clone());
+    loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData::from_table(
+        &colored_clipboard_table("not-a-color"),
+    ))
+    .unwrap();
+
+    app.invoke_paste();
+
+    assert_eq!(*state.current.borrow(), document);
+    assert_eq!(state.history.borrow().undo_len(), 0);
+    assert!(app.get_status_left().as_str().contains("Paste failed"));
+    assert!(app
+        .get_status_left()
+        .as_str()
+        .to_ascii_lowercase()
+        .contains("color"));
+}
+
+#[test]
+fn native_color_paste_preserves_valid_rgb_and_rgba_runs() {
+    loom_clipboard::set_mock_clipboard_enabled(true);
+    let _clipboard = NativeColorClipboardGuard;
+    for color in ["#123456", "#aBcDef80"] {
+        let (app, state) = session(text_document("body"));
+        loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData::from_table(
+            &colored_clipboard_table(color),
+        ))
+        .unwrap();
+
+        app.invoke_paste();
+
+        let saved = save_reload(&state.current.borrow());
+        let table = saved
+            .blocks
+            .iter()
+            .find_map(|block| block.typed_table())
+            .expect("pasted table");
+        assert_eq!(
+            table.cell(0, 0).unwrap().content.runs[0].color.as_deref(),
+            Some(color)
+        );
+    }
+}

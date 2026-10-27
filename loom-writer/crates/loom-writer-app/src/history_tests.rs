@@ -66,6 +66,160 @@ fn an_in_place_edit_adds_only_the_changed_text_to_its_entry() {
     );
 }
 
+fn increase_string_capacity(value: &mut String) -> usize {
+    let before = value.capacity();
+    value.reserve_exact(8192);
+    value.capacity() - before
+}
+
+#[test]
+fn history_charges_owned_style_capacity_in_both_snapshots() {
+    let mut original = text_document("styled");
+    original.blocks[0].runs.push(loom_text::StyleRun {
+        start: 0,
+        end: 6,
+        style: loom_text::CharacterStyle {
+            font_family: "Inter".into(),
+            color: Some("#112233FF".into()),
+            background: Some("#445566FF".into()),
+            ..Default::default()
+        },
+    });
+    let original = original.clone();
+    let mut larger = original.clone();
+    let style = &mut larger.blocks[0].runs[0].style;
+    let extra = increase_string_capacity(&mut style.font_family)
+        + increase_string_capacity(style.color.as_mut().unwrap())
+        + increase_string_capacity(style.background.as_mut().unwrap());
+
+    let before = super::history::retained_bytes(&original, &original);
+    let after = super::history::retained_bytes(&larger, &larger);
+    assert!(
+        after >= before + 2 * extra,
+        "both owned style copies must be charged for reserved storage: {before} -> {after}, extra {extra}"
+    );
+}
+
+#[test]
+fn history_charges_nested_table_allocations_and_shares_the_same_table() {
+    use loom_objects::table::{Border, CellBorders, CellStyleOverride, Table, TextRun};
+
+    let mut table = Table::new(1, 1);
+    table.name = Some("Table".into());
+    table.set_cell_rich_text(
+        0,
+        0,
+        vec![TextRun {
+            font_family: Some("Inter".into()),
+            color: Some("#112233FF".into()),
+            ..TextRun::plain("cell")
+        }],
+    );
+    table.rows[0].cells[0].style_override = Some(CellStyleOverride {
+        background_color: Some("#445566FF".into()),
+        borders: Some(CellBorders {
+            top: Some(Border::solid(1.0, "#000000FF")),
+            bottom: Some(Border::solid(1.0, "#000000FF")),
+            left: Some(Border::solid(1.0, "#000000FF")),
+            right: Some(Border::solid(1.0, "#000000FF")),
+        }),
+        ..Default::default()
+    });
+
+    let baseline = table.clone();
+    let mut larger = baseline.clone();
+    let mut extra = increase_string_capacity(&mut larger.id)
+        + increase_string_capacity(larger.name.as_mut().unwrap())
+        + increase_string_capacity(&mut larger.style_id);
+    let columns = larger.columns.capacity();
+    larger.columns.reserve_exact(128);
+    extra += (larger.columns.capacity() - columns)
+        * std::mem::size_of::<loom_objects::table::TableColumn>();
+    let rows = larger.rows.capacity();
+    larger.rows.reserve_exact(128);
+    extra += (larger.rows.capacity() - rows) * std::mem::size_of::<loom_objects::table::TableRow>();
+    let cells = larger.rows[0].cells.capacity();
+    larger.rows[0].cells.reserve_exact(128);
+    extra += (larger.rows[0].cells.capacity() - cells)
+        * std::mem::size_of::<loom_objects::table::TableCell>();
+    let cell = &mut larger.rows[0].cells[0];
+    let runs = cell.content.runs.capacity();
+    cell.content.runs.reserve_exact(128);
+    extra += (cell.content.runs.capacity() - runs) * std::mem::size_of::<TextRun>();
+    extra += increase_string_capacity(cell.content.runs[0].font_family.as_mut().unwrap());
+    extra += increase_string_capacity(cell.content.runs[0].color.as_mut().unwrap());
+    let style = cell.style_override.as_mut().unwrap();
+    extra += increase_string_capacity(style.background_color.as_mut().unwrap());
+    let borders = style.borders.as_mut().unwrap();
+    for border in [
+        &mut borders.top,
+        &mut borders.bottom,
+        &mut borders.left,
+        &mut borders.right,
+    ] {
+        extra += increase_string_capacity(&mut border.as_mut().unwrap().color);
+    }
+
+    let document = |table| {
+        let mut doc = WriterDocument::new("table", "Table");
+        doc.push(RichBlock::table_block(1, table));
+        doc
+    };
+    let original = document(baseline);
+    let larger = document(larger);
+    let before = super::history::retained_bytes(&original, &original);
+    let shared = super::history::retained_bytes(&larger, &larger);
+    assert!(
+        shared >= before + extra,
+        "the table's nested allocations must be charged: {before} -> {shared}, extra {extra}"
+    );
+    let mut distinct = larger.clone();
+    let shared_clone = super::history::retained_bytes(&larger, &distinct);
+    let separate_table = std::sync::Arc::make_mut(distinct.blocks[0].table.as_mut().unwrap());
+    separate_table.rows[0].cells[0].content.runs[0]
+        .font_family
+        .as_mut()
+        .unwrap()
+        .push_str(&"f".repeat(8192));
+    let both = super::history::retained_bytes(&larger, &distinct);
+    assert!(
+        both > shared_clone + 8192,
+        "a distinct table allocation must be charged in addition to the original"
+    );
+}
+
+#[test]
+fn history_charges_picture_name_and_shared_picture_bytes() {
+    use std::sync::Arc;
+
+    let mut original = text_document("image");
+    original.blocks[0].image = Some(loom_writer_core::InlineImage {
+        name: "image.png".into(),
+        format: loom_writer_core::ImageFormat::Png,
+        width_px: 1,
+        height_px: 1,
+        width_pt: 1.0,
+        height_pt: 1.0,
+        bytes: Arc::new(vec![7; 16 * 1024]),
+    });
+    let mut larger = original.clone();
+    let extra = increase_string_capacity(&mut larger.blocks[0].image.as_mut().unwrap().name);
+    let before = super::history::retained_bytes(&original, &original);
+    let shared = super::history::retained_bytes(&larger, &larger);
+    assert!(
+        shared >= before + 2 * extra,
+        "the two owned picture names must be charged"
+    );
+    let mut distinct = larger.clone();
+    let shared_clone = super::history::retained_bytes(&larger, &distinct);
+    std::sync::Arc::make_mut(&mut distinct.blocks[0].image.as_mut().unwrap().bytes);
+    let both = super::history::retained_bytes(&larger, &distinct);
+    assert!(
+        both >= shared_clone + 16 * 1024,
+        "independently allocated image bytes must be charged"
+    );
+}
+
 #[test]
 fn an_edit_larger_than_the_budget_stays_undoable() {
     let mut history = EditorHistory::with_budget(16, 1_000);

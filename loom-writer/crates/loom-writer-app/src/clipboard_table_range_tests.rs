@@ -13,41 +13,62 @@ fn table_text_hit_test_document() -> (loom_writer_core::WriterDocument, String) 
     (document, markdown)
 }
 
-fn painted_table_cell_bold_runs(
+fn painted_table_cell_geometry(
     document: &loom_writer_core::WriterDocument,
-    text: &str,
-) -> Vec<loom_text::StyleRun> {
-    let table = document.table_from_block(1).expect("table parses");
+    row: usize,
+    column: usize,
+    cell_width: f32,
+) -> (String, Vec<usize>, loom_writer_core::TableCellGeometry) {
+    let table_block = document
+        .blocks
+        .iter()
+        .find(|block| block.typed_table().is_some())
+        .expect("the document contains a typed table");
+    let table = table_block.typed_table().expect("the table block is typed");
     let style = loom_objects::TableStyleCatalog::get(&table.style_id)
         .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
     let options = loom_objects::TableStyleOptions {
         header_row: table.header_row,
+        total_row: table.total_row,
+        last_column: table.last_column,
         banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
         first_column: table.first_column,
         ..Default::default()
     };
-    if style
-        .resolve_cell(0, 0, table.rows.len(), table.columns(), &options, None)
-        .bold
-    {
-        vec![loom_text::StyleRun {
-            start: 0,
-            end: text.len(),
-            style: loom_text::CharacterStyle {
-                weight: loom_text::FontWeight::Bold,
-                ..Default::default()
-            },
-        }]
-    } else {
-        Vec::new()
-    }
+    let resolved = style.resolve_cell(
+        row,
+        column,
+        table.row_count(),
+        table.col_count(),
+        &options,
+        table.cell(row, column),
+    );
+    let block = crate::projection::cell_text_block_with_color(
+        table_block.id,
+        table,
+        row,
+        column,
+        resolved.bold,
+        resolved.text_color.as_deref(),
+    )
+    .expect("the table cell has text to shape");
+    let geometry = loom_writer_core::shape_table_cell_geometry(
+        &block,
+        loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
+        (cell_width - 12.0).max(1.0),
+    )
+    .expect("the canonical cell text has shaped geometry");
+    let (display_text, source_offsets) = document
+        .table_cell_display_map(table_block.id, row, column)
+        .expect("the typed cell has a display-to-source map");
+    (display_text, source_offsets, geometry)
 }
 
 // User action: click within text drawn in a painted cell.
-// Current failure: hit testing measures the pipe-delimited Markdown source,
-// while the cell renderer trims spaces and unescapes the literal pipe.
-// Required behavior: map the displayed UTF-8 caret boundary to its canonical
-// source Markdown byte offset, keeping the escaped pipe in the same cell.
+// The Markdown importer stores a trimmed, unescaped value in the typed cell.
+// Pointer geometry must follow that canonical UTF-8 text and map back to the
+// corresponding byte offset in the table block's editor text.
 #[test]
 fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
     let (document, _markdown) = table_text_hit_test_document();
@@ -60,28 +81,64 @@ fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
         .table_cell_rects
         .first()
         .expect("the first painted table cell has geometry");
-    let visible_text = "café | tea";
-    let runs = painted_table_cell_bold_runs(&document, visible_text);
-    let font_size = loom_writer_core::PageStyle::default().font_size_for_kind("paragraph");
-    let tea_start = visible_text.find("tea").expect("visible suffix");
-    let prefix = &visible_text[..tea_start];
-    let first_tea_glyph = &visible_text[tea_start..tea_start + 1];
-    let x = cell_rect.x
-        + 6.0
-        + loom_writer_core::text_advance(prefix, 0, &runs, font_size)
-        + loom_writer_core::text_advance(first_tea_glyph, tea_start, &runs, font_size) * 0.1;
-    let y = cell_rect.y + cell_rect.height / 2.0;
-    let expected_source_offset = document
+    let (visible_text, source_offsets, geometry) =
+        painted_table_cell_geometry(&document, 0, 0, cell_rect.width);
+    assert_eq!(
+        visible_text, "café | tea",
+        "the typed cell stores the trimmed, unescaped canonical value"
+    );
+    let tea_source_offset = document
         .editor_text()
         .find("tea")
         .expect("canonical source suffix");
+    let location = document
+        .table_cell_at_offset(tea_source_offset)
+        .expect("the canonical source suffix belongs to the table");
+    assert_eq!((location.row, location.col), (0, 0));
+    let block_start = document
+        .blocks
+        .iter()
+        .take(location.block_index)
+        .map(|block| block.text.as_str().len() + 1)
+        .sum::<usize>();
+    let cell_source_byte = tea_source_offset - block_start;
+    let display_byte = source_offsets
+        .iter()
+        .position(|source_byte| *source_byte == cell_source_byte)
+        .expect("the source suffix maps to a displayed UTF-8 boundary");
+    assert_eq!(
+        display_byte,
+        visible_text.find("tea").expect("visible suffix")
+    );
+    let line = geometry
+        .lines()
+        .iter()
+        .find(|line| {
+            let range = line.source_range();
+            range.start <= display_byte && display_byte < range.end
+        })
+        .expect("the suffix belongs to a shaped line");
+    let shaped = line.shaped().expect("the visible text has a shaped line");
+    let t_start = shaped.caret_x(display_byte, loom_fonts::Affinity::Leading);
+    let t_end = shaped.caret_x(display_byte + 1, loom_fonts::Affinity::Leading);
+    assert!(t_end > t_start, "the visible 't' has positive shaped width");
+    let local_x = t_start + (t_end - t_start) * 0.1;
+    assert_eq!(
+        shaped.hit_test(local_x).map(|stop| stop.offset),
+        Some(display_byte),
+        "the test coordinate lies inside the visible 't', after its leading boundary"
+    );
+    let x = cell_rect.x + 6.0 + local_x;
+    let y = cell_rect.y + cell_rect.height / 2.0;
+    let expected_source_offset = block_start + source_offsets[display_byte];
+    assert_eq!(expected_source_offset, tea_source_offset);
 
     let hit =
         crate::writer_pointer_offset(&document, loom_writer_core::PageViewport::default(), x, y)
             .expect("the pointer hits the painted cell");
     assert_eq!(
         hit, expected_source_offset,
-        "a click before the visible 't' lands on its source byte boundary"
+        "a click inside the visible 't' maps to its canonical source byte boundary"
     );
     let cell = document
         .table_cell_at_offset(hit)
@@ -89,25 +146,25 @@ fn painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset() {
     assert_eq!(
         (cell.row, cell.col),
         (0, 0),
-        "the escaped literal pipe does not shift the painted cell identity"
+        "the escaped literal pipe remains in the first typed cell"
     );
 }
 
 #[test]
 fn painted_table_caret_uses_trimmed_unescaped_utf8_cell_text() {
     let (mut document, _markdown) = table_text_hit_test_document();
-    let tea_start = document
+    let tea_source_offset = document
         .editor_text()
         .find("tea")
         .expect("canonical source suffix");
-    document.set_selection(loom_writer_core::TextSelection::caret(tea_start));
+    document.set_selection(loom_writer_core::TextSelection::caret(tea_source_offset));
     let selected_cell = document
-        .table_cell_at_offset(tea_start)
+        .table_cell_at_offset(tea_source_offset)
         .expect("the source caret belongs to the table");
     assert_eq!(
         (selected_cell.row, selected_cell.col),
         (0, 0),
-        "the escaped literal pipe remains part of the first cell"
+        "the escaped literal pipe remains part of the first typed cell"
     );
     let projection = crate::projection::project(
         &document,
@@ -118,13 +175,42 @@ fn painted_table_caret_uses_trimmed_unescaped_utf8_cell_text() {
         .table_cell_rects
         .first()
         .expect("the first painted table cell has geometry");
-    let visible_text = "café | tea";
-    let runs = painted_table_cell_bold_runs(&document, visible_text);
-    let font_size = loom_writer_core::PageStyle::default().font_size_for_kind("paragraph");
-    let tea_start = visible_text.find("tea").expect("visible suffix");
-    let before_caret = &visible_text[..tea_start];
+    let (visible_text, source_offsets, geometry) = painted_table_cell_geometry(
+        &document,
+        selected_cell.row,
+        selected_cell.col,
+        cell_rect.width,
+    );
+    assert_eq!(
+        visible_text, "café | tea",
+        "the typed cell stores the trimmed, unescaped canonical value"
+    );
+    let block_start = document
+        .blocks
+        .iter()
+        .take(selected_cell.block_index)
+        .map(|block| block.text.as_str().len() + 1)
+        .sum::<usize>();
+    let cell_source_byte = tea_source_offset - block_start;
+    let display_byte = source_offsets
+        .iter()
+        .position(|source_byte| *source_byte == cell_source_byte)
+        .expect("the source caret maps to a displayed UTF-8 boundary");
+    assert_eq!(
+        display_byte,
+        visible_text.find("tea").expect("visible suffix")
+    );
+    let line = geometry
+        .lines()
+        .iter()
+        .find(|line| {
+            let range = line.source_range();
+            range.start <= display_byte && display_byte < range.end
+        })
+        .expect("the caret belongs to a shaped line");
+    let shaped = line.shaped().expect("the visible text has a shaped line");
     let expected_x =
-        cell_rect.x + 6.0 + loom_writer_core::text_advance(before_caret, 0, &runs, font_size);
+        cell_rect.x + 6.0 + shaped.caret_x(display_byte, loom_fonts::Affinity::Leading);
     let caret = projection
         .selection_rects
         .iter()
@@ -133,7 +219,7 @@ fn painted_table_caret_uses_trimmed_unescaped_utf8_cell_text() {
 
     assert!(
         (caret.x - expected_x).abs() < 0.01,
-        "the caret at source offset {tea_start} should follow the visible prefix at x {expected_x}, got {}",
+        "the caret at canonical byte offset {tea_source_offset} follows the 12 pt shaped display boundary at x {expected_x}, got {}",
         caret.x
     );
 }

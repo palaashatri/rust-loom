@@ -1,0 +1,765 @@
+warning: loom-ui@0.1.0: warning: Exported component 'ButtonsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:21
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:48
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                                ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ChoiceSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:52
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                    ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DataSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:35
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                   ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FieldsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:37
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                     ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'GallerySection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'NavigationSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:67
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                                   ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverlaysSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:18
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RowsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'AppHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:551:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 551 | export component AppHeader inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: warning: Exported component 'AppleToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasBackdrop' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:655:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 655 | export component CanvasBackdrop inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CollapsiblePanel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:311:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 311 | export component CollapsiblePanel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CommandPalette' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:717:30
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 717 | export { CommandPaletteItem, CommandPalette, CommandPaletteTestWindow } from "command_palette.slint";
+warning: loom-ui@0.1.0:     |                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ContextToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DirectionalLayout' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'EmptyState' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:403:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 403 | export component EmptyState inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Field' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FormulaBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Hairline' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:617:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 617 | export component Hairline inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:82:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  82 | export component IconButton inherits IconOnlyToolbarItem { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOnlyToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOverLabelToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:58
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                                          ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'LabeledToolbar' doesn't inherit Window. This is deprecated
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'MetricChip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:676:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 676 | export component MetricChip inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ModalDialog' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:204:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 204 | export component ModalDialog inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Overflow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverflowMenuButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PaneTabs' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:667:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 667 | export component PaneTabs inherits TabStrip {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Panel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:428:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 428 | export component Panel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PanelHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:66
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PrimaryButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:86:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  86 | export component PrimaryButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PropertyRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RailButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:593:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 593 | export component RailButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RangeSlider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SearchField' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SegmentedControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SheetTabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:31
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SidebarSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:79
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                               ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Slider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:107:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 107 | export component Slider inherits RangeSlider { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:25
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                         ^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusPill' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:496:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 496 | export component StatusPill inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Switch' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:110:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 110 | export component Switch inherits Toggle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:116:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 116 | export component TabControl inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TitleChrome' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toggle' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:54
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                      ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:78:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  78 | export component ToolButton inherits ToolbarButton { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:24
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                        ^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarGroup' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarIconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:77
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                                             ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarOverflowButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarSpacer' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:47
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolkitStatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:15
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |               ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TransportButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:697:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 697 | export component TransportButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:634:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 634 | export component WorkspaceRow inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:631:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 631 | export component WorkspaceToolbar inherits Toolbar { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: function `measure` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:17:4
+   |
+17 | fn measure(text: &str, text_start: usize, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+   |    ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `block_measure` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:30:15
+   |
+30 | pub(crate) fn block_measure(text: &str, runs: &[StyleRun], base: &TextStyle) -> LineMeasure {
+   |               ^^^^^^^^^^^^^
+
+warning: function `justification_geometry` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:34:15
+   |
+34 | pub(crate) fn justification_geometry(
+   |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `line_width` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:55:15
+   |
+55 | pub(crate) fn line_width(
+   |               ^^^^^^^^^^
+
+warning: function `wrap` is never used
+  --> crates/loom-writer-core/src/export_flow.rs:77:15
+   |
+77 | pub(crate) fn wrap(
+   |               ^^^^
+
+warning: function `wrap_segment` is never used
+   --> crates/loom-writer-core/src/export_flow.rs:102:4
+    |
+102 | fn wrap_segment(
+    |    ^^^^^^^^^^^^
+
+warning: method `graphemes` is never used
+   --> crates/loom-writer-core/src/text_metrics/measure.rs:393:19
+    |
+342 | impl LineMeasure {
+    | ---------------- method in this implementation
+...
+393 |     pub(crate) fn graphemes<'t>(&self, text: &'t str) -> Vec<(usize, &'t str, f32)> {
+    |                   ^^^^^^^^^
+
+warning: `loom-writer-core` (lib) generated 7 warnings
+   Compiling loom-writer-app v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-app)
+warning: function `project_with_scale` is never used
+   --> crates/loom-writer-app/src/projection.rs:362:15
+    |
+362 | pub(crate) fn project_with_scale(
+    |               ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loom-writer-app` (bin "loom-writer" test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 43.98s
+     Running unittests src/main.rs (target/debug/deps/loom_writer-99dacea92078c6eb)
+
+running 593 tests
+test accessibility_tests::closing_the_palette_returns_focus_to_the_page ... ok
+test accessibility_tests::ctrl_f_opens_find_at_launch_and_escape_returns_focus_to_the_page ... ok
+test accessibility_tests::every_interactive_element_in_the_writer_window_has_an_accessible_name ... ok
+test accessibility_tests::no_two_buttons_on_screen_share_an_accessible_name ... ok
+test accessibility_tests::the_document_body_exposes_the_whole_document_as_its_accessible_value ... ok
+test accessibility_tests::typing_reaches_the_page_at_launch_without_any_click ... ok
+test actions_tests::a_bold_italic_run_is_drawn_italic_as_well_as_bold ... ok
+test actions_tests::an_italic_run_is_drawn_with_a_slanted_face_not_upright ... ok
+test actions_tests::an_underline_read_from_a_docx_reaches_the_page_as_a_rule ... ok
+test actions_tests::apply_document_projects_selection_formatting_and_accessible_announcement ... ok
+test actions_tests::coalesces_adjacent_typing_edits ... ok
+test actions_tests::collapsed_caret_announcement_reports_one_based_grapheme_position ... ok
+test actions_tests::collapsed_caret_uses_caret_style_for_toolbar_checked_state ... ok
+test actions_tests::document_action_breaks_typing_coalescing ... ok
+test actions_tests::empty_document_projection_exposes_a_visible_insertion_caret ... ok
+test actions_tests::expanding_past_overflow_breakpoint_closes_menu ... ok
+test actions_tests::failed_pdf_export_preserves_document_and_history ... ok
+test actions_tests::formatting_produces_named_undo_and_clears_redo ... ok
+test actions_tests::history_budget_evicts_oldest_entries ... ok
+test actions_tests::history_byte_budget_evicts_old_entries_and_keeps_the_newest ... ok
+test actions_tests::inspector_shows_mixed_heading_and_alignment_as_indeterminate ... ok
+test actions_tests::justified_rtl_line_keeps_the_deferred_bidi_notice ... ok
+test actions_tests::justify_control_applies_a_real_alignment_and_persists_it ... ok
+test actions_tests::keyboard_selection_updates_authoritative_state_and_accessible_announcement ... ok
+test actions_tests::layout_breakpoints_match_supported_width_boundaries ... ok
+test actions_tests::native_menu_and_palette_share_writer_callback_dispatch ... ok
+test actions_tests::new_document_is_blank_and_unsaved_ready ... ok
+test actions_tests::open_panel_cancellation_preserves_document_and_history ... ok
+test actions_tests::parse_args_accepts_template_without_changing_existing_flags ... ok
+test actions_tests::parse_args_rejects_unknown_template_id ... ok
+test actions_tests::persisted_justify_projection_only_marks_deferred_bidi_lines_unsupported ... ok
+test actions_tests::pointer_hit_test_selects_using_projected_heading_and_paragraph_geometry ... ok
+test actions_tests::redo_is_cleared_by_new_edit ... ok
+test actions_tests::render_projection_keeps_character_styles_and_paragraph_geometry_visible ... ok
+test actions_tests::render_projection_keeps_long_document_rows_on_their_page_flow ... ok
+test actions_tests::render_projection_uses_page_layout_for_rows_and_selection_overlay ... ok
+test actions_tests::save_panel_cancellation_preserves_document_and_history ... ok
+test actions_tests::scripted_dialog_request_uses_the_current_document_directory ... ok
+test actions_tests::selected_formatting_is_one_undoable_document_action ... ok
+test actions_tests::selection_announcement_is_meaningful_and_focus_restores_after_palette ... ok
+test actions_tests::selection_announcement_reports_utf8_character_count_not_byte_count ... ok
+test actions_tests::selection_change_is_first_class_without_history_or_block_mutation ... ok
+test actions_tests::selection_projection_preserves_a_pending_family_at_a_collapsed_caret ... ok
+test actions_tests::selection_projection_refreshes_font_family_after_moving_between_families ... ok
+test actions_tests::selection_projection_refreshes_font_size_from_the_active_paragraph ... ok
+test actions_tests::selection_projection_refreshes_strikethrough_after_moving_to_plain_text ... ok
+test actions_tests::template_category_filters_visible_cards ... ok
+test actions_tests::template_chooser_flag_parses_and_changes_headless_render ... ok
+test actions_tests::template_chooser_renders_at_reference_width ... ok
+test actions_tests::template_id_parser_accepts_stable_names_only ... ok
+test actions_tests::template_ids_are_stable_and_seed_real_documents ... ok
+test actions_tests::typing_into_a_table_cell_is_one_undo_step_and_undo_restores_the_table ... ok
+test actions_tests::viewport_callbacks_update_controller_and_clamp_inputs ... ok
+test actions_tests::widening_window_preserves_palette_focus ... ok
+test actions_tests::window_resize_updates_breakpoint_flags ... ok
+test actions_tests::writer_action_rail_is_one_row_before_the_canvas ... ok
+test actions_tests::writer_inspector_is_closed_by_default ... ok
+test actions_tests::writer_inspector_menu_check_tracks_live_window_state ... ok
+test actions_tests::writer_menu_disables_unhandled_controller_commands ... ok
+test actions_tests::writer_registry_all_surfaces_share_one_handler ... ok
+test actions_tests::writer_registry_disabled_bold_never_executes_handler ... ok
+test actions_tests::writer_registry_honest_enablement_transitions_with_document_and_history ... ok
+test actions_tests::writer_registry_search_is_deterministic_and_ranked ... ok
+test appearance_tests::a_corrupt_settings_file_falls_back_to_system ... ok
+test appearance_tests::a_fresh_install_follows_the_system_and_falls_back_to_light ... ok
+test appearance_tests::a_settings_directory_that_cannot_be_written_keeps_the_switch_and_says_so ... ok
+test appearance_tests::choosing_an_appearance_changes_the_chrome_pixels_but_not_the_document ... ok
+test appearance_tests::menu_check_marks_follow_the_setting_and_state_is_announced_to_assistive_technology ... ok
+test appearance_tests::system_follows_the_operating_system_while_it_is_chosen ... ok
+test appearance_tests::the_choice_is_remembered_by_the_next_app_instance ... ok
+test appearance_tests::the_command_palette_lists_and_runs_every_appearance ... ok
+test appearance_tests::the_theme_flag_overrides_the_saved_choice_and_does_not_overwrite_it ... ok
+test appearance_tests::the_toolbar_view_menu_offers_the_same_choices ... ok
+test appearance_tests::the_view_menu_works_from_the_keyboard ... ok
+test appearance_tests::the_window_does_not_depend_on_the_native_widget_palette ... ok
+test audit_tests::test_deep_audit_document_model_and_layout ... ok
+test audit_tests::test_deep_audit_document_statistics_and_toc ... ok
+test audit_tests::test_deep_audit_export_pipelines_pdf_and_markdown ... ok
+test audit_tests::test_deep_audit_native_loomdoc_persistence_and_recovery ... ok
+test audit_tests::test_deep_audit_native_macos_global_menu_bar ... ok
+test audit_tests::test_deep_audit_selection_and_grapheme_navigation ... ok
+test audit_tests::test_deep_audit_undo_redo_isolation_and_coalescing ... ok
+test caret_keys::rtl_caret_keys_tests::left_to_right_text_keeps_the_logical_arrow_moves ... ok
+test caret_keys::rtl_caret_keys_tests::right_and_left_move_visually_through_hebrew_text ... ok
+test caret_keys_tests::ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top ... FAILED
+test caret_keys_tests::ctrl_home_leaves_a_long_table_at_the_end_and_returns_to_the_top ... FAILED
+test caret_keys_tests::ctrl_home_returns_to_the_top_when_the_page_is_zoomed ... FAILED
+test caret_keys_tests::down_in_a_wrapped_heading_moves_to_its_second_visible_line ... ok
+test caret_keys_tests::end_and_home_stay_on_the_visible_line_and_shift_extends ... ok
+test caret_keys_tests::keys_inside_a_table_are_left_to_cell_navigation ... ok
+test caret_keys_tests::the_goal_column_survives_a_short_line_and_resets_after_other_movement ... ok
+test caret_scroll::tests::a_caret_above_the_view_scrolls_up_but_never_past_the_top ... ok
+test caret_scroll::tests::a_caret_below_the_view_scrolls_it_into_view_with_a_margin ... ok
+test caret_scroll::tests::a_visible_caret_does_not_scroll ... ok
+test caret_scroll::tests::degenerate_inputs_leave_the_scroll_alone ... ok
+test caret_scroll::tests::scrolling_up_to_near_the_top_snaps_to_the_top ... ok
+test clipboard_actions::paste_policy_tests::a_table_pasted_over_a_selection_replaces_the_selected_text ... ok
+test clipboard_actions::paste_policy_tests::ctrl_c_with_a_collapsed_caret_in_a_table_cell_copies_nothing ... ok
+test clipboard_actions::paste_policy_tests::html_with_a_table_inside_running_text_pastes_the_text_not_only_the_table ... ok
+test clipboard_actions::paste_policy_tests::indented_code_with_uniform_tabs_is_text_not_a_table ... ok
+test clipboard_actions::paste_policy_tests::tab_separated_rows_with_ragged_tab_counts_are_text_not_a_table ... ok
+test clipboard_actions::paste_policy_tests::tabbed_plain_text_without_a_spreadsheet_representation_is_text_not_a_table ... ok
+test clipboard_actions::tests::cut_tests::cut_of_a_virtual_table_range_copies_then_clears_only_the_selected_cells ... ok
+test clipboard_actions::tests::cut_tests::cut_preserves_a_picture_selection_when_its_clipboard_format_is_unsupported ... ok
+test clipboard_actions::tests::cut_tests::cut_preserves_selection_and_history_when_clipboard_write_fails ... ok
+test clipboard_actions::tests::cut_tests::failed_virtual_table_range_cut_preserves_cells_range_history_and_clipboard ... ok
+test clipboard_actions::tests::table_interop_tests::a_styled_sheets_table_pasted_into_writer_keeps_bold_alignment_and_widths ... ok
+test clipboard_actions::tests::table_interop_tests::copying_body_text_after_leaving_selected_table_cells_copies_only_body_text ... ok
+test clipboard_actions::tests::table_interop_tests::explicit_text_selection_ending_inside_table_is_copied_as_text ... ok
+test clipboard_actions::tests::table_interop_tests::pointer_reselecting_the_anchor_clears_table_range_when_caret_is_unchanged ... ok
+test clipboard_actions::tests::table_interop_tests::pointer_selecting_another_cell_clears_table_range_before_copy ... ok
+test clipboard_actions::tests::table_interop_tests::stale_table_range_does_not_override_text_selection_extended_from_table_into_body ... ok
+test clipboard_actions::tests::table_interop_tests::stale_table_range_is_cleared_when_replacing_document_with_same_table_id ... ok
+test clipboard_actions::tests::table_interop_tests::test_html_table_over_the_row_limit_says_rows_were_dropped ... ok
+test clipboard_actions::tests::table_interop_tests::test_html_table_resolves_to_table ... ok
+test clipboard_actions::tests::table_interop_tests::test_tsv_with_tabs_on_ge_2_rows_becomes_table ... ok
+test clipboard_actions::tests::table_interop_tests::test_tsv_with_tabs_on_single_row_does_not_become_table ... ok
+test clipboard_actions::tests::table_interop_tests::test_writer_copy_table_writes_multiformat_clipboard_for_sheets ... ok
+test clipboard_actions::tests::table_interop_tests::test_writer_paste_of_sheets_table_inserts_table_block ... ok
+test clipboard_actions::tests::table_range_tests::high_contrast_selection_boundaries_have_seven_to_one_contrast_for_all_table_styles ... ok
+test clipboard_actions::tests::table_range_tests::high_contrast_table_range_has_a_seven_to_one_boundary ... ok
+test clipboard_actions::tests::table_range_tests::ordinary_arrow_clears_table_range_before_copy_and_render ... ok
+test clipboard_actions::tests::table_range_tests::painted_table_caret_uses_trimmed_unescaped_utf8_cell_text ... ok
+test clipboard_actions::tests::table_range_tests::painted_table_pointer_maps_trimmed_unescaped_utf8_text_to_source_offset ... ok
+test clipboard_actions::tests::table_range_tests::shift_arrow_table_range_changes_pixels_inside_selected_cells ... ok
+test clipboard_actions::tests::table_range_tests::synthetic_slint_pointer_click_on_painted_c3_places_the_caret_in_c3 ... ok
+test clipboard_text_tests::cut_removes_only_the_selected_words_and_keeps_the_rest ... ok
+test clipboard_text_tests::paste_inserts_at_the_caret_and_keeps_every_other_paragraph ... ok
+test clipboard_text_tests::paste_over_a_selection_replaces_just_that_selection ... ok
+test clipboard_text_tests::pasting_lines_makes_paragraphs_and_normalises_line_endings ... ok
+test comment_colour_tests::comment_anchors_draw_the_document_highlight_in_every_theme ... ok
+test comment_colour_tests::comment_marker_draws_page_ink_on_page_paper_in_every_theme ... ok
+test comment_colour_tests::the_comment_highlight_keeps_page_ink_above_the_body_text_floor ... ok
+test comment_composer_tests::a_comment_on_selected_text_says_it_is_anchored_to_that_text ... ok
+test comment_composer_tests::a_comment_with_a_bare_caret_says_it_covers_the_whole_paragraph ... ok
+test comment_composer_tests::a_comment_with_the_caret_in_a_table_names_the_table ... ok
+test comment_composer_tests::a_selection_across_paragraphs_says_only_its_first_paragraph_is_commented ... ok
+test comment_composer_tests::insert_comment_from_the_menu_puts_the_caret_in_the_new_comment_field ... ok
+test comment_composer_tests::insert_comment_from_the_toolbar_command_path_focuses_the_field ... ok
+test comment_composer_tests::insert_comment_with_the_inspector_closed_opens_it_on_the_new_comment_field ... ok
+test comment_composer_tests::the_draft_stays_in_the_field_until_enter_adds_the_comment ... ok
+test comment_composer_tests::whole_block_comment_status_names_the_kind_of_block_it_covers ... ok
+test dialog_chooser_tests::each_save_changes_button_is_named_by_one_element ... ok
+test dialog_chooser_tests::every_template_category_icon_is_a_real_glyph_not_a_dash ... ok
+test dialog_chooser_tests::save_changes_buttons_are_tall_enough_for_double_size_labels ... ok
+test dialog_chooser_tests::the_find_bar_keeps_the_match_case_toggle_clear_of_its_edge_at_double_text ... ok
+test dialog_chooser_tests::the_find_bar_with_replace_takes_at_most_three_rows_at_double_text ... ok
+test document_formatting::m3_formatting_tests::direction_script_and_color_controls_follow_uniform_mixed_and_caret_selection ... ok
+test document_formatting::m3_formatting_tests::foreground_color_at_a_collapsed_caret_styles_only_new_text ... ok
+test document_formatting::m3_formatting_tests::foreground_color_input_applies_canonical_color_and_refuses_invalid_text ... ok
+test document_formatting::m3_formatting_tests::format_inspector_exposes_direction_and_logical_alignment_choices ... ok
+test document_formatting::m3_formatting_tests::format_inspector_exposes_real_foreground_and_script_actions ... ok
+test document_formatting::m3_formatting_tests::logical_alignment_commands_remain_distinct_from_physical_left_and_right ... ok
+test document_formatting::m3_formatting_tests::native_color_open_refuses_bad_file_without_replacing_the_document ... ok
+test document_formatting::m3_formatting_tests::native_color_paste_preserves_valid_rgb_and_rgba_runs ... ok
+test document_formatting::m3_formatting_tests::native_color_paste_refuses_bad_private_table_without_replacing_selection ... ok
+test document_formatting::m3_formatting_tests::native_color_save_refuses_bad_content_without_overwriting_the_file ... ok
+test document_formatting::m3_formatting_tests::rtl_direction_command_preserves_physical_alignment_and_is_undoable ... ok
+test document_formatting::m3_formatting_tests::selected_superscript_and_subscript_are_mutually_exclusive_undoable_edits ... ok
+test document_formatting::m3_formatting_tests::superscript_at_a_collapsed_caret_styles_only_new_text_and_survives_undo_redo ... ok
+test document_formatting::tests::a_family_is_applied_to_exactly_the_selection_as_one_mutation ... ok
+test document_formatting::tests::changing_the_list_kind_keeps_an_items_level ... ok
+test document_formatting::tests::collapsed_selection_does_not_retroactively_style_characters ... ok
+test document_formatting::tests::document_wide_character_formatting_is_persisted ... ok
+test document_formatting::tests::document_wide_paragraph_formatting_changes_authoritative_blocks ... ok
+test document_formatting::tests::existing_style_boundaries_are_preserved_by_document_operation ... ok
+test document_formatting::tests::flooring_walks_the_blocks_like_flooring_the_joined_text ... ok
+test document_formatting::tests::formatting_state_for_selection_reflects_only_the_active_range ... ok
+test document_formatting::tests::multi_paragraph_selection_formats_only_intersecting_text ... ok
+test document_formatting::tests::paragraph_formatting_uses_caret_or_selected_block_range ... ok
+test document_formatting::tests::selection_character_formatting_splits_and_coalesces_runs ... ok
+test document_formatting::tests::selection_offsets_are_direction_independent_and_utf8_safe ... ok
+test document_formatting::tests::the_font_field_reports_one_family_or_mixed ... ok
+test document_formatting::tests::the_size_field_shows_the_size_a_heading_is_drawn_at ... ok
+test document_formatting::tests::unlisting_an_item_forgets_its_level_so_listing_it_again_starts_at_the_top ... ok
+test docx_export_tests::a_destination_without_extension_gets_docx ... ok
+test docx_export_tests::an_empty_document_cannot_be_exported ... ok
+test docx_export_tests::cancel_and_empty_destination_leave_the_document_alone ... ok
+test docx_export_tests::export_writes_a_word_package_and_reports_it ... ok
+test docx_export_tests::menu_palette_and_registry_reach_the_same_export ... ok
+test docx_export_tests::skipped_comments_are_named_in_the_status ... ok
+test docx_export_tests::suggested_name_uses_the_title_and_stays_a_valid_file_name ... ok
+test docx_save_tests::save_after_opening_a_docx_asks_for_a_loom_file_and_leaves_the_word_file_alone ... ok
+test docx_save_tests::the_suggested_name_for_a_word_file_is_a_loom_name ... ok
+test docx_tests::test_committed_word_roundtrip_fixture ... ok
+test docx_tests::test_insert_chart_renders_and_exports_docx_and_pdf ... ok
+test docx_tests::test_open_docx_with_unsupported_warning_dialog_flow ... ok
+test docx_tests::test_word_com_rich_fixture_roundtrip ... ok
+test dpi_surfaces_tests::every_surface_keeps_its_logical_layout_at_real_scale_factors ... ok
+test dpi_surfaces_tests::scale_factor_is_independent_of_text_scale ... ok
+test file_title::tests::saved_files_show_their_stem_and_unsaved_documents_their_title ... ok
+test file_title::tests::saving_renames_the_window_and_the_close_prompt_without_touching_the_document ... ok
+test file_title::tests::the_window_title_names_the_document_and_marks_unsaved_work ... ok
+test find_bar::app_tests::opening_finding_and_stepping_select_matches_and_wrap ... ok
+test find_bar::app_tests::opening_with_a_selection_searches_for_it ... ok
+test find_bar::app_tests::replace_all_honours_match_case ... ok
+test find_bar::app_tests::replace_all_is_one_undoable_edit ... ok
+test find_bar::app_tests::replace_all_leaves_no_selection_on_the_offsets_it_shifted ... ok
+test find_bar::app_tests::replace_selects_first_then_replaces_the_selected_match ... ok
+test find_bar::app_tests::the_find_results_name_says_which_match_is_selected_in_both_directions ... ok
+test find_bar::tests::matches_are_offsets_in_the_editor_text_across_paragraphs ... ok
+test find_bar::tests::stepping_goes_forward_and_back_and_wraps ... ok
+test find_bar::tests::the_status_reads_position_count_or_nothing ... ok
+test find_bar::tests::typing_keeps_the_match_under_the_caret ... ok
+test find_bar_placement_tests::the_find_bar_never_covers_the_toolbar_inspector_or_outline ... ok
+test find_bar_placement_tests::the_find_bar_sits_at_the_reading_end_of_the_document_area ... ok
+test find_tests::every_other_match_is_highlighted_while_the_bar_is_open_and_only_then ... ok
+test find_tests::f3_and_shift_f3_step_matches_with_the_bar_closed_using_the_last_query ... ok
+test find_tests::highlights_are_built_only_for_matches_near_the_view ... ok
+test find_tests::highlights_follow_document_edits_while_the_bar_is_open ... ok
+test find_tests::match_case_switches_between_case_sensitive_and_insensitive_matching ... ok
+test find_tests::replace_all_clears_the_highlights_and_selection_of_the_matches_it_replaced ... ok
+test find_tests::the_f3_key_reaches_find_from_the_window ... ok
+test find_tests::whole_word_applies_to_replace_and_replace_all ... ok
+test find_tests::whole_word_limits_find_count_highlights_and_stepping_to_whole_words ... ok
+test font_picker::tests::a_family_chosen_at_a_caret_is_taken_by_the_text_typed_next ... ok
+test font_picker::tests::a_font_the_document_names_but_this_machine_lacks_is_marked_not_installed ... ok
+test font_picker::tests::a_line_with_two_families_is_drawn_as_rows_placed_by_the_measurement ... ok
+test font_picker::tests::a_pdf_export_status_does_not_claim_unverified_font_substitution ... ok
+test font_picker::tests::a_selection_with_two_families_reads_mixed ... ok
+test font_picker::tests::choosing_a_family_for_a_selection_is_one_undoable_edit ... ok
+test font_picker::tests::only_printable_keys_open_the_list_filtered ... ok
+test font_picker::tests::recent_fonts_come_first_then_the_documents_then_everything_installed ... ok
+test font_picker::tests::the_keyboard_opens_filters_moves_and_chooses ... ok
+test font_picker::tests::the_page_re_measures_when_the_scan_delivers_the_installed_fonts ... ok
+test font_picker::tests::the_window_keeps_the_highlight_in_view_and_a_section_with_its_heading ... ok
+test font_picker::tests::typing_filters_and_offers_an_unknown_name ... ok
+test font_store::tests::recents_keep_the_newest_first_without_repeats_and_are_bounded ... ok
+test font_store::tests::recents_round_trip_through_the_directory_and_survive_damage ... ok
+test font_store::tests::the_picker_scan_is_bounded ... ok
+test font_store::tests::the_scan_runs_on_its_own_thread_and_fills_the_cache ... ok
+test font_store::tests::writer_system_scan_prioritizes_bundled_script_fallbacks_and_keeps_platform_fallbacks ... ok
+test frame_bench_tests::writer_frame_bench_100_pages ... ok
+test frame_bench_tests::writer_frame_bench_100x20_table ... ok
+test frame_bench_tests::writer_frame_bench_20_pages ... ok
+test frame_bench_tests::writer_frame_bench_400_pages ... ok
+test frame_bench_tests::writer_keystroke_stage_profile ... ok
+test frame_bench_tests::writer_table_stage_profile ... ok
+test history::retained_byte_overflow_tests::retained_byte_total_saturates_instead_of_overflowing ... ok
+test history_tests::a_400_page_document_keeps_at_least_twenty_undo_steps ... ok
+test history_tests::a_pause_longer_than_the_coalescing_window_starts_a_new_step ... ok
+test history_tests::an_edit_larger_than_the_budget_stays_undoable ... ok
+test history_tests::an_in_place_edit_adds_only_the_changed_text_to_its_entry ... ok
+test history_tests::enter_and_a_caret_jump_each_start_a_new_undo_step ... ok
+test history_tests::history_charges_nested_table_allocations_and_shares_the_same_table ... ok
+test history_tests::history_charges_owned_style_capacity_in_both_snapshots ... ok
+test history_tests::history_charges_picture_name_and_shared_picture_bytes ... ok
+test history_tests::punctuation_after_a_word_starts_a_new_undo_step ... ok
+test history_tests::typing_a_sentence_undoes_one_word_at_a_time ... ok
+test history_tests::typing_in_a_table_cell_undoes_one_word_at_a_time ... ok
+test inspector_startup_tests::auto_opened_inspector_closes_when_actual_width_is_compact ... ok
+test inspector_startup_tests::closing_the_docked_inspector_returns_focus_to_its_toolbar_tab ... ok
+test inspector_startup_tests::compact_inspector_drawer_does_not_dim_the_page_outside_the_panel ... ok
+test inspector_startup_tests::focus_page_at_launch_focuses_editor_synchronously_without_mutating_focus_during_tree_instantiation ... ok
+test inspector_startup_tests::narrowing_after_launch_closes_the_inspector_without_moving_focus_during_tree_build ... ok
+test inspector_startup_tests::startup_does_not_put_keyboard_focus_on_the_inspector_tabs ... ok
+test inspector_startup_tests::user_opened_inspector_survives_compact_resize ... ok
+test inspector_startup_tests::widening_does_not_reopen_the_startup_inspector ... ok
+test kerned_highlight_tests::the_highlight_ends_where_a_kerned_line_of_text_ends ... ok
+test kerned_highlight_tests::the_highlight_ends_where_a_line_set_in_another_family_ends ... ok
+test kerned_highlight_tests::the_highlight_follows_a_bold_run_inside_a_kerned_line ... ok
+test kerned_highlight_tests::the_highlight_follows_a_family_change_inside_a_line ... ok
+test keyboard_flow_tests::alt_letters_open_every_menu_and_arrows_walk_them ... ok
+test keyboard_flow_tests::alt_letters_open_menus_from_the_find_field_without_typing_into_it ... ok
+test keyboard_flow_tests::arrow_keys_follow_the_visual_direction_in_right_to_left_text ... ok
+test keyboard_flow_tests::arrow_keys_move_between_toolbar_items_in_reading_order ... ok
+test keyboard_flow_tests::backspace_after_ctrl_a_clears_the_palette_search ... ok
+test keyboard_flow_tests::ctrl_a_in_the_palette_search_selects_the_query_so_typing_replaces_it ... ok
+test keyboard_flow_tests::ctrl_k_palette_runs_a_command_and_escape_closes_it_returning_focus ... ok
+test keyboard_flow_tests::ctrl_u_with_no_selection_underlines_the_next_typed_text_from_the_keyboard ... ok
+test keyboard_flow_tests::f10_opens_and_closes_the_first_menu_and_enter_runs_the_row ... ok
+test keyboard_flow_tests::f6_cycles_page_toolbar_inspector_and_shift_f6_runs_it_backwards ... ok
+test keyboard_flow_tests::find_bar_opens_steps_replaces_and_closes_from_the_keyboard ... ok
+test keyboard_flow_tests::left_from_the_more_button_returns_to_document ... ok
+test keyboard_flow_tests::menu_keys_do_nothing_while_a_modal_owns_the_keyboard ... ok
+test keyboard_flow_tests::outline_headings_are_keyboard_reachable_and_escape_closes_the_pane ... ok
+test keyboard_flow_tests::palette_ignores_arrow_and_tab_keys_in_its_query ... ok
+test keyboard_flow_tests::palette_query_keeps_capital_letters_and_shifted_symbols ... ok
+test keyboard_flow_tests::palette_says_so_when_no_command_matches ... ok
+test keyboard_flow_tests::picture_description_dialog_takes_focus_tabs_its_controls_and_returns_focus_on_escape ... ok
+test keyboard_flow_tests::save_changes_traps_tab_defaults_to_save_and_escape_cancels ... ok
+test keyboard_flow_tests::tab_order_is_logical_named_visible_and_free_of_traps ... ok
+test keyboard_flow_tests::table_insertion_cell_navigation_and_docx_import_warning_work_from_the_keyboard ... ok
+test keyboard_flow_tests::template_chooser_is_keyboard_complete_and_traps_tab ... ok
+test keyboard_flow_tests::toolbar_is_reachable_in_order_and_every_menu_works_from_the_keyboard ... ok
+test keyboard_flow_tests::type_format_find_and_save_without_a_pointer ... ok
+test launch_position_tests::parser_accepts_signed_physical_position_for_native_launch ... ok
+test launch_position_tests::parser_leaves_physical_position_unset_by_default ... ok
+test launch_position_tests::parser_rejects_malformed_and_out_of_range_position_values ... ok
+test launch_position_tests::parser_rejects_missing_position_value_as_a_position_error ... ok
+test list_keys_tests::backspace_at_the_start_of_a_list_item_removes_the_marker_before_joining ... ok
+test list_keys_tests::backspace_at_the_start_of_a_nested_item_moves_it_up_before_removing_its_marker ... ok
+test list_keys_tests::backspace_inside_a_list_item_is_left_to_the_editor ... ok
+test list_keys_tests::enter_at_the_end_of_a_list_item_adds_an_item_and_numbers_follow ... ok
+test list_keys_tests::enter_in_the_middle_of_a_centered_heading_keeps_both_halves_formatted ... ok
+test list_keys_tests::enter_on_a_non_empty_list_item_is_left_to_the_editor ... ok
+test list_keys_tests::enter_on_an_empty_list_item_leaves_the_list_as_one_undoable_step ... ok
+test list_keys_tests::enter_on_an_empty_nested_item_moves_it_up_then_leaves_the_list ... ok
+test list_keys_tests::joining_paragraphs_with_backspace_keeps_the_first_ones_kind ... ok
+test list_keys_tests::tab_in_a_paragraph_is_left_to_the_editor_which_inserts_spaces ... ok
+test list_keys_tests::tab_nests_a_list_item_from_any_caret_position_and_shift_tab_lifts_it ... ok
+test list_keys_tests::tab_over_a_selection_changes_each_list_item_in_it_and_leaves_other_blocks ... ok
+test list_keys_tests::tab_stops_at_the_deepest_level_and_each_change_is_one_undo_step ... ok
+test list_level_actions_tests::the_increase_and_decrease_list_level_commands_change_the_caret_item ... ok
+test list_level_actions_tests::the_line_break_command_breaks_the_line_as_shift_enter_does ... ok
+test list_level_actions_tests::the_list_level_commands_do_nothing_inside_a_table_cell ... ok
+test list_level_actions_tests::the_list_level_commands_do_nothing_outside_a_list_item ... ok
+test list_level_actions_tests::the_page_break_command_breaks_the_page_as_ctrl_enter_does ... ok
+test list_level_actions_tests::the_palette_offers_each_structure_command_with_its_shortcut ... ok
+test multi_click::tests::a_click_past_the_end_of_a_line_selects_the_last_word_and_stays_in_the_line ... ok
+test multi_click::tests::a_double_click_selects_the_word_under_the_pointer ... ok
+test multi_click::tests::a_triple_click_selects_the_whole_paragraph ... ok
+test multi_click::tests::presses_count_up_to_three_then_start_over_and_reset_when_far_or_slow ... ok
+test multi_click::tests::selection_never_crosses_a_paragraph_break_or_splits_a_character ... ok
+test multi_click::tests::spaces_and_punctuation_select_their_own_run ... ok
+test page_stack_tests::a_caret_drawn_on_a_later_page_is_hit_at_the_same_offset ... ok
+test page_stack_tests::a_click_in_the_gap_between_pages_goes_to_the_nearest_page ... ok
+test page_stack_tests::a_click_on_page_two_text_through_the_window_places_the_caret_there ... ok
+test page_stack_tests::a_find_match_on_page_three_is_selected_and_revealed ... ok
+test page_stack_tests::a_selection_across_a_page_boundary_has_rectangles_on_both_sheets ... ok
+test page_stack_tests::comment_highlights_on_a_later_page_sit_on_that_sheet ... ok
+test page_stack_tests::each_page_is_drawn_as_its_own_sheet_with_a_gap_at_every_zoom ... ok
+test page_stack_tests::page_down_walks_across_page_boundaries_and_keeps_the_caret_visible ... ok
+test page_stack_tests::text_on_every_page_sits_inside_its_own_sheet ... ok
+test page_stack_tests::the_gap_between_sheets_is_empty_canvas_with_no_text ... ok
+test page_stack_tests::the_page_gap_comes_from_the_one_core_constant ... ok
+test page_stack_tests::wheel_scrolling_moves_the_visible_pages_across_boundaries ... ok
+test palette_wiring::tests::markdown_search_ranks_the_export_first_and_enter_exports ... ok
+test palette_wiring::tests::menu_new_document_on_dirty_document_does_not_hold_the_registry ... ok
+test palette_wiring::tests::palette_new_document_on_clean_document_opens_template_chooser ... ok
+test palette_wiring::tests::palette_new_document_on_dirty_document_opens_prompt_and_closes_palette ... ok
+test palette_wiring::tests::palette_registry_lock_is_free_after_every_modal_command ... ok
+test palette_wiring::tests::palette_search_finds_the_markdown_export_command ... ok
+test paragraph_alignment::paragraph_alignment_tests::imported_rtl_justify_is_preserved_and_available_with_shaped_geometry ... FAILED
+test paragraph_alignment::paragraph_alignment_tests::mixed_ltr_rtl_selection_justifies_both_paragraphs ... ok
+test paragraph_alignment::paragraph_alignment_tests::mixed_text_and_table_selection_justifies_only_the_text_paragraph ... ok
+test paragraph_alignment::paragraph_alignment_tests::object_only_selection_does_not_offer_or_apply_justify ... ok
+test paragraph_alignment::paragraph_alignment_tests::rtl_justify_is_available_in_inspector_and_palette_and_undoable ... ok
+test paragraph_alignment::paragraph_alignment_tests::rtl_only_selection_is_justified_with_shaped_geometry ... FAILED
+test picture_actions::tests::picture_at_caret_finds_the_picture_above_or_under_the_caret ... ok
+test picture_drag_tests::a_drag_past_the_text_width_stops_at_the_text_width_and_inward_at_sixteen_points ... ok
+test picture_drag_tests::a_press_and_release_on_a_handle_without_moving_adds_no_history ... ok
+test picture_drag_tests::a_press_on_text_still_places_the_caret_in_the_text ... ok
+test picture_drag_tests::a_right_aligned_picture_previews_where_the_committed_layout_puts_it ... FAILED
+test picture_drag_tests::alt_shift_arrows_resize_the_selected_picture_by_ten_percent_without_moving_the_caret ... ok
+test picture_drag_tests::alt_shift_arrows_with_the_caret_in_text_are_left_to_the_editor ... ok
+test picture_drag_tests::dragging_the_bottom_right_handle_resizes_live_and_keeps_the_aspect_ratio ... FAILED
+test picture_drag_tests::escape_during_a_handle_drag_restores_the_size_and_a_later_release_adds_nothing ... FAILED
+test picture_drag_tests::pressing_a_picture_selects_it_and_moves_the_caret_into_its_block ... ok
+test picture_drag_tests::the_outline_follows_the_caret_off_the_picture ... ok
+test picture_drag_tests::undo_after_a_resize_restores_the_picture_size ... ok
+test picture_drag_tests::writes_selected_picture_captures_for_review ... ignored, writes review captures to LOOM_PICTURE_DUMP
+test picture_paste::tests::a_clipboard_with_text_pastes_the_text_and_not_the_picture ... ok
+test picture_paste::tests::a_picture_only_clipboard_pastes_one_picture_and_undo_removes_it ... ok
+test picture_paste::tests::an_empty_clipboard_changes_nothing ... ok
+test picture_paste::tests::an_oversized_picture_is_refused_before_it_is_decoded ... ok
+test picture_paste::tests::an_undecodable_picture_is_refused_and_the_document_is_unchanged ... ok
+test picture_tests::a_blank_picture_description_is_refused_and_the_dialog_stays_open ... ok
+test picture_tests::a_cancelled_chooser_changes_nothing ... ok
+test picture_tests::a_file_that_is_not_a_picture_is_refused_with_a_reason ... ok
+test picture_tests::a_picture_is_not_counted_as_a_paragraph_in_the_status_bar ... ok
+test picture_tests::a_picture_lands_below_the_caret_paragraph_and_the_next_one_is_typeable ... ok
+test picture_tests::cancelling_the_picture_description_changes_nothing ... ok
+test picture_tests::inserting_a_picture_adds_one_block_the_page_draws_and_undo_removes_it ... FAILED
+test picture_tests::picture_commands_resize_the_picture_under_the_caret_and_undo ... ok
+test picture_tests::picture_description_dialog_is_prefilled_and_save_applies_one_undoable_step ... ok
+test picture_tests::picture_description_needs_the_caret_on_a_picture ... ok
+test picture_tests::typing_at_the_end_of_a_picture_line_is_refused_and_the_picture_keeps_its_text ... ok
+test picture_tests::write_a_document_with_pictures ... ignored
+test pointer_hit_test::table_pointer_geometry_tests::a_held_drag_below_the_visible_bottom_scrolls_the_page_to_keep_the_focus_visible ... ok
+test pointer_hit_test::table_pointer_geometry_tests::a_press_on_each_painted_cell_text_selects_that_cell_at_every_scale ... ok
+test pointer_hit_test::table_pointer_geometry_tests::a_press_on_each_painted_cell_text_selects_that_cell_at_every_zoom ... ok
+test pointer_hit_test::table_pointer_geometry_tests::a_table_range_marks_exactly_its_cells_as_painted_selected ... ok
+test pointer_hit_test::table_pointer_geometry_tests::ctrl_end_in_a_long_table_keeps_the_caret_cell_inside_the_window ... ok
+test pointer_hit_test::table_pointer_geometry_tests::every_cell_centre_of_a_hundred_by_twenty_table_hits_that_cell ... ok
+test pointer_hit_test::table_pointer_geometry_tests::every_cell_centre_of_a_three_by_three_table_hits_that_cell ... ok
+test pointer_hit_test::table_pointer_geometry_tests::leading_cell_whitespace_pointer_uses_the_original_cell_byte_offset ... ok
+test pointer_hit_test::table_pointer_geometry_tests::long_table_presses_on_visible_cells_select_the_pressed_cell ... ok
+test pointer_hit_test::table_pointer_geometry_tests::mixed_script_table_cell_pointer_uses_the_painted_shaped_run_positions ... ok
+test pointer_hit_test::table_pointer_geometry_tests::page_down_from_a_table_cell_keeps_its_column ... ok
+test pointer_hit_test::table_pointer_geometry_tests::press_then_release_near_the_top_edge_keeps_the_pressed_cell ... ok
+test pointer_hit_test::table_pointer_geometry_tests::table_range_render_tests::keyboard_table_range_overlay_remains_visible_across_the_render_matrix ... ok
+test pointer_hit_test::table_pointer_geometry_tests::table_range_render_tests::keyboard_table_range_selection_reaches_the_painted_cell_overlay ... ok
+test pointer_hit_test::table_pointer_geometry_tests::the_sample_table_selects_the_pressed_cell_after_relayout_at_each_scroll ... ok
+test pointer_hit_test::table_pointer_geometry_tests::typed_table_projection_text_caret_and_hit_follow_rows_across_page_breaks ... ok
+test pointer_hit_test::table_pointer_geometry_tests::window_presses_on_a_three_by_three_table_select_the_pressed_cell_at_every_size_and_scale ... ok
+test pointer_hit_test::tests::pointer_after_an_expanded_justification_gap_hits_the_next_word ... ok
+test pointer_hit_test::tests::pointer_in_populated_cell_after_empty_cell_uses_painted_cell ... ok
+test projection::list_indent_tests::fallback_rows_keep_list_text_in_its_column_too ... ok
+test projection::list_indent_tests::projected_list_rows_start_right_of_body_text_and_carry_their_markers ... ok
+test projection::render_text::shaped_raster_tests::wrapped_cell_text_reports_a_visible_error_when_its_row_is_too_short ... ok
+test projection_tests::a_keystroke_in_a_long_document_projects_only_the_visible_pages ... ok
+test projection_tests::a_synchronous_write_invalidates_a_draft_still_being_serialized ... ok
+test projection_tests::a_windowed_projection_is_a_slice_of_the_full_one ... ok
+test projection_tests::deferred_recovery_arms_one_timer_per_window_and_settles ... ok
+test projection_tests::history_sizes_are_measured_once_per_entry ... ok
+test projection_tests::rows_built_for_a_view_do_not_grow_with_the_document ... 

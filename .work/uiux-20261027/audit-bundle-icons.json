@@ -1,0 +1,20 @@
+[
+  {
+    "bundle": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/Loom Writer Audit.app",
+    "icon": "loom-writer.icns",
+    "sha256": "2ec2b1d6cb8c8215250d86955463cd10f9317945feaa51f00e13d5b7a19c71bb",
+    "native_display_verified": false
+  },
+  {
+    "bundle": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/Loom Sheets Audit.app",
+    "icon": "loom-sheets.icns",
+    "sha256": "f3931f3ae13ca6e71e2d8fc3750d61557d98d318e211d0723f60ecbb9c4dea84",
+    "native_display_verified": false
+  },
+  {
+    "bundle": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/Loom Present Audit.app",
+    "icon": "loom-present.icns",
+    "sha256": "7d0b7194f9c35b8803c4045059131ee7da8e876bfdb36f9b50f30add170742ef",
+    "native_display_verified": false
+  }
+]

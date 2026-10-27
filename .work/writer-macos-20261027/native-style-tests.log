@@ -1,0 +1,25 @@
+   Compiling loom-writer-core v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.32s
+     Running unittests src/lib.rs (target/debug/deps/loom_writer_core-71911d5e22c3f632)
+
+running 7 tests
+test style_json::native_style_validation_tests::legacy_content_versions_accept_supported_colors_and_missing_fields ... ok
+test style_json::native_style_validation_tests::malformed_color_diagnostics_do_not_echo_untrusted_values ... ok
+test style_json::native_style_validation_tests::malformed_colors_in_later_and_covered_table_cells_are_rejected ... ok
+test style_json::native_style_validation_tests::malformed_inline_and_typed_cell_colors_are_refused_before_save_or_load ... ok
+test style_json::native_style_validation_tests::plus_signs_are_not_hexadecimal_color_digits ... 
+thread 'style_json::native_style_validation_tests::plus_signs_are_not_hexadecimal_color_digits' (3842598) panicked at crates/loom-writer-core/src/native_style_validation_tests.rs:128:9:
+#+10000 must not be accepted as hexadecimal
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test style_json::native_style_validation_tests::valid_rgb_rgba_and_automatic_colors_round_trip_in_native_packages ... ok
+test style_json::native_style_validation_tests::wrong_json_types_for_inline_colors_are_rejected ... ok
+
+failures:
+
+failures:
+    style_json::native_style_validation_tests::plus_signs_are_not_hexadecimal_color_digits
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 445 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p loom-writer-core --lib`

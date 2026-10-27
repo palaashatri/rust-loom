@@ -197,7 +197,7 @@ pub fn parse_document_body_with_archive(
         match (p_pos, tbl_pos) {
             (Some(p_rel), Some(tbl_rel)) if tbl_rel < p_rel => {
                 let tbl_abs = cursor + tbl_rel;
-                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id) {
+                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id)? {
                     blocks.push(block);
                     next_id += 1;
                     cursor = next_cursor;
@@ -209,7 +209,7 @@ pub fn parse_document_body_with_archive(
                 let p_rel = p_pos.unwrap();
                 let p_abs = cursor + p_rel;
                 if let Some((block_opt, next_cursor)) =
-                    parse_paragraph(body_xml, p_abs, next_id, archive)
+                    parse_paragraph(body_xml, p_abs, next_id, archive)?
                 {
                     if let Some(block) = block_opt {
                         blocks.push(block);
@@ -222,7 +222,7 @@ pub fn parse_document_body_with_archive(
             }
             (None, Some(tbl_rel)) => {
                 let tbl_abs = cursor + tbl_rel;
-                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id) {
+                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id)? {
                     blocks.push(block);
                     next_id += 1;
                     cursor = next_cursor;
@@ -342,22 +342,27 @@ fn parse_paragraph(
     start: usize,
     id: u64,
     archive: Option<&PackageArchive>,
-) -> Option<(Option<RichBlock>, usize)> {
-    let tag_open_end = xml[start..].find('>')? + start + 1;
+) -> Result<Option<(Option<RichBlock>, usize)>, String> {
+    let Some(tag_open_end) = xml[start..].find('>') else {
+        return Ok(None);
+    };
+    let tag_open_end = tag_open_end + start + 1;
     let tag_str = &xml[start..tag_open_end];
     if tag_str.ends_with("/>") {
-        return Some((None, tag_open_end));
+        return Ok(Some((None, tag_open_end)));
     }
 
     let close_tag = "</w:p>";
-    let end_rel = xml[start..].find(close_tag)?;
+    let Some(end_rel) = xml[start..].find(close_tag) else {
+        return Ok(None);
+    };
     let p_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
 
     // A picture: `<a:blip r:embed>` in a drawing, bytes from the package.
     if let Some(archive) = archive {
         if let Some(block) = parse_picture(p_xml, id, archive) {
-            return Some((Some(block), next_cursor));
+            return Ok(Some((Some(block), next_cursor)));
         }
     }
 
@@ -388,7 +393,7 @@ fn parse_paragraph(
                                     let text = crate::images::picture_text(id as u32);
                                     let mut block = RichBlock::chart_block(id, &text, json);
                                     block.style = paragraph_style_from_docx(p_xml);
-                                    return Some((Some(block), next_cursor));
+                                    return Ok(Some((Some(block), next_cursor)));
                                 }
                             }
                         }
@@ -474,7 +479,7 @@ fn parse_paragraph(
         let r_xml = &p_xml[r_start..r_start + r_close_rel + "</w:r>".len()];
         r_cursor = r_start + r_close_rel + "</w:r>".len();
 
-        let run_style = parse_run_style(r_xml);
+        let run_style = parse_run_style(r_xml)?;
         let run_text = parse_run_text(r_xml);
         if !run_text.is_empty() {
             let start_byte = text.len();
@@ -491,20 +496,19 @@ fn parse_paragraph(
     }
 
     if text.trim().is_empty() {
-        return Some((None, next_cursor));
+        return Ok(Some((None, next_cursor)));
     }
 
     let mut block = RichBlock::new(id, &kind, &text);
     block.style = paragraph_style;
     block.runs = runs;
-    Some((Some(block), next_cursor))
+    Ok(Some((Some(block), next_cursor)))
 }
 
-/// Parses character formatting from `<w:rPr>...</w:rPr>`.
-fn parse_run_style(r_xml: &str) -> CharacterStyle {
+fn parse_run_style(r_xml: &str) -> Result<CharacterStyle, String> {
     let mut style = CharacterStyle::default();
     let Some(pr_start) = r_xml.find("<w:rPr") else {
-        return style;
+        return Ok(style);
     };
     let pr_end = r_xml[pr_start..]
         .find("</w:rPr>")
@@ -536,8 +540,10 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
         if let Some(val) = extract_attribute_value(color_tag, "w:val") {
             if val == "auto" {
                 style.color = None;
-            } else if let Some(color) = writer_color(&val) {
-                style.color = Some(color);
+            } else {
+                style.color = Some(writer_color(&val).ok_or_else(|| {
+                    "DOCX color value must be six hexadecimal digits".to_string()
+                })?);
             }
         }
     }
@@ -554,7 +560,7 @@ fn parse_run_style(r_xml: &str) -> CharacterStyle {
             style.subscript = val == "subscript";
         }
     }
-    style
+    Ok(style)
 }
 
 fn tag_is_enabled(xml: &str, tag_name: &str) -> bool {
@@ -633,9 +639,11 @@ fn parse_run_text(r_xml: &str) -> String {
 }
 
 /// Parses a table `<w:tbl>...</w:tbl>`.
-fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
+fn parse_table(xml: &str, start: usize, id: u64) -> Result<Option<(RichBlock, usize)>, String> {
     let close_tag = "</w:tbl>";
-    let end_rel = xml[start..].find(close_tag)?;
+    let Some(end_rel) = xml[start..].find(close_tag) else {
+        return Ok(None);
+    };
     let tbl_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
 
@@ -671,7 +679,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
             let mut p_cursor = 0usize;
             while let Some(p_rel) = find_tag_start(&tc_xml[p_cursor..], "w:p") {
                 let p_start = p_cursor + p_rel;
-                if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0, None) {
+                if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0, None)? {
                     if let Some(block) = block_opt {
                         if !cell_runs.is_empty() {
                             cell_runs.push(TextRun::plain(" "));
@@ -693,7 +701,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
     }
 
     if rows.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
@@ -709,7 +717,7 @@ fn parse_table(xml: &str, start: usize, id: u64) -> Option<(RichBlock, usize)> {
             }
         }
     }
-    Some((RichBlock::table_block(id, table), next_cursor))
+    Ok(Some((RichBlock::table_block(id, table), next_cursor)))
 }
 
 fn paragraph_text_runs(block: &RichBlock) -> Vec<TextRun> {

@@ -59,8 +59,7 @@ pub use page_setup::PageSetup;
 use paragraph_match::{exact_paragraph_matches, metadata_matches};
 pub use replace::FindOptions;
 use style_json::{
-    alignment_name, paragraph_style_json, parse_alignment, parse_font_weight, runs_json,
-    selection_json,
+    alignment_name, paragraph_style_json, parse_alignment, runs_json, selection_json,
 };
 pub use table_geometry::{
     measure_table_row_geometry, shape_table_cell_geometry, TableCellGeometry,
@@ -733,6 +732,8 @@ impl WriterDocument {
             blocks,
             selection,
         };
+        style_json::validate_native_text_colors(&document)
+            .map_err(|error| WriterError::Invalid(error.into()))?;
         document.set_selection(document.selection.clone());
         Ok(document)
     }
@@ -1943,7 +1944,7 @@ fn parse_runs(raw: &str) -> Result<Vec<loom_text::StyleRun>, WriterError> {
             }
         }
         if let Some(raw) = style_raw {
-            style = parse_character_style(&raw, style)?;
+            style = style_json::parse_character_style(&raw, style)?;
         }
         runs.push(loom_text::StyleRun { start, end, style });
     }
@@ -1977,67 +1978,11 @@ fn parse_selection(raw: &str) -> Result<TextSelection, WriterError> {
     Ok(selection)
 }
 
-fn parse_character_style(
-    raw: &str,
-    mut style: loom_text::CharacterStyle,
-) -> Result<loom_text::CharacterStyle, WriterError> {
-    let fields = ContentParser::new(raw).parse()?;
-    for (key, value) in &fields {
-        match key.as_str() {
-            "font_family" => {
-                if let JsonValue::String(value) = value {
-                    style.font_family = value.clone();
-                }
-            }
-            "font_size" => parse_f32_value(value, &mut style.font_size),
-            "weight" => {
-                style.weight = parse_font_weight(&json_value_text(value));
-            }
-            "italic" => parse_bool_value(value, &mut style.italic),
-            "underline" => parse_bool_value(value, &mut style.underline),
-            "strikethrough" => parse_bool_value(value, &mut style.strikethrough),
-            "superscript" => parse_bool_value(value, &mut style.superscript),
-            "subscript" => parse_bool_value(value, &mut style.subscript),
-            "color" => {
-                if let Some(value) = parse_optional_string(value) {
-                    style.color = value;
-                }
-            }
-            "background" => {
-                if let Some(value) = parse_optional_string(value) {
-                    style.background = value;
-                }
-            }
-            "explicit_size" => parse_bool_value(value, &mut style.explicit_size),
-            _ => {}
-        }
-    }
-    Ok(style)
-}
-
 fn parse_f32_value(value: &JsonValue, target: &mut f32) {
     if let Ok(parsed) = json_value_text(value).parse::<f32>() {
         if parsed.is_finite() {
             *target = parsed;
         }
-    }
-}
-
-fn parse_bool_value(value: &JsonValue, target: &mut bool) {
-    if let JsonValue::Raw(value) = value {
-        match value.as_str() {
-            "true" => *target = true,
-            "false" => *target = false,
-            _ => {}
-        }
-    }
-}
-
-fn parse_optional_string(value: &JsonValue) -> Option<Option<String>> {
-    match value {
-        JsonValue::String(value) => Some(Some(value.clone())),
-        JsonValue::Raw(value) if value == "null" => Some(None),
-        _ => None,
     }
 }
 
@@ -2082,8 +2027,7 @@ impl ContentParser {
 
     fn parse(&self) -> Result<Vec<(String, JsonValue)>, WriterError> {
         // Parse an object while retaining whether a value was a JSON string.
-        // Optional style fields need this distinction because `"null"` is a
-        // valid color value and must not be confused with JSON null.
+        // Optional style fields distinguish a string from JSON null.
         let mut p = self.clone();
         p.skip_ws();
         if p.next() != Some(b'{') {
@@ -2326,6 +2270,8 @@ impl Clone for ContentParser {
 
 /// Save a document to a `.loomdoc` byte buffer (ZIP + manifest).
 pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
+    style_json::validate_native_text_colors(doc)
+        .map_err(|error| zip::ArchiveError::InvalidArgument(error.into()))?;
     let mut arch = PackageArchive::new();
     let content = doc.to_content_json();
     let content_bytes = content.as_bytes();

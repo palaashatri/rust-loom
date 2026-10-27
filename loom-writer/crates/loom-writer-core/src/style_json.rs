@@ -6,7 +6,9 @@ use crate::TextSelection;
 use loom_package::manifest::json as pkg_json;
 use loom_text::ParagraphDirection;
 
-use super::{json_value_text, parse_f32_value, ContentParser, WriterError};
+use super::{
+    json_value_text, parse_f32_value, ContentParser, JsonValue, WriterDocument, WriterError,
+};
 
 pub(crate) fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
     match alignment {
@@ -172,6 +174,86 @@ pub(crate) fn parse_paragraph_style(
         }
     }
     Ok(style)
+}
+
+const INVALID_NATIVE_TEXT_COLOR: &str = "invalid native text color; expected #RRGGBB or #RRGGBBAA";
+
+fn optional_color(value: &JsonValue) -> Result<Option<String>, WriterError> {
+    match value {
+        JsonValue::String(value) => Ok(Some(value.clone())),
+        JsonValue::Raw(value) if value == "null" => Ok(None),
+        _ => Err(WriterError::Invalid(INVALID_NATIVE_TEXT_COLOR.into())),
+    }
+}
+
+fn parse_bool_value(value: &JsonValue, target: &mut bool) {
+    if let JsonValue::Raw(value) = value {
+        match value.as_str() {
+            "true" => *target = true,
+            "false" => *target = false,
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn parse_character_style(
+    raw: &str,
+    mut style: loom_text::CharacterStyle,
+) -> Result<loom_text::CharacterStyle, WriterError> {
+    let fields = ContentParser::new(raw).parse()?;
+    for (key, value) in &fields {
+        match key.as_str() {
+            "font_family" => {
+                if let JsonValue::String(value) = value {
+                    style.font_family = value.clone();
+                }
+            }
+            "font_size" => parse_f32_value(value, &mut style.font_size),
+            "weight" => style.weight = parse_font_weight(&json_value_text(value)),
+            "italic" => parse_bool_value(value, &mut style.italic),
+            "underline" => parse_bool_value(value, &mut style.underline),
+            "strikethrough" => parse_bool_value(value, &mut style.strikethrough),
+            "superscript" => parse_bool_value(value, &mut style.superscript),
+            "subscript" => parse_bool_value(value, &mut style.subscript),
+            "color" => style.color = optional_color(value)?,
+            "background" => style.background = optional_color(value)?,
+            "explicit_size" => parse_bool_value(value, &mut style.explicit_size),
+            _ => {}
+        }
+    }
+    Ok(style)
+}
+
+fn validate_color(color: Option<&str>) -> Result<(), &'static str> {
+    if color.is_some() && crate::layout::parse_rgba(color).is_none() {
+        Err(INVALID_NATIVE_TEXT_COLOR)
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_table_text_colors(table: &loom_objects::Table) -> Result<(), &'static str> {
+    for row in &table.rows {
+        for cell in &row.cells {
+            for run in &cell.content.runs {
+                validate_color(run.color.as_deref())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_native_text_colors(document: &WriterDocument) -> Result<(), &'static str> {
+    for block in &document.blocks {
+        for run in &block.runs {
+            validate_color(run.style.color.as_deref())?;
+            validate_color(run.style.background.as_deref())?;
+        }
+        if let Some(table) = &block.table {
+            validate_table_text_colors(table)?;
+        }
+    }
+    Ok(())
 }
 
 fn character_style_json(style: &loom_text::CharacterStyle) -> String {

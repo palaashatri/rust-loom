@@ -1011,6 +1011,20 @@ fn project_inner(
                                     .and_then(|style| style.text_color.as_deref()),
                             )
                         });
+                        if drawn.is_none() {
+                            if let Some(color) = resolved
+                                .as_ref()
+                                .and_then(|style| style.text_color.as_deref())
+                            {
+                                if let Some(caret) =
+                                    selection_rects.iter_mut().find(|rect| rect.caret)
+                                {
+                                    caret.has_color = true;
+                                    caret.color =
+                                        slint::Color::from_argb_encoded(parse_hex_color(color));
+                                }
+                            }
+                        }
                         let col_width = geometry.col_widths[loc.col];
                         if let Some(block) = drawn.as_ref() {
                             let inner = (col_width - 12.0).max(1.0);

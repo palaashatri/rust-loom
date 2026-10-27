@@ -22,10 +22,10 @@ export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
 export component SheetsApp inherits Window {
+    icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
     default-font-family: Theme.ui-font-family;
-    // Native frame per platform.
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;
@@ -54,7 +54,6 @@ export component SheetsApp inherits Window {
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
-    /// Open toolbar menu: 0 none, 1 View, 2 Zoom, 3 Table, 4 Text, 5 Export.
     in-out property <int> toolbar-menu: 0;
     property <length> toolbar-menu-x: 0px;
     callback toolbar-command(string);

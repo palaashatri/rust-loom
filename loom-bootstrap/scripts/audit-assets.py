@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / "loom-bootstrap/contracts/assets.toml"
 TRACKED_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".webp", ".svg",
+    ".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico", ".icns",
     ".ttf", ".otf", ".woff", ".woff2",
     ".wav", ".mp3", ".flac", ".ogg",
 }

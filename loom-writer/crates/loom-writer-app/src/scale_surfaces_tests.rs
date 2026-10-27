@@ -274,25 +274,85 @@ fn rightmost(items: &[Rect], label: &str) -> Rect {
 }
 
 #[test]
-fn the_lists_control_is_not_covered_by_the_page_card_at_double_text_at_1024() {
+fn lists_control_is_reachable_by_scrolling_at_double_text_at_1024() {
     let (width, height) = (1024.0f32, 720.0f32);
     let app = editor(width, height, 2.0);
     open_surface(&app, "inspector");
     let _ = snapshot_component(&app, width, height, 1.0).expect("render");
+
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "None")
+            .next()
+            .is_none(),
+        "the Lists control starts below the compact inspector viewport at double text size"
+    );
+    let inspector = ElementHandle::find_by_element_type_name(&app, "WriterInspector")
+        .find(|element| element.size().width > 0.0)
+        .expect("the compact inspector drawer is open");
+    let scroll = inspector
+        .query_descendants()
+        .match_inherits("Flickable")
+        .find_all()
+        .into_iter()
+        .next()
+        .expect("the inspector content is scrollable");
+    let inspector_position = inspector.absolute_position();
+    let inspector_size = inspector.size();
+    let scroll_position = scroll.absolute_position();
+    let scroll_size = scroll.size();
+    assert!(
+        scroll_position.x >= inspector_position.x
+            && scroll_position.y >= inspector_position.y
+            && scroll_position.x + scroll_size.width
+                <= inspector_position.x + inspector_size.width
+            && scroll_position.y + scroll_size.height
+                <= inspector_position.y + inspector_size.height,
+        "the inspector Flickable {scroll_position:?} {scroll_size:?} must sit inside the inspector {inspector_position:?} {inspector_size:?}"
+    );
+
+    let automatic_y = || {
+        ElementHandle::find_by_accessible_label(&app, "Automatic")
+            .next()
+            .expect("the direction control is initially visible")
+            .absolute_position()
+            .y
+    };
+    let initial_automatic_y = automatic_y();
+    let mut automatic_positions = vec![Some(initial_automatic_y)];
+    let mut lists_became_visible = false;
+    for _ in 0..8 {
+        scroll.scroll(0.0, -120.0);
+        automatic_positions.push(
+            ElementHandle::find_by_accessible_label(&app, "Automatic")
+                .next()
+                .map(|element| element.absolute_position().y),
+        );
+        lists_became_visible |= ElementHandle::find_by_accessible_label(&app, "None")
+            .next()
+            .is_some();
+    }
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render scrolled inspector");
+    assert!(
+        automatic_positions
+            .iter()
+            .flatten()
+            .any(|y| *y < initial_automatic_y),
+        "wheel events must move the inspector content up from {initial_automatic_y}; after each event: {automatic_positions:?}"
+    );
+    assert!(
+        lists_became_visible
+            || ElementHandle::find_by_accessible_label(&app, "None")
+                .next()
+                .is_some(),
+        "wheel scrolling must reveal the Lists control"
+    );
+
     let items = rects(&app);
     let status_top = ElementHandle::find_by_element_type_name(&app, "WriterStatusBar")
         .next()
         .expect("the status bar is in the element tree")
         .absolute_position()
         .y;
-    // The page card is listed only while it is on screen. Scrolled to the top of
-    // the inspector it must be out of view, not drawn over the Lists control.
-    assert!(
-        ElementHandle::find_by_accessible_label(&app, "Page 1 of 1")
-            .next()
-            .is_none(),
-        "the page card is drawn over the top of the inspector"
-    );
     for label in ["None", "Bulleted", "Numbered"] {
         let segment = rightmost(&items, label);
         assert!(

@@ -1,0 +1,3 @@
+#!/bin/sh
+export LOOM_CONFIG_DIR='/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/state/sheets/config'
+exec '/Users/palaashatri/Code/personal/rust-loom/loom-sheets/target/debug/loom-sheets' --size 1280x800 --theme light > '/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/native-sheets.log' 2>&1

@@ -1,0 +1,104 @@
+[
+  {
+    "app": "writer",
+    "source": "/Users/palaashatri/.codex/generated_images/01a17c31-4c61-7e62-a8ae-110d6981e746/exec-8ab47f60-fee0-4726-95c3-9f08b7dd0e6e.png",
+    "source_size": [
+      1254,
+      1254
+    ],
+    "master_size": [
+      1024,
+      1024
+    ],
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "files": {
+      "loom-writer.png": {
+        "bytes": 963900,
+        "sha256": "5ae1caad8cb39912d6e7636d5daaaf9828165efc7881543fcea287d0bc5bf29f"
+      },
+      "loom-writer.ico": {
+        "bytes": 88417,
+        "sha256": "d128ffabb61d4b1b38cd31639fb4c61a20eb1755c20c36ffd7aa4173ea179ac6"
+      },
+      "loom-writer.icns": {
+        "bytes": 1590381,
+        "sha256": "2ec2b1d6cb8c8215250d86955463cd10f9317945feaa51f00e13d5b7a19c71bb"
+      },
+      "loom-writer.512.png": {
+        "bytes": 233928,
+        "sha256": "8fb1151c185c0f5e9989e3c058a1340968bcc67e44f9ee6eb0708f5671e082b9"
+      }
+    }
+  },
+  {
+    "app": "sheets",
+    "source": "/Users/palaashatri/.codex/generated_images/01a17c31-4c61-7e62-a8ae-110d6981e746/exec-2707d0b0-bc8e-4546-8121-fd5b0bcbfea4.png",
+    "source_size": [
+      1254,
+      1254
+    ],
+    "master_size": [
+      1024,
+      1024
+    ],
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "files": {
+      "loom-sheets.png": {
+        "bytes": 1079861,
+        "sha256": "7330d8c65362610610a66873cc7df442f73d322e6f396b2f61a378fb259bb0cc"
+      },
+      "loom-sheets.ico": {
+        "bytes": 100131,
+        "sha256": "37f5a79317bf066172347abf6969455f1e1bca67a9e656cb863bcd1f43d4efcb"
+      },
+      "loom-sheets.icns": {
+        "bytes": 1782654,
+        "sha256": "f3931f3ae13ca6e71e2d8fc3750d61557d98d318e211d0723f60ecbb9c4dea84"
+      },
+      "loom-sheets.512.png": {
+        "bytes": 263278,
+        "sha256": "ebe0d957e9606e2ddff242fced67af2f9457cba41eae05e7fd605d6ecce61af4"
+      }
+    }
+  },
+  {
+    "app": "present",
+    "source": "/Users/palaashatri/.codex/generated_images/01a17c31-4c61-7e62-a8ae-110d6981e746/exec-a3ed0761-434b-4716-8e57-4110d960edd1.png",
+    "source_size": [
+      1254,
+      1254
+    ],
+    "master_size": [
+      1024,
+      1024
+    ],
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "files": {
+      "loom-present.png": {
+        "bytes": 1031699,
+        "sha256": "5117a53da513196b5ef6c1ba1b41d8d69f76bf0bd52b2909459cc12d0186c887"
+      },
+      "loom-present.ico": {
+        "bytes": 91605,
+        "sha256": "2ac8c1b37eb7bf46b939e4ef70328ad75077017fd26fa3fca7d729bea4b7b339"
+      },
+      "loom-present.icns": {
+        "bytes": 1709527,
+        "sha256": "7d0b7194f9c35b8803c4045059131ee7da8e876bfdb36f9b50f30add170742ef"
+      },
+      "loom-present.512.png": {
+        "bytes": 254317,
+        "sha256": "be43985e5261366689fa544727ae8dd4ca4d79d0a3cec2f327ad7f98d9566d01"
+      }
+    }
+  }
+]

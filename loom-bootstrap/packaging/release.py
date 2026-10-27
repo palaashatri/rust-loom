@@ -135,14 +135,12 @@ def write_text(path: Path, text: str, mode: int | None = None) -> None:
         path.chmod(mode)
 
 
-def loom_svg(app: str) -> str:
-    initial = app[0].upper()
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#26282d"/><stop offset="1" stop-color="#111216"/></linearGradient></defs>
-<rect width="512" height="512" rx="112" fill="url(#g)"/>
-<path d="M128 356V156h48v154h208v46z" fill="#d59154"/>
-<text x="256" y="292" text-anchor="middle" font-family="sans-serif" font-size="156" font-weight="700" fill="#f4f1ec">{initial}</text>
-</svg>'''
+def icon_path(root: Path, app: str, suffix: str) -> Path:
+    """Return the original application artwork used by native packages."""
+    path = root / "loom-core/crates/loom-ui/ui/app-icons" / f"loom-{app}.{suffix}"
+    if not path.is_file():
+        fail(f"missing application icon: {path}")
+    return path
 
 
 def linux_mime_xml() -> str:
@@ -218,7 +216,7 @@ def package_linux(
         package_root = Path(temporary) / "loom-creator-suite"
         bin_dir = package_root / "usr" / "bin"
         applications = package_root / "usr" / "share" / "applications"
-        icons = package_root / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps"
+        icons = package_root / "usr/share/icons/hicolor/512x512/apps"
         mime_packages = package_root / "usr" / "share" / "mime" / "packages"
         bin_dir.mkdir(parents=True)
         applications.mkdir(parents=True)
@@ -230,7 +228,7 @@ def package_linux(
             shutil.copy2(source, destination)
             destination.chmod(0o755)
             installed_size += destination.stat().st_size
-            write_text(icons / f"loom-{app}.svg", loom_svg(app))
+            shutil.copy2(icon_path(root, app, "512.png"), icons / f"loom-{app}.png")
             write_text(
                 applications / f"loom-{app}.desktop",
                 "\n".join(
@@ -286,7 +284,7 @@ def package_linux(
                     f'#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/loom-{app}" "$@"\n',
                     0o755,
                 )
-                write_text(appdir / f"loom-{app}.svg", loom_svg(app))
+                shutil.copy2(icon_path(root, app, "png"), appdir / f"loom-{app}.png")
                 write_text(
                     appdir / f"loom-{app}.desktop",
                     "\n".join(
@@ -317,11 +315,14 @@ def package_linux(
     return artifacts
 
 
-def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> str:
+def wix_source(
+    binaries: dict[str, Path], version: str, architecture: str, root: Path,
+) -> str:
     del architecture  # Architecture is selected by `wix build -arch`.
     install_components: list[str] = []
     shortcut_components: list[str] = []
     refs: list[str] = []
+    icons: list[str] = []
     for app, source in binaries.items():
         component_id = f"Component_{app}"
         association_id = f"Association_{app}"
@@ -329,6 +330,9 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
         file_id = f"File_{app}"
         extension, _mime, description = DOCUMENT_TYPES[app]
         display = DISPLAY_NAMES[app]
+        icons.append(
+            f'<Icon Id="Icon_{app}.ico" SourceFile="{xml_escape(str(icon_path(root, app, "ico")))}" />'
+        )
         install_components.append(
             f'''<Component Id="{component_id}" Guid="*">
               <File Id="{file_id}" Source="{xml_escape(str(source))}" KeyPath="yes" />
@@ -344,7 +348,7 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
             f'''<Component Id="{shortcut_id}" Guid="*">
               <Shortcut Id="Shortcut_{app}" Directory="ApplicationProgramsFolder"
                         Name="{xml_escape(display)}" Target="[INSTALLFOLDER]loom-{app}.exe"
-                        WorkingDirectory="INSTALLFOLDER" />
+                        WorkingDirectory="INSTALLFOLDER" Icon="Icon_{app}.ico" IconIndex="0" />
               <RemoveFolder Id="RemoveFolder_{app}" Directory="ApplicationProgramsFolder" On="uninstall" />
               <RegistryValue Root="HKLM" Key="Software\\Loom\\Loom Creator Suite\\Shortcuts"
                              Name="{app}" Value="1" Type="integer" KeyPath="yes" />
@@ -360,6 +364,7 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
            UpgradeCode="{upgrade_code}" Scope="perMachine" Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Loom Creator Suite is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    {''.join(icons)}
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Loom Creator Suite">
         {''.join(install_components)}
@@ -399,7 +404,7 @@ def package_windows(
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="loom-wix-") as temporary:
         source = Path(temporary) / "loom.wxs"
-        write_text(source, wix_source(binaries, version, architecture))
+        write_text(source, wix_source(binaries, version, architecture, root))
         msi = output / f"Loom-Creator-Suite-{version}-{architecture}.msi"
         wix_arch = "x64" if architecture == "x86_64" else "arm64"
         run([wix, "build", "-arch", wix_arch, "-o", str(msi), str(source)])
@@ -453,6 +458,7 @@ def package_macos(
             resources = bundle / "Contents" / "Resources"
             executable_dir.mkdir(parents=True)
             resources.mkdir(parents=True)
+            shutil.copy2(icon_path(root, app, "icns"), resources / f"loom-{app}.icns")
             executable = executable_dir / f"loom-{app}"
             shutil.copy2(source, executable)
             executable.chmod(0o755)
@@ -466,6 +472,7 @@ def package_macos(
                         "CFBundleVersion": version,
                         "CFBundleShortVersionString": version,
                         "CFBundleExecutable": f"loom-{app}",
+                        "CFBundleIconFile": f"loom-{app}.icns",
                         "CFBundlePackageType": "APPL",
                         "CFBundleDevelopmentRegion": "en",
                         "CFBundleDocumentTypes": document_types,

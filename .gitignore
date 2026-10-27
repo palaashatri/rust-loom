@@ -9,9 +9,9 @@ target
 # Serena
 .serena/
 
-# Temporary work directories
-.work/
-**/.work/
+# # Temporary work directories
+# .work/
+# **/.work/
 
 # Generated zip and report archives
 Loom-Complete.zip*
@@ -56,4 +56,4 @@ Loom-Complete.zip
 Loom-Complete.zip.sha256
 Loom-Manifest.json
 *-Verification-Report.txt
-**/.work/
+# **/.work/

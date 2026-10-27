@@ -1,0 +1,103 @@
+Window: "Untitled Document - Loom Writer", App: Loom Writer Audit.
+0 standard window Untitled Document - Loom Writer, Secondary Actions: Raise
+	1 container
+		2 button File
+		3 button Edit
+		4 button View
+		5 button Format
+		6 button Insert
+		7 button Table
+		8 button View options
+			9 text (settable) View
+		10 button Zoom
+			11 text (settable) Zoom
+		12 button Insert
+			13 text (settable) Insert
+		14 button Text
+			15 text (settable) Text
+		16 button Style
+			17 text (settable) Style
+		18 button List
+			19 text (settable) List
+		20 button Export
+			21 text (settable) Export
+		22 button Format inspector
+			23 text (settable) Format
+		24 button Document
+			25 text (settable) Document
+		26 button More actions, Help: More actions: undo, redo, new, open, save and find
+		27 text entry area (settable) Document body, Placeholder: Type your text here...
+		28 Inspector tab
+			29 button Format
+				30 text (settable) Format
+			31 button Document
+				32 text (settable) Document
+		33 button Close inspector
+		34 text (settable) Paragraph Style
+		35 text (settable) Paragraph Direction
+		36 Paragraph Direction
+			37 toggle button (disabled, settable, boolean) Automatic, Help: Mixed paragraph direction, Value: off
+			38 toggle button (disabled, settable, boolean) Left to Right, Help: Mixed paragraph direction, Value: off
+			39 toggle button (disabled, settable, boolean) Right to Left, Help: Mixed paragraph direction, Value: off
+		40 Heading Style
+			41 button Body
+				42 text (settable) Body
+			43 button H1
+				44 text (settable) H1
+			45 button H2
+				46 text (settable) H2
+			47 button H3
+				48 text (settable) H3
+		49 text (settable) Font & Size
+		50 unknown
+			51 pop up button (settable) Font family, Value: Inter
+		52 button Smaller, Help: Decrease font size
+		53 text (settable) 11 pt
+		54 button Larger, Help: Increase font size
+		55 button Bold, Help: Bold (Ctrl+B)
+		56 button Italic, Help: Italic (Ctrl+I)
+		57 button Underline, Help: Underline (Ctrl+U)
+		58 button Strikethrough
+		59 button (disabled) Text Color, Help: Choose foreground color
+		60 toggle button (disabled, settable, boolean) Superscript, Help: Toggle superscript, Value: off
+		61 toggle button (disabled, settable, boolean) Subscript, Help: Toggle subscript, Value: off
+		62 text (settable) Alignment & Spacing
+		63 text (settable) Logical Alignment
+		64 Logical Alignment
+			65 toggle button (disabled, settable, boolean) Start, Help: No uniform logical alignment, Value: off
+			66 toggle button (disabled, settable, boolean) End, Help: No uniform logical alignment, Value: off
+		67 Text Alignment
+			68 button Left
+				69 text (settable) Left
+			70 button Center
+				71 text (settable) Center
+			72 button Right
+				73 text (settable) Right
+		74 button Outdent, Help: Decrease Indent
+		75 button Indent, Help: Increase Indent
+		76 text (settable) Line Spacing
+		77 Line Spacing
+			78 button 1.0
+				79 text (settable) 1.0
+			80 button 1.15
+				81 text (settable) 1.15
+			82 button 1.5
+				83 text (settable) 1.5
+			84 button 2.0
+				85 text (settable) 2.0
+		86 text (settable) Lists
+		87 List Style
+			88 button None
+				89 text (settable) None
+			90 button Bulleted
+				91 text (settable) Bulleted
+			92 button Numbered
+				93 text (settable) Numbered
+		94 text (settable) Created blank black document
+		95 text (settable) Caret at character 1
+	96 close button
+	97 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	98 minimize button
+	99 text Untitled Document - Loom Writer
+100 menu bar
+	101 Loom Writer Audit
