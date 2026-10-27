@@ -22,6 +22,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
             "loom-design-bible/tokens/loom.toml",
             "loom-core/crates/loom-ui/ui/foundation.slint",
             "loom-core/crates/loom-ui/ui/theme.slint",
+            "loom-core/crates/loom-ui/ui/app-accents.slint",
             "loom-sheets/crates/loom-sheets-app/ui/objects.slint",
         )
         for name in files:

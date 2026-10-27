@@ -32,7 +32,7 @@ opens the archived copy. Some of that prose still repeats older values, such as
 the former terracotta palette and some motion and sheet-tab metrics. Where it
 disagrees with `tokens/loom.toml` or `contracts/desktop-ui.toml`, the TOML is
 authoritative and the prose is a known defect tracked as GOV-02 in
-[AGENTS.md](../AGENTS.md#gov-02--reconcile-design-bible-prose-with-canonical-contracts).
+[AGENTS.md](../docs/workflow/governance-debt.md#gov-02--reconcile-design-bible-prose-with-canonical-contracts).
 
 | Document | Contents |
 |---|---|
@@ -89,7 +89,7 @@ authoritative and the prose is a known defect tracked as GOV-02 in
 ## 2027 accessibility and identity notes
 
 * Accessibility review uses WCAG 2.2 AA as applied to software by EN 301 549
-  V4.1.1 ([AGENTS.md §18](../AGENTS.md#18-2027-readiness-baseline--platforms-accessibility-supply-chain-and-regulation)).
+  V4.1.1 ([AGENTS.md §18](../docs/rules/platforms.md#18-2027-readiness-baseline--platforms-accessibility-supply-chain-and-regulation)).
   `contracts/desktop-ui.toml` sets a 28 px minimum pointer target. Three
   handle targets are smaller than 24 px and need recorded exceptions or larger
   hit areas (GOV-06).
@@ -114,7 +114,7 @@ authoritative and the prose is a known defect tracked as GOV-02 in
   *structure*: principles, single token source, theme matrix, anti-patterns and
   review. It does not use Loom's values. When Loom runs on SLOPOS, a versioned
   Slint theme/chrome adapter maps SLOPOS semantic roles onto the roles in
-  `tokens/loom.toml` (future gate LOOM-SLOPOS-03, [AGENTS.md §15](../AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite)).
+  `tokens/loom.toml` (future gate LOOM-SLOPOS-03, [AGENTS.md §15](../docs/rules/platforms.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite)).
   The adapter never edits this token source, and document content is never re-themed.
 * [PARAMA](https://github.com/palaashatri/parama) — an independent OS. A native
   PARAMA Loom target is far-future work. It would keep this bible unchanged

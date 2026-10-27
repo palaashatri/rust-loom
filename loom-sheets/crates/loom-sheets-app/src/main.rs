@@ -48,6 +48,7 @@ pub mod formatting;
 mod analysis;
 mod grid_gestures;
 mod grid_navigation;
+use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
 mod paste_formats;
@@ -1664,33 +1665,6 @@ pub(crate) fn select_cell(app: &SheetsApp, state: &GuiState, r: i32, c: i32) {
     update_selection(app, &sheet, &vals, refr);
 }
 
-/// Where a key move of `delta` takes the active cell, counting a page as the
-/// rows that fit in the window.
-fn moved_focus(app: &SheetsApp, sheet: &Sheet, from: CellRef, delta: (i32, i32)) -> CellRef {
-    let page = window_fill(app, grid_zoom(app)).map_or(DEFAULT_VISIBLE_ROWS, |(_, rows)| rows);
-    grid_navigation::destination(sheet, from, delta, page)
-}
-
-fn navigate_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
-    let selection = selection_from_app(app);
-    // A page move starts from the anchor, where the selection began, as in other
-    // spreadsheets: Shift+Page Down extends from there, and a plain Page Up then
-    // moves a page up from it instead of collapsing onto it.
-    let origin = if row_delta == grid_navigation::PAGE || row_delta == -grid_navigation::PAGE {
-        selection.anchor
-    } else {
-        selection.focus
-    };
-    let next = moved_focus(app, sheet, origin, (row_delta, col_delta));
-    update_selection(app, sheet, &evaluate(sheet), next);
-}
-
-fn extend_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
-    let selection = selection_from_app(app);
-    let next = moved_focus(app, sheet, selection.focus, (row_delta, col_delta));
-    update_selection_range(app, sheet, &evaluate(sheet), selection.extend(next));
-}
-
 fn inspector_section_visibility(query: &str) -> (bool, bool) {
     let query = query.trim().to_ascii_lowercase();
     let table = query.is_empty() || "table name rows columns worksheet".contains(query.as_str());
@@ -2379,7 +2353,7 @@ fn wire_selection_extension(app: &SheetsApp, state: &Rc<GuiState>) {
     let app_ref = app.as_weak();
     app.on_extend_selection(move |row_delta, col_delta| {
         if let Some(app) = app_ref.upgrade() {
-            extend_selection(&app, &state.current.borrow(), row_delta, col_delta);
+            extend_selection(&app, &state, row_delta, col_delta);
             project_current(&app, &state);
         }
     });

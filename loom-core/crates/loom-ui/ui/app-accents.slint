@@ -1,0 +1,68 @@
+// Owner-approved application accents; document and neutral chrome palettes stay in Theme.
+export struct ApplicationAccent {
+    accent: color, accent-hover: color, accent-pressed: color, accent-ink: color,
+    focus: color, selection: color, selection-soft: color,
+}
+
+export global AppAccents {
+    private property <ApplicationAccent> writer-light: {
+        accent: #6241ad,
+        accent-hover: #55369a,
+        accent-pressed: #492c87,
+        accent-ink: #ffffff,
+        focus: #6241ad,
+        selection: #6241ad,
+        selection-soft: #efeaf9,
+    };
+    private property <ApplicationAccent> writer-dark: {
+        accent: #bba7f4,
+        accent-hover: #ccbbff,
+        accent-pressed: #a38adb,
+        accent-ink: #171221,
+        focus: #9572ce,
+        selection: #9572ce,
+        selection-soft: #30263f,
+    };
+    private property <ApplicationAccent> sheets-light: {
+        accent: #087565,
+        accent-hover: #066657,
+        accent-pressed: #06594d,
+        accent-ink: #ffffff,
+        focus: #087565,
+        selection: #087565,
+        selection-soft: #e3f3ee,
+    };
+    private property <ApplicationAccent> sheets-dark: {
+        accent: #73d8ba,
+        accent-hover: #91e9d0,
+        accent-pressed: #55bea1,
+        accent-ink: #0a211b,
+        focus: #329d83,
+        selection: #329d83,
+        selection-soft: #173a30,
+    };
+    private property <ApplicationAccent> present-light: {
+        accent: #ad432e,
+        accent-hover: #9b3825,
+        accent-pressed: #872f1f,
+        accent-ink: #ffffff,
+        focus: #ad432e,
+        selection: #ad432e,
+        selection-soft: #f9ebe5,
+    };
+    private property <ApplicationAccent> present-dark: {
+        accent: #ffaf92,
+        accent-hover: #ffc3ab,
+        accent-pressed: #e99579,
+        accent-ink: #2b1710,
+        focus: #cc765d,
+        selection: #cc765d,
+        selection-soft: #422820,
+    };
+
+    public pure function for-application(application: string, dark: bool) -> ApplicationAccent {
+        return application == "writer" ? (dark ? writer-dark : writer-light)
+            : application == "sheets" ? (dark ? sheets-dark : sheets-light)
+            : dark ? present-dark : present-light;
+    }
+}

@@ -36,7 +36,7 @@ export component PresenterWindow inherits Window {
     callback reset-timer();
     callback close-presenter();
 
-    init => { keys.focus(); root.roomy = self.height >= 560px; }
+    init => { Theme.application = "present"; keys.focus(); root.roomy = self.height >= 560px; }
 
     keys := FocusScope {
         key-pressed(event) => {

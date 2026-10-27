@@ -1,0 +1,28 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "loom-sheets-app",
+    "--bin",
+    "loom-sheets",
+    "frame_bench_tests::scrolling_a_large_sheet_stays_within_the_frame_budget",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/Users/palaashatri/Code/personal/rust-loom/loom-sheets",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "LOOM_FRAME_BENCH": "1",
+    "CARGO_PROFILE_TEST_OPT_LEVEL": "2",
+    "CARGO_BUILD_JOBS": "2"
+  },
+  "timeout_seconds": 900,
+  "timed_out": false,
+  "exit_code": 0,
+  "elapsed_seconds": 423.42186941599357,
+  "log": "/Users/palaashatri/Code/personal/rust-loom/.work/sheets-perf-20261027/frame-bench-opt2.log"
+}

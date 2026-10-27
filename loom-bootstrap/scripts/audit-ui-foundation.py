@@ -32,6 +32,51 @@ def contrast_ratio(first: str, second: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+def application_accent_errors(source: str, tokens: dict, contract: dict) -> list[str]:
+    """Validate the shared brand colours without recolouring document roles."""
+    result: list[str] = []
+    roles = ("accent", "accent-hover", "accent-pressed", "accent-ink",
+             "focus", "selection", "selection-soft")
+    for app in ("writer", "sheets", "present"):
+        for theme in ("light", "dark"):
+            label = f"{app} {theme}"
+            palette = tokens.get("application-accent", {}).get(app, {}).get(theme, {})
+            expected = contract.get("application-accent", {}).get(app, {}).get(theme, {})
+            try:
+                block = braced_block(
+                    source, rf"property\s*<ApplicationAccent>\s*{app}-{theme}\s*:\s*\{{", label,
+                )
+                runtime = dict(re.findall(r"([a-z-]+):\s*(#[0-9a-fA-F]{6})\s*,", block))
+            except ValueError as error:
+                result.append(str(error))
+                runtime = {}
+            valid = True
+            for role in roles:
+                value = palette.get(role)
+                if not isinstance(value, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+                    result.append(f"{label} {role} must be an opaque colour")
+                    valid = False
+                    continue
+                if expected.get(role, "").lower() != value.lower():
+                    result.append(f"{label} {role} differs between token and desktop contract")
+                if runtime.get(role, "").lower() != value.lower():
+                    result.append(f"{label} {role} differs between runtime and token")
+            if not valid:
+                continue
+            for role in ("accent", "accent-hover", "accent-pressed", "selection"):
+                if contrast_ratio(palette[role], palette["accent-ink"]) < 4.5:
+                    result.append(f"{label} {role}/accent-ink contrast requires 4.5:1")
+            chrome = tokens["palette"][theme]
+            for role in ("focus", "selection"):
+                for background in ("canvas", "chrome", "panel", "surface", "paper"):
+                    if contrast_ratio(palette[role], chrome[background]) < 3.0:
+                        result.append(f"{label} {role}/{background} contrast requires 3:1")
+            foreground = palette["accent-pressed" if theme == "light" else "accent"]
+            if contrast_ratio(foreground, palette["selection-soft"]) < 4.5:
+                result.append(f"{label} selected control label contrast requires 4.5:1")
+    return result
+
+
 def slint_code_without_comments_or_strings(source: str) -> str:
     visible = list(source)
     index = 0
@@ -355,6 +400,12 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
 tokens = tomllib.loads(TOKEN_FILE.read_text(encoding="utf-8"))
 desktop_ui = tomllib.loads(DESKTOP_UI.read_text(encoding="utf-8"))
 theme_source = THEME_SOURCE.read_text(encoding="utf-8")
+try:
+    accents = THEME_SOURCE.with_name("app-accents.slint").read_text(encoding="utf-8")
+except OSError as error:
+    errors.append(f"application accent source is missing: {error}")
+else:
+    errors.extend(application_accent_errors(accents, tokens, desktop_ui))
 minimum_contrast = 4.5
 try:
     configured_contrast = float(tokens.get("a11y", {}).get("contrast-body"))

@@ -147,7 +147,7 @@ export component LoomIconButton inherits Rectangle {
         icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled
             : root.destructive ? Theme.palette().danger
-            : root.selected ? (Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent)
+            : root.selected ? (Theme.control-accent)
             : Theme.palette().ink;
     }
 

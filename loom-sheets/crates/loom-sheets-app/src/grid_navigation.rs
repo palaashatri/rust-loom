@@ -46,9 +46,47 @@ pub(crate) fn destination(
 use loom_sheets_core::SheetViewport;
 
 use crate::{
-    dimension_size, grid_zoom, text_scale, SheetsApp, DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS,
-    GRID_COLUMN_HEADER_HEIGHT, GRID_COL_WIDTH, GRID_ROW_HEADER_WIDTH, GRID_ROW_HEIGHT,
+    dimension_size, grid_zoom, selection_from_app, text_scale, update_selection,
+    update_selection_range, values_for_projection, window_fill, GuiState, SheetsApp,
+    DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS, GRID_COLUMN_HEADER_HEIGHT, GRID_COL_WIDTH,
+    GRID_ROW_HEADER_WIDTH, GRID_ROW_HEIGHT,
 };
+
+/// Where a key move of `delta` takes the active cell, counting a page as the
+/// rows that fit in the window.
+fn moved_focus(app: &SheetsApp, sheet: &Sheet, from: CellRef, delta: (i32, i32)) -> CellRef {
+    let page = window_fill(app, grid_zoom(app)).map_or(DEFAULT_VISIBLE_ROWS, |(_, rows)| rows);
+    destination(sheet, from, delta, page)
+}
+
+pub(crate) fn navigate_selection(
+    app: &SheetsApp,
+    state: &GuiState,
+    row_delta: i32,
+    col_delta: i32,
+) {
+    let values = values_for_projection(state);
+    let sheet = state.current.borrow();
+    let selection = selection_from_app(app);
+    // A page move starts from the anchor, where the selection began, as in other
+    // spreadsheets: Shift+Page Down extends from there, and a plain Page Up then
+    // moves a page up from it instead of collapsing onto it.
+    let origin = if row_delta == PAGE || row_delta == -PAGE {
+        selection.anchor
+    } else {
+        selection.focus
+    };
+    let next = moved_focus(app, &sheet, origin, (row_delta, col_delta));
+    update_selection(app, &sheet, &values, next);
+}
+
+pub(crate) fn extend_selection(app: &SheetsApp, state: &GuiState, row_delta: i32, col_delta: i32) {
+    let values = values_for_projection(state);
+    let sheet = state.current.borrow();
+    let selection = selection_from_app(app);
+    let next = moved_focus(app, &sheet, selection.focus, (row_delta, col_delta));
+    update_selection_range(app, &sheet, &values, selection.extend(next));
+}
 
 /// Scroll `viewport` just far enough to show `selected` completely, counting
 /// only the cells that really fit in the grid window.

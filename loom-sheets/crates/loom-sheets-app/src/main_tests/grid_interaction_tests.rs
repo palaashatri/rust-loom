@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn keyboard_navigation_reuses_workbook_values_for_plain_and_extended_moves() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    *state.active_sheet_index.borrow_mut() = 1;
+    *state.current.borrow_mut() = state.sheets.borrow()[1].clone();
+    project_current(&app, &state);
+    let accepted = values_for_projection(&state);
+    select_cell(&app, &state, 2, 0);
+    navigate_selection(&app, &state, -1, 0);
+    assert_eq!(app.get_selection_value().as_str(), "10");
+    navigate_selection(&app, &state, -1, 0);
+    assert_eq!(app.get_selection_value().as_str(), "25");
+    extend_selection(&app, &state, 1, 0);
+    assert_eq!(app.get_selection_value().as_str(), "10");
+    assert!(Rc::ptr_eq(&accepted, &values_for_projection(&state)));
+    if let Some(path) = std::env::var_os("LOOM_NAVIGATION_FIXTURE_PATH") {
+        sync_current_to_tabs(&state);
+        save_workbook(std::path::Path::new(&path), &state.sheets.borrow(), 1)
+            .expect("save native navigation fixture");
+    }
+}
+
+#[test]
+fn keyboard_navigation_keeps_accepted_values_while_an_edit_is_pending() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    *state.active_sheet_index.borrow_mut() = 1;
+    *state.current.borrow_mut() = state.sheets.borrow()[1].clone();
+    let recovery = attach_test_worker(&app, &state, "navigation-cache");
+    let accepted = values_for_projection(&state);
+    state.current.borrow_mut().set_str("A1", "=1000+19");
+    apply_sheet(&app, &state);
+    select_cell(&app, &state, 1, 0);
+    navigate_selection(&app, &state, -1, 0);
+    assert_eq!(app.get_selection_value().as_str(), "25");
+    assert!(Rc::ptr_eq(&accepted, &values_for_projection(&state)));
+    drop(state.workbook_worker.borrow_mut().take());
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery);
+}
+
+#[test]
 fn sheet_grid_projection_uses_viewport_offsets_for_headers_and_cells() {
     let mut sheet = Sheet::new("test");
     sheet.set_str("C11", "Bottom right");
@@ -337,6 +380,8 @@ fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
     let sheet = starter_workbook();
+    let state = state_with_identity(None, "selection");
+    *state.current.borrow_mut() = sheet.clone();
     update_selection(
         &app,
         &sheet,
@@ -344,7 +389,7 @@ fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
         CellRef::parse("C3").unwrap(),
     );
 
-    extend_selection(&app, &sheet, -1, -1);
+    extend_selection(&app, &state, -1, -1);
 
     assert_eq!(app.get_selected_cell().as_str(), "B2");
     assert_eq!(app.get_selection_anchor_row(), 2);
@@ -354,7 +399,7 @@ fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
 
     // Moving back through the anchor contracts the range without
     // changing which cell was the original anchor.
-    extend_selection(&app, &sheet, 1, 1);
+    extend_selection(&app, &state, 1, 1);
     assert_eq!(app.get_selected_cell().as_str(), "C3");
     assert_eq!(app.get_selection_anchor_row(), 2);
     assert_eq!(app.get_selection_anchor_col(), 2);

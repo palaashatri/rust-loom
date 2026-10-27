@@ -88,7 +88,7 @@ pub(crate) fn register_navigation(app: &crate::SheetsApp, state: &std::rc::Rc<cr
         match state.tab_run.before_move(focus, (row_delta, col_delta)) {
             TabRunMove::Return(cell) => select_cell(&app, &state, cell.row as i32, cell.col as i32),
             TabRunMove::Plain => {
-                navigate_selection(&app, &state.current.borrow(), row_delta, col_delta);
+                navigate_selection(&app, &state, row_delta, col_delta);
                 state.tab_run.after_move(selection_from_app(&app).focus);
             }
         }

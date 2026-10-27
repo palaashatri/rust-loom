@@ -1,0 +1,94 @@
+{
+  "docs/archive/audit-evidence-2026-09-14.md": {
+    "bytes": 7596,
+    "sha256": "2ec0c62c3673865c8549b39dea707b8f26e60c51807811c3526835684a88486c"
+  },
+  "docs/archive/continuation-2026-10-04-to-25.md": {
+    "bytes": 138283,
+    "sha256": "345d11b666714153e8eec1af518275983aaf1fa9902b9178bea0a12ec3f58544"
+  },
+  "docs/archive/product-evidence-2026-09-27-to-10-09.md": {
+    "bytes": 21375,
+    "sha256": "a2964a116e798cd73ccd19d0bf8ab99471f23fffe8550679c8df73dd42b24ae0"
+  },
+  "docs/archive/verification-2026-10-18-to-20.md": {
+    "bytes": 35445,
+    "sha256": "0e7b437644973d93db6ef4ab279b9f0e09b6fb60fb2cc9b8de2964a704d3c2f1"
+  },
+  "docs/archive/windows-ui-2026-09-30.md": {
+    "bytes": 52609,
+    "sha256": "c727cc11eb2ea67b4889d71a6d1efb424b9b788a322881d4499546801f1ffbea"
+  },
+  "docs/archive/writer-checkpoints-2026-10.md": {
+    "bytes": 45276,
+    "sha256": "a15b500659878211ff22eaefda6a89b996d58a24c01c099053ebf67c89247541"
+  },
+  "docs/audits/uiux-2026-10-27.md": {
+    "bytes": 22067,
+    "sha256": "45ef5aec3224adbf1d957c65c45e9b3ace1dcecebf76c6172d8383993e3c48ce"
+  },
+  "docs/rules/design.md": {
+    "bytes": 8222,
+    "sha256": "2cb2cfd1573484b2e7d4aaa5c6f1c69d2769d51abbb24e806d2349257a8df098"
+  },
+  "docs/rules/engineering.md": {
+    "bytes": 15632,
+    "sha256": "90e03ea146e0a1f8d23de3e4869e01b3a75dd8cf2fffa094dad578aba63b45c9"
+  },
+  "docs/rules/platforms.md": {
+    "bytes": 16633,
+    "sha256": "40a440fc996ed58d55c57a3151044cf0864ce3a870053f0520642b38f1acd95e"
+  },
+  "docs/rules/workflow.md": {
+    "bytes": 11733,
+    "sha256": "79585b76330318a56451c43eabcc07c409462b55ed2f0cf366287178707dd661"
+  },
+  "docs/workflow/capabilities.md": {
+    "bytes": 6986,
+    "sha256": "03554a7a8ebc89672c67b50ba4d72f9545aebff67985e776133c00788521cd5e"
+  },
+  "docs/workflow/current.md": {
+    "bytes": 9458,
+    "sha256": "be7efb06669c7b7256e229b66d08eb0b07a1e18db80f331b6fb0c09a4512df90"
+  },
+  "docs/workflow/governance-debt.md": {
+    "bytes": 17819,
+    "sha256": "458c27d9da170875027c0730c858f310b7839afcba0fa29b64e380d99788f831"
+  },
+  "docs/workflow/repairs.md": {
+    "bytes": 9568,
+    "sha256": "6b1a40cbfa3cd3245eadf3e732d8fd01cfd506a0e35635e35387c08aa7dae987"
+  },
+  "docs/workflow/writer.md": {
+    "bytes": 8639,
+    "sha256": "0d08432ef64ca4ec3e5d394adc482a107865a96247cb7814e50c43966d45ae1a"
+  },
+  "AGENTS.md": {
+    "bytes": 3261,
+    "sha256": "9a30fc2c1d77dea331eec3cdcfb4119a3f79229d7e2fd0a973d2428deda8f43d"
+  },
+  "docs/README.md": {
+    "bytes": 3578,
+    "sha256": "ddefade490570451fcf2fcda5b0725fc3003249a281ad6ac70aa8dcda6f16595"
+  },
+  "loom-bootstrap/contracts/documentation.toml": {
+    "bytes": 1037,
+    "sha256": "2f3f72ebb99a4afde9e46b5aae5c9adf725144853013dbf362fa59ea8ea4984b"
+  },
+  "loom-bootstrap/contracts/workflow.toml": {
+    "bytes": 1634,
+    "sha256": "eb2b01b205486c3192120c21bd3224e2c33000d2b97d4661915eb71c623e9a01"
+  },
+  "loom-bootstrap/scripts/documentation.py": {
+    "bytes": 6057,
+    "sha256": "62350e4727aa36c210977e7863f1c3fb206a4a60238df38a72e5d91b7e16b32f"
+  },
+  "loom-bootstrap/scripts/audit-governance.py": {
+    "bytes": 19080,
+    "sha256": "d8b6a20869722ed830ca158f9f1a6976674c7bed6c745b0e2c45e5fbe620b41b"
+  },
+  "loom-bootstrap/scripts/test_audit_governance.py": {
+    "bytes": 23905,
+    "sha256": "21396b8b5a546217be00a02a102defc22de70c4cc1a4f6686c6e3342da7a80f4"
+  }
+}

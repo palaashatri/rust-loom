@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,15 +16,21 @@ class GovernanceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in ("AGENTS.md", "loom-bootstrap/contracts/workflow.toml",
-                     "loom-bootstrap/scripts/audit-governance.py"):
+        manifest = tomllib.loads((ROOT / "loom-bootstrap/contracts/documentation.toml").read_text())
+        names = [*manifest["roles"].values(), manifest["documents"]["index"],
+                 *manifest["documents"]["archives"], "README.md",
+                 "loom-bootstrap/contracts/documentation.toml",
+                 "loom-bootstrap/contracts/workflow.toml",
+                 "loom-bootstrap/scripts/documentation.py",
+                 "loom-bootstrap/scripts/audit-governance.py"]
+        for name in names:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
         self.use_office_v1_fixture()
 
     def truth_text(self):
-        path = self.root / "AGENTS.md"
+        path = self.root / "docs/workflow/current.md"
         text = path.read_text(encoding="utf-8")
         match = re.search(
             r"<!-- CURRENT TRUTH START -->\s*(.*?)\s*<!-- CURRENT TRUTH END -->",
@@ -34,7 +41,7 @@ class GovernanceTests(unittest.TestCase):
         return match.group(1)
 
     def write_truth(self, truth):
-        path = self.root / "AGENTS.md"
+        path = self.root / "docs/workflow/current.md"
         text = path.read_text(encoding="utf-8")
         updated, count = re.subn(
             r"(<!-- CURRENT TRUTH START -->\s*).*?(\s*<!-- CURRENT TRUTH END -->)",
@@ -268,6 +275,7 @@ class GovernanceTests(unittest.TestCase):
                         count=1, flags=re.MULTILINE,
                     )
                 workflow_path.write_text(workflow, encoding="utf-8")
+                truth += "\n## Owner scope — 2026-10-27\n\nHistorical phase fixture.\n"
                 self.write_truth(truth)
                 result = self.run_audit()
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -295,7 +303,7 @@ class GovernanceTests(unittest.TestCase):
 
     def test_detailed_section_cannot_claim_a_different_status(self):
         self.use_shared_repair_fixture()
-        self.replace("current_truth", "### Present\n", "### Present\n\nStatus: `ACCEPTED`\n")
+        self.replace("docs/workflow/capabilities.md", "### Present\n", "### Present\n\nStatus: `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
     def test_workflow_cannot_unlock_an_app_during_shared_repair(self):
@@ -307,7 +315,7 @@ class GovernanceTests(unittest.TestCase):
     def test_active_phase_must_match_exactly(self):
         self.use_shared_repair_fixture()
         self.replace("current_truth", "ACTIVE PHASE: AUDIT-REPAIR", "ACTIVE PHASE: WRITER")
-        self.rejects("AGENTS.md current truth active phase disagrees with workflow")
+        self.rejects("docs/workflow/current.md current truth active phase disagrees with workflow")
 
     def test_live_gate_rejects_conflicting_duplicate_fields(self):
         self.use_shared_repair_fixture()
@@ -323,13 +331,13 @@ class GovernanceTests(unittest.TestCase):
                 self.write_truth(original.replace(
                     declaration, f"{declaration}\n{field}: {conflicting}", 1,
                 ))
-                self.rejects(f"AGENTS.md current truth {field} must appear once and match workflow")
+                self.rejects(f"docs/workflow/current.md current truth {field} must appear once and match workflow")
 
     def test_live_gate_cannot_be_supplied_only_by_incidental_prose(self):
         self.use_shared_repair_fixture()
         self.replace("current_truth", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "Old example: ACTIVE REPAIR: SHARED-RECOVERY")
-        self.rejects("AGENTS.md current truth ACTIVE REPAIR must appear once and match workflow")
+        self.rejects("docs/workflow/current.md current truth ACTIVE REPAIR must appear once and match workflow")
 
     def test_gate_values_allow_trailing_whitespace(self):
         self.use_shared_repair_fixture()
@@ -344,11 +352,11 @@ class GovernanceTests(unittest.TestCase):
         self.use_shared_repair_fixture()
         self.replace("current_truth", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "ACTIVE REPAIR: SHARED-RECOVERY\nACTIVE REPAIR: SHARED-RECOVERY  ")
-        self.rejects("AGENTS.md current truth ACTIVE REPAIR must appear once and match workflow")
+        self.rejects("docs/workflow/current.md current truth ACTIVE REPAIR must appear once and match workflow")
 
     def test_formatted_detailed_status_cannot_override_live_table(self):
         self.use_shared_repair_fixture()
-        self.replace("current_truth", "### Present\n",
+        self.replace("docs/workflow/capabilities.md", "### Present\n",
                      "### Present\n\n**Status:** `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
@@ -381,7 +389,7 @@ class GovernanceTests(unittest.TestCase):
         path = self.root / "loom-sheets/EXTRA.md"
         path.parent.mkdir(parents=True)
         path.write_text("Performance notes")
-        self.rejects("non-README Markdown must be consolidated into root AGENTS.md")
+        self.rejects("Markdown path is not declared in documentation.toml")
 
     def test_owner_authorized_linux_input_skill_markdown_is_allowed(self):
         path = self.root / ".agents/skills/linux-desktop-input/SKILL.md"
@@ -394,7 +402,7 @@ class GovernanceTests(unittest.TestCase):
         path = self.root / ".agents/skills/another-skill/SKILL.md"
         path.parent.mkdir(parents=True)
         path.write_text("Not an owner-authorized exception")
-        self.rejects("non-README Markdown must be consolidated into root AGENTS.md")
+        self.rejects("Markdown path is not declared in documentation.toml")
 
     def test_project_readmes_are_exempt_from_consolidation(self):
         path = self.root / "loom-sheets/README.md"
@@ -404,13 +412,47 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_marked_current_truth_section_is_required(self):
-        path = self.root / "AGENTS.md"
+        path = self.root / "docs/workflow/current.md"
         path.write_text(path.read_text(encoding="utf-8").replace("<!-- CURRENT TRUTH START -->", "", 1), encoding="utf-8")
-        self.rejects("AGENTS.md must contain exactly one marked current truth section")
+        self.rejects("docs/workflow/current.md must contain exactly one marked current truth section")
 
     def test_missing_workflow_reports_an_error_without_a_traceback(self):
         (self.root / "loom-bootstrap/contracts/workflow.toml").unlink()
         self.rejects("missing loom-bootstrap/contracts/workflow.toml")
+
+    def test_missing_imported_rules_fail(self):
+        (self.root / "docs/rules/design.md").unlink()
+        self.rejects("missing declared documentation: docs/rules/design.md")
+
+    def test_documentation_roles_cannot_redirect_the_live_ledger(self):
+        self.replace("loom-bootstrap/contracts/documentation.toml",
+                     'current = "docs/workflow/current.md"',
+                     'current = "docs/archive/AGENTS-ARCHIVE.md"')
+        self.rejects("documentation roles must match")
+
+    def test_unreachable_imported_rules_fail(self):
+        for path in self.root.rglob("*.md"):
+            path.write_text(path.read_text().replace("platforms.md", "engineering.md"))
+        self.rejects("document unreachable from AGENTS.md: docs/rules/platforms.md")
+
+    def test_broken_reading_anchor_fails(self):
+        self.replace("AGENTS.md", "current.md#current-truth", "current.md#nonexistent")
+        self.rejects("broken documentation anchor")
+
+    def test_competing_ledger_in_imported_document_fails(self):
+        path = self.root / "docs/workflow/capabilities.md"
+        path.write_text(path.read_text() + "\n| Order | Application | Product status |\n")
+        self.rejects("competing live application status table")
+
+    def test_truth_markers_cannot_move_to_an_archive(self):
+        path = self.root / "docs/archive/AGENTS-ARCHIVE.md"
+        path.write_text(path.read_text() + "\n<!-- CURRENT TRUTH START -->\n")
+        self.rejects("current-truth marker outside canonical owner")
+
+    def test_root_reading_budget_is_enforced(self):
+        path = self.root / "AGENTS.md"
+        path.write_text(path.read_text() + "x" * 5120)
+        self.rejects("AGENTS.md entrypoint exceeds")
 
 
 if __name__ == "__main__":

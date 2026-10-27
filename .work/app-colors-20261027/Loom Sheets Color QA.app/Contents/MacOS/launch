@@ -1,0 +1,3 @@
+#!/bin/sh
+export LOOM_CONFIG_DIR=/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/config/sheets
+exec /Users/palaashatri/Code/personal/rust-loom/loom-sheets/target/debug/loom-sheets --size 1280x800 --theme light --open /Users/palaashatri/Code/personal/rust-loom/.work/sheets-perf-20261027/keyboard-cache.loomtable > /Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/native-sheets.log 2>&1

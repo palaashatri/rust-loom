@@ -1,0 +1,61 @@
+[
+  {
+    "command": [
+      "git",
+      "diff",
+      "e3c8865^",
+      "e3c8865",
+      "--",
+      "loom-sheets"
+    ],
+    "exit_code": 0,
+    "stdout": "diff --git a/loom-sheets/crates/loom-sheets-app/ui/app.slint b/loom-sheets/crates/loom-sheets-app/ui/app.slint\nindex c294805..2400f10 100644\n--- a/loom-sheets/crates/loom-sheets-app/ui/app.slint\n+++ b/loom-sheets/crates/loom-sheets-app/ui/app.slint\n@@ -22,10 +22,10 @@ export { Theme, ResponsivePolicy } from \"theme.slint\";\n export { LocalMenu, LocalMenuEntry } from \"foundation.slint\";\n export { GridPointer, CellSpill, CellInk } from \"grid_pointer.slint\";\n export component SheetsApp inherits Window {\n+    icon: @image-url(\"../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png\");\n     in-out property <string> window-title: \"Untitled\";\n     title: root.window-title;\n     default-font-family: Theme.ui-font-family;\n-    // Native frame per platform.\n     in property <bool> custom-chrome: false;\n     no-frame: root.custom-chrome;\n     callback window-drag;\n@@ -54,7 +54,6 @@ export component SheetsApp inherits Window {\n     in property <bool> overflow-toolbar: false;\n     in property <bool> rtl: false;\n     in-out property <bool> toolbar-overflow-open: false;\n-    /// Open toolbar menu: 0 none, 1 View, 2 Zoom, 3 Table, 4 Text, 5 Export.\n     in-out property <int> toolbar-menu: 0;\n     property <length> toolbar-menu-x: 0px;\n     callback toolbar-command(string);\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "blame",
+      "-L",
+      "295,305",
+      "--",
+      "loom-sheets/crates/loom-sheets-app/ui/components.slint"
+    ],
+    "exit_code": 0,
+    "stdout": "62ac27d0 (Palaash Atri 2026-10-17 06:44:38 +0530 295)                             // A cell is exposed on its own when it is the active cell, is in\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 296)                             // a small selection (up to 64 cells), or holds a value in the\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 297)                             // active cell's row or column. Naming every visible cell made each\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 298)                             // scroll rebind hundreds of accessibility nodes (about 40 ms a frame\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 299)                             // over a screenful of values); moving the selection names the cells\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 300)                             // it reaches, blank ones as empty, while Select All stays bounded.\neb6a6cd1 (Palaash Atri 2026-10-17 21:43:42 +0530 301)                             if is-active || (in-selection && root.selection-end-row - root.selection-start-row < 64 && root.selection-end-col - root.selection-start-col < 64 && (root.selection-end-row - root.selection-start-row + 1) * (root.selection-end-col - root.selection-start-col + 1) <= 64) || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != \"\" || spill-kind != 0)) : Rectangle {\n35493299 (Palaash Atri 2026-10-17 06:20:02 +0530 302)                                 width: parent.width;\n35493299 (Palaash Atri 2026-10-17 06:20:02 +0530 303)                                 height: parent.height;\n35493299 (Palaash Atri 2026-10-17 06:20:02 +0530 304)                                 accessible-role: text;\n35493299 (Palaash Atri 2026-10-17 06:20:02 +0530 305)                                 accessible-label: root.cell-labels[cell-idx];\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "blame",
+      "-L",
+      "12,31",
+      "--",
+      "loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs"
+    ],
+    "exit_code": 0,
+    "stdout": "ea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 12) /// Update `current` in place when it is a `VecModel`, so repeaters keep their\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 13) /// elements. Returns a fresh model only when the property held something else.\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 14) fn refresh_model<T>(current: ModelRc<T>, next: Vec<T>) -> Option<ModelRc<T>>\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 15) where\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 16)     T: Clone + PartialEq + 'static,\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 17) {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 18)     match current.as_any().downcast_ref::<VecModel<T>>() {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 19)         Some(model) if model.row_count() == next.len() => {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 20)             for (index, item) in next.into_iter().enumerate() {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 21)                 if model.row_data(index).as_ref() != Some(&item) {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 22)                     model.set_row_data(index, item);\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 23)                 }\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 24)             }\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 25)             None\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 26)         }\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 27)         Some(model) => {\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 28)             model.set_vec(next);\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 29)             None\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 30)         }\nea159149 (Palaash Atri 2026-09-30 19:54:31 +0530 31)         None => Some(ModelRc::new(VecModel::from(next))),\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "show",
+      "ea15914:loom-sheets/Cargo.lock"
+    ],
+    "exit_code": 0,
+    "stdout": "name = \"i-slint-backend-winit\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"a27c7e8f53418d3017362465367b6612b6e439a68097d627d1b91c94b885f0a6\"\nname = \"i-slint-core\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"4e407dc2bd5385dcbdd9c1cf927213d2e4bacda667545abf8839c60f8290f754\"\nname = \"slint\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"ce12038f57f8f3a423564b0c9301a2ab3fda4246e4cbadd6b97acf9124bdc315\"",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "show",
+      "HEAD:loom-sheets/Cargo.lock"
+    ],
+    "exit_code": 0,
+    "stdout": "name = \"i-slint-backend-winit\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"a27c7e8f53418d3017362465367b6612b6e439a68097d627d1b91c94b885f0a6\"\nname = \"i-slint-core\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"4e407dc2bd5385dcbdd9c1cf927213d2e4bacda667545abf8839c60f8290f754\"\nname = \"slint\"\nversion = \"1.17.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"ce12038f57f8f3a423564b0c9301a2ab3fda4246e4cbadd6b97acf9124bdc315\"",
+    "stderr": ""
+  }
+]

@@ -25,6 +25,8 @@ allowed_active_prefixes = [
   ".github/",
   "AGENTS.md",
   "README.md",
+  # Owner 2026-10-27: focused governed documentation, not a product unlock.
+  "docs/",
   "loom-bootstrap/",
   "loom-core/",
   "loom-sheets/",
@@ -32,6 +34,8 @@ allowed_active_prefixes = [
   "loom-present/",
   # UI-42 authorizes this exact responsive contract file only.
   "loom-design-bible/contracts/desktop-ui.toml",
+  # Owner 2026-10-27: shared per-app accent schemes, with contrast review.
+  "loom-design-bible/tokens/loom.toml",
 ]
 
 [foundation_gate]

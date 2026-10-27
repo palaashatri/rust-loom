@@ -1,0 +1,29 @@
+schema_version = 1
+
+# Owner 2026-10-27: focused files replace the monolithic root document.
+# Roles are fixed so a caller cannot silently substitute a different ledger.
+[roles]
+entrypoint = "AGENTS.md"
+engineering = "docs/rules/engineering.md"
+workflow = "docs/rules/workflow.md"
+design = "docs/rules/design.md"
+platforms = "docs/rules/platforms.md"
+current = "docs/workflow/current.md"
+writer = "docs/workflow/writer.md"
+capabilities = "docs/workflow/capabilities.md"
+repairs = "docs/workflow/repairs.md"
+debt = "docs/workflow/governance-debt.md"
+audit = "docs/audits/uiux-2026-10-27.md"
+
+[documents]
+index = "docs/README.md"
+archives = [
+  "docs/archive/AGENTS-ARCHIVE.md",
+  "docs/archive/audit-evidence-2026-09-14.md",
+  "docs/archive/continuation-2026-10-04-to-25.md",
+  "docs/archive/product-evidence-2026-09-27-to-10-09.md",
+  "docs/archive/verification-2026-10-18-to-20.md",
+  "docs/archive/windows-ui-2026-09-30.md",
+  "docs/archive/writer-checkpoints-2026-10.md",
+]
+exceptions = [".agents/skills/linux-desktop-input/SKILL.md"]

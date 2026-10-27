@@ -351,6 +351,61 @@ mod visual_tests {
     }
 
     #[test]
+    fn application_accents_preserve_document_and_accessibility_palettes() {
+        loom_test_support::capture::set_platform();
+        let window = SmokeWindow::new().expect("create theme probe");
+        let theme = Theme::get(&window);
+        for (mode, apps) in [
+            (
+                "light",
+                [
+                    ("writer", 0xff6241ad),
+                    ("sheets", 0xff087565),
+                    ("present", 0xffad432e),
+                ],
+            ),
+            (
+                "dark",
+                [
+                    ("writer", 0xffbba7f4),
+                    ("sheets", 0xff73d8ba),
+                    ("present", 0xffffaf92),
+                ],
+            ),
+        ] {
+            theme.set_application("".into());
+            slint::platform::update_timers_and_animations();
+            theme.set_active_theme(mode.into());
+            slint::platform::update_timers_and_animations();
+            let original = theme.get_tokens().palette;
+            for (application, accent) in apps {
+                theme.set_application(application.into());
+                slint::platform::update_timers_and_animations();
+                let branded = theme.get_tokens().palette;
+                assert_eq!(branded.accent, slint::Color::from_argb_encoded(accent));
+                assert_eq!(branded.canvas, original.canvas);
+                assert_eq!(branded.chrome, original.chrome);
+                assert_eq!(branded.paper, original.paper);
+                assert_eq!(branded.paper_ink, original.paper_ink);
+                assert_eq!(branded.paper_muted, original.paper_muted);
+                assert_eq!(branded.content_accent, original.content_accent);
+                assert_eq!(branded.content_accent_soft, original.content_accent_soft);
+            }
+            theme.set_application("".into());
+            slint::platform::update_timers_and_animations();
+            assert_eq!(theme.get_tokens().palette, original);
+        }
+        theme.set_active_theme("high-contrast".into());
+        slint::platform::update_timers_and_animations();
+        let accessible = theme.get_tokens().palette;
+        for application in ["writer", "sheets", "present"] {
+            theme.set_application(application.into());
+            slint::platform::update_timers_and_animations();
+            assert_eq!(theme.get_tokens().palette, accessible);
+        }
+    }
+
+    #[test]
     fn active_theme_switches_the_complete_token_bundle() {
         loom_test_support::capture::set_platform();
         let window = SmokeWindow::new().expect("create Loom UI reference window");

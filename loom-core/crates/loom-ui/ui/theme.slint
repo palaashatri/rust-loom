@@ -17,6 +17,7 @@ import "fonts/Inter-BoldItalic.ttf";
 // Only the platform's light/dark preference is read from the widget library;
 // no widget is instantiated.
 import { Palette as SystemPalette } from "std-widgets.slint";
+import { AppAccents } from "app-accents.slint";
 
 struct Palette {
     canvas: color, canvas-alt: color, surface: color, surface-raised: color,
@@ -123,6 +124,8 @@ export global Theme {
     // the selected theme instead of only the palette function changing.
     in-out property <ThemeTokens> tokens: light-tokens;
     in-out property <string> active-theme: "light";
+    in-out property <string> application: "";
+    out property <color> control-accent: active-theme == "light" ? tokens.palette.accent-pressed : tokens.palette.accent;
     // The user's choice: "system", "light", "dark" or "high-contrast". Hosts
     // set it together with `active-theme`; while it is "system", a change of
     // the operating system's preference re-resolves `active-theme` on its own.
@@ -168,11 +171,23 @@ export global Theme {
         display: tokens.typography.display * max(1.0, root.text-scale),
         display-large: tokens.typography.display-large * max(1.0, root.text-scale),
     };
-    changed active-theme => {
+    function update-tokens() {
         tokens = active-theme == "dark" ? ThemeDark.tokens
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens
             : light-tokens;
+        if (active-theme != "high-contrast" && (application == "writer" || application == "sheets" || application == "present")) {
+            let accent = AppAccents.for-application(application, active-theme == "dark");
+            tokens.palette.accent = accent.accent;
+            tokens.palette.accent-hover = accent.accent-hover;
+            tokens.palette.accent-pressed = accent.accent-pressed;
+            tokens.palette.accent-ink = accent.accent-ink;
+            tokens.palette.focus = accent.focus;
+            tokens.palette.selection = accent.selection;
+            tokens.palette.selection-soft = accent.selection-soft;
+        }
     }
+    changed active-theme => { update-tokens(); }
+    changed application => { update-tokens(); }
     public pure function palette() -> Palette {
         // All consumers read the same active token bundle. Keeping palette()
         // on `tokens` prevents palette-only branches from drifting away from

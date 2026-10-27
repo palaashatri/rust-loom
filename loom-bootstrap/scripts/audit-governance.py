@@ -8,19 +8,14 @@ import sys
 import tomllib
 from pathlib import Path
 
+from documentation import TRUTH_BEGIN, TRUTH_END, read_documentation
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / "loom-bootstrap/contracts/workflow.toml"
 AGENTS = ROOT / "AGENTS.md"
-TRUTH_BEGIN = "<!-- CURRENT TRUTH START -->"
-TRUTH_END = "<!-- CURRENT TRUTH END -->"
 APPS = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
-OWNER_AUTHORIZED_MARKDOWN = {
-    Path(".agents/skills/linux-desktop-input/SKILL.md"),
-    # Owner 2026-10-02: archive of repair cards and reference docs, kept out of
-    # AGENTS.md so the live instructions fit a small model's context window.
-    Path("docs/archive/AGENTS-ARCHIVE.md"),
-}
-errors: list[str] = []
+roles, documents, permitted_markdown, errors = read_documentation(ROOT)
+CURRENT = ROOT / roles.get("current", Path("docs/workflow/current.md"))
 workflow: dict = {}
 phase = None
 
@@ -136,8 +131,10 @@ else:
                     fail(f"application {app} must remain LOCKED in office-v1 phase")
         office_prefixes = {
             ".agents/", ".github/", "AGENTS.md", "README.md",
+            "docs/",
             "loom-bootstrap/", "loom-core/", "loom-sheets/", "loom-writer/",
             "loom-present/", "loom-design-bible/contracts/desktop-ui.toml",
+            "loom-design-bible/tokens/loom.toml",
         }
         prefixes = workflow.get("allowed_active_prefixes")
         if (not isinstance(prefixes, list)
@@ -202,8 +199,8 @@ for directory, child_directories, filenames in os.walk(ROOT):
         is_markdown = path.suffix.lower() in {".md", ".markdown"}
         is_readme = path.name.lower().startswith("readme.")
         relative = path.relative_to(ROOT)
-        if is_markdown and path != AGENTS and not is_readme and relative not in OWNER_AUTHORIZED_MARKDOWN:
-            fail(f"non-README Markdown must be consolidated into root AGENTS.md: {relative}")
+        if is_markdown and not is_readme and relative not in permitted_markdown:
+            fail(f"Markdown path is not declared in documentation.toml: {relative}")
 
 for stale in (
     ROOT / ".superpowers",
@@ -213,26 +210,26 @@ for stale in (
     if stale.exists() and any(path.is_file() for path in stale.rglob("*")):
         fail(f"stale agent planning residue remains: {stale.relative_to(ROOT)}")
 
-agents_text = AGENTS.read_text(encoding="utf-8") if AGENTS.is_file() else ""
+agents_text = documents.get(Path("AGENTS.md"), "")
+current_text = documents.get(Path("docs/workflow/current.md"), "")
 truth_matches = list(re.finditer(
     re.escape(TRUTH_BEGIN) + r"\s*(.*?)\s*" + re.escape(TRUTH_END),
-    agents_text,
+    current_text,
     re.DOTALL,
 ))
-if len(truth_matches) != 1 or agents_text.count(TRUTH_BEGIN) != 1 or agents_text.count(TRUTH_END) != 1:
-    fail("AGENTS.md must contain exactly one marked current truth section")
+if len(truth_matches) != 1 or current_text.count(TRUTH_BEGIN) != 1 or current_text.count(TRUTH_END) != 1:
+    fail("docs/workflow/current.md must contain exactly one marked current truth section")
 truth_text = truth_matches[0].group(1) if len(truth_matches) == 1 else ""
-agents_lower = agents_text.lower()
 truth_lower = truth_text.lower()
-for phrase in (
-    "highest-authority engineering instruction",
-    "Active workflow and audit repair gate",
-    "Serial application workflow",
-    "Visual foundation gate",
-    "commercially redistributable assets",
-):
-    if phrase.lower() not in agents_lower:
-        fail(f"AGENTS.md missing required constitutional clause: {phrase}")
+for document, phrases in {
+    "AGENTS.md": ("highest-authority engineering instruction",),
+    "docs/rules/workflow.md": ("Active workflow and audit repair gate", "Serial application workflow"),
+    "docs/rules/design.md": ("Visual foundation gate",),
+    "docs/rules/engineering.md": ("commercially redistributable assets",),
+}.items():
+    for phrase in phrases:
+        if phrase.lower() not in documents.get(Path(document), "").lower():
+            fail(f"{document} missing required constitutional clause: {phrase}")
 
 if phase == "audit-repair":
     truth_phrases = (
@@ -291,7 +288,7 @@ else:
 
 for phrase in truth_phrases:
     if phrase.lower() not in truth_lower:
-        fail(f"AGENTS.md current truth section missing required active-state statement: {phrase}")
+        fail(f"docs/workflow/current.md current truth section missing required active-state statement: {phrase}")
 
 # Check the live gate, not incidental words in historical prose. Readiness is
 # evidence and explicit status, not an arbitrary number required by a regex.
@@ -299,10 +296,10 @@ if phase:
     phases = re.findall(r"^ACTIVE PHASE: (.+)$", truth_text, re.MULTILINE)
     expected_phase = "UI FOUNDATION" if phase == "ui-foundation" else phase.upper()
     if [value.strip() for value in phases] != [expected_phase]:
-        fail("AGENTS.md current truth active phase disagrees with workflow")
+        fail("docs/workflow/current.md current truth active phase disagrees with workflow")
     foundations = re.findall(r"^FOUNDATION STATUS: (.+)$", truth_text, re.MULTILINE)
     if [value.strip() for value in foundations] != [workflow.get("foundation_status")]:
-        fail("AGENTS.md current truth foundation status disagrees with workflow")
+        fail("docs/workflow/current.md current truth foundation status disagrees with workflow")
 
 if phase in ("audit-repair", "office-v1"):
     if phase == "audit-repair":
@@ -324,7 +321,7 @@ if phase in ("audit-repair", "office-v1"):
     for field, expected in gate_fields.items():
         values = re.findall(rf"^{re.escape(field)}: (.+)$", truth_text, re.MULTILINE)
         if [value.strip() for value in values] != [expected]:
-            fail(f"AGENTS.md current truth {field} must appear once and match workflow")
+            fail(f"docs/workflow/current.md current truth {field} must appear once and match workflow")
     tables = re.findall(
         r"^\|[ \t]*Order[ \t]*\|[ \t]*Application[ \t]*\|"
         r"[ \t]*Product status[ \t]*\|[ \t]*Work status[ \t]*\|[^\n]*\n"
@@ -336,7 +333,7 @@ if phase in ("audit-repair", "office-v1"):
         tables[0] if len(tables) == 1 else "", re.MULTILINE,
     )
     if len(tables) != 1 or [name.lower() for name, _, _ in rows] != list(APPS):
-        fail("AGENTS.md current truth must contain exactly one ordered live application status table")
+        fail("docs/workflow/current.md current truth must contain exactly one ordered live application status table")
     for name, quality, schedule in rows:
         if quality != "ACCEPTANCE_BLOCKED":
             fail(f"{name} product status must remain ACCEPTANCE_BLOCKED {table_status_context}")
@@ -344,7 +341,8 @@ if phase in ("audit-repair", "office-v1"):
             fail(f"{name} work status disagrees with workflow")
         section = re.search(
             rf"^### {re.escape(name)}\s*\n(.*?)(?=^## |^### |\Z)",
-            truth_text, re.MULTILINE | re.DOTALL,
+            truth_text + "\n" + documents.get(Path("docs/workflow/capabilities.md"), ""),
+            re.MULTILINE | re.DOTALL,
         )
         if section:
             for status in re.findall(

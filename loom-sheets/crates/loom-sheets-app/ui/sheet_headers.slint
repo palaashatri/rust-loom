@@ -84,7 +84,7 @@ export component SheetHeaders inherits Rectangle {
                     accessible-role: AccessibleRole.none;
                     font-size: Theme.type.caption * root.zoom-factor;
                     font-weight: is-col-selected ? 700 : 500;
-                    color: is-col-selected ? (Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent) : Theme.palette().ink-secondary;
+                    color: is-col-selected ? (Theme.control-accent) : Theme.palette().ink-secondary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -152,7 +152,7 @@ export component SheetHeaders inherits Rectangle {
                     accessible-role: AccessibleRole.none;
                     font-size: Theme.type.caption * root.zoom-factor;
                     font-weight: is-row-selected ? 700 : 500;
-                    color: is-row-selected ? (Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent) : Theme.palette().ink-secondary;
+                    color: is-row-selected ? (Theme.control-accent) : Theme.palette().ink-secondary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }

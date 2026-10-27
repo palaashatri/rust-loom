@@ -506,4 +506,113 @@ test recovery_draft::tests::a_cut_short_header_is_an_error_and_never_a_guessed_p
 test recovery_draft::tests::a_draft_keeps_its_file_path_and_its_package ... ok
 test recovery_draft::tests::an_untitled_draft_has_no_source_and_older_packages_read_as_untitled ... ok
 test rtl_tests::every_surface_is_the_mirror_image_in_right_to_left ... ok
-test scale_surfaces_tests::dialogs_menus_and_drawers_fit_at_every_text_scale ... 
+test scale_surfaces_tests::dialogs_menus_and_drawers_fit_at_every_text_scale ... ok
+test scale_surfaces_tests::presenter_window_inherits_text_scale_and_fits_its_minimum_size ... ok
+test scale_surfaces_tests::toolbar_captions_scale_and_the_row_grows_to_hold_them ... ok
+test scaling_tests::a_save_checkpoint_cancels_a_pending_draft ... ok
+test scaling_tests::an_edit_rebuilds_one_thumbnail_whatever_the_deck_length ... ok
+test scaling_tests::only_the_strip_window_has_thumbnails_and_scrolling_fills_the_next_one ... ok
+test scaling_tests::refreshing_never_serializes_the_deck_until_the_timer_flushes ... ok
+test scaling_tests::switching_slides_rebuilds_no_thumbnail_whatever_the_deck_length ... ok
+test slide_focus::tests::only_a_different_active_slide_counts_as_a_change ... ok
+test slide_layout_tests::a_new_slide_has_an_empty_title_and_body_not_filler_text ... ok
+test slide_layout_tests::an_empty_new_slide_survives_save_and_reopen_empty ... ok
+test slide_layout_tests::duplicating_a_new_slide_keeps_it_empty_and_numbering_intact ... ok
+test slide_layout_tests::each_layout_creates_empty_placeholders_and_keeps_typed_text ... ok
+test slide_layout_tests::every_add_slide_route_creates_the_same_empty_slide ... ok
+test slide_layout_tests::exports_omit_prompts_and_filler_for_a_new_slide ... ok
+test slide_layout_tests::the_canvas_prompts_over_a_new_slide_and_the_thumbnail_does_not ... ok
+test slide_layout_tests::the_sample_deck_keeps_its_real_content ... ok
+test slide_layout_tests::the_two_column_layout_puts_empty_columns_side_by_side ... ok
+test slide_layout_tests::undo_removes_the_new_slide_and_redo_restores_its_placeholders ... ok
+test slide_order_tests::a_focused_thumbnail_moves_with_ctrl_up_and_down_and_keeps_focus ... ok
+test slide_order_tests::a_move_command_is_one_undoable_edit_and_keeps_the_slide_selected ... ok
+test slide_order_tests::a_move_marks_the_recovery_draft_stale_and_the_draft_restores_the_order ... ok
+test slide_order_tests::a_press_that_moves_under_four_pixels_is_a_plain_click ... ok
+test slide_order_tests::ctrl_alt_arrows_move_the_slide_and_nothing_else_does ... ok
+test slide_order_tests::dragging_a_slide_upward_drops_before_the_slide_under_the_pointer ... ok
+test slide_order_tests::dragging_a_thumbnail_shows_a_drop_line_and_releasing_moves_the_slide_once ... ok
+test slide_order_tests::dragging_near_the_strip_edge_scrolls_it_and_the_slide_lands_far_away ... ok
+test slide_order_tests::escape_cancels_a_drag_and_returns_focus_to_the_editor ... ok
+test slide_order_tests::move_commands_are_enabled_only_where_the_slide_can_move ... FAILED
+test slide_order_tests::new_and_duplicated_slides_after_a_reorder_never_repeat_an_id ... ok
+test slide_order_tests::rtl_dragging_moves_the_slide_like_ltr ... ok
+test slide_order_tests::save_reopen_and_both_exports_follow_the_new_order ... ok
+test slide_order_tests::the_drop_line_is_not_a_focus_stop_and_has_no_role ... ok
+test slide_order_tests::the_drop_line_stays_inside_the_strip_and_its_round_end_leads_in_both_directions ... ok
+test slide_order_tests::the_slide_menu_and_the_palette_run_the_move ... ok
+test slide_order_tests::the_strip_buttons_move_the_selected_slide ... ok
+test slide_order_tests::the_strip_is_a_live_region_that_speaks_the_move ... ok
+test startup_recovery_tests::a_draft_of_a_file_that_is_gone_is_restored_for_that_path ... ok
+test startup_recovery_tests::a_draft_of_another_file_is_kept_while_the_requested_file_opens ... ok
+test startup_recovery_tests::a_draft_of_the_opened_file_is_restored_as_unsaved_work ... ok
+test startup_recovery_tests::a_draft_that_matches_its_file_opens_clean ... ok
+test startup_recovery_tests::a_lossy_startup_pptx_stays_pending_while_another_file_draft_is_current ... ok
+test startup_recovery_tests::a_restored_draft_keeps_its_file_name_when_launched_without_a_path ... ok
+test startup_recovery_tests::a_same_source_pptx_draft_keeps_precedence_over_the_startup_file ... ok
+test startup_recovery_tests::an_unedited_draft_is_not_kept_as_unsaved_when_another_file_opens ... ok
+test startup_recovery_tests::an_untitled_draft_is_kept_beside_an_opened_file_and_restored_on_a_plain_launch ... ok
+test startup_recovery_tests::kept_drafts_are_written_beside_the_recovery_store_and_never_overwritten ... ok
+test startup_recovery_tests::kept_drafts_sit_beside_the_recovery_store_so_clearing_it_cannot_remove_them ... ok
+test startup_recovery_tests::unreadable_recovery_data_is_kept_as_it_was_found ... ok
+test startup_recovery_tests::unreadable_recovery_is_verified_byte_for_byte_before_a_choice_can_release_it ... ok
+test startup_recovery_tests::unreadable_recovery_stays_untouched_while_a_lossy_startup_import_waits ... ok
+test table_tests::cancel_after_a_partial_import_checkpoint_restores_the_visible_deck ... ok
+test table_tests::insert_chart_builds_the_chart_from_a_copied_range_and_never_invents_data ... ok
+test table_tests::picker_continue_keeps_the_warning_open_without_a_recovery_service ... ok
+test table_tests::pre_checkpoint_quarantine_failure_does_not_block_close_or_change_recovery ... ok
+test table_tests::pressing_a_table_cell_makes_that_cell_the_active_one ... ok
+test table_tests::test_insert_table_and_chart_via_callbacks ... ok
+test table_tests::test_insert_table_and_chart_via_dispatch_and_palette ... ok
+test table_tests::test_pdf_export_with_table_and_chart ... ok
+test table_tests::test_powerpoint_com_live_verification ... ok
+test table_tests::test_pptx_export_import_roundtrip_with_tables_and_charts ... ok
+test table_tests::test_pptx_import_warning_dialog_flow ... ok
+test table_tests::test_t4a_present_table_gaps ... ok
+test table_tests::test_table_cell_text_editing_and_a11y_label ... ok
+test table_tests::test_table_inspector_style_and_options_and_undo ... ok
+test table_tests::test_table_keyboard_navigation_and_row_append ... ok
+test table_tests::test_table_row_and_column_mutations ... ok
+test template_chooser_tests::creating_from_a_template_asks_before_replacing_unsaved_work ... ok
+test template_chooser_tests::each_template_creates_the_slides_its_card_describes_with_empty_placeholders ... ok
+test template_chooser_tests::nothing_in_the_chooser_or_its_entry_points_is_called_a_theme ... ok
+test template_chooser_tests::the_palette_offers_new_from_template_and_no_theme_command ... ok
+test template_chooser_tests::the_template_cards_fill_one_row_of_the_chooser_at_1280 ... ok
+test text_scale_tests::chrome_fits_every_contract_viewport_and_text_scale ... ok
+test toolbar_tests::add_slide_text_and_shape_buttons_edit_the_deck ... ok
+test toolbar_tests::escape_closes_an_open_toolbar_menu ... ok
+test toolbar_tests::every_toolbar_item_is_a_named_button_in_three_groups ... ok
+test toolbar_tests::inspector_is_open_by_default_and_tab_buttons_switch_or_close_it ... ok
+test toolbar_tests::view_menu_commands_toggle_panes_and_checkmarks_follow_every_control ... ok
+test toolbar_tests::view_toolbar_menu_toggles_the_navigator_and_notes ... ok
+test toolbar_tests::wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_the_menu ... ok
+test toolbar_tests::zoom_toolbar_menu_chooses_a_level ... ok
+test ui_font_tests::chrome_takes_the_interface_face_and_slides_keep_the_bundled_face ... ok
+test visual_defect_tests::high_contrast_segmented_control_draws_no_partial_dividers ... ok
+test visual_defect_tests::inspector_has_only_tab_label_and_accessible_name ... ok
+test visual_defect_tests::menu_separators_stay_inside_popup ... ok
+test visual_defect_tests::navigator_buttons_and_glyphs_scale ... ok
+test visual_defect_tests::open_inspector_remains_enabled_in_compact_chrome ... ok
+test visual_defect_tests::rtl_inspector_hint_follows_reading_direction ... ok
+test visual_defect_tests::slide_navigator_sits_at_reading_start_and_empty_inspector_hides_geometry_rows ... ok
+test visual_defect_tests::slide_stage_fills_most_of_the_canvas_and_keeps_16_by_9 ... ok
+test visual_defect_tests::template_cards_use_content_width_in_both_directions ... ok
+test visual_defect_tests::template_categories_draw_layout_and_blank_icons ... ok
+test visual_defect_tests::thumbnail_title_words_keep_their_spacing_at_2x ... ok
+test visual_defect_tests::toolbar_icons_and_caption_glyphs_scale_with_text ... ok
+
+failures:
+
+---- slide_order_tests::move_commands_are_enabled_only_where_the_slide_can_move stdout ----
+
+thread 'slide_order_tests::move_commands_are_enabled_only_where_the_slide_can_move' (4568473) panicked at crates/loom-present-app/src/slide_order_tests.rs:117:5:
+[("New Slide", "Cmd+Shift+N"), ("Insert Table...", ""), ("Insert Chart...", ""), ("Insert Image...", ""), ("Duplicate Slide", ""), ("Delete Slide", ""), ("Move Slide Up", "Cmd+Opt+Up"), ("Move Slide Down", "Cmd+Opt+Down"), ("Previous Slide", ""), ("Next Slide", "")]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    slide_order_tests::move_commands_are_enabled_only_where_the_slide_can_move
+
+test result: FAILED. 290 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 675.52s
+
+error: test failed, to rerun pass `-p loom-present-app --bin loom-present`

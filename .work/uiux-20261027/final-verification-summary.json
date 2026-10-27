@@ -1,0 +1,48 @@
+{
+  "writer": {
+    "build_exit": 0,
+    "clippy_exit": 101,
+    "test_exit": null,
+    "test_timeout_seconds": 900,
+    "reported_failed_tests": [
+      "caret_keys_tests::ctrl_end_then_ctrl_home_returns_the_caret_and_the_page_to_the_top",
+      "caret_keys_tests::ctrl_home_leaves_a_long_table_at_the_end_and_returns_to_the_top",
+      "caret_keys_tests::ctrl_home_returns_to_the_top_when_the_page_is_zoomed",
+      "paragraph_alignment::paragraph_alignment_tests::imported_rtl_justify_is_preserved_and_available_with_shaped_geometry",
+      "paragraph_alignment::paragraph_alignment_tests::rtl_only_selection_is_justified_with_shaped_geometry",
+      "picture_drag_tests::a_right_aligned_picture_previews_where_the_committed_layout_puts_it",
+      "picture_drag_tests::dragging_the_bottom_right_handle_resizes_live_and_keeps_the_aspect_ratio",
+      "picture_drag_tests::escape_during_a_handle_drag_restores_the_size_and_a_later_release_adds_nothing",
+      "picture_tests::inserting_a_picture_adds_one_block_the_page_draws_and_undo_removes_it"
+    ],
+    "test_result_lines": []
+  },
+  "sheets": {
+    "build_exit": 0,
+    "clippy_exit": 0,
+    "test_exit": null,
+    "test_timeout_seconds": 900,
+    "reported_failed_tests": [],
+    "test_result_lines": []
+  },
+  "present": {
+    "build_exit": 0,
+    "clippy_exit": 0,
+    "test_exit": 101,
+    "test_timeout_seconds": null,
+    "reported_failed_tests": [
+      "slide_order_tests::move_commands_are_enabled_only_where_the_slide_can_move"
+    ],
+    "test_result_lines": [
+      "test result: FAILED. 290 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 675.52s"
+    ]
+  },
+  "_metadata": {
+    "initial_audit_base": "e54bea7",
+    "final_repository_head": "e3c8865bd678181a0f98f9937f248d8d681f2553",
+    "audit_ran_git_commit": false,
+    "scope": "UI review plus owner-authorized original app icon assets/integration; no menu/padding/material behavior fixes",
+    "icon_packaging_tests": "20 passed in 0.44s",
+    "native_packaging_tools": "mocked in focused staging tests; not executed"
+  }
+}

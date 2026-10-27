@@ -1,0 +1,57 @@
+## current-truth
+
+<!-- CURRENT TRUTH START -->
+# Loom — Current Truth
+
+This file alone owns the current workflow gate and ordered quality/work table. Root [AGENTS.md](../../AGENTS.md) imports the rules; [workflow.toml](../../loom-bootstrap/contracts/workflow.toml) records the machine gate. Read the [repair index](repairs.md), [governance debt](governance-debt.md), [Writer scope](writer.md) or [current UI audit](../audits/uiux-2026-10-27.md) only when relevant. Dated test/evidence records are linked from the [documentation index](../README.md); earlier green runs do not carry across edits.
+
+## Active gate — read this before choosing a card
+
+```text
+ACTIVE PHASE: OFFICE-V1
+FOUNDATION STATUS: ACCEPTED
+SUITE STATUS: ACCEPTANCE_BLOCKED
+APPLICATION DEVELOPMENT: UNLOCKED
+ACTIVE APPLICATIONS: SHEETS, WRITER, PRESENT
+NEXT APPLICATION: PHOTO
+```
+
+The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this run. Existing consumer imports remain compatible. The `office-v1` scheduling phase records the 2026-10-02 and 2026-10-06 owner grants for Sheets, Writer, and Present; it does not grant application acceptance or recertify the gallery. Do not delete or refresh existing baselines to hide findings.
+
+**Machine gate:** Sheets, Writer, and Present are `IN_PROGRESS` under the dated owner overrides. Photo, Motion, Video, Studio, and Encode remain `LOCKED` for product changes. All eight applications remain `ACCEPTANCE_BLOCKED`; the earlier retracted acceptance records do not satisfy any gate. Keep native, visual, accessibility, interoperability, performance, and persistence evidence open until each applicable gate is proven.
+
+The contract's allowed prefixes are an outer file boundary for the three authorized applications and their necessary shared infrastructure. They do not unlock later applications. The `office-v1` validator requires the group declaration, matching work and product statuses, accepted foundation, and exact bounded prefixes. Existing serial phases remain supported.
+
+**Repository scope (2026-10-25, housekeeping on `main`).** `main` carries the shared infrastructure and the three v1 applications only (Writer, Sheets, Present). Photo, Motion, Video, Studio, Encode, `loom-vision`, `loom-plugin-sdk`, `loom-samples` and `loom-spec` moved to branch `apps/later`, which keeps the full pre-removal state. Six `loom-core` crates used only by those applications were removed from the workspace: `loom-color`, `loom-history`, `loom-interop`, `loom-jobs`, `loom-media-runtime` and `loom-runtime`. The matrix and packaging scripts, the root and bootstrap READMEs, the CI and release workflows, and the conformance-corpus generator (its output lived in the removed `loom-samples`) were trimmed to the same three applications. `loom-bootstrap/contracts/workflow.toml` and `audit-governance.py` still describe the eight-application serial order with the five later applications `LOCKED`; that is a deliberate governance choice until the owner decides otherwise. Evidence: the four repository audits and 29 governance unit tests pass, and `cargo metadata --locked` resolves the loom-core, Writer, Sheets and Present workspaces. Full builds were not rerun for this housekeeping. No application acceptance status changed.
+
+**Repair order:** address the [current supervisor pending list](repairs.md#current-supervisor-pending-list--2026-10-18) in bounded milestones across Sheets, Writer, and Present; data loss and broken output come before visual polish. Review each app independently against all section 13 gates. Photo is next after the authorized group and remains locked until a separate reviewed workflow transition with passing acceptance evidence.
+
+**How to use a card:** follow [Start here](../rules/workflow.md#start-here--one-small-repair-at-a-time). Select one coherent defect, reproduce it, make a small repair, run its concrete check, and record evidence. The owner overrides authorize the three-application continuation, not weaker acceptance requirements. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
+
+Quality and permission to work are different. The office-v1 owner grant permits bounded Sheets, Writer and Present work; the five later applications stay locked. This is the single live application status table:
+
+| Order | Application | Product status | Work status | Current blocking evidence |
+|---:|---|---|---|---|
+| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS | v1 scope (Windows, Linux). The 2026-10-18 ACCEPTED record was retracted by the supervisor (see the [retraction record](../archive/continuation-2026-10-04-to-25.md)): its evidence file cites tests that do not exist and its Argon review is not shown to have run. Oct27 developer-build and keyboard-cache repairs have focused passing evidence in the [performance follow-up](../audits/uiux-2026-10-27.md#sheets-performance-follow-up--perf-01--needs_review); sustained native GPU input/frame latency remains unmeasured. Full-matrix and live Linux visual evidence, independent review, and the remaining PERF-01/acceptance gates stay open; gate 9 speech is deferred by the owner |
+| 2 | Writer | ACCEPTANCE_BLOCKED | IN_PROGRESS | v1 scope (Windows, Linux). M3 mixed-direction text/inline-style integration is unfinished, with failing checkpoint tests, history/native-colour repairs and final strict checks pending. Headers/footers, footnotes and tracked changes remain M4–M6 work; M7 requires current live Linux/Windows workflows, visual/accessibility/performance/interop evidence and independent review. The retracted 2026-10-18 acceptance does not satisfy these gates. |
+| 3 | Present | ACCEPTANCE_BLOCKED | IN_PROGRESS | v1 scope (Windows, Linux). The 2026-10-18 ACCEPTED record was retracted by the supervisor (see the [retraction record](../archive/continuation-2026-10-04-to-25.md)): unverified evidence and no shown independent review. Real open items: live Linux evidence beyond typing and F5, per-run text formatting, an independent Argon review with recorded evidence |
+| 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
+| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-17 still-frame parity verified; UI-14/18 and full video-render acceptance remain |
+| 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-25 repaired in code; UI-19/20 and real-media checks remain |
+| 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10 repaired in code; audio and visual acceptance checks remain |
+| 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09/UI-23 repaired in code; filesystem/media checks remain |
+
+
+## Owner scope — 2026-10-27
+
+The owner explicitly requested splitting the oversized root instructions into focused files, icon-matched application accents, and investigation/repair of reported Sheets lag. This bounded grant supersedes the old single-Markdown policy and the part of the 2026-10-25 GOV-05 decision that deferred per-app accents. It does not change application quality, foundation acceptance, phase, baseline approval or the later-app locks.
+
+- **Documentation:** root remains the authority router. Move rules, active gate, current task scopes, findings and dated evidence to their declared owners, preserve original findings/results and update validators/callers. No duplicate readiness ledger. Historical display/game permissions and model choices stay dated; the current chat governs desktop access.
+- **Application accents:** implement Writer violet, Sheets jade and Present coral through the existing shared tokens, contracts and theme selector. Keep neutral structural chrome, existing document artwork/content colours, accessible labels, visible focus and the universal high-contrast scheme. Synchronize TOML/runtime values; verify contrast and fresh renders without approving or refreshing baselines. The implementation/evidence owner is the [Oct27 audit](../audits/uiux-2026-10-27.md); do not assert completion until its checks run.
+- **Sheets performance:** reproduce the reported lag with a declared workload, build, renderer and environment; trace the measured cause through event handling, viewport projection, calculation and recovery as applicable. Repair only a demonstrated bottleneck, retain data/undo/recovery and acceptance budgets, add a meaningful regression and record actual timings and remaining native checks. No speedup or result is recorded by this authorization alone; this task is permitted within existing `loom-sheets/` and necessary shared infrastructure boundaries.
+
+The selected bounded Sheets investigation is keyboard navigation: reproduce arrow/Shift+arrow reaching a formula through a standalone evaluation path instead of the existing workbook cache, including cross-sheet values, and compare the mouse path. RED/GREEN and performance verification remain pending; preserve the earlier fixes and record only actual results. Supporting investigation data belongs under `.work/sheets-perf-20261027/`.
+
+The latest recorded icon checkpoint includes Writer Clippy errors and incomplete/failing app suites, preserved in the [audit](../audits/uiux-2026-10-27.md#comparative-uiux-audit--owner-request-2026-10-27). Product acceptance remains blocked. Record any later accent/performance verification in that finding/evidence owner before changing an applicable state.
+
+<!-- CURRENT TRUTH END -->

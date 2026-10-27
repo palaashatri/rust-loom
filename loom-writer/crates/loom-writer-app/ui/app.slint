@@ -23,6 +23,7 @@ export { Palette as WidgetPalette } from "std-widgets.slint";
 export { WriterTableCellRect, WriterPageImage, PageImages, PictureAlt } from "writer_components.slint";
 
 export component WriterApp inherits Window {
+    init => { Theme.application = "writer"; }
     icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-writer.png");
     in-out property <string> window-title: "Loom Writer";
     title: root.window-title;
@@ -54,7 +55,6 @@ export component WriterApp inherits Window {
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
-    /// The More menu (kind 8). Other toolbar menus use `toolbar-menu`.
     in-out property <bool> toolbar-overflow-open: false;
     /// 0 none, 1 View, 2 Zoom, 3 Insert, 4 Text, 5 Style, 6 List, 7 Export.
     in-out property <int> toolbar-menu: 0;
@@ -62,7 +62,6 @@ export component WriterApp inherits Window {
     property <length> outline-width: root.show-navigator ? 220px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0)) : 0px;
     property <int> toolbar-menu-kind: root.toolbar-overflow-open ? 8 : root.toolbar-menu;
     in-out property <bool> show-inspector: false;
-    /// 0 = Format, 1 = Document.
     in-out property <int> inspector-tab: 0;
     in-out property <bool> comment-focus-pending: false;
     in-out property <bool> show-navigator: false;

@@ -2,7 +2,7 @@
 
 Loom is an original, local-first creative software suite built with Rust and Slint.
 
-The v1 scope on `main` is three desktop applications. Their acceptance status is in the [current-truth section](AGENTS.md#current-truth).
+The v1 scope on `main` is three desktop applications. Their acceptance status is in the [current-truth section](docs/workflow/current.md#current-truth).
 
 - [**Loom Writer**](loom-writer/README.md) — Document composition with Apple Pages-class interface polish.
 - [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with Apple Numbers-class multi-sheet workbooks.
@@ -13,9 +13,9 @@ Shared workspaces provide package formats, document and text engines, recovery, 
 ## Current status
 
 Loom is in active productisation toward Apple Creator Studio-class depth and polish.
-The current honest product-parity estimate and application boundaries are kept in the [current-truth section](AGENTS.md#current-truth).
+The current honest product-parity estimate and application boundaries are kept in the [current-truth section](docs/workflow/current.md#current-truth).
 
-The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are consolidated in [`AGENTS.md`](AGENTS.md).
+The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are routed by [`AGENTS.md`](AGENTS.md) to focused files in [docs](docs/README.md).
 
 ## Future SLOPOS desktop integration (planned)
 
@@ -23,7 +23,7 @@ Loom is intended to be the creative suite for [SLOPOS](https://github.com/palaas
 
 The symbolic app-list icons in SLOPOS are pinned, licensed Lucide reference SVGs, not custom colorful Loom or Sinty app artwork. Loom keeps its original cross-platform Slint visual identity when SLOPOS is absent.
 
-**Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](AGENTS.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
+**Not implemented and not an active release gate.** Writer, Sheets and Present are the first integration targets; the other five Loom apps retain their existing separate status. No native PARAMA compatibility is implied. See [AGENTS.md §15](docs/rules/platforms.md#15-future-interoperability-goal--loom-as-sloposs-creative-suite) for the proposed acceptance criteria.
 
 ## Reusable interaction tooling
 
@@ -51,25 +51,25 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-The CI matrix additionally validates Linux x86-64, Windows x86-64, macOS arm64, and macOS x86-64 builds (macOS x86-64 is being retired: macOS 27 dropped Intel Macs and GitHub retires its Intel runner in fall 2027; see [AGENTS.md §18](AGENTS.md#18-2027-readiness-baseline--platforms-accessibility-supply-chain-and-regulation)), native packages, functional journeys, keyboard palette journeys, UI productisation audits, and visual QA evidence.
+The CI matrix additionally validates Linux x86-64, Windows x86-64, macOS arm64, and macOS x86-64 builds (macOS x86-64 is being retired: macOS 27 dropped Intel Macs and GitHub retires its Intel runner in fall 2027; see [AGENTS.md §18](docs/rules/platforms.md#18-2027-readiness-baseline--platforms-accessibility-supply-chain-and-regulation)), native packages, functional journeys, keyboard palette journeys, UI productisation audits, and visual QA evidence.
 
 ## Engineering discipline
 
 Loom prefers **proven libraries with small adapters** over unnecessary engine rewrites. Compatibility is established with real Writer/Sheets/Present files across the complete native GUI workflow—import, edit, save, reopen, export and failure/recovery—not by startup or fixture-only tests. Repeatable performance measurements include input latency, p50/p95, peak memory, hardware/OS, actual file workload and failures. Imported source, libraries, models, fonts and assets need component-level provenance and license review.
 
-AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](AGENTS.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
+AI-agent changes must preserve the current serial workflow gate and report independently tested evidence and unrun checks. SLOPOS and PARAMA integration remain future, separate milestones. See [AGENTS.md §16](docs/rules/engineering.md#16-engineering-discipline--reuse-interoperability-and-real-workflow-evidence).
 
 ## SLOPOS and future PARAMA platform goals
 
 As an **originally authored suite**, Loom is a candidate for SLOPOS's optional first-party creative catalog after independently verified Linux GUI integration and licensing/packaging. Loom must remain **Rust + Slint** and cross-platform. On a future Pi Zero 2 W Linux session, small real Writer/Sheets/Present workflows should favor bounded memory, lazy work, cancellation and accurate file round-trips; **actual ARM64 device support has not been demonstrated**.
 
-**PARAMA is a conditional future native source target**, requiring a real Rust/Slint-compatible app runtime, SURYA graphics/input, filesystem/fonts and actual performance/QA. No present PARAMA binary, SDK or support is claimed. Forked Tricycle and texture-auto-upscaler are not SLOPOS first-party bundle candidates. See [AGENTS.md integration policy](AGENTS.md#first-party-distribution-edge-profiles-and-future-parama-target).
+**PARAMA is a conditional future native source target**, requiring a real Rust/Slint-compatible app runtime, SURYA graphics/input, filesystem/fonts and actual performance/QA. No present PARAMA binary, SDK or support is claimed. Forked Tricycle and texture-auto-upscaler are not SLOPOS first-party bundle candidates. See [AGENTS.md integration policy](docs/rules/engineering.md#first-party-distribution-edge-profiles-and-future-parama-target).
 
 ## Edge efficiency goal
 
 Loom aims for **responsive small-document workflows on a Raspberry Pi Zero 2 W** (AArch64 Cortex-A53, **512 MB RAM**) as a future low-end reference, while preserving fully featured workloads on capable systems. The GUI must stay interactive and allow progress/cancellation during slow disk/network/CPU work; large documents and demanding media/ML may require more memory and must fail safely with truthful explanations, never silently drop data. Memory, input p95, caches, startup and swapping must be instrumented on **actual hardware**.
 
-**AArch64 Pi Zero 2 W support is not implemented or verified.** Existing Rust/Slint, supported host-platform gates and sequential app development remain unchanged. See [AGENTS.md §17](AGENTS.md#17-edge-first-efficiency-raspberry-pi-zero-2-w-reference).
+**AArch64 Pi Zero 2 W support is not implemented or verified.** Existing Rust/Slint, supported host-platform gates and sequential app development remain unchanged. See [AGENTS.md §17](docs/rules/platforms.md#17-edge-first-efficiency-raspberry-pi-zero-2-w-reference).
 
 ## Principles
 

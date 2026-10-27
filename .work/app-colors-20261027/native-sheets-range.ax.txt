@@ -1,0 +1,48 @@
+The following is a diff from the previous accessibility tree for Window: "keyboard-cache.loomtable" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 37, 44
+~			33 text field (settable) Name box, Help: Type a cell address such as D50 or B2:C3 and press Enter, Value: A1:A2
+~			36 text field (settable) Formula bar, Help: Edit the selected cell's value or formula. Enter commits, Escape cancels, Value: =Data!B1+5
+~		40 button Fill down
+~		41 container Report worksheet grid, Help: A1:A2 selected; value: 25; formula: =Data!B1+5
+~			42 table Report table, Help: A1:A2 selected; value: 25; formula: =Data!B1+5
+~					45 text (settable) A1, value 25, formula =Data!B1+5
++					159 button Selected cell fill handle
++					160 text (settable) A2, value 10, formula =SUM(Data!A1:A1)
+~					59 text (settable) Row 1
+~					60 text (settable) Row 2
+~					61 text (settable) Row 3
+~					62 text (settable) Row 4
+~					63 text (settable) Row 5
+~					64 text (settable) Row 6
+~					65 text (settable) Row 7
+~					66 text (settable) Row 8
+~					67 text (settable) Row 9
+~					68 text (settable) Row 10
+~					69 text (settable) Row 11
+~					70 text (settable) Row 12
+~					71 text (settable) Row 13
+~					72 text (settable) Row 14
+~					73 text (settable) Row 15
+~					74 text (settable) Row 16
+~					75 text (settable) Row 17
+~					76 text (settable) Row 18
+~					77 text (settable) Row 19
+~					78 text (settable) Row 20
+~					79 text (settable) Row 21
+~					80 text (settable) Row 22
+~					81 text (settable) Row 23
+~					82 text (settable) Row 24
+~					83 text (settable) Row 25
+~					84 text (settable) Row 26
+~					85 text (settable) Row 27
+~					86 slider (settable, float) Vertical sheet scroll, Value: 0
+~		89 container Inspector, A1:A2 selection, ID: loom-sheets-inspector-focus-root
+~			90 text (settable) A1:A2 selection
+~			102 text (settable) A1:A2
+~				103 text (settable) A1:A2
+~			105 text (settable) Displayed value
+~				106 text (settable) 25
+~			108 text (settable) =Data!B1+5
+~				109 text (settable) =Data!B1+5
+~		146 text (settable) SUM: 35.00  AVG: 17.50  COUNT: 2
+The focused UI element is 41 container Report worksheet grid, Help: A1:A2 selected; value: 25; formula: =Data!B1+5

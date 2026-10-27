@@ -1,0 +1,161 @@
+Window: "keyboard-cache.loomtable", App: Loom Sheets Color QA.
+1 standard window keyboard-cache.loomtable, Secondary Actions: Raise
+	2 container
+		3 button View
+			4 text (settable) View
+		5 button Zoom
+			6 text (settable) Zoom
+		7 button Add Sheet
+			8 text (settable) Add Sheet
+		9 button Chart
+			10 text (settable) Chart
+		11 button Table
+			12 text (settable) Table
+		13 button Text
+			14 text (settable) Text
+		15 button Shape
+			16 text (settable) Shape
+		17 button Image
+			18 text (settable) Image
+		19 button Export
+			20 text (settable) Export
+		21 button Format
+			22 text (settable) Format
+		23 button Organize
+			24 text (settable) Organize
+		25 button More actions
+		26 button Add sheet, Help: Add a worksheet to this workbook.
+		27 tab (settable, boolean) Tabs, Value: off
+			28 tab (settable, boolean) Data, Value: off
+				29 text (settable) Data
+			30 tab (settable, boolean) Report, Value: off
+				31 text (settable) Report
+		32 unknown
+			33 text field (settable) Name box, Help: Type a cell address such as D50 or B2:C3 and press Enter, Value: A4
+		34 text (settable) fx
+		35 unknown
+			36 text field (settable) Formula bar, Help: Edit the selected cell's value or formula. Enter commits, Escape cancels
+			37 text (settable) Enter a value or formula (=SUM, =AVERAGE)
+		38 button Commit formula, Help: Apply the formula bar entry to the selected cell.
+		39 button Cancel formula edit, Help: Discard formula bar changes and keep the current cell value.
+		40 button (disabled) Fill down
+		41 container Report worksheet grid, Help: A4 selected; value: Empty
+			42 table Report table, Help: A4 selected; value: Empty
+				43 container Report cell canvas
+					44 text (settable) A4, empty
+					45 button Selected cell fill handle
+					46 button Table select handle
+					47 text (settable) Column A
+					48 text (settable) Column B
+					49 text (settable) Column C
+					50 text (settable) Column D
+					51 text (settable) Column E
+					52 text (settable) Column F
+					53 text (settable) Column G
+					54 text (settable) Column H
+					55 text (settable) Column I
+					56 text (settable) Column J
+					57 text (settable) Column K
+					58 text (settable) Column L
+					59 text (settable) Row 3
+					60 text (settable) Row 4
+					61 text (settable) Row 5
+					62 text (settable) Row 6
+					63 text (settable) Row 7
+					64 text (settable) Row 8
+					65 text (settable) Row 9
+					66 text (settable) Row 10
+					67 text (settable) Row 11
+					68 text (settable) Row 12
+					69 text (settable) Row 13
+					70 text (settable) Row 14
+					71 text (settable) Row 15
+					72 text (settable) Row 16
+					73 text (settable) Row 17
+					74 text (settable) Row 18
+					75 text (settable) Row 19
+					76 text (settable) Row 20
+					77 text (settable) Row 21
+					78 text (settable) Row 22
+					79 text (settable) Row 23
+					80 text (settable) Row 24
+					81 text (settable) Row 25
+					82 text (settable) Row 26
+					83 text (settable) Row 27
+					84 text (settable) Row 28
+					85 text (settable) Row 29
+					86 slider (settable, float) Vertical sheet scroll, Value: 48
+					87 slider (settable, float) Horizontal sheet scroll, Value: -0
+		88 list Worksheet objects, Help: F6 or the command palette selects worksheet objects. Tab and Shift+Tab browse; M moves; R resizes; arrows preview; Enter commits; Escape cancels or returns to the sheet.
+		89 container Inspector, A4 selection, ID: loom-sheets-inspector-focus-root
+			90 text (settable) A4 selection
+			91 button Close
+			92 unknown
+				93 text field (settable) Search
+				94 text (settable) Search properties…
+			95 tab (settable, boolean) Tabs, Value: off
+				96 tab (settable, boolean) Organize, Value: off
+					97 text (settable) Organize
+				98 tab (settable, boolean) Format, Value: off
+					99 text (settable) Format
+			100 text (settable) Cell
+			101 text (settable) Selection
+			102 text (settable) A4
+				103 text (settable) A4
+			104 text (settable) Value
+			105 text (settable) Empty
+				106 text (settable) Empty
+			107 text (settable) Formula
+			108 text (settable) No formula
+				109 text (settable) No formula
+			110 text (settable) Font Style
+			111 button Toggle bold formatting (Cell inspector), Help: Turn bold formatting on or off for selected cells in the Cell inspector.
+			112 button Toggle italic formatting (Cell inspector), Help: Turn italic formatting on or off for selected cells in the Cell inspector.
+			113 button Toggle underline formatting (Cell inspector), Help: Turn underline formatting on or off for selected cells in the Cell inspector.
+			114 text (settable) Font size
+			115 text (settable) Font size in points
+				116 text (settable) 14
+			117 button Decrease selected cell font size, Help: Reduce the font size of selected cells by one step.
+			118 button Increase selected cell font size, Help: Increase the font size of selected cells by one step.
+			119 text (settable) Text colour
+			120 button Text red
+			121 button Text orange
+			122 button Text green
+			123 button Text blue
+			124 button Text purple
+			125 button Text gray
+			126 button Text black
+			127 button Automatic text colour
+			128 switch (settable, boolean) Wrap text, Value: off
+				129 text (settable) Wrap text
+			130 text (settable) Borders & Fill
+			131 switch (settable, boolean) Border, Value: off
+				132 text (settable) Border
+			133 text (settable) Fill
+			134 button Fill red
+			135 button Fill orange
+			136 button Fill yellow
+			137 button Fill green
+			138 button Fill blue
+			139 button Fill purple
+			140 button Fill gray
+			141 button No fill
+			142 text (settable) Data Format
+		143 slider (settable, float) Inspector scroll, Value: -0
+		144 text (settable) Ready
+		145 text (settable) 2 cells · 2 formulas
+		146 text (settable)
+	147 close button
+	148 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	149 minimize button
+	150 text keyboard-cache.loomtable
+151 menu bar
+	152 Loom Sheets Color QA
+	153 File
+	154 Edit
+	155 View
+	156 Table
+	157 Window
+	158 Help
+
+The focused UI element is 41 container Report worksheet grid, Help: A4 selected; value: Empty

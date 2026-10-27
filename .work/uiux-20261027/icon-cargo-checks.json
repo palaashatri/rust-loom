@@ -132,5 +132,22 @@
     "exit_code": 0,
     "seconds": 25.82,
     "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-present-clippy.log"
+  },
+  {
+    "app": "present",
+    "check": "tests",
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "loom-present-app",
+      "--locked",
+      "--offline",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 101,
+    "seconds": 713.65,
+    "log": "/Users/palaashatri/Code/personal/rust-loom/.work/uiux-20261027/icons-present-tests.log"
   }
 ]

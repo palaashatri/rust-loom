@@ -1,0 +1,86 @@
+[
+  {
+    "name": "python-tests",
+    "command": [
+      "python3",
+      "-m",
+      "pytest",
+      "loom-bootstrap/scripts/test_audit_governance.py",
+      "loom-bootstrap/scripts/test_audit_ui_foundation.py",
+      "loom-bootstrap/scripts/test_app_accent_contract.py",
+      "-q"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 9.496453916013706,
+    "output": ".......................................................                  [100%]\n55 passed in 9.11s\n"
+  },
+  {
+    "name": "ruff",
+    "command": [
+      "python3",
+      "-m",
+      "ruff",
+      "check",
+      "loom-bootstrap/scripts/documentation.py",
+      "loom-bootstrap/scripts/audit-governance.py",
+      "loom-bootstrap/scripts/test_audit_governance.py",
+      "loom-bootstrap/scripts/audit-ui-foundation.py",
+      "loom-bootstrap/scripts/test_app_accent_contract.py",
+      "loom-bootstrap/scripts/test_audit_ui_foundation.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.11325529200257733,
+    "output": "All checks passed!\n"
+  },
+  {
+    "name": "governance",
+    "command": [
+      "python3",
+      "loom-bootstrap/scripts/audit-governance.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.13574383297236636,
+    "output": "Loom governance audit: PASS\n"
+  },
+  {
+    "name": "ui-foundation",
+    "command": [
+      "python3",
+      "loom-bootstrap/scripts/audit-ui-foundation.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.07015445805154741,
+    "output": "Loom UI foundation audit: PASS (foundation ACCEPTED; approved baselines present)\n"
+  },
+  {
+    "name": "assets",
+    "command": [
+      "python3",
+      "loom-bootstrap/scripts/audit-assets.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 2.455801750009414,
+    "output": "Loom asset audit: PASS\n"
+  },
+  {
+    "name": "structure",
+    "command": [
+      "python3",
+      "loom-bootstrap/scripts/audit-code-structure.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 2.4308694589999504,
+    "output": "Loom code-structure audit: PASS (13 legacy ceilings enforced)\n"
+  },
+  {
+    "name": "whitespace",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.051744792028330266,
+    "output": ""
+  }
+]

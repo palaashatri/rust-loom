@@ -1,0 +1,57 @@
+{
+  "scope": "Owner-authorized app accents, focused documentation split and Sheets performance investigation/repair; no app acceptance or baseline promotion",
+  "app_identity": {
+    "writer": "violet",
+    "sheets": "jade",
+    "present": "coral",
+    "high_contrast": "existing universal palette"
+  },
+  "core_ui_tests": "11 unit and 4 integration passed; no failures",
+  "grid_tests": "26 passed; no failures",
+  "tab_enter_tests": "5 passed; no failures",
+  "new_cache_regressions_red": "2 failed before repair (#REF! vs10;1019 vs accepted25)",
+  "new_cache_regressions_green": "Both passed inside26gridtests",
+  "same_source_profile_comparison": {
+    "cells": 300000,
+    "unoptimized": {
+      "callback_p95_ms": 7.37,
+      "software_frame_p95_ms": 195.99
+    },
+    "opt_level_2": {
+      "callback_p95_ms": 1.5,
+      "software_frame_p95_ms": 11.57
+    }
+  },
+  "final_enforced_frame_budget": {
+    "callback_p95_ms": 1.25,
+    "software_frame_p95_ms": 9.96,
+    "callback_budget_ms": 16.7,
+    "software_frame_budget_ms": 45.0,
+    "passed": true
+  },
+  "native_checks": {
+    "plain_arrows": "A3\u2192Up:A2=10\u2192Up:A1=25",
+    "scroll": "visible row headers advanced to30\u201357",
+    "edit_undo": "typed99inA3;nativeEditUndo restored2cells/2formulas and clean title",
+    "range_entry": "A1:A2;SUM35.00,AVG17.50,COUNT2",
+    "modifier_probe": "CUA shift+Down produced a plain move; physical modifier delivery unverified",
+    "theme_views": "all three native light-theme apps inspected/captured"
+  },
+  "native_limit": "Software benchmark does not measure native OpenGL event-to-frame latency",
+  "performance_fixes_reverted": false,
+  "history_evidence": "/Users/palaashatri/Code/personal/rust-loom/.work/sheets-perf-20261027/history-retention.json",
+  "captures_generated": 36,
+  "representatives_visually_inspected": 9,
+  "documentation": {
+    "root_before_bytes": 410395,
+    "root_after_bytes": 3261,
+    "governance_tests_passed": 36
+  },
+  "independent_review": "Worker sessions hit usage limits; root finished integration and verification. No new independent verdict or human visual acceptance claimed.",
+  "unchanged_wider_test_gaps": "Earlier Writer strict-Clippy failures/incomplete app tests and Present shortcut assertion are retained; full app suites not repeated for this scoped change.",
+  "binaries": {
+    "writer": "4a81d7a4ec922781eb691c5b6bd391bd971266208fe3fea1fee2d6e6b539d83d",
+    "sheets": "30fd221cede6b25cc4ae40a5ab58381e971fb63e8526722ae264dcdc1c8f1550",
+    "present": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  }
+}

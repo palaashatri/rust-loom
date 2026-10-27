@@ -312,3 +312,60 @@ contrast-ui = 3.0
 target-default = 28
 target-visual-minimum = 20
 text-scale = [1.0, 1.25, 1.5, 2.0]
+
+# Owner-approved app identity accents (2026-10-27). Neutral/document roles stay shared.
+# High contrast retains the shared yellow/black accessibility palette.
+
+[application-accent.writer.light]
+accent = "#6241AD"
+accent-hover = "#55369A"
+accent-pressed = "#492C87"
+accent-ink = "#FFFFFF"
+focus = "#6241AD"
+selection = "#6241AD"
+selection-soft = "#EFEAF9"
+
+[application-accent.writer.dark]
+accent = "#BBA7F4"
+accent-hover = "#CCBBFF"
+accent-pressed = "#A38ADB"
+accent-ink = "#171221"
+focus = "#9572CE"
+selection = "#9572CE"
+selection-soft = "#30263F"
+
+[application-accent.sheets.light]
+accent = "#087565"
+accent-hover = "#066657"
+accent-pressed = "#06594D"
+accent-ink = "#FFFFFF"
+focus = "#087565"
+selection = "#087565"
+selection-soft = "#E3F3EE"
+
+[application-accent.sheets.dark]
+accent = "#73D8BA"
+accent-hover = "#91E9D0"
+accent-pressed = "#55BEA1"
+accent-ink = "#0A211B"
+focus = "#329D83"
+selection = "#329D83"
+selection-soft = "#173A30"
+
+[application-accent.present.light]
+accent = "#AD432E"
+accent-hover = "#9B3825"
+accent-pressed = "#872F1F"
+accent-ink = "#FFFFFF"
+focus = "#AD432E"
+selection = "#AD432E"
+selection-soft = "#F9EBE5"
+
+[application-accent.present.dark]
+accent = "#FFAF92"
+accent-hover = "#FFC3AB"
+accent-pressed = "#E99579"
+accent-ink = "#2B1710"
+focus = "#CC765D"
+selection = "#CC765D"
+selection-soft = "#422820"

@@ -191,7 +191,7 @@ export component PresentApp inherits Window {
         else { root.strip-focus-tick += 1; }
     }
 
-    init => { root.focus-editor(); }
+    init => { Theme.application = "present"; root.focus-editor(); }
 
     changed palette-open => {
         if (!root.palette-open) { root.focus-editor(); }

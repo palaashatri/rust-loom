@@ -14,7 +14,7 @@ export component IconOverLabelToolbarItem inherits Rectangle {
     in property <string> accessible-name: "";
     in property <bool> enabled: true;
     in property <bool> checked: false;
-    property <color> on-tint: Theme.active-theme == "light" ? Theme.palette().accent-pressed : Theme.palette().content-accent;
+    property <color> on-tint: Theme.control-accent;
     callback clicked;
     // Left (-1) and Right (+1). The key still bubbles, so a host that does not
     // connect this callback sees the same key as before.

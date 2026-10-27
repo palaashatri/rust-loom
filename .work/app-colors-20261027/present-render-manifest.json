@@ -1,0 +1,254 @@
+[
+  {
+    "app": "present",
+    "size": "1024x720",
+    "theme": "light",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1024,
+      720
+    ],
+    "sha256": "8ba1bac26290f3df74732f7ac49cdb23146b8e5f0d6b2fc0e7a0e1b4c23cd1d4",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1024x720",
+    "theme": "dark",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1024x720-dark.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1024,
+      720
+    ],
+    "sha256": "24a622bde4151a04dbd662af33e6e046c5842a0188edfd620df788f7e5046dee",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1024x720",
+    "theme": "high-contrast",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1024x720-high-contrast.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "high-contrast"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1024,
+      720
+    ],
+    "sha256": "17abaf3d3dfa47ce1861a0a47feca753564d694b4edf2b04effc0b190205050f",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1280x800",
+    "theme": "light",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1280x800-light.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "light"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1280,
+      800
+    ],
+    "sha256": "6a03c3d48e8dd61be92663f45f172417044b18e560ddb329482ea0b3c068f270",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1280x800",
+    "theme": "dark",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1280x800-dark.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1280,
+      800
+    ],
+    "sha256": "d2d55e92270da06c3547b600726b67489e6518a4efdec563e81a083d5c3b328a",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1280x800",
+    "theme": "high-contrast",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1280x800-high-contrast.png",
+      "--size",
+      "1280x800",
+      "--theme",
+      "high-contrast"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1280,
+      800
+    ],
+    "sha256": "44ef78eafde1afd206cf5f0d80dde602d26613bdb4922a578f9d66a3830fe890",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1440x900",
+    "theme": "light",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1440,
+      900
+    ],
+    "sha256": "1f0dfc86b621344f509702b539c5facf66a058778d319097c961a8f186e47180",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1440x900",
+    "theme": "dark",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1440,
+      900
+    ],
+    "sha256": "e3752116efd39a7c493e99a2127d5191da35af6592badc2a452384c5e16eef38",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1440x900",
+    "theme": "high-contrast",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1440x900-high-contrast.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "high-contrast"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1440,
+      900
+    ],
+    "sha256": "3843c955d56a9c060df2415d9807fa06e55db98e56417e6d1dbfe257c000f921",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1920x1200",
+    "theme": "light",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1920x1200-light.png",
+      "--size",
+      "1920x1200",
+      "--theme",
+      "light"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1920,
+      1200
+    ],
+    "sha256": "3ebb4c3af4f398d3199ec46aec11d08b8a7dda833d485c6716ea1dcec8c3f976",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1920x1200",
+    "theme": "dark",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1920x1200-dark.png",
+      "--size",
+      "1920x1200",
+      "--theme",
+      "dark"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1920,
+      1200
+    ],
+    "sha256": "55048b68c68daec811f815822e1fab46eb8cfed6a8ab6c831fbea0e946992e13",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  },
+  {
+    "app": "present",
+    "size": "1920x1200",
+    "theme": "high-contrast",
+    "command": [
+      "/Users/palaashatri/Code/personal/rust-loom/loom-present/target/debug/loom-present",
+      "--screenshot",
+      "/Users/palaashatri/Code/personal/rust-loom/.work/app-colors-20261027/present-1920x1200-high-contrast.png",
+      "--size",
+      "1920x1200",
+      "--theme",
+      "high-contrast"
+    ],
+    "exit_code": 0,
+    "dimensions": [
+      1920,
+      1200
+    ],
+    "sha256": "2436f5e824bf136a3fa420160d1a2ab28e9e49043e3a9d3d4f320fa871070269",
+    "binary_sha256": "85948418847bf225539a602ef34bbc8d7b249df93d48a0be735068260e535d1a"
+  }
+]

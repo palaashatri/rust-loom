@@ -1,0 +1,502 @@
+{"command": ["git", "diff", "ea15914..HEAD", "--", "loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs"], "exit_code": 0}
+diff --git a/loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs b/loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs
+index f7782ad..2ef0f33 100644
+--- a/loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs
++++ b/loom-sheets/crates/loom-sheets-app/src/scroll_projection.rs
+@@ -52,6 +52,7 @@ pub(super) fn apply_grid(
+     geometry: &GridGeometry,
+     zoom: f32,
+ ) {
++    publish_spill(app, &grid, geometry, zoom);
+     sync_model!(app, get_cols, set_cols, grid.cols);
+     sync_model!(app, get_rows, set_rows, grid.rows);
+     sync_model!(
+@@ -67,6 +68,12 @@ pub(super) fn apply_grid(
+         shared(grid.row_headers)
+     );
+     sync_model!(app, get_cells, set_cells, shared(grid.cells));
++    sync_model!(
++        app,
++        get_cell_labels,
++        set_cell_labels,
++        shared(grid.cell_labels)
++    );
+     sync_model!(
+         app,
+         get_cell_alignments,
+@@ -123,20 +130,21 @@ fn scrolled_viewport(
+     app: &SheetsApp,
+     sheet: &Sheet,
+     zoom: f32,
+-) -> (SheetViewport, SheetDimensions) {
+-    let dimensions = SheetDimensions::new(
++) -> (SheetViewport, SheetDimensions, bool) {
++    let text = text_scale(app);
++    let mut dimensions = SheetDimensions::new(
+         app.get_workbook_rows().max(1) as u32,
+         app.get_workbook_cols().max(1) as u32,
+     );
+     let viewport_width = if app.get_grid_viewport_width() > 1.0 {
+         app.get_grid_viewport_width()
+     } else {
+-        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
++        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH * text
+     };
+     let viewport_height = if app.get_grid_viewport_height() > 1.0 {
+         app.get_grid_viewport_height()
+     } else {
+-        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
++        GRID_ROW_HEIGHT * zoom * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT * text
+     };
+     let default_col_width = valid_dimension(app.get_grid_col_width(), GRID_COL_WIDTH * zoom);
+     let default_row_height = GRID_ROW_HEIGHT * zoom;
+@@ -150,21 +158,55 @@ fn scrolled_viewport(
+         .iter()
+         .map(|(&row, &height)| (row, height * zoom))
+         .collect();
+-    let viewport = viewport_from_dimensions(
+-        (
+-            (-app.get_grid_scroll_x()).max(0.0),
+-            (-app.get_grid_scroll_y()).max(0.0),
+-        ),
+-        (
+-            (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
+-            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
+-        ),
+-        dimensions,
+-        default_col_width,
+-        &scaled_rows,
+-        &scaled_cols,
+-    );
+-    (viewport, dimensions)
++    let window_at = |dimensions| {
++        viewport_from_dimensions(
++            (
++                (-app.get_grid_scroll_x()).max(0.0),
++                (-app.get_grid_scroll_y()).max(0.0),
++            ),
++            (
++                (viewport_width - GRID_ROW_HEADER_WIDTH * text).max(default_col_width),
++                (viewport_height - GRID_COLUMN_HEADER_HEIGHT * text).max(default_row_height),
++            ),
++            dimensions,
++            default_col_width,
++            default_row_height,
++            &scaled_rows,
++            &scaled_cols,
++        )
++    };
++    // Scrolling toward the end of the sheet makes more of it: a spreadsheet
++    // has no last row to hit. The window is then worked out again against the
++    // longer sheet, so it reaches the new rows instead of stopping short.
++    let grown = grown_dimensions(dimensions, window_at(dimensions));
++    let did_grow = grown != dimensions;
++    if did_grow {
++        app.set_workbook_rows(grown.rows as i32);
++        app.set_workbook_cols(grown.cols as i32);
++        dimensions = grown;
++    }
++    (window_at(dimensions), dimensions, did_grow)
++}
++
++/// Rows and columns the grid keeps beyond the last visible one.
++const TAIL_ROWS: u32 = 30;
++const TAIL_COLS: u32 = 12;
++const MAX_GRID_ROWS: u32 = 1_048_576;
++const MAX_GRID_COLS: u32 = 16_384;
++
++/// `dimensions`, extended so at least a tail's worth of rows and columns lies
++/// past the visible window, up to the sheet limits.
++fn grown_dimensions(dimensions: SheetDimensions, viewport: SheetViewport) -> SheetDimensions {
++    let rows_needed = (viewport.first_row + viewport.visible_rows)
++        .saturating_add(TAIL_ROWS)
++        .min(MAX_GRID_ROWS);
++    let cols_needed = (viewport.first_col + viewport.visible_cols)
++        .saturating_add(TAIL_COLS)
++        .min(MAX_GRID_COLS);
++    SheetDimensions::new(
++        dimensions.rows.max(rows_needed),
++        dimensions.cols.max(cols_needed),
++    )
+ }
+ 
+ /// Handle a scroll event. Cell text is re-projected only when the set of
+@@ -172,9 +214,12 @@ fn scrolled_viewport(
+ /// but keep their decoded images.
+ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
+     let sheet = state.current.borrow();
+-    let zoom = zoom_factor(app);
+-    let (viewport, dimensions) = scrolled_viewport(app, &sheet, zoom);
+-    let window_moved = viewport.first_row as i32 != app.get_view_row_origin()
++    let zoom = grid_zoom(app);
++    let (viewport, dimensions, grew) = scrolled_viewport(app, &sheet, zoom);
++    // New rows change the scrollable extent, which only a full grid update
++    // publishes.
++    let window_moved = grew
++        || viewport.first_row as i32 != app.get_view_row_origin()
+         || viewport.first_col as i32 != app.get_view_col_origin()
+         || viewport.visible_rows as usize != app.get_rows().row_count()
+         || viewport.visible_cols as usize != app.get_cols().row_count();
+@@ -209,3 +254,94 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
+     app.set_grid_scroll_x(viewport_geometry.0);
+     app.set_grid_scroll_y(viewport_geometry.1);
+ }
++
++#[cfg(test)]
++mod tail_tests {
++    use super::*;
++
++    fn window(first_row: u32, first_col: u32) -> SheetViewport {
++        SheetViewport {
++            first_row,
++            first_col,
++            visible_rows: 24,
++            visible_cols: 10,
++        }
++    }
++
++    #[test]
++    fn scrolling_near_the_end_adds_rows_and_columns() {
++        let grown = grown_dimensions(SheetDimensions::new(60, 20), window(40, 12));
++        assert_eq!((grown.rows, grown.cols), (40 + 24 + 30, 12 + 10 + 12));
++    }
++
++    #[test]
++    fn a_window_well_inside_the_sheet_changes_nothing() {
++        let dims = SheetDimensions::new(500, 80);
++        assert_eq!(grown_dimensions(dims, window(10, 0)), dims);
++    }
++
++    #[test]
++    fn growth_stops_at_the_sheet_limits() {
++        let grown = grown_dimensions(
++            SheetDimensions::new(MAX_GRID_ROWS, MAX_GRID_COLS),
++            window(MAX_GRID_ROWS - 24, MAX_GRID_COLS - 10),
++        );
++        assert_eq!((grown.rows, grown.cols), (MAX_GRID_ROWS, MAX_GRID_COLS));
++    }
++}
++
++thread_local! {
++    static SETTLE: slint::Timer = slint::Timer::default();
++}
++
++/// Project once more shortly after scrolling stops. A burst of wheel events can
++/// leave the window one step behind the final position, which shows as a blank
++/// strip at the edge; this catches the window up to wherever the scroll ended.
++pub(crate) fn settle_after_scroll(app: &slint::Weak<SheetsApp>, state: &std::rc::Rc<GuiState>) {
++    let (app, state) = (app.clone(), state.clone());
++    SETTLE.with(|timer| {
++        timer.start(
++            slint::TimerMode::SingleShot,
++            std::time::Duration::from_millis(50),
++            move || {
++                if let Some(app) = app.upgrade() {
++                    project_scroll(&app, &state);
++                }
++            },
++        );
++    });
++}
++
++/// Publish which cells overflow into their neighbours for this window.
++fn publish_spill(app: &SheetsApp, grid: &ProjectedSheetGrid, geometry: &GridGeometry, zoom: f32) {
++    let face = cell_spill::CellFace {
++        cells: &grid.cells,
++        aligns: &grid.cell_alignments,
++        bolds: &grid.cell_bolds,
++        italics: &grid.cell_italics,
++        sizes: &grid.cell_font_sizes,
++        inks: &grid.cell_text_colors,
++        wraps: &grid.cell_wraps,
++    };
++    let ink = app.global::<CellInk>();
++    if let Some(model) = refresh_model(ink.get_colors(), grid.cell_text_colors.clone()) {
++        ink.set_colors(model);
++    }
++    if let Some(model) = refresh_model(ink.get_wraps(), grid.cell_wraps.clone()) {
++        ink.set_wraps(model);
++    }
++    let spill = cell_spill::compute(
++        &face,
++        grid.cols.len(),
++        &geometry.column_widths,
++        &geometry.row_heights,
++        zoom,
++    );
++    let global = app.global::<CellSpill>();
++    if let Some(model) = refresh_model(global.get_kinds(), spill.kinds) {
++        global.set_kinds(model);
++    }
++    if let Some(model) = refresh_model(global.get_items(), spill.items) {
++        global.set_items(model);
++    }
++}
+
+{"command": ["git", "diff", "62ac27d..HEAD", "--", "loom-sheets/crates/loom-sheets-app/ui/components.slint"], "exit_code": 0}
+diff --git a/loom-sheets/crates/loom-sheets-app/ui/components.slint b/loom-sheets/crates/loom-sheets-app/ui/components.slint
+index 0d444ea..c4fa520 100644
+--- a/loom-sheets/crates/loom-sheets-app/ui/components.slint
++++ b/loom-sheets/crates/loom-sheets-app/ui/components.slint
+@@ -5,7 +5,7 @@ import {
+ } from "foundation.slint";
+ import { Icon } from "icons.slint";
+ import { Theme } from "theme.slint";
+-import { GridPointer, CellSpill } from "grid_pointer.slint";
++import { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
+ import { CellOverflowLayer } from "cell_overflow.slint";
+ import { SheetHeaders } from "sheet_headers.slint";
+ import { SheetScrollBar } from "sheet_scrollbar.slint";
+@@ -205,6 +205,7 @@ export component SheetTable inherits Rectangle {
+                 viewport-height: max(self.height, root.grid-content-height);
+                 viewport-x <=> root.grid-scroll-x;
+                 viewport-y <=> root.grid-scroll-y;
++                changed viewport-y => { root.grid-scrolled(); }
+                 flicked => { root.grid-scrolled(); }
+ 
+                 projected-grid := GridLayout {
+@@ -236,6 +237,8 @@ export component SheetTable inherits Rectangle {
+                             property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
+                             property <int> spill-kind: cell-idx < CellSpill.kinds.length ? CellSpill.kinds[cell-idx] : 0;
+                             property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
++                            property <int> ink: cell-idx < CellInk.colors.length ? CellInk.colors[cell-idx] : -1;
++                            property <bool> wraps: cell-idx < CellInk.wraps.length && CellInk.wraps[cell-idx];
+ 
+                             // High-contrast paper-line is black, so using it
+                             // behind black paper text makes header and
+@@ -278,23 +281,24 @@ export component SheetTable inherits Rectangle {
+                                 font-size: font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
+                                 font-weight: is-bold ? 700 : 400;
+                                 font-italic: is-italic;
+-                                color: Theme.palette().paper-ink;
++                                color: CellInk.paint(ink, Theme.palette().paper-ink);
++                                wrap: wraps ? TextWrap.word-wrap : TextWrap.no-wrap;
+                                 horizontal-alignment: (r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 1
+                                     ? TextHorizontalAlignment.center
+                                     : ((r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 2
+                                         ? TextHorizontalAlignment.right
+                                         : TextHorizontalAlignment.left);
+-                                vertical-alignment: center;
++                                vertical-alignment: wraps ? TextVerticalAlignment.top : TextVerticalAlignment.center;
+                                 overflow: spill-kind == 2 ? TextOverflow.clip : TextOverflow.elide;
+                             }
+ 
+                             // A cell is exposed on its own when it is the active cell, is in
+-                            // the selection, or holds a value in the active cell's row or
+-                            // column. Naming every visible cell made each scroll rebind
+-                            // hundreds of accessibility nodes (about 40 ms a frame over a
+-                            // screenful of values); moving the selection names the cells it
+-                            // reaches, blank ones as empty.
+-                            if is-active || in-selection || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
++                            // a small selection (up to 64 cells), or holds a value in the
++                            // active cell's row or column. Naming every visible cell made each
++                            // scroll rebind hundreds of accessibility nodes (about 40 ms a frame
++                            // over a screenful of values); moving the selection names the cells
++                            // it reaches, blank ones as empty, while Select All stays bounded.
++                            if is-active || (in-selection && root.selection-end-row - root.selection-start-row < 64 && root.selection-end-col - root.selection-start-col < 64 && (root.selection-end-row - root.selection-start-row + 1) * (root.selection-end-col - root.selection-start-col + 1) <= 64) || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
+                                 width: parent.width;
+                                 height: parent.height;
+                                 accessible-role: text;
+
+{"command": ["git", "show", "c59b11b", "--", "loom-sheets/crates/loom-sheets-app/ui/components.slint"], "exit_code": 0}
+commit c59b11bc295d216b9284ee01559e43f90d7441f0
+Author: Palaash Atri <palaash.atri@gmail.com>
+Date:   Sun Oct 25 04:03:10 2026 +0530
+
+    chore(sheets): working-tree changes to grid scroll coverage and components
+    
+    Working-tree state of the Sheets app as it stands (scroll coverage test module,
+    one components line, README note). Not separately verified in this commit.
+    
+    Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>
+
+diff --git a/loom-sheets/crates/loom-sheets-app/ui/components.slint b/loom-sheets/crates/loom-sheets-app/ui/components.slint
+index 0f60928..c4fa520 100644
+--- a/loom-sheets/crates/loom-sheets-app/ui/components.slint
++++ b/loom-sheets/crates/loom-sheets-app/ui/components.slint
+@@ -205,6 +205,7 @@ export component SheetTable inherits Rectangle {
+                 viewport-height: max(self.height, root.grid-content-height);
+                 viewport-x <=> root.grid-scroll-x;
+                 viewport-y <=> root.grid-scroll-y;
++                changed viewport-y => { root.grid-scrolled(); }
+                 flicked => { root.grid-scrolled(); }
+ 
+                 projected-grid := GridLayout {
+
+{"command": ["git", "diff", "e3c8865^", "e3c8865", "--", "loom-sheets/crates/loom-sheets-app/ui/app.slint"], "exit_code": 0}
+diff --git a/loom-sheets/crates/loom-sheets-app/ui/app.slint b/loom-sheets/crates/loom-sheets-app/ui/app.slint
+index c294805..2400f10 100644
+--- a/loom-sheets/crates/loom-sheets-app/ui/app.slint
++++ b/loom-sheets/crates/loom-sheets-app/ui/app.slint
+@@ -22,10 +22,10 @@ export { Theme, ResponsivePolicy } from "theme.slint";
+ export { LocalMenu, LocalMenuEntry } from "foundation.slint";
+ export { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
+ export component SheetsApp inherits Window {
++    icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");
+     in-out property <string> window-title: "Untitled";
+     title: root.window-title;
+     default-font-family: Theme.ui-font-family;
+-    // Native frame per platform.
+     in property <bool> custom-chrome: false;
+     no-frame: root.custom-chrome;
+     callback window-drag;
+@@ -54,7 +54,6 @@ export component SheetsApp inherits Window {
+     in property <bool> overflow-toolbar: false;
+     in property <bool> rtl: false;
+     in-out property <bool> toolbar-overflow-open: false;
+-    /// Open toolbar menu: 0 none, 1 View, 2 Zoom, 3 Table, 4 Text, 5 Export.
+     in-out property <int> toolbar-menu: 0;
+     property <length> toolbar-menu-x: 0px;
+     callback toolbar-command(string);
+
+{"command": ["git", "log", "--all", "--format=%H %s%n%b", "--regexp-ignore-case", "--grep=macos\\|mac os\\|macOS", "--", "loom-sheets"], "exit_code": 0}
+06af6b0bf1939b82d2db1aa8a1e5826f395a8462 feat: integrated title bar, bundled Inter font, and downloadable release builds
+- Windows and Linux draw one title row: menu on the left, document title
+  centered, minimize/maximize/close on the right, with edge and corner resize
+  handles (LoomTitleBar, LoomWindowResizeEdges in loom-ui). The menu popup and
+  close path are unchanged: Close still raises the normal close request, so
+  unsaved-changes handling runs. macOS keeps its native frame and menu bar.
+- Ship Inter (SIL OFL 1.1) so text metrics match on every OS; registered in
+  assets.toml.
+- New release workflow builds all eight apps for Linux, Windows, and both
+  macOS architectures and publishes portable archives: a rolling "nightly"
+  pre-release on every push to main, a versioned release for v* tags.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+6afcb0f87dcf83aa7ef8c9979f494c1c46c8c323 test(sheets): budget the scroll callback and frame render on every desktop OS
+The benchmark now drives the real scroll callback on a 300,000-cell sheet and
+renders each frame through the software renderer. A CI job runs it on Linux,
+Windows, and both macOS runners and fails if the callback exceeds one 60 Hz
+frame or a full-window render exceeds 45 ms. Windows measurement: callback
+p95 1.9 ms, render p95 21.7 ms.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+edbb42bedc350eb0ece2bfd87ac34c7c83d57302 fix(sheets): restore native macOS menu bar
+
+e6950c29a2e7f9e551a823209ad4406a280b4bdf fix(sheets): report the geometry an object gesture actually commits
+Native macOS interaction with the running window found that the keyboard
+move and resize confirmations reported where the object used to be. The
+outcome string was built before finish_gesture_state applied the preview,
+so a move previewing E3 confirmed "moved to D3" while the object sat at
+E3, and a resize previewing 510x120 confirmed the pre-resize width.
+
+handle_keyboard_action now computes the outcome after the gesture is
+committed and reads the object's real anchor and size. The regression
+asserts the invariant the Rust-only path had missed: the anchor announced
+by the commit must equal the anchor the preview announced, and the
+reported pixel size must equal the committed size. Reverting
+object_actions.rs fails it with left "C2" versus right "D2".
+
+Verified natively on the rebuilt binary: move preview "to F3" and commit
+"moved to F3" agree, resize preview "510 by 120 pixels" and commit
+"resized to 510 by 120 pixels" agree, and re-entering object navigation
+reports Anchor F3, 510 by 120 pixels with the focus ring and resize handle
+visible. R does begin a resize; an earlier apparent failure was a harness
+error where F6 had toggled out of object navigation and the keys were
+parked in a cell editor.
+
+Workspace suite 452 passed with 1 ignored, clippy -D warnings clean, fmt,
+governance, and asset audits pass. The code-structure audit still reports
+the same six locked applications and no Sheets file.
+
+c7878992bf90a0b1bbd0524203213f3caedc27fa test(sheets): verify the repairs and record the scale-matrix gap
+Native macOS interaction is not available in this session. The machine is
+running an Aqua session with a real display, but screencapture fails with
+"could not create image from display" and System Events returns "osascript is
+not allowed assistive access (-1728)". Both are macOS privacy permissions
+granted per application through a GUI consent prompt; they cannot be granted
+non-interactively and were not attempted. The repo's linux-desktop-input skill
+is X11-specific and does not apply to this Darwin host. The app itself launches
+and creates its window, verified through System Events process discovery, so the
+blocker is capture and input permission rather than the application.
+
+The evidence therefore comes from the application's own render path.
+--screenshot at real window sizes drives the production component tree, the real
+theme, and the real accessibility tree through snapshot_component, and the
+keyboard journeys drive the real Window::dispatch_event pipeline. That is
+renderer and pipeline evidence, not a photograph of a composited OS window, and
+it is labelled as such. No native-window, focus-ring, or frame-rate claim is
+made from it.
+
+What it bought: the repairs are visibly confirmed. The 2x chart shows 1200,
+450, and 150 as clearly distinct bar heights instead of three identical
+one-pixel rules. The Checklist card previews a light two-column task table
+instead of an empty dark grid. The redundant worksheet heading is gone. The
+inspector property labels are fully readable at 2x high contrast. Twelve
+viewport/theme captures at 1024x720, 1280x800, 1440x900, and 1920x1200 in
+light, dark, and high contrast all render, and all captures are checked in under
+loom-sheets/docs/qa-renderer/, which the asset contract already covers.
+
+The same matrix exposed a defect the source reading could not. At 2x text in a
+1018 px window the toolbar overruns the window by 41 to 74 px and the overflow
+menu never opens, because ResponsivePolicy compares width alone and reports no
+overflow at a width it considers wide enough. At 2x the inspector's own Close
+control and the toolbar's Format action render outside the window, so neither is
+reachable. That is recorded as UI-42 with its measured table and an executable
+ignored reproduction; the passing sibling guards 1.0 and 1.5. It was not quietly
+omitted and not papered over.
+
+The workspace passes 452 tests with 1 ignored and 0 failures.
+
+ecd3bd16ccc3452d88ed99009983fedf9bd688f7 fix(sheets): make the close prompt, grid, and inspector truthful
+Three trust/legibility defects plus two cross-platform blockers.
+
+UI-30: the "Save changes?" prompt derived its name only from the save path
+and otherwise returned "Untitled workbook", so a created template showed
+"Checklist" in the window title and tab while the prompt asked about
+something else. The document identity now lives in one function,
+workbook_identity_name, shared by the window title, the close prompt, the
+New/Open replacement prompt, and the export status line.
+
+UI-32: the active sheet name was painted a third time in a fixed 32 px
+centered heading above the grid. It is removed; worksheet identity survives
+through the existing "X worksheet grid" and "X table" accessible labels, and
+the scrollable region gains its own "X cell canvas" landmark. The reclaimed
+32 px is measured, not assumed: the headless 1280x800 viewport materializes
+24 row headers instead of 22 and the deepest scroll offset moves by exactly
+32 px.
+
+UI-39: SheetPropertyRow gave every property label a hard 70 px width with
+overflow: elide, which truncated "Column width" to "Column wi…". Labels now
+start at the contract minimum of 84 px, wrap instead of eliding, and are real
+accessibility nodes, so a screen reader can finally read the property name.
+
+CODE-30: the recovery policy walked every ancestor to the filesystem root and
+refused to start on a symlink. macOS makes /var and /tmp symlinks to /private,
+so 85 of 302 app tests failed on a required target. The store Loom owns is
+still required to be a real directory, and entries inside a store are still
+refused, but OS-owned ancestors are now resolved. A short-path test fixture
+also makes the non-regular-entry case creatable on macOS, whose 104-byte
+sun_path cap the old fixture exceeded.
+
+Clippy: nine pre-existing errors in active Sheets sources are fixed, so
+-D warnings now exits 0. The two trailing booleans on finish_gesture_state
+became a named GestureScroll policy, which is the first place those booleans
+were readable.
+
+The Sheets workspace passes 441 tests (307 app, 2 cache, 114 core, 13 formula,
+1 perf, 4 range) with 0 failures on macOS arm64: the first fully green run on
+that platform. Governance, asset, and format checks pass; the code-structure
+audit still reports only the six pre-existing locked-application files.
+
+dd77cda6a6ad785cbe60ad38e2501756a5ee66ef fix(sheets): add local menu fallback off macOS
+
+4e9198edd5d592b800a0884c33808b58a3d46a8f docs(apps): use native macOS screencapture window shots as the README screenshots
+Replace the deterministic software-renderer captures as the primary
+docs/screenshot.png in all eight apps with native macOS window captures
+(screencapture -l of the live GUI showing real window chrome, retina
+scale, and the fresh sample document). Session-recovery state was cleared
+before capture so every shot shows the pristine sample document rather
+than a restored working session. The pixel-reproducible renderer capture
+of the same state is preserved alongside as
+docs/screenshot-deterministic.png, and each README caption names both
+and how to regenerate them.
+
+Screenshots were reviewed after capture: fresh sample states, no
+recovered-session artifacts.
+
+839c8d0f6207f9d1c860f5b55c6ca1ab03bbd063 feat(desktop): implement native macOS global menu bar reflection and deep audit
+
+
