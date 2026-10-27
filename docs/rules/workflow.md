@@ -149,5 +149,3 @@ Before claiming a task is finished, an agent must:
 6. state remaining blockers explicitly.
 
 The goal is not to make CI green at any cost. The goal is to make Loom genuinely excellent while keeping the repository small enough, clear enough, and strict enough that the next agent cannot accidentally turn it back into a jungle.
-
-

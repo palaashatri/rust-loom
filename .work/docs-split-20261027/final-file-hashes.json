@@ -1,63 +1,63 @@
 {
   "docs/archive/audit-evidence-2026-09-14.md": {
-    "bytes": 7596,
-    "sha256": "2ec0c62c3673865c8549b39dea707b8f26e60c51807811c3526835684a88486c"
+    "bytes": 7595,
+    "sha256": "feb4f1dd2e22189c936f3e64fca3e99be9213c017c7385260e12c17253b18bda"
   },
   "docs/archive/continuation-2026-10-04-to-25.md": {
     "bytes": 138283,
     "sha256": "345d11b666714153e8eec1af518275983aaf1fa9902b9178bea0a12ec3f58544"
   },
   "docs/archive/product-evidence-2026-09-27-to-10-09.md": {
-    "bytes": 21375,
-    "sha256": "a2964a116e798cd73ccd19d0bf8ab99471f23fffe8550679c8df73dd42b24ae0"
+    "bytes": 21374,
+    "sha256": "11014e5e1785f9c746660aa58b4fa0511824d048a04706945201bca5ae19fef6"
   },
   "docs/archive/verification-2026-10-18-to-20.md": {
-    "bytes": 35445,
-    "sha256": "0e7b437644973d93db6ef4ab279b9f0e09b6fb60fb2cc9b8de2964a704d3c2f1"
+    "bytes": 35444,
+    "sha256": "49d99cc73b7e5cb46b35e55b03f4eb170931484555849379c181cac75d5ea2f9"
   },
   "docs/archive/windows-ui-2026-09-30.md": {
-    "bytes": 52609,
-    "sha256": "c727cc11eb2ea67b4889d71a6d1efb424b9b788a322881d4499546801f1ffbea"
+    "bytes": 52608,
+    "sha256": "bf8f9605c1afc8f68391d2cd3db48f934cb6a88ebea39cb436890e2d48e47f42"
   },
   "docs/archive/writer-checkpoints-2026-10.md": {
-    "bytes": 45276,
-    "sha256": "a15b500659878211ff22eaefda6a89b996d58a24c01c099053ebf67c89247541"
+    "bytes": 45275,
+    "sha256": "7a1034912a3d9b06600a6490082c2537787c2675744229b615276cda3e949d9c"
   },
   "docs/audits/uiux-2026-10-27.md": {
     "bytes": 22067,
     "sha256": "45ef5aec3224adbf1d957c65c45e9b3ace1dcecebf76c6172d8383993e3c48ce"
   },
   "docs/rules/design.md": {
-    "bytes": 8222,
-    "sha256": "2cb2cfd1573484b2e7d4aaa5c6f1c69d2769d51abbb24e806d2349257a8df098"
+    "bytes": 8221,
+    "sha256": "c39d68680e7497f2fec68dc57f659055b7c81c7aa830034c2231a2eae72c7c2b"
   },
   "docs/rules/engineering.md": {
-    "bytes": 15632,
-    "sha256": "90e03ea146e0a1f8d23de3e4869e01b3a75dd8cf2fffa094dad578aba63b45c9"
+    "bytes": 15631,
+    "sha256": "33a102bdb5852f4489c54228ae491f98c808e44323a4318586de7b74cd77a0ec"
   },
   "docs/rules/platforms.md": {
-    "bytes": 16633,
-    "sha256": "40a440fc996ed58d55c57a3151044cf0864ce3a870053f0520642b38f1acd95e"
+    "bytes": 16632,
+    "sha256": "5dbf1479173007cb193a6de7d830d30670fa1a06aae51629a37c17156ee5f62d"
   },
   "docs/rules/workflow.md": {
-    "bytes": 11733,
-    "sha256": "79585b76330318a56451c43eabcc07c409462b55ed2f0cf366287178707dd661"
+    "bytes": 11731,
+    "sha256": "dfb1a3698c5c3455338999e19e199e3763f5ecf42950c569ff786badbfe31844"
   },
   "docs/workflow/capabilities.md": {
-    "bytes": 6986,
-    "sha256": "03554a7a8ebc89672c67b50ba4d72f9545aebff67985e776133c00788521cd5e"
+    "bytes": 6985,
+    "sha256": "3510ef9f089f7404d4e5ec8cab85bd41a6246b4f26e4d6fbd9b640fbf5681f5e"
   },
   "docs/workflow/current.md": {
     "bytes": 9458,
     "sha256": "be7efb06669c7b7256e229b66d08eb0b07a1e18db80f331b6fb0c09a4512df90"
   },
   "docs/workflow/governance-debt.md": {
-    "bytes": 17819,
-    "sha256": "458c27d9da170875027c0730c858f310b7839afcba0fa29b64e380d99788f831"
+    "bytes": 17818,
+    "sha256": "3eac1acf246c8596137d8439fdd407a330d980d0d4b3477cb32f93a4f363f8dc"
   },
   "docs/workflow/repairs.md": {
-    "bytes": 9568,
-    "sha256": "6b1a40cbfa3cd3245eadf3e732d8fd01cfd506a0e35635e35387c08aa7dae987"
+    "bytes": 9567,
+    "sha256": "168226ed470a9be69c565302ff985862944b72d52419238b7ef65cb8b8044312"
   },
   "docs/workflow/writer.md": {
     "bytes": 8639,

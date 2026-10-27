@@ -82,4 +82,3 @@ Loom is intended to be "safe to sell commercially" (§11). A commercial product 
 - Sign the release artifacts: Windows Authenticode, macOS Developer ID signing with notarization, and signed Linux packages. Use a signed update channel if auto-update is added.
 - Declare a support period and define the 24-hour/72-hour CRA reporting path. Vulnerability reports already go through GitHub private vulnerability reporting, which is enabled for this repository (Security tab → Report a vulnerability).
 - Any future AI-assisted feature stays local-first (§1) and records each model's provenance and license. The owner reviews current EU AI Act transparency duties before shipping generated-content features. This is not legal advice.
-

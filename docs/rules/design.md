@@ -89,4 +89,3 @@ Apply the specific UI cards in the current-truth section, one at a time. These r
 - Precise properties need typed numeric entry with units, commit/cancel, and undo. Distinguish timeline zoom from scrolling. Show real sample peaks/time positions where an editor asks users to cut audio; never draw fictional media detail.
 - Give each transport action one primary control. Show progress for actual jobs, derive readiness from real prerequisites, and provide a readable way to resolve missing local tools. Keep one authoritative editing location per setting.
 - Keep visible keyboard focus and meaningful accessible names. Screenshots can reveal unreadable text; they cannot prove tab order, screen-reader output, or a complete keyboard workflow. Record untested accessibility work explicitly.
-

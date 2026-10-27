@@ -37,4 +37,3 @@ Tracks/regions, PCM/WAV support, synthesis/DSP, mixer/automation primitives, per
 ### Encode
 
 FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recovery, probe/conformance helpers, hardware-codec planning, and destination primitives exist. CODE-09 final no-overwrite protection and the UI-23/25 readiness paths are repaired in code; filesystem review, real encode fixtures, queue/settings hierarchy, watch-folder experience, hardware policy, pause/resume guarantees, exhaustive format support, and perceptual conformance remain incomplete or unverified.
-
