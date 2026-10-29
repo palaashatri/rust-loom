@@ -143,18 +143,9 @@ commercial = true
 redistributable = true
 attribution_required = true
 
-# Original Loom desktop app icon vector masters and their generated PNG exports.
-[[allow]]
-glob = "loom-core/crates/loom-ui/ui/app-icons/loom-*.svg"
-origin = "Original Loom app icon vectors, authored 2026-10-29"
-license = "MIT OR Apache-2.0 (repository project license)"
-commercial = true
-redistributable = true
-attribution_required = false
-
 [[allow]]
 glob = "loom-core/crates/loom-ui/ui/app-icons/loom-*.png"
-origin = "CairoSVG/Pillow raster exports of original Loom app icons"
+origin = "Approved original Loom generated icon PNGs and Pillow-derived resolution exports"
 license = "MIT OR Apache-2.0 (repository project license)"
 commercial = true
 redistributable = true
