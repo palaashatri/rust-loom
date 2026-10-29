@@ -80,6 +80,7 @@ export component SheetToolbarMenu inherits Rectangle {
                 checked: idx < root.checks.length && root.checks[idx];
                 checkable: idx < root.checkables.length && root.checkables[idx];
                 selected: idx == root.selected;
+                pointer-hovered => { root.selected = idx; }
                 activated => { root.command(root.ids[idx]); }
             }
         }

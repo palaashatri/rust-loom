@@ -24,7 +24,7 @@ from typing import Any
 
 try:
     import release  # type: ignore
-    from writer_pe_icon import validate_writer_pe_icon
+    from app_pe_icon import validate_application_pe_icon
 except Exception as exc:  # pragma: no cover - startup contract
     raise SystemExit(f"package validation error: cannot import release metadata: {exc}")
 
@@ -267,8 +267,8 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
                 raise RuntimeError(f"expected one extracted loom-{app}.exe, found {len(candidates)}")
             if pe_machine(candidates[0]) != expected_machine:
                 raise RuntimeError(f"PE architecture mismatch for loom-{app}")
-            if app == "writer":
-                validate_writer_pe_icon(candidates[0])
+            if app in release.PE_ICON_EMBEDDED_APPS:
+                validate_application_pe_icon(candidates[0], app)
 
     assertions.extend(
         [

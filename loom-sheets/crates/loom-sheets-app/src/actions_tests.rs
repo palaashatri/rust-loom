@@ -1025,7 +1025,7 @@ fn test_deep_audit_data_interop_csv_and_xlsx() {
 }
 
 #[test]
-fn test_deep_audit_native_macos_global_menu_bar() {
+fn test_native_menu_bar_reports_installation_status_and_preserves_actions() {
     let menu = NativeMenuBar::new();
     let bar = build_standard_menu_bar(
         "Loom Sheets",
@@ -1064,9 +1064,23 @@ fn test_deep_audit_native_macos_global_menu_bar() {
     assert!(bar.find_item("table.sort_asc").is_some());
     assert!(bar.find_item("file.export_csv").is_some());
 
-    // 2. Install menu bar
+    // 2. Install the menu bar and honor only confirmed native installation.
     assert!(menu.install_menu_bar(&bar).is_ok());
-    assert!(menu.is_installed());
+    let installation_status = menu.installation_status();
+    assert!(
+        matches!(
+            installation_status,
+            loom_desktop::menu::NativeMenuInstallationStatus::Installed
+                | loom_desktop::menu::NativeMenuInstallationStatus::MainThreadRequired
+                | loom_desktop::menu::NativeMenuInstallationStatus::VerificationUnavailable
+        ),
+        "unexpected native menu installation status: {installation_status:?}"
+    );
+    assert_eq!(
+        menu.is_installed(),
+        installation_status == loom_desktop::menu::NativeMenuInstallationStatus::Installed,
+        "is_installed must only report a confirmed native installation"
+    );
 
     // 3. Action sink registration and invocation
     let dispatched = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

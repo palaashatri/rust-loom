@@ -279,6 +279,51 @@ fn menus_open_below_the_toolbar_and_keyboard_runs_a_row() {
 }
 
 #[test]
+fn toolbar_menu_pointer_hover_syncs_the_selected_command_for_enter() {
+    use slint::platform::{Key, WindowEvent};
+
+    let app = launched();
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let italic_calls = calls.clone();
+    app.on_toggle_italic(move || italic_calls.borrow_mut().push("italic"));
+    let bold_calls = calls.clone();
+    app.on_toggle_bold(move || bold_calls.borrow_mut().push("bold"));
+
+    button(&app, "Text");
+    render(&app);
+    let italic = ElementHandle::find_by_accessible_label(&app, "Italic")
+        .find(|item| item.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("Italic row");
+    let position = italic.absolute_position();
+    let size = italic.size();
+    let point = slint::LogicalPosition::new(
+        position.x + size.width / 2.0,
+        position.y + size.height / 2.0,
+    );
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: point });
+    render(&app);
+
+    let enter: SharedString = Key::Return.into();
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: enter.clone(),
+    });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: enter });
+
+    assert_eq!(
+        *calls.borrow(),
+        ["italic"],
+        "Enter must activate the row selected by pointer hover"
+    );
+    assert_eq!(
+        app.get_toolbar_menu(),
+        0,
+        "the activated row closes the menu"
+    );
+}
+
+#[test]
 fn toolbar_toggle_rows_remain_checkable_when_off() {
     use slint::platform::{Key, WindowEvent};
 

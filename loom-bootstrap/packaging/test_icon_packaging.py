@@ -127,8 +127,8 @@ def _pe_with_resources(resources: dict[int, dict[int, dict[int, bytes]]]) -> byt
     return _pe_image_with_resource_section(_resource_section(resources))
 
 
-def _writer_pe_icon_fixture(fault: str | None = None) -> bytes:
-    ico = (ICONS / "loom-writer.ico").read_bytes()
+def _application_pe_icon_fixture(app: str, fault: str | None = None) -> bytes:
+    ico = (ICONS / f"loom-{app}.ico").read_bytes()
     _reserved, _kind, count = struct.unpack_from("<HHH", ico)
     group = bytearray(ico[:6])
     icon_resources = {}
@@ -149,6 +149,7 @@ def _writer_pe_icon_fixture(fault: str | None = None) -> bytes:
     return _pe_with_resources(resources)
 
 
+@pytest.mark.parametrize("app", release.PE_ICON_EMBEDDED_APPS)
 @pytest.mark.parametrize(
     ("fault", "error"),
     [
@@ -158,18 +159,19 @@ def _writer_pe_icon_fixture(fault: str | None = None) -> bytes:
         ("substituted", "substituted"),
     ],
 )
-def test_writer_pe_icon_validator_checks_group_reference_and_payload(
+def test_application_pe_icon_validator_checks_group_reference_and_payload(
     tmp_path: Path,
+    app: str,
     fault: str | None,
     error: str | None,
 ) -> None:
-    executable = tmp_path / "loom-writer.exe"
-    executable.write_bytes(_writer_pe_icon_fixture(fault))
+    executable = tmp_path / f"loom-{app}.exe"
+    executable.write_bytes(_application_pe_icon_fixture(app, fault))
     if error is None:
-        validate.validate_writer_pe_icon(executable)
+        validate.validate_application_pe_icon(executable, app)
     else:
         with pytest.raises(RuntimeError, match=error):
-            validate.validate_writer_pe_icon(executable)
+            validate.validate_application_pe_icon(executable, app)
 
 
 def test_linux_package_installs_original_pngs_and_matching_desktop_keys(

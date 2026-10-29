@@ -635,7 +635,7 @@ mod visual_tests {
             let (loom_overflow, _) =
                 assert_inset("More Loom", "LoomIconButton::state-outline", 28.0);
 
-            window.focus_image();
+            window.invoke_focus_image();
             let focused_image =
                 loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
                     .expect("render focused labeled toolbar item");
@@ -664,7 +664,7 @@ mod visual_tests {
                 "Edit selected state",
             );
 
-            window.focus_toolkit_overflow();
+            window.invoke_focus_toolkit_overflow();
             let focused_toolkit_overflow =
                 loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
                     .expect("render focused toolkit overflow action");
@@ -677,7 +677,7 @@ mod visual_tests {
                 "toolkit overflow focus state",
             );
 
-            window.focus_overflow();
+            window.invoke_focus_overflow();
             let focused_loom_overflow =
                 loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
                     .expect("render focused Loom overflow action");

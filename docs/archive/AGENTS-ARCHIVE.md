@@ -682,7 +682,7 @@ Sheets pushes its existing `--text-scale` value into `Theme.text-scale` through 
 **Done when:** A workbook with two tabs remains intact when Add Sheet is chosen and gains one tab. New Workbook invokes CODE-04's dirty-work decision and replaces the whole file only after consent. Every visible label accurately names its scope.
 ### UI-10 — Remove the contradictory permission to truncate action captions
 
-**P2 · Shared design contract · OPEN · Source-confirmed design debt.** `AGENTS.md` requires readable complete action labels, but `desktop-ui.toml` permits 10 px ellipsized toolbar captions. A small model can obey one rule and violate the other.
+**P2 · Shared design contract · FIXED (2026-10-29).** `AGENTS.md` requires readable complete action labels, but `desktop-ui.toml` permits 10 px ellipsized toolbar captions. A small model can obey one rule and violate the other.
 
 **Open:** `loom-design-bible/contracts/desktop-ui.toml`, `[component.labeled-toolbar-item]`, `[component.icon-over-label-toolbar-item]`, toolbar/ellipsis clauses; shared toolbar components and their contract audits.
 
@@ -691,6 +691,8 @@ Sheets pushes its existing `--text-scale` value into `Theme.text-scale` through 
 3. Update component measurement/overflow behavior and contract checks together. Preserve optional ellipsis for user content names where explicitly allowed.
 
 **Done when:** Long translated action labels and 1.25/1.5 text scale remain operable at the boundary widths 1179/1180, 1279/1280, and 1319/1320. The contract and UI tests reject clipped action captions. This is a source-confirmed rule conflict, not a claim that every captured toolbar currently clips.
+
+**Repair result and verification (2026-10-29):** The desktop contract, shared `IconOverLabelToolbarItem`, and foundation audit now agree on the shared 11 px/15 px caption tokens, intrinsic width for the complete measured label, no-wrap rendering, and no action-caption ellipsis. The focused `long_toolbar_captions_remain_complete_at_responsive_boundaries_and_scaled_sizes` test passed at 1.25× and 1.5× for 1179, 1180, 1279, 1280, 1319, and 1320 px. The focused toolbar state-inset test also passed after its Rust harness was updated to invoke the generated Slint callback methods. `PYTHONDONTWRITEBYTECODE=1 python3 loom-bootstrap/scripts/test_audit_ui_foundation.py` passed 19 tests; `python3 loom-bootstrap/scripts/audit-ui-foundation.py` and `python3 loom-bootstrap/scripts/audit-governance.py` passed. This fixes UI-10's bounded rule and regression; general native viewport/theme, accessibility, and human visual acceptance remain part of the Sheets/shared acceptance gate.
 
 ### UI-11 — Keep product help out of the user's document
 
