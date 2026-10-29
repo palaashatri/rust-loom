@@ -899,7 +899,7 @@ fn configure_responsive_width(app: &PresentApp, width: u32) -> bool {
     let inspector_available = !state.icon_only;
     app.set_icon_only_toolbar(state.icon_only);
     app.set_labeled_toolbar(state.labeled);
-    app.set_show_inspector(inspector_available);
+    app.set_inspector_available(inspector_available);
     app.set_labeled_export(state.labeled);
     if !state.overflow && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();

@@ -713,8 +713,10 @@ fn after_a_slide_is_chosen_from_the_strip_tab_reaches_its_first_object() {
 }
 
 #[test]
+
 fn f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back() {
     let s = launched();
+    s.app.set_show_inspector(true);
     let page = focus_weak(&s.app);
     press(&s.app, Key::F6);
     assert_eq!(
@@ -725,8 +727,8 @@ fn f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back() {
     press(&s.app, Key::F6);
     assert_eq!(
         focus_name(&s.app),
-        "Inspector Tabs",
-        "F6 again reaches the inspector"
+        "Layout Template",
+        "F6 again reaches the first control in the inspector"
     );
     press(&s.app, Key::F6);
     assert!(

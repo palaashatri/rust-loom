@@ -147,22 +147,31 @@ fn template_cards_use_content_width_in_both_directions() {
 }
 
 #[test]
-fn inspector_has_only_tab_label_and_accessible_name() {
+
+fn inspector_has_no_duplicate_mode_selector_and_keeps_accessible_name() {
     let session = launched();
     let app = &session.app;
     app.set_show_inspector(true);
     snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
     let inspector = element(app, "PresentInspector");
-    let labels = inspector
+    let duplicate_selectors = inspector
         .query_descendants()
-        .match_type_name("Text")
-        .match_predicate(|e| e.accessible_label().as_deref() == Some("Format"))
+        .match_accessible_role(AccessibleRole::RadioGroup)
+        .match_predicate(|e| e.accessible_label().as_deref() == Some("Inspector Tabs"))
         .find_all();
-    assert_eq!(
-        labels.len(),
-        1,
-        "Format should appear only in the tab strip"
+    assert!(
+        duplicate_selectors.is_empty(),
+        "mode selection stays in the toolbar, not inside the inspector"
     );
+    for label in ["Format", "Animate", "Document"] {
+        let toolbar_button = ElementHandle::find_by_accessible_label(app, label)
+            .find(|e| {
+                e.accessible_role() == Some(AccessibleRole::Button)
+                    && e.absolute_position().y < 100.0
+            })
+            .unwrap_or_else(|| panic!("toolbar mode button {label:?}"));
+        assert!(toolbar_button.size().width > 0.0);
+    }
     assert_eq!(inspector.accessible_role(), Some(AccessibleRole::Groupbox));
     assert_eq!(
         inspector.accessible_label().as_deref(),
@@ -413,40 +422,45 @@ fn rtl_inspector_hint_follows_reading_direction() {
 }
 
 #[test]
+
 fn high_contrast_segmented_control_draws_no_partial_dividers() {
     let session = launched();
     let app = &session.app;
     apply_theme(app, "high-contrast");
     configure_responsive_layout(app, (1920, 1200));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(0);
+    app.set_active_template_index(0);
     let image = snapshot_component(app, 1920.0, 1200.0, 1.0).unwrap();
-    // Inspector tabs: Format is selected, so the boundary Animate|Document is
-    // not next to the selection and is where a stray divider would show.
-    let segments: Vec<_> = ["Format", "Animate", "Document"]
+
+    // The Layout Template control is selected on Title; check the boundary
+    // between two unselected options in the inspector.
+    let segments: Vec<_> = ["Title", "Content", "2 Col", "Image"]
         .iter()
         .map(|label| {
             ElementHandle::find_by_accessible_label(app, label)
                 .find(|e| {
                     let p = e.absolute_position();
-                    // The inspector's tab strip, not the toolbar's identical labels.
-                    p.x > 1600.0 && p.y > 90.0 && p.y < 200.0
+                    e.accessible_role() == Some(AccessibleRole::Button)
+                        && p.x > 1600.0
+                        && p.y > 90.0
+                        && p.y < 220.0
                 })
-                .expect(label)
+                .unwrap_or_else(|| panic!("Layout Template option {label:?}"))
         })
         .collect();
     let mut dividers = Vec::new();
     for pair in segments.windows(2) {
         let right = pair[1].absolute_position();
-        let s = pair[1].size();
+        let size = pair[1].size();
         let x = right.x as u32;
-        let cy = (right.y + s.height / 2.0) as u32;
+        let cy = (right.y + size.height / 2.0) as u32;
         let differs = image.get_pixel(x, cy).0 != image.get_pixel(x, cy.saturating_sub(10)).0;
         dividers.push(differs);
     }
-    // Only the boundary away from the selected segment is judged: a selected
-    // segment is bounded by its own raised edge, which is not a divider.
     assert!(
         !dividers[1],
-        "high-contrast segmented control draws a divider between Animate and Document but not between Format and Animate"
+        "high-contrast segmented control draws no divider between two unselected options"
     );
 }
 

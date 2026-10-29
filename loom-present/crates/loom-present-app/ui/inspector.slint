@@ -225,7 +225,6 @@ export component PresentInspector inherits LoomPanel {
 
     /// Bumped by F6 to move keyboard focus to the Format / Animate / Document tabs.
     in property <int> focus-request: 0;
-    changed focus-request => { tabs.grab-focus(); }
 
     accessible-role: groupbox;
     accessible-label: "Slide inspector";
@@ -250,12 +249,6 @@ export component PresentInspector inherits LoomPanel {
             padding: Theme.tokens.space.md;
             alignment: start;
 
-            tabs := LoomSegmentedControl {
-                items: ["Format", "Animate", "Document"];
-                current <=> root.inspector-tab;
-                label: "Inspector Tabs";
-            }
-
             // The tab's content scrolls inside the panel, so a long Format tab or a large
             // text scale never grows the window's own layout.
             scroller := Flickable {
@@ -271,10 +264,14 @@ export component PresentInspector inherits LoomPanel {
                     width: scroller.viewport-width;
                     height: max(scroller.height, self.preferred-height);
                 if root.inspector-tab == 0 : VerticalLayout {
+                    property <int> focus-request-tick: root.focus-request;
+                    changed focus-request-tick => {
+                        if (focus-request-tick > 0) { layout-template-control.grab-focus(); }
+                    }
                     spacing: Theme.tokens.space.md;
 
                     InspectorHeading { title: "Slide Layout"; }
-                    LoomSegmentedControl {
+                    layout-template-control := LoomSegmentedControl {
                         items: ["Title", "Content", "2 Col", "Image"];
                         current <=> root.active-template-index;
                         label: "Layout Template";
@@ -419,9 +416,13 @@ export component PresentInspector inherits LoomPanel {
                 }
 
                 if root.inspector-tab == 1 : VerticalLayout {
+                    property <int> focus-request-tick: root.focus-request;
+                    changed focus-request-tick => {
+                        if (focus-request-tick > 0) { transition-type-control.grab-focus(); }
+                    }
                     spacing: Theme.tokens.space.md;
                     InspectorHeading { title: "Slide Transition"; }
-                    LoomSegmentedControl {
+                    transition-type-control := LoomSegmentedControl {
                         items: ["None", "Dissolve", "Push"];
                         current <=> root.transition-index;
                         label: "Transition Type";
@@ -437,9 +438,13 @@ export component PresentInspector inherits LoomPanel {
                 }
 
                 if root.inspector-tab == 2 : VerticalLayout {
+                    property <int> focus-request-tick: root.focus-request;
+                    changed focus-request-tick => {
+                        if (focus-request-tick > 0) { new-presentation-template.grab-focus(); }
+                    }
                     spacing: Theme.tokens.space.md;
                     InspectorHeading { title: "New Presentation"; }
-                    LoomButton {
+                    new-presentation-template := LoomButton {
                         icon: "format";
                         label: "New from Template...";
                         variant: "secondary";

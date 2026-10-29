@@ -46,7 +46,10 @@ export component PresentApp inherits Window {
     preferred-height: 800px;
     background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
 
+    // User-requested state survives widths where the inspector is unavailable.
     in-out property <bool> show-inspector: false;
+    in property <bool> inspector-available: true;
+    out property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in-out property <bool> show-navigator: true;
     in-out property <bool> view-menu-open: false;
     in-out property <bool> zoom-menu-open: false;
@@ -58,7 +61,7 @@ export component PresentApp inherits Window {
     changed show-navigator => { root.view-state-changed(); }
     changed show-notes-drawer => { root.view-state-changed(); }
     public function show-inspector-tab(tab: int) {
-        if (root.show-inspector && root.inspector-tab == tab) {
+        if (root.inspector-visible && root.inspector-tab == tab) {
             root.show-inspector = false;
         } else {
             root.inspector-tab = tab;
@@ -179,7 +182,7 @@ export component PresentApp inherits Window {
     }
     /// F6 walks the regions (slide, toolbar, inspector, strip); Shift+F6 walks back.
     public function cycle-region(start: int, backwards: bool) {
-        let inspector = root.show-inspector && !root.is-preview-mode;
+        let inspector = root.inspector-visible && !root.is-preview-mode;
         let strip = root.show-navigator && !root.is-preview-mode;
         let target = start == 0 ? (backwards ? (strip ? 3 : (inspector ? 2 : 1)) : 1)
             : start == 1 ? (backwards ? 0 : (inspector ? 2 : (strip ? 3 : 0)))
@@ -426,7 +429,7 @@ export component PresentApp inherits Window {
                 focus-view-tick: root.focus-view-tick;
                 focus-zoom-tick: root.focus-zoom-tick;
                 overflow: root.overflow-toolbar;
-                inspector-visible: root.show-inspector;
+                inspector-visible: root.inspector-visible;
                 inspector-tab: root.inspector-tab;
                 view-menu-open: root.view-menu-open;
                 zoom-menu-open: root.zoom-menu-open;
@@ -464,7 +467,7 @@ export component PresentApp inherits Window {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                if root.rtl && root.show-inspector && !root.is-preview-mode : inspector-rtl := PresentInspector {
+                if root.rtl && root.inspector-visible && !root.is-preview-mode : inspector-rtl := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
@@ -632,7 +635,7 @@ export component PresentApp inherits Window {
                     focus-active-tick: root.strip-focus-tick;
                 }
 
-                if !root.rtl && root.show-inspector && !root.is-preview-mode : inspector-ltr := PresentInspector {
+                if !root.rtl && root.inspector-visible && !root.is-preview-mode : inspector-ltr := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;

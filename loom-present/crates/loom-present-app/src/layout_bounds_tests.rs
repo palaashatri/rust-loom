@@ -99,6 +99,7 @@ fn the_presenter_shows_the_current_slide_first_and_largest_at_every_size() {
 #[test]
 fn inspector_headings_start_on_the_left_edge_of_the_controls() {
     let s = launched();
+    s.app.set_show_inspector(true);
     let root = s.app.root_element();
     let heading = labelled(root.clone(), |label| label == "Slide Layout")
         .into_iter()

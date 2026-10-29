@@ -33,7 +33,13 @@ fn launched(menu: Option<Rc<NativeMenuBar>>) -> (PresentApp, Rc<GuiState>) {
 }
 
 fn render(app: &PresentApp) {
-    let _ = snapshot_component(app, 1280.0, 800.0, 1.0).expect("render");
+    render_at(app, (1280, 800));
+}
+
+fn render_at(app: &PresentApp, size: (u32, u32)) {
+    app.window()
+        .set_size(slint::PhysicalSize::new(size.0, size.1));
+    let _ = snapshot_component(app, size.0 as f32, size.1 as f32, 1.0).expect("render");
 }
 
 fn root(app: &PresentApp) -> ElementHandle {
@@ -72,6 +78,21 @@ fn button(app: &PresentApp, label: &str) {
     toolbar_button(app, label).invoke_accessible_default_action();
 }
 
+fn focus_toolbar_button_by_keyboard(app: &PresentApp, size: (u32, u32), label: &str) {
+    for _ in 0..24 {
+        render_at(app, size);
+        let focused = crate::keyboard_flow_tests::focus_name(app);
+        if focused == label {
+            return;
+        }
+        crate::keyboard_flow_tests::press(app, slint::platform::Key::Tab);
+    }
+    panic!(
+        "keyboard did not reach toolbar button {label:?}; focused {:?}",
+        crate::keyboard_flow_tests::focus_name(app)
+    );
+}
+
 #[test]
 fn every_toolbar_item_is_a_named_button_in_three_groups() {
     let (app, _state) = launched(None);
@@ -106,10 +127,16 @@ fn every_toolbar_item_is_a_named_button_in_three_groups() {
 }
 
 #[test]
-fn inspector_is_open_by_default_and_tab_buttons_switch_or_close_it() {
+
+fn inspector_defaults_closed_and_toolbar_buttons_switch_or_close_it() {
     let (app, _state) = launched(None);
-    assert!(app.get_show_inspector());
+    assert!(!app.get_show_inspector());
+    assert!(!app.get_inspector_visible());
     assert_eq!(app.get_inspector_tab(), 0);
+
+    button(&app, "Format");
+    assert!(app.get_show_inspector());
+    assert!(app.get_inspector_visible());
 
     button(&app, "Animate");
     assert!(app.get_show_inspector());
@@ -127,6 +154,107 @@ fn inspector_is_open_by_default_and_tab_buttons_switch_or_close_it() {
     button(&app, "Format");
     assert!(app.get_show_inspector());
     assert_eq!(app.get_inspector_tab(), 0);
+}
+
+#[test]
+fn inspector_requested_visibility_survives_responsive_resizes() {
+    let (app, _state) = launched(None);
+    let sizes = [(1024, 720), (1280, 800), (1440, 900)];
+
+    assert!(
+        !app.get_show_inspector(),
+        "fresh Present state starts closed"
+    );
+    assert!(!app.get_inspector_visible());
+    for size in sizes {
+        let available = configure_responsive_width(&app, size.0);
+        render_at(&app, size);
+        assert_eq!(available, size.0 >= 1180);
+        assert!(!app.get_show_inspector(), "closed request at {} px", size.0);
+        assert!(
+            !app.get_inspector_visible(),
+            "closed effective state at {} px",
+            size.0
+        );
+    }
+
+    configure_responsive_width(&app, 1280);
+    button(&app, "Format");
+    assert!(
+        app.get_show_inspector(),
+        "toolbar request opens the inspector"
+    );
+
+    for size in sizes {
+        let available = configure_responsive_width(&app, size.0);
+        render_at(&app, size);
+        assert!(
+            app.get_show_inspector(),
+            "open request survives {} px",
+            size.0
+        );
+        assert_eq!(
+            app.get_inspector_visible(),
+            available,
+            "effective visibility follows availability at {} px",
+            size.0
+        );
+    }
+
+    configure_responsive_width(&app, 1440);
+    render_at(&app, (1440, 900));
+    button(&app, "Format");
+    for size in sizes {
+        configure_responsive_width(&app, size.0);
+        render_at(&app, size);
+        assert!(
+            !app.get_show_inspector(),
+            "closed request survives {} px",
+            size.0
+        );
+        assert!(!app.get_inspector_visible(), "closed at {} px", size.0);
+    }
+}
+
+#[test]
+fn inspector_mode_toolbar_buttons_remain_keyboard_reachable_at_responsive_widths() {
+    let (app, _state) = launched(None);
+    for size in [(1024, 720), (1280, 800), (1440, 900)] {
+        app.set_show_inspector(false);
+        app.set_inspector_tab(0);
+        let available = configure_responsive_width(&app, size.0);
+        render_at(&app, size);
+        assert_eq!(available, size.0 >= 1180);
+
+        app.invoke_focus_editor();
+        render_at(&app, size);
+        crate::keyboard_flow_tests::press(&app, slint::platform::Key::F6);
+        render_at(&app, size);
+        assert_eq!(
+            crate::keyboard_flow_tests::focus_name(&app),
+            "View",
+            "F6 reaches the toolbar at {} px",
+            size.0
+        );
+
+        for (label, tab) in [("Format", 0), ("Animate", 1), ("Document", 2)] {
+            focus_toolbar_button_by_keyboard(&app, size, label);
+            crate::keyboard_flow_tests::press(&app, slint::platform::Key::Return);
+            render_at(&app, size);
+            assert!(
+                app.get_show_inspector(),
+                "keyboard activation of {label} requests the inspector at {} px",
+                size.0
+            );
+            assert_eq!(app.get_inspector_tab(), tab);
+            assert_eq!(
+                app.get_inspector_visible(),
+                available,
+                "effective inspector visibility at {} px",
+                size.0
+            );
+        }
+    }
 }
 
 #[test]
