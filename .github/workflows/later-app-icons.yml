@@ -1,0 +1,41 @@
+name: Later-app icon exports
+
+on:
+  pull_request:
+    paths:
+      - 'loom-core/crates/loom-ui/ui/app-icons/**'
+      - 'loom-bootstrap/scripts/generate-app-icons.py'
+      - 'loom-bootstrap/contracts/assets.toml'
+      - '.github/workflows/later-app-icons.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install icon render tools
+        run: python -m pip install 'Pillow>=10,<13'
+      - name: Export the five application icons from approved PNG masters
+        run: python loom-bootstrap/scripts/generate-app-icons.py
+      - name: Validate all native icon formats
+        run: python loom-bootstrap/scripts/generate-app-icons.py --check
+      - name: Check asset provenance
+        run: python loom-bootstrap/scripts/audit-assets.py
+      - name: Upload rendered icons for PR inspection and packaging
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-later-app-icons
+          if-no-files-found: error
+          path: |
+            loom-core/crates/loom-ui/ui/app-icons/loom-photo.*
+            loom-core/crates/loom-ui/ui/app-icons/loom-motion.*
+            loom-core/crates/loom-ui/ui/app-icons/loom-video.*
+            loom-core/crates/loom-ui/ui/app-icons/loom-studio.*
+            loom-core/crates/loom-ui/ui/app-icons/loom-encode.*
