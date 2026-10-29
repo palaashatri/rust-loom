@@ -341,9 +341,12 @@ fn replace_selection(doc: &mut loom_writer_core::WriterDocument, insert: &str) -
 }
 
 pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
-    let Ok(clip) = read_clipboard() else {
-        app.set_status_left("Clipboard unavailable".into());
-        return;
+    let clip = match read_clipboard() {
+        Ok(clip) => clip,
+        Err(error) => {
+            app.set_status_left(slint::SharedString::from(format!("Paste failed: {error}")));
+            return;
+        }
     };
 
     let mut next = state.current.borrow().clone();

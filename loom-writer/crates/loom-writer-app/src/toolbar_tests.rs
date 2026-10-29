@@ -296,6 +296,65 @@ fn table_menu_enablement_tracks_selection_for_native_and_in_window_menus() {
 }
 
 #[test]
+fn picture_description_menu_command_reaches_the_dialog_and_keeps_the_empty_state_guard() {
+    set_platform();
+    let mut document = WriterDocument::new("picture-menu", "Picture Menu");
+    document.replace_paragraphs("Before the picture");
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(40, 20, image::Rgba([1, 2, 3, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let image = loom_writer_core::InlineImage::from_bytes("photo.png", png).unwrap();
+    let picture_id = document.insert_image_block(usize::MAX, image).unwrap();
+    let picture_offset = document
+        .blocks
+        .iter()
+        .take_while(|block| block.id != picture_id)
+        .map(|block| block.text.len_bytes() + 1)
+        .sum::<usize>();
+    document.set_selection(TextSelection::caret(picture_offset));
+
+    let (app, _state) = launched_with(document, scripted(vec![]));
+    let menu_item = local_menu::writer_menu_bar()
+        .find_item("picture.alt_text")
+        .cloned()
+        .expect("Picture Description is in the Table menu");
+    assert!(local_menu::SUPPORTED_COMMANDS.contains(&"picture.alt_text"));
+    assert!(
+        menu_item.is_enabled(),
+        "the menu keeps the supported action enabled"
+    );
+
+    button(&app, "Table");
+    row(&app, "Picture Description...");
+    let dialog = app.global::<PictureAlt>();
+    assert!(
+        dialog.get_open(),
+        "the menu command opens the production dialog"
+    );
+    assert_eq!(
+        dialog.get_value(),
+        "photo.png",
+        "the picture name prefills it"
+    );
+
+    dialog.invoke_cancel();
+    app.invoke_selection_changed(0, 0);
+    button(&app, "Table");
+    row(&app, "Picture Description...");
+    assert!(
+        !dialog.get_open(),
+        "no picture at the caret keeps the dialog closed"
+    );
+    assert!(
+        app.get_status_left()
+            .contains("Place the caret on a picture first"),
+        "{}",
+        app.get_status_left()
+    );
+}
+
+#[test]
 fn table_insert_size_callback_refreshes_both_menus_without_manual_sync() {
     let (app, state) = test_state(text_document("Body text"), scripted(vec![]));
     let menu = Arc::new(NativeMenuBar::new());

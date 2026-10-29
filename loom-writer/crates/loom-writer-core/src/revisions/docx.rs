@@ -1,16 +1,20 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
-use super::{RevisionBoundaryKind, RevisionKind, RevisionPayload, RevisionRecord, TrackedChanges};
+use super::{
+    RevisionBlockFormat, RevisionBlockFormatChange, RevisionBoundaryKind, RevisionKind,
+    RevisionPayload, RevisionRecord, TrackedChanges,
+};
 use crate::{RichBlock, WriterDocument};
 
 impl WriterDocument {
-    /// Installs DOCX revisions after normalizing IDs and validating their anchors.
     pub(crate) fn import_docx_revisions(
         &mut self,
         mut revisions: Vec<RevisionRecord>,
+        mut block_formats: BTreeMap<u64, RevisionBlockFormatChange>,
         recording: bool,
+        author: Option<String>,
     ) -> Result<(), String> {
-        if revisions.len() > super::MAX_REVISIONS {
+        if revisions.len() > super::MAX_REVISIONS || block_formats.len() > super::MAX_REVISIONS {
             return Err("DOCX has too many tracked changes".into());
         }
         if revisions.iter().filter(|revision| revision.id == 0).count() > 1 {
@@ -32,6 +36,15 @@ impl WriterDocument {
                 .ok_or_else(|| "DOCX revision IDs exceed the supported range".to_string())?;
             revision.id = replacement;
             ids.insert(replacement);
+            if let Some(change) = block_formats.remove(&0) {
+                block_formats.insert(replacement, change);
+            }
+        }
+        if block_formats
+            .keys()
+            .any(|revision_id| !ids.contains(revision_id))
+        {
+            return Err("DOCX paragraph-format revision ID collides or has no revision".into());
         }
         let next_id = ids
             .iter()
@@ -40,16 +53,18 @@ impl WriterDocument {
             .unwrap_or(0)
             .checked_add(1)
             .ok_or_else(|| "DOCX revision IDs exceed the supported range".to_string())?;
-        let author = revisions
-            .last()
-            .map(|revision| revision.author.clone())
-            .unwrap_or_else(|| self.tracked_changes.author.clone());
-        let tracked_changes = TrackedChanges {
+        let mut tracked_changes = TrackedChanges {
             recording,
-            author,
+            author: "Anonymous".into(),
             next_id,
             revisions,
+            block_formats,
         };
+        if let Some(author) = author {
+            tracked_changes
+                .set_author(author)
+                .map_err(|error| format!("invalid DOCX tracked-change author: {error}"))?;
+        }
         tracked_changes.validate_for_document(&self.blocks)?;
         self.tracked_changes = tracked_changes;
         Ok(())
@@ -172,6 +187,8 @@ impl WriterDocument {
         self.tracked_changes.validate_for_document(&self.blocks)?;
         let revisions = self.tracked_changes.revisions();
         let mut ranges = Vec::with_capacity(revisions.len());
+        let mut paragraph_format_ids = HashSet::new();
+        let mut paragraph_format_blocks = HashSet::new();
         let mut block_starts = Vec::with_capacity(self.blocks.len());
         let mut block_start = 0usize;
         for (index, block) in self.blocks.iter().enumerate() {
@@ -200,6 +217,14 @@ impl WriterDocument {
             let start_block = &self.blocks[start_index];
             let end_block = &self.blocks[end_index];
             let cross_paragraph = start_index != end_index;
+            if let Some(change) = self.tracked_changes.paragraph_format_change(revision.id) {
+                if cross_paragraph || !paragraph_format_blocks.insert(start_block.id) {
+                    return Err("DOCX supports one paragraph-format revision per paragraph".into());
+                }
+                Self::validate_docx_paragraph_format(change.before.kind, change.before.style)?;
+                Self::validate_docx_paragraph_format(change.after.kind, change.after.style)?;
+                paragraph_format_ids.insert(revision.id);
+            }
             let is_text_paragraph = |block: &RichBlock| {
                 block.typed_table().is_none()
                     && block.kind != crate::TABLE_BLOCK_KIND
@@ -359,11 +384,15 @@ impl WriterDocument {
                     );
                 }
             }
-            ranges.push((revision.kind, global_start, global_end));
+            ranges.push((revision.id, revision.kind, global_start, global_end));
         }
 
-        for (index, (kind, start, end)) in ranges.iter().copied().enumerate() {
-            for (other_kind, other_start, other_end) in ranges[index + 1..].iter().copied() {
+        for (index, (id, kind, start, end)) in ranges.iter().copied().enumerate() {
+            for (other_id, other_kind, other_start, other_end) in
+                ranges[index + 1..].iter().copied()
+            {
+                let paragraph_format_overlap =
+                    paragraph_format_ids.contains(&id) || paragraph_format_ids.contains(&other_id);
                 let replacement_pair = (kind == RevisionKind::Deletion
                     && other_kind == RevisionKind::Insertion
                     && start == end
@@ -383,6 +412,7 @@ impl WriterDocument {
                         && other_start < end);
                 if (overlaps || deletion_point_inside)
                     && !replacement_pair
+                    && !paragraph_format_overlap
                     && (matches!(kind, RevisionKind::Insertion | RevisionKind::Formatting)
                         || matches!(
                             other_kind,
@@ -394,6 +424,7 @@ impl WriterDocument {
                 if kind == other_kind
                     && matches!(kind, RevisionKind::Insertion | RevisionKind::Formatting)
                     && overlaps
+                    && !paragraph_format_overlap
                 {
                     return Err(
                         "DOCX export cannot represent overlapping revisions of one kind".into(),
@@ -423,6 +454,62 @@ impl WriterDocument {
         target
             .validate()
             .map_err(|error| format!("DOCX tracked-change payload is invalid: {error}"))
+    }
+
+    fn validate_docx_paragraph_format(
+        kind: &str,
+        style: &loom_text::ParagraphStyle,
+    ) -> Result<(), String> {
+        let is_heading = kind
+            .strip_prefix("heading")
+            .is_some_and(|level| matches!(level, "1" | "2" | "3" | "4" | "5" | "6"));
+        if kind != "paragraph" && !is_heading {
+            return Err(
+                "DOCX tracked paragraph formatting supports paragraph and heading1-heading6 only"
+                    .into(),
+            );
+        }
+        if style.list_level != 0 {
+            return Err("DOCX tracked paragraph formatting cannot preserve list levels".into());
+        }
+        if style.break_rule != loom_text::LineBreakRule::Word {
+            return Err(
+                "DOCX tracked paragraph formatting cannot preserve this line-break rule".into(),
+            );
+        }
+
+        let exact_twips = |value: f32, property: &str, allow_negative: bool| {
+            let twips = value * 20.0;
+            if !value.is_finite()
+                || (!allow_negative && value < 0.0)
+                || !twips.is_finite()
+                || twips.abs() > 31_680.0
+                || twips.round() != twips
+                || value != twips.round() / 20.0
+            {
+                return Err(format!(
+                    "DOCX tracked paragraph {property} is not exactly representable in twips"
+                ));
+            }
+            Ok(())
+        };
+        exact_twips(style.space_before, "space before", false)?;
+        exact_twips(style.space_after, "space after", false)?;
+        exact_twips(style.left_indent, "left indent", false)?;
+        exact_twips(style.right_indent, "right indent", false)?;
+        exact_twips(style.first_line_indent, "first-line indent", true)?;
+
+        let line = style.line_spacing * 240.0;
+        if !style.line_spacing.is_finite()
+            || !line.is_finite()
+            || line <= 0.0
+            || line > 31_680.0
+            || line.round() != line
+            || style.line_spacing != line.round() / 240.0
+        {
+            return Err("DOCX tracked paragraph line spacing is not exactly representable".into());
+        }
+        Ok(())
     }
 
     fn validate_docx_revision_style(style: &loom_text::CharacterStyle) -> Result<(), String> {

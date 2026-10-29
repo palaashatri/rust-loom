@@ -57,6 +57,59 @@ fn copy_reports_injected_clipboard_write_failure_without_mutating_document_or_hi
     );
 }
 
+#[test]
+fn paste_reports_injected_clipboard_read_failure_without_mutating_document_history_selection_or_recovery(
+) {
+    let _clipboard = MockClipboardGuard::new();
+    let mut document = loom_writer_core::WriterDocument::new("paste-failure", "Paste failure");
+    document.replace_paragraphs("alpha beta gamma");
+    let (app, state) = cut_test_app(document);
+    app.invoke_selection_changed(6, 10);
+
+    let before = state.current.borrow().clone();
+    let mut undo_source = before.clone();
+    undo_source.replace_paragraphs("alpha beta");
+    state
+        .history
+        .borrow_mut()
+        .record(undo_source, before.clone(), HistoryKind::DocumentAction, 0);
+    let selection_before = before.selection();
+    let history_before = {
+        let history = state.history.borrow();
+        (history.undo_len(), history.redo_len())
+    };
+    let recovery_before = (
+        crate::recovery::WRITES.with(|writes| writes.get()),
+        crate::recovery::DEFERRED.with(|deferred| deferred.is_stale()),
+        crate::recovery::DEFERRED.with(|deferred| deferred.epoch()),
+    );
+
+    loom_clipboard::set_mock_clipboard_fails(true);
+    super::paste_action(&app, &state);
+
+    assert_eq!(
+        app.get_status_left().as_str(),
+        "Paste failed: Clipboard is unavailable"
+    );
+    assert_eq!(*state.current.borrow(), before);
+    assert_eq!(state.current.borrow().selection(), selection_before);
+    assert_eq!(
+        {
+            let history = state.history.borrow();
+            (history.undo_len(), history.redo_len())
+        },
+        history_before
+    );
+    assert_eq!(
+        (
+            crate::recovery::WRITES.with(|writes| writes.get()),
+            crate::recovery::DEFERRED.with(|deferred| deferred.is_stale()),
+            crate::recovery::DEFERRED.with(|deferred| deferred.epoch()),
+        ),
+        recovery_before
+    );
+}
+
 fn tiny_png() -> Vec<u8> {
     let mut bytes = Vec::new();
     image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 80, 120, 255]))

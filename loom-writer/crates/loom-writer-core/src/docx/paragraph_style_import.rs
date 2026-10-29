@@ -1,6 +1,8 @@
 //! Paragraph properties represented by Writer's paragraph style model.
 
+use loom_package::zip::PackageArchive;
 use loom_text::{Alignment, ParagraphDirection, ParagraphStyle};
+use roxmltree::Node;
 
 use super::inline_style::{attribute_value, property_tag};
 
@@ -143,4 +145,356 @@ fn twips_value(tag: &str, name: &str) -> Result<Option<i32>, String> {
 
 fn twips_points(tag: &str, name: &str) -> Result<Option<f32>, String> {
     twips_value(tag, name).map(|value| value.map(|twips| twips as f32 / 20.0))
+}
+
+pub(super) struct ParagraphProperties {
+    pub current_xml: String,
+    pub previous_xml: Option<String>,
+    pub revision_id: Option<u64>,
+    pub revision_author: Option<String>,
+}
+
+pub(super) fn extract_paragraph_properties(
+    paragraph_xml: &str,
+    root_tag: &str,
+) -> Result<ParagraphProperties, String> {
+    let wrapped = format!("{root_tag}<w:body>{paragraph_xml}</w:body></w:document>");
+    let document = roxmltree::Document::parse(&wrapped)
+        .map_err(|error| format!("invalid DOCX paragraph XML: {error}"))?;
+    let paragraph = document
+        .root_element()
+        .descendants()
+        .find(|node| node.has_tag_name((super::xml::W_NS, "p")))
+        .ok_or_else(|| "DOCX paragraph element is missing".to_string())?;
+    let mut properties = paragraph
+        .children()
+        .filter(|node| node.has_tag_name((super::xml::W_NS, "pPr")));
+    let Some(ppr) = properties.next() else {
+        return Ok(ParagraphProperties {
+            current_xml: "<w:pPr/>".into(),
+            previous_xml: None,
+            revision_id: None,
+            revision_author: None,
+        });
+    };
+    if properties.next().is_some() {
+        return Err("DOCX paragraph has duplicate w:pPr elements".into());
+    }
+
+    let mut changes = ppr
+        .children()
+        .filter(|node| node.has_tag_name((super::xml::W_NS, "pPrChange")));
+    let change = changes.next();
+    if changes.next().is_some() {
+        return Err("DOCX paragraph has multiple w:pPrChange revisions".into());
+    }
+    if change.is_some() && ppr.attributes().next().is_some() {
+        return Err("DOCX paragraph properties have unsupported attributes".into());
+    }
+    let prefix_len = root_tag.len() + "<w:body>".len();
+    let current_properties = ppr
+        .children()
+        .filter(Node::is_element)
+        .filter(|node| !node.has_tag_name((super::xml::W_NS, "pPrChange")))
+        .map(|node| {
+            let range = node.range();
+            let start = range
+                .start
+                .checked_sub(prefix_len)
+                .ok_or_else(|| "invalid DOCX paragraph-property location".to_string())?;
+            let end = range
+                .end
+                .checked_sub(prefix_len)
+                .ok_or_else(|| "invalid DOCX paragraph-property location".to_string())?;
+            paragraph_xml
+                .get(start..end)
+                .map(str::to_owned)
+                .ok_or_else(|| "invalid DOCX paragraph-property boundary".to_string())
+        })
+        .collect::<Result<String, String>>()?;
+
+    let Some(change) = change else {
+        return Ok(ParagraphProperties {
+            current_xml: format!("<w:pPr>{current_properties}</w:pPr>"),
+            previous_xml: None,
+            revision_id: None,
+            revision_author: None,
+        });
+    };
+    validate_property_attributes(change, "pPrChange", &["id", "author"])?;
+    if change
+        .children()
+        .filter(Node::is_text)
+        .any(|node| node.text().is_some_and(|text| !text.trim().is_empty()))
+    {
+        return Err("DOCX w:pPrChange contains unsupported text".into());
+    }
+    let mut previous_properties = change
+        .children()
+        .filter(|node| node.has_tag_name((super::xml::W_NS, "pPr")));
+    let Some(previous_ppr) = previous_properties.next() else {
+        return Err("DOCX w:pPrChange is missing its previous w:pPr".into());
+    };
+    if previous_properties.next().is_some()
+        || previous_ppr
+            .descendants()
+            .any(|node| node.has_tag_name((super::xml::W_NS, "pPrChange")))
+        || change
+            .children()
+            .filter(Node::is_element)
+            .any(|node| !node.has_tag_name((super::xml::W_NS, "pPr")))
+    {
+        return Err("DOCX nested or duplicate paragraph-property revisions are unsupported".into());
+    }
+    let id = change
+        .attribute((super::xml::W_NS, "id"))
+        .ok_or_else(|| "DOCX pPrChange is missing w:id".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "DOCX pPrChange has an invalid w:id".to_string())?;
+    let author = change
+        .attribute((super::xml::W_NS, "author"))
+        .ok_or_else(|| "DOCX pPrChange is missing w:author".to_string())?
+        .to_owned();
+    let range = previous_ppr.range();
+    let start = range
+        .start
+        .checked_sub(prefix_len)
+        .ok_or_else(|| "invalid DOCX previous paragraph-property location".to_string())?;
+    let end = range
+        .end
+        .checked_sub(prefix_len)
+        .ok_or_else(|| "invalid DOCX previous paragraph-property location".to_string())?;
+    let previous_xml = paragraph_xml
+        .get(start..end)
+        .ok_or_else(|| "invalid DOCX previous paragraph-property boundary".to_string())?
+        .to_owned();
+
+    Ok(ParagraphProperties {
+        current_xml: format!("<w:pPr>{current_properties}</w:pPr>"),
+        previous_xml: Some(previous_xml),
+        revision_id: Some(id),
+        revision_author: Some(author),
+    })
+}
+
+pub(super) fn validate_tracked_paragraph_properties(
+    ppr_xml: &str,
+    root_tag: &str,
+    allow_paragraph_mark_revisions: bool,
+) -> Result<(), String> {
+    let wrapped = format!("{root_tag}<w:body><w:p>{ppr_xml}</w:p></w:body></w:document>");
+    let document = roxmltree::Document::parse(&wrapped)
+        .map_err(|error| format!("invalid DOCX paragraph properties: {error}"))?;
+    let ppr = document
+        .root_element()
+        .descendants()
+        .find(|node| node.has_tag_name((super::xml::W_NS, "pPr")))
+        .ok_or_else(|| "DOCX paragraph-property change is missing w:pPr".to_string())?;
+    if ppr.attributes().next().is_some() {
+        return Err("tracked DOCX paragraph properties have unsupported attributes".into());
+    }
+    for property in ppr.children().filter(Node::is_element) {
+        let (name, allowed_attributes): (&str, &[&str]) = match property.tag_name().name() {
+            "pStyle" => ("pStyle", &["val"]),
+            "bidi" => ("bidi", &["val"]),
+            "spacing" => ("spacing", &["before", "after", "line", "lineRule"]),
+            "ind" => ("ind", &["left", "right", "firstLine", "hanging"]),
+            "jc" => ("jc", &["val"]),
+            "rPr" if allow_paragraph_mark_revisions => {
+                validate_paragraph_mark_properties(property)?;
+                continue;
+            }
+            "numPr" => {
+                return Err(
+                    "tracked paragraph formatting revisions with list mappings are unsupported"
+                        .into(),
+                );
+            }
+            other => {
+                return Err(format!(
+                    "tracked DOCX paragraph property w:{other} is not supported"
+                ));
+            }
+        };
+        validate_property_attributes(property, name, allowed_attributes)?;
+        if name == "bidi" {
+            let value = property.attribute((super::xml::W_NS, "val"));
+            if value.is_some_and(|value| {
+                !["true", "1", "on", "false", "0", "off"]
+                    .iter()
+                    .any(|allowed| value.eq_ignore_ascii_case(allowed))
+            }) {
+                return Err("tracked DOCX paragraph bidi value is not supported".into());
+            }
+        } else if name == "jc" {
+            let value = property.attribute((super::xml::W_NS, "val"));
+            if value.is_none_or(|value| {
+                !["start", "end", "left", "center", "right", "both"]
+                    .iter()
+                    .any(|allowed| value.eq_ignore_ascii_case(allowed))
+            }) {
+                return Err("tracked DOCX paragraph alignment is not supported".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_property_attributes(
+    node: Node<'_, '_>,
+    property: &str,
+    allowed: &[&str],
+) -> Result<(), String> {
+    for attribute in node.attributes() {
+        if attribute.namespace() != Some(super::xml::W_NS) || !allowed.contains(&attribute.name()) {
+            return Err(format!(
+                "tracked DOCX paragraph property w:{property} has an unsupported attribute"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_paragraph_mark_properties(node: Node<'_, '_>) -> Result<(), String> {
+    if node.attributes().next().is_some() {
+        return Err("tracked DOCX paragraph-mark properties are unsupported".into());
+    }
+    for revision in node.children().filter(Node::is_element) {
+        if !revision.has_tag_name((super::xml::W_NS, "ins"))
+            && !revision.has_tag_name((super::xml::W_NS, "del"))
+        {
+            return Err("tracked DOCX paragraph-mark formatting is unsupported".into());
+        }
+        validate_property_attributes(revision, revision.tag_name().name(), &["id", "author"])?;
+    }
+    Ok(())
+}
+
+pub(super) struct LocalParagraphFormatChange {
+    pub(super) id: u64,
+    pub(super) author: String,
+    pub(super) before: crate::revisions::RevisionBlockFormat,
+    pub(super) after: crate::revisions::RevisionBlockFormat,
+}
+
+pub(super) fn paragraph_kind_from_docx(
+    ppr_xml: &str,
+    archive: Option<&PackageArchive>,
+    strict: bool,
+) -> Result<String, String> {
+    let mut kind = "paragraph".to_string();
+    if let Some(style_start) = ppr_xml.find("<w:pStyle") {
+        let Some(value) = super::import::extract_attribute_value(&ppr_xml[style_start..], "w:val")
+        else {
+            if strict {
+                return Err("tracked DOCX paragraph style is missing w:val".into());
+            }
+            return Ok(kind);
+        };
+        let value_lower = value.to_ascii_lowercase();
+        if strict {
+            if value_lower == "normal" {
+                kind = "paragraph".into();
+            } else if let Some(level) = value_lower.strip_prefix("heading") {
+                if matches!(level, "1" | "2" | "3" | "4" | "5" | "6") {
+                    kind = format!("heading{level}");
+                } else {
+                    return Err(
+                        "tracked DOCX paragraph style is not an exact heading mapping".into(),
+                    );
+                }
+            } else {
+                return Err(
+                    "tracked DOCX paragraph style is not an exact paragraph or heading mapping"
+                        .into(),
+                );
+            }
+        } else if value_lower.starts_with("heading") {
+            let num_str: String = value_lower.chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(level @ 1..=6) = num_str.parse::<u8>() {
+                kind = format!("heading{level}");
+            }
+        } else if value_lower == "title" {
+            kind = "heading1".to_string();
+        } else if value_lower == "subtitle" {
+            kind = "heading2".to_string();
+        } else if value_lower == "listparagraph"
+            || value_lower == "bullet"
+            || value_lower.contains("list")
+        {
+            kind = "list-bulleted".to_string();
+        }
+    }
+
+    if let Some(num_start) = ppr_xml.find("<w:numPr") {
+        if strict {
+            return Err(
+                "tracked paragraph formatting revisions with list mappings are unsupported".into(),
+            );
+        }
+        let num_end = ppr_xml[num_start..]
+            .find("</w:numPr>")
+            .unwrap_or(ppr_xml.len() - num_start);
+        let num_snippet = &ppr_xml[num_start..num_start + num_end];
+        if let Some(num_id_pos) = num_snippet.find("<w:numId") {
+            if let Some(num_id_val) =
+                super::import::extract_attribute_value(&num_snippet[num_id_pos..], "w:val")
+            {
+                if let Some(list_kind) =
+                    super::import::resolve_num_id_list_kind(archive, &num_id_val)
+                {
+                    kind = list_kind.to_string();
+                }
+            } else {
+                kind = "list-bulleted".to_string();
+            }
+        } else {
+            kind = "list-bulleted".to_string();
+        }
+    }
+    if strict && crate::list_levels::is_list_kind(&kind) {
+        return Err(
+            "tracked paragraph formatting revisions with list mappings are unsupported".into(),
+        );
+    }
+    Ok(kind)
+}
+
+pub(super) fn parse_tracked_paragraph_format_change(
+    properties: &ParagraphProperties,
+    root_tag: &str,
+    archive: Option<&PackageArchive>,
+    current_kind: &str,
+    current_style: &ParagraphStyle,
+) -> Result<Option<LocalParagraphFormatChange>, String> {
+    let Some(previous_xml) = properties.previous_xml.as_deref() else {
+        return Ok(None);
+    };
+    validate_tracked_paragraph_properties(&properties.current_xml, root_tag, true)?;
+    validate_tracked_paragraph_properties(previous_xml, root_tag, false)?;
+    let parsed_current_kind = paragraph_kind_from_docx(&properties.current_xml, archive, true)?;
+    if parsed_current_kind != current_kind {
+        return Err("tracked DOCX paragraph style is not represented by the live paragraph".into());
+    }
+    let before_kind = paragraph_kind_from_docx(previous_xml, archive, true)?;
+    let before_style = paragraph_style_from_docx(previous_xml)?;
+    let id = properties
+        .revision_id
+        .ok_or_else(|| "DOCX pPrChange is missing its revision ID".to_string())?;
+    let author = properties
+        .revision_author
+        .clone()
+        .ok_or_else(|| "DOCX pPrChange is missing its author".to_string())?;
+    Ok(Some(LocalParagraphFormatChange {
+        id,
+        author,
+        before: crate::revisions::RevisionBlockFormat {
+            kind: before_kind,
+            style: before_style,
+        },
+        after: crate::revisions::RevisionBlockFormat {
+            kind: current_kind.to_owned(),
+            style: current_style.clone(),
+        },
+    }))
 }

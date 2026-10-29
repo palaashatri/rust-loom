@@ -117,6 +117,10 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     }
     add("docProps/core.xml", package::core_properties(&doc.title))?;
     add("docProps/app.xml", package::app_properties())?;
+    add(
+        "docProps/custom.xml",
+        package::custom_properties(doc.tracked_changes.author()),
+    )?;
     for image in &body.images {
         archive.add(
             &format!("word/media/image{}.{}", image.index, image.extension),

@@ -22,6 +22,27 @@ The owner requested continuation of Claude's unfinished Writer work and explicit
 - [ ] M6, tracked changes: focused range-revision model and edit-transaction integration, serialization, review UI and DOCX import/export. Regression covers tracked insertion/deletion/replacement/formatting across blocks, accept/reject one/all, overlapping later edits, author identity, undo/redo, recovery/reopen, and DOCX unresolved revisions. Keep unresolved deleted content until explicit acceptance; final/review PDF modes must be deliberate.
 - [ ] M7, integration and acceptance: independent source review, current whole-workspace fmt/Clippy/tests and four audits, owner-authorized native workflows, isolated Linux checks where available, performance and export inspection. Update README claims and live blockers from evidence, commit/push coherent milestones, then clean only disposable outputs owned by this run. Retain `ACCEPTANCE_BLOCKED` for any unproven applicable gate.
 
+### M6 completion sequence — 2026-10-29 (plan only)
+
+M6 remains open. Complete the tracked-changes work in this order:
+
+1. Wire app-level bulk accept/reject actions to the atomic core APIs, with each action recorded as one history and recovery commit.
+2. Present paragraph-style before/after payloads in the review UI.
+3. Add focused tests for author and recording-setting behavior, including save/reopen.
+4. Separately verify recovery after process restart and DOCX round trips for unresolved revisions, including transport of the selected future author. Current DOCX import sets the tracked-changes author from the last imported revision, which loses a later future-author choice; preserve and test that setting independently of revision authors ([import path](../../loom-writer/crates/loom-writer-core/src/revisions/docx.rs)).
+
+#### DOCX subplan — Sol 6.1 Medium (plan only)
+
+- Export whole-block paragraph and heading formatting revisions through standard `w:pPrChange`; keep this paragraph-level payload out of inline run-revision handling.
+- On import, parse live/current `w:pPr` separately from the nested old `w:pPr` inside `w:pPrChange`, preventing old properties from leaking into current paragraph style. Keep one revision-ID namespace across inline and paragraph changes, and install imported revisions atomically after validation.
+- Fail closed for unsupported list mappings, multiple paragraph changes on one paragraph, and paragraph-property values that cannot be represented without loss.
+- Persist the future tracked-changes author as a standard custom property in `docProps/custom.xml`, including its package relationship and content-type declaration; validate the property during import.
+- **Source owners:** `loom-writer/crates/loom-writer-core/src/docx/body.rs` (paragraph revision emission); `docx/import.rs` and `docx/paragraph_style_import.rs` (current/old paragraph property parsing and validation); `revisions/docx.rs` (revision IDs, atomic installation, author import); `docx/package.rs` and `docx/mod.rs` (custom-property package part, relationship, content type, and export wiring).
+- **Required tests:** style, heading, and empty-paragraph round trips; separation of inline and paragraph revisions; a future author differing from revision authors, both with revisions and with no revisions; rejection of malformed IDs, malformed/lossy paragraph properties, ID collisions, and unsupported list mappings. Extend `docx/revision_tests.rs`, `docx/tests.rs`, and `revisions/tests.rs` as needed.
+- **References:** [Microsoft Learn: paragraph-property revisions](https://learn.microsoft.com/en-us/office/open-xml/word/how-to-accept-all-revisions-in-a-word-processing-document) and [Microsoft Learn: custom properties](https://learn.microsoft.com/en-us/office/open-xml/word/how-to-set-a-custom-property-in-a-word-processing-document).
+
+This is an implementation sequence only; no new result or finding-state change is recorded here.
+
 
 ## Checkpoints and remaining work
 

@@ -162,6 +162,17 @@ pub(super) fn build(
     let mut previous_numbered = false;
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut images: Vec<BodyImage> = Vec::new();
+    let paragraph_format_ids: Vec<u64> = doc
+        .tracked_changes
+        .revisions()
+        .iter()
+        .filter(|revision| {
+            doc.tracked_changes
+                .paragraph_format_change(revision.id)
+                .is_some()
+        })
+        .map(|revision| revision.id)
+        .collect();
     for (index, block) in doc.blocks.iter().enumerate() {
         if let Some(table) = &tables[index] {
             xml.push_str(&table_xml(
@@ -239,7 +250,26 @@ pub(super) fn build(
         xml.push_str("<w:p>");
         let paragraph_marks =
             paragraph_mark_revisions(index, &doc.blocks, doc.tracked_changes.revisions());
-        xml.push_str(&paragraph_properties(block, num_id, &paragraph_marks));
+        let paragraph_format = doc.tracked_changes.revisions().iter().find_map(|revision| {
+            (revision.anchor.block_id == block.id
+                && doc
+                    .tracked_changes
+                    .paragraph_format_change(revision.id)
+                    .is_some())
+            .then(|| {
+                let change = doc
+                    .tracked_changes
+                    .paragraph_format_change(revision.id)
+                    .expect("paragraph format was checked");
+                (revision, change.before.kind, change.before.style)
+            })
+        });
+        xml.push_str(&paragraph_properties(
+            block,
+            num_id,
+            &paragraph_marks,
+            paragraph_format,
+        ));
         xml.push_str(&paragraph_content(
             block,
             index,
@@ -247,6 +277,7 @@ pub(super) fn build(
             plan.anchors_for(block.id),
             footnotes.references_for(block.id),
             doc.tracked_changes.revisions(),
+            &paragraph_format_ids,
         ));
         xml.push_str("</w:p>");
     }
@@ -270,7 +301,7 @@ fn picture_paragraph(
 ) -> String {
     let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
     let name = xml::attr(&image.name);
-    let alignment = paragraph_properties(block, None, &[]);
+    let alignment = paragraph_properties(block, None, &[], None);
     format!(
         "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
         id = 1000 + index
@@ -278,7 +309,7 @@ fn picture_paragraph(
 }
 
 fn chart_xml_paragraph(rid: &str, chart_id: usize, block: &RichBlock) -> String {
-    let properties = paragraph_properties(block, None, &[]);
+    let properties = paragraph_properties(block, None, &[], None);
     format!(
         "<w:p>{properties}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\
          <wp:extent cx=\"5486400\" cy=\"3200400\"/>\
@@ -320,82 +351,57 @@ fn style_id(kind: &str) -> Option<String> {
     }
 }
 
-/// `<w:pPr>` for a block. Direct spacing and indentation are written only
-/// where the block differs from Writer's defaults, so the Word styles keep
-/// control of everything the user did not change.
 fn paragraph_properties(
     block: &RichBlock,
     num_id: Option<usize>,
     paragraph_marks: &[&RevisionRecord],
+    paragraph_format: Option<(&RevisionRecord, &str, &loom_text::ParagraphStyle)>,
 ) -> String {
-    let style = &block.style;
+    let mut out = paragraph_property_content(
+        &block.kind,
+        &block.style,
+        num_id,
+        block.effective_list_level(),
+        block.list_indent_pt(),
+        paragraph_marks,
+    );
+    if let Some((revision, old_kind, old_style)) = paragraph_format {
+        let old_properties =
+            paragraph_property_content(old_kind, old_style, None, old_style.list_level, 0.0, &[]);
+        out.push_str(&format!(
+            "<w:pPrChange {}><w:pPr>{old_properties}</w:pPr></w:pPrChange>",
+            revision_attributes(revision)
+        ));
+    }
+    if out.is_empty() {
+        out
+    } else {
+        format!("<w:pPr>{out}</w:pPr>")
+    }
+}
+
+fn paragraph_property_content(
+    kind: &str,
+    style: &loom_text::ParagraphStyle,
+    num_id: Option<usize>,
+    list_level: u8,
+    list_indent_pt: f32,
+    paragraph_marks: &[&RevisionRecord],
+) -> String {
     let mut out = String::new();
-    if let Some(id) = style_id(block.kind.as_str()) {
+    if let Some(id) = style_id(kind) {
         out.push_str(&format!("<w:pStyle w:val=\"{id}\"/>"));
     }
     if let Some(id) = num_id {
-        let level = block.effective_list_level();
         out.push_str(&format!(
-            "<w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{id}\"/></w:numPr>"
+            "<w:numPr><w:ilvl w:val=\"{list_level}\"/><w:numId w:val=\"{id}\"/></w:numPr>"
         ));
     }
-
     if let Some(direction) = bidi_property(style) {
         out.push_str(direction);
     }
-
-    let mut spacing = String::new();
-    let before = twips(style.space_before).max(0);
-    if before != 0 {
-        spacing.push_str(&format!(" w:before=\"{before}\""));
-    }
-    let after = twips(style.space_after).max(0);
-    if after != DEFAULT_SPACE_AFTER_TWIPS {
-        spacing.push_str(&format!(" w:after=\"{after}\""));
-    }
-    let line = (style.line_spacing * 240.0).round();
-    if line.is_finite() && line > 0.0 && line as i32 != DEFAULT_LINE_TWIPS {
-        spacing.push_str(&format!(
-            " w:line=\"{}\" w:lineRule=\"auto\"",
-            line.min(31_680.0) as i32
-        ));
-    }
-    if !spacing.is_empty() {
-        out.push_str(&format!("<w:spacing{spacing}/>"));
-    }
-
-    let left = twips(style.left_indent).max(0);
-    let right = twips(style.right_indent).max(0);
-    let first = twips(style.first_line_indent);
-    let mut indent = String::new();
-    if num_id.is_some() {
-        // The list level supplies a hanging indent; keep it when the user
-        // moved the item. A nested item sits 18 pt in per level, as Writer draws it.
-        let level_twips = twips(block.list_indent_pt());
-        if left != 0 || right != 0 || level_twips != 0 {
-            indent.push_str(&format!(" w:left=\"{}\"", 720 + level_twips + left));
-            if right != 0 {
-                indent.push_str(&format!(" w:right=\"{right}\""));
-            }
-            indent.push_str(" w:hanging=\"360\"");
-        }
-    } else {
-        if left != 0 {
-            indent.push_str(&format!(" w:left=\"{left}\""));
-        }
-        if right != 0 {
-            indent.push_str(&format!(" w:right=\"{right}\""));
-        }
-        if first > 0 {
-            indent.push_str(&format!(" w:firstLine=\"{first}\""));
-        } else if first < 0 {
-            indent.push_str(&format!(" w:hanging=\"{}\"", -first));
-        }
-    }
-    if !indent.is_empty() {
-        out.push_str(&format!("<w:ind{indent}/>"));
-    }
-
+    out.push_str(&paragraph_spacing_properties(style));
+    out.push_str(&paragraph_indent_properties(style, num_id, list_indent_pt));
     out.push_str(&format!(
         "<w:jc w:val=\"{}\"/>",
         match style.alignment {
@@ -420,10 +426,68 @@ fn paragraph_properties(
         }
         out.push_str("</w:rPr>");
     }
-    if out.is_empty() {
-        out
+    out
+}
+
+fn paragraph_spacing_properties(style: &loom_text::ParagraphStyle) -> String {
+    let mut spacing = String::new();
+    let before = twips(style.space_before).max(0);
+    if before != 0 {
+        spacing.push_str(&format!(" w:before=\"{before}\""));
+    }
+    let after = twips(style.space_after).max(0);
+    if after != DEFAULT_SPACE_AFTER_TWIPS {
+        spacing.push_str(&format!(" w:after=\"{after}\""));
+    }
+    let line = (style.line_spacing * 240.0).round();
+    if line.is_finite() && line > 0.0 && line as i32 != DEFAULT_LINE_TWIPS {
+        spacing.push_str(&format!(
+            " w:line=\"{}\" w:lineRule=\"auto\"",
+            line.min(31_680.0) as i32
+        ));
+    }
+    if spacing.is_empty() {
+        String::new()
     } else {
-        format!("<w:pPr>{out}</w:pPr>")
+        format!("<w:spacing{spacing}/>")
+    }
+}
+
+fn paragraph_indent_properties(
+    style: &loom_text::ParagraphStyle,
+    num_id: Option<usize>,
+    list_indent_pt: f32,
+) -> String {
+    let left = twips(style.left_indent).max(0);
+    let right = twips(style.right_indent).max(0);
+    let first = twips(style.first_line_indent);
+    let mut indent = String::new();
+    if num_id.is_some() {
+        let level_twips = twips(list_indent_pt);
+        if left != 0 || right != 0 || level_twips != 0 {
+            indent.push_str(&format!(" w:left=\"{}\"", 720 + level_twips + left));
+            if right != 0 {
+                indent.push_str(&format!(" w:right=\"{right}\""));
+            }
+            indent.push_str(" w:hanging=\"360\"");
+        }
+    } else {
+        if left != 0 {
+            indent.push_str(&format!(" w:left=\"{left}\""));
+        }
+        if right != 0 {
+            indent.push_str(&format!(" w:right=\"{right}\""));
+        }
+        if first > 0 {
+            indent.push_str(&format!(" w:firstLine=\"{first}\""));
+        } else if first < 0 {
+            indent.push_str(&format!(" w:hanging=\"{}\"", -first));
+        }
+    }
+    if indent.is_empty() {
+        String::new()
+    } else {
+        format!("<w:ind{indent}/>")
     }
 }
 
@@ -715,11 +779,12 @@ fn deleted_paragraph_mark_xml(block: &RichBlock, revision: &RevisionRecord) -> S
     let mut xml = String::new();
 
     xml.push_str("<w:p>");
-    xml.push_str(&paragraph_properties(&first, None, &[revision]));
+    xml.push_str(&paragraph_properties(&first, None, &[revision], None));
     xml.push_str(&paragraph_content(
         &first,
         0,
         std::slice::from_ref(&first),
+        &[],
         &[],
         &[],
         &[],
@@ -728,7 +793,7 @@ fn deleted_paragraph_mark_xml(block: &RichBlock, revision: &RevisionRecord) -> S
     xml.push_str("</w:p>");
 
     xml.push_str("<w:p>");
-    xml.push_str(&paragraph_properties(&second, None, &[]));
+    xml.push_str(&paragraph_properties(&second, None, &[], None));
     push_deleted_revision_slice(
         &mut xml,
         revision,
@@ -739,6 +804,7 @@ fn deleted_paragraph_mark_xml(block: &RichBlock, revision: &RevisionRecord) -> S
         &second,
         0,
         std::slice::from_ref(&second),
+        &[],
         &[],
         &[],
         &[],
@@ -790,6 +856,7 @@ fn paragraph_revision_segments<'a>(
     block_index: usize,
     blocks: &'a [RichBlock],
     revisions: &'a [RevisionRecord],
+    paragraph_format_ids: &[u64],
 ) -> Vec<(&'a RevisionRecord, usize, usize, usize)> {
     let block = &blocks[block_index];
     let block_start = blocks[..block_index]
@@ -798,6 +865,9 @@ fn paragraph_revision_segments<'a>(
         .sum::<usize>();
     let mut segments = Vec::new();
     for revision in revisions {
+        if paragraph_format_ids.contains(&revision.id) {
+            continue;
+        }
         let Some(start_index) = blocks
             .iter()
             .position(|candidate| candidate.id == revision.anchor.block_id)
@@ -890,9 +960,11 @@ fn paragraph_content(
     anchors: &[Anchor],
     footnotes: &[FootnoteReference],
     all_revisions: &[RevisionRecord],
+    paragraph_format_ids: &[u64],
 ) -> String {
     let text = block.text.as_str();
-    let revisions = paragraph_revision_segments(block_index, blocks, all_revisions);
+    let revisions =
+        paragraph_revision_segments(block_index, blocks, all_revisions, paragraph_format_ids);
     let mut cuts: BTreeSet<usize> = BTreeSet::from([0, text.len()]);
     let boundaries = block
         .runs
@@ -1123,6 +1195,7 @@ fn cell_content(
         &[],
         footnotes,
         &local_revisions,
+        &[],
     )
 }
 

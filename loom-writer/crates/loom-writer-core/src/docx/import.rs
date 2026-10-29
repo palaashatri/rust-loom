@@ -11,7 +11,9 @@ use roxmltree::Node;
 
 use super::header_footer;
 use super::inline_style::{attribute_value, property_tag_with_start, writer_color};
+use super::paragraph_style_import::LocalParagraphFormatChange;
 use super::xml::W_NS;
+use crate::revisions::{RevisionBlockFormat, RevisionBlockFormatChange};
 use crate::{
     PageAppearance, PageOrientation, PageSetup, RevisionAnchor, RevisionBoundaryKind, RevisionKind,
     RevisionPayload, RevisionRecord, RichBlock, TrackedChanges, WriterDocument,
@@ -212,7 +214,7 @@ pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
         .and_then(extract_core_title)
         .unwrap_or_else(|| "Untitled Document".to_string());
 
-    let (blocks, references, revisions, comment_anchors) =
+    let (blocks, references, revisions, block_formats, comment_anchors) =
         parse_document_body_and_references(xml, Some(&archive))?;
     let document = roxmltree::Document::parse(xml)
         .map_err(|error| format!("invalid DOCX document.xml: {error}"))?;
@@ -228,6 +230,7 @@ pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
     let footnotes = super::footnotes::import_document(&archive, &references, &blocks)?;
     let comments = super::comments_import::import_document(&archive, &comment_anchors, &blocks)?;
     let recording = import_track_revisions(&archive)?;
+    let tracked_changes_author = super::package::import_tracked_changes_author(&archive)?;
 
     let mut doc = WriterDocument::new("imported-doc", title);
     doc.page = import_page_setup(xml)?;
@@ -238,7 +241,7 @@ pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
     doc.header_footer
         .validate_for_page_style(&doc.page.page_style())
         .map_err(str::to_owned)?;
-    doc.import_docx_revisions(revisions, recording)?;
+    doc.import_docx_revisions(revisions, block_formats, recording, tracked_changes_author)?;
 
     Ok(doc)
 }
@@ -365,7 +368,7 @@ pub fn parse_document_body_with_archive(
     xml: &str,
     archive: Option<&PackageArchive>,
 ) -> Result<Vec<RichBlock>, String> {
-    parse_document_body_and_references(xml, archive).map(|(blocks, _, _, _)| blocks)
+    parse_document_body_and_references(xml, archive).map(|(blocks, _, _, _, _)| blocks)
 }
 
 fn parse_document_body_and_references(
@@ -376,6 +379,7 @@ fn parse_document_body_and_references(
         Vec<RichBlock>,
         Vec<FootnoteReference>,
         Vec<RevisionRecord>,
+        std::collections::BTreeMap<u64, RevisionBlockFormatChange>,
         Vec<super::comments_import::CommentAnchor>,
     ),
     String,
@@ -403,6 +407,7 @@ fn parse_document_body_and_references(
     let mut blocks = Vec::new();
     let mut references = Vec::new();
     let mut revisions: Vec<RevisionRecord> = Vec::new();
+    let mut block_formats = std::collections::BTreeMap::new();
     let mut comment_anchors = Vec::new();
     let mut cursor = 0usize;
     let mut next_id = 1u64;
@@ -438,6 +443,7 @@ fn parse_document_body_and_references(
                 let p_abs = cursor + p_rel;
                 let mut local_references = Vec::new();
                 let mut local_revisions = Vec::new();
+                let mut local_paragraph_formats = Vec::new();
                 if let Some((block_opt, next_cursor)) = parse_paragraph(
                     body_xml,
                     p_abs,
@@ -446,6 +452,7 @@ fn parse_document_body_and_references(
                     root_tag,
                     &mut local_references,
                     &mut local_revisions,
+                    &mut local_paragraph_formats,
                     &mut comment_anchors,
                 )? {
                     if let Some(block) = block_opt {
@@ -456,6 +463,17 @@ fn parse_document_body_and_references(
                                 offset: reference.offset,
                             }
                         }));
+                        if local_revisions.iter().any(|revision| {
+                            block_formats.contains_key(&revision.id)
+                                || local_paragraph_formats
+                                    .iter()
+                                    .any(|change| change.id == revision.id)
+                        }) {
+                            return Err(
+                                "DOCX revision ID collides between inline and paragraph formatting"
+                                    .into(),
+                            );
+                        }
                         for revision in local_revisions {
                             if let Some(existing) = revisions
                                 .iter_mut()
@@ -470,6 +488,41 @@ fn parse_document_body_and_references(
                             } else {
                                 revisions.push(revision);
                             }
+                        }
+                        for change in local_paragraph_formats {
+                            if revisions.iter().any(|revision| revision.id == change.id)
+                                || block_formats.contains_key(&change.id)
+                            {
+                                return Err(
+                                    "DOCX reuses a revision ID for paragraph formatting".into()
+                                );
+                            }
+                            let payload = RevisionPayload {
+                                text: block.text.as_str().to_owned(),
+                                runs: block.runs.clone(),
+                            };
+                            revisions.push(RevisionRecord {
+                                id: change.id,
+                                author: change.author,
+                                anchor: RevisionAnchor {
+                                    block_id: block.id,
+                                    start: 0,
+                                    end: block.text.len_bytes(),
+                                    end_block_id: None,
+                                    prefix_sha256: crate::zip::sha256(&[]),
+                                },
+                                kind: RevisionKind::Formatting,
+                                boundary_kind: RevisionBoundaryKind::Unknown,
+                                before: Some(payload.clone()),
+                                after: Some(payload),
+                            });
+                            block_formats.insert(
+                                change.id,
+                                RevisionBlockFormatChange {
+                                    before: change.before,
+                                    after: change.after,
+                                },
+                            );
                         }
                         blocks.push(block);
                         next_id += 1;
@@ -514,7 +567,13 @@ fn parse_document_body_and_references(
         &comment_anchors,
     )?;
     super::comments_import::validate_document_markers(xml, &comment_anchors)?;
-    Ok((blocks, references, revisions, comment_anchors))
+    Ok((
+        blocks,
+        references,
+        revisions,
+        block_formats,
+        comment_anchors,
+    ))
 }
 
 fn find_tag_start(xml: &str, tag_name: &str) -> Option<usize> {
@@ -630,6 +689,23 @@ fn validate_revision_markup_scope(xml: &str) -> Result<(), String> {
             }
             continue;
         }
+        if name == "pPrChange" {
+            let is_paragraph_property_change = node.parent().is_some_and(|ppr| {
+                ppr.has_tag_name((W_NS, "pPr"))
+                    && ppr
+                        .parent()
+                        .is_some_and(|paragraph| paragraph.has_tag_name((W_NS, "p")))
+            });
+            if !is_paragraph_property_change {
+                return Err("DOCX pPrChange is outside a paragraph's direct w:pPr".into());
+            }
+            if has_ancestor("tbl") {
+                return Err(
+                    "tracked paragraph formatting inside DOCX tables is unsupported".into(),
+                );
+            }
+            continue;
+        }
         if name == "rPrChange" {
             if !has_ancestor("r") || has_ancestor("pPr") {
                 return Err("DOCX run-property revision is outside a supported run".into());
@@ -727,6 +803,9 @@ fn collect_revision_runs<'a, 'input>(
             if runs.len() == count {
                 return Err("DOCX tracked change has no supported text runs".into());
             }
+            return Ok(());
+        }
+        if name == "pPrChange" {
             return Ok(());
         }
         if name == "rPrChange" && has_paragraph_properties_ancestor(node) {
@@ -1154,6 +1233,7 @@ fn parse_paragraph(
     root_tag: &str,
     footnotes: &mut Vec<LocalFootnoteReference>,
     revisions: &mut Vec<RevisionRecord>,
+    paragraph_formats: &mut Vec<LocalParagraphFormatChange>,
     comment_anchors: &mut Vec<super::comments_import::CommentAnchor>,
 ) -> Result<Option<(Option<RichBlock>, usize)>, String> {
     let Some(tag_open_end) = xml[start..].find('>') else {
@@ -1181,7 +1261,11 @@ fn parse_paragraph(
     ]
     .iter()
     .any(|tag| p_xml.contains(tag));
-    let paragraph_style = super::paragraph_style_import::paragraph_style_from_docx(p_xml)?;
+    let paragraph_properties =
+        super::paragraph_style_import::extract_paragraph_properties(p_xml, root_tag)?;
+    let paragraph_style = super::paragraph_style_import::paragraph_style_from_docx(
+        &paragraph_properties.current_xml,
+    )?;
     let local_comment_anchors = super::comments_import::paragraph_anchors(p_xml, root_tag, id)?;
 
     // A picture: `<a:blip r:embed>` in a drawing, bytes from the package.
@@ -1247,50 +1331,12 @@ fn parse_paragraph(
         }
     }
 
-    // Style & Kind
-    let mut kind = "paragraph".to_string();
-    if let Some(style_start) = p_xml.find("<w:pStyle") {
-        if let Some(val) = extract_attribute_value(&p_xml[style_start..], "w:val") {
-            let val_lower = val.to_ascii_lowercase();
-            if val_lower.starts_with("heading") {
-                let num_str: String = val_lower.chars().filter(|c| c.is_ascii_digit()).collect();
-                if let Ok(lvl) = num_str.parse::<u8>() {
-                    if (1..=6).contains(&lvl) {
-                        kind = format!("heading{lvl}");
-                    }
-                }
-            } else if val_lower == "title" {
-                kind = "heading1".to_string();
-            } else if val_lower == "subtitle" {
-                kind = "heading2".to_string();
-            } else if val_lower == "listparagraph"
-                || val_lower == "bullet"
-                || val_lower.contains("list")
-            {
-                kind = "list-bulleted".to_string();
-            }
-        }
-    }
-
-    // Numbering / list detection
-    if let Some(num_start) = p_xml.find("<w:numPr") {
-        let num_end = p_xml[num_start..]
-            .find("</w:numPr>")
-            .unwrap_or(p_xml.len() - num_start);
-        let num_snippet = &p_xml[num_start..num_start + num_end];
-        if let Some(num_id_pos) = num_snippet.find("<w:numId") {
-            if let Some(num_id_val) = extract_attribute_value(&num_snippet[num_id_pos..], "w:val") {
-                if let Some(list_kind) = resolve_num_id_list_kind(archive, &num_id_val) {
-                    kind = list_kind.to_string();
-                }
-            } else {
-                kind = "list-bulleted".to_string();
-            }
-        } else {
-            kind = "list-bulleted".to_string();
-        }
-    }
-
+    // The live paragraph properties exclude the nested previous pPr in pPrChange.
+    let mut kind = super::paragraph_style_import::paragraph_kind_from_docx(
+        &paragraph_properties.current_xml,
+        archive,
+        false,
+    )?;
     let mut paragraph_style = paragraph_style;
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
@@ -1312,9 +1358,26 @@ fn parse_paragraph(
     )?;
     table::append_paragraph_mark_revisions(root_tag, p_xml, &text, &mut local_revisions)?;
 
+    let local_paragraph_format =
+        super::paragraph_style_import::parse_tracked_paragraph_format_change(
+            &paragraph_properties,
+            root_tag,
+            archive,
+            &kind,
+            &paragraph_style,
+        )?;
+    if local_paragraph_format.as_ref().is_some_and(|change| {
+        local_revisions
+            .iter()
+            .any(|revision| revision.id == change.id)
+    }) {
+        return Err("DOCX paragraph-format revision ID collides with an inline revision".into());
+    }
+
     if text.trim().is_empty()
         && footnotes.is_empty()
         && local_revisions.is_empty()
+        && local_paragraph_format.is_none()
         && local_comment_anchors.is_empty()
     {
         return Ok(Some((None, next_cursor)));
@@ -1331,6 +1394,9 @@ fn parse_paragraph(
     block.style = paragraph_style;
     block.runs = runs;
     revisions.extend(local_revision_records(id, &text, local_revisions)?);
+    if let Some(change) = local_paragraph_format {
+        paragraph_formats.push(change);
+    }
     Ok(Some((Some(block), next_cursor)))
 }
 
@@ -1507,7 +1573,7 @@ fn trim_text_runs(runs: Vec<TextRun>) -> Vec<TextRun> {
     out
 }
 
-fn extract_attribute_value(tag_snippet: &str, attr_name: &str) -> Option<String> {
+pub(super) fn extract_attribute_value(tag_snippet: &str, attr_name: &str) -> Option<String> {
     attribute_value(tag_snippet, attr_name)
 }
 
@@ -1544,7 +1610,7 @@ fn parse_rels(rels_xml: &str) -> std::collections::BTreeMap<String, String> {
     map
 }
 
-fn resolve_num_id_list_kind(
+pub(super) fn resolve_num_id_list_kind(
     archive: Option<&PackageArchive>,
     num_id: &str,
 ) -> Option<&'static str> {

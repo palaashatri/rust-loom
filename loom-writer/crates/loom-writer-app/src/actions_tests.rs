@@ -242,6 +242,62 @@ fn failed_pdf_export_preserves_document_and_history() {
 }
 
 #[test]
+fn failed_pdf_write_reports_the_filesystem_cause_and_preserves_document_and_history() {
+    let document = text_document("failed export");
+    let root = std::env::temp_dir().join(format!(
+        "loom-writer-pdf-write-failure-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create isolated PDF failure root");
+    let blocker = root.join("regular-file");
+    std::fs::write(&blocker, b"not a directory")
+        .expect("create regular file as destination parent");
+    let destination = blocker.join("failed.pdf");
+    let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [],
+        [Some(destination.clone())],
+    ));
+    let (app, state) = test_state(document.clone(), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    {
+        let mut history = state.history.borrow_mut();
+        history.record(
+            text_document("before export"),
+            document.clone(),
+            HistoryKind::DocumentAction,
+            0,
+        );
+    }
+    apply_state(&app, &state);
+    let before = state.current.borrow().clone();
+    let before_history = history_shape(&state.history.borrow());
+
+    app.invoke_export_pdf();
+    let review = app.global::<WriterReviewState>();
+    assert!(review.get_pdf_export_open());
+    review.invoke_export_pdf_view(0);
+
+    let status = app.get_status_left();
+    let prefix = format!("Export failed: atomic write {}: ", destination.display());
+    assert!(
+        status.as_str().starts_with(&prefix),
+        "filesystem failure detail missing from status: {}",
+        status.as_str()
+    );
+    assert!(
+        status.as_str().len() > prefix.len(),
+        "filesystem cause missing from status: {}",
+        status.as_str()
+    );
+    assert_eq!(*state.current.borrow(), before);
+    assert_eq!(history_shape(&state.history.borrow()), before_history);
+    assert!(!destination.exists(), "failed export must not create a PDF");
+
+    std::fs::remove_dir_all(&root).expect("remove isolated PDF failure root");
+}
+
+#[test]
 fn viewport_callbacks_update_controller_and_clamp_inputs() {
     let document = text_document("viewport");
     let dialogs: Rc<dyn FileDialogService> =

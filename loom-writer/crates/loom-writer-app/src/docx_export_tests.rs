@@ -87,6 +87,61 @@ fn cancel_and_empty_destination_leave_the_document_alone() {
 }
 
 #[test]
+fn filesystem_write_failure_reports_the_cause_without_mutating_document_or_history() {
+    let document = text_document("keep me");
+    let root = scratch_dir("write-failure");
+    let blocker = root.join("regular-file");
+    std::fs::write(&blocker, b"not a directory")
+        .expect("create regular file as destination parent");
+    let destination = blocker.join("failed.docx");
+    let (app, state) = test_state(document.clone(), scripted(vec![Some(destination.clone())]));
+    wire_writer_shared_callbacks(&app, &state, None);
+    {
+        let mut history = state.history.borrow_mut();
+        history.record(
+            text_document("before export"),
+            document.clone(),
+            HistoryKind::DocumentAction,
+            0,
+        );
+    }
+    let before_document = state.current.borrow().clone();
+    let before_history = {
+        let history = state.history.borrow();
+        (history.undo_len(), history.redo_len())
+    };
+
+    app.invoke_export_docx();
+
+    let status = app.get_status_left();
+    let prefix = format!("Export failed: atomic write {}: ", destination.display());
+    assert!(
+        status.as_str().starts_with(&prefix),
+        "filesystem failure detail missing from status: {}",
+        status.as_str()
+    );
+    assert!(
+        status.as_str().len() > prefix.len(),
+        "filesystem cause missing from status: {}",
+        status.as_str()
+    );
+    assert_eq!(*state.current.borrow(), before_document);
+    assert_eq!(
+        {
+            let history = state.history.borrow();
+            (history.undo_len(), history.redo_len())
+        },
+        before_history
+    );
+    assert!(
+        !destination.exists(),
+        "failed export must not create a DOCX"
+    );
+
+    std::fs::remove_dir_all(&root).expect("remove isolated DOCX failure root");
+}
+
+#[test]
 fn an_empty_document_cannot_be_exported() {
     let dir = scratch_dir("empty");
     let target = dir.join("never.docx");

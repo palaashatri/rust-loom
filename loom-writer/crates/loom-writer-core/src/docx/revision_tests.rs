@@ -3,6 +3,7 @@ use crate::{
     RevisionAnchor, RevisionBoundaryKind, RevisionKind, RevisionPayload, RevisionRecord, RichBlock,
     TrackedChanges, WriterDocument,
 };
+use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphDirection, StyleRun};
 
 fn payload(text: &str) -> RevisionPayload {
     RevisionPayload {
@@ -20,6 +21,14 @@ fn document_xml(bytes: &[u8]) -> String {
             .to_vec(),
     )
     .expect("DOCX document part is UTF-8")
+}
+
+fn import_document_xml(xml: &str) -> Result<WriterDocument, String> {
+    let mut archive = PackageArchive::new();
+    archive
+        .add("word/document.xml", xml.as_bytes().to_vec())
+        .map_err(|error| error.to_string())?;
+    import_docx(&archive.to_bytes().map_err(|error| error.to_string())?)
 }
 
 fn assert_revisions_round_trip(expected: &WriterDocument, actual: &WriterDocument) {
@@ -282,7 +291,9 @@ fn cross_paragraph_formatting_round_trips_payload_styles_and_boundary() {
                 before: Some(before),
                 after: Some(after),
             }],
+            std::collections::BTreeMap::new(),
             true,
+            None,
         )
         .expect("install cross-paragraph formatting");
 
@@ -315,4 +326,339 @@ fn overlapping_insertions_are_rejected_before_docx_output() {
         error.contains("overlapping revisions"),
         "unexpected error: {error}"
     );
+}
+
+#[test]
+fn paragraph_heading_and_empty_paragraph_format_revisions_round_trip() {
+    let mut before = WriterDocument::new("paragraph-format", "Paragraph format revisions");
+    before
+        .blocks
+        .push(RichBlock::new(1, "paragraph", "body text"));
+    before
+        .blocks
+        .push(RichBlock::new(2, "paragraph", "heading text"));
+    before.blocks.push(RichBlock::new(3, "paragraph", ""));
+    before
+        .tracked_changes
+        .set_author("Paragraph Reviewer")
+        .unwrap();
+    before.tracked_changes.set_recording(true);
+
+    let mut changed = before.clone();
+    changed.blocks[0].style.alignment = Alignment::Center;
+    changed.blocks[0].style.space_before = 4.0;
+    changed.blocks[1].kind = "heading2".into();
+    changed.blocks[1].style.direction = ParagraphDirection::RightToLeft;
+    changed.blocks[1].style.line_spacing = 1.5;
+    changed.blocks[2].kind = "heading1".into();
+    changed.blocks[2].style.alignment = Alignment::Right;
+    changed.record_user_edit_from(&before, None).unwrap();
+
+    let exported = export_docx(&changed).expect("export whole-paragraph format revisions");
+    let xml = document_xml(&exported.bytes);
+    assert_eq!(xml.matches("<w:pPrChange ").count(), 3);
+    assert_eq!(
+        xml.matches("<w:rPrChange ").count(),
+        0,
+        "paragraph properties are not written as inline run-property changes"
+    );
+
+    let reopened = import_docx(&exported.bytes).expect("reopen paragraph-format revisions");
+    assert_eq!(reopened.blocks[0].style.alignment, Alignment::Center);
+    assert_eq!(reopened.blocks[0].style.space_before, 4.0);
+    assert_eq!(reopened.blocks[1].kind, "heading2");
+    assert_eq!(
+        reopened.blocks[1].style.direction,
+        ParagraphDirection::RightToLeft
+    );
+    assert_eq!(reopened.blocks[1].style.line_spacing, 1.5);
+    assert_eq!(reopened.blocks[2].kind, "heading1");
+    assert_eq!(reopened.blocks[2].text.as_str(), "");
+    assert_eq!(reopened.blocks[2].style.alignment, Alignment::Right);
+    assert_revisions_round_trip(&changed, &reopened);
+
+    for expected in changed.tracked_changes.revisions() {
+        let expected_format = changed
+            .tracked_changes
+            .paragraph_format_change(expected.id)
+            .expect("revision carries paragraph before/after formats");
+        let actual_format = reopened
+            .tracked_changes
+            .paragraph_format_change(expected.id)
+            .expect("paragraph formats survive DOCX import");
+        assert_eq!(actual_format.before.kind, expected_format.before.kind);
+        assert_eq!(actual_format.before.style, expected_format.before.style);
+        assert_eq!(actual_format.after.kind, expected_format.after.kind);
+        assert_eq!(actual_format.after.style, expected_format.after.style);
+    }
+}
+
+#[test]
+fn inline_and_paragraph_format_revisions_keep_separate_ooxml_properties() {
+    let mut before = WriterDocument::new("mixed-format", "Inline and paragraph formats");
+    before.blocks.push(RichBlock::new(1, "paragraph", "word"));
+    before
+        .tracked_changes
+        .set_author("Formatting Reviewer")
+        .unwrap();
+    before.tracked_changes.set_recording(true);
+
+    let mut changed = before.clone();
+    changed.blocks[0].kind = "heading1".into();
+    changed.blocks[0].style.alignment = Alignment::Center;
+    changed.blocks[0].runs.push(StyleRun {
+        start: 0,
+        end: 4,
+        style: CharacterStyle {
+            weight: FontWeight::Bold,
+            ..CharacterStyle::default()
+        },
+    });
+    changed.record_user_edit_from(&before, None).unwrap();
+
+    let paragraph_revision = changed
+        .tracked_changes
+        .revisions()
+        .iter()
+        .find(|revision| {
+            changed
+                .tracked_changes
+                .paragraph_format_change(revision.id)
+                .is_some()
+        })
+        .expect("paragraph format change was recorded");
+    let inline_revision = changed
+        .tracked_changes
+        .revisions()
+        .iter()
+        .find(|revision| revision.id != paragraph_revision.id)
+        .expect("inline format change was recorded");
+    assert_ne!(paragraph_revision.id, inline_revision.id);
+
+    let exported = export_docx(&changed).expect("export independent format revisions");
+    let xml = document_xml(&exported.bytes);
+    assert_eq!(xml.matches("<w:pPrChange ").count(), 1);
+    assert_eq!(xml.matches("<w:rPrChange ").count(), 1);
+    assert!(xml.contains(&format!("w:id=\"{}\"", paragraph_revision.id)));
+    assert!(xml.contains(&format!("w:id=\"{}\"", inline_revision.id)));
+
+    let reopened = import_docx(&exported.bytes).expect("reopen independent format revisions");
+    assert_revisions_round_trip(&changed, &reopened);
+    assert!(reopened
+        .tracked_changes
+        .paragraph_format_change(paragraph_revision.id)
+        .is_some());
+    assert!(reopened
+        .tracked_changes
+        .paragraph_format_change(inline_revision.id)
+        .is_none());
+}
+
+#[test]
+fn paragraph_property_import_separates_live_and_previous_ppr_and_rejects_bad_changes() {
+    let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:jc w:val="right"/><w:pPrChange w:id="7" w:author="Paragraph Reviewer"><w:pPr><w:jc w:val="center"/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#;
+    let imported = import_document_xml(xml).expect("import live and previous paragraph styles");
+    assert_eq!(imported.blocks[0].style.alignment, Alignment::Right);
+    let revision = &imported.tracked_changes.revisions()[0];
+    let format = imported
+        .tracked_changes
+        .paragraph_format_change(revision.id)
+        .expect("pPrChange carries paragraph snapshots");
+    assert_eq!(format.before.style.alignment, Alignment::Center);
+    assert_eq!(format.after.style.alignment, Alignment::Right);
+    let reopened = import_docx(
+        &export_docx(&imported)
+            .expect("export imported paragraph change")
+            .bytes,
+    )
+    .expect("reopen paragraph change");
+    assert_eq!(reopened.blocks[0].style.alignment, Alignment::Right);
+    assert_eq!(
+        reopened
+            .tracked_changes
+            .paragraph_format_change(revision.id)
+            .unwrap()
+            .before
+            .style
+            .alignment,
+        Alignment::Center
+    );
+
+    let make_document = |ppr: &str| {
+        format!(
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>{ppr}<w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#
+        )
+    };
+    let cases = [
+        (
+            r#"<w:pPr><w:pPrChange w:id="1" w:author="Reviewer"/></w:pPr>"#,
+            "missing its previous w:pPr",
+        ),
+        (
+            r#"<w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr><w:pPrChange w:id="2" w:author="Nested"><w:pPr/></w:pPrChange></w:pPr></w:pPrChange></w:pPr>"#,
+            "outside a paragraph's direct w:pPr",
+        ),
+        (
+            r#"<w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr/></w:pPrChange><w:pPrChange w:id="2" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr>"#,
+            "multiple w:pPrChange revisions",
+        ),
+        (
+            r#"<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr>"#,
+            "list mappings are unsupported",
+        ),
+        (
+            r#"<w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr><w:keepNext/></w:pPr></w:pPrChange></w:pPr>"#,
+            "w:keepNext is not supported",
+        ),
+        (
+            r#"<w:pPr><w:pPrChange w:id="invalid" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr>"#,
+            "invalid w:id",
+        ),
+        (
+            r#"<w:pPr><w:jc w:val="distribute"/><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr>"#,
+            "alignment is not supported",
+        ),
+    ];
+    for (ppr, expected_error) in cases {
+        let error = import_document_xml(&make_document(ppr))
+            .expect_err("malformed or unsupported paragraph-property changes are rejected");
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?} in error {error:?}"
+        );
+    }
+
+    let collision = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:jc w:val="right"/><w:pPrChange w:id="4" w:author="Paragraph Reviewer"><w:pPr><w:jc w:val="left"/></w:pPr></w:pPrChange></w:pPr><w:r><w:rPr><w:b/><w:rPrChange w:id="4" w:author="Inline Reviewer"><w:rPr/></w:rPrChange></w:rPr><w:t>text</w:t></w:r></w:p></w:body></w:document>"#;
+    let error = import_document_xml(collision)
+        .expect_err("one OOXML ID cannot identify both inline and paragraph changes");
+    assert!(error.contains("collides with an inline revision"));
+}
+
+#[test]
+fn repeated_paragraph_format_revisions_fail_closed_for_one_ppr_change_limit() {
+    let mut before = WriterDocument::new("repeated-format", "Repeated paragraph format");
+    before.blocks.push(RichBlock::new(1, "paragraph", "text"));
+    before.tracked_changes.set_recording(true);
+
+    let mut first = before.clone();
+    first.blocks[0].style.alignment = Alignment::Center;
+    first.record_user_edit_from(&before, None).unwrap();
+
+    let mut second = first.clone();
+    second.blocks[0].style.alignment = Alignment::Right;
+    second.record_user_edit_from(&first, None).unwrap();
+
+    let error = export_docx(&second)
+        .expect_err("multiple pPrChange revisions for one paragraph are unsupported")
+        .to_string();
+    assert!(error.contains("one paragraph-format revision per paragraph"));
+}
+
+#[test]
+fn custom_author_property_preserves_future_author_and_is_validated() {
+    let mut before = WriterDocument::new("author", "Tracked change author");
+    before.blocks.push(RichBlock::new(1, "paragraph", "before"));
+    before.tracked_changes.set_recording(true);
+    before
+        .tracked_changes
+        .set_author("Revision Author")
+        .unwrap();
+
+    let mut changed = before.clone();
+    changed.replace_editor_text_at("after", None).unwrap();
+    changed.record_user_edit_from(&before, None).unwrap();
+    changed
+        .tracked_changes
+        .set_author("Future & <Writer> — 李")
+        .unwrap();
+
+    let exported = export_docx(&changed).expect("export the future tracked-change author");
+    let repeated = export_docx(&changed).expect("repeat deterministic author export");
+    assert_eq!(exported.bytes, repeated.bytes);
+    let archive = PackageArchive::from_bytes(&exported.bytes).expect("read exported package");
+    let custom = std::str::from_utf8(archive.get("docProps/custom.xml").unwrap())
+        .expect("custom properties are UTF-8");
+    assert!(custom.contains("name=\"LoomTrackedChangesAuthor\""));
+    assert!(custom.contains("Future &amp; &lt;Writer&gt; — 李"));
+    let rels = std::str::from_utf8(archive.get("_rels/.rels").unwrap()).unwrap();
+    assert!(rels.contains("Target=\"docProps/custom.xml\""));
+    let content_types = std::str::from_utf8(archive.get("[Content_Types].xml").unwrap()).unwrap();
+    assert!(content_types.contains("PartName=\"/docProps/custom.xml\""));
+
+    let reopened = import_docx(&exported.bytes).expect("reopen explicit custom author");
+    assert_eq!(reopened.tracked_changes.author(), "Future & <Writer> — 李");
+    assert!(reopened
+        .tracked_changes
+        .revisions()
+        .iter()
+        .all(|revision| revision.author == "Revision Author"));
+
+    let mut author_only = WriterDocument::new("author-only", "No revisions");
+    author_only
+        .tracked_changes
+        .set_author("No Revision Author — 李")
+        .unwrap();
+    let no_revisions = export_docx(&author_only).expect("export author without revisions");
+    let no_revisions = import_docx(&no_revisions.bytes).expect("reopen author without revisions");
+    assert!(no_revisions.tracked_changes.revisions().is_empty());
+    assert_eq!(
+        no_revisions.tracked_changes.author(),
+        "No Revision Author — 李"
+    );
+
+    let no_custom_author = import_document_xml(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:ins w:id="8" w:author="Last Revision Author"><w:r><w:t>text</w:t></w:r></w:ins></w:p></w:body></w:document>"#,
+    )
+    .expect("import a DOCX without an explicit author property");
+    assert_eq!(no_custom_author.tracked_changes.author(), "Anonymous");
+
+    let mut malformed = PackageArchive::new();
+    malformed
+        .add(
+            "word/document.xml",
+            b"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body/></w:document>".to_vec(),
+        )
+        .unwrap();
+    malformed
+        .add(
+            "docProps/custom.xml",
+            b"<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/custom-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><property fmtid=\"{D5CDD505-2E9C-101B-9397-08002B2CF9AE}\" pid=\"2\" name=\"LoomTrackedChangesAuthor\"><vt:bool>true</vt:bool></property></Properties>".to_vec(),
+        )
+        .unwrap();
+    let error = import_docx(&malformed.to_bytes().unwrap())
+        .expect_err("a non-string custom author is rejected");
+    assert!(error.contains("must be a string custom property"));
+}
+
+#[test]
+fn docx_revision_import_installs_validated_paragraph_formats_atomically() {
+    let mut document = WriterDocument::new("atomic-import", "Atomic revisions");
+    document.blocks.push(RichBlock::new(1, "paragraph", "text"));
+    document
+        .tracked_changes
+        .set_author("Existing Author")
+        .unwrap();
+
+    let change = crate::revisions::RevisionBlockFormatChange {
+        before: crate::revisions::RevisionBlockFormat {
+            kind: "paragraph".into(),
+            style: loom_text::ParagraphStyle::default(),
+        },
+        after: crate::revisions::RevisionBlockFormat {
+            kind: "heading1".into(),
+            style: loom_text::ParagraphStyle::default(),
+        },
+    };
+    let error = document
+        .import_docx_revisions(
+            Vec::new(),
+            std::collections::BTreeMap::from([(7, change)]),
+            true,
+            Some("Imported Author".into()),
+        )
+        .expect_err("unmatched paragraph format IDs fail validation");
+    assert!(error.contains("collides or has no revision"));
+    assert_eq!(document.tracked_changes.author(), "Existing Author");
+    assert!(!document.tracked_changes.recording());
+    assert!(document.tracked_changes.revisions().is_empty());
 }

@@ -188,15 +188,15 @@ pub struct RevisionRecord {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct RevisionBlockFormat {
-    kind: String,
-    style: loom_text::ParagraphStyle,
+pub(crate) struct RevisionBlockFormat {
+    pub(crate) kind: String,
+    pub(crate) style: loom_text::ParagraphStyle,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct RevisionBlockFormatChange {
-    before: RevisionBlockFormat,
-    after: RevisionBlockFormat,
+pub(crate) struct RevisionBlockFormatChange {
+    pub(crate) before: RevisionBlockFormat,
+    pub(crate) after: RevisionBlockFormat,
 }
 
 /// A read-only view of one side of a tracked paragraph-format change.

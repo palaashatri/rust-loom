@@ -1251,8 +1251,8 @@ fn malformed_and_unrepresentable_docx_revisions_are_rejected() {
             "missing w:author",
         ),
         (
-            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
-            "w:pPrChange is not supported",
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr><w:keepNext/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
+            "tracked DOCX paragraph property w:keepNext is not supported",
         ),
     ];
     for (xml, expected_error) in cases {

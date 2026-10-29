@@ -46,6 +46,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "insert.table",
     "insert.chart",
     "insert.image",
+    "picture.alt_text",
     "table.insert_row_above",
     "table.insert_row_below",
     "table.insert_col_left",

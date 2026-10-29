@@ -4,6 +4,8 @@
 use super::header_footer::HeaderFooterParts;
 use super::xml::{self, W_NS, XML_DECLARATION};
 use crate::PageStyle;
+use loom_package::zip::PackageArchive;
+use roxmltree::Node;
 
 const CT_MAIN: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
@@ -86,12 +88,15 @@ pub(super) fn content_types(
         "/docProps/app.xml",
         "application/vnd.openxmlformats-officedocument.extended-properties+xml",
     );
+    part(
+        "/docProps/custom.xml",
+        "application/vnd.openxmlformats-officedocument.custom-properties+xml",
+    );
     out.push_str(&header_footer.content_type_overrides());
     out.push_str("</Types>");
     out
 }
 
-/// `_rels/.rels`.
 pub(super) fn package_rels() -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
@@ -100,7 +105,8 @@ pub(super) fn package_rels() -> String {
     out.push_str(&format!(
         "<Relationship Id=\"rId1\" Type=\"{REL}/officeDocument\" Target=\"word/document.xml\"/>\
          <Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>\
-         <Relationship Id=\"rId3\" Type=\"{REL}/extended-properties\" Target=\"docProps/app.xml\"/>"
+         <Relationship Id=\"rId3\" Type=\"{REL}/extended-properties\" Target=\"docProps/app.xml\"/>\
+         <Relationship Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties\" Target=\"docProps/custom.xml\"/>"
     ));
     out.push_str("</Relationships>");
     out
@@ -184,6 +190,162 @@ pub(super) fn app_properties() -> String {
          xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\">\
          <Application>Loom Writer</Application><DocSecurity>0</DocSecurity><ScaleCrop>false</ScaleCrop></Properties>"
     )
+}
+
+/// `docProps/custom.xml` stores the future tracked-changes author.
+pub(super) fn custom_properties(tracked_changes_author: &str) -> String {
+    format!(
+        "{XML_DECLARATION}<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/custom-properties\" \\
+         xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\">\\
+         <property fmtid=\"{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}\" pid=\"2\" name=\"LoomTrackedChangesAuthor\"><vt:lpwstr>{}</vt:lpwstr></property></Properties>",
+        xml::text(tracked_changes_author)
+    )
+}
+
+/// Imports and validates Loom's future tracked-changes author custom property.
+pub(super) fn import_tracked_changes_author(
+    archive: &PackageArchive,
+) -> Result<Option<String>, String> {
+    const CUSTOM_PROPERTIES_NS: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties";
+    const CUSTOM_VALUES_NS: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes";
+    const PACKAGE_REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+    const CONTENT_TYPES_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
+    const CUSTOM_REL: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties";
+    const CUSTOM_CONTENT_TYPE: &str =
+        "application/vnd.openxmlformats-officedocument.custom-properties+xml";
+
+    let Some(bytes) = archive.get("docProps/custom.xml") else {
+        return Ok(None);
+    };
+    let xml = std::str::from_utf8(bytes)
+        .map_err(|_| "DOCX custom properties are not valid UTF-8".to_string())?;
+    let document = roxmltree::Document::parse(xml)
+        .map_err(|error| format!("invalid DOCX custom properties: {error}"))?;
+    if !document
+        .root_element()
+        .has_tag_name((CUSTOM_PROPERTIES_NS, "Properties"))
+    {
+        return Err("DOCX custom properties root is invalid".into());
+    }
+    let children: Vec<_> = document
+        .root_element()
+        .children()
+        .filter(Node::is_element)
+        .collect();
+    if children
+        .iter()
+        .any(|node| !node.has_tag_name((CUSTOM_PROPERTIES_NS, "property")))
+    {
+        return Err("DOCX custom properties contain an unsupported element".into());
+    }
+    let mut property_ids = std::collections::HashSet::new();
+    let mut author_property = None;
+    for property in children {
+        let raw_id = property
+            .attribute("pid")
+            .ok_or_else(|| "DOCX custom property is missing pid".to_string())?;
+        let id = raw_id
+            .parse::<u32>()
+            .map_err(|_| "DOCX custom property pid is invalid".to_string())?;
+        if id < 2 || !property_ids.insert(id) {
+            return Err("DOCX custom property pids must be unique and at least 2".into());
+        }
+        if property.attribute("name") == Some("LoomTrackedChangesAuthor") {
+            if author_property.replace(property).is_some() {
+                return Err("DOCX has duplicate LoomTrackedChangesAuthor properties".into());
+            }
+        }
+    }
+    let Some(property) = author_property else {
+        validate_custom_property_package(
+            archive,
+            CUSTOM_REL,
+            CUSTOM_CONTENT_TYPE,
+            PACKAGE_REL_NS,
+            CONTENT_TYPES_NS,
+        )?;
+        return Ok(None);
+    };
+    if property.attribute("fmtid") != Some("{D5CDD505-2E9C-101B-9397-08002B2CF9AE}") {
+        return Err("DOCX LoomTrackedChangesAuthor property has an invalid fmtid".into());
+    }
+    if property.attributes().any(|attribute| {
+        attribute.namespace().is_some() || !["fmtid", "pid", "name"].contains(&attribute.name())
+    }) {
+        return Err("DOCX LoomTrackedChangesAuthor property has unsupported attributes".into());
+    }
+    let mut values = property.children().filter(Node::is_element);
+    let Some(value) = values.next() else {
+        return Err("DOCX LoomTrackedChangesAuthor property has no value".into());
+    };
+    if values.next().is_some()
+        || !value.has_tag_name((CUSTOM_VALUES_NS, "lpwstr"))
+        || value.attributes().next().is_some()
+        || value.children().any(Node::is_element)
+    {
+        return Err("DOCX LoomTrackedChangesAuthor must be a string custom property".into());
+    }
+    validate_custom_property_package(
+        archive,
+        CUSTOM_REL,
+        CUSTOM_CONTENT_TYPE,
+        PACKAGE_REL_NS,
+        CONTENT_TYPES_NS,
+    )?;
+    Ok(Some(value.text().unwrap_or_default().to_owned()))
+}
+
+fn validate_custom_property_package(
+    archive: &PackageArchive,
+    custom_relationship_type: &str,
+    custom_content_type: &str,
+    relationship_namespace: &str,
+    content_type_namespace: &str,
+) -> Result<(), String> {
+    let rels = archive
+        .get("_rels/.rels")
+        .ok_or_else(|| "DOCX custom properties are missing the package relationship".to_string())?;
+    let rels = std::str::from_utf8(rels)
+        .map_err(|_| "DOCX package relationships are not valid UTF-8".to_string())?;
+    let rels = roxmltree::Document::parse(rels)
+        .map_err(|error| format!("invalid DOCX package relationships: {error}"))?;
+    let mut custom_rels = rels.root_element().children().filter(|node| {
+        node.has_tag_name((relationship_namespace, "Relationship"))
+            && node.attribute("Type") == Some(custom_relationship_type)
+    });
+    let Some(relationship) = custom_rels.next() else {
+        return Err("DOCX custom properties are missing their package relationship".into());
+    };
+    if custom_rels.next().is_some()
+        || relationship.attribute("Target") != Some("docProps/custom.xml")
+        || relationship.attribute("TargetMode").is_some()
+    {
+        return Err("DOCX custom properties have an invalid package relationship".into());
+    }
+
+    let content_types = archive
+        .get("[Content_Types].xml")
+        .ok_or_else(|| "DOCX custom properties are missing a content type".to_string())?;
+    let content_types = std::str::from_utf8(content_types)
+        .map_err(|_| "DOCX content types are not valid UTF-8".to_string())?;
+    let content_types = roxmltree::Document::parse(content_types)
+        .map_err(|error| format!("invalid DOCX content types: {error}"))?;
+    let mut overrides = content_types.root_element().children().filter(|node| {
+        node.has_tag_name((content_type_namespace, "Override"))
+            && node.attribute("PartName") == Some("/docProps/custom.xml")
+    });
+    let Some(override_node) = overrides.next() else {
+        return Err("DOCX custom properties are missing their content type".into());
+    };
+    if overrides.next().is_some()
+        || override_node.attribute("ContentType") != Some(custom_content_type)
+    {
+        return Err("DOCX custom properties have an invalid content type".into());
+    }
+    Ok(())
 }
 
 /// Half-points for a size in points, never below one point.
