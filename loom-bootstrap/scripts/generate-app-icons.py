@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Render original Loom SVG masters as cross-platform application icon assets.
+"""Export approved Loom PNG masters without redrawing any artwork.
 
-Requires: pip install cairosvg pillow
+Requires: pip install pillow
 Usage:
     python loom-bootstrap/scripts/generate-app-icons.py
     python loom-bootstrap/scripts/generate-app-icons.py --check
@@ -9,8 +9,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
-import struct
+import hashlib
+import json
 from pathlib import Path
 
 APPS = ("photo", "motion", "video", "studio", "encode")
@@ -20,15 +20,19 @@ SIZES = ((16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256
 
 
 def build_icon(app: str) -> None:
-    import cairosvg
     from PIL import Image
 
-    source = ICONS / f"loom-{app}.svg"
-    image = Image.open(io.BytesIO(cairosvg.svg2png(
-        url=str(source), output_width=1024, output_height=1024
-    ))).convert("RGBA")
-    if image.size != (1024, 1024) or image.getpixel((0, 0))[3] != 0:
-        raise ValueError(f"{app}: expected transparent 1024x1024 master")
+    source = ICONS / f"loom-{app}.source.png"
+    if not source.is_file():
+        raise FileNotFoundError(f"Missing pixel-identical approved PNG master: {source}")
+    image = Image.open(source).convert("RGBA")
+    if image.size != (1254, 1254):
+        raise ValueError(f"{app}: expected unmodified 1254x1254 approved PNG")
+    manifest = json.loads((ICONS / "approved-source-sha256.json").read_text())
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    if digest != manifest[app]:
+        raise ValueError(f"{app}: source does not match the approved generated PNG")
+    image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     image.save(ICONS / f"loom-{app}.png", optimize=True)
     image.resize((512, 512), Image.Resampling.LANCZOS).save(
         ICONS / f"loom-{app}.512.png", optimize=True
@@ -41,7 +45,7 @@ def check_icon(app: str) -> None:
     from PIL import Image
 
     base = ICONS / f"loom-{app}"
-    files = [Path(str(base) + ext) for ext in (".svg", ".png", ".512.png", ".ico", ".icns")]
+    files = [Path(str(base) + ext) for ext in (".source.png", ".png", ".512.png", ".ico", ".icns")]
     missing = [str(f) for f in files if not f.exists()]
     if missing:
         raise FileNotFoundError(f"{app}: missing icons: {', '.join(missing)}")
