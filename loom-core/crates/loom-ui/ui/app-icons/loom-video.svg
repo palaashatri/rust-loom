@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Loom Video app icon">
+ <defs>
+ <linearGradient id="tile" x1=".05" y1="0" x2=".93" y2="1"><stop offset="0" stop-color="#4896B4"/><stop offset="1" stop-color="#275878"/></linearGradient>
+ <linearGradient id="ivory" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFFEF6"/><stop offset=".5" stop-color="#F4EDE0"/><stop offset="1" stop-color="#DDD6CB"/></linearGradient>
+ <linearGradient id="inset" x1="0" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#275878"/><stop offset="1" stop-color="#4896B4"/></linearGradient>
+ <radialGradient id="sheen" cx=".16" cy=".08" r=".9"><stop offset="0" stop-color="#8FDFEF" stop-opacity=".46"/><stop offset=".56" stop-color="#FFFFFF" stop-opacity=".03"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+ <filter id="tile-shadow" x="-20%" y="-20%" width="140%" height="155%"><feGaussianBlur stdDeviation="17"/></filter>
+ <filter id="markshadow" x="-20%" y="-20%" width="140%" height="145%"><feDropShadow dx="0" dy="16" stdDeviation="17" flood-color="#261928" flood-opacity=".24"/></filter>
+ </defs>
+ <rect x="104" y="113" width="817" height="829" rx="192" fill="#171A2A" opacity=".22" filter="url(#tile-shadow)"/>
+ <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#tile)"/>
+ <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#sheen)"/>
+ <rect x="101" y="95" width="822" height="822" rx="184" fill="none" stroke="#FFF8E8" stroke-opacity=".22" stroke-width="5"/>
+ <path d="M165 271 Q203 125 363 113 L687 113" fill="none" stroke="#FFFDF4" stroke-opacity=".15" stroke-width="15" stroke-linecap="round"/>
+ <g filter="url(#markshadow)">
+ <rect x="273" y="338" width="478" height="351" rx="53" fill="url(#ivory)"/>
+ <rect x="326" y="376" width="372" height="276" rx="23" fill="url(#inset)"/>
+ <path d="M463 419 Q454 415 454 435 L454 596 Q454 608 468 599 L598 526 Q615 516 598 507Z" fill="url(#ivory)"/>
+ <g fill="#285C78"><rect x="288" y="403" width="21" height="43" rx="5"/><rect x="288" y="491" width="21" height="43" rx="5"/><rect x="288" y="579" width="21" height="43" rx="5"/><rect x="715" y="403" width="21" height="43" rx="5"/><rect x="715" y="491" width="21" height="43" rx="5"/><rect x="715" y="579" width="21" height="43" rx="5"/></g>
+ <rect x="337" y="383" width="349" height="6" rx="3" fill="#FFFDF5" opacity=".55"/>
+ </g>
+ </svg>
