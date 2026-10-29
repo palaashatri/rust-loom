@@ -1,22 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Loom Video app icon">
- <defs>
- <linearGradient id="tile" x1=".05" y1="0" x2=".93" y2="1"><stop offset="0" stop-color="#4896B4"/><stop offset="1" stop-color="#275878"/></linearGradient>
- <linearGradient id="ivory" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFFEF6"/><stop offset=".5" stop-color="#F4EDE0"/><stop offset="1" stop-color="#DDD6CB"/></linearGradient>
- <linearGradient id="inset" x1="0" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#275878"/><stop offset="1" stop-color="#4896B4"/></linearGradient>
- <radialGradient id="sheen" cx=".16" cy=".08" r=".9"><stop offset="0" stop-color="#8FDFEF" stop-opacity=".46"/><stop offset=".56" stop-color="#FFFFFF" stop-opacity=".03"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
- <filter id="tile-shadow" x="-20%" y="-20%" width="140%" height="155%"><feGaussianBlur stdDeviation="17"/></filter>
- <filter id="markshadow" x="-20%" y="-20%" width="140%" height="145%"><feDropShadow dx="0" dy="16" stdDeviation="17" flood-color="#261928" flood-opacity=".24"/></filter>
- </defs>
- <rect x="104" y="113" width="817" height="829" rx="192" fill="#171A2A" opacity=".22" filter="url(#tile-shadow)"/>
- <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#tile)"/>
- <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#sheen)"/>
- <rect x="101" y="95" width="822" height="822" rx="184" fill="none" stroke="#FFF8E8" stroke-opacity=".22" stroke-width="5"/>
- <path d="M165 271 Q203 125 363 113 L687 113" fill="none" stroke="#FFFDF4" stroke-opacity=".15" stroke-width="15" stroke-linecap="round"/>
- <g filter="url(#markshadow)">
- <rect x="273" y="338" width="478" height="351" rx="53" fill="url(#ivory)"/>
- <rect x="326" y="376" width="372" height="276" rx="23" fill="url(#inset)"/>
- <path d="M463 419 Q454 415 454 435 L454 596 Q454 608 468 599 L598 526 Q615 516 598 507Z" fill="url(#ivory)"/>
- <g fill="#285C78"><rect x="288" y="403" width="21" height="43" rx="5"/><rect x="288" y="491" width="21" height="43" rx="5"/><rect x="288" y="579" width="21" height="43" rx="5"/><rect x="715" y="403" width="21" height="43" rx="5"/><rect x="715" y="491" width="21" height="43" rx="5"/><rect x="715" y="579" width="21" height="43" rx="5"/></g>
- <rect x="337" y="383" width="349" height="6" rx="3" fill="#FFFDF5" opacity=".55"/>
- </g>
- </svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Loom Video application icon">
+<title>Loom Video application icon</title>
+<defs>
+  <linearGradient id="base" x1="0" y1="0" x2="0.97" y2="1"><stop offset="0" stop-color="#5DC6CA"/><stop offset=".45" stop-color="#12688B"/><stop offset="1" stop-color="#083C62"/></linearGradient>
+  <radialGradient id="glow" cx="0.04" cy="0.04" r=".98"><stop offset="0" stop-color="#9DEDDC" stop-opacity=".92"/><stop offset=".3" stop-color="#5DC6CA" stop-opacity=".23"/><stop offset=".72" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+  <linearGradient id="porcelain" x1=".06" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFFDF3"/><stop offset=".35" stop-color="#FFFAEC"/><stop offset=".71" stop-color="#F4E5D3"/><stop offset="1" stop-color="#DDD1C7"/></linearGradient>
+  <linearGradient id="ribbon" x1="0" y1=".2" x2="1" y2=".85"><stop offset="0" stop-color="#FDFBF5"/><stop offset=".43" stop-color="#F6F5F1"/><stop offset=".74" stop-color="#A9BFE4"/><stop offset="1" stop-color="#F7F3E9"/></linearGradient>
+  <radialGradient id="pearl" cx=".33" cy=".24" r=".9"><stop offset="0" stop-color="#FFFFF7"/><stop offset=".4" stop-color="#F7EFE8"/><stop offset=".76" stop-color="#E2D7D4"/><stop offset="1" stop-color="#9DEDDC"/></radialGradient>
+  <linearGradient id="groove" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#083C62"/><stop offset=".47" stop-color="#461B39"/><stop offset="1" stop-color="#12688B"/></linearGradient>
+  <linearGradient id="sky" x1="0" y1="0" x2=".2" y2="1"><stop offset="0" stop-color="#F5C9B5"/><stop offset=".62" stop-color="#FAD2BE"/><stop offset="1" stop-color="#EFAE9E"/></linearGradient>
+  <linearGradient id="film" x1="0" y1="0" x2=".95" y2="1"><stop offset="0" stop-color="#3B9FAE"/><stop offset=".5" stop-color="#317FA5"/><stop offset="1" stop-color="#15AEB3"/></linearGradient>
+  <linearGradient id="specular" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".31"/><stop offset=".35" stop-color="#FFFFFF" stop-opacity=".05"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+  <clipPath id="tileClip"><rect x="90" y="87" width="844" height="844" rx="199"/></clipPath>
+  <filter id="drop" x="-22%" y="-22%" width="145%" height="150%"><feGaussianBlur stdDeviation="22"/></filter>
+</defs>
+<!-- Same 844px macOS tile footprint and transparent outside margin across all five apps -->
+<rect x="112" y="123" width="804" height="831" rx="193" fill="#15152A" opacity=".22" filter="url(#drop)"/>
+<rect x="90" y="87" width="844" height="844" rx="199" fill="url(#base)"/>
+<g clip-path="url(#tileClip)">
+  <rect x="90" y="87" width="844" height="844" fill="url(#glow)"/>
+  <ellipse cx="480" cy="258" rx="421" ry="288" transform="rotate(-19 480 258)" fill="url(#specular)" opacity=".48"/>
+  <path d="M131 301 Q152 132 341 113 C410 112 473 113 576 113" stroke="#FFFFFF" stroke-opacity=".35" stroke-width="16" fill="none" stroke-linecap="round"/>
+  
+<g transform="rotate(7 514 515)">
+  <rect x="266" y="309" width="497" height="421" rx="51" fill="#062F4B" opacity=".36" transform="translate(15 23)"/>
+  <rect x="266" y="309" width="497" height="421" rx="51" fill="url(#porcelain)" stroke="#FFFFFF" stroke-opacity=".78" stroke-width="8"/>
+  <rect x="294" y="336" width="440" height="365" rx="33" fill="url(#film)" stroke="#FFF8E6" stroke-opacity=".35" stroke-width="6"/>
+  <g fill="#0E5576">
+    <rect x="306" y="356" width="56" height="67" rx="12"/><rect x="306" y="450" width="56" height="67" rx="12"/><rect x="306" y="544" width="56" height="67" rx="12"/><rect x="306" y="639" width="56" height="43" rx="11"/>
+    <rect x="664" y="356" width="56" height="67" rx="12"/><rect x="664" y="450" width="56" height="67" rx="12"/><rect x="664" y="544" width="56" height="67" rx="12"/><rect x="664" y="639" width="56" height="43" rx="11"/>
+  </g>
+  <path d="M455 412 Q447 408 447 423 L447 609 Q447 624 461 616 L600 532 Q616 521 601 511Z" fill="url(#porcelain)" stroke="#FFFFFF" stroke-width="6" stroke-opacity=".6"/>
+  <path d="M301 341 Q322 326 354 328 L689 328" fill="none" stroke="#FFFEF6" stroke-opacity=".37" stroke-width="12" stroke-linecap="round"/>
+</g>
+  <path d="M115 732 Q135 901 321 917" fill="none" stroke="#FFFFFF" stroke-opacity=".04" stroke-width="24" />
+</g>
+<rect x="101" y="99" width="822" height="820" rx="185" fill="none" stroke="#FFF7F0" stroke-opacity=".22" stroke-width="5"/>
+</svg>
