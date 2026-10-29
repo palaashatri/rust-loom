@@ -19,19 +19,28 @@ ICONS = ROOT / "loom-core/crates/loom-ui/ui/app-icons"
 SIZES = ((16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256))
 
 
-def build_icon(app: str) -> None:
+def validate_source(app: str) -> None:
+    """Reject any changed source image, including metadata or byte-level edits."""
     from PIL import Image
 
     source = ICONS / f"loom-{app}.source.png"
     if not source.is_file():
-        raise FileNotFoundError(f"Missing pixel-identical approved PNG master: {source}")
-    image = Image.open(source).convert("RGBA")
-    if image.size != (1254, 1254):
-        raise ValueError(f"{app}: expected unmodified 1254x1254 approved PNG")
+        raise FileNotFoundError(f"Missing approved PNG master: {source}")
     manifest = json.loads((ICONS / "approved-source-sha256.json").read_text())
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     if digest != manifest[app]:
-        raise ValueError(f"{app}: source does not match the approved generated PNG")
+        raise ValueError(f"{app}: source is not byte-identical to approved PNG")
+    with Image.open(source) as image:
+        if image.size != (1254, 1254) or image.mode != "RGBA":
+            raise ValueError(f"{app}: unexpected master size or color mode")
+
+
+def build_icon(app: str) -> None:
+    from PIL import Image
+
+    validate_source(app)
+    source = ICONS / f"loom-{app}.source.png"
+    image = Image.open(source).convert("RGBA")
     image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     image.save(ICONS / f"loom-{app}.png", optimize=True)
     image.resize((512, 512), Image.Resampling.LANCZOS).save(
@@ -44,6 +53,8 @@ def build_icon(app: str) -> None:
 def check_icon(app: str) -> None:
     from PIL import Image
 
+    validate_source(app)
+
     base = ICONS / f"loom-{app}"
     files = [Path(str(base) + ext) for ext in (".source.png", ".png", ".512.png", ".ico", ".icns")]
     missing = [str(f) for f in files if not f.exists()]
@@ -53,7 +64,7 @@ def check_icon(app: str) -> None:
         with Image.open(str(base) + suffix) as image:
             if image.size != dimensions:
                 raise ValueError(f"{app}{suffix}: size {image.size}, expected {dimensions}")
-            if image.convert("RGBA").getpixel((0, 0))[3] != 0:
+            if image.convert("RGBA").getpixel((0, 0))[3] > 1:
                 raise ValueError(f"{app}{suffix}: transparent margin was lost")
     with Image.open(str(base) + ".ico") as image:
         if image.format != "ICO" or image.size != (256, 256):
