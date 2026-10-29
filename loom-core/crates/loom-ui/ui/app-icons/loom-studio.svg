@@ -1,23 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Loom Studio app icon">
- <defs>
- <linearGradient id="tile" x1=".05" y1="0" x2=".93" y2="1"><stop offset="0" stop-color="#C15C9F"/><stop offset="1" stop-color="#75376D"/></linearGradient>
- <linearGradient id="ivory" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFFEF6"/><stop offset=".5" stop-color="#F4EDE0"/><stop offset="1" stop-color="#DDD6CB"/></linearGradient>
- <linearGradient id="inset" x1="0" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#75376D"/><stop offset="1" stop-color="#C15C9F"/></linearGradient>
- <radialGradient id="sheen" cx=".16" cy=".08" r=".9"><stop offset="0" stop-color="#F3B1D9" stop-opacity=".46"/><stop offset=".56" stop-color="#FFFFFF" stop-opacity=".03"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
- <filter id="tile-shadow" x="-20%" y="-20%" width="140%" height="155%"><feGaussianBlur stdDeviation="17"/></filter>
- <filter id="markshadow" x="-20%" y="-20%" width="140%" height="145%"><feDropShadow dx="0" dy="16" stdDeviation="17" flood-color="#261928" flood-opacity=".24"/></filter>
- </defs>
- <rect x="104" y="113" width="817" height="829" rx="192" fill="#171A2A" opacity=".22" filter="url(#tile-shadow)"/>
- <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#tile)"/>
- <rect x="87" y="81" width="850" height="850" rx="197" fill="url(#sheen)"/>
- <rect x="101" y="95" width="822" height="822" rx="184" fill="none" stroke="#FFF8E8" stroke-opacity=".22" stroke-width="5"/>
- <path d="M165 271 Q203 125 363 113 L687 113" fill="none" stroke="#FFFDF4" stroke-opacity=".15" stroke-width="15" stroke-linecap="round"/>
- <g filter="url(#markshadow)">
- <rect x="281" y="338" width="463" height="350" rx="47" fill="url(#ivory)"/>
- <rect x="311" y="368" width="403" height="290" rx="29" fill="url(#inset)"/>
- <g stroke="url(#ivory)" stroke-width="24" stroke-linecap="round">
-  <path d="M369 447 V571"/><path d="M430 408 V603"/><path d="M492 463 V556"/><path d="M554 403 V614"/><path d="M615 438 V579"/><path d="M675 465 V551"/>
- </g>
- <g fill="#FFFBEF" stroke="#8B447F" stroke-width="7"><rect x="352" y="494" width="34" height="43" rx="10"/><rect x="413" y="456" width="34" height="43" rx="10"/><rect x="475" y="515" width="34" height="43" rx="10"/><rect x="537" y="468" width="34" height="43" rx="10"/><rect x="598" y="497" width="34" height="43" rx="10"/><rect x="658" y="478" width="34" height="43" rx="10"/></g>
- </g>
- </svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Loom Studio application icon">
+<title>Loom Studio application icon</title>
+<defs>
+  <linearGradient id="base" x1="0" y1="0" x2="0.97" y2="1"><stop offset="0" stop-color="#C86B9D"/><stop offset=".45" stop-color="#8A2A68"/><stop offset="1" stop-color="#4F153F"/></linearGradient>
+  <radialGradient id="glow" cx="0.04" cy="0.04" r=".98"><stop offset="0" stop-color="#FFC6DF" stop-opacity=".92"/><stop offset=".3" stop-color="#C86B9D" stop-opacity=".23"/><stop offset=".72" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+  <linearGradient id="porcelain" x1=".06" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#FFFDF3"/><stop offset=".35" stop-color="#FFFAEC"/><stop offset=".71" stop-color="#F4E5D3"/><stop offset="1" stop-color="#DDD1C7"/></linearGradient>
+  <linearGradient id="ribbon" x1="0" y1=".2" x2="1" y2=".85"><stop offset="0" stop-color="#FDFBF5"/><stop offset=".43" stop-color="#F6F5F1"/><stop offset=".74" stop-color="#A9BFE4"/><stop offset="1" stop-color="#F7F3E9"/></linearGradient>
+  <radialGradient id="pearl" cx=".33" cy=".24" r=".9"><stop offset="0" stop-color="#FFFFF7"/><stop offset=".4" stop-color="#F7EFE8"/><stop offset=".76" stop-color="#E2D7D4"/><stop offset="1" stop-color="#FFC6DF"/></radialGradient>
+  <linearGradient id="groove" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4F153F"/><stop offset=".47" stop-color="#461B39"/><stop offset="1" stop-color="#8A2A68"/></linearGradient>
+  <linearGradient id="sky" x1="0" y1="0" x2=".2" y2="1"><stop offset="0" stop-color="#F5C9B5"/><stop offset=".62" stop-color="#FAD2BE"/><stop offset="1" stop-color="#EFAE9E"/></linearGradient>
+  <linearGradient id="film" x1="0" y1="0" x2=".95" y2="1"><stop offset="0" stop-color="#3B9FAE"/><stop offset=".5" stop-color="#317FA5"/><stop offset="1" stop-color="#15AEB3"/></linearGradient>
+  <linearGradient id="specular" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".31"/><stop offset=".35" stop-color="#FFFFFF" stop-opacity=".05"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+  <clipPath id="tileClip"><rect x="90" y="87" width="844" height="844" rx="199"/></clipPath>
+  <filter id="drop" x="-22%" y="-22%" width="145%" height="150%"><feGaussianBlur stdDeviation="22"/></filter>
+</defs>
+<!-- Same 844px macOS tile footprint and transparent outside margin across all five apps -->
+<rect x="112" y="123" width="804" height="831" rx="193" fill="#15152A" opacity=".22" filter="url(#drop)"/>
+<rect x="90" y="87" width="844" height="844" rx="199" fill="url(#base)"/>
+<g clip-path="url(#tileClip)">
+  <rect x="90" y="87" width="844" height="844" fill="url(#glow)"/>
+  <ellipse cx="480" cy="258" rx="421" ry="288" transform="rotate(-19 480 258)" fill="url(#specular)" opacity=".48"/>
+  <path d="M131 301 Q152 132 341 113 C410 112 473 113 576 113" stroke="#FFFFFF" stroke-opacity=".35" stroke-width="16" fill="none" stroke-linecap="round"/>
+  
+<g>
+  <rect x="293" y="278" width="434" height="482" rx="100" fill="#451536" opacity=".14"/>
+  <g>
+    <rect x="343" y="345" width="92" height="364" rx="46" fill="#47102E" opacity=".55"/>
+    <rect x="466" y="345" width="92" height="364" rx="46" fill="#47102E" opacity=".55"/>
+    <rect x="589" y="345" width="92" height="364" rx="46" fill="#47102E" opacity=".55"/>
+    <rect x="353" y="350" width="73" height="352" rx="37" fill="url(#groove)" stroke="#F2AECF" stroke-opacity=".34" stroke-width="6"/>
+    <rect x="476" y="350" width="73" height="352" rx="37" fill="url(#groove)" stroke="#F2AECF" stroke-opacity=".34" stroke-width="6"/>
+    <rect x="599" y="350" width="73" height="352" rx="37" fill="url(#groove)" stroke="#F2AECF" stroke-opacity=".34" stroke-width="6"/>
+  </g>
+  <g>
+    <circle cx="389" cy="501" r="71" fill="#4F1740" opacity=".27" transform="translate(7 11)"/>
+    <circle cx="512" cy="584" r="71" fill="#4F1740" opacity=".27" transform="translate(7 11)"/>
+    <circle cx="635" cy="443" r="71" fill="#4F1740" opacity=".27" transform="translate(7 11)"/>
+    <circle cx="389" cy="501" r="65" fill="url(#pearl)" stroke="#FFFEF7" stroke-opacity=".71" stroke-width="5"/>
+    <circle cx="512" cy="584" r="65" fill="url(#pearl)" stroke="#FFFEF7" stroke-opacity=".71" stroke-width="5"/>
+    <circle cx="635" cy="443" r="65" fill="url(#pearl)" stroke="#FFFEF7" stroke-opacity=".71" stroke-width="5"/>
+  </g>
+</g>
+  <path d="M115 732 Q135 901 321 917" fill="none" stroke="#FFFFFF" stroke-opacity=".04" stroke-width="24" />
+</g>
+<rect x="101" y="99" width="822" height="820" rx="185" fill="none" stroke="#FFF7F0" stroke-opacity=".22" stroke-width="5"/>
+</svg>
