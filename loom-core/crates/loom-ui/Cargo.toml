@@ -13,6 +13,7 @@ slint = { version = "1.17.1", default-features = false, features = ["std", "comp
 slint-build = "1.17.1"
 
 [dev-dependencies]
+i-slint-backend-testing = "1.17.1"
 image = "0.25"
 loom-test-support = { path = "../loom-test-support" }
 

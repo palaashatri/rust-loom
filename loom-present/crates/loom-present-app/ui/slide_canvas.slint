@@ -69,6 +69,7 @@ export component PresentSlideCanvas inherits Rectangle {
     callback handle-released(int, string);
     callback handle-cancelled(int, string);
     callback content-edited(string);
+    callback table-text-edit-ended;
 
     background: Theme.palette().canvas;
 
@@ -366,7 +367,11 @@ export component PresentSlideCanvas inherits Rectangle {
                     // not what was typed in the last one (typing broke the binding).
                     property <string> cell-key: self.in-cell ? "" + ObjectParts.active-cells[idx].fx + "," + ObjectParts.active-cells[idx].fy : "";
                     text: self.seed;
-                    changed cell-key => { self.text = self.seed; self.select-all(); }
+                    changed cell-key => {
+                        if (self.in-cell) { root.table-text-edit-ended(); }
+                        self.text = self.seed;
+                        self.select-all();
+                    }
                     font-size: self.in-cell || self.styled ? ObjectParts.active-cells[idx].fs * slide.height / 562.5
                         : (root.element-types[idx] == 0 ? Theme.tokens.typography.display
                         : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
@@ -379,10 +384,20 @@ export component PresentSlideCanvas inherits Rectangle {
                     single-line: false;
                     accessible-label: "Edit text";
                     init => { self.focus(); self.select-all(); }
-                    changed has-focus => { if (!self.has-focus) { root.editing-idx = -1; } }
+                    changed has-focus => {
+                        if (!self.has-focus) {
+                            if (self.in-cell) { root.table-text-edit-ended(); }
+                            root.editing-idx = -1;
+                        }
+                    }
                     edited => { root.content-edited(self.text); }
                     key-pressed(event) => {
-                        if (event.text == Key.Escape) { root.editing-idx = -1; element-focus.focus(); return accept; }
+                        if (event.text == Key.Escape) {
+                            if (self.in-cell) { root.table-text-edit-ended(); }
+                            root.editing-idx = -1;
+                            element-focus.focus();
+                            return accept;
+                        }
                         return reject;
                     }
                 }

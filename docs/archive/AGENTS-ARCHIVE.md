@@ -242,15 +242,17 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 
 ### CODE-18 — Do not consume a storage sequence when append fails
 
-**P2 · Shared storage · OPEN.** A failed write is not a completed journal entry.
+**P2 · Shared storage · FIXED (2026-10-28).** A failed write is not a completed journal entry.
 
-**Open:** `loom-core/crates/loom-storage/src/lib.rs`, journal `append`.
+**Original scope:** `loom-core/crates/loom-storage/src/lib.rs`, journal `append`.
 
 1. Reserve the next sequence locally. Advance in-memory sequence state only after the entry is durably written.
 2. Define and implement partial-write recovery/truncation so a retry cannot append behind a broken tail.
 3. Preserve the original error and keep the journal recoverable. Do not waive sequence validation on load.
 
 **Prove it:** Force the first open/write to fail, remove the fixture obstruction, append successfully, reopen. The entry must load at sequence 1. Also inject partial-write and sync failures. Current retry writes sequence 2 and reopen fails. This storage journal is distinct from desktop production recovery. Evidence: `shared-probes/src/lib.rs`, `shared-probes.log`.
+
+**Repair result (2026-10-28) — FIXED.** Sequence state advances only after a durable append. If rollback truncation or sync fails, the error diagnostic retains both the original append failure and rollback failure, and that journal handle rejects later appends until reopened or successfully cleared. Reopen repairs a torn tail and continues from the last valid sequence. Regressions cover an obstructed journal path, partial write, pre-sync failure, rollback-truncate failure and rollback-sync failure, including reopen and sequence continuity. Verification: `cargo fmt --manifest-path loom-core/Cargo.toml -p loom-storage -- --check` passed; `cargo test --manifest-path loom-core/Cargo.toml -p loom-storage --locked --offline` passed 13 tests, with 0 failed and 0 ignored; doc tests passed (0 tests). Evidence: `.work/code18-20261028/storage-verification.json`. The Sheets and production recovery managers use their own higher-level journal implementations.
 
 ### CODE-19 — Undo Present transitions with the rest of the slide
 

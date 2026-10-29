@@ -8,16 +8,21 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use muda::{
     accelerator::{Accelerator, Code, Modifiers},
-    CheckMenuItem, Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu,
+    CheckMenuItem, ContextMenu, Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem,
+    Submenu,
 };
 use objc2::MainThreadMarker;
+use objc2_app_kit::NSApplication;
 
-use crate::menu::{CommandState, MenuBar, MenuItem as LoomMenuItem, MenuShortcut};
+use crate::menu::{
+    CommandState, MenuBar, MenuItem as LoomMenuItem, MenuShortcut, NativeMenuInstallationStatus,
+};
 use crate::DesktopError;
 
 type DispatcherFn = Arc<dyn Fn(&str) -> Result<(), DesktopError> + Send + Sync + 'static>;
@@ -33,6 +38,7 @@ static GLOBAL_DISPATCHER: Mutex<Option<DispatcherFn>> = Mutex::new(None);
 pub struct MacosMenuState {
     _root: Menu,
     items: BTreeMap<String, MenuItemKind>,
+    installation_id: u64,
 }
 
 impl MacosMenuState {
@@ -159,10 +165,81 @@ fn ensure_event_handler_installed() {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeQuitItemKind {
+    System,
+    Command,
+}
+
+fn native_quit_item_kind(
+    item_id: &str,
+    route_quit_through_command: bool,
+) -> Option<NativeQuitItemKind> {
+    item_id
+        .ends_with(".quit")
+        .then_some(if route_quit_through_command {
+            NativeQuitItemKind::Command
+        } else {
+            NativeQuitItemKind::System
+        })
+}
+
+fn status_for_appkit_root_pointers(
+    expected_root: Option<*const c_void>,
+    appkit_root: Option<*const c_void>,
+) -> NativeMenuInstallationStatus {
+    match (expected_root, appkit_root) {
+        (Some(expected), Some(actual)) if !expected.is_null() && !actual.is_null() => {
+            if expected == actual {
+                NativeMenuInstallationStatus::Installed
+            } else {
+                NativeMenuInstallationStatus::AppKitRootMismatch
+            }
+        }
+        _ => NativeMenuInstallationStatus::VerificationUnavailable,
+    }
+}
+
+/// Checks whether AppKit's current main menu matches the root installed by Muda.
+fn appkit_root_status(root: &Menu) -> NativeMenuInstallationStatus {
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return NativeMenuInstallationStatus::MainThreadRequired;
+    };
+
+    let appkit_root = NSApplication::sharedApplication(main_thread).mainMenu();
+    let Some(appkit_root) = appkit_root else {
+        return NativeMenuInstallationStatus::VerificationUnavailable;
+    };
+
+    let native_root = ContextMenu::ns_menu(root);
+    let expected_root = (!native_root.is_null()).then_some(native_root as *const c_void);
+    let appkit_root = std::ptr::from_ref(&*appkit_root).cast::<c_void>();
+    status_for_appkit_root_pointers(expected_root, Some(appkit_root))
+}
+
+/// Confirm whether the current AppKit main menu still matches this installation.
+pub fn native_menu_installation_status(
+    installation_id: u64,
+    last_status: NativeMenuInstallationStatus,
+) -> NativeMenuInstallationStatus {
+    if MainThreadMarker::new().is_none() {
+        return NativeMenuInstallationStatus::MainThreadRequired;
+    }
+
+    ACTIVE_MACOS_MENU.with(|menu_ref| match menu_ref.borrow().as_ref() {
+        Some(state) if state.installation_id == installation_id => appkit_root_status(&state._root),
+        Some(_) | None if last_status == NativeMenuInstallationStatus::Installed => {
+            NativeMenuInstallationStatus::AppKitRootMismatch
+        }
+        _ => last_status,
+    })
+}
+
 fn populate_submenu(
     parent: &Submenu,
     items: &[LoomMenuItem],
     items_map: &mut BTreeMap<String, MenuItemKind>,
+    route_quit_through_command: bool,
 ) -> Result<(), DesktopError> {
     for item in items {
         match item {
@@ -190,7 +267,9 @@ fn populate_submenu(
                         .append(&p)
                         .map_err(|e| DesktopError::InvalidRequest(e.to_string()))?;
                     items_map.insert(id.clone(), MenuItemKind::Predefined(p));
-                } else if id.ends_with(".quit") {
+                } else if native_quit_item_kind(id, route_quit_through_command)
+                    == Some(NativeQuitItemKind::System)
+                {
                     let p = PredefinedMenuItem::quit(Some(label));
                     parent
                         .append(&p)
@@ -248,7 +327,7 @@ fn populate_submenu(
             }
             LoomMenuItem::Submenu(sub) => {
                 let sub_menu = Submenu::new(&sub.title, true);
-                populate_submenu(&sub_menu, &sub.items, items_map)?;
+                populate_submenu(&sub_menu, &sub.items, items_map, route_quit_through_command)?;
                 parent
                     .append(&sub_menu)
                     .map_err(|e| DesktopError::InvalidRequest(e.to_string()))?;
@@ -258,25 +337,30 @@ fn populate_submenu(
     Ok(())
 }
 
-/// Install the native macOS menu bar if executing on the main thread.
+/// Install the native macOS menu bar and report whether AppKit accepted its root.
 pub fn install_native_macos_menu(
     menu_bar: &MenuBar,
     dispatcher: DispatcherFn,
-) -> Result<(), DesktopError> {
+    route_quit_through_command: bool,
+    installation_id: u64,
+) -> Result<NativeMenuInstallationStatus, DesktopError> {
     if MainThreadMarker::new().is_none() {
-        // Non-GUI or worker test thread: keep model in memory without touching AppKit.
-        return Ok(());
+        // Keep the legacy model install usable on worker threads, but report
+        // that this native menu was not installed because AppKit requires main.
+        return Ok(NativeMenuInstallationStatus::MainThreadRequired);
     }
-
-    *GLOBAL_DISPATCHER.lock().unwrap() = Some(dispatcher);
-    ensure_event_handler_installed();
 
     let root = Menu::new();
     let mut items_map = BTreeMap::new();
 
     for menu in &menu_bar.menus {
         let submenu = Submenu::new(&menu.title, true);
-        populate_submenu(&submenu, &menu.items, &mut items_map)?;
+        populate_submenu(
+            &submenu,
+            &menu.items,
+            &mut items_map,
+            route_quit_through_command,
+        )?;
         root.append(&submenu)
             .map_err(|e| DesktopError::InvalidRequest(e.to_string()))?;
 
@@ -289,14 +373,23 @@ pub fn install_native_macos_menu(
 
     root.init_for_nsapp();
 
+    let status = appkit_root_status(&root);
+    if status == NativeMenuInstallationStatus::AppKitRootMismatch {
+        return Ok(status);
+    }
+
+    *GLOBAL_DISPATCHER.lock().unwrap() = Some(dispatcher);
+    ensure_event_handler_installed();
+
     ACTIVE_MACOS_MENU.with(|menu_ref| {
         *menu_ref.borrow_mut() = Some(MacosMenuState {
             _root: root,
             items: items_map,
+            installation_id,
         });
     });
 
-    Ok(())
+    Ok(status)
 }
 
 /// Update a native macOS menu item state if on the main thread.
@@ -352,17 +445,66 @@ mod tests {
     }
 
     #[test]
+    fn native_quit_keeps_system_default_and_supports_command_routing() {
+        assert_eq!(
+            native_quit_item_kind("writer.quit", false),
+            Some(NativeQuitItemKind::System)
+        );
+        assert_eq!(
+            native_quit_item_kind("writer.quit", true),
+            Some(NativeQuitItemKind::Command)
+        );
+        assert_eq!(native_quit_item_kind("writer.exit", true), None);
+    }
+
+    #[test]
+    fn appkit_installation_status_requires_the_same_root_pointer() {
+        let root = 1_u8;
+        let other_root = 2_u8;
+        let expected = std::ptr::from_ref(&root).cast::<c_void>();
+        let actual_other = std::ptr::from_ref(&other_root).cast::<c_void>();
+
+        assert_eq!(
+            status_for_appkit_root_pointers(Some(expected), Some(expected)),
+            NativeMenuInstallationStatus::Installed
+        );
+        assert_eq!(
+            status_for_appkit_root_pointers(Some(expected), Some(actual_other)),
+            NativeMenuInstallationStatus::AppKitRootMismatch
+        );
+        assert_eq!(
+            status_for_appkit_root_pointers(Some(expected), None),
+            NativeMenuInstallationStatus::VerificationUnavailable
+        );
+    }
+
+    #[test]
     fn test_worker_thread_safety_without_appkit_panic() {
-        let menu_bar = build_standard_menu_bar("Loom Sheets", vec![], vec![], vec![], vec![]);
-        let dispatcher = Arc::new(|_id: &str| Ok(()));
+        use crate::menu::NativeMenuBar;
 
-        // When executed on a worker test thread, MainThreadMarker is None
-        // so install_native_macos_menu must gracefully return Ok(()) without crashing.
-        assert!(install_native_macos_menu(&menu_bar, dispatcher).is_ok());
+        let status = std::thread::spawn(|| {
+            let menu_bar = build_standard_menu_bar("Loom Writer", vec![], vec![], vec![], vec![]);
+            let service = NativeMenuBar::new();
+            let status = service
+                .install_menu_bar_with_status(&menu_bar)
+                .expect("worker-thread install reports its status");
 
-        // Similarly, update functions must be safe no-ops on worker threads.
-        update_native_item("file.save", true, None);
-        let cmd_state = CommandState::action("file.save", "Save");
-        update_native_command_state(&cmd_state);
+            assert_eq!(status, NativeMenuInstallationStatus::MainThreadRequired);
+            assert_eq!(
+                service.installation_status(),
+                NativeMenuInstallationStatus::MainThreadRequired
+            );
+            assert!(!service.is_installed());
+
+            // Native update operations must remain safe no-ops off the AppKit thread.
+            update_native_item("file.save", true, None);
+            let cmd_state = CommandState::action("file.save", "Save");
+            update_native_command_state(&cmd_state);
+            status
+        })
+        .join()
+        .expect("worker thread");
+
+        assert_eq!(status, NativeMenuInstallationStatus::MainThreadRequired);
     }
 }

@@ -81,6 +81,11 @@ fn button(app: &WriterApp, label: &str) {
     toolbar_button(app, label).invoke_accessible_default_action();
 }
 
+fn zoom_button(app: &WriterApp) {
+    let label = format!("Zoom {}%", (app.get_page_zoom() * 100.0).round() as i32);
+    button(app, &label);
+}
+
 fn row(app: &WriterApp, label: &str) {
     press(app, AccessibleRole::ListItem, label);
 }
@@ -108,7 +113,7 @@ fn select_all(app: &WriterApp, state: &GuiState) {
 #[test]
 fn every_toolbar_item_is_a_named_button_in_three_groups() {
     let (app, _state) = launched("Hello");
-    let left = ["View options", "Zoom"].map(|l| toolbar_x(&app, l));
+    let left = ["View options", "Zoom 100%"].map(|l| toolbar_x(&app, l));
     let centre = ["Insert", "Text", "Style", "List"].map(|l| toolbar_x(&app, l));
     let right =
         ["Export", "Format inspector", "Document", "More actions"].map(|l| toolbar_x(&app, l));
@@ -443,27 +448,28 @@ fn table_inspector_delete_row_button_stays_inside_its_reading_edge_padding() {
             apply_state(&app, &state);
 
             let _ = snapshot_component(&app, width as f32, 800.0, 1.0).expect("render inspector");
-            let delete_row = ElementHandle::find_by_accessible_label(&app, "Del Row")
-                .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
-                .expect("Delete Row remains accessible");
-            let right = delete_row.absolute_position().x + delete_row.size().width;
-            println!(
-                "Del Row geometry: width={width}, text_scale={text_scale}, x={}, y={}, width={}, height={}, right={right}",
-                delete_row.absolute_position().x,
-                delete_row.absolute_position().y,
-                delete_row.size().width,
-                delete_row.size().height,
-            );
-            if right > width as f32 - 16.0 + 1.0 {
-                violations.push(format!(
-                    "Del Row right edge {right} exceeds the 16px inset at {width}px, text scale {text_scale}"
-                ));
-            }
-            if delete_row.size().height + 0.5 < Theme::get(&app).get_scaled_control_height() {
-                violations.push(format!(
-                    "Del Row height {:?} is below the themed control height at {width}px, text scale {text_scale}",
-                    delete_row.size(),
-                ));
+            for label in ["Del Row", "Del Col"] {
+                let button = ElementHandle::find_by_accessible_label(&app, label)
+                    .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+                    .unwrap_or_else(|| panic!("{label} remains accessible"));
+                let position = button.absolute_position();
+                let size = button.size();
+                let right = position.x + size.width;
+                println!(
+                    "{label} geometry: width={width}, text_scale={text_scale}, x={}, y={}, width={}, height={}, right={right}",
+                    position.x, position.y, size.width, size.height,
+                );
+                if right > width as f32 - 16.0 + 1.0 {
+                    violations.push(format!(
+                        "{label} right edge {right} exceeds the 16px inset at {width}px, text scale {text_scale}"
+                    ));
+                }
+                if size.height + 0.5 < Theme::get(&app).get_scaled_control_height() {
+                    violations.push(format!(
+                        "{label} height {:?} is below the themed control height at {width}px, text scale {text_scale}",
+                        size,
+                    ));
+                }
             }
         }
     }
@@ -578,15 +584,15 @@ fn insert_menu_page_and_line_break_rows_run_the_breaks_at_the_caret() {
 #[test]
 fn zoom_menu_changes_the_page_zoom() {
     let (app, state) = launched("Hello");
-    button(&app, "Zoom");
+    zoom_button(&app);
     row(&app, "Zoom In");
     assert!((state.viewport.borrow().zoom - 1.25).abs() < 1e-3);
-    button(&app, "Zoom");
+    zoom_button(&app);
     row(&app, "Zoom Out");
-    button(&app, "Zoom");
+    zoom_button(&app);
     row(&app, "Zoom Out");
     assert!((state.viewport.borrow().zoom - 0.75).abs() < 1e-3);
-    button(&app, "Zoom");
+    zoom_button(&app);
     row(&app, "Actual Size");
     assert!((state.viewport.borrow().zoom - 1.0).abs() < 1e-3);
 }

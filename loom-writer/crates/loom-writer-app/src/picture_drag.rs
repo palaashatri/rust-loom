@@ -264,11 +264,12 @@ pub(crate) fn pointer_released(app: &WriterApp, state: &GuiState) -> bool {
     if let (true, Some(id)) = (changed, id) {
         let mut next = state.current.borrow().clone();
         if next.scale_image_block(id, drag.width / drag.stored.0) {
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
-            app.set_status_left(
-                picture_status(drag.width, drag.width * drag.stored.1 / drag.stored.0).into(),
-            );
-            return true;
+            if apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                app.set_status_left(
+                    picture_status(drag.width, drag.width * drag.stored.1 / drag.stored.0).into(),
+                );
+                return true;
+            }
         }
     }
     picture_view::restore(drag.key);
@@ -353,7 +354,9 @@ fn resize_selected(app: &WriterApp, state: &GuiState, factor: f32) -> bool {
     }
     let mut next = state.current.borrow().clone();
     if next.scale_image_block(id, target / stored.0) {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return true;
+        }
     }
     app.set_status_left(picture_status(target, height).into());
     true

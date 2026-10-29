@@ -285,12 +285,12 @@ fn markdown_indents_each_nested_item_two_spaces_per_level() {
     assert!(md.contains("1. Numbered\n  1. Sub\n"), "{md:?}");
 }
 
-/// The x position read from the PDF text run's text matrix.
-fn run_x(content: &str, text: &str) -> f32 {
-    drawn_runs(content)
-        .into_iter()
-        .find(|run| run.text == text)
-        .unwrap_or_else(|| panic!("{text:?} is drawn in {content:?}"))
+/// The x position read from a semantically extracted PDF text run.
+fn run_x(runs: &[crate::export::test_support::DrawnTextRun], text: &str) -> f32 {
+    let marker = format!("{text} ");
+    runs.iter()
+        .find(|run| run.text == text || run.text == marker)
+        .unwrap_or_else(|| panic!("{text:?} is drawn in {runs:?}"))
         .x
 }
 
@@ -303,23 +303,23 @@ fn pdf_draws_each_level_further_in_with_its_marker() {
         block(3, "list-bulleted", "Deeper", 2),
     ]);
     let pdf = crate::export::test_support::export_valid_pdf(&doc);
-    let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+    let runs = crate::export::test_support::drawn_text_runs(&pdf).expect("semantic PDF text runs");
     let margin = style.margin_left_pt;
     // Each item's text starts at the shared text start: its level's indent plus
     // the marker room, as the editor lays it out.
     let text_start = |index: usize| margin + doc.blocks[index].text_start_pt(&style);
     assert!(
-        (run_x(&content, "Top") - text_start(0)).abs() < 0.01,
+        (run_x(&runs, "Top") - text_start(0)).abs() < 0.01,
         "top text starts at {}",
         text_start(0)
     );
     assert!(
-        (run_x(&content, "Nested") - text_start(1)).abs() < 0.01,
+        (run_x(&runs, "Nested") - text_start(1)).abs() < 0.01,
         "nested text starts at {}",
         text_start(1)
     );
     assert!(
-        (run_x(&content, "Deeper") - text_start(2)).abs() < 0.01,
+        (run_x(&runs, "Deeper") - text_start(2)).abs() < 0.01,
         "deeper text starts at {}",
         text_start(2)
     );
@@ -329,17 +329,12 @@ fn pdf_draws_each_level_further_in_with_its_marker() {
         ..Default::default()
     };
     for (index, glyph) in ["\u{2022}", "\u{25e6}", "\u{25aa}"].into_iter().enumerate() {
-        let right = run_x(&content, glyph) + crate::text_metrics::pdf_text_width(glyph, &body);
+        let right = run_x(&runs, glyph) + crate::text_metrics::pdf_text_width(glyph, &body);
         assert!(
             (right - (text_start(index) - 4.0)).abs() < 0.01,
             "marker {glyph:?} ends at {right}"
         );
     }
-}
-
-/// Every supported PDF text run in drawing order.
-fn drawn_runs(content: &str) -> Vec<crate::export::test_support::DrawnTextRun> {
-    crate::export::test_support::parse_drawn_text_runs(content).expect("semantic text runs")
 }
 
 #[test]
@@ -352,8 +347,7 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
         block(2, "list-numbered", "Nested", 1),
     ]);
     let pdf = crate::export::test_support::export_valid_pdf(&doc);
-    let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
-    let runs = drawn_runs(&content);
+    let runs = crate::export::test_support::drawn_text_runs(&pdf).expect("semantic PDF text runs");
     let margin = style.margin_left_pt;
     let first = margin + doc.blocks[0].text_start_pt(&style);
     let nested = margin + doc.blocks[1].text_start_pt(&style);
@@ -380,17 +374,17 @@ fn a_list_lines_text_starts_where_the_editor_starts_it() {
         "nested text at {nested_x}, the editor's text start is {nested}"
     );
 
-    // The marker hangs in the room left of the text, its right edge 4 pt before it
-    // (the editor's 4 px gap in writer_components.slint).
+    // The marker includes its nonprinting separator in the extracted run.
     let body = loom_pdf::TextStyle {
         size_pt: style.body_font_size_pt,
         ..Default::default()
     };
     for (glyph, start) in [("\u{2022}", first), ("1.", nested)] {
+        let marker = format!("{glyph} ");
         let run = runs
             .iter()
-            .find(|run| run.text == glyph)
-            .unwrap_or_else(|| panic!("{glyph:?} is drawn in {runs:?}"));
+            .find(|run| run.text == marker)
+            .unwrap_or_else(|| panic!("{marker:?} is drawn in {runs:?}"));
         let right = run.x + crate::text_metrics::pdf_text_width(glyph, &body);
         assert!(
             (right - (start - 4.0)).abs() < 0.01,

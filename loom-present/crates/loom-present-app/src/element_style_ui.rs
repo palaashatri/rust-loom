@@ -54,42 +54,68 @@ pub(crate) fn publish_geometry(app: &PresentApp, element: &loom_present_core::Sl
     ink.set_rot_text(shown(element.rotation_deg).into());
 }
 
-/// Parse what was typed into a geometry field; units and spaces are allowed.
-fn parse_number(text: &str) -> Option<f32> {
-    let cleaned = text
-        .trim()
-        .trim_end_matches(|c: char| c == '°' || c.is_alphabetic())
-        .trim();
-    cleaned
+/// The 1000-unit slide is 13⅓ inches wide in both PDF and PPTX exports.
+fn parse_number(field: &str, text: &str) -> Option<f32> {
+    let text = text.trim().to_ascii_lowercase();
+    let units: &[(&str, f32)] = if field == "rot" {
+        &[("°", 1.0), ("deg", 1.0)]
+    } else {
+        &[
+            ("in", 75.0),
+            ("cm", 75.0 / 2.54),
+            ("mm", 75.0 / 25.4),
+            ("pt", 75.0 / 72.0),
+        ]
+    };
+    let (number, factor) = units
+        .iter()
+        .find_map(|(suffix, factor)| {
+            text.strip_suffix(suffix)
+                .map(|number| (number.trim(), *factor))
+        })
+        .unwrap_or((&text, 1.0));
+    number
         .parse::<f32>()
         .ok()
+        .map(|value| value * factor)
         .filter(|value| value.is_finite())
 }
 
-/// Apply a typed position, size or rotation to the active object as one undo
-/// step. The result is clamped to the slide, and the fields then show what the
-/// object really has. `Err` carries a reason to show when the text was not a number.
 pub(crate) fn apply_geometry(state: &GuiState, field: &str, text: &str) -> Result<bool, String> {
     if text.trim().is_empty() {
         return Ok(false);
     }
-    let value = parse_number(text).ok_or_else(|| format!("'{}' is not a number", text.trim()))?;
+    let value = parse_number(field, text).ok_or_else(|| {
+        let units = if field == "rot" {
+            "° or deg"
+        } else {
+            "in, cm, mm or pt"
+        };
+        format!(
+            "'{}' is not a number with a supported unit ({units})",
+            text.trim()
+        )
+    })?;
     let mut session = state.session.borrow_mut();
-    let Some(element) = session.document.active_slide().and_then(|slide| {
-        slide
+    let Some((id, x, y, width, height)) = session.document.active_slide().and_then(|slide| {
+        let mut selected = slide
             .elements
             .iter()
-            .find(|element| session.selected_elements.contains(&element.id))
+            .filter(|element| session.selected_elements.contains(&element.id));
+        let element = selected.next()?;
+        if selected.next().is_some() {
+            return None;
+        }
+        Some((
+            element.id.clone(),
+            element.x,
+            element.y,
+            element.width,
+            element.height,
+        ))
     }) else {
         return Ok(false);
     };
-    let (id, x, y, width, height) = (
-        element.id.clone(),
-        element.x,
-        element.y,
-        element.width,
-        element.height,
-    );
     Ok(match field {
         "x" => session.transform_element(&id, value, y, width, height),
         "y" => session.transform_element(&id, x, value, width, height),

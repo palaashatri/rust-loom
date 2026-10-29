@@ -3,7 +3,7 @@ use loom_text::{Alignment, ParagraphDirection};
 use crate::{load_document, save_document, RichBlock, WriterDocument, WRITER_CONTENT_FORMAT};
 
 #[test]
-fn format_three_round_trips_paragraph_direction_and_logical_alignment() {
+fn current_format_round_trips_paragraph_direction_and_logical_alignment() {
     let mut document = WriterDocument::new("direction", "Direction");
     let mut rtl = RichBlock::new(1, "paragraph", "שלום world");
     rtl.style.alignment = Alignment::End;
@@ -28,7 +28,7 @@ fn format_three_round_trips_paragraph_direction_and_logical_alignment() {
     assert!(content.contains("\"alignment\":\"left\",\"direction\":\"ltr\""));
     assert!(content.contains("\"alignment\":\"start\",\"direction\":\"auto\""));
     assert!(content.contains("\"alignment\":\"right\",\"direction\":\"ltr\""));
-    let from_content = WriterDocument::from_content_json(&content).expect("parse format 3");
+    let from_content = WriterDocument::from_content_json(&content).expect("parse current format");
     assert_eq!(from_content, document);
 
     let saved = save_document(&document).expect("save .loomdoc");
@@ -43,24 +43,17 @@ fn formats_one_and_two_default_missing_direction_to_auto() {
     assert_eq!(old.blocks[0].style.alignment, Alignment::Right);
     assert_eq!(old.blocks[0].style.direction, ParagraphDirection::Auto);
 
-    let mut current = WriterDocument::new("v2", "Legacy");
-    let mut block = RichBlock::new(1, "paragraph", "Old");
-    block.style.alignment = Alignment::Right;
-    block.style.direction = ParagraphDirection::RightToLeft;
-    current.blocks.push(block);
-    let format_two = current
-        .to_content_json()
-        .replace("\"format\":3", "\"format\":2")
-        .replace(",\"direction\":\"rtl\"", "");
-    let old = WriterDocument::from_content_json(&format_two).expect("parse format 2");
+    let format_two = r#"{"format":2,"id":"v2","title":"Legacy","blocks":[{"id":1,"kind":"paragraph","text":"Old","align":"right"}]}"#;
+    let old = WriterDocument::from_content_json(format_two).expect("parse format 2");
     assert_eq!(old.blocks[0].style.alignment, Alignment::Right);
     assert_eq!(old.blocks[0].style.direction, ParagraphDirection::Auto);
 }
 
 #[test]
 fn future_content_format_is_rejected() {
-    let error = WriterDocument::from_content_json(r#"{"format":4,"blocks":[]}"#)
-        .expect_err("format 4 is newer than this Writer");
+    let content = format!("{{\"format\":{},\"blocks\":[]}}", WRITER_CONTENT_FORMAT + 1);
+    let error =
+        WriterDocument::from_content_json(&content).expect_err("future content format is refused");
     assert!(error.to_string().contains("newer Writer"));
 }
 

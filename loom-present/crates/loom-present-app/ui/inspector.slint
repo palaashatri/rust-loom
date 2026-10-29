@@ -5,37 +5,63 @@ import { Theme } from "theme.slint";
 import { PresentTableInspector } from "table_inspector.slint";
 import { ElementInk } from "object_part.slint";
 
-/// A colour swatch for the text and fill rows; `ring` marks the chosen one.
+/// A keyboard-operable colour swatch; `ring` marks the chosen one.
 component StyleSwatch inherits Rectangle {
     in property <color> swatch-color: transparent;
     in property <bool> selected: false;
+    in property <bool> focus-target: false;
+    in property <int> slot: 0;
     in property <string> swatch-label: "";
     callback pick();
+    callback move-focus(int, int);
     width: 24px;
     height: 24px;
     border-radius: 4px;
     background: root.swatch-color;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().ink : Theme.palette().border;
+    border-width: focus.has-focus ? 2px : root.selected ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().ink : Theme.palette().border;
     accessible-role: button;
     accessible-label: root.swatch-label;
+    accessible-checked: root.selected;
     accessible-action-default => { root.pick(); }
-    TouchArea { clicked => { root.pick(); } }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.pick(); return accept; }
+            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                let direction = event.text == Key.LeftArrow ? -1 : 1;
+                root.move-focus(root.slot, direction);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    changed focus-target => { if (root.focus-target) { focus.focus(); } }
+    TouchArea { clicked => { focus.focus(); root.move-focus(root.slot, 0); root.pick(); } }
 }
 
 /// Seven palette colours and a reset swatch; right-to-left starts at the right edge.
 component StyleSwatchRow inherits HorizontalLayout {
     in property <int> chosen: -1;
     in property <string> kind-name: "Text colour";
+    in-out property <int> focus-slot: -1;
     callback pick(int);
     spacing: Theme.tokens.space.xs;
     alignment: Theme.rtl ? end : start;
+    property <[string]> colour-names: ["Red", "Orange", "Green", "Blue", "Purple", "Gray", "Black"];
     for slot in 8 : StyleSwatch {
         property <int> k: Theme.rtl ? 7 - slot : slot;
         swatch-color: k == 7 ? transparent : (k < ElementInk.palette.length ? ElementInk.palette[k] : transparent);
         selected: root.chosen == (k == 7 ? -1 : k);
-        swatch-label: k == 7 ? "Automatic " + root.kind-name : root.kind-name + " " + (k + 1);
+        focus-target: root.focus-slot == k;
+        slot: k;
+        swatch-label: k == 7
+            ? (root.kind-name == "Fill" ? "Remove fill" : "Automatic text colour")
+            : root.kind-name + " " + root.colour-names[k];
         pick => { root.pick(k); }
+        move-focus(from, direction) => {
+            let target = from + direction;
+            root.focus-slot = target < 0 ? 7 : target > 7 ? 0 : target;
+        }
     }
 }
 
@@ -348,8 +374,15 @@ export component PresentInspector inherits LoomPanel {
                     }
 
                     if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
-                    if root.selection-count > 0 : InspectorPropertyRow {
-                        label: "Position (X, Y)";
+                    if root.selection-count > 1 : Text {
+                        text: "Select one object to edit its geometry.";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    if root.selection-count == 1 : InspectorPropertyRow {
+                        label: "Position (slide units)";
                         GeometryPair {
                             first-label: "X position";
                             second-label: "Y position";
@@ -360,8 +393,8 @@ export component PresentInspector inherits LoomPanel {
                             focus-moved(y, h) => { root.reveal(y, h); }
                         }
                     }
-                    if root.selection-count > 0 : InspectorPropertyRow {
-                        label: "Size (width, height)";
+                    if root.selection-count == 1 : InspectorPropertyRow {
+                        label: "Size (slide units)";
                         GeometryPair {
                             first-label: "Width";
                             second-label: "Height";
@@ -372,7 +405,7 @@ export component PresentInspector inherits LoomPanel {
                             focus-moved(y, h) => { root.reveal(y, h); }
                         }
                     }
-                    if root.selection-count > 0 : InspectorPropertyRow {
+                    if root.selection-count == 1 : InspectorPropertyRow {
                         label: "Rotation (degrees)";
                         LoomTextField {
                             label: "Rotation";
@@ -389,10 +422,17 @@ export component PresentInspector inherits LoomPanel {
                     spacing: Theme.tokens.space.md;
                     InspectorHeading { title: "Slide Transition"; }
                     LoomSegmentedControl {
-                        items: ["None", "Dissolve", "Push", "Morph"];
+                        items: ["None", "Dissolve", "Push"];
                         current <=> root.transition-index;
                         label: "Transition Type";
                         selected(idx) => { root.set-transition(idx); }
+                    }
+                    if root.transition-index == 3 : Text {
+                        text: "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it.";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
                     }
                 }
 

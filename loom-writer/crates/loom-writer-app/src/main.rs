@@ -21,8 +21,11 @@ mod docx_tests;
 mod file_title;
 mod find_bar;
 mod font_picker;
+mod font_size_actions;
 mod font_store;
+mod footnote_actions;
 mod formatting_actions;
+mod header_footer_actions;
 mod history;
 mod inline_formatting;
 mod launch_position;
@@ -32,9 +35,11 @@ mod local_menu;
 mod markdown_export;
 mod multi_click;
 mod outline;
+mod page_setup_actions;
 mod palette_catalog;
 mod palette_wiring;
 mod paragraph_alignment;
+mod pdf_export_actions;
 mod picture_actions;
 mod picture_drag;
 mod picture_paste;
@@ -42,11 +47,16 @@ mod picture_view;
 mod pointer_hit_test;
 mod press_reveal;
 mod projection;
+mod revision_actions;
+mod save_flow;
 use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
+#[cfg(target_os = "macos")]
+mod macos_window_evidence;
 mod reading_time;
 mod recovery;
 mod recovery_draft;
 mod table_actions;
+mod templates;
 mod toolbar_commands;
 mod typing_style;
 mod view_state;
@@ -54,25 +64,30 @@ mod window_chrome;
 
 use history::{EditorHistory, HistoryKind};
 use paragraph_alignment::writer_render_alignment;
+use save_flow::{
+    load_file, save_current_document, save_file, warning_is_open, writer_open_request,
+};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+#[cfg(test)]
+use templates::blank_document;
+use templates::{parse_template_id, template_document, TemplateId};
 
 use toolbar_commands::apply_layout_breakpoints;
 #[cfg(test)]
 use toolbar_commands::{layout_breakpoints, ResponsiveToolbarState};
 
-#[cfg(test)]
-use document_formatting::set_selection_strikethrough;
 use document_formatting::{
     formatting_state_for_selection, indent_selection, selection_text_spans,
-    set_selection_alignment, set_selection_bold, set_selection_font_family,
-    set_selection_font_size, set_selection_heading, set_selection_italic,
-    set_selection_line_spacing, set_selection_list_style, set_selection_underline,
-    DocumentSelection,
+    set_selection_alignment, set_selection_bold, set_selection_font_family, set_selection_heading,
+    set_selection_italic, set_selection_line_spacing, set_selection_list_style,
+    set_selection_underline, DocumentSelection,
 };
+#[cfg(test)]
+use document_formatting::{set_selection_font_size, set_selection_strikethrough};
 use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
     InvocationSource,
@@ -81,7 +96,7 @@ use loom_command::{
 use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
 use loom_desktop::{
     CommandAction, DesktopError, FileDialogService, FileFilter, MenuBarService, NativeFileDialogs,
-    NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    NativeMenuBar, SaveFileRequest,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -93,7 +108,6 @@ use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString
 
 slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const SAVE_FILENAME: &str = "loom-writer-document.loomdoc";
 const EXPORT_FILENAME: &str = "loom-writer-export.pdf";
 
 #[derive(Debug)]
@@ -218,7 +232,7 @@ where
             "--template" => {
                 let value = it.next().ok_or("--template needs an id")?;
                 args.template = Some(parse_template_id(&value).ok_or_else(|| {
-                    format!("unknown template: {value} (expected blank, report, letter, or cv)")
+                    format!("unknown template: {value} (expected blank, report, letter, cv, or newsletter)")
                 })?);
             }
             "--template-chooser" => {
@@ -243,144 +257,6 @@ where
         }
     }
     Ok(args)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TemplateId {
-    Blank,
-    BlankBlack,
-    Report,
-    Letter,
-    Cv,
-    Newsletter,
-}
-
-impl TemplateId {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Blank => "blank",
-            Self::BlankBlack => "blank-black",
-            Self::Report => "report",
-            Self::Letter => "letter",
-            Self::Cv => "cv",
-            Self::Newsletter => "newsletter",
-        }
-    }
-}
-
-fn parse_template_id(value: &str) -> Option<TemplateId> {
-    match value {
-        "blank" => Some(TemplateId::Blank),
-        "blank-black" => Some(TemplateId::BlankBlack),
-        "report" => Some(TemplateId::Report),
-        "letter" => Some(TemplateId::Letter),
-        "cv" => Some(TemplateId::Cv),
-        "newsletter" => Some(TemplateId::Newsletter),
-        _ => None,
-    }
-}
-
-fn template_document(template: TemplateId) -> WriterDocument {
-    let (id, title) = (
-        format!("template-{}", template.as_str()),
-        match template {
-            TemplateId::Blank | TemplateId::BlankBlack => "Untitled Document",
-            TemplateId::Report => "Untitled Report",
-            TemplateId::Letter => "Untitled Letter",
-            TemplateId::Cv => "Untitled CV",
-            TemplateId::Newsletter => "Untitled Newsletter",
-        },
-    );
-    let mut document = WriterDocument::new(id, title);
-    match template {
-        TemplateId::Blank | TemplateId::BlankBlack => {}
-        TemplateId::Report => {
-            document.push(RichBlock::new(
-                document.next_id(),
-                "heading1",
-                "Report Title",
-            ));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Executive summary",
-            ));
-            document.push(RichBlock::new(document.next_id(), "heading2", "Overview"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Start writing your report here.",
-            ));
-        }
-        TemplateId::Letter => {
-            document.push(RichBlock::new(document.next_id(), "paragraph", "Your Name"));
-            document.push(RichBlock::new(document.next_id(), "paragraph", "Date"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Dear Recipient,",
-            ));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Write your letter here.",
-            ));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Sincerely,",
-            ));
-        }
-        TemplateId::Cv => {
-            document.push(RichBlock::new(document.next_id(), "heading1", "Your Name"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Professional title · email@example.com",
-            ));
-            document.push(RichBlock::new(document.next_id(), "heading2", "Experience"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Role — Company · 2020–Present",
-            ));
-            document.push(RichBlock::new(document.next_id(), "heading2", "Education"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Degree — Institution",
-            ));
-        }
-        TemplateId::Newsletter => {
-            document.push(RichBlock::new(
-                document.next_id(),
-                "heading1",
-                "Newsletter title",
-            ));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "A short introduction for your readers.",
-            ));
-            document.push(RichBlock::new(document.next_id(), "heading2", "Story one"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Write the first newsletter story here.",
-            ));
-            document.push(RichBlock::new(document.next_id(), "heading2", "Story two"));
-            document.push(RichBlock::new(
-                document.next_id(),
-                "paragraph",
-                "Add another useful update for your readers.",
-            ));
-        }
-    }
-    document
-}
-
-fn blank_document() -> WriterDocument {
-    template_document(TemplateId::Blank)
 }
 
 /// What a first launch opens: an empty, untitled document the user owns.
@@ -412,6 +288,7 @@ fn open_quick_start_sample(app: &WriterApp, state: &GuiState) {
     *state.last_saved.borrow_mut() = sample.clone();
     *state.current.borrow_mut() = sample;
     *state.save_path.borrow_mut() = None;
+    state.compatibility_save.set(false);
     *state.history.borrow_mut() = EditorHistory::new();
     apply_state(app, state);
     app.set_status_left("Opened the Quick Start sample".into());
@@ -446,37 +323,21 @@ fn sample_document() -> WriterDocument {
     d
 }
 
-fn load_file(path: &Path) -> Result<WriterDocument, String> {
-    let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
-    {
-        loom_writer_core::import_docx(&bytes)
-            .map_err(|error| format!("import docx {}: {error}", path.display()))
-    } else {
-        loom_writer_core::load_document(&bytes)
-            .map_err(|error| format!("load {}: {error}", path.display()))
-    }
-}
-
-fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
-    let bytes = loom_writer_core::save_document(doc).map_err(|error| error.to_string())?;
-    loom_storage::atomic_write(path, &bytes)
-        .map_err(|error| format!("atomic write {}: {error}", path.display()))
-}
-
 /// The status line after a successful PDF export.
 fn pdf_export_message(path: &Path, _doc: &WriterDocument) -> String {
     format!("Exported {}", path.display())
 }
 
-fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
+fn export_pdf_file(
+    path: &Path,
+    doc: &WriterDocument,
+    view: loom_writer_core::pdf_export_view::PdfRevisionView,
+) -> Result<(), String> {
     if path.as_os_str().is_empty() || path.file_name().is_none() {
         return Err("PDF destination is empty".into());
     }
-    let bytes =
-        loom_writer_core::export_pdf(doc).map_err(|error| format!("PDF export: {error}"))?;
+    let bytes = loom_writer_core::pdf_export_view::export_pdf_with_view(doc, view)
+        .map_err(|error| format!("PDF export: {error}"))?;
     if bytes.is_empty() {
         return Err("PDF export produced no bytes".into());
     }
@@ -492,6 +353,7 @@ fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
 /// palette entries remain stable without creating a second mutation path.
 fn dispatch_command(app: &WriterApp, id: &str) -> bool {
     match id {
+        "app.quit" | "loom writer.quit" => app.invoke_application_quit_requested(),
         "file.new" | "writer.new" => app.invoke_new_doc(),
         "file.open" | "writer.open" => app.invoke_open_doc(),
         "file.save" | "writer.save" => app.invoke_save_doc(),
@@ -505,6 +367,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "edit.copy" | "writer.copy" => app.invoke_copy(),
         "edit.paste" | "writer.paste" => app.invoke_paste(),
         "app.palette" => app.invoke_open_palette(),
+        "writer.footnotes" => app.global::<WriterFootnoteState>().invoke_open_editor(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
         "insert.image" | "writer.image.insert" => app.invoke_insert_image(),
@@ -775,6 +638,11 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Apply body paragraph style to selected blocks")
             .with_category("format")
             .with_order(71),
+        CommandSpec::new("writer.footnotes", "Footnotes…")
+            .with_undo_label("Open Footnotes")
+            .with_description("Add, edit, or remove a footnote at the current reference")
+            .with_category("insert")
+            .with_order(75),
         // Insert commands are defined in table_actions::table_command_specs().
         // Utility/palette/inspector — always enabled
         CommandSpec::new("app.palette", "Command Palette")
@@ -844,6 +712,15 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_shortcut("Ctrl+Shift+Z")
             .with_enabled(false),
     ];
+    catalog.push(
+        CommandSpec::new(local_menu::QUIT_COMMAND_ID, "Quit Writer")
+            .with_undo_label("Quit Writer")
+            .with_description("Quit Writer after resolving unsaved changes")
+            .with_category("file")
+            .with_order(60)
+            .with_shortcut("Ctrl+Q")
+            .with_enabled(true),
+    );
     catalog.extend(paragraph_alignment::command_specs());
     catalog.extend(formatting_actions::command_specs());
     catalog.extend(appearance::command_specs());
@@ -974,6 +851,7 @@ fn sync_writer_registry_enablement(
     }
     // App utility commands are always reachable.
     registry.set_enabled(&CommandId::new("app.palette"), true);
+    registry.set_enabled(&CommandId::new(local_menu::QUIT_COMMAND_ID), true);
     // view.inspector enablement is drive by window availability, not document.
 }
 
@@ -1085,6 +963,8 @@ pub(crate) struct GuiState {
     pointer_anchor: Cell<Option<usize>>,
     pointer_active: Cell<bool>,
     save_path: RefCell<Option<PathBuf>>,
+    /// True only after the user chose `.loomdoc` as the explicit save format.
+    compatibility_save: Cell<bool>,
     history: RefCell<EditorHistory>,
     history_clock: Instant,
     syncing_editor: Cell<bool>,
@@ -1101,8 +981,12 @@ enum PendingReplacement {
     NewDocument,
     QuickStartSample,
     OpenDocument,
+    DocxImport,
+    CreateTemplate(TemplateId),
     /// Closing the window with unsaved changes.
     CloseWindow,
+    /// Quitting the application after resolving unsaved changes.
+    QuitApplication,
 }
 
 fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool {
@@ -1112,7 +996,10 @@ fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool
     left.id == right.id
         && left.title == right.title
         && left.page == right.page
+        && left.header_footer == right.header_footer
         && left.comments == right.comments
+        && left.footnotes == right.footnotes
+        && left.tracked_changes == right.tracked_changes
         && left.blocks == right.blocks
 }
 
@@ -1147,43 +1034,6 @@ fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn writer_open_request(state: &GuiState) -> OpenFileRequest {
-    let mut filters = vec![state.document_filter.clone()];
-    if let Ok(docx_filter) = FileFilter::new("Word document", ["docx"]) {
-        filters.push(docx_filter);
-    }
-    OpenFileRequest {
-        title: "Open Loom Writer Document".into(),
-        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
-        suggested_name: None,
-        filters,
-    }
-}
-
-fn writer_save_request(state: &GuiState) -> SaveFileRequest {
-    let path = state.save_path.borrow();
-    let suggested_name = path
-        .as_deref()
-        .map(|path| {
-            if is_loom_document_path(path) {
-                path.to_path_buf()
-            } else {
-                path.with_extension("loomdoc")
-            }
-        })
-        .and_then(|path| {
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| SAVE_FILENAME.to_string());
-    SaveFileRequest {
-        title: "Save Loom Writer Document".into(),
-        initial_directory: initial_directory(path.as_deref()),
-        suggested_name: Some(suggested_name),
-        filters: vec![state.document_filter.clone()],
-    }
-}
-
 fn writer_export_request(state: &GuiState) -> SaveFileRequest {
     SaveFileRequest {
         title: "Export Loom Writer PDF".into(),
@@ -1203,62 +1053,11 @@ pub(crate) fn replace_opened_document(
     *state.last_saved.borrow_mut() = document.clone();
     *state.current.borrow_mut() = document;
     *state.save_path.borrow_mut() = Some(path);
+    state.compatibility_save.set(false);
     *state.history.borrow_mut() = EditorHistory::new();
     set_recovery_notice(None);
     apply_state(app, state);
     recovery::end_replaced_session(app);
-}
-
-/// Whether `path` names a Loom Writer document (the format Save writes).
-fn is_loom_document_path(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("loomdoc"))
-}
-
-fn save_current_document(
-    app: &WriterApp,
-    state: &GuiState,
-    force_picker: bool,
-) -> Result<bool, String> {
-    // A document opened from a Word file saves as a Loom file: writing a Loom
-    // package over the `.docx` would destroy it.
-    let path = if !force_picker {
-        state
-            .save_path
-            .borrow()
-            .clone()
-            .filter(|path| is_loom_document_path(path))
-    } else {
-        None
-    };
-    let path = match path {
-        Some(path) => Some(path),
-        None => state
-            .dialogs
-            .save_file(&writer_save_request(state))
-            .map_err(|error| error.to_string())?,
-    };
-    let Some(path) = path else {
-        app.set_status_left("Save cancelled".into());
-        return Ok(false);
-    };
-    let document = state.current.borrow().clone();
-    save_file(&path, &document)?;
-    *state.save_path.borrow_mut() = Some(path.clone());
-    let checkpoint_result = recovery::checkpoint_document(&document, Some(path.as_path()));
-    *state.last_saved.borrow_mut() = document;
-    set_recovery_notice(None);
-    file_title::sync(app, state);
-    app.set_document_dirty(document_is_dirty(state));
-    let status = match checkpoint_result {
-        Ok(()) => format!("Saved {}", path.display()),
-        Err(error) => {
-            eprintln!("Writer recovery checkpoint failed: {error}");
-            "Saved. Recovery checkpoint failed; keep another copy.".to_owned()
-        }
-    };
-    app.set_status_left(SharedString::from(status));
-    Ok(true)
 }
 
 fn apply_document(app: &WriterApp, doc: &WriterDocument) {
@@ -1283,9 +1082,11 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     formatting_actions::project_document_controls(app, doc);
     refresh_writer_render_projection(app, doc, viewport);
     outline::publish(app, doc);
+    page_setup_actions::project(app, doc);
     app.set_page_paper_index(match doc.page.paper {
         loom_writer_core::PaperSize::A4 => 0,
         loom_writer_core::PaperSize::Letter => 1,
+        loom_writer_core::PaperSize::Custom => 2,
         _ => 0,
     });
     app.set_page_orientation_index(match doc.page.orientation {
@@ -1296,6 +1097,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
         loom_writer_core::PageMarginsPreset::Normal => 0,
         loom_writer_core::PageMarginsPreset::Narrow => 1,
         loom_writer_core::PageMarginsPreset::Wide => 2,
+        loom_writer_core::PageMarginsPreset::Custom => 3,
         _ => 0,
     });
     app.set_selection_announcement(SharedString::from(announcement.clone()));
@@ -1324,6 +1126,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     };
     app.set_status_left(SharedString::from(status_text));
     app.set_status_right(SharedString::from(announcement));
+    revision_actions::sync_state(app, doc, viewport);
 }
 
 /// The left status text: the document's counts, with paragraphs named as
@@ -1403,6 +1206,13 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
     app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
     app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
+    app.global::<WriterReviewState>()
+        .set_revision_marks(Rc::new(VecModel::from(projection.revision_marks)).into());
+    app.global::<WriterHeaderFooterState>()
+        .set_page_lines(Rc::new(VecModel::from(projection.header_footer_lines)).into());
+    let footnotes = app.global::<WriterFootnoteState>();
+    footnotes.set_page_lines(Rc::new(VecModel::from(projection.footnote_lines)).into());
+    footnotes.set_page_references(Rc::new(VecModel::from(projection.footnote_references)).into());
     // Compare against this component's own model: a thread-local cache lets
     // one WriterApp suppress publication to another app with identical cells.
     let table_rects = app.get_table_cell_rects();
@@ -1424,7 +1234,6 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
-    app.set_page_margin_pt(page_style.margin_top_pt);
     app.global::<FindBar>()
         .set_match_rects(Rc::new(VecModel::from(match_rects)).into());
 }
@@ -1885,11 +1694,56 @@ fn apply_pending_typing_style(
     });
 }
 
-/// Apply a keystroke or paste as a coalescing typing edit. The recovery draft is
-/// written shortly afterwards instead of inside the callback; see
-/// [`recovery::DeferredWrite`]. `next` must differ from the current document, as a
-/// changed text always does.
-fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) {
+fn finalize_user_edit(
+    before: &WriterDocument,
+    after: &mut WriterDocument,
+    edits: Option<&[loom_writer_core::RevisionTextEdit]>,
+) -> Result<(), loom_writer_core::WriterError> {
+    match edits {
+        Some(edits) => after.record_user_edits_from(before, edits),
+        None => after.record_user_edit_from(before, Some(after.selection().focus)),
+    }
+}
+
+fn restore_rejected_edit_projection(app: &WriterApp, state: &GuiState, document: &WriterDocument) {
+    let syncing = state.syncing_editor.replace(true);
+    apply_document_with_viewport(app, document, *state.viewport.borrow());
+    state.syncing_editor.set(syncing);
+}
+
+fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) -> bool {
+    apply_typing_transaction(app, state, next, typing_style::snapshot())
+}
+
+fn apply_typing_with_pending_style(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    next: WriterDocument,
+    before_selection: TextSelection,
+) -> bool {
+    let pending_style = typing_style::snapshot();
+    let mut next = next;
+    let typed_end = next.selection().focus;
+    apply_pending_typing_style(&mut next, before_selection, typed_end);
+    apply_typing_transaction(app, state, next, pending_style)
+}
+
+fn apply_typing_transaction(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    next: WriterDocument,
+    pending_style_before: typing_style::Snapshot,
+) -> bool {
+    let before = state.current.borrow().clone();
+    let mut next = next;
+    if let Err(error) = finalize_user_edit(&before, &mut next, None) {
+        typing_style::restore(pending_style_before);
+        restore_rejected_edit_projection(app, state, &before);
+        app.set_status_left(SharedString::from(format!("Edit not applied: {error}")));
+        return false;
+    }
+
+    table_actions::clear_table_cell_selection_range();
     let previous = state.current.replace(next);
     let after = state.current.borrow().clone();
     state
@@ -1911,6 +1765,7 @@ fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) {
         });
     }
     apply_state_with(app, state, RecoveryWrite::Deferred);
+    true
 }
 
 std::thread_local! {
@@ -1944,17 +1799,64 @@ pub(crate) fn apply_with_history(
     state: &GuiState,
     next: WriterDocument,
     kind: HistoryKind,
-) {
-    if *state.current.borrow() == next {
-        return;
+) -> bool {
+    apply_with_history_using_edits(app, state, next, kind, None, false)
+}
+
+/// Commits a structural table action with its cell-range overlay cleared before projection.
+pub(crate) fn apply_table_action_with_history(
+    app: &WriterApp,
+    state: &GuiState,
+    next: WriterDocument,
+    kind: HistoryKind,
+) -> bool {
+    apply_with_history_using_edits(app, state, next, kind, None, true)
+}
+
+pub(crate) fn apply_with_history_with_edits(
+    app: &WriterApp,
+    state: &GuiState,
+    next: WriterDocument,
+    kind: HistoryKind,
+    edits: &[loom_writer_core::RevisionTextEdit],
+) -> bool {
+    apply_with_history_using_edits(app, state, next, kind, Some(edits), false)
+}
+
+fn apply_with_history_using_edits(
+    app: &WriterApp,
+    state: &GuiState,
+    next: WriterDocument,
+    kind: HistoryKind,
+    edits: Option<&[loom_writer_core::RevisionTextEdit]>,
+    clear_table_range_before_projection: bool,
+) -> bool {
+    let before = state.current.borrow().clone();
+    if before == next {
+        if clear_table_range_before_projection {
+            table_actions::clear_table_cell_selection_range();
+            apply_document_with_viewport(app, &before, *state.viewport.borrow());
+        }
+        return true;
     }
+    let mut next = next;
+    if let Err(error) = finalize_user_edit(&before, &mut next, edits) {
+        restore_rejected_edit_projection(app, state, &before);
+        app.set_status_left(SharedString::from(format!("Edit not applied: {error}")));
+        return false;
+    }
+
     let previous = state.current.replace(next);
     let after = state.current.borrow().clone();
     state
         .history
         .borrow_mut()
         .record(previous, after, kind, history_now_ms(state));
+    if clear_table_range_before_projection {
+        table_actions::clear_table_cell_selection_range();
+    }
     apply_state(app, state);
+    true
 }
 
 /// Switches the window to a named appearance (`--theme`, tests). The page is
@@ -2047,6 +1949,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
+    templates::install_catalog(&app);
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
@@ -2117,6 +2020,35 @@ fn wire_close_guard(app: &WriterApp, state: &Rc<GuiState>) {
     });
 }
 
+fn quit_slint_event_loop() {
+    if let Err(error) = slint::quit_event_loop() {
+        eprintln!("loom-writer: failed to quit event loop: {error:?}");
+    }
+}
+
+/// Routes an application Quit through the shared dirty-document decision.
+fn wire_application_quit(app: &WriterApp, state: &Rc<GuiState>) {
+    wire_application_quit_with(app, state, Rc::new(quit_slint_event_loop));
+}
+
+/// The injected exit callback keeps the quit decision deterministic in unit tests.
+fn wire_application_quit_with(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    quit_event_loop: Rc<dyn Fn()>,
+) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_application_quit_requested(move || {
+        let Some(app) = app_ref.upgrade() else {
+            return;
+        };
+        if !request_document_replacement(&app, &state, PendingReplacement::QuitApplication) {
+            quit_event_loop();
+        }
+    });
+}
+
 /// The window is really closing: drop the recovery data so it is not offered
 /// again. A failure only costs a stale draft, so it is reported, not fatal.
 fn end_session_recovery() {
@@ -2137,7 +2069,7 @@ fn focus_page_at_launch(app: &WriterApp) {
 fn begin_new_document(app: &WriterApp) {
     // Opening the chooser is safe: it does not replace the current document.
     // Replacement happens only after the user presses Create Document.
-    app.set_template_selected(0);
+    app.set_template_selected("blank".into());
     app.set_template_category(0);
     app.set_template_chooser_open(true);
     app.set_status_left("Choose a document template".into());
@@ -2198,64 +2130,112 @@ fn request_document_replacement(
         &state.current.borrow().title,
     );
     app.set_save_changes_document(SharedString::from(title));
-    app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
+    app.set_save_changes_closing(matches!(
+        operation,
+        PendingReplacement::CloseWindow | PendingReplacement::QuitApplication
+    ));
     app.set_save_changes_open(true);
     app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
     true
 }
 
+fn cancel_pending_replacement(app: &WriterApp, state: &GuiState) {
+    if state.pending_replacement.take() == Some(PendingReplacement::DocxImport) {
+        docx_actions::clear_pending_docx_import();
+    }
+    app.set_save_changes_open(false);
+    app.set_status_left("Changes kept; replacement cancelled".into());
+}
+
+/// Sends a recovered-document replacement through the shared Save/Discard/Cancel guard.
+pub(crate) fn request_docx_import_replacement(app: &WriterApp, state: &GuiState) -> bool {
+    request_document_replacement(app, state, PendingReplacement::DocxImport)
+}
+
 fn continue_pending_replacement(
     app: &WriterApp,
     state: &GuiState,
-    menu_service: &Arc<NativeMenuBar>,
+    menu_service: &Option<Arc<NativeMenuBar>>,
+) {
+    continue_pending_replacement_with_quit(app, state, menu_service, quit_slint_event_loop);
+}
+
+/// Finishes a replacement after its Save or Discard decision has succeeded.
+fn continue_pending_replacement_with_quit(
+    app: &WriterApp,
+    state: &GuiState,
+    menu_service: &Option<Arc<NativeMenuBar>>,
+    quit_event_loop: impl FnOnce(),
 ) {
     match state.pending_replacement.take() {
         Some(PendingReplacement::NewDocument) => begin_new_document(app),
         Some(PendingReplacement::QuickStartSample) => open_quick_start_sample(app, state),
         Some(PendingReplacement::OpenDocument) => {
-            open_document_from_picker(app, state, &Some(menu_service.clone()))
+            open_document_from_picker(app, state, menu_service)
+        }
+        Some(PendingReplacement::DocxImport) => {
+            docx_actions::apply_pending_docx_import(app, state, menu_service)
+        }
+        Some(PendingReplacement::CreateTemplate(template)) => {
+            templates::apply_template_document(app, state, template, menu_service.as_deref());
         }
         Some(PendingReplacement::CloseWindow) => {
             end_session_recovery();
             let _ = slint::ComponentHandle::hide(app);
         }
+        Some(PendingReplacement::QuitApplication) => {
+            end_session_recovery();
+            quit_event_loop();
+        }
         None => {}
     }
 }
 
-fn wire_font_size_callbacks(app: &WriterApp, state: &Rc<GuiState>) {
-    let app_ref = app.as_weak();
-    let increase_state = state.clone();
-    app.on_increase_font_size(move || {
-        let Some(app) = app_ref.upgrade() else { return };
-        let size = (app.get_font_size_pt() + 1).min(144) as f32;
-        apply_selected_font_size(&app, &increase_state, size);
-    });
-
-    let app_ref = app.as_weak();
-    let decrease_state = state.clone();
-    app.on_decrease_font_size(move || {
-        let Some(app) = app_ref.upgrade() else { return };
-        let size = (app.get_font_size_pt() - 1).max(6) as f32;
-        apply_selected_font_size(&app, &decrease_state, size);
-    });
-}
-
-fn apply_selected_font_size(app: &WriterApp, state: &GuiState, size: f32) {
-    let mut next = state.current.borrow().clone();
-    let selection = next.selection();
-    set_selection_font_size(
-        &mut next,
-        DocumentSelection::range(selection.anchor, selection.focus),
-        size,
-    );
-    table_actions::table_format_actions::set_selection_font_size(
-        &mut next,
-        selection.clone(),
-        size,
-    );
-    next.set_selection(selection);
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+fn wire_save_changes_guard(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    menu_service: Option<Arc<NativeMenuBar>>,
+) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_save(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            match save_current_document(&app, &state, false) {
+                Ok(true) => {
+                    app.set_save_changes_open(false);
+                    continue_pending_replacement(&app, &state, &menu_service);
+                }
+                Ok(false) => {
+                    if !warning_is_open(&app) {
+                        app.set_status_left("Save cancelled; changes kept".into());
+                    }
+                }
+                Err(error) => {
+                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_discard(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            app.set_save_changes_open(false);
+            continue_pending_replacement(&app, &state, &menu_service);
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_cancel(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            cancel_pending_replacement(&app, &state);
+        });
+    }
 }
 
 /// Register callbacks shared by the native GUI and deterministic journey.
@@ -2267,7 +2247,14 @@ fn wire_writer_shared_callbacks(
     state: &Rc<GuiState>,
     menu_service: Option<Arc<NativeMenuBar>>,
 ) {
+    page_setup_actions::register(app, state);
+    header_footer_actions::register(app, state);
+    footnote_actions::register(app, state);
+    revision_actions::register(app, state);
+    templates::install_catalog(app);
+    templates::wire_create_template_callback(app, state, menu_service.clone());
     *state.menu_service.borrow_mut() = menu_service.clone();
+    wire_save_changes_guard(app, state, menu_service.clone());
     find_bar::wire(app, state);
     toolbar_commands::wire(app);
     outline::wire(app, state);
@@ -2275,9 +2262,10 @@ fn wire_writer_shared_callbacks(
     view_state::wire(app, state, menu_service.clone());
     table_actions::wire(app, state);
     formatting_actions::wire(app, state);
-    wire_font_size_callbacks(app, state);
+    font_size_actions::wire(app, state);
     clipboard_actions::wire(app, state);
     docx_actions::wire(app, state, &menu_service);
+    save_flow::wire_loss_dialog(app, state, &menu_service);
     picture_actions::wire(app, state);
     {
         let state = state.clone();
@@ -2362,6 +2350,32 @@ fn wire_writer_shared_callbacks(
     }
 
     {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_move_document_edge(move |to_end, extend| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let (anchor, focus) = {
+                let document = state.current.borrow();
+                let focus = if to_end {
+                    document.editor_text().len()
+                } else {
+                    0
+                };
+                let anchor = if extend {
+                    document.selection().anchor
+                } else {
+                    focus
+                };
+                (
+                    anchor.min(i32::MAX as usize) as i32,
+                    focus.min(i32::MAX as usize) as i32,
+                )
+            };
+            app.invoke_selection_changed(anchor, focus);
+            reveal_caret(&app, &state);
+        });
+    }
+    {
         // Page Up / Page Down move the caret one screen (Shift extends the
         // selection); the caret-follow logic then scrolls the page.
         let state = state.clone();
@@ -2427,14 +2441,17 @@ fn wire_writer_shared_callbacks(
             if in_table {
                 let mut next = state.current.borrow().clone();
                 if let Ok(new_caret) = next.tab_navigate_table(start, false) {
-                    table_actions::clear_table_cell_selection_range();
                     let rows_changed = {
                         let current = state.current.borrow();
                         current.blocks != next.blocks
                     };
                     if rows_changed {
-                        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                        if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                            return;
+                        }
+                        table_actions::clear_table_cell_selection_range();
                     } else {
+                        table_actions::clear_table_cell_selection_range();
                         state
                             .current
                             .borrow_mut()
@@ -2489,9 +2506,9 @@ fn wire_writer_shared_callbacks(
                     focus.max(0) as usize,
                 ));
                 if text_changed {
-                    table_actions::clear_table_cell_selection_range();
-                    apply_pending_typing_style(&mut next, before, focus.max(0) as usize);
-                    apply_typing(&app, &state, next);
+                    if !apply_typing_with_pending_style(&app, &state, next, before) {
+                        return;
+                    }
                     sync_writer_menu_if_present(&menu_service, &app, &state);
                 } else if state.current.borrow().selection() != next.selection() {
                     // A selection-only callback updates model/UI state but is
@@ -2560,7 +2577,9 @@ fn wire_writer_shared_callbacks(
                     !enabled,
                 );
                 next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 sync_writer_menu_if_present(&menu_service, &app, &state);
                 let announcement = if enabled {
                     "Bold removed from selection"
@@ -2615,7 +2634,9 @@ fn wire_writer_shared_callbacks(
                     !enabled,
                 );
                 next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 sync_writer_menu_if_present(&menu_service, &app, &state);
                 let announcement = if enabled {
                     "Underline removed from selection"
@@ -2670,7 +2691,9 @@ fn wire_writer_shared_callbacks(
                     !enabled,
                 );
                 next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 sync_writer_menu_if_present(&menu_service, &app, &state);
                 let announcement = if enabled {
                     "Italic removed from selection"
@@ -2713,7 +2736,9 @@ fn wire_writer_shared_callbacks(
                     level,
                 );
                 next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 sync_writer_menu_if_present(&menu_service, &app, &state);
                 let label = match level {
                     1 => "Heading 1",
@@ -2774,7 +2799,9 @@ fn wire_writer_shared_callbacks(
                     format!("{label} alignment applied to selected paragraph(s)")
                 };
                 next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 sync_writer_menu_if_present(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(announcement.clone()));
                 app.set_selection_announcement(SharedString::from(announcement));
@@ -2845,10 +2872,15 @@ fn wire_writer_shared_callbacks(
                 if guard.is_err() {
                     return;
                 }
-                if let Err(error) = save_current_document(&app, &state, false) {
-                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                match save_current_document(&app, &state, false) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                    }
                 }
-                app.invoke_focus_page();
+                if !warning_is_open(&app) {
+                    app.invoke_focus_page();
+                }
             }
         });
     }
@@ -2871,44 +2903,13 @@ fn wire_writer_shared_callbacks(
                 if let Err(error) = save_current_document(&app, &state, true) {
                     app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
                 }
-                app.invoke_focus_page();
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_pdf(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.export_pdf",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    app.set_status_right("Add content before exporting PDF".into());
-                    return;
-                }
-                match state.dialogs.save_file(&writer_export_request(&state)) {
-                    Ok(Some(path)) => match export_pdf_file(&path, &state.current.borrow()) {
-                        Ok(()) => app.set_status_left(SharedString::from(pdf_export_message(
-                            &path,
-                            &state.current.borrow(),
-                        ))),
-                        Err(error) => app
-                            .set_status_left(SharedString::from(format!("Export failed: {error}"))),
-                    },
-                    Ok(None) => app.set_status_left("Export cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Export dialog failed: {error}"
-                    ))),
+                if !warning_is_open(&app) {
+                    app.invoke_focus_page();
                 }
             }
         });
     }
+    pdf_export_actions::register(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -3035,7 +3036,9 @@ fn wire_writer_shared_callbacks(
                 index,
             );
             next.set_selection(sel);
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             let label = match index {
                 1 => "Bulleted list",
                 2 => "Numbered list",
@@ -3061,7 +3064,9 @@ fn wire_writer_shared_callbacks(
                 loom_writer_core::INSERT_COLUMNS,
             ) {
                 Ok(_) => {
-                    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                    if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                        return;
+                    }
                     app.set_status_right(SharedString::from("Table inserted — edit cells as text"));
                 }
                 Err(error) => {
@@ -3118,8 +3123,10 @@ fn wire_writer_shared_callbacks(
             };
             match result {
                 Ok(_) => {
+                    if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                        return;
+                    }
                     app.set_comment_draft(SharedString::from(""));
-                    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                     app.set_status_right(SharedString::from(added));
                 }
                 Err(error) => {
@@ -3186,7 +3193,9 @@ fn wire_writer_shared_callbacks(
             let Some(app) = app_ref.upgrade() else { return };
             let mut next = state.current.borrow().clone();
             if next.set_comment_thread_resolved(&id, resolved) {
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 let label = if resolved {
                     "Comment resolved"
                 } else {
@@ -3203,7 +3212,9 @@ fn wire_writer_shared_callbacks(
             let Some(app) = app_ref.upgrade() else { return };
             let mut next = state.current.borrow().clone();
             if next.remove_comment_thread(&id) {
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 app.set_status_right(SharedString::from("Comment deleted"));
             }
         });
@@ -3218,14 +3229,21 @@ fn wire_writer_shared_callbacks(
         app.on_select_paper_size(move |index| {
             let Some(app) = app_ref.upgrade() else { return };
             let mut next = state.current.borrow().clone();
-            next.page.paper = match index {
+            next.page.select_paper(match index {
                 1 => loom_writer_core::PaperSize::Letter,
+                2 => loom_writer_core::PaperSize::Custom,
                 _ => loom_writer_core::PaperSize::A4,
-            };
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            });
+            if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(format!(
                 "Paper: {}",
-                if index == 1 { "US Letter" } else { "A4" }
+                match index {
+                    1 => "US Letter",
+                    2 => "Custom",
+                    _ => "A4",
+                }
             )));
         });
     }
@@ -3235,11 +3253,13 @@ fn wire_writer_shared_callbacks(
         app.on_select_orientation(move |index| {
             let Some(app) = app_ref.upgrade() else { return };
             let mut next = state.current.borrow().clone();
-            next.page.orientation = match index {
+            next.page.select_orientation(match index {
                 1 => loom_writer_core::PageOrientation::Landscape,
                 _ => loom_writer_core::PageOrientation::Portrait,
-            };
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            });
+            if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(format!(
                 "Orientation: {}",
                 if index == 1 { "Landscape" } else { "Portrait" }
@@ -3252,17 +3272,21 @@ fn wire_writer_shared_callbacks(
         app.on_select_margins(move |index| {
             let Some(app) = app_ref.upgrade() else { return };
             let mut next = state.current.borrow().clone();
-            next.page.margins = match index {
+            next.page.select_margins(match index {
                 1 => loom_writer_core::PageMarginsPreset::Narrow,
                 2 => loom_writer_core::PageMarginsPreset::Wide,
+                3 => loom_writer_core::PageMarginsPreset::Custom,
                 _ => loom_writer_core::PageMarginsPreset::Normal,
-            };
-            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            });
+            if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(format!(
                 "Margins: {}",
                 match index {
                     1 => "Narrow",
                     2 => "Wide",
+                    3 => "Custom",
                     _ => "Normal",
                 }
             )));
@@ -3340,57 +3364,20 @@ fn startup_documents(
     open: Option<&str>,
     template: Option<TemplateId>,
 ) -> Result<(WriterDocument, WriterDocument), String> {
-    // The saved file is the baseline: the requested file, or else the file a
-    // recovered draft was edited from. The template is used only without one.
-    let baseline = open
-        .map(PathBuf::from)
-        .or_else(|| recovered.as_ref().and_then(|draft| draft.source.clone()));
-    let fresh = match baseline {
-        None => template
-            .map(template_document)
-            .unwrap_or_else(blank_startup_document),
-        Some(path) => {
-            if path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
-            {
-                let has_warnings = std::fs::read(&path)
-                    .ok()
-                    .and_then(|bytes| loom_writer_core::inspect_docx_unsupported(&bytes).ok())
-                    .is_some_and(|w| !w.is_empty());
-                if has_warnings {
-                    template
-                        .map(template_document)
-                        .unwrap_or_else(blank_startup_document)
-                } else {
-                    load_file(&path)?
-                }
-            } else {
-                match load_file(&path) {
-                    Ok(document) => document,
-                    // A draft whose file has since disappeared still opens and reads as
-                    // unsaved; saving recreates the file.
-                    Err(_)
-                        if recovered
-                            .as_ref()
-                            .is_some_and(|draft| draft.source.is_some()) =>
-                    {
-                        template
-                            .map(template_document)
-                            .unwrap_or_else(blank_startup_document)
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-    };
-    Ok(match recovered {
-        Some(draft) => (draft.document, fresh),
-        None => (fresh.clone(), fresh),
-    })
+    docx_actions::startup_documents_with_prepared_docx(recovered, open, template)
+        .map(|(document, saved, _prepared)| (document, saved))
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
+    #[cfg(all(target_os = "macos", not(test)))]
+    {
+        let backend = i_slint_backend_winit::Backend::builder()
+            .with_default_menu_bar(false)
+            .build()
+            .map_err(|error| error.to_string())?;
+        slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
+    }
+
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
@@ -3416,8 +3403,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     // Build the document once; both the GUI state and the initial registry
     // enablement are derived from this single loaded instance.
-    let (initial_document, initial_saved_document) =
-        startup_documents(recovered.clone(), args.open.as_deref(), args.template)?;
+    let (initial_document, initial_saved_document, prepared_docx) =
+        docx_actions::startup_documents_with_prepared_docx(
+            recovered.clone(),
+            args.open.as_deref(),
+            args.template,
+        )?;
     let mut initial_registry = build_writer_registry();
     {
         let provisional_history = EditorHistory::new();
@@ -3427,32 +3418,28 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             &provisional_history,
         );
     }
-    // A recovered draft keeps the file it was edited from, so Save writes back
-    // to it; otherwise the window saves to the requested file, if any.
+    // A recovered draft keeps the file it was edited from. Existing DOCX files
+    // remain the ordinary Save target; a Loom package needs an explicit
+    // compatibility Save As choice before ordinary Save can overwrite it.
     let save_path = match &recovered {
         Some(draft) => draft.source.clone(),
-        None => {
-            if let Some(open_str) = args.open.as_ref() {
-                let p = PathBuf::from(open_str);
-                if p.extension()
+        None => match args.open.as_ref() {
+            Some(open_str) => {
+                let path = PathBuf::from(open_str);
+                if path
+                    .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
                 {
-                    let has_warnings = std::fs::read(&p)
-                        .ok()
-                        .and_then(|bytes| loom_writer_core::inspect_docx_unsupported(&bytes).ok())
-                        .is_some_and(|w| !w.is_empty());
-                    if has_warnings {
-                        None
-                    } else {
-                        Some(p)
-                    }
+                    prepared_docx
+                        .as_ref()
+                        .filter(|prepared| prepared.warnings.is_empty())
+                        .map(|prepared| prepared.path.clone())
                 } else {
-                    Some(p)
+                    Some(path)
                 }
-            } else {
-                None
             }
-        }
+            None => None,
+        },
     };
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
@@ -3461,6 +3448,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(save_path),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -3484,29 +3472,38 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // Keep one shared adapter alive for the whole application lifetime.  Its
     // registered sink below dispatches accepted native menu actions into the
     // same Slint callbacks used by toolbar and palette controls.
-    let menu_service = Arc::new(NativeMenuBar::new());
+    let menu_service = Arc::new(NativeMenuBar::new().with_command_routed_quit());
     wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
     wire_close_guard(&app, &state);
+    wire_application_quit(&app, &state);
     // The installed fonts are scanned off this thread; until the scan lands
     // the page and the font list use the bundled faces.
     font_picker::start_live(&app, &state, appearance::APPLICATION_ID);
 
     let menu_bar = local_menu::writer_menu_bar();
-    menu_service
-        .install_menu_bar(&menu_bar)
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = menu_service.install_menu_bar_with_status(&menu_bar) {
+        eprintln!("loom-writer: native menu installation failed: {error}");
+    }
+    #[cfg(all(target_os = "macos", not(test)))]
+    if menu_service.is_installed() {
+        app.set_local_menu_visible(false);
+    } else {
+        eprintln!("loom-writer: native menu is unconfirmed; keeping the in-window menu visible");
+    }
     local_menu::wire_action(&app, menu_service.clone());
     let _ = local_menu::sync(&app, &menu_service);
-    if let Some(open_path) = args.open.as_deref().map(Path::new) {
-        if open_path
+    if args.open.as_deref().is_some_and(|open_path| {
+        Path::new(open_path)
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
-        {
-            let _ = docx_actions::open_docx_path(
+    }) {
+        if let Some(prepared) = prepared_docx {
+            let _ = docx_actions::open_prepared_docx_import(
                 &app,
                 &state,
-                open_path.to_path_buf(),
+                prepared,
                 &Some(menu_service.clone()),
+                true,
             );
         }
     }
@@ -3560,58 +3557,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_create_template(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.new",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                let template = match index {
-                    1 => TemplateId::BlankBlack,
-                    2 => TemplateId::Report,
-                    3 => TemplateId::Letter,
-                    4 => TemplateId::Cv,
-                    5 => TemplateId::Newsletter,
-                    _ => TemplateId::Blank,
-                };
-                let next = if matches!(template, TemplateId::Blank | TemplateId::BlankBlack) {
-                    blank_document()
-                } else {
-                    template_document(template)
-                };
-                *state.last_saved.borrow_mut() = next.clone();
-                *state.current.borrow_mut() = next;
-                *state.save_path.borrow_mut() = None;
-                *state.history.borrow_mut() = EditorHistory::new();
-                app.set_template_chooser_open(false);
-                apply_state(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
-                app.set_status_left(SharedString::from(format!(
-                    "Created {} document",
-                    match template {
-                        TemplateId::Blank => "blank",
-                        TemplateId::BlankBlack => "blank black",
-                        TemplateId::Report => "report",
-                        TemplateId::Letter => "letter",
-                        TemplateId::Cv => "CV",
-                        TemplateId::Newsletter => "newsletter",
-                    }
-                )));
-                recovery::end_replaced_session(&app);
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
         app.on_cancel_template(move || {
             if let Some(app) = app_ref.upgrade() {
                 let _ = state
@@ -3625,46 +3570,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 app.set_template_chooser_open(false);
                 app.set_status_left("New document cancelled".into());
             }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_save_changes_save(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            match save_current_document(&app, &state, false) {
-                Ok(true) => {
-                    app.set_save_changes_open(false);
-                    continue_pending_replacement(&app, &state, &menu_service);
-                }
-                Ok(false) => {
-                    app.set_status_left("Save cancelled; changes kept".into());
-                }
-                Err(error) => {
-                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_save_changes_discard(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            app.set_save_changes_open(false);
-            continue_pending_replacement(&app, &state, &menu_service);
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_save_changes_cancel(move || {
-            let Some(app) = app_ref.upgrade() else { return };
-            state.pending_replacement.set(None);
-            app.set_save_changes_open(false);
-            app.set_status_left("Changes kept; replacement cancelled".into());
         });
     }
     wire_writer_inspector_toggle(&app, &state, Some(menu_service.clone()));
@@ -3750,6 +3655,18 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.window().set_position(PhysicalPosition::new(x, y));
     }
     app.show().map_err(|e| e.to_string())?;
+    #[cfg(all(target_os = "macos", not(test)))]
+    let _macos_window_evidence = macos_window_evidence::install(
+        &app,
+        macos_window_evidence::RequestedWindow {
+            physical_size: args.size,
+            physical_position: args.position,
+        },
+    )
+    .or_else(|| {
+        eprintln!("loom-writer: macOS window evidence adapter could not attach");
+        None
+    });
     if let Some((x, y)) = args.position {
         let reported = app.window().position();
         eprintln!(
@@ -3869,6 +3786,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(None),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(initial_history),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -4484,12 +4402,16 @@ mod recovery_tests;
 mod render_text_tests;
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod revision_transaction_tests;
 
 #[cfg(test)]
 mod text_scale_tests;
 
 #[cfg(test)]
 mod toolbar_tests;
+#[cfg(test)]
+mod zoom_tests;
 
 #[cfg(test)]
 mod dialog_chooser_tests;

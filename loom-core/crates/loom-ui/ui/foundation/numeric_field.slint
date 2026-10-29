@@ -1,0 +1,85 @@
+import { Theme } from "../theme.slint";
+
+/// Shared numeric entry with a non-editable unit and host-owned validation.
+export component LoomNumericField inherits Rectangle {
+    in property <string> label: "Value";
+    in property <string> description: "";
+    in property <string> unit: "";
+    in property <length> field-min-width: 88px;
+    in property <bool> enabled: true;
+    in property <bool> invalid: false;
+    in-out property <string> value: "";
+    out property <bool> focused: input.has-focus;
+    callback edited(string);
+    callback accepted(string);
+    callback cancelled;
+
+    public function focus-input() {
+        input.focus();
+        input.set-selection-offsets(input.text.character-count, input.text.character-count);
+    }
+
+    height: Theme.scaled-control-height;
+    min-width: root.field-min-width;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: root.invalid ? Theme.palette().danger
+        : input.has-focus ? Theme.palette().focus
+        : Theme.palette().ink-secondary;
+    background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
+    accessible-role: AccessibleRole.none;
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        clicked => { root.focus-input(); }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        if Theme.rtl && root.unit != "" : Text {
+            text: root.unit;
+            font-size: Theme.type.caption;
+            font-weight: 600;
+            color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        input := TextInput {
+            text <=> root.value;
+            horizontal-stretch: 1;
+            horizontal-alignment: Theme.rtl ? right : left;
+            height: root.height;
+            single-line: true;
+            vertical-alignment: center;
+            font-size: Theme.type.body;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            enabled: root.enabled;
+            accessible-role: AccessibleRole.text-input;
+            accessible-action-default => { root.focus-input(); }
+            accessible-label: root.label;
+            accessible-description: root.description != "" ? root.description
+                : root.unit != "" ? "Enter a value in " + root.unit : root.label;
+            accessible-value: root.unit != "" ? root.value + " " + root.unit : root.value;
+            edited => { root.edited(input.text); }
+            accepted => { root.accepted(input.text); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) { root.cancelled(); return accept; }
+                return reject;
+            }
+        }
+        if !Theme.rtl && root.unit != "" : Text {
+            text: root.unit;
+            font-size: Theme.type.caption;
+            font-weight: 600;
+            color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}

@@ -5,6 +5,7 @@
 use super::actions_tests::{test_state, text_document};
 use super::frame_bench_tests::{build_document, setup};
 use super::*;
+use loom_writer_core::loom_objects::chart::{Chart, ChartSeries, ChartType};
 use loom_writer_core::Text;
 
 fn rows_in_window(doc: &WriterDocument, viewport: PageViewport) -> projection::Projection {
@@ -147,15 +148,32 @@ fn the_dirty_check_ignores_the_caret_and_sees_every_content_change() {
         .expect("comment");
     let mut resized = doc.clone();
     resized.page.paper = loom_writer_core::PaperSize::Letter;
+    let mut headered = doc.clone();
+    headered.header_footer.header_text = "Cover".into();
+    let mut footnoted = doc.clone();
+    footnoted
+        .insert_footnote(doc.blocks[0].id, 0, "note body")
+        .expect("valid footnote anchor");
     let mut bolded = doc.clone();
     loom_writer_core::set_selection_bold(&mut bolded, TextSelection::range(2, 8), true);
+    let mut recording = doc.clone();
+    recording.tracked_changes.set_recording(true);
+    let mut author_changed = doc.clone();
+    author_changed
+        .tracked_changes
+        .set_author("Another reviewer")
+        .unwrap();
     for (name, changed) in [
         ("title", retitled),
         ("text", retyped),
         ("kind", restyled),
         ("comment", commented),
         ("paper", resized),
+        ("header/footer", headered),
+        ("footnote", footnoted),
         ("bold", bolded),
+        ("recording setting", recording),
+        ("revision author", author_changed),
     ] {
         assert!(!document_content_equal(&doc, &changed), "{name}");
         assert_ne!(
@@ -164,6 +182,40 @@ fn the_dirty_check_ignores_the_caret_and_sees_every_content_change() {
             "{name} is real content"
         );
     }
+
+    let mut same_settings = doc.clone();
+    same_settings.tracked_changes.set_recording(true);
+    let mut with_revision = same_settings.clone();
+    // Paragraph 1 has no inline style runs, so a plain payload exactly matches
+    // the current range and isolates revision metadata in this dirty check.
+    let plain_block = &with_revision.blocks[1];
+    assert!(
+        plain_block.runs.is_empty(),
+        "selected paragraph is unstyled"
+    );
+    let block_id = plain_block.id;
+    let first_character = plain_block
+        .text
+        .as_str()
+        .chars()
+        .next()
+        .expect("benchmark paragraph has text")
+        .to_string();
+    let first_character_len = first_character.len();
+    with_revision
+        .record_revision(
+            loom_writer_core::RevisionKind::Insertion,
+            block_id,
+            0..first_character_len,
+            None,
+            Some(loom_writer_core::RevisionPayload::plain(first_character)),
+        )
+        .expect("record pending revision");
+    assert_eq!(with_revision.tracked_changes.revisions().len(), 1);
+    assert!(
+        !document_content_equal(&same_settings, &with_revision),
+        "pending revision count is document content"
+    );
 }
 
 #[test]
@@ -198,6 +250,58 @@ fn history_sizes_are_measured_once_per_entry() {
         crate::history::retained_bytes(&typing.undo[0].before, &third)
     );
     assert_eq!(typing.total_bytes(), typing.undo[0].bytes);
+}
+
+#[test]
+fn chart_plot_is_projected_after_reopen_and_history_round_trip() {
+    let before = text_document("Chart insertion");
+    let mut inserted = before.clone();
+    let chart = Chart::from_data(
+        "writer-chart-projection",
+        Some("Saved chart".to_string()),
+        ChartType::Line,
+        vec!["Q1".to_string(), "Q2".to_string(), "Q3".to_string()],
+        vec![ChartSeries {
+            name: "Revenue".to_string(),
+            values: vec![4.0, 9.0, 7.0],
+            color: Some("#4472C4".to_string()),
+        }],
+    );
+    let chart_id = inserted
+        .insert_chart_block(0, chart)
+        .expect("insert chart object");
+
+    let mut history = EditorHistory::new();
+    history.record(
+        before.clone(),
+        inserted.clone(),
+        HistoryKind::DocumentAction,
+        1,
+    );
+    let undone = history.undo().expect("undo chart insertion");
+    assert!(undone.blocks.iter().all(|block| !block.is_chart()));
+    let redone = history.redo().expect("redo chart insertion");
+    assert_eq!(redone, inserted);
+
+    let saved = loom_writer_core::save_document(&redone).expect("save chart document");
+    let reopened = loom_writer_core::load_document(&saved).expect("reopen chart document");
+    assert_eq!(
+        reopened
+            .chart_from_block(chart_id)
+            .expect("reopened chart")
+            .title
+            .as_deref(),
+        Some("Saved chart")
+    );
+
+    let projected = projection::project(&reopened, PageViewport::default(), None);
+    assert!(
+        projected
+            .rows
+            .iter()
+            .any(|row| row.glyph_tiles.row_count() > 0),
+        "the reopened chart must project a real image tile"
+    );
 }
 
 #[test]

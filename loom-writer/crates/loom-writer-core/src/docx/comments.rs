@@ -8,10 +8,13 @@
 //! text, so both are counted as skipped instead of being attached to
 //! unrelated words.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::xml::{self, MC_NS, W14_NS, W15_NS, W_NS, XML_DECLARATION};
 use crate::{WriterDocument, TABLE_BLOCK_KIND};
+
+/// Maximum comment ID whose paragraph IDs fit in the OOXML 32-bit field.
+pub(super) const MAX_COMMENT_ID: u32 = (u32::MAX - 0x1000_0000 - 0xFF) / 0x100;
 
 /// One comment that will be written.
 struct Entry {
@@ -37,13 +40,14 @@ pub(super) struct CommentPlan {
 }
 
 impl CommentPlan {
-    /// Decides which threads can be exported and numbers them in order.
+    /// Keeps unique numeric identities and assigns valid IDs to other threads.
     pub(super) fn new(doc: &WriterDocument) -> Self {
         let mut plan = Self {
             entries: Vec::new(),
             by_block: HashMap::new(),
             skipped: 0,
         };
+        let mut candidates = Vec::new();
         for thread in &doc.comments {
             let block = doc.blocks.iter().find(|block| block.id == thread.block_id);
             let anchored = block.filter(|block| {
@@ -59,20 +63,51 @@ impl CommentPlan {
                 plan.skipped += 1;
                 continue;
             };
-            let id = plan.entries.len() as u32;
+            candidates.push((thread, block.id));
+        }
+
+        let mut numeric_counts = HashMap::<u32, usize>::new();
+        for (thread, _) in &candidates {
+            if let Some(id) = Self::numeric_comment_id(&thread.id) {
+                *numeric_counts.entry(id).or_default() += 1;
+            }
+        }
+        let mut used_ids: HashSet<u32> = numeric_counts
+            .iter()
+            .filter_map(|(&id, &count)| (count == 1).then_some(id))
+            .collect();
+        let mut next_fallback = 0u32;
+        for (thread, block_id) in candidates {
+            let id = Self::numeric_comment_id(&thread.id)
+                .filter(|id| numeric_counts.get(id) == Some(&1))
+                .unwrap_or_else(|| {
+                    while used_ids.contains(&next_fallback) {
+                        next_fallback = next_fallback
+                            .checked_add(1)
+                            .expect("DOCX comment ID space is exhausted");
+                    }
+                    let id = next_fallback;
+                    used_ids.insert(id);
+                    next_fallback = next_fallback.saturating_add(1);
+                    id
+                });
             plan.entries.push(Entry {
                 id,
                 author: thread.author.clone(),
                 body: thread.body.clone(),
                 resolved: thread.resolved,
             });
-            plan.by_block.entry(block.id).or_default().push(Anchor {
+            plan.by_block.entry(block_id).or_default().push(Anchor {
                 id,
                 start: thread.start,
                 end: thread.end,
             });
         }
         plan
+    }
+
+    fn numeric_comment_id(id: &str) -> Option<u32> {
+        id.parse::<u32>().ok().filter(|id| *id <= MAX_COMMENT_ID)
     }
 
     /// Comments that will appear in the file.

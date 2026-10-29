@@ -1,0 +1,72 @@
+import { Theme } from "theme.slint";
+import { WriterReviewState } from "writer_review.slint";
+
+export component WriterRevisionMarkup inherits Rectangle {
+    in property <float> page-zoom: 1.0;
+    in property <length> left-margin: 0px;
+    in property <length> top-margin: 0px;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    accessible-role: AccessibleRole.none;
+
+    for mark in WriterReviewState.revision-marks : Rectangle {
+        x: root.left-margin + mark.x * root.page-zoom;
+        y: root.top-margin + (mark.y + mark.height - 2px) * root.page-zoom;
+        width: max(1px, mark.width * root.page-zoom);
+        height: max(1px, 1.5px * root.page-zoom);
+        background: mark.kind == 0 ? Theme.palette().success : Theme.palette().info;
+        visible: mark.kind != 1;
+        accessible-role: AccessibleRole.text;
+        accessible-label: mark.accessible-text;
+    }
+
+    for mark in WriterReviewState.revision-marks : Rectangle {
+        x: root.left-margin + mark.x * root.page-zoom;
+        y: root.top-margin + (mark.y + mark.height) * root.page-zoom;
+        width: max(1px, mark.width * root.page-zoom);
+        height: max(1px, 1.5px * root.page-zoom);
+        background: Theme.palette().info;
+        visible: mark.kind == 2;
+        accessible-role: AccessibleRole.none;
+    }
+
+    for mark in WriterReviewState.revision-marks : Text {
+        x: root.left-margin + mark.x * root.page-zoom;
+        y: root.top-margin + mark.y * root.page-zoom;
+        width: max(1px, mark.width * root.page-zoom);
+        height: max(12px, mark.height * root.page-zoom);
+        text: mark.label;
+        font-size: 9px * root.page-zoom;
+        color: Theme.palette().danger;
+        horizontal-alignment: mark.right-aligned ? right : left;
+        vertical-alignment: center;
+        wrap: TextWrap.no-wrap;
+        overflow: elide;
+        visible: mark.kind == 1 && mark.width >= 24px;
+        accessible-role: AccessibleRole.text;
+        accessible-label: mark.accessible-text;
+    }
+
+    for mark in WriterReviewState.revision-marks : Rectangle {
+        x: root.left-margin + mark.x * root.page-zoom;
+        y: root.top-margin + (mark.y + mark.height / 2.0) * root.page-zoom;
+        width: max(1px, mark.width * root.page-zoom);
+        height: max(1px, 1px * root.page-zoom);
+        background: Theme.palette().danger;
+        visible: mark.kind == 1 && mark.width >= 24px;
+        accessible-role: AccessibleRole.none;
+    }
+
+    for mark in WriterReviewState.revision-marks : Rectangle {
+        x: root.left-margin + mark.x * root.page-zoom;
+        y: root.top-margin + mark.y * root.page-zoom;
+        width: max(2px, mark.width * root.page-zoom);
+        height: max(1px, mark.height * root.page-zoom);
+        background: Theme.palette().danger;
+        visible: mark.kind == 1 && mark.width > 0px && mark.width < 24px;
+        accessible-role: AccessibleRole.text;
+        accessible-label: mark.accessible-text;
+    }
+}

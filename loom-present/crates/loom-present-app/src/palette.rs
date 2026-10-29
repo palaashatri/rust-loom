@@ -82,7 +82,11 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::AddSlide,
             id: "present.add-slide",
             label: "Add Slide",
-            shortcut: "Ctrl+Shift+A",
+            shortcut: if cfg!(target_os = "macos") {
+                "Cmd+Shift+N"
+            } else {
+                "Ctrl+Shift+N"
+            },
         },
         PaletteCommand {
             action: PaletteAction::DuplicateSlide,
@@ -177,7 +181,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
         PaletteCommand {
             action: PaletteAction::AddChart,
             id: "present.insert-chart",
-            label: "Insert Chart",
+            label: "Insert Chart from Clipboard",
             shortcut: "",
         },
         PaletteCommand {
@@ -262,12 +266,6 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::SetTransition(2),
             id: "present.transition.push",
             label: "Transition: Push",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::SetTransition(3),
-            id: "present.transition.morph",
-            label: "Transition: Morph",
             shortcut: "",
         },
     ]

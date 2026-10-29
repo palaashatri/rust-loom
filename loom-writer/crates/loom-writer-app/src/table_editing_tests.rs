@@ -896,11 +896,13 @@ mod tests {
 
         // 3. PDF export
         let pdf_bytes = loom_writer_core::export_pdf(&doc).expect("export table editing PDF");
-        let pdf_readable = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable PDF");
+        let pdf_text = loom_pdf::inspect::page_text(&pdf_bytes)
+            .expect("extract PDF text")
+            .join("\n");
         for word in &test_words {
             assert!(
-                pdf_readable.contains(word),
-                "PDF export must contain word '{word}'; extracted text: {pdf_readable:?}"
+                pdf_text.contains(word),
+                "PDF export must preserve word '{word}'; extracted text: {pdf_text:?}"
             );
         }
     }

@@ -238,12 +238,13 @@ export component LoomMenuItem inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> enabled: true;
     callback activated;
+    callback pointer-hovered;
 
     height: Theme.scaled-control-height;
     border-radius: Theme.tokens.metrics.radius-small;
     background: !root.enabled ? transparent
         : root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
+        : touch.has-hover ? Theme.palette().selection-soft
         : transparent;
     accessible-role: list-item;
     accessible-label: root.label;
@@ -324,8 +325,13 @@ export component LoomMenuItem inherits Rectangle {
     }
 
     touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
         enabled: root.enabled;
         clicked => { root.activated(); }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.move) { root.pointer-hovered(); }
+        }
     }
 }
 

@@ -278,6 +278,9 @@ fn rtl_only_selection_is_justified_with_shaped_geometry() {
     document.set_selection(TextSelection::range(0, text.len()));
 
     let (app, state) = app_with_document(document);
+
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0)
+        .expect("render RTL page with a measured viewport");
     assert!(
         state
             .registry
@@ -387,6 +390,9 @@ fn imported_rtl_justify_is_preserved_and_available_with_shaped_geometry() {
     );
 
     let (app, state) = app_with_document(imported);
+
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0)
+        .expect("render imported RTL page with a measured viewport");
     assert_eq!(
         state.current.borrow().blocks[0].style.alignment,
         loom_text::Alignment::Justify,
@@ -402,10 +408,21 @@ fn imported_rtl_justify_is_preserved_and_available_with_shaped_geometry() {
         "the imported RTL paragraph keeps Justify available"
     );
     let rendered = app.get_render_blocks();
+    let lines: Vec<_> = (0..rendered.row_count())
+        .filter_map(|index| rendered.row_data(index))
+        .filter(|row| row.alignment == 3)
+        .map(|row| {
+            (
+                row.glyph_tiles.row_count(),
+                row.unsupported,
+                row.unsupported_label.to_string(),
+            )
+        })
+        .collect();
     assert!(
-        (0..rendered.row_count())
-            .filter_map(|index| rendered.row_data(index))
-            .any(|row| row.alignment == 3 && row.glyph_tiles.row_count() > 0 && !row.unsupported),
-        "the imported RTL Justify paragraph has a painted shaped projection"
+        lines
+            .iter()
+            .any(|(tiles, unsupported, _)| *tiles > 0 && !unsupported),
+        "the imported RTL Justify paragraph has a painted shaped projection: {lines:?}"
     );
 }

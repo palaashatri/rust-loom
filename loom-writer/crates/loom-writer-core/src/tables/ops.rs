@@ -16,6 +16,162 @@ use super::store::TableTextMap;
 use super::{block_insert_index, TableArrowDirection, TableCellLocation, TABLE_BLOCK_KIND};
 use crate::{RichBlock, TextSelection, WriterDocument, WriterTable};
 
+fn rebase_table_merge_footnotes(
+    footnotes: &mut [crate::FootnoteEntry],
+    block_id: u64,
+    old_table: &Table,
+    new_table: &Table,
+    old_text: &str,
+    new_text: &str,
+    start_row: usize,
+    start_column: usize,
+    row_span: usize,
+    column_span: usize,
+) -> Result<(), String> {
+    let old_map = TableTextMap::new(old_table);
+    let new_map = TableTextMap::new(new_table);
+    let origin_old = old_map
+        .cell_range(start_row, start_column)
+        .and_then(|range| old_text.get(range))
+        .ok_or_else(|| "Failed to map the merged origin cell".to_string())?;
+    let origin_new_start = new_map
+        .cell_range(start_row, start_column)
+        .map(|range| range.start)
+        .ok_or_else(|| "Failed to map the merged origin cell".to_string())?;
+
+    let row_end = start_row
+        .saturating_add(row_span)
+        .min(old_table.row_count());
+    let column_end = start_column
+        .saturating_add(column_span)
+        .min(old_table.col_count());
+    let mut appended_offsets = Vec::new();
+    let mut appended_len = origin_old.len();
+    for row in start_row..row_end {
+        for column in start_column..column_end {
+            if row == start_row && column == start_column {
+                continue;
+            }
+            let source = old_map
+                .cell_range(row, column)
+                .and_then(|range| old_text.get(range))
+                .ok_or_else(|| "Failed to map a merged source cell".to_string())?;
+            if !source.is_empty() {
+                appended_len = appended_len.saturating_add(1);
+                appended_offsets.push(((row, column), appended_len));
+                appended_len = appended_len.saturating_add(source.len());
+            }
+        }
+    }
+
+    let mut updates = Vec::new();
+    let mut target_offsets = std::collections::HashSet::new();
+    for (index, note) in footnotes.iter().enumerate() {
+        if note.block_id != block_id {
+            continue;
+        }
+        let (row, column) = old_map
+            .cell_at(note.offset)
+            .ok_or_else(|| format!("Footnote {} is outside the table text", note.id))?;
+        let old_range = old_map
+            .cell_range(row, column)
+            .ok_or_else(|| format!("Footnote {} has no table cell", note.id))?;
+        let old_cell = old_text
+            .get(old_range.clone())
+            .ok_or_else(|| format!("Footnote {} has an invalid table anchor", note.id))?;
+        let local = note
+            .offset
+            .saturating_sub(old_range.start)
+            .min(old_cell.len());
+        let new_range = new_map
+            .cell_range(row, column)
+            .ok_or_else(|| format!("Footnote {} has no destination cell", note.id))?;
+
+        let in_merged_range =
+            (start_row..row_end).contains(&row) && (start_column..column_end).contains(&column);
+        let target = if in_merged_range && row == start_row && column == start_column {
+            origin_new_start.saturating_add(local)
+        } else if in_merged_range {
+            if let Some((_, appended_start)) =
+                appended_offsets
+                    .iter()
+                    .find(|((source_row, source_column), _)| {
+                        *source_row == row && *source_column == column
+                    })
+            {
+                origin_new_start
+                    .saturating_add(*appended_start)
+                    .saturating_add(local)
+            } else {
+                new_range.start
+            }
+        } else {
+            let new_cell = new_text
+                .get(new_range.clone())
+                .ok_or_else(|| format!("Footnote {} has an invalid destination cell", note.id))?;
+            new_range.start.saturating_add(local.min(new_cell.len()))
+        };
+
+        if target > new_text.len() || !new_text.is_char_boundary(target) {
+            return Err(format!(
+                "Footnote {} cannot be rebased through the table merge",
+                note.id
+            ));
+        }
+        if !target_offsets.insert(target) {
+            return Err("Table merge would overlap footnote references".into());
+        }
+        updates.push((index, target));
+    }
+
+    for (index, target) in updates {
+        footnotes[index].offset = target;
+    }
+    Ok(())
+}
+
+fn flat_text_change(old_text: &str, new_text: &str) -> (usize, usize, usize) {
+    let edit = crate::comments::TextEdit::diff(old_text, new_text);
+    (edit.old_start, edit.old_end, edit.new_end - edit.new_start)
+}
+
+fn table_text_changes(
+    old_table: &Table,
+    new_table: &Table,
+    old_text: &str,
+    new_text: &str,
+) -> Option<Vec<(usize, usize, usize)>> {
+    if old_table.row_count() != new_table.row_count()
+        || old_table.col_count() != new_table.col_count()
+    {
+        return None;
+    }
+    let old_map = TableTextMap::new(old_table);
+    let new_map = TableTextMap::new(new_table);
+    let mut changes = Vec::new();
+    for row in 0..old_table.row_count() {
+        for column in 0..old_table.col_count() {
+            let (old_range, new_range) = (
+                old_map.cell_range(row, column)?,
+                new_map.cell_range(row, column)?,
+            );
+            let (old_cell, new_cell) = (
+                old_text.get(old_range.clone())?,
+                new_text.get(new_range.clone())?,
+            );
+            if old_cell != new_cell {
+                let edit = crate::comments::TextEdit::diff(old_cell, new_cell);
+                changes.push((
+                    old_range.start + edit.old_start,
+                    old_range.start + edit.old_end,
+                    edit.new_end - edit.new_start,
+                ));
+            }
+        }
+    }
+    Some(changes)
+}
+
 /// A new row like `template`: it keeps the template's cell alignment and fills
 /// (`style_override`), and none of its text.
 fn row_like(table: &Table, template: usize) -> TableRow {
@@ -59,16 +215,85 @@ impl WriterDocument {
         id
     }
 
-    /// Stores `table` in block `index` and puts the caret at `(row, column)`,
-    /// returning its offset (or the block start when that cell is missing).
+    fn set_table_rebasing_footnotes(&mut self, index: usize, table: Table) {
+        let old_text = self.blocks[index].text.as_str().to_owned();
+        let new_text = super::flat_table_text(&table);
+        let changes = [flat_text_change(&old_text, &new_text)];
+        self.set_table_rebasing_footnotes_with_changes(
+            index, table, &old_text, &new_text, &changes,
+        );
+    }
+
+    fn set_table_rebasing_footnotes_with_changes(
+        &mut self,
+        index: usize,
+        table: Table,
+        old_text: &str,
+        new_text: &str,
+        changes: &[(usize, usize, usize)],
+    ) {
+        let block_id = self.blocks[index].id;
+        self.blocks[index].set_table(table);
+        if !self.footnotes.is_empty() {
+            crate::footnotes::rebase_block_changes(
+                &mut self.footnotes,
+                block_id,
+                old_text,
+                new_text,
+                changes,
+            );
+        }
+    }
+
+    fn set_table_rebasing_footnotes_by_cell(
+        &mut self,
+        index: usize,
+        table: Table,
+        map_cell: impl Fn(usize, usize) -> Option<(usize, usize)>,
+    ) {
+        let block_id = self.blocks[index].id;
+        let Some(old_table) = self.blocks[index].typed_table().cloned() else {
+            self.blocks[index].set_table(table);
+            return;
+        };
+        if !self.footnotes.is_empty() {
+            let old_map = TableTextMap::new(&old_table);
+            let new_map = TableTextMap::new(&table);
+            self.footnotes.retain_mut(|note| {
+                if note.block_id != block_id {
+                    return true;
+                }
+                let Some((row, column)) = old_map.cell_at(note.offset) else {
+                    return true;
+                };
+                let Some(old_range) = old_map.cell_range(row, column) else {
+                    return true;
+                };
+                let Some((new_row, new_column)) = map_cell(row, column) else {
+                    return false;
+                };
+                let Some(new_range) = new_map.cell_range(new_row, new_column) else {
+                    return true;
+                };
+                let cell_offset = note.offset.saturating_sub(old_range.start);
+                if cell_offset <= new_range.len() {
+                    note.offset = new_range.start + cell_offset;
+                }
+                true
+            });
+        }
+        self.blocks[index].set_table(table);
+    }
+
     fn store_table_and_place_caret(
         &mut self,
         index: usize,
         table: Table,
         row: usize,
         column: usize,
+        map_cell: impl Fn(usize, usize) -> Option<(usize, usize)>,
     ) -> usize {
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes_by_cell(index, table, map_cell);
         let start = self.table_block_start(index);
         let caret = self.blocks[index]
             .typed_table()
@@ -162,8 +387,6 @@ impl WriterDocument {
         )
     }
 
-    /// Applies edited flat text to a table block. An edit that would change the
-    /// rows or cells is refused and the document is left unchanged.
     pub fn edit_table_text(&mut self, block_id: u64, new_flat: &str) -> Result<(), String> {
         let index = self
             .table_index(block_id)
@@ -172,7 +395,17 @@ impl WriterDocument {
             .typed_table()
             .ok_or_else(|| "Table block has no table".to_string())?;
         let updated = apply_flat_text(table, new_flat)?;
-        self.blocks[index].set_table(updated);
+        if self.footnotes.is_empty() {
+            self.blocks[index].set_table(updated);
+        } else {
+            let old_text = self.blocks[index].text.as_str().to_owned();
+            let new_text = super::flat_table_text(&updated);
+            let changes = table_text_changes(table, &updated, &old_text, &new_text)
+                .unwrap_or_else(|| vec![flat_text_change(&old_text, &new_text)]);
+            self.set_table_rebasing_footnotes_with_changes(
+                index, updated, &old_text, &new_text, &changes,
+            );
+        }
         Ok(())
     }
 
@@ -245,7 +478,7 @@ impl WriterDocument {
             target = next as usize;
         }
         let (row, column) = (target / columns, target % columns);
-        Ok(self.store_table_and_place_caret(index, table, row, column))
+        Ok(self.store_table_and_place_caret(index, table, row, column, |r, c| Some((r, c))))
     }
 
     /// Navigates between table cells using arrow keys.
@@ -289,7 +522,11 @@ impl WriterDocument {
         let at = if below { loc.row + 1 } else { loc.row };
         let row = row_like(&table, loc.row);
         table.rows.insert(at, row);
-        Ok(self.store_table_and_place_caret(index, table, at, 0))
+        Ok(
+            self.store_table_and_place_caret(index, table, at, 0, |row, column| {
+                Some((if row >= at { row + 1 } else { row }, column))
+            }),
+        )
     }
 
     /// Deletes the table row containing the given offset.
@@ -308,7 +545,22 @@ impl WriterDocument {
         table.delete_row(loc.row);
         let row = loc.row.min(table.row_count() - 1);
         let column = loc.col.min(table.col_count() - 1);
-        Ok(self.store_table_and_place_caret(index, table, row, column))
+        Ok(
+            self.store_table_and_place_caret(index, table, row, column, |old_row, old_column| {
+                if old_row == loc.row {
+                    None
+                } else {
+                    Some((
+                        if old_row > loc.row {
+                            old_row - 1
+                        } else {
+                            old_row
+                        },
+                        old_column,
+                    ))
+                }
+            }),
+        )
     }
 
     /// Inserts a column into the table at the given offset, to the left or right of current column.
@@ -329,7 +581,11 @@ impl WriterDocument {
         table.insert_column(at, None);
         // A new column is left-aligned, as it always was; the others keep theirs.
         table.ensure_grid_consistency();
-        Ok(self.store_table_and_place_caret(index, table, loc.row, at))
+        Ok(
+            self.store_table_and_place_caret(index, table, loc.row, at, |row, column| {
+                Some((row, if column >= at { column + 1 } else { column }))
+            }),
+        )
     }
 
     /// Deletes the table column containing the given offset.
@@ -347,10 +603,28 @@ impl WriterDocument {
         }
         table.delete_column(loc.col);
         let column = loc.col.min(table.col_count() - 1);
-        Ok(self.store_table_and_place_caret(index, table, loc.row, column))
+        Ok(self.store_table_and_place_caret(
+            index,
+            table,
+            loc.row,
+            column,
+            |old_row, old_column| {
+                if old_column == loc.col {
+                    None
+                } else {
+                    Some((
+                        old_row,
+                        if old_column > loc.col {
+                            old_column - 1
+                        } else {
+                            old_column
+                        },
+                    ))
+                }
+            },
+        ))
     }
 
-    /// Merges a rectangular block of cells starting at the cell at `offset`.
     pub fn merge_cells_at_offset(
         &mut self,
         offset: usize,
@@ -361,13 +635,29 @@ impl WriterDocument {
             .table_cell_at_offset(offset)
             .ok_or_else(|| "Offset is not in a table".to_string())?;
         let index = loc.block_index;
+        let block_id = self.blocks[index].id;
+        let old_text = self.blocks[index].text.as_str().to_owned();
         let mut table = self.blocks[index]
             .typed_table()
             .cloned()
             .ok_or_else(|| "Failed to parse table".to_string())?;
+        let old_table = table.clone();
         table
             .merge_cells(loc.row, loc.col, row_span, col_span)
             .map_err(|e| e.to_string())?;
+        let new_text = super::flat_table_text(&table);
+        rebase_table_merge_footnotes(
+            &mut self.footnotes,
+            block_id,
+            &old_table,
+            &table,
+            &old_text,
+            &new_text,
+            loc.row,
+            loc.col,
+            row_span,
+            col_span,
+        )?;
         self.blocks[index].set_table(table);
         Ok(())
     }
@@ -385,7 +675,7 @@ impl WriterDocument {
         table
             .split_cell(loc.row, loc.col)
             .map_err(|e| e.to_string())?;
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(())
     }
 
@@ -404,7 +694,7 @@ impl WriterDocument {
             .cloned()
             .ok_or_else(|| "Failed to parse table".to_string())?;
         table.style_id = style_id.to_string();
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(())
     }
 
@@ -429,7 +719,7 @@ impl WriterDocument {
             "first_column" => table.first_column = !table.first_column,
             _ => return Err(format!("Unknown table option '{option}'")),
         }
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(())
     }
 }
@@ -563,7 +853,7 @@ impl WriterDocument {
                 cell.content.runs = restyle_runs(&cell.content.runs, 0..len, &change);
             }
         }
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(())
     }
 
@@ -635,7 +925,7 @@ impl WriterDocument {
                 cell.content.runs = restyle_runs(&cell.content.runs, part, &change);
             }
         }
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(true)
     }
 
@@ -662,7 +952,7 @@ impl WriterDocument {
                 }
             }
         }
-        self.blocks[index].set_table(table);
+        self.set_table_rebasing_footnotes(index, table);
         Ok(())
     }
 }

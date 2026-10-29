@@ -192,7 +192,7 @@ fn test_deep_audit_export_pipelines_pdf_and_markdown() {
 }
 
 #[test]
-fn test_deep_audit_native_macos_global_menu_bar() {
+fn test_deep_audit_writer_menu_descriptor_and_native_status() {
     let menu = NativeMenuBar::new();
     let mut bar = build_standard_menu_bar(
         "Loom Writer",
@@ -248,8 +248,22 @@ fn test_deep_audit_native_macos_global_menu_bar() {
         "format.underline",
     ]);
 
-    menu.install_menu_bar(&bar).expect("install menu bar");
-    assert!(menu.is_installed());
+    let installation_status = menu
+        .install_menu_bar_with_status(&bar)
+        .expect("install menu bar");
+    match installation_status {
+        loom_desktop::menu::NativeMenuInstallationStatus::Installed => {
+            assert!(menu.is_installed());
+        }
+        loom_desktop::menu::NativeMenuInstallationStatus::MainThreadRequired
+            if cfg!(target_os = "macos") =>
+        {
+            // Rust's test harness executes this test off AppKit's main thread.
+            // The application performs native installation from its UI thread.
+            assert!(!menu.is_installed());
+        }
+        unexpected => panic!("unexpected native menu installation status: {unexpected:?}"),
+    }
 
     let installed = menu.installed_menu_bar().expect("installed menu bar");
     assert!(installed.find_item("file.export_pdf").is_some());

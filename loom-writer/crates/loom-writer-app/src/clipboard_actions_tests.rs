@@ -25,6 +25,38 @@ fn cut_test_app(document: loom_writer_core::WriterDocument) -> (WriterApp, std::
     (app, state)
 }
 
+#[test]
+fn copy_reports_injected_clipboard_write_failure_without_mutating_document_or_history() {
+    let mut document = loom_writer_core::WriterDocument::new("copy-failure", "Copy failure");
+    document.replace_paragraphs("alpha beta gamma");
+    let (app, state) = cut_test_app(document);
+    app.invoke_selection_changed(6, 10);
+
+    let before = state.current.borrow().clone();
+    let undo_before = state.history.borrow().undo_len();
+    let redo_before = state.history.borrow().redo_len();
+    let mut attempted_text = None;
+
+    super::copy_action_with(&app, &state, |data| {
+        attempted_text = data.plain_text.clone();
+        Err("Clipboard is unavailable")
+    });
+
+    assert_eq!(attempted_text.as_deref(), Some("beta"));
+    assert_eq!(*state.current.borrow(), before);
+    assert_eq!(
+        (
+            state.history.borrow().undo_len(),
+            state.history.borrow().redo_len()
+        ),
+        (undo_before, redo_before)
+    );
+    assert_eq!(
+        app.get_status_left().as_str(),
+        "Copy failed: Clipboard is unavailable"
+    );
+}
+
 fn tiny_png() -> Vec<u8> {
     let mut bytes = Vec::new();
     image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 80, 120, 255]))

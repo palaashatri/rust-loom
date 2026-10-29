@@ -87,10 +87,28 @@ fn layout_and_pagination_match_the_reference_implementation() {
 }
 
 #[test]
-fn selection_rectangles_match_the_reference_for_every_caret_and_many_ranges() {
+fn layout_bounds_match_the_shaped_visual_line_width() {
+    let doc = sample_document(1);
+    let style = doc.page.page_style();
+    let flow = doc.flow(&style, viewport(1.0, 0.0)).unwrap();
+    let line = flow
+        .lines()
+        .iter()
+        .find(|line| line.shaped_line.is_some())
+        .expect("the fixture has a shaped line");
+    assert_eq!(
+        line.bounds.width,
+        line.shaped_line.as_ref().unwrap().width_pt(),
+        "the line box follows the width used to place its shaped glyphs"
+    );
+}
+
+#[test]
+fn selection_rectangles_match_shaped_flow_for_every_caret_and_many_ranges() {
     let doc = sample_document(40);
     let style = doc.page.page_style();
     let layout = doc.layout(&style, viewport(1.0, 0.0)).unwrap();
+    let flow = doc.flow(&style, viewport(1.0, 0.0)).unwrap();
     let total = doc.editor_text().len();
     for affinity in [CaretAffinity::Upstream, CaretAffinity::Downstream] {
         for offset in (0..=total).step_by(3) {
@@ -98,7 +116,7 @@ fn selection_rectangles_match_the_reference_for_every_caret_and_many_ranges() {
             selection.affinity = affinity;
             assert_eq!(
                 doc.selection_rectangles_for(&layout, &style, &selection),
-                doc.reference_rects_for(&layout, &style, &selection),
+                flow.selection_rects(&doc, &selection, 0..flow.page_count()),
                 "caret {offset} {affinity:?}"
             );
         }
@@ -113,7 +131,7 @@ fn selection_rectangles_match_the_reference_for_every_caret_and_many_ranges() {
         let selection = TextSelection::range(a, b);
         assert_eq!(
             doc.selection_rectangles_for(&layout, &style, &selection),
-            doc.reference_rects_for(&layout, &style, &selection),
+            flow.selection_rects(&doc, &selection, 0..flow.page_count()),
             "range {a}..{b}"
         );
     }

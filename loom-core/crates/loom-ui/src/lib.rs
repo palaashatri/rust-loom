@@ -162,8 +162,12 @@ mod tests {
 #[cfg(test)]
 mod visual_tests {
     use super::foundation_gallery::{FoundationGallery, Theme as FoundationTheme};
-    use super::smoke_window::{DirectionalPropertyProbeWindow, SmokeWindow, Theme};
+    use super::smoke_window::{
+        DirectionalPropertyProbeWindow, SmokeWindow, Theme, ToolbarCaptionProbeWindow,
+        ToolbarStateInsetProbeWindow,
+    };
     use crate::{CommandPalette, CommandPaletteItem};
+    use i_slint_backend_testing::{AccessibleRole, ElementHandle};
     use slint::Global;
 
     const VIEWPORTS: &[(f32, f32)] = &[
@@ -494,6 +498,198 @@ mod visual_tests {
             non_canvas_pixels(&scaled) > 1_000,
             "scaled probe must remain rendered"
         );
+    }
+
+    #[test]
+    fn long_toolbar_captions_remain_complete_at_responsive_boundaries_and_scaled_sizes() {
+        loom_test_support::capture::set_platform();
+        let window = ToolbarCaptionProbeWindow::new().expect("create toolbar caption probe");
+        let theme = Theme::get(&window);
+        let label = "Export all currently selected worksheets as a complete accessible spreadsheet";
+        window.set_probe_label(label.into());
+
+        for scale in [1.25f32, 1.5] {
+            theme.set_text_scale(scale);
+            for base_width in [1179.0f32, 1180.0, 1279.0, 1280.0, 1319.0, 1320.0] {
+                let width = base_width;
+                window.set_probe_width(width);
+                let required_width = window.get_required_caption_width();
+                let required_line_height = window.get_required_caption_line_height();
+
+                let caption = ElementHandle::find_by_element_id(
+                    &window,
+                    "IconOverLabelToolbarItem::label-text",
+                )
+                .next()
+                .expect("toolbar caption text");
+                let caption_size = caption.size();
+                assert!(
+                    caption_size.width + 0.1 >= required_width,
+                    "caption width {} must fit its measured text {required_width} at width {base_width}, scale {scale}",
+                    caption_size.width
+                );
+                assert!(
+                    caption_size.height + 0.1 >= required_line_height,
+                    "caption line box {} must meet {required_line_height} at width {base_width}, scale {scale}",
+                    caption_size.height
+                );
+
+                let action = ElementHandle::find_by_accessible_label(&window, label)
+                    .find(|item| item.accessible_role() == Some(AccessibleRole::Button))
+                    .expect("toolbar action retains its full accessible label");
+                let action_left = action.absolute_position().x;
+                let action_right = action_left + action.size().width;
+                let caption_left = caption.absolute_position().x;
+                assert!(
+                    action.size().width + 0.1 >= required_width + 16.0,
+                    "toolbar intrinsic width {} must preserve the caption and 16px horizontal padding ({required_width}) at width {base_width}, scale {scale}",
+                    action.size().width
+                );
+                assert!(
+                    caption_left + 0.1 >= action_left
+                        && caption_left + caption_size.width <= action_right + 0.1,
+                    "caption bounds [{caption_left}, {}] must remain inside action bounds [{action_left}, {action_right}] at width {base_width}, scale {scale}",
+                    caption_left + caption_size.width
+                );
+                assert!(
+                    action_right <= width + 0.1,
+                    "full caption action ends at {action_right} beyond viewport {width} at scale {scale}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn toolbar_state_outlines_are_inset_without_shrinking_targets_at_one_and_two_x() {
+        loom_test_support::capture::set_platform();
+        let window = ToolbarStateInsetProbeWindow::new().expect("create toolbar inset probe");
+        let theme = Theme::get(&window);
+        theme.set_text_scale(1.0);
+
+        let find_button = |label: &str| {
+            ElementHandle::find_by_accessible_label(&window, label)
+                .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+                .unwrap_or_else(|| panic!("toolbar button {label:?}"))
+        };
+        let assert_inset = |label: &str, outline_id: &str, expected_height: f32| {
+            let button = find_button(label);
+            let button_position = button.absolute_position();
+            let button_size = button.size();
+            assert!(
+                (button_size.height - expected_height).abs() < 0.1,
+                "{label} target height {} must remain {expected_height}",
+                button_size.height
+            );
+
+            let outline = ElementHandle::find_by_element_id(&window, outline_id)
+                .find(|element| {
+                    let position = element.absolute_position();
+                    (position.x - button_position.x - 2.0).abs() < 0.1
+                        && (position.y - button_position.y - 2.0).abs() < 0.1
+                })
+                .unwrap_or_else(|| panic!("{label} outline has the 2px contract inset"));
+            let outline_size = outline.size();
+            assert!(
+                (outline_size.width - (button_size.width - 4.0)).abs() < 0.1
+                    && (outline_size.height - (button_size.height - 4.0)).abs() < 0.1,
+                "{label} outline must preserve a 2px inset on every edge"
+            );
+            (button, button_position)
+        };
+        let assert_visible_top_stroke = |image: &image::RgbaImage,
+                                         button: &ElementHandle,
+                                         button_x: f32,
+                                         button_y: f32,
+                                         scale_factor: f32,
+                                         label: &str| {
+            let x = ((button_x + button.size().width / 2.0) * scale_factor).round() as u32;
+            let gap_y = ((button_y + 1.0) * scale_factor).round() as u32;
+            let ring_y = ((button_y + 2.0) * scale_factor).round() as u32;
+            assert_ne!(
+                image.get_pixel(x, gap_y),
+                image.get_pixel(x, ring_y),
+                "{label} must show its focus/selection stroke after the 2px inset at {scale_factor}x"
+            );
+        };
+
+        for scale_factor in [1.0f32, 2.0] {
+            let initial =
+                loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
+                    .expect("render 48px toolbar inset probe");
+            assert_eq!(initial.width(), (300.0 * scale_factor) as u32);
+            assert_eq!(initial.height(), (48.0 * scale_factor) as u32);
+
+            let toolbar =
+                ElementHandle::find_by_element_id(&window, "ToolbarStateInsetProbeWindow::toolbar")
+                    .next()
+                    .expect("48px labeled toolbar");
+            assert!((toolbar.size().height - 48.0).abs() < 0.1);
+
+            let (format, format_position) =
+                assert_inset("Format", "IconOverLabelToolbarItem::state-outline", 48.0);
+            let (image_button, image_position) =
+                assert_inset("Image", "IconOverLabelToolbarItem::state-outline", 48.0);
+            let (edit, _) = assert_inset("Edit", "IconOnlyToolbarItem::state-outline", 28.0);
+            let (toolkit_overflow, _) =
+                assert_inset("More toolkit", "Overflow::state-outline", 28.0);
+            let (loom_overflow, _) =
+                assert_inset("More Loom", "LoomIconButton::state-outline", 28.0);
+
+            window.focus_image();
+            let focused_image =
+                loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
+                    .expect("render focused labeled toolbar item");
+            assert_visible_top_stroke(
+                &focused_image,
+                &format,
+                format_position.x,
+                format_position.y,
+                scale_factor,
+                "Format selected state",
+            );
+            assert_visible_top_stroke(
+                &focused_image,
+                &image_button,
+                image_position.x,
+                image_position.y,
+                scale_factor,
+                "Image focus state",
+            );
+            assert_visible_top_stroke(
+                &focused_image,
+                &edit,
+                edit.absolute_position().x,
+                edit.absolute_position().y,
+                scale_factor,
+                "Edit selected state",
+            );
+
+            window.focus_toolkit_overflow();
+            let focused_toolkit_overflow =
+                loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
+                    .expect("render focused toolkit overflow action");
+            assert_visible_top_stroke(
+                &focused_toolkit_overflow,
+                &toolkit_overflow,
+                toolkit_overflow.absolute_position().x,
+                toolkit_overflow.absolute_position().y,
+                scale_factor,
+                "toolkit overflow focus state",
+            );
+
+            window.focus_overflow();
+            let focused_loom_overflow =
+                loom_test_support::capture::snapshot_component(&window, 300.0, 48.0, scale_factor)
+                    .expect("render focused Loom overflow action");
+            assert_visible_top_stroke(
+                &focused_loom_overflow,
+                &loom_overflow,
+                loom_overflow.absolute_position().x,
+                loom_overflow.absolute_position().y,
+                scale_factor,
+                "Loom overflow focus state",
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { WriterFormatState } from "alignment_state.slint";
+import { WriterReviewState } from "writer_review.slint";
 
 /// The menu that opens under a toolbar item, with its click-away scrim and
 /// keyboard handling (Up/Down move, Return or Space run, Escape closes).
@@ -14,6 +15,10 @@ export component WriterToolbarMenu inherits Rectangle {
     in property <bool> inspector-visible: false;
     in property <bool> navigator-visible: false;
     in property <float> page-zoom: 1.0;
+    in property <length> view-width: 0px;
+    in property <length> view-height: 0px;
+    in property <float> page-width-pt: 595.0;
+    in property <float> page-height-pt: 842.0;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <bool> is-bold: false;
@@ -44,6 +49,8 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "view.zoom_in", label: "Zoom In", shortcut: "", checked: false, enabled: root.page-zoom < 1.99 },
             { id: "view.zoom_out", label: "Zoom Out", shortcut: "", checked: false, enabled: root.page-zoom > 0.51 },
             { id: "view.zoom_actual", label: "Actual Size", shortcut: "", checked: Math.abs(root.page-zoom - 1.0) < 0.01, enabled: true },
+            { id: "view.zoom_fit_width", label: "Fit Width", shortcut: "", checked: false, enabled: root.view-width > 48px && root.page-width-pt > 0.0 },
+            { id: "view.zoom_fit_page", label: "Fit Page", shortcut: "", checked: false, enabled: root.view-width > 48px && root.view-height > 48px && root.page-width-pt > 0.0 && root.page-height-pt > 0.0 },
         ]
         : root.kind == 3 ? [
             { id: "insert.page_break", label: "Page Break", shortcut: "Ctrl+Enter", checked: false, enabled: true },
@@ -52,6 +59,7 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "insert.image", label: "Picture...", shortcut: "", checked: false, enabled: true },
             { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, enabled: true },
             { id: "insert.comment", label: "Comment", shortcut: "", checked: false, enabled: true },
+            { id: "writer.footnotes", label: "Footnotes…", shortcut: "", checked: false, enabled: true },
         ]
         : root.kind == 4 ? (WriterFormatState.justify-available ? [
             { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
@@ -106,6 +114,7 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "file.save", label: "Save", shortcut: "Ctrl+S", checked: false, enabled: true },
             { id: "file.save_as", label: "Save As", shortcut: "Ctrl+Shift+S", checked: false, enabled: true },
             { id: "edit.find", label: "Find", shortcut: "Ctrl+F", checked: false, enabled: true },
+            { id: "writer.review.open", label: "Tracked Changes", shortcut: "", checked: WriterReviewState.panel-open, enabled: true },
         ]
         : [];
 

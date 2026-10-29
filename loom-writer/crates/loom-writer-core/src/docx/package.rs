@@ -1,6 +1,7 @@
 //! The fixed parts of a `.docx` package: content types, relationships,
 //! styles, numbering, settings and document properties.
 
+use super::header_footer::HeaderFooterParts;
 use super::xml::{self, W_NS, XML_DECLARATION};
 use crate::PageStyle;
 
@@ -28,8 +29,10 @@ pub(super) const SANS_FAMILY: &str = "Arial";
 /// `[Content_Types].xml`.
 pub(super) fn content_types(
     has_comments: bool,
+    has_footnotes: bool,
     chart_count: usize,
     images: &[super::body::BodyImage],
+    header_footer: &HeaderFooterParts,
 ) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
@@ -56,6 +59,12 @@ pub(super) fn content_types(
     part("/word/styles.xml", &format!("{WML}.styles+xml"));
     part("/word/numbering.xml", &format!("{WML}.numbering+xml"));
     part("/word/settings.xml", &format!("{WML}.settings+xml"));
+    if has_footnotes {
+        part(
+            "/word/footnotes.xml",
+            super::footnotes::FOOTNOTES_CONTENT_TYPE,
+        );
+    }
     if has_comments {
         part("/word/comments.xml", &format!("{WML}.comments+xml"));
         part(
@@ -77,6 +86,7 @@ pub(super) fn content_types(
         "/docProps/app.xml",
         "application/vnd.openxmlformats-officedocument.extended-properties+xml",
     );
+    out.push_str(&header_footer.content_type_overrides());
     out.push_str("</Types>");
     out
 }
@@ -99,8 +109,10 @@ pub(super) fn package_rels() -> String {
 /// `word/_rels/document.xml.rels`.
 pub(super) fn document_rels(
     has_comments: bool,
+    has_footnotes: bool,
     chart_count: usize,
     images: &[super::body::BodyImage],
+    header_footer: &HeaderFooterParts,
 ) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(
@@ -117,6 +129,12 @@ pub(super) fn document_rels(
              <Relationship Id=\"rId5\" Type=\"{REL_COMMENTS_EXTENDED}\" Target=\"commentsExtended.xml\"/>"
         ));
     }
+    if has_footnotes {
+        out.push_str(&format!(
+            "<Relationship Id=\"rIdFootnotes\" Type=\"{}\" Target=\"footnotes.xml\"/>",
+            super::footnotes::FOOTNOTES_REL
+        ));
+    }
     for c in 1..=chart_count {
         out.push_str(&format!(
             "<Relationship Id=\"rIdChart{c}\" Type=\"{REL}/chart\" Target=\"charts/chart{c}.xml\"/>"
@@ -129,19 +147,17 @@ pub(super) fn document_rels(
             ext = image.extension
         ));
     }
+    out.push_str(&header_footer.relationships_xml());
     out.push_str("</Relationships>");
     out
 }
 
 /// `word/settings.xml`. Compatibility mode 15 keeps Word from opening the
 /// file in "Compatibility Mode".
-pub(super) fn settings() -> String {
+pub(super) fn settings(recording: bool) -> String {
+    let track_revisions = if recording { "<w:trackRevisions/>" } else { "" };
     format!(
-        "{XML_DECLARATION}<w:settings xmlns:w=\"{W_NS}\"><w:zoom w:percent=\"100\"/>\
-         <w:defaultTabStop w:val=\"720\"/><w:characterSpacingControl w:val=\"doNotCompress\"/>\
-         <w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/>\
-         <w:compatSetting w:name=\"overrideTableStyleFontSizeAndJustification\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"1\"/>\
-         </w:compat></w:settings>"
+        "{XML_DECLARATION}<w:settings xmlns:w=\"{W_NS}\"><w:zoom w:percent=\"100\"/>         {track_revisions}<w:defaultTabStop w:val=\"720\"/><w:characterSpacingControl w:val=\"doNotCompress\"/>         <w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/>         <w:compatSetting w:name=\"overrideTableStyleFontSizeAndJustification\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"1\"/>         </w:compat></w:settings>"
     )
 }
 
@@ -178,16 +194,21 @@ fn half_points(points: f32) -> u32 {
 /// `word/styles.xml`: Normal, Heading 1 to 6 (so Word's navigation pane
 /// works), List Paragraph, Quote, Table Grid and the comment styles. Sizes
 /// follow the page style the editor lays out with.
-pub(super) fn styles(page: &PageStyle) -> String {
+pub(super) fn styles(page: &PageStyle, appearance: crate::PageAppearance) -> String {
     // Unnamed text is the editor's default run: 12 pt in the Sans family.
     let body = half_points(loom_text::CharacterStyle::default().font_size);
     let family = SANS_FAMILY;
+    let default_color = if appearance.is_black() {
+        "<w:color w:val=\"FFFFFF\"/>"
+    } else {
+        ""
+    };
     let mut out = String::from(XML_DECLARATION);
     out.push_str(&format!("<w:styles xmlns:w=\"{W_NS}\">"));
     out.push_str(&format!(
         "<w:docDefaults><w:rPrDefault><w:rPr>\
          <w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" w:cs=\"{family}\"/>\
-         <w:sz w:val=\"{body}\"/><w:szCs w:val=\"{body}\"/><w:lang w:val=\"en-US\" w:eastAsia=\"en-US\" w:bidi=\"ar-SA\"/>\
+         <w:sz w:val=\"{body}\"/><w:szCs w:val=\"{body}\"/>{default_color}<w:lang w:val=\"en-US\" w:eastAsia=\"en-US\" w:bidi=\"ar-SA\"/>\
          </w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>\
          <w:spacing w:after=\"{DEFAULT_SPACE_AFTER_TWIPS}\" w:line=\"{DEFAULT_LINE_TWIPS}\" w:lineRule=\"auto\"/>\
          </w:pPr></w:pPrDefault></w:docDefaults>"

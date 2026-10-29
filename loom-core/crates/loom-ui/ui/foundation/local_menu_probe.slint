@@ -1,0 +1,42 @@
+import { LocalMenuBar, LocalMenuEntry, LocalMenuPopup } from "../foundation.slint";
+import { Theme } from "../theme.slint";
+export { Theme } from "../theme.slint";
+
+export component LocalMenuProbeWindow inherits Window {
+    title: "Local menu probe";
+    width: 520px;
+    height: 300px;
+    background: Theme.palette().canvas;
+
+    in-out property <int> open-index: -1;
+    in-out property <int> selected-index: -1;
+    out property <string> activated-command: "";
+    out property <int> pointer-selection-sync-count: 0;
+
+    LocalMenuBar {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 36px;
+        labels: ["File", "Edit"];
+        open-index <=> root.open-index;
+    }
+
+    LocalMenuPopup {
+        x: 0px;
+        y: 36px;
+        width: parent.width;
+        height: parent.height - 36px;
+        labels: ["File", "Edit"];
+        items: [
+            { menu_index: 0, label: "Open", command_id: "file.open", shortcut: "", enabled: true, checked: false, checkable: false, separator: false },
+            { menu_index: 1, label: "Paste", command_id: "edit.paste", shortcut: "", enabled: true, checked: false, checkable: false, separator: false },
+        ];
+        open-index <=> root.open-index;
+        selected-index <=> root.selected-index;
+        menu-action(command) => { root.activated-command = command; }
+        menu-move(direction) => {
+            if (direction == 0) { root.pointer-selection-sync-count += 1; }
+        }
+    }
+}

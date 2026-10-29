@@ -333,7 +333,9 @@ fn replace_current(app: &WriterApp, state: &GuiState) {
     }
     let caret = start + replacement.len();
     next.set_selection(TextSelection::range(caret, caret));
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+        return;
+    }
     step(app, state, true);
 }
 
@@ -344,7 +346,8 @@ fn replace_all(app: &WriterApp, state: &GuiState) {
         .first()
         .map(|&(start, _)| start);
     let mut next = state.current.borrow().clone();
-    let count = next.replace_all_with(query.as_str(), replacement.as_str(), options_of(app));
+    let (count, edits) =
+        next.replace_all_with_edits(query.as_str(), replacement.as_str(), options_of(app));
     if count == 0 {
         bar.set_status(SharedString::from("No matches"));
         return;
@@ -355,7 +358,11 @@ fn replace_all(app: &WriterApp, state: &GuiState) {
     if let Some(start) = first_match {
         next.set_selection(TextSelection::caret(start + replacement.len()));
     }
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    let applied =
+        crate::apply_with_history_with_edits(app, state, next, HistoryKind::DocumentAction, &edits);
+    if !applied {
+        return;
+    }
     bar.set_status(SharedString::from(format!("{count} replaced")));
     refresh_rects(app, state);
 }

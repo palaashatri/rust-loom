@@ -9,7 +9,8 @@ use loom_pdf::{PageIndex, PathStyle, PdfDocument};
 
 use crate::export::shaped_export::{self, FontRegistry};
 use crate::{
-    measure_table_row_geometry, shape_table_cell_geometry, table_cell_rich_block, RichBlock,
+    measure_table_row_geometry_with_footnotes, shape_table_cell_geometry_with_footnotes,
+    table_cell_rich_block, FootnoteReferencePlacement, RichBlock, TableTextMap, WriterDocument,
     WriterError, WriterShapedVisualLine, TABLE_CELL_BASE_FONT_SIZE_PT,
     TABLE_CELL_HORIZONTAL_INSET_PT, TABLE_CELL_VERTICAL_INSET_PT,
 };
@@ -152,15 +153,24 @@ impl TableLayout {
     /// Sizes the columns as the editor does (see [`editor_column_widths`]), wraps
     /// each cell onto as many lines as its column needs, and resolves each cell's
     /// format from the table's style. Text uses the same shaped runs as the page.
-    pub(crate) fn new(table: &Table, max_width: f32) -> Result<Self, WriterError> {
+    pub(crate) fn new(
+        doc: &WriterDocument,
+        block_id: u64,
+        table: &Table,
+        max_width: f32,
+    ) -> Result<Self, WriterError> {
         let columns = table.col_count();
         let header_row = table.header_row;
         let is_header = |index: usize| header_row && index == 0;
         let widths = editor_column_widths(table, max_width);
-        let row_geometry =
-            measure_table_row_geometry(table, max_width, TABLE_CELL_BASE_FONT_SIZE_PT).map_err(
-                |error| WriterError::Invalid(format!("PDF export table geometry: {error}")),
-            )?;
+        let row_geometry = measure_table_row_geometry_with_footnotes(
+            doc,
+            block_id,
+            table,
+            max_width,
+            TABLE_CELL_BASE_FONT_SIZE_PT,
+        )
+        .map_err(|error| WriterError::Invalid(format!("PDF export table geometry: {error}")))?;
         let mut starts = Vec::with_capacity(columns);
         let mut width = 0.0;
         for column in &widths {
@@ -188,14 +198,23 @@ impl TableLayout {
                             base_color.as_deref(),
                         )
                         .unwrap_or_else(|| RichBlock::new(0, "paragraph", ""));
+                        let block = shaped_export::with_automatic_ink(&block);
                         let inner = (column_width - 2.0 * CELL_PAD_X_PT).max(1.0);
-                        let geometry =
-                            shape_table_cell_geometry(&block, TABLE_CELL_BASE_FONT_SIZE_PT, inner)
-                                .map_err(|error| {
-                                    WriterError::Invalid(format!(
-                                        "PDF export table cell {row},{column}: {error}"
-                                    ))
-                                })?;
+                        let geometry = shape_table_cell_geometry_with_footnotes(
+                            doc,
+                            block_id,
+                            table,
+                            row,
+                            column,
+                            &block,
+                            TABLE_CELL_BASE_FONT_SIZE_PT,
+                            inner,
+                        )
+                        .map_err(|error| {
+                            WriterError::Invalid(format!(
+                                "PDF export table cell {row},{column}: {error}"
+                            ))
+                        })?;
                         let lines = geometry
                             .lines()
                             .iter()
@@ -287,10 +306,12 @@ pub(crate) fn draw_row(
                     fonts,
                     page,
                     &context,
-                    cell.block.text.as_str(),
-                    line_top,
-                    x,
-                    shaped,
+                    shaped_export::PdfLine {
+                        text: cell.block.text.as_str(),
+                        line_top_pdf: line_top,
+                        text_origin_x: x,
+                        shaped_line: shaped,
+                    },
                 )?;
             }
             line_top -= line.height;
@@ -321,6 +342,87 @@ pub(crate) fn draw_row(
                 pdf.draw_line(page, from.0, from.1, to.0, to.1, style);
             }
         }
+    }
+    Ok(())
+}
+
+/// Draw a table row and its inline footnote references at shaped cell carets.
+pub(crate) fn draw_row_with_footnotes(
+    pdf: &mut PdfDocument,
+    fonts: &mut FontRegistry,
+    page: PageIndex,
+    layout: &TableLayout,
+    table: &Table,
+    index: usize,
+    origin: (f32, f32),
+    references: &[&FootnoteReferencePlacement],
+) -> Result<(), WriterError> {
+    draw_row(pdf, fonts, page, layout, index, origin)?;
+    let map = TableTextMap::new(table);
+    let row = &layout.rows[index];
+    let (left, top) = origin;
+    for reference in references {
+        let (row_index, column) = map.cell_at(reference.offset).ok_or_else(|| {
+            WriterError::Invalid(format!(
+                "PDF export could not map footnote {} to a table cell",
+                reference.note_id
+            ))
+        })?;
+        if row_index != index {
+            continue;
+        }
+        if table
+            .effective_cell(row_index, column)
+            .is_some_and(|(r, c, _)| r != row_index || c != column)
+        {
+            return Err(WriterError::Invalid(format!(
+                "PDF export cannot place footnote {} in a covered table cell",
+                reference.note_id
+            )));
+        }
+        let cell_range = map.cell_range(row_index, column).ok_or_else(|| {
+            WriterError::Invalid(format!(
+                "PDF export has no text range for footnote {} table cell",
+                reference.note_id
+            ))
+        })?;
+        let cell_offset = reference.offset.saturating_sub(cell_range.start);
+        let cell = &row.cells[column];
+        let mut x = left + layout.starts[column] + CELL_PAD_X_PT;
+        let mut line_top = top - CELL_PAD_Y_PT;
+        let mut found = false;
+        for line in &cell.lines {
+            if let Some(shaped) = &line.shaped {
+                let range = shaped.source_range();
+                if cell_offset > range.start && cell_offset <= range.end
+                    || cell_offset == range.start && range.start == 0
+                {
+                    x += crate::export::footnote_export::caret_x(shaped, cell_offset);
+                    found = true;
+                    break;
+                }
+            } else if cell.block.text.is_empty() && cell_offset == 0 {
+                found = true;
+                break;
+            }
+            line_top -= line.height;
+        }
+        if !found {
+            return Err(WriterError::Invalid(format!(
+                "PDF export could not map footnote {} to a shaped table-cell line",
+                reference.note_id
+            )));
+        }
+        crate::export::footnote_export::draw_reference_marker(
+            pdf,
+            fonts,
+            page,
+            reference.number,
+            x,
+            line_top,
+            TABLE_CELL_BASE_FONT_SIZE_PT,
+            &format!("footnote {} table reference", reference.note_id),
+        )?;
     }
     Ok(())
 }

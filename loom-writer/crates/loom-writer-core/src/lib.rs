@@ -17,6 +17,7 @@ mod caret_move;
 mod charts;
 mod comments;
 pub mod docx;
+mod footnotes;
 pub use docx::{import_docx, inspect_docx_unsupported};
 #[cfg(test)]
 mod alignment_start_tests;
@@ -26,6 +27,9 @@ mod export;
 mod export_flow;
 mod export_table;
 pub mod fonts;
+mod header_footer;
+#[cfg(test)]
+mod header_footer_tests;
 mod images;
 mod layout;
 mod list_levels;
@@ -33,7 +37,10 @@ mod markdown;
 mod page_setup;
 mod paragraph_edit;
 mod paragraph_match;
+pub mod pdf_export_view;
 mod replace;
+mod revisions;
+pub use revisions::RevisionTextEdit;
 mod search;
 mod style_json;
 mod table_geometry;
@@ -48,21 +55,32 @@ pub use charts::*;
 pub use docx::{export_docx, DocxExport};
 pub use export::{export_document_as_docx, export_pdf};
 pub use export_table::editor_column_widths;
+pub use header_footer::{
+    HeaderFooterAlignment, HeaderFooterConfig, HeaderFooterLineGeometry, HeaderFooterLineKind,
+    PageNumberFormat, HEADER_FOOTER_FONT_SIZE_PT, HEADER_FOOTER_LINE_HEIGHT_EM,
+    MAX_HEADER_FOOTER_TEXT_BYTES,
+};
 pub(crate) use images::OBJECT_CHAR;
 pub use images::*;
 pub use layout::{
     shape_text_line, shape_wrapped_block_lines, DocumentFlow, FlowLine, WriterCaretStop,
     WriterPaintedRun, WriterSelectionSpan, WriterShapedVisualLine,
 };
+pub use layout::{FootnoteLinePlacement, FootnoteReferencePlacement};
 pub use loom_objects;
-pub use page_setup::PageSetup;
+pub use page_setup::{CustomPageGeometry, PageAppearance, PageSetup};
 use paragraph_match::{exact_paragraph_matches, metadata_matches};
 pub use replace::FindOptions;
+pub use revisions::{
+    RevisionAnchor, RevisionBoundaryKind, RevisionKind, RevisionParagraphFormat,
+    RevisionParagraphFormatChange, RevisionPayload, RevisionRecord, TrackedChanges,
+};
 use style_json::{
     alignment_name, paragraph_style_json, parse_alignment, runs_json, selection_json,
 };
 pub use table_geometry::{
-    measure_table_row_geometry, shape_table_cell_geometry, TableCellGeometry,
+    measure_table_row_geometry, measure_table_row_geometry_with_footnotes,
+    shape_table_cell_geometry, shape_table_cell_geometry_with_footnotes, TableCellGeometry,
     TableCellLineGeometry, TableGeometryError, TableRowGeometry, TABLE_CELL_HORIZONTAL_INSET_PT,
     TABLE_CELL_LINE_PITCH_EM, TABLE_CELL_VERTICAL_INSET_PT, TABLE_ROW_MIN_HEIGHT_PT,
 };
@@ -80,9 +98,12 @@ pub type DocId = String;
 
 /// The version of the document content JSON this build writes. Format 2 stores
 /// tables as typed objects; format 1 migrated Markdown tables. Format 3 adds
-/// paragraph direction while retaining defaults for older content. Higher
+/// paragraph direction; format 4 adds document-owned header/footer settings.
+/// Format 5 adds exact custom page geometry; format 6 adds anchored footnotes;
+/// format 7 adds persistent tracked changes.
+/// Older content receives defaults for fields it did not store and higher
 /// numbers are refused.
-pub const WRITER_CONTENT_FORMAT: u32 = 3;
+pub const WRITER_CONTENT_FORMAT: u32 = 8;
 
 /// A single rich-text block (paragraph or heading) in the document.
 #[derive(Debug, Clone, PartialEq)]
@@ -321,8 +342,14 @@ pub struct WriterDocument {
     pub title: String,
     /// Page setup (paper size, orientation, margins) driving layout and export.
     pub page: PageSetup,
+    /// Document-owned headers, footers, and page-number formatting.
+    pub header_footer: HeaderFooterConfig,
     /// Anchored comment threads. Threads follow their block across edits.
     pub comments: Vec<CommentThread>,
+    /// Anchored footnotes with stable IDs and UTF-8 reference offsets.
+    pub footnotes: Vec<FootnoteEntry>,
+    /// Pending tracked changes and recording identity/settings.
+    pub tracked_changes: TrackedChanges,
     /// Document blocks in order.
     pub blocks: Vec<RichBlock>,
     /// Active text selection in the canonical [`Self::editor_text`] stream.
@@ -342,14 +369,20 @@ impl WriterDocument {
             id,
             title,
             page,
+            header_footer,
             comments,
+            footnotes,
+            tracked_changes,
             blocks,
             selection: _,
         } = self;
         *id == other.id
             && *title == other.title
             && *page == other.page
+            && *header_footer == other.header_footer
             && *comments == other.comments
+            && *footnotes == other.footnotes
+            && *tracked_changes == other.tracked_changes
             && *blocks == other.blocks
     }
 
@@ -359,7 +392,10 @@ impl WriterDocument {
             id: id.into(),
             title: title.into(),
             page: PageSetup::default(),
+            header_footer: HeaderFooterConfig::default(),
             comments: Vec::new(),
+            footnotes: Vec::new(),
+            tracked_changes: TrackedChanges::default(),
             blocks: Vec::new(),
             selection: TextSelection::caret(0),
         }
@@ -508,9 +544,13 @@ impl WriterDocument {
     /// text matches retain the complete old block, including id, kind, paragraph
     /// style, and runs, even when an insertion or deletion moves them. The
     /// empty string represents an empty document rather than one empty block.
+
     pub fn replace_paragraphs(&mut self, plain_text: &str) {
         let old_blocks = self.rebuild_blocks(plain_text, None);
         Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
+        if !self.footnotes.is_empty() {
+            footnotes::rebase_after_block_rebuild(&mut self.footnotes, &old_blocks, &self.blocks);
+        }
     }
 
     /// Rebuild the blocks from plain text and return the old ones; comment
@@ -657,8 +697,14 @@ impl WriterDocument {
         s.push(']');
         s.push_str(",\"page\":");
         s.push_str(&self.page.write_content_json());
+        s.push_str(",\"header_footer\":");
+        s.push_str(&self.header_footer.write_content_json());
         s.push_str(",\"comments\":");
         s.push_str(&self.comments_to_content_json());
+        s.push_str(",\"footnotes\":");
+        s.push_str(&self.footnotes_to_content_json());
+        s.push_str(",\"tracked_changes\":");
+        s.push_str(&self.tracked_changes.write_content_json());
         s.push_str(",\"selection\":");
         s.push_str(&selection_json(&self.selection));
         s.push('}');
@@ -672,8 +718,12 @@ impl WriterDocument {
         let mut raw_blocks: Option<String> = None;
         let mut format = 1u32;
         let mut selection = TextSelection::caret(0);
-        let mut page = PageSetup::default();
+        let mut raw_page: Option<String> = None;
+        let mut header_footer = None;
         let mut comments: Vec<CommentThread> = Vec::new();
+        let mut footnotes: Option<Vec<FootnoteEntry>> = None;
+        let mut tracked_changes: Option<TrackedChanges> = None;
+        let mut tracked_changes_seen = false;
 
         // Minimal safe parse: reuse loom_package's bounded JSON parser on the
         // top-level object, then iterate the entries array.
@@ -703,37 +753,122 @@ impl WriterDocument {
                     }
                 }
                 "page" => {
-                    if let JsonValue::Raw(raw) = v {
-                        if let Some(setup) = PageSetup::from_content_json_value(raw) {
-                            page = setup;
-                        }
+                    if raw_page.is_some() {
+                        return Err(WriterError::Json("duplicate page setup field".into()));
                     }
+                    let JsonValue::Raw(raw) = v else {
+                        return Err(WriterError::Json("expected page setup object".into()));
+                    };
+                    raw_page = Some(raw.clone());
+                }
+                "header_footer" => {
+                    let raw = match v {
+                        JsonValue::Raw(raw) => raw,
+                        JsonValue::String(_) => {
+                            return Err(WriterError::Json("expected header_footer object".into()))
+                        }
+                    };
+                    header_footer = Some(HeaderFooterConfig::from_content_json_value(raw)?);
                 }
                 "comments" => {
                     if let JsonValue::Raw(raw) = v {
                         comments = WriterDocument::comments_from_content_json(raw);
                     }
                 }
+                "footnotes" => {
+                    let raw = match v {
+                        JsonValue::Raw(raw) => raw,
+                        JsonValue::String(_) => {
+                            return Err(WriterError::Json("expected footnotes array".into()))
+                        }
+                    };
+                    footnotes = Some(WriterDocument::footnotes_from_content_json(raw)?);
+                }
+                "tracked_changes" => {
+                    if tracked_changes_seen {
+                        return Err(WriterError::Json("duplicate tracked changes field".into()));
+                    }
+                    tracked_changes_seen = true;
+                    let raw = match v {
+                        JsonValue::Raw(raw) => raw,
+                        JsonValue::String(_) => {
+                            return Err(WriterError::Json("expected tracked changes object".into()))
+                        }
+                    };
+                    tracked_changes = Some(TrackedChanges::from_content_json_value(raw)?);
+                }
                 _ => {}
             }
+        }
+        if format == 0 {
+            return Err(WriterError::Invalid("bad content format".into()));
         }
         if format > WRITER_CONTENT_FORMAT {
             return Err(WriterError::Invalid(format!(
                 "written by a newer Writer (content format {format}); this Writer reads format {WRITER_CONTENT_FORMAT} and older"
             )));
         }
+        let page = PageSetup::from_document_content_value(raw_page.as_deref(), format)
+            .map_err(WriterError::Invalid)?;
+        let header_footer = match header_footer {
+            Some(config) => config,
+            None if format < 4 => HeaderFooterConfig::default(),
+            None => {
+                return Err(WriterError::Invalid(
+                    "content format 4 or later is missing header_footer settings".into(),
+                ))
+            }
+        };
+        let footnotes = match footnotes {
+            Some(_) if format < 6 => {
+                return Err(WriterError::Invalid(
+                    "footnotes require content format 6 or later".into(),
+                ))
+            }
+            Some(entries) => entries,
+            None if format < 6 => Vec::new(),
+            None => {
+                return Err(WriterError::Invalid(
+                    "content format 6 or later is missing footnotes".into(),
+                ))
+            }
+        };
+        let tracked_changes = match tracked_changes {
+            Some(_) if format < 7 => {
+                return Err(WriterError::Invalid(
+                    "tracked changes require content format 7 or later".into(),
+                ))
+            }
+            Some(state) => state,
+            None if format < 7 => TrackedChanges::default(),
+            None => {
+                return Err(WriterError::Invalid(
+                    "content format 7 or later is missing tracked changes settings".into(),
+                ))
+            }
+        };
         let (blocks, legacy) = parse_blocks(raw_blocks.as_deref().unwrap_or("[]"))?;
         tables::remap_legacy_offsets(&blocks, &legacy, &mut comments, &mut selection);
         let mut document = Self {
             id,
             title,
             page,
+            header_footer,
             comments,
+            footnotes,
+            tracked_changes,
             blocks,
             selection,
         };
         style_json::validate_native_text_colors(&document)
             .map_err(|error| WriterError::Invalid(error.into()))?;
+        document
+            .validate_footnotes()
+            .map_err(WriterError::Invalid)?;
+        document
+            .tracked_changes
+            .validate_for_document(&document.blocks)
+            .map_err(WriterError::Invalid)?;
         document.set_selection(document.selection.clone());
         Ok(document)
     }
@@ -883,119 +1018,6 @@ impl WriterDocument {
             characters,
             reading_time_minutes,
         }
-    }
-
-    /// Split a block at byte offset, creating a new block with remaining text and preserving styles.
-    ///
-    /// The offset is floored to the previous UTF-8 character boundary and
-    /// clamped to the block bounds.
-    pub fn split_block(&mut self, block_id: u64, byte_offset: usize) -> Result<u64, WriterError> {
-        let index = self
-            .blocks
-            .iter()
-            .position(|b| b.id == block_id)
-            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
-        let block = &self.blocks[index];
-        let text = block.text.as_str();
-        let text_len = text.len();
-        let offset = floor_char_boundary(text, byte_offset.min(text_len));
-
-        let first_text = &block.text.as_str()[..offset];
-        let second_text = &block.text.as_str()[offset..];
-
-        let new_id = self.next_id();
-        let mut first_block = RichBlock::new(block.id, &block.kind, first_text);
-        first_block.style = block.style.clone();
-        for run in &block.runs {
-            if run.start < offset {
-                let start = floor_char_boundary(text, run.start.min(text_len));
-                let end = floor_char_boundary(text, run.end.min(offset));
-                if start < end {
-                    first_block.runs.push(loom_text::StyleRun {
-                        start,
-                        end,
-                        style: run.style.clone(),
-                    });
-                }
-            }
-        }
-
-        let mut second_block = RichBlock::new(new_id, &block.kind, second_text);
-        second_block.style = block.style.clone();
-        for run in &block.runs {
-            if run.end > offset {
-                let start = run.start.saturating_sub(offset);
-                let end = run.end - offset;
-                // Offsets in the second block are already relative; they remain
-                // valid UTF-8 boundaries because `offset` was floored.
-                if start < end {
-                    second_block.runs.push(loom_text::StyleRun {
-                        start,
-                        end,
-                        style: run.style.clone(),
-                    });
-                }
-            }
-        }
-
-        self.blocks[index] = first_block;
-        self.blocks.insert(index + 1, second_block);
-        Ok(new_id)
-    }
-
-    /// Merge two adjacent blocks.
-    pub fn merge_blocks(&mut self, first_id: u64, second_id: u64) -> Result<(), WriterError> {
-        let first_index = self
-            .blocks
-            .iter()
-            .position(|b| b.id == first_id)
-            .ok_or_else(|| WriterError::Invalid(format!("block {first_id} not found")))?;
-        let second_index = self
-            .blocks
-            .iter()
-            .position(|b| b.id == second_id)
-            .ok_or_else(|| WriterError::Invalid(format!("block {second_id} not found")))?;
-        if second_index != first_index + 1 {
-            return Err(WriterError::Invalid(
-                "blocks must be adjacent to merge".into(),
-            ));
-        }
-
-        let first = &self.blocks[first_index];
-        let second = &self.blocks[second_index];
-        let first_len = first.text.as_str().len();
-        let combined_text = format!("{}{}", first.text.as_str(), second.text.as_str());
-
-        let mut combined_block = RichBlock::new(first.id, &first.kind, &combined_text);
-        combined_block.style = first.style.clone();
-        combined_block.runs.extend(first.runs.clone());
-        for run in &second.runs {
-            combined_block.runs.push(loom_text::StyleRun {
-                start: run.start + first_len,
-                end: run.end + first_len,
-                style: run.style.clone(),
-            });
-        }
-        combined_block.runs.sort_by_key(|run| run.start);
-        // Coalesce adjacent runs with identical style.
-        let mut coalesced: Vec<loom_text::StyleRun> = Vec::with_capacity(combined_block.runs.len());
-        for run in combined_block.runs.drain(..) {
-            if run.start == run.end {
-                continue;
-            }
-            if let Some(last) = coalesced.last_mut() {
-                if last.end == run.start && last.style == run.style {
-                    last.end = run.end;
-                    continue;
-                }
-            }
-            coalesced.push(run);
-        }
-        combined_block.runs = coalesced;
-
-        self.blocks[first_index] = combined_block;
-        self.blocks.remove(second_index);
-        Ok(())
     }
 
     /// Formats a sub-range within a block with a given character style.
@@ -2034,6 +2056,7 @@ impl ContentParser {
             return Err(WriterError::Json("expected object".into()));
         }
         let mut fields = Vec::new();
+        let mut footnotes_seen = false;
         p.skip_ws();
         if p.peek() == Some(b'}') {
             return Ok(fields);
@@ -2045,7 +2068,17 @@ impl ContentParser {
             if p.next() != Some(b':') {
                 return Err(WriterError::Json("expected ':'".into()));
             }
-            let value = p.capture_typed_value()?;
+            let value = if key == "footnotes" {
+                if footnotes_seen {
+                    return Err(WriterError::Json("duplicate footnotes field".into()));
+                }
+                footnotes_seen = true;
+                JsonValue::Raw(
+                    p.capture_raw_value_bounded(crate::footnotes::MAX_FOOTNOTE_JSON_BYTES)?,
+                )
+            } else {
+                p.capture_typed_value()?
+            };
             fields.push((key, value));
             p.skip_ws();
             match p.peek() {
@@ -2268,10 +2301,20 @@ impl Clone for ContentParser {
     }
 }
 
-/// Save a document to a `.loomdoc` byte buffer (ZIP + manifest).
 pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
     style_json::validate_native_text_colors(doc)
         .map_err(|error| zip::ArchiveError::InvalidArgument(error.into()))?;
+    doc.page
+        .validate()
+        .map_err(loom_package::zip::ArchiveError::InvalidArgument)?;
+    doc.header_footer
+        .validate_for_page_style(&doc.page.page_style())
+        .map_err(|error| zip::ArchiveError::InvalidArgument(error.into()))?;
+    doc.validate_footnotes()
+        .map_err(loom_package::zip::ArchiveError::InvalidArgument)?;
+    doc.tracked_changes
+        .validate_for_document(&doc.blocks)
+        .map_err(loom_package::zip::ArchiveError::InvalidArgument)?;
     let mut arch = PackageArchive::new();
     let content = doc.to_content_json();
     let content_bytes = content.as_bytes();
@@ -2315,7 +2358,12 @@ pub fn load_document(bytes: &[u8]) -> Result<WriterDocument, WriterError> {
         .ok_or_else(|| WriterError::Invalid("missing document.json".into()))?;
     let s = std::str::from_utf8(content)
         .map_err(|_| WriterError::Invalid("content not utf8".into()))?;
-    WriterDocument::from_content_json(s)
+    let document = WriterDocument::from_content_json(s)?;
+    document
+        .header_footer
+        .validate_for_page_style(&document.page.page_style())
+        .map_err(|error| WriterError::Invalid(error.into()))?;
+    Ok(document)
 }
 
 /// One text-search hit in a document block.
@@ -2404,6 +2452,8 @@ pub enum PaperSize {
     Executive,
     A3,
     A5,
+    /// User-entered dimensions stored in [`CustomPageGeometry`].
+    Custom,
 }
 
 impl PaperSize {
@@ -2416,6 +2466,8 @@ impl PaperSize {
             Self::Executive => (522.0, 756.0),
             Self::A3 => (842.0, 1191.0),
             Self::A5 => (420.0, 595.0),
+            // A custom page without stored geometry is rejected during load.
+            Self::Custom => (595.0, 842.0),
         }
     }
 }
@@ -2436,6 +2488,8 @@ pub enum PageMarginsPreset {
     Narrow,   // 0.5 inch (36pt)
     Moderate, // 1 inch top/bottom, 0.75 inch left/right (54pt)
     Wide,     // 1 inch top/bottom, 2 inch left/right (144pt)
+    /// User-entered margins stored in [`CustomPageGeometry`].
+    Custom,
 }
 
 impl PageMarginsPreset {
@@ -2446,6 +2500,8 @@ impl PageMarginsPreset {
             Self::Narrow => (36.0, 36.0, 36.0, 36.0),
             Self::Moderate => (72.0, 72.0, 54.0, 54.0),
             Self::Wide => (72.0, 72.0, 144.0, 144.0),
+            // A custom margin value without stored geometry is rejected during load.
+            Self::Custom => (72.0, 72.0, 72.0, 72.0),
         }
     }
 }
@@ -2470,115 +2526,18 @@ pub fn calculate_speaking_time_minutes(word_count: usize, words_per_minute: u32)
     word_count as f32 / wpm as f32
 }
 
-/// Page number numbering format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PageNumberFormat {
-    #[default]
-    Arabic,
-    RomanUpper,
-    RomanLower,
-    Alphabetical,
-}
-
-impl PageNumberFormat {
-    /// Formats a 1-based page number into a string according to this format.
-    pub fn format(&self, page_num: usize) -> String {
-        match self {
-            Self::Arabic => format!("{}", page_num),
-            Self::RomanUpper => match page_num {
-                1 => "I".into(),
-                2 => "II".into(),
-                3 => "III".into(),
-                4 => "IV".into(),
-                5 => "V".into(),
-                6 => "VI".into(),
-                7 => "VII".into(),
-                8 => "VIII".into(),
-                9 => "IX".into(),
-                10 => "X".into(),
-                _ => format!("{}", page_num),
-            },
-            Self::RomanLower => match page_num {
-                1 => "i".into(),
-                2 => "ii".into(),
-                3 => "iii".into(),
-                4 => "iv".into(),
-                5 => "v".into(),
-                6 => "vi".into(),
-                7 => "vii".into(),
-                8 => "viii".into(),
-                9 => "ix".into(),
-                10 => "x".into(),
-                _ => format!("{}", page_num),
-            },
-            Self::Alphabetical => {
-                if (1..=26).contains(&page_num) {
-                    let ch = (b'A' + (page_num as u8 - 1)) as char;
-                    ch.to_string()
-                } else {
-                    format!("{}", page_num)
-                }
-            }
-        }
-    }
-}
-
-/// Header and footer layout configuration for paginated documents.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct HeaderFooterConfig {
-    /// Header text (supports `{page}` and `{total}` placeholders).
-    pub header_text: String,
-    /// Footer text (supports `{page}` and `{total}` placeholders).
-    pub footer_text: String,
-    /// Header/footer text alignment.
-    pub alignment: String,
-    /// Page number formatting style.
-    pub page_number_format: PageNumberFormat,
-    /// Whether the first page omits headers and footers (e.g. cover page).
-    pub different_first_page: bool,
-}
-
-impl HeaderFooterConfig {
-    /// Formats header text for a given page index (1-based) and total page count.
-    pub fn format_header(&self, page_num: usize, total_pages: usize) -> Option<String> {
-        if self.different_first_page && page_num == 1 {
-            return None;
-        }
-        if self.header_text.is_empty() {
-            return None;
-        }
-        let formatted_page = self.page_number_format.format(page_num);
-        let res = self
-            .header_text
-            .replace("{page}", &formatted_page)
-            .replace("{total}", &total_pages.to_string());
-        Some(res)
-    }
-
-    /// Formats footer text for a given page index (1-based) and total page count.
-    pub fn format_footer(&self, page_num: usize, total_pages: usize) -> Option<String> {
-        if self.different_first_page && page_num == 1 {
-            return None;
-        }
-        if self.footer_text.is_empty() {
-            return None;
-        }
-        let formatted_page = self.page_number_format.format(page_num);
-        let res = self
-            .footer_text
-            .replace("{page}", &formatted_page)
-            .replace("{total}", &total_pages.to_string());
-        Some(res)
-    }
-}
-
-/// Footnote or endnote citation entry.
+/// A stable footnote identity, its single inline-reference position, and note body.
+/// The anchor uses a stable block ID plus a UTF-8 byte offset within that block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FootnoteEntry {
+    /// Stable note ID shared by its reference and body.
     pub id: u64,
-    pub marker: String,
-    pub text: String,
-    pub is_endnote: bool,
+    /// Block containing the inline reference.
+    pub block_id: u64,
+    /// UTF-8 byte offset of the inline reference within `block_id`.
+    pub offset: usize,
+    /// Editable note body.
+    pub body: String,
 }
 
 /// Multi-column page layout configuration.
@@ -5286,33 +5245,6 @@ mod tests {
     }
 
     #[test]
-    fn header_footer_formatting_and_page_numbers() {
-        assert_eq!(PageNumberFormat::Arabic.format(3), "3");
-        assert_eq!(PageNumberFormat::RomanUpper.format(4), "IV");
-        assert_eq!(PageNumberFormat::RomanLower.format(5), "v");
-        assert_eq!(PageNumberFormat::Alphabetical.format(2), "B");
-
-        let config = HeaderFooterConfig {
-            header_text: "Document Title - Page {page} of {total}".into(),
-            footer_text: "Confidential - {page}".into(),
-            alignment: "center".into(),
-            page_number_format: PageNumberFormat::Arabic,
-            different_first_page: true,
-        };
-
-        // First page should be omitted
-        assert_eq!(config.format_header(1, 10), None);
-        assert_eq!(config.format_footer(1, 10), None);
-
-        // Second page
-        assert_eq!(
-            config.format_header(2, 10),
-            Some("Document Title - Page 2 of 10".into())
-        );
-        assert_eq!(config.format_footer(2, 10), Some("Confidential - 2".into()));
-    }
-
-    #[test]
     fn multi_column_layout_and_drop_caps() {
         let single = MultiColumnConfig::default();
         assert_eq!(single.calculate_column_width(500.0), 500.0);
@@ -5845,7 +5777,7 @@ mod tests {
     #[test]
     fn docx_extraction_paragraphs_and_headings() {
         let document_xml = "<?xml version=\"1.0\"?>\
-            <w:document><w:body>\
+            <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>\
             <w:p><w:r><w:t>Hello </w:t></w:r><w:r><w:t>World</w:t></w:r></w:p>\
             <w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Chapter</w:t></w:r></w:p>\
             <w:p><w:r><w:t xml:space=\"preserve\">A &amp;amp; B</w:t></w:r></w:p>\
@@ -6400,5 +6332,33 @@ mod tests {
         let mut modified = loaded.clone();
         modified.blocks[0].kind = "heading2".into();
         assert_ne!(modified.to_content_json(), json1);
+    }
+
+    #[test]
+    fn custom_page_geometry_survives_package_save_and_open() {
+        let mut document = WriterDocument::new("custom-page", "Custom page");
+        document
+            .page
+            .set_custom_geometry_points(612.25, 792.5, 24.0, 30.0, 36.0, 42.0)
+            .expect("valid custom page");
+        let saved = save_document(&document).expect("save custom page");
+        assert_eq!(load_document(&saved).expect("open custom page"), document);
+    }
+
+    #[test]
+    fn malformed_page_setup_json_is_rejected() {
+        let document = WriterDocument::new("bad-page", "Bad page");
+        let json = document.to_content_json();
+        let malformed = json.replace(
+            "\"page\":{\"paper\":\"a4\",\"orientation\":\"portrait\",\"margins\":\"normal\",\"appearance\":\"white\"}",
+            "\"page\":\"invalid\"",
+        );
+        assert_ne!(json, malformed, "fixture replaces the page field");
+        assert!(WriterDocument::from_content_json(&malformed).is_err());
+        let duplicated = json.replace(
+            "\"header_footer\":",
+            "\"page\":{\"paper\":\"a4\",\"orientation\":\"portrait\",\"margins\":\"normal\",\"appearance\":\"white\"},\"header_footer\":",
+        );
+        assert!(WriterDocument::from_content_json(&duplicated).is_err());
     }
 }

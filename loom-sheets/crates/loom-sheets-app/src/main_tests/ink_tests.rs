@@ -121,6 +121,35 @@ fn a_wrapped_cell_stays_in_its_own_box_instead_of_spilling_into_neighbours() {
 }
 
 #[test]
+fn inspect_wrapped_row_gridline_pixels() {
+    let wrapped = "hello world";
+    let s = wired(&[("A1", wrapped)]);
+    s.app.global::<CellInk>().invoke_wrap_toggled();
+    let image = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render wrapped row");
+    let label = s.app.get_cell_labels().row_data(0).expect("A1 label");
+    let a1 = ElementHandle::find_by_accessible_label(&s.app, label.as_str())
+        .next()
+        .expect("active A1 element");
+    let origin = a1.absolute_position();
+    let size = a1.size();
+    let next_column_width = s.app.get_grid_column_widths().row_data(1).unwrap();
+    let row_height = s.app.get_grid_row_heights().row_data(0).unwrap();
+    let a1_center_x = (origin.x + size.width / 2.0).round() as u32;
+    let next_center_x = (origin.x + size.width + next_column_width / 2.0).round() as u32;
+    let boundary = (origin.y + row_height).round() as i32;
+    let a1_pixels: Vec<_> = (-8..=8)
+        .map(|offset| image.get_pixel(a1_center_x, (boundary + offset) as u32).0)
+        .collect();
+    let next_pixels: Vec<_> = (-8..=8)
+        .map(|offset| image.get_pixel(next_center_x, (boundary + offset) as u32).0)
+        .collect();
+    eprintln!(
+        "wrapped-row-gridline origin=({}, {}) size=({}, {}) row_height={row_height} boundary={boundary} a1_x={a1_center_x} a1_pixels={a1_pixels:?} next_x={next_center_x} next_pixels={next_pixels:?}",
+        origin.x, origin.y, size.width, size.height
+    );
+}
+
+#[test]
 fn the_inspector_offers_named_swatches_for_every_text_colour() {
     let s = wired(&[("A1", "hello")]);
     s.app.global::<CellInk>().invoke_wrap_toggled();

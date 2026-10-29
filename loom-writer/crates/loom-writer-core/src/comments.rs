@@ -40,7 +40,7 @@ impl TextEdit {
     /// Place a pure insertion or pure deletion using the caret the editor
     /// reports after the edit. Returns `None` when the caret does not explain
     /// the change, so the caller falls back to [`Self::diff`].
-    fn from_caret(old_text: &str, new_text: &str, caret: usize) -> Option<Self> {
+    pub(crate) fn from_caret(old_text: &str, new_text: &str, caret: usize) -> Option<Self> {
         if caret > new_text.len() || !new_text.is_char_boundary(caret) {
             return None;
         }
@@ -246,14 +246,20 @@ impl WriterDocument {
         }
     }
 
-    /// `replace_paragraphs` for a caller that knows the exact edit: comment
-    /// anchors rebase through `edit` instead of through an inferred diff.
     pub(crate) fn replace_paragraphs_with_edit(&mut self, plain_text: &str, edit: TextEdit) {
         let old_blocks = self.rebuild_blocks(plain_text, Some(edit));
-        if self.comments.is_empty() {
+        if self.comments.is_empty() && self.footnotes.is_empty() {
             return;
         }
-        Self::rebase_comment_anchors_through(&mut self.comments, &old_blocks, &self.blocks, edit);
+        if !self.comments.is_empty() {
+            Self::rebase_comment_anchors_through(
+                &mut self.comments,
+                &old_blocks,
+                &self.blocks,
+                edit,
+            );
+        }
+        crate::footnotes::rebase_through(&mut self.footnotes, &old_blocks, &self.blocks, edit);
     }
 
     /// Replace the editor's canonical text after a native text-buffer edit.
@@ -322,7 +328,6 @@ impl WriterDocument {
         (shown, Some(block_start + range.start + typed))
     }
 
-    /// Applies an edit that lies inside table block `index` to its cells.
     pub(crate) fn type_into_table(
         &mut self,
         index: usize,
@@ -353,12 +358,14 @@ impl WriterDocument {
                 new_start: block_start + range.start,
                 new_end: (block_start as isize + range.end as isize + delta) as usize,
             };
-            Self::rebase_comment_anchors_through(
-                &mut self.comments,
-                &before,
-                &self.blocks,
-                applied,
-            );
+            if !self.comments.is_empty() {
+                Self::rebase_comment_anchors_through(
+                    &mut self.comments,
+                    &before,
+                    &self.blocks,
+                    applied,
+                );
+            }
         }
         Ok(true)
     }
@@ -509,7 +516,7 @@ pub(crate) fn blocks_to_text(blocks: &[RichBlock]) -> String {
         .join("\n")
 }
 
-fn block_start(blocks: &[RichBlock], block_id: u64) -> Option<(usize, &RichBlock)> {
+pub(crate) fn block_start(blocks: &[RichBlock], block_id: u64) -> Option<(usize, &RichBlock)> {
     let mut start = 0;
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
@@ -523,7 +530,7 @@ fn block_start(blocks: &[RichBlock], block_id: u64) -> Option<(usize, &RichBlock
     None
 }
 
-fn block_at_offset(blocks: &[RichBlock], offset: usize) -> Option<(&RichBlock, usize)> {
+pub(crate) fn block_at_offset(blocks: &[RichBlock], offset: usize) -> Option<(&RichBlock, usize)> {
     let mut start = 0;
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
@@ -538,7 +545,7 @@ fn block_at_offset(blocks: &[RichBlock], offset: usize) -> Option<(&RichBlock, u
     None
 }
 
-fn map_comment_endpoint(
+pub(crate) fn map_comment_endpoint(
     offset: usize,
     old_start: usize,
     old_end: usize,

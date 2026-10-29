@@ -393,7 +393,11 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
         (
             PaletteAction::InsertChart,
             "sheets.insert_chart",
-            "Insert Chart",
+            if !app.get_chart_exists() {
+                "Insert Chart"
+            } else {
+                "Change Chart Source"
+            },
             "",
         ),
         (

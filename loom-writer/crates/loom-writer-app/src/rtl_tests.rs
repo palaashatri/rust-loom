@@ -23,7 +23,7 @@ const SURFACES: [&str; 17] = [
     "inspector-document",
     "navigator",
     "menu-View",
-    "menu-Zoom",
+    "menu-Zoom 100%",
     "menu-Insert",
     "menu-Export",
     "menu-More actions",
@@ -33,6 +33,7 @@ fn render(surface: &str, width: f32, height: f32, rtl: bool, scale: f32) -> Vec<
     let session = launched("");
     let app = session.app;
     configure_direction(&app, rtl);
+    super::templates::install_catalog(&app);
     apply_theme(&app, "light");
     Theme::get(&app).set_text_scale(scale);
     apply_layout_breakpoints(&app, width as u32);
@@ -76,6 +77,64 @@ fn every_surface_is_the_mirror_image_in_right_to_left() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn template_chooser_mirrors_at_double_scale_and_documented_viewports() {
+    let template_names = [
+        "Blank",
+        "Blank Black",
+        "Executive Report",
+        "Business Letter",
+        "Curriculum Vitae",
+        "Newsletter",
+    ];
+    let visible_card_names = |items: &[Rect]| {
+        let mut names: Vec<_> = items
+            .iter()
+            .filter(|item| template_names.contains(&item.0.as_str()))
+            .map(|item| item.0.clone())
+            .collect();
+        names.sort();
+        names
+    };
+
+    for (width, height) in [
+        (1024.0f32, 720.0),
+        (1280.0, 800.0),
+        (1440.0, 900.0),
+        (1920.0, 1200.0),
+    ] {
+        let ltr = render("templates", width, height, false, 2.0);
+        let rtl = render("templates", width, height, true, 2.0);
+        let ltr_names = visible_card_names(&ltr);
+        let rtl_names = visible_card_names(&rtl);
+        assert!(
+            !ltr_names.is_empty(),
+            "the template chooser exposes cards at {width}x{height}"
+        );
+        assert_eq!(
+            ltr_names, rtl_names,
+            "LTR and RTL expose the same cards at {width}x{height}"
+        );
+
+        for (direction, items) in [("LTR", &ltr), ("RTL", &rtl)] {
+            let cards: Vec<_> = items
+                .iter()
+                .filter(|item| template_names.contains(&item.0.as_str()))
+                .collect();
+            for (label, x, y, card_width, _) in cards {
+                assert!(
+                    *x >= 0.0 && *y >= 0.0 && *x + *card_width <= width,
+                    "{direction} {width}x{height}: {label:?} is clipped horizontally at {x}"
+                );
+            }
+        }
+        assert!(
+            mirror_difference(&ltr, &rtl, width, &[]).is_none(),
+            "template chooser mirrors at {width}x{height}"
+        );
+    }
 }
 
 /// The character-style row (Bold, Italic, Underline, Strikethrough) belongs to

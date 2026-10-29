@@ -186,7 +186,6 @@ fn table_cell_pointer_offset(
         banded_rows: table.banded_rows,
         banded_columns: table.banded_columns,
         first_column: table.first_column,
-        ..Default::default()
     };
     let resolved = catalog_style.resolve_cell(
         location.row,
@@ -199,7 +198,7 @@ fn table_cell_pointer_offset(
     let font_size = loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT;
     let block = loom_writer_core::table_cell_rich_block(
         location.block_id,
-        &table,
+        table,
         location.row,
         location.col,
         font_size,
@@ -207,8 +206,17 @@ fn table_cell_pointer_offset(
         resolved.text_color.as_deref(),
     )?;
     let available_width = (rect.width - 12.0).max(1.0);
-    let geometry =
-        loom_writer_core::shape_table_cell_geometry(&block, font_size, available_width).ok()?;
+    let geometry = loom_writer_core::shape_table_cell_geometry_with_footnotes(
+        doc,
+        location.block_id,
+        table,
+        location.row,
+        location.col,
+        &block,
+        font_size,
+        available_width,
+    )
+    .ok()?;
     if geometry.lines().is_empty() {
         return Some(cell_offset);
     }

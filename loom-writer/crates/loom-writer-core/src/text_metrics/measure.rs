@@ -390,6 +390,7 @@ impl LineMeasure {
 
     /// The graphemes of `text` (the text this was measured from) with their
     /// advances: `(start byte, grapheme, advance)`.
+    #[cfg(test)]
     pub(crate) fn graphemes<'t>(&self, text: &'t str) -> Vec<(usize, &'t str, f32)> {
         (0..self.len())
             .map(|index| {

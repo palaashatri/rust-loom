@@ -6,8 +6,13 @@
 //! on screen, not how long the document is. Geometry still comes from the core
 //! layout of the whole document, so positions are identical either way.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+
+#[path = "chart_projection.rs"]
+mod chart_projection;
+#[path = "revision_projection.rs"]
+mod revision_projection;
 
 use loom_writer_core::fonts;
 use loom_writer_core::loom_objects::table::Table;
@@ -20,8 +25,9 @@ use slint::{Model, SharedString};
 #[path = "render_text.rs"]
 pub(crate) mod render_text;
 use render_text::{
-    fragment_justification_spaces, render_row, set_shaped_block_glyphs, set_shaped_glyphs, Align,
-    Frame, RasterClip, RowGeometry,
+    fragment_justification_spaces, render_row, set_shaped_block_glyphs,
+    set_shaped_block_glyphs_with_footnotes, set_shaped_glyphs, Align, Frame, RasterClip,
+    RowGeometry,
 };
 
 /// Screens of height kept when the view height is not yet known.
@@ -29,8 +35,9 @@ const PAGE_VIEW_FALLBACK_SCREENS: f32 = 2.0;
 
 use crate::{
     normalize_page_scroll, normalize_page_zoom, writer_render_alignment,
-    writer_render_height_for_width, WriterCellEdge, WriterCommentRect, WriterRenderBlock,
-    WriterSelectionRect, WriterTableCellRect,
+    writer_render_height_for_width, WriterCellEdge, WriterCommentRect, WriterFootnoteLine,
+    WriterFootnoteReference, WriterGlyphTile, WriterHeaderFooterLine, WriterRenderBlock,
+    WriterRevisionMark, WriterSelectionRect, WriterTableCellRect,
 };
 
 /// Everything the page canvas shows for one document state.
@@ -38,9 +45,13 @@ pub(crate) struct Projection {
     pub rows: Vec<WriterRenderBlock>,
     pub selection_rects: Vec<WriterSelectionRect>,
     pub comment_rects: Vec<WriterCommentRect>,
+    pub revision_marks: Vec<WriterRevisionMark>,
     pub table_cell_rects: Vec<WriterTableCellRect>,
     /// Pictures on the pages shown, in page-stack coordinates.
     pub images: Vec<PageImagePart>,
+    pub header_footer_lines: Vec<WriterHeaderFooterLine>,
+    pub footnote_lines: Vec<WriterFootnoteLine>,
+    pub footnote_references: Vec<WriterFootnoteReference>,
     pub page_count: i32,
     pub stack_height: f32,
     /// Pages the rows, selection and comment rectangles cover.
@@ -355,19 +366,6 @@ pub(crate) fn project(
     project_inner(doc, viewport, view_height, None, None)
 }
 
-/// Project the document and rasterize shaped glyphs at the active window
-/// scale. `device_scale_factor` is supplied by Slint; the viewport zoom is
-/// combined with it only at the raster boundary, while core geometry remains
-/// in page points.
-pub(crate) fn project_with_scale(
-    doc: &WriterDocument,
-    viewport: PageViewport,
-    view_height: Option<f32>,
-    device_scale_factor: f32,
-) -> Projection {
-    project_inner(doc, viewport, view_height, None, Some(device_scale_factor))
-}
-
 /// Project and rasterize only the part visible in the page canvas. The width
 /// and height are logical pixels reported by the canvas; the device scale is
 /// applied only to physical glyph pixels.
@@ -394,6 +392,15 @@ fn project_inner(
     raster_view_width: Option<f32>,
     raster_device_scale: Option<f32>,
 ) -> Projection {
+    // Startup can project before Slint reports a nonzero canvas size.
+    let raster_view_width = raster_view_width.filter(|width| width.is_finite() && *width > 0.0);
+    let view_height = view_height.map(|height| {
+        if height.is_finite() && height > 0.0 {
+            height
+        } else {
+            viewport.height
+        }
+    });
     let style = doc.page.page_style();
     let Ok(flow) = doc.flow(&style, layout_viewport(&style, viewport)) else {
         let mut selection_rects = Vec::new();
@@ -413,8 +420,12 @@ fn project_inner(
             rows: fallback_rows(doc, &style),
             selection_rects,
             comment_rects: Vec::new(),
+            revision_marks: Vec::new(),
             table_cell_rects: Vec::new(),
             images: Vec::new(),
+            header_footer_lines: Vec::new(),
+            footnote_lines: Vec::new(),
+            footnote_references: Vec::new(),
             page_count: 1,
             stack_height: style.height_pt,
             pages: 0..1,
@@ -474,7 +485,11 @@ fn project_inner(
             .max(loom_writer_core::line_pitch(&block.runs, font_size) * style.line_height);
 
         if let Some(picture) = block.image.as_ref().filter(|_| block.is_image()) {
-            let width = line.bounds.width / zoom;
+            // Flow bounds reserve the fitted image box, which may be narrower than the text column.
+            let (width, height) = picture.fitted_size(
+                style.width_pt - style.margin_left_pt - style.margin_right_pt,
+                style.height_pt - style.margin_top_pt - style.margin_bottom_pt,
+            );
             let shift = match block
                 .style
                 .alignment
@@ -488,7 +503,7 @@ fn project_inner(
                 x: x + shift.max(0.0),
                 y,
                 width,
-                height: line.bounds.height / zoom,
+                height,
                 label: format!("Picture: {}", picture.name),
                 image: picture.clone(),
             });
@@ -529,13 +544,15 @@ fn project_inner(
                         banded_rows: table.banded_rows,
                         banded_columns: table.banded_columns,
                         first_column: table.first_column,
-                        ..Default::default()
                     };
                     let cols = table.col_count().max(1);
+                    let table_text_map = loom_writer_core::TableTextMap::new(table);
                     let num_rows = table.row_count();
-                    let col_widths = loom_writer_core::editor_column_widths(&table, column_width);
+                    let col_widths = loom_writer_core::editor_column_widths(table, column_width);
                     let col_starts = column_starts(&col_widths);
-                    let measurement = loom_writer_core::measure_table_row_geometry(
+                    let measurement = loom_writer_core::measure_table_row_geometry_with_footnotes(
+                        doc,
+                        block.id,
                         table,
                         column_width,
                         loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
@@ -723,7 +740,7 @@ fn project_inner(
                             );
                             let Some(cell_block) = cell_text_block_with_color(
                                 block.id,
-                                &table,
+                                table,
                                 r,
                                 c,
                                 resolved.bold,
@@ -760,20 +777,44 @@ fn project_inner(
                                 row.unsupported = true;
                                 row.unsupported_label = SharedString::from(message.as_str());
                             }
-                            if raster_device_scale.is_some() {
-                                if let Err(error) = set_shaped_block_glyphs(
+                            let has_footnote_reference =
+                                flow.footnote_references().iter().any(|reference| {
+                                    reference.block_id == block.id
+                                        && table_text_map.cell_at(reference.offset) == Some((r, c))
+                                });
+                            let glyph_result = if has_footnote_reference {
+                                Some(set_shaped_block_glyphs_with_footnotes(
+                                    &mut row,
+                                    doc,
+                                    block.id,
+                                    table,
+                                    r,
+                                    c,
+                                    &cell_block,
+                                    frame,
+                                    loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
+                                    pixels_per_point,
+                                    raster_clip,
+                                    doc.page.appearance.auto_ink_rgba(),
+                                ))
+                            } else if raster_device_scale.is_some() {
+                                Some(set_shaped_block_glyphs(
                                     &mut row,
                                     &cell_block,
                                     frame,
                                     loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                                     pixels_per_point,
                                     raster_clip,
-                                ) {
-                                    row.unsupported = true;
-                                    row.unsupported_label = SharedString::from(format!(
-                                        "Glyph rendering unavailable: {error}"
-                                    ));
-                                }
+                                    doc.page.appearance.auto_ink_rgba(),
+                                ))
+                            } else {
+                                None
+                            };
+                            if let Some(Err(error)) = glyph_result {
+                                row.unsupported = true;
+                                row.unsupported_label = SharedString::from(format!(
+                                    "Glyph rendering unavailable: {error}"
+                                ));
                             }
                             rows.push(row);
                         }
@@ -785,55 +826,87 @@ fn project_inner(
 
         if block.kind == loom_writer_core::CHART_BLOCK_KIND {
             if seen_chart_blocks.insert(block.id) {
-                if let Some(chart) = loom_writer_core::chart_from_block(block) {
-                    let chart_title = chart.title.as_deref().unwrap_or("Chart");
-                    let chart_w = column_width.min(460.0);
-                    let chart_h = 200.0f32;
-                    table_cell_rects.push(WriterTableCellRect {
-                        x: 0.0,
-                        y,
-                        width: chart_w,
-                        height: chart_h,
-                        bg_color: slint::Color::from_argb_encoded(0xFFF8F9FA),
-                        has_bg: true,
-                        border_color: slint::Color::from_argb_encoded(0xFFD9D9D9),
-                        selection_border_color: slint::Color::from_argb_encoded(0xFF000000),
-                        border_width: 1.0,
-                        selected: false,
-                        table_cell: false,
-                        caret_offset: -1,
-                        edge_top: WriterCellEdge::default(),
-                        edge_bottom: WriterCellEdge::default(),
-                        edge_left: WriterCellEdge::default(),
-                        edge_right: WriterCellEdge::default(),
-                    });
-                    let mut title_block = RichBlock::new(block.id, "heading2", chart_title);
-                    title_block.runs.push(loom_text::StyleRun {
-                        start: 0,
-                        end: chart_title.len(),
-                        style: loom_text::CharacterStyle {
-                            weight: loom_text::FontWeight::Bold,
-                            ..Default::default()
-                        },
-                    });
-                    let frame = Frame::new(12.0, y + 8.0, chart_w - 24.0, 24.0);
-                    rows.push(render_row(&title_block, frame, "", "", Align::Block, None));
-                    let summary_text = format!(
-                        "[{:?} chart: {} categories, {} series]",
-                        chart.chart_type,
-                        chart.categories.len(),
-                        chart.series.len()
-                    );
-                    let summary_block = RichBlock::new(block.id, "paragraph", &summary_text);
-                    let frame = Frame::new(12.0, y + 36.0, chart_w - 24.0, 20.0);
-                    rows.push(render_row(
-                        &summary_block,
-                        frame,
-                        "",
-                        "",
-                        Align::Block,
-                        None,
-                    ));
+                let (chart_w, chart_h) = block
+                    .chart_display_size(column_width)
+                    .expect("chart blocks have canonical page geometry");
+                table_cell_rects.push(WriterTableCellRect {
+                    x: 0.0,
+                    y,
+                    width: chart_w,
+                    height: chart_h,
+                    bg_color: slint::Color::from_argb_encoded(0xFFF8F9FA),
+                    has_bg: true,
+                    border_color: slint::Color::from_argb_encoded(0xFFD9D9D9),
+                    selection_border_color: slint::Color::from_argb_encoded(0xFF000000),
+                    border_width: 1.0,
+                    selected: false,
+                    table_cell: false,
+                    caret_offset: -1,
+                    edge_top: WriterCellEdge::default(),
+                    edge_bottom: WriterCellEdge::default(),
+                    edge_left: WriterCellEdge::default(),
+                    edge_right: WriterCellEdge::default(),
+                });
+                let plot_x = 12.0;
+                let plot_y = y + 8.0;
+                let plot_w = chart_w - 24.0;
+                let plot_h = chart_h - 16.0;
+                match chart_projection::image_for_block(block, plot_w, plot_h) {
+                    Ok(source) => {
+                        let frame = Frame::new(plot_x, plot_y, plot_w, plot_h);
+                        let mut row = render_row(
+                            &RichBlock::new(block.id, "paragraph", ""),
+                            frame,
+                            "",
+                            "",
+                            Align::Block,
+                            None,
+                        );
+                        row.glyph_tiles =
+                            slint::ModelRc::new(slint::VecModel::from(vec![WriterGlyphTile {
+                                x: 0.0,
+                                y: 0.0,
+                                width: plot_w,
+                                height: plot_h,
+                                source,
+                            }]));
+                        rows.push(row);
+                    }
+                    Err(message) => {
+                        if let Some(chart) = chart_projection::model(block) {
+                            let chart_title = chart.title.as_deref().unwrap_or("Chart");
+                            let mut title_block = RichBlock::new(block.id, "heading2", chart_title);
+                            title_block.runs.push(loom_text::StyleRun {
+                                start: 0,
+                                end: chart_title.len(),
+                                style: loom_text::CharacterStyle {
+                                    weight: loom_text::FontWeight::Bold,
+                                    ..Default::default()
+                                },
+                            });
+                            let frame = Frame::new(plot_x, plot_y, plot_w, 24.0);
+                            rows.push(render_row(&title_block, frame, "", "", Align::Block, None));
+                            let summary_block = RichBlock::new(
+                                block.id,
+                                "paragraph",
+                                &format!("Chart preview unavailable: {message}"),
+                            );
+                            let frame = Frame::new(plot_x, plot_y + 30.0, plot_w, 34.0);
+                            rows.push(render_row(
+                                &summary_block,
+                                frame,
+                                "",
+                                "",
+                                Align::Block,
+                                None,
+                            ));
+                        } else {
+                            let message =
+                                RichBlock::new(block.id, "paragraph", "Chart data is invalid");
+                            let frame = Frame::new(plot_x, plot_y, plot_w, 30.0);
+                            rows.push(render_row(&message, frame, "", "", Align::Block, None));
+                        }
+                    }
                 }
             }
             continue;
@@ -842,8 +915,16 @@ fn project_inner(
         let segments = line_segments(block, line.start, line.end);
         let (line_spaces, deferred_bidi) =
             block.justification_spaces_for_line(line.start..line.end, font_size, column_width);
+        let has_inline_marker = flow.footnote_references().iter().any(|reference| {
+            reference.page == line.page
+                && reference.block_index == line.block_index
+                && line
+                    .shaped_line
+                    .as_ref()
+                    .is_some_and(|shaped| shaped.inline_marker_x(reference.offset).is_some())
+        });
         let mut shaped_error = None;
-        if raster_device_scale.is_some() {
+        if raster_device_scale.is_some() || has_inline_marker {
             if let Some(shaped) = line.shaped_line.as_deref() {
                 let frame = Frame::new(x, y, column_width, height);
                 let mut row = render_row(
@@ -854,7 +935,14 @@ fn project_inner(
                     Align::Line(line.bounds.width / zoom),
                     None,
                 );
-                match set_shaped_glyphs(&mut row, shaped, frame, pixels_per_point, raster_clip) {
+                match set_shaped_glyphs(
+                    &mut row,
+                    shaped,
+                    frame,
+                    pixels_per_point,
+                    raster_clip,
+                    doc.page.appearance.auto_ink_rgba(),
+                ) {
                     Ok(()) if row.glyph_tiles.row_count() > 0 => {
                         rows.push(row);
                         continue;
@@ -986,7 +1074,6 @@ fn project_inner(
                                 banded_rows: t.banded_rows,
                                 banded_columns: t.banded_columns,
                                 first_column: t.first_column,
-                                ..Default::default()
                             };
                             style_def.resolve_cell(
                                 loc.row,
@@ -1028,9 +1115,20 @@ fn project_inner(
                         let col_width = geometry.col_widths[loc.col];
                         if let Some(block) = drawn.as_ref() {
                             let inner = (col_width - 12.0).max(1.0);
-                            if let Ok(cell_geometry) =
-                                loom_writer_core::shape_table_cell_geometry(block, font_size, inner)
-                            {
+                            let cell_geometry = typed.as_ref().and_then(|table| {
+                                loom_writer_core::shape_table_cell_geometry_with_footnotes(
+                                    doc,
+                                    loc.block_id,
+                                    table,
+                                    loc.row,
+                                    loc.col,
+                                    block,
+                                    font_size,
+                                    inner,
+                                )
+                                .ok()
+                            });
+                            if let Some(cell_geometry) = cell_geometry {
                                 let offset = display_byte.min(block.text.as_str().len());
                                 let caret_line = cell_geometry
                                     .lines()
@@ -1095,15 +1193,267 @@ fn project_inner(
         });
     }
     let comment_rects = comment_rects(doc, &style, &flow, base_page, &pages);
+    let revision_marks = revision_projection::project(doc, &style, &flow, base_page, &pages);
+    let header_footer_lines = project_header_footer_lines(
+        doc,
+        &style,
+        bounds,
+        base_page,
+        zoom,
+        &pages,
+        flow.page_count(),
+    );
+    let (footnote_lines, footnote_references) =
+        project_footnotes(doc, &flow, base_page, zoom, &pages);
     Projection {
         rows,
         selection_rects,
         comment_rects,
+        revision_marks,
         table_cell_rects,
         images,
+        header_footer_lines,
+        footnote_lines,
+        footnote_references,
         page_count: flow.page_count().max(1).min(i32::MAX as usize) as i32,
         stack_height,
         pages,
+    }
+}
+
+fn project_header_footer_lines(
+    doc: &WriterDocument,
+    style: &PageStyle,
+    bounds: &[PageRect],
+    base_page: PageRect,
+    zoom: f32,
+    pages: &Range<usize>,
+    page_count: usize,
+) -> Vec<WriterHeaderFooterLine> {
+    let body_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+    if !zoom.is_finite()
+        || zoom <= 0.0
+        || body_width <= 0.0
+        || doc.header_footer.validate_for_page_style(style).is_err()
+    {
+        return Vec::new();
+    }
+    let total = page_count.max(1);
+    let mut lines = Vec::new();
+    for index in pages.clone() {
+        let Some(page) = bounds.get(index) else {
+            continue;
+        };
+        let page_top = (page.y - base_page.y) / zoom;
+        let page_number = index + 1;
+        for (kind, text, label) in [
+            (
+                loom_writer_core::HeaderFooterLineKind::Header,
+                doc.header_footer.format_header(page_number, total),
+                "Header",
+            ),
+            (
+                loom_writer_core::HeaderFooterLineKind::Footer,
+                doc.header_footer.format_footer(page_number, total),
+                "Footer",
+            ),
+        ] {
+            let Some(text) = text else { continue };
+            let Ok(geometry) = doc.header_footer.line_geometry(&text, style, kind) else {
+                continue;
+            };
+            lines.push(WriterHeaderFooterLine {
+                text: SharedString::from(text),
+                accessible_label: SharedString::from(format!(
+                    "{label}, page {page_number} of {total}"
+                )),
+                x: geometry.x_pt,
+                y: page_top + geometry.top_pt,
+                width: geometry.width_pt,
+                height: geometry.height_pt,
+                font_size: geometry.font_size_pt,
+                alignment: match geometry.alignment {
+                    loom_writer_core::HeaderFooterAlignment::Left => 0,
+                    loom_writer_core::HeaderFooterAlignment::Center => 1,
+                    loom_writer_core::HeaderFooterAlignment::Right => 2,
+                },
+            });
+        }
+    }
+    lines
+}
+
+fn project_footnotes(
+    doc: &WriterDocument,
+    flow: &DocumentFlow,
+    base_page: PageRect,
+    zoom: f32,
+    pages: &Range<usize>,
+) -> (Vec<WriterFootnoteLine>, Vec<WriterFootnoteReference>) {
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return (Vec::new(), Vec::new());
+    }
+    let mut continued_labels = HashSet::new();
+    let mut lines = Vec::new();
+    for placement in flow
+        .footnote_lines()
+        .iter()
+        .filter(|placement| pages.contains(&placement.page))
+    {
+        let Some(note) = doc
+            .footnotes
+            .iter()
+            .find(|note| note.id == placement.note_id)
+        else {
+            continue;
+        };
+        let Some(body) = note.body.get(placement.body_range.clone()) else {
+            continue;
+        };
+        let continuation_prefix =
+            if placement.continued && continued_labels.insert((note.id, placement.page)) {
+                "(continued). "
+            } else {
+                ""
+            };
+        let number = if placement.show_number {
+            format!("{}.", placement.number)
+        } else {
+            String::new()
+        };
+        lines.push(WriterFootnoteLine {
+            number: SharedString::from(number.as_str()),
+            text: SharedString::from(format!("{continuation_prefix}{body}")),
+            accessible_label: SharedString::from(format!("Footnote {}: {body}", placement.number)),
+            number_x: ((placement.number_bounds.x - base_page.x) / zoom).max(0.0),
+            text_x: ((placement.text_bounds.x - base_page.x) / zoom).max(0.0),
+            y: ((placement.number_bounds.y - base_page.y) / zoom).max(0.0),
+            number_width: (placement.number_bounds.width / zoom).max(0.0),
+            text_width: (placement.text_bounds.width / zoom).max(1.0),
+            font_size: placement.font_size_pt,
+            line_height: (placement.number_bounds.height / zoom).max(1.0),
+        });
+    }
+
+    let style = doc.page.page_style();
+    let mut references = Vec::new();
+    for placement in flow
+        .footnote_references()
+        .iter()
+        .filter(|placement| pages.contains(&placement.page))
+    {
+        let Some(note) = doc
+            .footnotes
+            .iter()
+            .find(|note| note.id == placement.note_id)
+        else {
+            continue;
+        };
+        let marker_rect = flow.footnote_reference_rect(doc, placement);
+        let fallback_rect = || {
+            flow.selection_rects(
+                doc,
+                &TextSelection::caret(placement.global_offset),
+                placement.page..placement.page + 1,
+            )
+            .into_iter()
+            .next()
+            .map(|rect| rect.rect)
+        };
+        let Some(rect) = marker_rect.or_else(fallback_rect) else {
+            continue;
+        };
+        let reference_body_size =
+            if doc.blocks[placement.block_index].kind == loom_writer_core::TABLE_BLOCK_KIND {
+                loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT
+            } else {
+                style.font_size_for_kind(doc.blocks[placement.block_index].kind.as_str())
+            };
+        let reference_font_size = (reference_body_size * 0.65).max(5.0);
+        let label = placement.number.to_string();
+        references.push(WriterFootnoteReference {
+            id: SharedString::from(note.id.to_string()),
+            label: SharedString::from(label.as_str()),
+            accessible_label: SharedString::from(format!(
+                "Footnote {} reference, activate to edit",
+                placement.number
+            )),
+            x: ((rect.x - base_page.x) / zoom).max(0.0),
+            y: ((rect.y - base_page.y) / zoom - reference_font_size * 0.35).max(0.0),
+            font_size: reference_font_size,
+            width: placement.marker_width_pt,
+        });
+    }
+    (lines, references)
+}
+
+#[cfg(test)]
+mod header_footer_projection_tests {
+    use super::*;
+
+    #[test]
+    fn page_fields_and_first_page_rule_follow_the_live_page_count() {
+        let mut document = WriterDocument::new("headers", "Headers");
+        document.header_footer.header_text = "Page {page} of {total}".into();
+        document.header_footer.footer_text = "Footer {page}".into();
+        document.header_footer.alignment = "center".into();
+        document.header_footer.different_first_page = true;
+        let style = document.page.page_style();
+        let bounds = [
+            PageRect {
+                x: 0.0,
+                y: 0.0,
+                width: style.width_pt,
+                height: style.height_pt,
+            },
+            PageRect {
+                x: 0.0,
+                y: style.height_pt + 24.0,
+                width: style.width_pt,
+                height: style.height_pt,
+            },
+        ];
+        let first_page =
+            project_header_footer_lines(&document, &style, &bounds, bounds[0], 1.0, &(0..1), 2);
+        assert!(
+            first_page.is_empty(),
+            "the configured first page is suppressed"
+        );
+
+        let lines =
+            project_header_footer_lines(&document, &style, &bounds, bounds[0], 1.0, &(0..2), 2);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text.as_str(), "Page 2 of 2");
+        assert_eq!(lines[1].text.as_str(), "Footer 2");
+        let page_top = bounds[1].y - bounds[0].y;
+        for (line, text, kind) in [
+            (
+                &lines[0],
+                "Page 2 of 2",
+                loom_writer_core::HeaderFooterLineKind::Header,
+            ),
+            (
+                &lines[1],
+                "Footer 2",
+                loom_writer_core::HeaderFooterLineKind::Footer,
+            ),
+        ] {
+            let geometry = document
+                .header_footer
+                .line_geometry(text, &style, kind)
+                .expect("shared line geometry");
+            assert_eq!(line.x, geometry.x_pt);
+            assert_eq!(line.y, page_top + geometry.top_pt);
+            assert_eq!(line.width, geometry.width_pt);
+            assert_eq!(line.height, geometry.height_pt);
+            assert_eq!(line.font_size, geometry.font_size_pt);
+            let expected_alignment = match geometry.alignment {
+                loom_writer_core::HeaderFooterAlignment::Left => 0,
+                loom_writer_core::HeaderFooterAlignment::Center => 1,
+                loom_writer_core::HeaderFooterAlignment::Right => 2,
+            };
+            assert_eq!(line.alignment, expected_alignment);
+        }
     }
 }
 
@@ -1123,6 +1473,7 @@ fn column_starts(widths: &[f32]) -> Vec<f32> {
 /// The text of one table cell as a block the page draws: its typed runs with
 /// all supported inline attributes, its column's alignment and, when `bold`,
 /// bold throughout. `None` for an empty cell.
+#[cfg(test)]
 pub(crate) fn cell_text_block(
     block_id: u64,
     table: &Table,

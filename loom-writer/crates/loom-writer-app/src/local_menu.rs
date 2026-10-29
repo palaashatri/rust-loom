@@ -5,6 +5,13 @@
 use crate::{appearance, view_state, WriterApp};
 use loom_desktop::{CommandStateProjection, DesktopError, NativeMenuBar};
 
+/// The standard menu uses this ID for Quit on the current platform.
+pub(crate) const QUIT_COMMAND_ID: &str = if cfg!(target_os = "macos") {
+    "loom writer.quit"
+} else {
+    "app.quit"
+};
+
 /// Commands Writer's menu bar enables; the same list gates the native menu.
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.new",
@@ -20,6 +27,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "edit.copy",
     "edit.paste",
     "app.palette",
+    "app.quit",
+    "loom writer.quit",
     "view.inspector",
     "view.navigator",
     "view.appearance.system",
@@ -33,6 +42,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "list.level.decrease",
     "insert.page_break",
     "insert.line_break",
+    "writer.footnotes",
     "insert.table",
     "insert.chart",
     "insert.image",
@@ -192,6 +202,7 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                         "Line Break",
                         key_shortcut("Enter", true),
                     ),
+                    MenuItem::action("writer.footnotes", "Footnotes…"),
                 ],
             ),
             Menu::new(

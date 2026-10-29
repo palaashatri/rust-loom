@@ -6,7 +6,7 @@
 //! and the Markdown export never see it.
 
 use crate::{RichBlock, WriterDocument};
-use loom_objects::chart::Chart;
+use loom_objects::chart::{Chart, ChartType};
 use std::sync::Arc;
 
 /// Block kind for an embedded chart block in a Writer document.
@@ -15,6 +15,146 @@ pub const CHART_BLOCK_KIND: &str = "chart";
 pub const CHART_HEIGHT_PT: f32 = 200.0;
 /// Widest a chart is drawn, in points.
 pub const CHART_MAX_WIDTH_PT: f32 = 460.0;
+
+/// Numeric X values and the validated visible range for a Writer Scatter chart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScatterAxis {
+    pub values: Vec<f64>,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// Uses the same category parser and range rules for Writer's SVG, PDF, and DOCX
+/// Scatter projections. The categories argument is the number of leading X values to plot.
+pub fn writer_scatter_axis(
+    chart: &Chart,
+    categories: usize,
+) -> Result<Option<ScatterAxis>, String> {
+    if chart.chart_type != ChartType::Scatter {
+        return Ok(None);
+    }
+    let values = chart
+        .categories
+        .iter()
+        .take(categories)
+        .map(|category| {
+            numeric_category_value(category)
+                .ok_or_else(|| "scatter charts require numeric X values".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.is_empty() {
+        return Err("scatter charts require numeric X values".to_string());
+    }
+    let data_min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let data_max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let axis_min = chart
+        .category_axis
+        .min
+        .filter(|value| value.is_finite() && value.abs() <= 1.0e100);
+    let axis_max = chart
+        .category_axis
+        .max
+        .filter(|value| value.is_finite() && value.abs() <= 1.0e100);
+    let mut min = axis_min.unwrap_or(data_min);
+    let mut max = axis_max.unwrap_or(data_max);
+    if !min.is_finite() || !max.is_finite() || max <= min {
+        if axis_min.is_some() || axis_max.is_some() {
+            return Err("scatter X-axis minimum must be below its maximum".to_string());
+        }
+        let padding = min.abs().max(1.0) * 0.1;
+        min -= padding;
+        max += padding;
+    } else {
+        let padding = (max - min) * 0.05;
+        if axis_min.is_none() {
+            min -= padding;
+        }
+        if axis_max.is_none() {
+            max += padding;
+        }
+    }
+    Ok(Some(ScatterAxis { values, min, max }))
+}
+
+fn numeric_category_value(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let raw = raw.strip_prefix('$').unwrap_or(raw).trim();
+    let text = raw.strip_suffix('%').unwrap_or(raw).trim();
+    if text.contains(',') {
+        let integer_end = text.find(['.', 'e', 'E']).unwrap_or(text.len());
+        if text[integer_end..].contains(',') {
+            return None;
+        }
+        let integer = text[..integer_end].trim_start_matches(['+', '-']);
+        let groups: Vec<_> = integer.split(',').collect();
+        if groups.is_empty()
+            || !(1..=3).contains(&groups[0].len())
+            || !groups[0].bytes().all(|byte| byte.is_ascii_digit())
+            || groups
+                .iter()
+                .skip(1)
+                .any(|group| group.len() != 3 || !group.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return None;
+        }
+    }
+    text.replace(',', "")
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && value.abs() <= 1.0e100)
+}
+
+/// Builds Writer's chart part, converting Scatter categories into numeric X values.
+pub(crate) fn writer_chart_to_c_chart_xml(chart: &Chart) -> Result<String, String> {
+    if chart.chart_type != ChartType::Scatter {
+        return Ok(loom_objects::chart_ooxml::chart_to_c_chart_xml(chart));
+    }
+
+    let axis = writer_scatter_axis(chart, chart.categories.len())?
+        .ok_or_else(|| "scatter chart has no numeric X axis".to_string())?;
+    let mut numeric_chart = chart.clone();
+    numeric_chart.categories = axis.values.iter().map(ToString::to_string).collect();
+    let mut xml = loom_objects::chart_ooxml::chart_to_c_chart_xml(&numeric_chart);
+
+    xml = xml.replacen(
+        "<c:scatterChart>",
+        "<c:scatterChart>\n        <c:scatterStyle val=\"marker\"/>",
+        1,
+    );
+    xml = xml
+        .replace("<c:cat>", "<c:xVal>")
+        .replace("</c:cat>", "</c:xVal>")
+        .replace(
+            "<c:strLit>\n",
+            "<c:numLit>\n              <c:formatCode>General</c:formatCode>\n",
+        )
+        .replace("</c:strLit>", "</c:numLit>")
+        .replace("<c:val>", "<c:yVal>")
+        .replace("</c:val>", "</c:yVal>")
+        .replace("<c:catAx>", "<c:valAx>")
+        .replace("</c:catAx>", "</c:valAx>");
+
+    let x_scaling = chart_axis_scaling(Some(axis.min), Some(axis.max));
+    let y_scaling = chart_axis_scaling(chart.value_axis.min, chart.value_axis.max);
+    let default_scaling = "<c:scaling><c:orientation val=\"minMax\"/></c:scaling>";
+    xml = xml.replacen(default_scaling, &x_scaling, 1);
+    xml = xml.replacen(default_scaling, &y_scaling, 1);
+    Ok(xml)
+}
+
+fn chart_axis_scaling(min: Option<f64>, max: Option<f64>) -> String {
+    let min = min.filter(|value| value.is_finite() && value.abs() <= 1.0e100);
+    let max = max.filter(|value| value.is_finite() && value.abs() <= 1.0e100);
+    let mut xml = String::from("<c:scaling><c:orientation val=\"minMax\"/>");
+    if let Some(max) = max {
+        xml.push_str(&format!("<c:max val=\"{max}\"/>"));
+    }
+    if let Some(min) = min {
+        xml.push_str(&format!("<c:min val=\"{min}\"/>"));
+    }
+    xml.push_str("</c:scaling>");
+    xml
+}
 
 /// Deserializes a [`Chart`] from a chart block, if this block is a [`CHART_BLOCK_KIND`].
 pub fn chart_from_block(block: &RichBlock) -> Option<Chart> {
@@ -201,6 +341,42 @@ mod tests {
         assert_eq!(embedded.title.as_deref(), Some("Expense Distribution"));
         assert_eq!(embedded.chart_type, ChartType::Pie);
         assert_eq!(embedded.series[0].values, vec![40.0, 35.0, 25.0]);
+    }
+
+    #[test]
+    fn writer_scatter_ooxml_uses_numeric_x_y_values_and_axis_bounds() {
+        let mut chart = Chart::new("scatter-docx", ChartType::Scatter);
+        chart.categories = vec!["$1,000".into(), "2".into(), "10".into()];
+        chart.add_series("Samples", vec![3.0, 4.0, 5.0], None);
+        chart.category_axis.min = Some(0.0);
+        chart.category_axis.max = Some(20.0);
+        chart.value_axis.min = Some(-5.0);
+        chart.value_axis.max = Some(15.0);
+
+        let xml = writer_chart_to_c_chart_xml(&chart).expect("numeric Scatter export");
+        assert!(xml.contains("<c:scatterStyle val=\"marker\"/>"));
+        assert!(xml.contains("<c:xVal>"));
+        assert!(xml.contains("<c:yVal>"));
+        assert!(xml.contains("<c:xVal>\n            <c:numLit>"));
+        assert!(xml.contains("<c:pt idx=\"0\"><c:v>1000</c:v></c:pt>"));
+        assert!(xml.contains("<c:pt idx=\"2\"><c:v>10</c:v></c:pt>"));
+        assert!(xml.contains("<c:yVal>\n            <c:numLit>"));
+        assert!(xml.contains("<c:pt idx=\"1\"><c:v>4</c:v></c:pt>"));
+        assert!(!xml.contains("<c:cat>"));
+        assert!(!xml.contains("<c:catAx>"));
+        assert_eq!(xml.matches("<c:valAx>").count(), 2);
+        assert!(xml.contains("<c:max val=\"20\"/><c:min val=\"0\"/>"));
+        assert!(xml.contains("<c:max val=\"15\"/><c:min val=\"-5\"/>"));
+    }
+
+    #[test]
+    fn writer_scatter_ooxml_rejects_non_numeric_x_values() {
+        let mut chart = Chart::new("scatter-invalid-docx", ChartType::Scatter);
+        chart.categories = vec!["0".into(), "north".into()];
+        chart.add_series("Samples", vec![3.0, 4.0], None);
+
+        let error = writer_chart_to_c_chart_xml(&chart).expect_err("invalid X values fail export");
+        assert!(error.contains("numeric X values"));
     }
 }
 

@@ -33,6 +33,8 @@ export component SheetToolbarMenu inherits Rectangle {
     property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false, Theme.appearance == "system", Theme.appearance == "light", Theme.appearance == "dark", Theme.appearance == "high-contrast"]
         : root.kind == 4 ? [root.cell-bold, root.cell-italic, root.cell-underline,
             root.cell-alignment == 0, root.cell-alignment == 1, root.cell-alignment == 2] : [];
+    property <[bool]> checkables: root.kind == 1 ? [true, false, true, true, true, true]
+        : root.kind == 4 ? [true, true, true, true, true, true] : [];
 
     changed kind => { root.selected = 0; }
 
@@ -76,7 +78,7 @@ export component SheetToolbarMenu inherits Rectangle {
             for label[idx] in root.labels : LoomMenuItem {
                 label: label;
                 checked: idx < root.checks.length && root.checks[idx];
-                checkable: idx < root.checks.length && root.checks[idx];
+                checkable: idx < root.checkables.length && root.checkables[idx];
                 selected: idx == root.selected;
                 activated => { root.command(root.ids[idx]); }
             }

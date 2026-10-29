@@ -150,12 +150,11 @@ fn typing_in_a_table_cell_keeps_the_table_one_block() {
     );
 
     let pdf = crate::export::test_support::export_valid_pdf(&document);
-    let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
-    assert!(!content.contains('|'), "no pipe characters are printed");
-    assert!(
-        content.contains("(NorthX) Tj"),
-        "the edited cell is printed"
-    );
+    let text = loom_pdf::inspect::page_text(&pdf)
+        .expect("extracted PDF text")
+        .join("\n");
+    assert!(!text.contains('|'), "no pipe characters are printed");
+    assert!(text.contains("NorthX"), "the edited cell is printed");
 }
 
 #[test]

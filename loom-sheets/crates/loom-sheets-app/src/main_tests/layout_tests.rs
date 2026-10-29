@@ -280,7 +280,7 @@ fn assert_inspector_and_toolbar_fit(
     let _ = snapshot_component(&app, width, height, 1.0).expect("render the Table inspector");
     for label in [
         "Close",
-        "Table name",
+        "Worksheet name",
         "Add worksheet row",
         "Add worksheet column",
     ] {

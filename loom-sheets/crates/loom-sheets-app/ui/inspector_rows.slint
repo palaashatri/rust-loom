@@ -1,7 +1,7 @@
 // Rows of the Sheets inspector. Each row lists its parts from the reading-start
 // edge, so right-to-left is the exact mirror image of left-to-right: label,
 // then field, then the buttons; or buttons, field, label.
-import { LoomTextField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
+import { LoomTextField, LoomNumericField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { CellInk } from "grid_pointer.slint";
 
@@ -141,8 +141,16 @@ export component SheetStepperRow inherits Rectangle {
     in property <string> decrease-tip: "";
     in property <string> increase-label: "";
     in property <string> increase-tip: "";
+    in property <bool> editable: false;
+    in property <string> edit-unit: "";
+    in property <string> edit-description: "";
+    in-out property <string> edit-value: "";
+    in-out property <bool> invalid: false;
     callback decrease;
     callback increase;
+    callback edited(string);
+    callback accepted(string) -> bool;
+    callback cancelled;
 
     // Stack when the label, the field's 140 px minimum and both full-size
     // buttons cannot share a line. Scaling also gives the label its own line.
@@ -174,7 +182,18 @@ export component SheetStepperRow inherits Rectangle {
                 decrease => { root.decrease(); }
                 increase => { root.increase(); }
             }
-            SheetValueBox { field-label: root.field-label; value: root.value; }
+            if root.editable : LoomNumericField {
+                field-min-width: 140px;
+                label: root.field-label;
+                description: root.edit-description;
+                unit: root.edit-unit;
+                value <=> root.edit-value;
+                invalid <=> root.invalid;
+                edited(text) => { root.edited(text); }
+                accepted(text) => { root.invalid = !root.accepted(text); }
+                cancelled => { root.cancelled(); }
+            }
+            if !root.editable : SheetValueBox { field-label: root.field-label; value: root.value; }
             if !Theme.rtl : SheetStepButtons {
                 plus-first: root.plus-first;
                 decrease-label: root.decrease-label; decrease-tip: root.decrease-tip;

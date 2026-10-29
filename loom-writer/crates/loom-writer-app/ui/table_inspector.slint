@@ -148,11 +148,6 @@ export component WriterTableInspector inherits VerticalLayout {
                 label: "+ Row Below";
                 clicked => { root.table-action("insert-row-below"); }
             }
-            LoomButton {
-                height: Theme.scaled-control-height;
-                label: "Del Row";
-                clicked => { root.table-action("delete-row"); }
-            }
         }
         HorizontalLayout {
             spacing: Theme.tokens.space.sm;
@@ -165,6 +160,14 @@ export component WriterTableInspector inherits VerticalLayout {
                 height: Theme.scaled-control-height;
                 label: "+ Col Right";
                 clicked => { root.table-action("insert-col-right"); }
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomButton {
+                height: Theme.scaled-control-height;
+                label: "Del Row";
+                clicked => { root.table-action("delete-row"); }
             }
             LoomButton {
                 height: Theme.scaled-control-height;

@@ -1,7 +1,7 @@
 //! HTML table serialization and parsing with inline CSS styles.
 
 use loom_objects::styles::{TableStyleCatalog, TableStyleOptions};
-use loom_objects::table::{CellStyleOverride, HorizontalAlign, Table};
+use loom_objects::table::{CellStyleOverride, HorizontalAlign, Table, TextRun};
 
 /// Converts a `Table` to an HTML table with inline CSS styling.
 pub fn table_to_html(table: &Table) -> String {
@@ -72,7 +72,8 @@ pub fn table_to_html(table: &Table) -> String {
             match resolved.horizontal_align {
                 HorizontalAlign::Center => css.push_str(" text-align: center;"),
                 HorizontalAlign::Right => css.push_str(" text-align: right;"),
-                _ => css.push_str(" text-align: left;"),
+                HorizontalAlign::Justify => css.push_str(" text-align: justify;"),
+                HorizontalAlign::Left => css.push_str(" text-align: left;"),
             }
 
             out.push_str(&format!("      <td style=\"{}\"{}>\n", css, td_attrs));
@@ -127,6 +128,8 @@ const MAX_TABLE_COLS: usize = 1_000;
 const MAX_PARSE_DURATION_MS: u128 = 1800;
 /// Maximum text length extracted per cell to guard against gigantic string allocations.
 const MAX_CELL_TEXT_LEN: usize = 64 * 1024;
+const MAX_TABLE_COLUMN_WIDTH_PT: f32 = 100_000.0;
+const MAX_INLINE_STYLE_DEPTH: usize = 64;
 
 /// Performs zero-allocation case-insensitive ASCII search.
 fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
@@ -216,6 +219,7 @@ pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)>
         None => html.len(),
     };
     let table_slice = &html[table_start..table_end];
+    let column_widths = parse_column_widths(table_slice, &start_time, &mut report);
 
     let mut rows_raw: Vec<Vec<RawCell>> = Vec::new();
     let mut search_pos = 0;
@@ -283,9 +287,15 @@ pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)>
             let row_span = parse_attr_u32(attrs, "rowspan").unwrap_or(1) as usize;
             let style_attr = parse_attr_str(attrs, "style");
 
-            let text = strip_html_tags(inner_html);
+            let runs = parse_inline_runs(
+                inner_html,
+                is_th,
+                style_attr.as_deref(),
+                &start_time,
+                &mut report,
+            );
             cells.push(RawCell {
-                text,
+                runs,
                 col_span: col_span.min(100),
                 row_span: row_span.min(100),
                 is_th,
@@ -332,8 +342,13 @@ pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)>
 
     let mut table = Table::new(num_rows, num_cols);
     table.header_row = rows_raw.first().is_some_and(|r| r.iter().any(|c| c.is_th));
+    for (column, width) in table.columns.iter_mut().zip(column_widths) {
+        if let Some(width) = width {
+            column.width_pt = width;
+        }
+    }
 
-    for (r, row) in rows_raw.iter().enumerate() {
+    for (r, row) in rows_raw.into_iter().enumerate() {
         let mut target_c = 0;
         for raw_cell in row {
             while target_c < num_cols && table.is_covered(r, target_c) {
@@ -343,38 +358,9 @@ pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)>
                 break;
             }
 
-            table.set_cell_text(r, target_c, &raw_cell.text);
+            table.set_cell_rich_text(r, target_c, raw_cell.runs);
 
-            let mut style_override = CellStyleOverride::default();
-            if let Some(style_str) = &raw_cell.style_attr {
-                let lower_style = style_str.to_lowercase();
-                if lower_style.contains("font-weight: bold")
-                    || lower_style.contains("font-weight:bold")
-                    || raw_cell.is_th
-                {
-                    if let Some(cell) = table.cell_mut(r, target_c) {
-                        for run in &mut cell.content.runs {
-                            run.bold = true;
-                        }
-                    }
-                }
-                if lower_style.contains("text-align: right")
-                    || lower_style.contains("text-align:right")
-                {
-                    style_override.horizontal_align = Some(HorizontalAlign::Right);
-                } else if lower_style.contains("text-align: center")
-                    || lower_style.contains("text-align:center")
-                {
-                    style_override.horizontal_align = Some(HorizontalAlign::Center);
-                }
-
-                if let Some(bg_start) = lower_style.find("background-color:") {
-                    let val = &style_str[bg_start + 17..];
-                    let end = val.find(';').unwrap_or(val.len());
-                    style_override.background_color = Some(val[..end].trim().to_string());
-                }
-            }
-
+            let style_override = parse_cell_style_override(raw_cell.style_attr.as_deref());
             if style_override != CellStyleOverride::default() {
                 if let Some(cell) = table.cell_mut(r, target_c) {
                     cell.style_override = Some(style_override);
@@ -392,8 +378,390 @@ pub fn html_to_table_with_report(html: &str) -> Option<(Table, HtmlParseReport)>
     Some((table, report))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HtmlInlineTag {
+    Span,
+    Bold,
+    Italic,
+    Underline,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct HtmlTextStyle {
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    color: Option<String>,
+}
+
+fn parse_column_widths(
+    table_html: &str,
+    start_time: &std::time::Instant,
+    report: &mut HtmlParseReport,
+) -> Vec<Option<f32>> {
+    let mut widths = Vec::new();
+    let mut search_pos = 0;
+
+    while search_pos < table_html.len() && widths.len() < MAX_TABLE_COLS {
+        if start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+            report.timed_out = true;
+            break;
+        }
+
+        let Some(tag_start_rel) = find_case_insensitive(&table_html[search_pos..], "<col") else {
+            break;
+        };
+        let tag_start = search_pos + tag_start_rel;
+        let name_end = tag_start + "<col".len();
+        let Some(delimiter) = table_html.as_bytes().get(name_end).copied() else {
+            break;
+        };
+        if !(delimiter.is_ascii_whitespace() || delimiter == b'/' || delimiter == b'>') {
+            search_pos = name_end;
+            continue;
+        }
+
+        let Some(tag_end_rel) = table_html[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + tag_end_rel;
+        let attrs = &table_html[name_end..tag_end];
+        let width = parse_attr_str(attrs, "style")
+            .and_then(|style| css_property_value(&style, "width").map(str::to_owned))
+            .and_then(|value| parse_css_length_pt(&value));
+        let span = parse_attr_u32(attrs, "span").unwrap_or(1).max(1) as usize;
+        for _ in 0..span.min(MAX_TABLE_COLS - widths.len()) {
+            widths.push(width);
+        }
+        search_pos = tag_end + 1;
+    }
+
+    widths
+}
+
+fn parse_css_length_pt(value: &str) -> Option<f32> {
+    let value = value.trim().to_ascii_lowercase();
+    let (number, scale) = if let Some(value) = value.strip_suffix("pt") {
+        (value.trim(), 1.0)
+    } else if let Some(value) = value.strip_suffix("px") {
+        (value.trim(), 0.75)
+    } else if let Some(value) = value.strip_suffix("in") {
+        (value.trim(), 72.0)
+    } else if let Some(value) = value.strip_suffix("cm") {
+        (value.trim(), 72.0 / 2.54)
+    } else if let Some(value) = value.strip_suffix("mm") {
+        (value.trim(), 72.0 / 25.4)
+    } else {
+        return None;
+    };
+
+    let width = number.parse::<f32>().ok()? * scale;
+    (width.is_finite() && width > 0.0 && width <= MAX_TABLE_COLUMN_WIDTH_PT).then_some(width)
+}
+
+fn css_property_value<'a>(style: &'a str, property: &str) -> Option<&'a str> {
+    style.split(';').find_map(|declaration| {
+        let (name, value) = declaration.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case(property)
+            .then_some(value.trim())
+    })
+}
+
+fn parse_css_color(value: &str) -> Option<String> {
+    let hex = value.trim().strip_prefix('#')?;
+    if !matches!(hex.len(), 3 | 4 | 6 | 8)
+        || !hex.is_ascii()
+        || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+
+    match hex.len() {
+        3 | 4 => {
+            let mut expanded = String::with_capacity(1 + hex.len() * 2);
+            expanded.push('#');
+            for nibble in hex.bytes() {
+                expanded.push(nibble as char);
+                expanded.push(nibble as char);
+            }
+            Some(expanded)
+        }
+        6 | 8 => Some(format!("#{hex}")),
+        _ => None,
+    }
+}
+
+fn parse_font_weight(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bold" | "bolder" => Some(true),
+        "normal" | "lighter" => Some(false),
+        numeric => numeric.parse::<u16>().ok().map(|weight| weight >= 600),
+    }
+}
+
+fn apply_css_run_style(style: &mut HtmlTextStyle, declarations: &str) {
+    if let Some(value) = css_property_value(declarations, "font-weight").and_then(parse_font_weight)
+    {
+        style.bold = value;
+    }
+    if let Some(value) = css_property_value(declarations, "font-style") {
+        match value.to_ascii_lowercase().trim() {
+            "italic" | "oblique" => style.italic = true,
+            "normal" => style.italic = false,
+            _ => {}
+        }
+    }
+    if let Some(value) = css_property_value(declarations, "text-decoration") {
+        let value = value.to_ascii_lowercase();
+        if value
+            .split_ascii_whitespace()
+            .any(|token| token == "underline")
+        {
+            style.underline = true;
+        } else if value.trim() == "none" {
+            style.underline = false;
+        }
+    }
+    if let Some(color) = css_property_value(declarations, "color").and_then(parse_css_color) {
+        style.color = Some(color);
+    }
+}
+
+fn parse_cell_style_override(style: Option<&str>) -> CellStyleOverride {
+    let mut cell_style = CellStyleOverride::default();
+    let Some(style) = style else {
+        return cell_style;
+    };
+
+    if let Some(value) = css_property_value(style, "text-align") {
+        cell_style.horizontal_align = match value.to_ascii_lowercase().trim() {
+            "left" => Some(HorizontalAlign::Left),
+            "center" => Some(HorizontalAlign::Center),
+            "right" => Some(HorizontalAlign::Right),
+            "justify" => Some(HorizontalAlign::Justify),
+            _ => None,
+        };
+    }
+    cell_style.background_color =
+        css_property_value(style, "background-color").and_then(parse_css_color);
+
+    cell_style
+}
+
+fn parse_inline_tag(tag_text: &str) -> Option<(bool, bool, HtmlInlineTag, Option<String>)> {
+    let tag_text = tag_text.trim();
+    let closing = tag_text.starts_with('/');
+    let contents = if closing {
+        tag_text[1..].trim_start()
+    } else {
+        tag_text
+    };
+    let self_closing = !closing && contents.trim_end().ends_with('/');
+    let name_end = contents
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(contents.len());
+    let tag = match &contents[..name_end] {
+        name if name.eq_ignore_ascii_case("span") => HtmlInlineTag::Span,
+        name if name.eq_ignore_ascii_case("b") || name.eq_ignore_ascii_case("strong") => {
+            HtmlInlineTag::Bold
+        }
+        name if name.eq_ignore_ascii_case("i") || name.eq_ignore_ascii_case("em") => {
+            HtmlInlineTag::Italic
+        }
+        name if name.eq_ignore_ascii_case("u") => HtmlInlineTag::Underline,
+        _ => return None,
+    };
+    let declarations = if tag == HtmlInlineTag::Span && !closing {
+        parse_attr_str(contents, "style")
+    } else {
+        None
+    };
+    Some((closing, self_closing, tag, declarations))
+}
+
+fn parse_inline_runs(
+    html: &str,
+    is_th: bool,
+    cell_style: Option<&str>,
+    start_time: &std::time::Instant,
+    report: &mut HtmlParseReport,
+) -> Vec<TextRun> {
+    let mut base_style = HtmlTextStyle {
+        bold: is_th,
+        ..HtmlTextStyle::default()
+    };
+    if let Some(cell_style) = cell_style {
+        apply_css_run_style(&mut base_style, cell_style);
+    }
+
+    let mut style_stack: Vec<(HtmlInlineTag, HtmlTextStyle)> = Vec::new();
+    let mut overflow_depth = 0;
+    let mut runs = Vec::new();
+    let mut text_buffer = String::new();
+    let mut extracted_len = 0;
+    let mut pos = 0;
+    let mut steps = 0;
+
+    while pos < html.len() {
+        steps += 1;
+        if steps % 256 == 0 && start_time.elapsed().as_millis() > MAX_PARSE_DURATION_MS {
+            report.timed_out = true;
+            break;
+        }
+
+        if html.as_bytes()[pos] == b'<' {
+            let Some(tag_end_rel) = html[pos..].find('>') else {
+                break;
+            };
+            let tag_end = pos + tag_end_rel;
+            if let Some((closing, self_closing, tag, declarations)) =
+                parse_inline_tag(&html[pos + 1..tag_end])
+            {
+                let active_style = style_stack
+                    .last()
+                    .map(|(_, style)| style)
+                    .unwrap_or(&base_style);
+                push_inline_run(&mut runs, &mut text_buffer, active_style);
+
+                if !self_closing {
+                    if closing {
+                        if overflow_depth > 0 {
+                            overflow_depth -= 1;
+                        } else if let Some(index) = style_stack
+                            .iter()
+                            .rposition(|(open_tag, _)| *open_tag == tag)
+                        {
+                            style_stack.truncate(index);
+                        }
+                    } else if overflow_depth > 0 || style_stack.len() >= MAX_INLINE_STYLE_DEPTH {
+                        overflow_depth += 1;
+                    } else {
+                        let mut style = active_style.clone();
+                        match tag {
+                            HtmlInlineTag::Span => {
+                                if let Some(declarations) = declarations.as_deref() {
+                                    apply_css_run_style(&mut style, declarations);
+                                }
+                            }
+                            HtmlInlineTag::Bold => style.bold = true,
+                            HtmlInlineTag::Italic => style.italic = true,
+                            HtmlInlineTag::Underline => style.underline = true,
+                        }
+                        style_stack.push((tag, style));
+                    }
+                }
+            }
+            pos = tag_end + 1;
+        } else {
+            let next_tag = html[pos..]
+                .find('<')
+                .map(|offset| pos + offset)
+                .unwrap_or(html.len());
+            let remaining = MAX_CELL_TEXT_LEN.saturating_sub(extracted_len);
+            if remaining == 0 {
+                break;
+            }
+            extracted_len += append_decoded_text(&html[pos..next_tag], &mut text_buffer, remaining);
+            pos = next_tag;
+            if extracted_len >= MAX_CELL_TEXT_LEN {
+                break;
+            }
+        }
+    }
+
+    let active_style = style_stack
+        .last()
+        .map(|(_, style)| style)
+        .unwrap_or(&base_style);
+    push_inline_run(&mut runs, &mut text_buffer, active_style);
+    trim_inline_runs(&mut runs);
+    runs
+}
+
+fn append_decoded_text(input: &str, output: &mut String, max_bytes: usize) -> usize {
+    let initial_len = output.len();
+    let mut pos = 0;
+
+    while pos < input.len() && output.len() - initial_len < max_bytes {
+        let remaining = max_bytes - (output.len() - initial_len);
+        let rest = &input[pos..];
+        let entity = [
+            ("&nbsp;", " "),
+            ("&amp;", "&"),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&quot;", "\""),
+        ]
+        .into_iter()
+        .find(|(encoded, _)| rest.starts_with(encoded));
+
+        if let Some((encoded, decoded)) = entity {
+            if decoded.len() > remaining {
+                break;
+            }
+            output.push_str(decoded);
+            pos += encoded.len();
+        } else if let Some(character) = rest.chars().next() {
+            if character.len_utf8() > remaining {
+                break;
+            }
+            output.push(character);
+            pos += character.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    output.len() - initial_len
+}
+
+fn push_inline_run(runs: &mut Vec<TextRun>, text: &mut String, style: &HtmlTextStyle) {
+    if text.is_empty() {
+        return;
+    }
+
+    let mut run = TextRun::plain(std::mem::take(text));
+    run.bold = style.bold;
+    run.italic = style.italic;
+    run.underline = style.underline;
+    run.color = style.color.clone();
+
+    if let Some(previous) = runs.last_mut() {
+        if previous.bold == run.bold
+            && previous.italic == run.italic
+            && previous.underline == run.underline
+            && previous.color == run.color
+        {
+            previous.text.push_str(&run.text);
+            return;
+        }
+    }
+    runs.push(run);
+}
+
+fn trim_inline_runs(runs: &mut Vec<TextRun>) {
+    let mut leading_trimmed = false;
+    for run in runs.iter_mut() {
+        if !leading_trimmed {
+            run.text = run.text.trim_start().to_owned();
+            leading_trimmed = !run.text.is_empty();
+        }
+    }
+
+    let mut trailing_trimmed = false;
+    for run in runs.iter_mut().rev() {
+        if !trailing_trimmed {
+            run.text = run.text.trim_end().to_owned();
+            trailing_trimmed = !run.text.is_empty();
+        }
+    }
+
+    runs.retain(|run| !run.text.is_empty());
+}
+
 struct RawCell {
-    text: String,
+    runs: Vec<TextRun>,
     col_span: usize,
     row_span: usize,
     is_th: bool,
@@ -414,45 +782,36 @@ fn parse_attr_u32(attrs: &str, name: &str) -> Option<u32> {
 }
 
 fn parse_attr_str(attrs: &str, name: &str) -> Option<String> {
-    let key = format!("{}=\"", name);
-    let start = find_case_insensitive(attrs, &key)? + key.len();
-    if !attrs.is_char_boundary(start) {
-        return None;
-    }
-    let end = attrs[start..].find('"')? + start;
-    if !attrs.is_char_boundary(end) {
-        return None;
-    }
-    let val = &attrs[start..end];
-    if val.len() > 1024 {
-        Some(val[..1024].to_string())
-    } else {
-        Some(val.to_string())
-    }
-}
+    let key = format!("{name}=");
+    let mut search_pos = 0;
 
-fn strip_html_tags(html: &str) -> String {
-    let mut text = String::new();
-    let mut in_tag = false;
-    for ch in html.chars() {
-        if text.len() >= MAX_CELL_TEXT_LEN {
-            break;
+    while search_pos < attrs.len() {
+        let key_start = search_pos + find_case_insensitive(&attrs[search_pos..], &key)?;
+        if !attrs.is_char_boundary(key_start) {
+            return None;
         }
-        if ch == '<' {
-            in_tag = true;
-        } else if ch == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            text.push(ch);
+        if key_start > 0 && !attrs.as_bytes()[key_start - 1].is_ascii_whitespace() {
+            search_pos = key_start + key.len();
+            continue;
         }
+
+        let value_start = key_start + key.len();
+        let quote = *attrs.as_bytes().get(value_start)?;
+        if quote != b'"' && quote != b'\'' {
+            search_pos = value_start + 1;
+            continue;
+        }
+        let content_start = value_start + 1;
+        let end = attrs[content_start..].find(char::from(quote))? + content_start;
+        let value = &attrs[content_start..end];
+        let mut safe_end = value.len().min(1024);
+        while !value.is_char_boundary(safe_end) {
+            safe_end -= 1;
+        }
+        return Some(value[..safe_end].to_owned());
     }
-    text.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .trim()
-        .to_string()
+
+    None
 }
 
 fn quick_escape(text: &str) -> String {
@@ -484,6 +843,85 @@ mod tests {
         assert_eq!(parsed.col_count(), 2);
         assert_eq!(parsed.cell_text(0, 0).as_deref(), Some("Name"));
         assert_eq!(parsed.cell_text(1, 0).as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn html_round_trips_column_widths_cell_styles_and_inline_runs() {
+        let mut source = Table::new(2, 2);
+        source.header_row = false;
+        source.set_cell_text(0, 0, "Name");
+        source.set_cell_text(0, 1, "Score");
+        source.cell_mut(0, 1).expect("cell").style_override = Some(CellStyleOverride {
+            horizontal_align: Some(HorizontalAlign::Center),
+            ..Default::default()
+        });
+
+        let mut styled_run = loom_objects::table::TextRun::plain("Styled");
+        styled_run.bold = true;
+        styled_run.italic = true;
+        styled_run.underline = true;
+        styled_run.color = Some("#123456FF".to_owned());
+        source.set_cell_rich_text(1, 0, vec![styled_run]);
+        source.set_cell_text(1, 1, "100");
+        source.columns[0].width_pt = 210.0;
+        source.columns[1].width_pt = 91.0;
+        source.cell_mut(1, 1).expect("cell").style_override = Some(CellStyleOverride {
+            background_color: Some("#E6F4EA".to_owned()),
+            horizontal_align: Some(HorizontalAlign::Justify),
+            ..Default::default()
+        });
+
+        let html = table_to_html(&source);
+        let parsed = html_to_table(&html).expect("parsed table");
+
+        assert_eq!(
+            parsed
+                .columns
+                .iter()
+                .map(|column| column.width_pt)
+                .collect::<Vec<_>>(),
+            vec![210.0, 91.0]
+        );
+        let styled_cell = parsed.cell(1, 0).expect("styled cell");
+        let styled_run = styled_cell
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text == "Styled")
+            .expect("styled text run");
+        assert!(styled_run.bold && styled_run.italic && styled_run.underline);
+        assert_eq!(styled_run.color.as_deref(), Some("#123456FF"));
+
+        let cell_style = parsed
+            .cell(1, 1)
+            .and_then(|cell| cell.style_override.as_ref())
+            .expect("cell style override");
+        assert_eq!(cell_style.horizontal_align, Some(HorizontalAlign::Justify));
+        assert_eq!(cell_style.background_color.as_deref(), Some("#E6F4EA"));
+        assert_eq!(
+            parsed
+                .cell(0, 1)
+                .and_then(|cell| cell.style_override.as_ref())
+                .and_then(|style| style.horizontal_align),
+            Some(HorizontalAlign::Center)
+        );
+    }
+
+    #[test]
+    fn invalid_column_widths_fall_back_to_finite_defaults() {
+        let html = concat!(
+            "<table><col style=\"width: NaNpt;\">",
+            "<col style=\"width: -4pt;\">",
+            "<col style=\"width: 1e999pt;\">",
+            "<tr><td>a</td><td>b</td><td>c</td></tr></table>"
+        );
+        let parsed = html_to_table(html).expect("table with invalid widths");
+        let defaults = Table::new(1, 3);
+
+        for (actual, default) in parsed.columns.iter().zip(defaults.columns.iter()) {
+            assert!(actual.width_pt.is_finite() && actual.width_pt > 0.0);
+            assert_eq!(actual.width_pt, default.width_pt);
+        }
     }
 
     #[test]

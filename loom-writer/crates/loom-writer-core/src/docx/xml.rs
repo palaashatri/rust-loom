@@ -63,19 +63,27 @@ pub(super) fn attr(value: &str) -> String {
     out
 }
 
-/// Appends the children of a run for `value`: `<w:t>` for text, `<w:tab/>`
-/// for a tab, `<w:br/>` for a line break (a newline or vertical tab) and
-/// `<w:br w:type="page"/>` for a page break (form feed). Carriage
-/// returns and characters XML forbids are dropped. Returns whether anything
-/// was written, so callers can skip an empty run.
 pub(super) fn push_run_children(out: &mut String, value: &str) -> bool {
+    push_run_children_with_text_tag(out, value, "w:t")
+}
+
+/// Appends run children using OOXML's deleted-text element for textual content.
+pub(super) fn push_deleted_run_children(out: &mut String, value: &str) -> bool {
+    push_run_children_with_text_tag(out, value, "w:delText")
+}
+
+fn push_run_children_with_text_tag(out: &mut String, value: &str, text_tag: &str) -> bool {
     let start = out.len();
     let mut pending = String::new();
     let flush = |out: &mut String, pending: &mut String| {
         if !pending.is_empty() {
-            out.push_str("<w:t xml:space=\"preserve\">");
+            out.push('<');
+            out.push_str(text_tag);
+            out.push_str(" xml:space=\"preserve\">");
             out.push_str(&text(pending));
-            out.push_str("</w:t>");
+            out.push_str("</");
+            out.push_str(text_tag);
+            out.push('>');
             pending.clear();
         }
     };

@@ -29,6 +29,149 @@ def binaries(tmp_path: Path) -> dict[str, Path]:
     return result
 
 
+def _resource_section(
+    resources: dict[int, dict[int, dict[int, bytes]]],
+) -> bytes:
+    nodes: dict[object, list[tuple[int, tuple[str, object]]]] = {"root": []}
+    root_entries = []
+    for resource_type, names in resources.items():
+        type_key = ("type", resource_type)
+        nodes[type_key] = []
+        root_entries.append((resource_type, ("directory", type_key)))
+        for name_id, languages in names.items():
+            name_key = ("name", resource_type, name_id)
+            nodes[name_key] = []
+            nodes[type_key].append((name_id, ("directory", name_key)))
+            for language_id, payload in languages.items():
+                nodes[name_key].append((language_id, ("data", payload)))
+    nodes["root"] = root_entries
+
+    directory_offsets = {}
+    cursor = 0
+    for key, entries in nodes.items():
+        directory_offsets[key] = cursor
+        cursor += 16 + len(entries) * 8
+    cursor = (cursor + 3) & ~3
+    data_entries = {}
+    payload_records = []
+    for key, entries in nodes.items():
+        for index, (_identifier, (kind, payload)) in enumerate(entries):
+            if kind == "data":
+                data_entries[(key, index)] = cursor
+                payload_records.append((cursor, payload))
+                cursor += 16
+    cursor = (cursor + 3) & ~3
+    payload_offsets = {}
+    for data_entry, payload in payload_records:
+        payload_offsets[data_entry] = cursor
+        cursor += len(payload)
+        cursor = (cursor + 3) & ~3
+
+    section = bytearray(cursor)
+    for key, entries in nodes.items():
+        offset = directory_offsets[key]
+        struct.pack_into("<IIHHHH", section, offset, 0, 0, 0, 0, 0, len(entries))
+        for index, (identifier, (kind, payload)) in enumerate(entries):
+            target = (
+                0x80000000 | directory_offsets[payload]
+                if kind == "directory"
+                else data_entries[(key, index)]
+            )
+            struct.pack_into("<II", section, offset + 16 + index * 8, identifier, target)
+    for data_entry, payload in payload_records:
+        payload_offset = payload_offsets[data_entry]
+        struct.pack_into(
+            "<IIII",
+            section,
+            data_entry,
+            0x1000 + payload_offset,
+            len(payload),
+            0,
+            0,
+        )
+        section[payload_offset:payload_offset + len(payload)] = payload
+    return bytes(section)
+
+
+def _pe_image_with_resource_section(section: bytes) -> bytes:
+    pe_offset = 0x80
+    optional_size = 0xF0
+    section_offset = pe_offset + 24 + optional_size
+    raw_offset = 0x200
+    raw_size = (len(section) + 0x1FF) & ~0x1FF
+    image = bytearray(raw_offset + raw_size)
+    image[:2] = b"MZ"
+    struct.pack_into("<I", image, 0x3C, pe_offset)
+    image[pe_offset:pe_offset + 4] = b"PE\x00\x00"
+    struct.pack_into(
+        "<HHIIIHH", image, pe_offset + 4, 0x8664, 1, 0, 0, 0,
+        optional_size, 0x2022,
+    )
+    optional = pe_offset + 24
+    struct.pack_into("<H", image, optional, 0x20B)
+    struct.pack_into("<I", image, optional + 108, 16)
+    struct.pack_into(
+        "<II", image, optional + 112 + 2 * 8, 0x1000, len(section)
+    )
+    section_header = section_offset
+    image[section_header:section_header + 8] = b".rsrc\x00\x00\x00"
+    struct.pack_into(
+        "<IIII", image, section_header + 8, len(section), 0x1000, raw_size, raw_offset
+    )
+    struct.pack_into("<I", image, section_header + 36, 0x40000040)
+    image[raw_offset:raw_offset + len(section)] = section
+    return bytes(image)
+
+
+def _pe_with_resources(resources: dict[int, dict[int, dict[int, bytes]]]) -> bytes:
+    return _pe_image_with_resource_section(_resource_section(resources))
+
+
+def _writer_pe_icon_fixture(fault: str | None = None) -> bytes:
+    ico = (ICONS / "loom-writer.ico").read_bytes()
+    _reserved, _kind, count = struct.unpack_from("<HHH", ico)
+    group = bytearray(ico[:6])
+    icon_resources = {}
+    for index in range(count):
+        entry_offset = 6 + index * 16
+        entry = ico[entry_offset:entry_offset + 16]
+        size, image_offset = struct.unpack_from("<II", entry, 8)
+        payload = ico[image_offset:image_offset + size]
+        icon_id = index + 1
+        if fault == "substituted" and index == 0:
+            payload = b"substituted image resource"
+        icon_resources[icon_id] = {0: payload}
+        reference_id = 255 if fault == "misreferenced" and index == 0 else icon_id
+        group.extend(entry[:12] + struct.pack("<H", reference_id))
+    resources: dict[int, dict[int, dict[int, bytes]]] = {3: icon_resources}
+    if fault != "missing_group":
+        resources[14] = {1: {0: bytes(group)}}
+    return _pe_with_resources(resources)
+
+
+@pytest.mark.parametrize(
+    ("fault", "error"),
+    [
+        (None, None),
+        ("missing_group", "group resource"),
+        ("misreferenced", "referenced"),
+        ("substituted", "substituted"),
+    ],
+)
+def test_writer_pe_icon_validator_checks_group_reference_and_payload(
+    tmp_path: Path,
+    fault: str | None,
+    error: str | None,
+) -> None:
+    executable = tmp_path / "loom-writer.exe"
+    executable.write_bytes(_writer_pe_icon_fixture(fault))
+    if error is None:
+        validate.validate_writer_pe_icon(executable)
+    else:
+        with pytest.raises(RuntimeError, match=error):
+            validate.validate_writer_pe_icon(executable)
+
+
 def test_linux_package_installs_original_pngs_and_matching_desktop_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

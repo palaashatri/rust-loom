@@ -38,6 +38,9 @@ impl PendingStyle {
     }
 }
 
+/// Complete pending typing-style state for a document edit transaction.
+pub(crate) type Snapshot = Option<PendingStyle>;
+
 /// The character styles that Ctrl+B, Ctrl+I and Ctrl+U toggle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InlineStyle {
@@ -121,6 +124,17 @@ pub(crate) fn toggle_subscript(
 /// Store the pending style. It applies to text typed at its caret.
 pub(crate) fn store(style: PendingStyle) {
     PENDING.with(|pending| *pending.borrow_mut() = Some(style));
+}
+
+/// Capture pending typing style for a document edit transaction.
+pub(crate) fn snapshot() -> Snapshot {
+    PENDING.with(|pending| pending.borrow().clone())
+}
+
+/// Restore pending typing style after a rejected document transaction.
+
+pub(crate) fn restore(snapshot: Snapshot) {
+    PENDING.with(|pending| *pending.borrow_mut() = snapshot);
 }
 
 /// Forget the pending style, whatever its caret. Tests start from a clean slate.

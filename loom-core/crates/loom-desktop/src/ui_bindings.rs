@@ -262,6 +262,26 @@ macro_rules! local_menu_bindings {
                         return;
                     }
                     let menu_index = app.get_local_menu_open_index();
+                    if direction == 0 {
+                        let current = app.get_local_menu_selected_index();
+                        if current < 0
+                            || !items.row_data(current as usize).is_some_and(|item| {
+                                item.menu_index == menu_index && item.enabled && !item.separator
+                            })
+                        {
+                            return;
+                        }
+                        let popup_index = (0..=current as usize)
+                            .filter(|index| {
+                                items
+                                    .row_data(*index)
+                                    .is_some_and(|item| item.menu_index == menu_index)
+                            })
+                            .count() as i32
+                            - 1;
+                        app.set_local_menu_popup_selected_index(popup_index);
+                        return;
+                    }
                     let current = app.get_local_menu_selected_index();
                     let delta: isize = if direction < 0 { -1 } else { 1 };
                     for offset in 1..=count {
@@ -333,9 +353,18 @@ macro_rules! window_chrome_bindings {
         /// Native window frames are default; custom chrome is an opt-in via LOOM_CUSTOM_CHROME=1.
         pub(crate) const USES_CUSTOM_CHROME: bool = false;
 
+        /// Whether this target supports the window operations needed by custom chrome.
+        const CUSTOM_CHROME_CALLBACKS_SUPPORTED: bool =
+            cfg!(any(target_os = "windows", target_os = "linux"));
+
+        fn custom_chrome_requested(callbacks_supported: bool, request: Option<&str>) -> bool {
+            callbacks_supported && request == Some("1")
+        }
+
         /// Whether custom chrome was requested via environment variable.
         pub(crate) fn uses_custom_chrome() -> bool {
-            ::std::env::var("LOOM_CUSTOM_CHROME").is_ok_and(|v| v == "1")
+            let request = ::std::env::var("LOOM_CUSTOM_CHROME").ok();
+            custom_chrome_requested(CUSTOM_CHROME_CALLBACKS_SUPPORTED, request.as_deref())
         }
 
         /// Turn on custom chrome when requested and connect its callbacks. Safe in headless

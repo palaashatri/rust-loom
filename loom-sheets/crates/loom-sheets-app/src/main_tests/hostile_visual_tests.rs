@@ -7,7 +7,7 @@ fn control(app: &SheetsApp, label: &str) -> ElementHandle {
     // while keeping the prompt's text node available for the ink measurement.
     let role = if label == app.get_save_changes_prompt().as_str() {
         AccessibleRole::Text
-    } else if ["Table name"].contains(&label) {
+    } else if ["Worksheet name"].contains(&label) {
         AccessibleRole::TextInput
     } else if ["Worksheet rows", "Worksheet columns"].contains(&label) {
         // Read-only values in the Table tab expose their value as text.
@@ -43,7 +43,7 @@ fn hostile_inspector_fields_and_both_step_buttons_fit_inside_padding() {
             let left = panel.absolute_position().x + 16.0;
             let right = panel.absolute_position().x + panel.size().width - 16.0;
             for label in [
-                "Table name",
+                "Worksheet name",
                 "Worksheet rows",
                 "Worksheet columns",
                 "Add worksheet row",

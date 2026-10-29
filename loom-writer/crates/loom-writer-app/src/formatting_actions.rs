@@ -56,7 +56,9 @@ fn wire_strikethrough(app: &WriterApp, state: &Rc<GuiState>) {
         let mut next = state.current.borrow().clone();
         set_selection_strikethrough(&mut next, selection.clone(), !enabled);
         next.set_selection(selection);
-        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+            return;
+        }
         announce(
             &app,
             if enabled {
@@ -92,7 +94,9 @@ fn wire_direction(app: &WriterApp, state: &Rc<GuiState>) {
             );
             next.set_selection(selection);
             if next != *state.current.borrow() {
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
             }
             announce(
                 &app,
@@ -129,7 +133,9 @@ fn wire_logical_alignment(app: &WriterApp, state: &Rc<GuiState>) {
             };
             next.set_selection(selection);
             if next != *state.current.borrow() {
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
             }
             announce(
                 &app,
@@ -228,7 +234,9 @@ fn toggle_script(app: &WriterApp, state: &GuiState, superscript: bool) {
     }
     next.set_selection(selection.clone());
     if next != *state.current.borrow() {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return;
+        }
     }
     let label = if superscript {
         "Superscript"
@@ -341,7 +349,9 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
     );
     next.set_selection(selection.clone());
     if next != *state.current.borrow() {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return;
+        }
     }
     global.set_color_dialog_open(false);
     global.set_color_error(SharedString::new());
@@ -385,7 +395,7 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
             formatting.italic = table_styles.iter().all(|style| style.italic);
             formatting.underline = table_styles.iter().all(|style| style.underline);
             formatting.strikethrough = table_styles.iter().all(|style| style.strikethrough);
-            formatting.font_size_pt = table_styles[0].font_size.round() as i32;
+            formatting.font_size_pt = table_styles[0].font_size;
         }
     }
     let pending = (selection.is_collapsed()
@@ -430,7 +440,8 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
     app.set_is_underline(formatting.underline);
     app.set_is_strikethrough(formatting.strikethrough);
     font_picker::publish_current(app, document);
-    app.set_font_size_pt(formatting.font_size_pt);
+    app.set_font_size_pt(formatting.font_size_pt.round() as i32);
+    app.set_font_size_value(SharedString::from(formatting.font_size_pt.to_string()));
     app.set_line_spacing_index(formatting.line_spacing_index);
     app.set_list_style_index(formatting.list_style_index);
     app.set_heading_level(heading_level);

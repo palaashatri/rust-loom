@@ -117,6 +117,22 @@ pub fn inspect_pptx_unsupported(pptx_bytes: &[u8]) -> Result<Vec<String>, String
         {
             warnings.push("Embedded OLE objects are not supported.".to_string());
         }
+        if path.starts_with("ppt/slides/slide") && path.ends_with(".xml") {
+            let has_transition = archive
+                .get(path)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .is_some_and(|xml| xml.contains("<p:transition"));
+            if has_transition
+                && !warnings
+                    .iter()
+                    .any(|warning: &String| warning.contains("slide transitions"))
+            {
+                warnings.push(
+                    "PowerPoint slide transitions are not supported and will be omitted."
+                        .to_string(),
+                );
+            }
+        }
         if path.contains("vbaProject.bin") && !warnings.iter().any(|w: &String| w.contains("VBA")) {
             warnings.push("Macros and VBA code are not supported.".to_string());
         }
@@ -550,6 +566,24 @@ mod tests {
     use crate::export_pptx;
     use loom_objects::chart::{Chart, ChartSeries, ChartType};
     use loom_objects::Table;
+
+    #[test]
+    fn morph_transition_is_reported_as_omitted() {
+        let mut archive = PackageArchive::new();
+        archive
+            .add(
+                "ppt/slides/slide1.xml",
+                br#"<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"><p:transition><p14:morph/></p:transition></p:sld>"#.to_vec(),
+            )
+            .expect("slide part");
+
+        let warnings =
+            inspect_pptx_unsupported(&archive.to_bytes().expect("pptx archive")).expect("inspect");
+        assert_eq!(
+            warnings,
+            vec!["PowerPoint slide transitions are not supported and will be omitted."]
+        );
+    }
 
     #[test]
     fn test_import_pptx_deck_with_tables_and_charts() {

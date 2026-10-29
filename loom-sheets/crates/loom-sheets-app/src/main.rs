@@ -32,8 +32,8 @@ use loom_sheets_core::workbook_to_json;
 #[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, RangeEdit, Sheet,
-    SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, CellAlignment, CellRange, CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions,
+    SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
@@ -51,6 +51,9 @@ mod grid_navigation;
 use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
+mod inspector_search;
+#[cfg(test)]
+use inspector_search::inspector_section_visibility;
 mod paste_formats;
 mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
@@ -128,6 +131,8 @@ use journey::*;
 mod cell_spill;
 mod responsive_layout;
 mod scroll_projection;
+mod selection_projection;
+pub(crate) use selection_projection::update_selection_range;
 mod template_navigation;
 mod window_chrome;
 #[cfg(test)]
@@ -1073,14 +1078,12 @@ fn project_sheet_inner_with_preview(
     update_selection_range(app, sheet, vals, selection);
     app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
     app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));
-    app.set_selected_row_height(SharedString::from(format!(
-        "{:.0} px",
-        sheet.row_height(selected.row)
-    )));
-    app.set_selected_col_width(SharedString::from(format!(
-        "{:.0} px",
-        sheet.col_width(selected.col)
-    )));
+    app.set_selected_row_height(SharedString::from(
+        sheet.row_height(selected.row).to_string(),
+    ));
+    app.set_selected_col_width(SharedString::from(
+        sheet.col_width(selected.col).to_string(),
+    ));
     app.set_sheet_name(sheet.name.as_str().into());
     // Counted by the cell map as it changes, so the status line costs no scan.
     app.set_status_summary(SharedString::from(format!(
@@ -1179,107 +1182,6 @@ pub(crate) fn update_selection(
     selected: CellRef,
 ) {
     update_selection_range(app, sheet, vals, GridSelection::new(selected, selected));
-}
-
-pub(crate) fn update_selection_range(
-    app: &SheetsApp,
-    sheet: &Sheet,
-    vals: &std::collections::HashMap<CellRef, Value>,
-    selection: GridSelection,
-) {
-    let selected = selection.focus;
-    let range = selection.range();
-    let formula = sheet
-        .raw(selected)
-        .map(SharedString::from)
-        .unwrap_or_default();
-    app.set_inspector_formula(if formula.starts_with('=') {
-        formula.clone()
-    } else {
-        SharedString::new()
-    });
-    app.set_selection_formula(formula);
-    app.invoke_reset_formula_edit_buffer();
-    app.set_selected_cell(selected.to_a1().into());
-    app.set_selected_row(selected.row as i32);
-    app.set_selected_col(selected.col as i32);
-    app.set_selection_anchor_row(selection.anchor.row as i32);
-    app.set_selection_anchor_col(selection.anchor.col as i32);
-    app.set_selection_start_row(range.start.row as i32);
-    app.set_selection_start_col(range.start.col as i32);
-    app.set_selection_end_row(range.end.row as i32);
-    app.set_selection_end_col(range.end.col as i32);
-    app.set_selection_range(range.to_a1().into());
-    app.set_selection_count((range.cells().len() as i32).max(1));
-    let align_code = match sheet.cell_alignment(selected) {
-        CellAlignment::General | CellAlignment::Left => 0,
-        CellAlignment::Center => 1,
-        CellAlignment::Right => 2,
-    };
-    app.set_cell_alignment(align_code);
-    let style = sheet.cell_style(selected);
-    app.set_cell_bold(style.bold);
-    app.set_cell_italic(style.italic);
-    app.set_cell_underline(style.underline);
-    let fmt_code = match style.number_format {
-        NumberFormat::General
-        | NumberFormat::PlainText
-        | NumberFormat::Scientific
-        | NumberFormat::DateIso => 0,
-        NumberFormat::Currency => 1,
-        NumberFormat::Percentage => 2,
-        NumberFormat::Number => 3,
-    };
-    app.set_cell_format(fmt_code);
-    let decimals = style.decimal_places.unwrap_or(2);
-    app.set_cell_decimals(decimals as i32);
-    app.set_cell_decimals_label(SharedString::from(decimals.to_string()));
-    app.set_cell_border(style.border);
-    app.set_cell_fill(style.fill.swatch_index());
-    ink_actions::publish_selected(app, style);
-    let font_size = formatting::effective_font_size(style);
-    app.set_cell_font_size(font_size as i32);
-    app.set_cell_font_label(SharedString::from(font_size.to_string()));
-
-    let raw_display = cell_value(sheet, vals, selected.row, selected.col);
-    let display = style.format_value(&raw_display);
-    let formula_text = sheet.raw(selected).unwrap_or("");
-    let value_text = if display.is_empty() {
-        "Empty".to_string()
-    } else {
-        display.clone()
-    };
-    let formula_suffix = if formula_text.is_empty() {
-        String::new()
-    } else {
-        format!("; formula: {formula_text}")
-    };
-    app.set_selection_announcement(SharedString::from(format!(
-        "{} selected; value: {}{}",
-        selection.label(),
-        value_text,
-        formula_suffix
-    )));
-    app.set_selection_value(SharedString::from(display));
-    let cell_count = range.cells().len();
-    if cell_count > 1 {
-        let mut sum = 0.0;
-        let mut count = 0;
-        for c in range.cells() {
-            let val = cell_value(sheet, vals, c.row, c.col);
-            let clean = val.trim().trim_start_matches('$').trim_end_matches('%');
-            if let Ok(n) = clean.parse::<f64>() {
-                sum += n;
-                count += 1;
-            }
-        }
-        if count > 0 {
-            let avg = sum / count as f64;
-            app.set_status_right(SharedString::from(format!(
-                "SUM: {sum:.2}  AVG: {avg:.2}  COUNT: {count}"
-            )));
-        }
-    }
 }
 
 /// A typed undo/redo transaction in Loom Sheets supporting single cell edits,
@@ -1663,14 +1565,6 @@ pub(crate) fn select_cell(app: &SheetsApp, state: &GuiState, r: i32, c: i32) {
     let vals = values_for_projection(state);
     let sheet = state.current.borrow();
     update_selection(app, &sheet, &vals, refr);
-}
-
-fn inspector_section_visibility(query: &str) -> (bool, bool) {
-    let query = query.trim().to_ascii_lowercase();
-    let table = query.is_empty() || "table name rows columns worksheet".contains(query.as_str());
-    let cell = query.is_empty()
-        || "cell selection value formula row height column width".contains(query.as_str());
-    (table, cell)
 }
 
 fn inspector_tab_index(index: i32) -> i32 {
@@ -2595,40 +2489,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let app_ref = app.as_weak();
-        app.on_inspector_search_edited(move |query| {
-            if let Some(app) = app_ref.upgrade() {
-                let (table, cell) = inspector_section_visibility(query.as_str());
-                app.set_inspector_show_table(table);
-                app.set_inspector_show_cell(cell);
-                // Search is also a context switch when only one inspector
-                // section matches. This keeps a query such as "formula"
-                // useful even when the Table tab was previously selected.
-                if table && !cell {
-                    app.set_inspector_tab(0);
-                } else if cell && !table {
-                    app.set_inspector_tab(1);
-                }
-            }
-        });
-    }
-
-    {
-        let app_ref = app.as_weak();
-        app.on_inspector_context_changed(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                // TabStrip owns the visual selection; clamp the mirrored
-                // state so keyboard/programmatic activation cannot address a
-                // context that has no inspector section.
-                app.set_inspector_tab(inspector_tab_index(index));
-                let (table, cell) =
-                    inspector_section_visibility(app.get_inspector_search().as_str());
-                app.set_inspector_show_table(table);
-                app.set_inspector_show_cell(cell);
-            }
-        });
-    }
+    inspector_search::wire(&app);
 
     {
         let state = state.clone();

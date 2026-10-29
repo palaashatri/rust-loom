@@ -33,8 +33,7 @@ required-directions = ["ltr", "rtl"]
 required-themes = ["light", "dark", "high-contrast"]
 max-unintentional-overlap-px = 0
 max-control-label-clipping-px = 0
-# Regular horizontal action labels must remain intact; icon-over-label
-# captions use the dedicated labeled-toolbar-item elision rule below.
+# Action labels, including icon-over-label captions, must remain intact.
 max-action-label-truncation = 0
 max-toolbar-lines = 1
 max-toolbar-groups = 3
@@ -325,17 +324,18 @@ icon = 16
 radius = 6
 tooltip-required = true
 
-# Icon-over-label toolbar controls use a taller slot so the icon and 10px
-# caption have independent breathing room. Their labels may elide when the
-# item reaches its intrinsic minimum; the regular horizontal action contract
-# below still requires labels to remain fully visible.
+# Icon-over-label toolbar controls use a taller slot so the icon and caption
+# have independent breathing room. Action captions use the shared caption
+# size and line height and remain complete; constrained hosts must use an
+# accessible icon-only action with a tooltip and a reachable labeled menu item.
 [component.labeled-toolbar-item]
 min-height = 48
 max-height = 52
 icon = 18
-label-size = 10
+label-size = 11
+label-line-height = 15
 padding-y = 4
-allow-label-elision = true
+allow-label-elision = false
 
 [component.title-chrome]
 height = 40
@@ -352,9 +352,10 @@ tooltip-required = true
 min-height = 48
 max-height = 52
 icon = 18
-label-size = 10
+label-size = 11
+label-line-height = 15
 padding-y = 4
-allow-label-elision = true
+allow-label-elision = false
 
 [component.sheet-tab-strip]
 height = 30
@@ -513,8 +514,9 @@ preserve-primary-workspace = true
 # Toolbar policy. Priority 0 survives all supported widths; priority 1 may
 # become icon-only; priority 2 moves to overflow. Compact icon-only controls
 # keep the [component.icon-button] geometry. Icon-over-label controls use the
-# [component.labeled-toolbar-item] slot and may elide their caption at the
-# intrinsic minimum; regular horizontal action labels remain fully visible.
+# [component.labeled-toolbar-item] slot; action captions remain complete at
+# their intrinsic minimum width, and constrained actions use icon-only or menu
+# routes instead of ellipsis.
 # ---------------------------------------------------------------------------
 [toolbar]
 max-groups = 3
@@ -525,18 +527,15 @@ priority-1-icon-only-below = 1180
 priority-2-overflow-below = 1320
 never-scroll = true
 never-wrap = true
-# Applies to regular horizontal action labels; labeled toolbar captions use
-# component.labeled-toolbar-item.allow-label-elision instead.
 never-truncate-actions = true
-allow-labeled-item-elision = true
+allow-labeled-item-elision = false
 all-items-have-menu-command = true
 show-app-name = false
 show-neutral-local-state = false
 
 # ---------------------------------------------------------------------------
-# Text truncation policy. The action/control defaults apply to regular
-# horizontal controls; the labeled toolbar item is the explicit caption
-# exception documented above.
+# Text truncation policy. User content names may elide where listed; action
+# and control labels remain complete or use the shared icon-only/menu route.
 # ---------------------------------------------------------------------------
 [truncation]
 allow-user-content = true
@@ -546,7 +545,7 @@ allow-track-name = true
 allow-layer-name = true
 allow-action-label = false
 allow-control-label = false
-allow-labeled-toolbar-label = true
+allow-labeled-toolbar-label = false
 allow-section-title = false
 allow-status-severity = false
 tooltip-required-when-ellipsized = true
@@ -624,12 +623,10 @@ app-local-control-radii = true
 app-local-control-heights = true
 app-local-toolbar-shells = true
 persistent-canvas-status-overlays = true
-# Standard horizontal button/control labels may not ellipsize. The
-# icon-over-label toolbar caption is governed by its dedicated component
-# contract and is intentionally exempt.
+# Action captions, including icon-over-label toolbar captions, may not elide.
 button-label-ellipsis = true
 control-label-ellipsis = true
-labeled-toolbar-label-ellipsis = false
+labeled-toolbar-label-ellipsis = true
 nested-panel-scrollbars = true
 scrolling-toolbar = true
 wrapped-toolbar = true

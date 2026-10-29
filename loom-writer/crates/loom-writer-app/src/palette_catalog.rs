@@ -260,6 +260,12 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             shortcut: "",
         },
         PaletteCommand {
+            action: PaletteAction::Command("writer.footnotes"),
+            id: "writer.footnotes",
+            label: "Footnotes…",
+            shortcut: "",
+        },
+        PaletteCommand {
             action: PaletteAction::InsertTable,
             id: "writer.table.insert",
             label: "Insert Table",

@@ -5,3 +5,16 @@
 use crate::WriterApp;
 
 loom_desktop::window_chrome_bindings!(WriterApp);
+
+#[cfg(test)]
+mod tests {
+    use super::custom_chrome_requested;
+
+    #[test]
+    fn custom_chrome_requires_supported_callbacks_and_explicit_opt_in() {
+        assert!(custom_chrome_requested(true, Some("1")));
+        assert!(!custom_chrome_requested(false, Some("1")));
+        assert!(!custom_chrome_requested(true, None));
+        assert!(!custom_chrome_requested(true, Some("true")));
+    }
+}

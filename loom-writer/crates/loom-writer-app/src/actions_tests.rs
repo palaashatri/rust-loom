@@ -12,6 +12,7 @@ pub(super) fn test_state(
 ) -> (WriterApp, Rc<GuiState>) {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
+    templates::install_catalog(&app);
     let saved_document = document.clone();
     let mut registry = build_writer_registry();
     let history = EditorHistory::new();
@@ -23,6 +24,7 @@ pub(super) fn test_state(
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(None),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(history),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -131,6 +133,7 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomdoc"))),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -143,6 +146,8 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
     };
     let request = writer_open_request(&state);
     assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
+    assert_eq!(request.filters[0].extensions, vec!["docx"]);
+    assert_eq!(request.filters[1].extensions, vec!["loomdoc"]);
     assert_eq!(
         state.dialogs.open_file(&request).expect("open"),
         Some(PathBuf::from("/tmp/next.loomdoc"))
@@ -224,6 +229,9 @@ fn failed_pdf_export_preserves_document_and_history() {
     let before_history = history_shape(&state.history.borrow());
 
     app.invoke_export_pdf();
+    let review = app.global::<WriterReviewState>();
+    assert!(review.get_pdf_export_open());
+    review.invoke_export_pdf_view(0);
 
     assert_eq!(*state.current.borrow(), document);
     assert_eq!(history_shape(&state.history.borrow()), before_history);
@@ -793,6 +801,7 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(None),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -906,9 +915,10 @@ fn widening_window_preserves_palette_focus() {
 fn template_chooser_renders_at_reference_width() {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
+    templates::install_catalog(&app);
     apply_theme(&app, "dark");
     apply_layout_breakpoints(&app, 1440);
-    app.set_template_selected(2);
+    app.set_template_selected("report".into());
     app.set_template_chooser_open(true);
     let image = snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render chooser");
     assert_eq!(image.width(), 1440);
@@ -936,24 +946,47 @@ fn writer_action_rail_is_one_row_before_the_canvas() {
 fn template_category_filters_visible_cards() {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
+    templates::install_catalog(&app);
     apply_theme(&app, "light");
     apply_layout_breakpoints(&app, 1440);
     app.set_template_chooser_open(true);
     app.set_template_category(0);
     let all = snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render all templates");
 
-    app.set_template_category(2);
+    let visible_card = |label: &str| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, label).find(
+            |element| {
+                element.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button)
+                    && element.size().width > 0.0
+                    && element.size().height > 0.0
+            },
+        )
+    };
+    let report = visible_card("Executive Report").expect("Report card is visible in All Templates");
+    let report_origin = report.absolute_position();
+    let report_size = report.size();
+    assert!(report_origin.x >= 0.0 && report_origin.y >= 0.0);
+
+    // Letters is category 3; category 2 is Reports.
+    app.set_template_category(3);
     let letters = snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render letter templates");
-    assert_eq!(app.get_template_category(), 2);
-    // The chooser now scales to 1160px at this viewport, placing the
-    // Report card in this content-region rectangle. Check the full card
-    // region instead of one global pixel so the filter test stays tied to
-    // the actual card rather than the old 960px modal geometry.
-    let report_card_changed =
-        (220..396).any(|y| (674..814).any(|x| all.get_pixel(x, y) != letters.get_pixel(x, y)));
+    assert_eq!(app.get_template_category(), 3);
     assert!(
-        report_card_changed,
-        "selecting Letters must remove the Report card from the chooser"
+        visible_card("Executive Report").is_none(),
+        "selecting Letters removes the Report card from the accessible chooser"
+    );
+    assert!(
+        visible_card("Business Letter").is_some(),
+        "selecting Letters keeps the matching card visible"
+    );
+
+    let x0 = report_origin.x.floor().max(0.0) as u32;
+    let y0 = report_origin.y.floor().max(0.0) as u32;
+    let x1 = (report_origin.x + report_size.width).ceil().min(1440.0) as u32;
+    let y1 = (report_origin.y + report_size.height).ceil().min(900.0) as u32;
+    assert!(
+        (y0..y1).any(|y| (x0..x1).any(|x| all.get_pixel(x, y) != letters.get_pixel(x, y))),
+        "the measured Report card bounds change after filtering"
     );
 }
 
@@ -964,10 +997,11 @@ fn template_ids_are_stable_and_seed_real_documents() {
         (TemplateId::Report, "report", "Untitled Report"),
         (TemplateId::Letter, "letter", "Untitled Letter"),
         (TemplateId::Cv, "cv", "Untitled CV"),
+        (TemplateId::Newsletter, "newsletter", "Untitled Newsletter"),
     ];
 
     for (template, id, title) in cases {
-        assert_eq!(template.as_str(), id);
+        assert_eq!(template.stable_id(), id);
         let document = template_document(template);
         assert_eq!(document.id, format!("template-{id}"));
         assert_eq!(document.title, title);
@@ -986,9 +1020,17 @@ fn template_ids_are_stable_and_seed_real_documents() {
 #[test]
 fn template_id_parser_accepts_stable_names_only() {
     assert_eq!(parse_template_id("blank"), Some(TemplateId::Blank));
+    assert_eq!(
+        parse_template_id("blank-black"),
+        Some(TemplateId::BlankBlack)
+    );
     assert_eq!(parse_template_id("report"), Some(TemplateId::Report));
     assert_eq!(parse_template_id("letter"), Some(TemplateId::Letter));
     assert_eq!(parse_template_id("cv"), Some(TemplateId::Cv));
+    assert_eq!(
+        parse_template_id("newsletter"),
+        Some(TemplateId::Newsletter)
+    );
     assert_eq!(parse_template_id("CV"), None);
     assert_eq!(parse_template_id("memo"), None);
 }

@@ -1,0 +1,121 @@
+import { ScrollView } from "std-widgets.slint";
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// Full, keyboard-readable account of content omitted from a Word export and
+/// the destination that was written. The bounded scroll region keeps long
+/// paths readable in compact windows.
+export component DocxExportReportDialog inherits Rectangle {
+    in-out property <bool> open: false;
+    in property <string> report-message: "";
+
+    visible: root.open;
+
+    init => {
+        if (root.open) {
+            done-button.grab-focus();
+        }
+    }
+
+    changed open => {
+        if (root.open) {
+            done-button.grab-focus();
+        }
+    }
+
+    dialog-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.open;
+        visible: root.open;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.open = false;
+                return accept;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                done-button.grab-focus();
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            width: root.width;
+            height: root.height;
+            background: Theme.palette().scrim;
+
+            TouchArea {
+                clicked => { done-button.grab-focus(); }
+            }
+
+            Rectangle {
+                width: min(560px * max(1.0, Theme.text-scale), root.width - 32px);
+                height: min(520px * max(1.0, Theme.text-scale), root.height - 32px);
+                x: (root.width - self.width) / 2;
+                y: (root.height - self.height) / 2;
+                background: Theme.palette().surface;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                border-radius: Theme.tokens.metrics.radius-large;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: Theme.palette().shadow;
+
+                report-layout := VerticalLayout {
+                    padding: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.md;
+
+                    Text {
+                        text: "Word export completed with omissions";
+                        font-size: Theme.tokens.typography.heading * max(1.0, Theme.text-scale);
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        wrap: word-wrap;
+                    }
+
+                    ScrollView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        viewport-width: self.width;
+                        viewport-height: max(self.height, report-content.preferred-height);
+
+                        report-content := Rectangle {
+                            width: parent.viewport-width;
+                            min-height: parent.height;
+                            preferred-height: report-text.preferred-height;
+                            background: transparent;
+
+                            report-text := Text {
+                                width: parent.width;
+                                text: root.report-message;
+                                font-size: Theme.type.body;
+                                color: Theme.palette().ink-secondary;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                                vertical-alignment: top;
+                                wrap: word-wrap;
+                                accessible-role: AccessibleRole.text;
+                                accessible-label: root.report-message;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: Theme.scaled-control-height;
+                        done-button := LoomButton {
+                            label: "Done";
+                            variant: "primary";
+                            width: self.preferred-width;
+                            x: Theme.rtl ? 0px : parent.width - self.width;
+                            clicked => { root.open = false; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

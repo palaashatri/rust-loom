@@ -8,6 +8,7 @@ import { Theme } from "theme.slint";
 /// window x through `toggle-menu`; the menu itself is `WriterToolbarMenu`.
 export component WriterActionToolbar inherits LabeledToolbar {
     in property <bool> inspector-visible: false;
+    in property <float> page-zoom: 1.0;
     /// 0 = Format, 1 = Document.
     in property <int> inspector-tab: 0;
     /// 0 = none, 1 View, 2 Zoom, 3 Insert, 4 Text, 5 Style, 6 List, 7 Export,
@@ -75,7 +76,10 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.toggle-menu(1, self.absolute-position.x); }
         }
         LoomToolbarItem {
-            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            icon: "zoom-fit";
+            label: "\{Math.round(root.page-zoom * 100)}%";
+            accessible-name: "Zoom \{Math.round(root.page-zoom * 100)}%";
+            checked: root.menu-kind == 2; focus-request: root.request(2);
             arrow(delta) => { root.step-focus(2, delta); }
             clicked => { root.toggle-menu(2, self.absolute-position.x); }
         }
@@ -188,7 +192,10 @@ export component WriterActionToolbar inherits LabeledToolbar {
         ToolbarSpacer { }
 
         LoomToolbarItem {
-            icon: "zoom-fit"; label: "Zoom"; checked: root.menu-kind == 2; focus-request: root.request(2);
+            icon: "zoom-fit";
+            label: "\{Math.round(root.page-zoom * 100)}%";
+            accessible-name: "Zoom \{Math.round(root.page-zoom * 100)}%";
+            checked: root.menu-kind == 2; focus-request: root.request(2);
             arrow(delta) => { root.step-focus(2, delta); }
             clicked => { root.toggle-menu(2, self.absolute-position.x + self.width); }
         }

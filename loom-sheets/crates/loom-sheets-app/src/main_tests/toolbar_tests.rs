@@ -277,3 +277,56 @@ fn menus_open_below_the_toolbar_and_keyboard_runs_a_row() {
     press_key(Key::Escape);
     assert_eq!(app.get_toolbar_menu(), 0, "Escape closes the menu");
 }
+
+#[test]
+fn toolbar_toggle_rows_remain_checkable_when_off() {
+    use slint::platform::{Key, WindowEvent};
+
+    let app = launched();
+    button(&app, "Text");
+    let bold = ElementHandle::find_by_accessible_label(&app, "Bold")
+        .find(|item| item.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("Bold row");
+    assert_eq!(bold.accessible_checkable(), Some(true));
+    assert_eq!(bold.accessible_checked(), Some(false));
+
+    app.set_cell_bold(true);
+    render(&app);
+    let bold = ElementHandle::find_by_accessible_label(&app, "Bold")
+        .find(|item| item.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("Bold row");
+    assert_eq!(bold.accessible_checkable(), Some(true));
+    assert_eq!(bold.accessible_checked(), Some(true));
+
+    let escape: SharedString = Key::Escape.into();
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: escape.clone(),
+    });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: escape });
+    button(&app, "View");
+    let checked = [
+        "Appearance: System",
+        "Appearance: Light",
+        "Appearance: Dark",
+        "Appearance: High Contrast",
+    ]
+    .map(|label| {
+        let item = ElementHandle::find_by_accessible_label(&app, label)
+            .find(|item| item.accessible_role() == Some(AccessibleRole::ListItem))
+            .unwrap_or_else(|| panic!("{label} row"));
+        assert_eq!(item.accessible_checkable(), Some(true), "{label}");
+        item.accessible_checked()
+    });
+    assert_eq!(
+        checked.iter().filter(|state| **state == Some(true)).count(),
+        1
+    );
+    assert_eq!(
+        checked
+            .iter()
+            .filter(|state| **state == Some(false))
+            .count(),
+        3
+    );
+}

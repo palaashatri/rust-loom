@@ -31,6 +31,7 @@ fn fixture_document() -> WriterDocument {
         paper: PaperSize::Letter,
         orientation: PageOrientation::Landscape,
         margins: PageMarginsPreset::Moderate,
+        ..PageSetup::default()
     };
     doc.blocks
         .push(RichBlock::new(1, "heading1", "Quarterly Overview"));

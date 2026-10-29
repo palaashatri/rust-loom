@@ -139,6 +139,16 @@ fn source_less_recovery_only_treats_default_blank_documents_as_clean() {
 }
 
 #[test]
+fn source_less_recovery_keeps_header_footer_only_changes() {
+    let mut document = WriterDocument::new("headers-only", "Untitled");
+    document.header_footer.header_text = "Cover page".into();
+    assert!(
+        !draft(document).is_clean_against_source(),
+        "header/footer settings are meaningful document content"
+    );
+}
+
+#[test]
 fn source_less_recovery_keeps_whitespace_only_text() {
     let mut document = WriterDocument::new("whitespace", "Untitled");
     document.push(RichBlock::new(1, "paragraph", " \t"));
@@ -201,6 +211,12 @@ fn file_backed_recovery_compares_the_saved_document_content() {
     assert!(
         !recovered.is_clean_against_source(),
         "formatting is content"
+    );
+    recovered.document.blocks[0].style.direction = ParagraphDirection::LeftToRight;
+    recovered.document.header_footer.footer_text = "{page}".into();
+    assert!(
+        !recovered.is_clean_against_source(),
+        "header/footer changes are content"
     );
     std::fs::remove_file(&path).expect("remove source");
     assert!(

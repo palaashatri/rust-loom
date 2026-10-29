@@ -74,7 +74,9 @@ pub(crate) fn change_level(app: &WriterApp, state: &GuiState, deeper: bool) -> b
         }));
         return true;
     }
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+        return true;
+    }
     let items = shift.changed;
     app.set_status_right(SharedString::from(format!(
         "List level changed for {items} list {}",

@@ -2919,6 +2919,7 @@ version = "0.1.0"
 dependencies = [
  "muda",
  "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "rfd",
 ]
 
@@ -3003,6 +3004,7 @@ version = "0.1.0"
 name = "loom-ui"
 version = "0.1.0"
 dependencies = [
+ "i-slint-backend-testing",
  "image",
  "loom-test-support",
  "slint",

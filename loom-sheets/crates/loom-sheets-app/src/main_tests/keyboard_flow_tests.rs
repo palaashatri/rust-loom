@@ -6,6 +6,7 @@
 
 use super::*;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle, ElementRoot};
+use loom_sheets_core::NumberFormat;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::private_unstable_api::re_exports::{ItemWeak, WindowInner};
 
@@ -1018,6 +1019,227 @@ fn f6_leaves_the_grid_for_the_toolbar_and_the_inspector_and_comes_back() {
     assert_eq!(focus_name(&s.app), "View");
     shift_key(&s.app, Key::F6);
     assert!(same_focus(&focus_weak(&s.app), &grid));
+}
+
+#[test]
+fn inspector_number_formats_follow_their_names_for_pointer_and_keyboard_activation() {
+    use slint::platform::PointerEventButton;
+    let s = launched(&[("A1", "0.125")]);
+    let cell = CellRef::parse("A1").unwrap();
+    let mut style = s.state.current.borrow().cell_style(cell);
+    style.number_format = NumberFormat::Number;
+    s.state.current.borrow_mut().set_cell_style(cell, style);
+    s.app.set_selected_cell("A1".into());
+    s.app.set_selection_range("A1".into());
+    s.app.set_inspector_tab(1);
+    s.app.set_show_inspector(true);
+    project_current(&s.app, &s.state);
+    render(&s.app);
+
+    let assert_format = |index, expected, displayed: &str| {
+        assert_eq!(s.app.get_cell_format(), index);
+        let style = s.state.current.borrow().cell_style(cell);
+        assert_eq!(style.number_format, expected);
+        assert_eq!(s.app.get_selection_value().as_str(), displayed);
+    };
+    let assert_saved_format = |index, expected, displayed: &str| {
+        let path = std::env::temp_dir().join(format!(
+            "loom-format-{}-{index}.loomtable",
+            std::process::id()
+        ));
+        save_workbook(&path, &[s.state.current.borrow().clone()], 0).expect("save format");
+        let reopened = load_workbook(&path).expect("reopen format");
+        let style = reopened.sheets[0].cell_style(cell);
+        assert_eq!(style.number_format, expected);
+        assert_eq!(style.format_value("0.125"), displayed);
+        std::fs::remove_file(path).ok();
+    };
+
+    // Pointer activation changes Number to General through the actual action callback.
+    let general: Vec<_> = ElementHandle::find_by_accessible_label(&s.app, "General")
+        .filter(|element| element.accessible_role() == Some(AccessibleRole::Button))
+        .collect();
+    assert_eq!(general.len(), 1, "one General format button");
+    let origin = general[0].absolute_position();
+    let size = general[0].size();
+    let at = slint::LogicalPosition::new(origin.x + size.width / 2.0, origin.y + size.height / 2.0);
+    s.app
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position: at });
+    s.app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: at,
+        button: PointerEventButton::Left,
+    });
+    s.app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: at,
+        button: PointerEventButton::Left,
+    });
+    render(&s.app);
+    assert_format(0, NumberFormat::General, "0.125");
+    assert_saved_format(0, NumberFormat::General, "0.125");
+
+    // Keyboard activation proves each spoken name reaches and persists its format.
+    for (label, index, expected, displayed) in [
+        ("Currency", 1, NumberFormat::Currency, "$0.13"),
+        ("Percentage", 2, NumberFormat::Percentage, "12.5%"),
+        ("Number", 3, NumberFormat::Number, "0.13"),
+    ] {
+        s.app.invoke_focus_grid();
+        shift_key(&s.app, Key::F6);
+        tab_to(&s.app, label);
+        press(&s.app, Key::Return);
+        assert_format(index, expected, displayed);
+        assert_saved_format(index, expected, displayed);
+    }
+}
+
+#[test]
+fn inspector_property_search_reveals_a_keyboard_usable_control_and_keeps_selection() {
+    let s = launched(&[]);
+    inspector_search::wire(&s.app);
+    s.app.invoke_cell_clicked(2, 1);
+    project_current(&s.app, &s.state);
+
+    s.app.invoke_focus_grid();
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    ctrl(&s.app, "a");
+    type_text(&s.app, "font");
+    render(&s.app);
+    assert_eq!(s.app.get_inspector_tab(), 1);
+    assert!(!s.app.get_inspector_show_table());
+    assert!(s.app.get_inspector_show_cell());
+
+    tab_to(&s.app, "Font size in pixels");
+    ctrl(&s.app, "a");
+    type_text(&s.app, "20");
+    press(&s.app, Key::Return);
+    assert_eq!(
+        s.state
+            .current
+            .borrow()
+            .cell_style(CellRef::parse("B3").unwrap())
+            .font_size,
+        Some(20),
+        "the search result is reachable and operable by keyboard"
+    );
+
+    s.app.invoke_focus_grid();
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    ctrl(&s.app, "a");
+    press(&s.app, Key::Backspace);
+    render(&s.app);
+    assert_eq!(s.app.get_selection_range(), "B3");
+    assert!(s.app.get_inspector_show_table());
+    assert!(s.app.get_inspector_show_cell());
+}
+
+#[test]
+fn inspector_property_search_scrolls_a_lower_geometry_control_into_view() {
+    let s = launched(&[]);
+    inspector_search::wire(&s.app);
+    s.app.invoke_cell_clicked(2, 1);
+    project_current(&s.app, &s.state);
+
+    s.app.invoke_focus_grid();
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    ctrl(&s.app, "a");
+    type_text(&s.app, "column width");
+    render(&s.app);
+    assert_eq!(s.app.get_inspector_tab(), 1);
+    assert!(!s.app.get_inspector_show_table());
+    assert!(s.app.get_inspector_show_cell());
+
+    tab_to(&s.app, "Selected column width");
+    let focused = stop(&s.app).expect("column-width field has keyboard focus");
+    assert_eq!(focused.name, "Selected column width");
+    assert_eq!(focused.role, Some(AccessibleRole::TextInput));
+    assert!(
+        focused.on_screen(),
+        "Tab should scroll the lower search result into view: {focused:?}"
+    );
+    ctrl(&s.app, "a");
+    type_text(&s.app, "137.5");
+    press(&s.app, Key::Return);
+    assert_eq!(s.state.current.borrow().col_width(1), 137.5);
+
+    s.app.invoke_focus_grid();
+    shift_key(&s.app, Key::F6);
+    tab_to(&s.app, "Search");
+    ctrl(&s.app, "a");
+    press(&s.app, Key::Backspace);
+    render(&s.app);
+    assert_eq!(s.app.get_selection_range(), "B3");
+}
+
+#[test]
+fn inspector_numeric_entry_is_exact_validated_undoable_and_persistent() {
+    let s = launched(&[("A1", "123")]);
+    let cell = CellRef::parse("A1").unwrap();
+    s.app.set_inspector_tab(1);
+    s.app.set_show_inspector(true);
+    project_current(&s.app, &s.state);
+
+    let edit = |label: &str, value: &str| {
+        s.app.invoke_focus_grid();
+        shift_key(&s.app, Key::F6);
+        tab_to(&s.app, label);
+        ctrl(&s.app, "a");
+        type_text(&s.app, value);
+        press(&s.app, Key::Return);
+        render(&s.app);
+    };
+
+    edit("Font size in pixels", "19");
+    assert_eq!(
+        s.state.current.borrow().cell_style(cell).font_size,
+        Some(19)
+    );
+    edit("Selected row height", "44.5");
+    assert_eq!(s.state.current.borrow().row_height(0), 44.5);
+    edit("Selected column width", "123.25");
+    assert_eq!(s.state.current.borrow().col_width(0), 123.25);
+    assert_eq!(
+        s.state.undo_stack.borrow().len(),
+        3,
+        "each field is one undo step"
+    );
+
+    // Rejected input stays visible for correction and does not add a history entry.
+    edit("Selected row height", "161");
+    assert_eq!(s.state.current.borrow().row_height(0), 44.5);
+    assert_eq!(s.state.undo_stack.borrow().len(), 3);
+    assert!(s.app.get_status_left().contains("16 to 160 px"));
+    press(&s.app, Key::Escape);
+    render(&s.app);
+    let row_field: Vec<_> =
+        ElementHandle::find_by_accessible_label(&s.app, "Selected row height").collect();
+    assert_eq!(row_field.len(), 1, "one row-height input");
+    assert_eq!(
+        row_field[0].accessible_value().as_deref(),
+        Some("44.5 px"),
+        "Escape restores the current model value"
+    );
+
+    let path = std::env::temp_dir().join(format!(
+        "loom-inspector-dimensions-{}.loomtable",
+        std::process::id()
+    ));
+    save_workbook(&path, &[s.state.current.borrow().clone()], 0).expect("save dimensions");
+    let reopened = load_workbook(&path).expect("reopen dimensions");
+    assert_eq!(reopened.sheets[0].cell_style(cell).font_size, Some(19));
+    assert_eq!(reopened.sheets[0].row_height(0), 44.5);
+    assert_eq!(reopened.sheets[0].col_width(0), 123.25);
+    std::fs::remove_file(path).ok();
+
+    s.app.invoke_undo();
+    s.app.invoke_undo();
+    s.app.invoke_undo();
+    assert_eq!(s.state.current.borrow().col_width(0), 80.0);
+    assert_eq!(s.state.current.borrow().row_height(0), 24.0);
+    assert_eq!(s.state.current.borrow().cell_style(cell).font_size, None);
 }
 
 #[test]

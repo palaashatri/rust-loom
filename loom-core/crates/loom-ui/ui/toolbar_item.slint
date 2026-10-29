@@ -27,8 +27,8 @@ export component IconOverLabelToolbarItem inherits Rectangle {
     min-height: ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
     max-height: ResponsivePolicy.labeled-toolbar-max-height + ResponsivePolicy.toolbar-label-extra;
     border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
-    border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
+    border-width: 0px;
+    border-color: transparent;
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : root.checked ? Theme.palette().selection-soft
@@ -48,14 +48,25 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         }
         label-text := Text {
             text: root.label;
-            font-size: 10px * max(1.0, Theme.text-scale);
+            font-size: Theme.type.caption;
+            min-height: Theme.leading.caption;
+            wrap: no-wrap;
             font-weight: root.checked ? 600 : 500;
             color: !root.enabled ? Theme.palette().ink-disabled
                 : root.checked ? root.on-tint : Theme.palette().ink-secondary;
             horizontal-alignment: center;
             vertical-alignment: center;
-            overflow: elide;
         }
+    }
+    state-outline := Rectangle {
+        x: Theme.tokens.metrics.focus-offset;
+        y: Theme.tokens.metrics.focus-offset;
+        width: max(0px, root.width - 2 * Theme.tokens.metrics.focus-offset);
+        height: max(0px, root.height - 2 * Theme.tokens.metrics.focus-offset);
+        border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
+        border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.checked ? 1px : 0px;
+        border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
+        background: transparent;
     }
     focus := FocusScope {
         enabled: root.enabled;

@@ -1153,7 +1153,9 @@ fn a_late_completion_after_accepted_open_cannot_restore_the_old_deck() {
 #[test]
 fn warning_free_pptx_open_clears_the_previous_recovery_draft() {
     let mut harness = Harness::install();
-    let baseline = sample_session();
+    let mut baseline = sample_session();
+    // The shared sample deck includes a transition that routes Open through the warning flow.
+    baseline.transitions.clear();
     let mut recovery = RecoveryScratch::with_service(&prior_source_less_recovery_payload());
     assert_prior_source_less_draft_is_restorable(&mut recovery);
     let fixture = DeckFileFixture::new_pptx(&baseline);

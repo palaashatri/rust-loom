@@ -22,7 +22,9 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
             "loom-design-bible/tokens/loom.toml",
             "loom-core/crates/loom-ui/ui/foundation.slint",
             "loom-core/crates/loom-ui/ui/theme.slint",
+            "loom-core/crates/loom-ui/ui/toolkit.slint",
             "loom-core/crates/loom-ui/ui/app-accents.slint",
+            "loom-core/crates/loom-ui/ui/toolbar_item.slint",
             "loom-sheets/crates/loom-sheets-app/ui/objects.slint",
         )
         for name in files:
@@ -45,6 +47,73 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+        )
+
+    def test_toolbar_caption_contract_rejects_action_elision(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        contract_path = self.root / "loom-design-bible/contracts/desktop-ui.toml"
+        contract = contract_path.read_text(encoding="utf-8")
+        contract = contract.replace(
+            "allow-label-elision = false",
+            "allow-label-elision = true",
+            1,
+        )
+        contract_path.write_text(contract, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "toolbar action elision must fail the audit")
+        self.assertIn("labeled-toolbar-item must forbid action-caption elision", result.stderr)
+
+    def test_toolbar_caption_component_uses_shared_size_and_never_elides(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        component_path = self.root / "loom-core/crates/loom-ui/ui/toolbar_item.slint"
+        component = component_path.read_text(encoding="utf-8")
+        component = component.replace(
+            "font-size: Theme.type.caption;",
+            "font-size: 10px * max(1.0, Theme.text-scale);",
+            1,
+        )
+        component = component.replace(
+            "min-height: Theme.leading.caption;",
+            "min-height: 10px;",
+            1,
+        )
+        component = component.replace(
+            "wrap: no-wrap;",
+            "wrap: word-wrap;\n            overflow: elide;",
+            1,
+        )
+        component_path.write_text(component, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "shrunk or ellipsized captions must fail the audit")
+        self.assertIn("toolbar action caption must use Theme.type.caption", result.stderr)
+        self.assertIn("toolbar action caption must use Theme.leading.caption", result.stderr)
+        self.assertIn("toolbar action captions must remain on one line", result.stderr)
+        self.assertIn("toolbar action captions must not elide", result.stderr)
+
+    def test_toolbar_state_outlines_use_the_contract_inset_and_ring_width(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        component_path = self.root / "loom-core/crates/loom-ui/ui/toolbar_item.slint"
+        component = component_path.read_text(encoding="utf-8")
+        component = component.replace(
+            "y: Theme.tokens.metrics.focus-offset;",
+            "y: 0px;",
+            1,
+        )
+        component_path.write_text(component, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "toolbar outline without the inset must fail the audit")
+        self.assertIn(
+            "toolbar action focus/selection outline must preserve the contract y inset",
+            result.stderr,
         )
 
     def test_dark_runtime_foreground_must_match_dark_tokens(self):

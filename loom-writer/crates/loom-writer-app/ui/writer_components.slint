@@ -2,6 +2,10 @@ import { LoomStatusBar, LoomStatusText, LoomIconButton } from "foundation.slint"
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import { FindBar } from "find_bar.slint";
+import { WriterPageGeometry } from "inspector.slint";
+import { WriterHeaderFooterState, WriterHeaderFooterText } from "writer_header_footer.slint";
+import { WriterFootnoteState, WriterFootnoteBodyLine, WriterFootnoteReferenceText } from "writer_footnotes.slint";
+import { WriterRevisionMarkup } from "writer_revision_marks.slint";
 
 export { WriterActionToolbar } from "toolbar.slint";
 export { WriterToolbarMenu } from "toolbar_menu.slint";
@@ -24,6 +28,8 @@ export struct WriterTextSegment {
     italic: bool,
     underline: bool,
     strikethrough: bool,
+    has-color: bool,
+    color: color,
 }
 
 /// A line drawn under (underline) or through (strikethrough) a segment, in the
@@ -202,21 +208,20 @@ component WriterDocumentEditor inherits Rectangle {
     in property <[WriterTableCellRect]> table-cell-rects: [];
     in property <string> document-accessible-label: "Document body";
     in property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
     in property <length> font-size: Theme.tokens.typography.body;
     in property <int> selection-anchor: 0;
     in property <int> selection-focus: 0;
-    // Approximate relative luminance of a colour (a square-law gamma stands in
-    // for the sRGB curve), from 0 (black) to 1 (white).
+    // Estimate relative luminance for contrast checks.
     pure function luminance(c: color) -> float {
         return (0.2126 * c.red * c.red + 0.7152 * c.green * c.green + 0.0722 * c.blue * c.blue) / 65025.0;
     }
     pure function contrast(a: float, b: float) -> float {
         return (max(a, b) + 0.05) / (min(a, b) + 0.05);
     }
-    // The line between table cells, chosen against the fill it sits on: the soft
-    // page-muted grey where that reaches 3:1, else white on a dark fill, else ink.
+    // Choose a separator that reaches 3:1 contrast against the cell fill.
     pure function table-line(fill: float) -> color {
         return root.contrast(root.luminance(Theme.palette().paper-muted), fill) >= 3.0
             ? Theme.palette().paper-muted
@@ -231,6 +236,8 @@ component WriterDocumentEditor inherits Rectangle {
     callback pointer-released(length, length);
     callback pointer-cancelled;
     callback key-pressed(event: KeyEvent) -> EventResult;
+
+    public function focus-editor() { editor.focus(); }
 
     horizontal-stretch: 1;
     vertical-stretch: 1;
@@ -248,14 +255,15 @@ component WriterDocumentEditor inherits Rectangle {
     focus-touch := TouchArea { clicked => { editor.focus(); } }
 
     if root.text == "" : Text {
-        x: 0px;
+        // Keep the empty-page prompt clear of the insertion caret at column one.
+        x: 2px * root.page-zoom;
         y: 0px;
-        width: root.width;
+        width: max(0px, root.width - 2px * root.page-zoom);
         height: root.height;
         text: root.placeholder;
         font-family: Theme.document-font-family;
         font-size: root.font-size;
-        color: Theme.palette().paper-muted;
+        color: root.page-appearance == "black" ? #AAAAAA : Theme.palette().paper-muted;
         vertical-alignment: top;
         wrap: word-wrap;
         accessible-role: none;
@@ -293,10 +301,7 @@ component WriterDocumentEditor inherits Rectangle {
         for cell in root.table-cell-rects : Rectangle {
             x: cell.x * root.page-zoom;
             y: cell.y * root.page-zoom;
-            // A table cell draws its border inside its own box. Reaching one border
-            // width past the right and bottom edges puts each shared line where the
-            // neighbour's left or top border is, so every interior line is drawn once
-            // rather than as two adjacent borders.
+            // Extend right/bottom borders into neighbours so shared edges draw once.
             width: max(1px, cell.width * root.page-zoom)
                 + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
             height: max(1px, cell.height * root.page-zoom)
@@ -400,9 +405,7 @@ component WriterDocumentEditor inherits Rectangle {
             accessible-role: none;
         }
         for block in root.render-blocks : Text {
-            // A list marker ends a small gap before its item's text, inside
-            // the room the layout reserves left of that text (text_start_pt).
-            // The text column is the layout's own, so caret and selection align.
+            // The layout reserves this gutter so list markers align with text.
             x: block.x * root.page-zoom - 4px * root.page-zoom - self.width;
             y: block.y * root.page-zoom;
             width: max(14px, block.marker.character-count * block.font-size * 0.62) * root.page-zoom;
@@ -411,7 +414,7 @@ component WriterDocumentEditor inherits Rectangle {
             font-family: Theme.document-font-family;
             visible: block.marker != "";
             font-size: block.font-size * root.page-zoom;
-            color: Theme.palette().paper-ink;
+            color: root.page-appearance == "black" ? #FFFFFF : #000000;
             horizontal-alignment: right;
             vertical-alignment: top;
             accessible-role: none;
@@ -422,9 +425,8 @@ component WriterDocumentEditor inherits Rectangle {
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             accessible-role: none;
-            property <color> ink: Theme.active-theme == "high-contrast" && block.table-cell
-                ? Theme.palette().paper-ink
-                : block.has-color ? block.color : Theme.palette().paper-ink;
+            property <color> ink: block.has-color ? block.color
+                : root.page-appearance == "black" ? #FFFFFF : #000000;
             for tile in block.glyph-tiles : Image {
                 x: tile.x * root.page-zoom;
                 y: tile.y * root.page-zoom;
@@ -434,9 +436,7 @@ component WriterDocumentEditor inherits Rectangle {
                 image-fit: fill;
                 accessible-role: none;
             }
-            // One Text per typed segment. A row of plain text is one segment
-            // that the Text aligns and wraps itself; a row with several looks
-            // or with rules is positioned segment by segment from Rust.
+            // Uniform rows wrap in Slint; styled rows use Rust-measured positions.
             for segment in block.segments : Text {
                 x: block.positioned ? segment.x * root.page-zoom : 0px;
                 y: block.positioned ? segment.y * root.page-zoom : 0px;
@@ -447,12 +447,15 @@ component WriterDocumentEditor inherits Rectangle {
                     ? max(block.font-size * 1.4, block.height - segment.y) * root.page-zoom
                     : parent.height;
                 text: segment.text;
-                visible: block.glyph-tiles.length == 0;
+                // Keep an accessible text node while glyph tiles provide the visible pixels.
+                accessible-role: text;
+                accessible-label: segment.text;
+                opacity: block.glyph-tiles.length == 0 ? 1.0 : 0.0;
                 font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
                 font-size: segment.size * 1px * root.page-zoom;
                 font-weight: segment.weight;
                 font-italic: segment.italic;
-                color: parent.ink;
+                color: segment.has-color ? segment.color : parent.ink;
                 wrap: block.positioned ? TextWrap.no-wrap : TextWrap.word-wrap;
                 horizontal-alignment: !block.positioned && block.alignment == 1
                     ? TextHorizontalAlignment.center
@@ -484,8 +487,7 @@ component WriterDocumentEditor inherits Rectangle {
             accessible-role: none;
         }
         for selection in root.selection-rects : Rectangle {
-            // A caret stands a fixed gap before its position, so the glyph there
-            // never touches it. The gap scales with the page.
+            // Keep the caret clear of its glyph at every zoom.
             property <length> mark-width: max(1px, selection.width * root.page-zoom);
             x: selection.caret
                 ? selection.x * root.page-zoom - 2px * root.page-zoom - mark-width
@@ -493,9 +495,8 @@ component WriterDocumentEditor inherits Rectangle {
             y: selection.y * root.page-zoom;
             width: mark-width;
             height: max(1px, selection.height * root.page-zoom);
-            background: Theme.active-theme == "high-contrast"
-                ? Theme.palette().paper-ink
-                : selection.has-color ? selection.color : Theme.palette().paper-ink;
+            background: selection.has-color ? selection.color
+                : root.page-appearance == "black" ? #FFFFFF : #000000;
             visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
             accessible-role: none;
         }
@@ -575,15 +576,19 @@ export component WriterPageCanvas inherits Rectangle {
     private property <length> measured-width: page-scroll.width;
     private property <length> measured-height: page-scroll.height;
     in property <int> page-count: 1;
-    // Only the sheets near the viewport are drawn; a long document would
-    // otherwise keep one shadowed rectangle alive per page.
+    // Draw only sheets near the viewport in long documents.
     in property <int> visible-page-first: 0;
     in property <int> visible-page-count: 1;
     in property <length> page-stack-height: 842px;
     in property <float> page-gap-pt: 24.0;
     in property <float> page-width-pt: 595.0;
     in property <float> page-height-pt: 842.0;
-    in property <float> page-margin-pt: 72.0;
+    in property <string> page-appearance: "white";
+    in property <WriterPageGeometry> page-geometry: {
+        width_mm: 210.0, height_mm: 297.0,
+        top_mm: 25.4, bottom_mm: 25.4, left_mm: 25.4, right_mm: 25.4,
+        margin_top_pt: 72.0, margin_bottom_pt: 72.0, margin_left_pt: 72.0, margin_right_pt: 72.0,
+    };
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
     callback pointer-pressed(length, length, bool);
@@ -594,6 +599,8 @@ export component WriterPageCanvas inherits Rectangle {
     callback page-zoom-changed(float);
     callback page-scroll-changed(length, length);
     callback key-pressed(event: KeyEvent) -> EventResult;
+
+    public function focus-document() { document-editor.focus-editor(); }
 
     background: Theme.palette().canvas;
     horizontal-stretch: 1;
@@ -628,15 +635,15 @@ export component WriterPageCanvas inherits Rectangle {
             // (loom_writer_core::PageSetup::page_style) in points.
             private property <length> raw-width: root.page-width-pt * 1px;
             private property <length> raw-height: root.page-height-pt * 1px;
-            private property <length> page-padding: root.page-margin-pt * 1px * root.page-zoom;
-            // Gap between sheets, from the same constant the layout uses.
+            private property <length> top-padding: root.page-geometry.margin_top_pt * 1px * root.page-zoom;
+            private property <length> bottom-padding: root.page-geometry.margin_bottom_pt * 1px * root.page-zoom;
+            private property <length> left-padding: root.page-geometry.margin_left_pt * 1px * root.page-zoom;
+            private property <length> right-padding: root.page-geometry.margin_right_pt * 1px * root.page-zoom;
             property <length> gap: root.page-gap-pt * 1px * root.page-zoom;
 
             x: max(24px, (page-scroll.width - self.width) / 2);
             y: 24px;
             width: self.raw-width * root.page-zoom;
-            // The container spans the whole stack; the paper itself is drawn
-            // one sheet per page below, at the pitch the layout projects.
             height: root.page-count > 1
                 ? root.page-stack-height * root.page-zoom
                 : self.raw-height * root.page-zoom;
@@ -650,7 +657,7 @@ export component WriterPageCanvas inherits Rectangle {
                 border-radius: Theme.tokens.metrics.radius-small;
                 border-width: 1px;
                 border-color: Theme.palette().border;
-                background: Theme.palette().paper;
+                background: root.page-appearance == "black" ? #000000 : #FFFFFF;
                 // A tight shadow: it must not reach the sheet above across the gap.
                 drop-shadow-blur: 8px;
                 drop-shadow-offset-y: 1px;
@@ -658,10 +665,10 @@ export component WriterPageCanvas inherits Rectangle {
                 accessible-role: none;
             }
             VerticalLayout {
-                padding-top: page.page-padding;
-                padding-bottom: page.page-padding;
-                padding-left: page.page-padding;
-                padding-right: page.page-padding;
+                padding-top: page.top-padding;
+                padding-bottom: page.bottom-padding;
+                padding-left: page.left-padding;
+                padding-right: page.right-padding;
                 spacing: 0px;
 
                 document-editor := WriterDocumentEditor {
@@ -674,6 +681,7 @@ export component WriterPageCanvas inherits Rectangle {
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     page-zoom: root.page-zoom;
+                    page-appearance: root.page-appearance;
                     font-size: 11px * root.page-zoom;
                     edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                     selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
@@ -686,10 +694,30 @@ export component WriterPageCanvas inherits Rectangle {
             }
             // An icon-only chip: its label is spoken, never drawn, so it cannot
             // run past the page edge at any zoom or text scale.
+            for header-footer-line in WriterHeaderFooterState.page-lines : WriterHeaderFooterText {
+                line: header-footer-line;
+                page-zoom: root.page-zoom;
+                page-appearance: root.page-appearance;
+            }
+            for footnote-line in WriterFootnoteState.page-lines : WriterFootnoteBodyLine {
+                line: footnote-line;
+                page-zoom: root.page-zoom;
+                page-appearance: root.page-appearance;
+            }
+            for footnote-reference in WriterFootnoteState.page-references : WriterFootnoteReferenceText {
+                reference: footnote-reference;
+                page-zoom: root.page-zoom;
+                page-appearance: root.page-appearance;
+            }
+            WriterRevisionMarkup {
+                page-zoom: root.page-zoom;
+                left-margin: page.left-padding;
+                top-margin: page.top-padding;
+            }
             for comment in root.comment-rects : CommentMarker {
                 visible: comment.marker;
-                x: page.width - page.page-padding / 2 - self.width / 2;
-                y: page.page-padding + comment.y * root.page-zoom - self.height / 2;
+                x: page.width - page.right-padding / 2 - self.width / 2;
+                y: page.top-padding + comment.y * root.page-zoom - self.height / 2;
                 label: comment.label;
                 clicked => { root.activate-comment(comment.comment-id); }
             }
@@ -697,7 +725,6 @@ export component WriterPageCanvas inherits Rectangle {
     }
 }
 
-/// App-local status surface using canonical LoomStatusBar.
 export component WriterStatusBar inherits LoomStatusBar {
     // The shared bar is a fixed 28 px, which left the 2.0x caption 2 px of room
     // below. Writer's bar grows to hold its own caption and never shrinks below

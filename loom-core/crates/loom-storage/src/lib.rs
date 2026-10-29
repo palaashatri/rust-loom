@@ -3,8 +3,12 @@
 //! autosave management, failure injection, and append-only recovery journaling with
 //! torn-tail self-healing and interior corruption detection.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows_replace;
 
 use loom_package::zip::sha256;
 use std::fmt;
@@ -96,6 +100,10 @@ pub enum FailPoint {
     JournalPartialWrite,
     /// Fail before syncing a recovery-journal entry.
     JournalBeforeSync,
+    /// Write half a journal record, then fail to truncate the failed tail.
+    JournalPartialWriteRollbackTruncate,
+    /// Write half a journal record, truncate it, then fail to sync the rollback.
+    JournalPartialWriteRollbackSync,
 }
 
 thread_local! {
@@ -118,6 +126,8 @@ fn check_fail_point(fp: FailPoint) -> Result<()> {
             FailPoint::JournalBeforeWrite => "JournalBeforeWrite",
             FailPoint::JournalPartialWrite => "JournalPartialWrite",
             FailPoint::JournalBeforeSync => "JournalBeforeSync",
+            FailPoint::JournalPartialWriteRollbackTruncate => "JournalRollbackTruncate",
+            FailPoint::JournalPartialWriteRollbackSync => "JournalRollbackSync",
         }));
     }
     Ok(())
@@ -127,12 +137,13 @@ fn active_fail_point() -> Option<FailPoint> {
     FAIL_POINT.with(|cell| cell.get())
 }
 
-/// Atomically write bytes to `path` with durable fsync and unique temporary files:
-/// 1. Creates a unique temporary file in the destination's parent directory.
-/// 2. Writes data and calls `sync_all()`.
-/// 3. Closes temporary file handle.
-/// 4. Replaces target file via atomic rename.
-/// 5. Durably syncs parent directory on supported platforms.
+/// Writes `data` through a same-directory temporary file, then replaces `path` after syncing the file.
+///
+/// On Windows, an existing destination is replaced through the recoverable replacement path.
+///
+/// # Errors
+/// Returns an error if creating the parent or temporary file, writing or syncing the data, or replacing the destination fails.
+
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -176,14 +187,18 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
 
     check_fail_point(FailPoint::BeforeRename)?;
 
-    // On Windows, rename over an existing file may fail unless replaced
     #[cfg(windows)]
-    {
-        if path.exists() {
-            let _ = fs::remove_file(path);
-        }
+    if path.exists() {
+        // ReplaceFileW keeps the existing target recoverable until replacement
+        // succeeds. Its backup path is in the same directory and volume.
+        windows_replace::replace_existing(path, &tmp_path)?;
+    } else {
+        // A newly created target has nothing to preserve. Rename fails rather
+        // than overwriting if another process creates it after the exists check.
+        fs::rename(&tmp_path, path)?;
     }
 
+    #[cfg(not(windows))]
     fs::rename(&tmp_path, path)?;
 
     // Durably sync directory on Unix
@@ -222,6 +237,7 @@ pub struct RecoveryJournal {
     path: PathBuf,
     entries: Vec<JournalEntry>,
     next_seq: u64,
+    append_blocked: Option<String>,
 }
 
 impl RecoveryJournal {
@@ -249,11 +265,17 @@ impl RecoveryJournal {
             path: path.to_path_buf(),
             entries,
             next_seq,
+            append_blocked: None,
         })
     }
 
     /// Append an operation entry and durably sync it to disk.
     pub fn append(&mut self, op: impl Into<String>, payload: Vec<u8>) -> Result<JournalEntry> {
+        if let Some(reason) = &self.append_blocked {
+            return Err(StorageError::Corruption(format!(
+                "journal append is blocked after rollback failed ({reason}); reopen before retrying"
+            )));
+        }
         let next_seq = self.next_seq.checked_add(1).ok_or_else(|| {
             StorageError::Corruption("journal sequence is exhausted at u64::MAX".into())
         })?;
@@ -282,42 +304,49 @@ impl RecoveryJournal {
 
         let original_len = file.metadata()?.len();
         if let Err(error) = check_fail_point(FailPoint::JournalBeforeWrite) {
-            return Err(rollback_journal_append(&mut file, original_len, error));
+            return Err(self.rollback_append_error(&mut file, original_len, error));
         }
-        if active_fail_point() == Some(FailPoint::JournalPartialWrite) {
+        if matches!(
+            active_fail_point(),
+            Some(
+                FailPoint::JournalPartialWrite
+                    | FailPoint::JournalPartialWriteRollbackTruncate
+                    | FailPoint::JournalPartialWriteRollbackSync
+            )
+        ) {
             let partial_len = (encoded.len() / 2).max(1).min(encoded.len());
             if let Err(error) = file.write_all(&encoded[..partial_len]) {
-                return Err(rollback_journal_append(
+                return Err(self.rollback_append_error(
                     &mut file,
                     original_len,
                     StorageError::from(error),
                 ));
             }
-            return Err(rollback_journal_append(
+            return Err(self.rollback_append_error(
                 &mut file,
                 original_len,
                 StorageError::InjectedFailure("JournalPartialWrite"),
             ));
         }
         if let Err(error) = file.write_all(&encoded) {
-            return Err(rollback_journal_append(
+            return Err(self.rollback_append_error(
                 &mut file,
                 original_len,
                 StorageError::from(error),
             ));
         }
         if let Err(error) = file.flush() {
-            return Err(rollback_journal_append(
+            return Err(self.rollback_append_error(
                 &mut file,
                 original_len,
                 StorageError::from(error),
             ));
         }
         if let Err(error) = check_fail_point(FailPoint::JournalBeforeSync) {
-            return Err(rollback_journal_append(&mut file, original_len, error));
+            return Err(self.rollback_append_error(&mut file, original_len, error));
         }
         if let Err(error) = file.sync_all() {
-            return Err(rollback_journal_append(
+            return Err(self.rollback_append_error(
                 &mut file,
                 original_len,
                 StorageError::from(error),
@@ -327,6 +356,24 @@ impl RecoveryJournal {
         self.entries.push(e.clone());
         self.next_seq = next_seq;
         Ok(e)
+    }
+
+    fn rollback_append_error(
+        &mut self,
+        file: &mut File,
+        original_len: u64,
+        append_error: StorageError,
+    ) -> StorageError {
+        match rollback_journal_append(file, original_len) {
+            Ok(()) => append_error,
+            Err(rollback_error) => {
+                let reason = rollback_error.to_string();
+                self.append_blocked = Some(reason.clone());
+                StorageError::Io(format!(
+                    "journal append failed ({append_error}); rollback failed ({reason}); reopen before retrying"
+                ))
+            }
+        }
     }
 
     /// Return all verified journal entries.
@@ -349,6 +396,7 @@ impl RecoveryJournal {
         atomic_write(&self.path, b"")?;
         self.entries.clear();
         self.next_seq = 1;
+        self.append_blocked = None;
         Ok(())
     }
 
@@ -358,18 +406,17 @@ impl RecoveryJournal {
     }
 }
 
-/// Return the original append error after removing any bytes written by the
-/// failed attempt. The journal remains positioned at the same verified tail,
-/// so a caller can retry without consuming a sequence or appending behind a
-/// torn record.
-fn rollback_journal_append(
-    file: &mut File,
-    original_len: u64,
-    error: StorageError,
-) -> StorageError {
-    let _ = file.set_len(original_len);
-    let _ = file.sync_all();
-    error
+/// Truncate and sync any bytes written by the failed append.
+fn rollback_journal_append(file: &mut File, original_len: u64) -> Result<()> {
+    if active_fail_point() == Some(FailPoint::JournalPartialWriteRollbackTruncate) {
+        return Err(StorageError::InjectedFailure("JournalRollbackTruncate"));
+    }
+    file.set_len(original_len)?;
+    if active_fail_point() == Some(FailPoint::JournalPartialWriteRollbackSync) {
+        return Err(StorageError::InjectedFailure("JournalRollbackSync"));
+    }
+    file.sync_all()?;
+    Ok(())
 }
 
 fn encode_entry(e: &JournalEntry, out: &mut Vec<u8>) {
@@ -694,6 +741,25 @@ mod tests {
     }
 
     #[test]
+    fn failed_journal_open_does_not_consume_sequence() {
+        let dir = temp_dir("journal-failed-open");
+        let p = dir.join("recovery.journal");
+        let mut journal = RecoveryJournal::open(&p).unwrap();
+        fs::create_dir(&p).unwrap();
+
+        let error = journal.append("edit", vec![1, 2, 3]).unwrap_err();
+        assert!(matches!(error, StorageError::Io(_)));
+        fs::remove_dir(&p).unwrap();
+
+        let entry = journal.append("edit", vec![4, 5, 6]).unwrap();
+        assert_eq!(entry.seq, 1);
+        let reopened = RecoveryJournal::open(&p).unwrap();
+        assert_eq!(reopened.entries()[0].seq, 1);
+        assert_eq!(reopened.entries()[0].payload, vec![4, 5, 6]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn partial_journal_write_is_truncated_before_retry() {
         let dir = temp_dir("journal-partial-write");
         let p = dir.join("recovery.journal");
@@ -727,6 +793,56 @@ mod tests {
         let reopened = RecoveryJournal::open(&p).unwrap();
         assert_eq!(reopened.entries()[0].payload, vec![4, 5, 6]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rollback_failures_block_the_handle_and_reopen_recovers_next_sequence() {
+        for (fail_point, suffix, rollback_error) in [
+            (
+                FailPoint::JournalPartialWriteRollbackTruncate,
+                "truncate",
+                "injected failure at: JournalRollbackTruncate",
+            ),
+            (
+                FailPoint::JournalPartialWriteRollbackSync,
+                "sync",
+                "injected failure at: JournalRollbackSync",
+            ),
+        ] {
+            let dir = temp_dir(&format!("journal-rollback-{suffix}"));
+            let p = dir.join("recovery.journal");
+            let mut journal = RecoveryJournal::open(&p).unwrap();
+            assert_eq!(journal.append("seed", vec![1]).unwrap().seq, 1);
+
+            set_fail_point(Some(fail_point));
+            let append_error = journal.append("failed", vec![2, 3, 4]).unwrap_err();
+            set_fail_point(None);
+            assert!(matches!(&append_error, StorageError::Io(_)));
+            let diagnostic = append_error.to_string();
+            assert!(
+                diagnostic.contains("injected failure at: JournalPartialWrite"),
+                "{diagnostic}"
+            );
+            assert!(diagnostic.contains(rollback_error), "{diagnostic}");
+
+            let failed_tail_len = fs::metadata(&p).unwrap().len();
+            let blocked_error = journal.append("same-handle-retry", vec![5]).unwrap_err();
+            assert!(matches!(blocked_error, StorageError::Corruption(_)));
+            assert_eq!(fs::metadata(&p).unwrap().len(), failed_tail_len);
+            drop(journal);
+
+            let mut reopened = RecoveryJournal::open(&p).unwrap();
+            assert_eq!(reopened.len(), 1);
+            assert_eq!(reopened.entries()[0].seq, 1);
+            assert_eq!(reopened.entries()[0].op, "seed");
+            assert_eq!(reopened.append("recovered", vec![6]).unwrap().seq, 2);
+
+            let final_reopen = RecoveryJournal::open(&p).unwrap();
+            assert_eq!(final_reopen.len(), 2);
+            assert_eq!(final_reopen.entries()[1].seq, 2);
+            assert_eq!(final_reopen.entries()[1].op, "recovered");
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

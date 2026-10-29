@@ -71,7 +71,9 @@ impl WriterDocument {
             // columns to every block) prevents long headings from producing
             // fragments that the renderer cannot fit on the page.
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let line_height = font_size * style.line_height;
+            let line_height = block
+                .object_display_size(usable_width, usable_height)
+                .map_or(font_size * style.line_height, |(_, height)| height);
             let ranges = reference_wrap_by_width(block, font_size, usable_width);
             let page_has_content = |pages: &Vec<DocumentPage>| {
                 pages.last().is_some_and(|page| !page.fragments.is_empty())
@@ -85,7 +87,9 @@ impl WriterDocument {
                 }
                 if let Some(next) = self.blocks.get(block_index + 1) {
                     let next_size = style.font_size_for_kind(next.kind.as_str());
-                    let next_line = next_size * style.line_height;
+                    let next_line = next
+                        .object_display_size(usable_width, usable_height)
+                        .map_or(next_size * style.line_height, |(_, height)| height);
                     let next_lines = reference_wrap_by_width(next, next_size, usable_width).len();
                     let wanted = if next_lines >= 3 { 2 } else { 1 };
                     let mut probe = after;
@@ -150,14 +154,19 @@ impl WriterDocument {
                     height_used = 0.0;
                 }
             }
-            // Paragraph spacing consumes one body line unless the next block
-            // starts on a fresh page. This mirrors `layout`, which adds the
-            // same gap only between fragments that share a page.
-            if block_index + 1 < self.blocks.len()
-                && height_used > 0.0
-                && height_used + body_line <= usable_height + f32::EPSILON
+            // Keep paragraph spacing only when the next line also fits.
+            if let Some(next) = self
+                .blocks
+                .get(block_index + 1)
+                .filter(|_| height_used > 0.0)
             {
-                height_used += body_line;
+                let next_size = style.font_size_for_kind(next.kind.as_str());
+                let next_line_height = next
+                    .object_display_size(usable_width, usable_height)
+                    .map_or(next_size * style.line_height, |(_, height)| height);
+                if height_used + body_line + next_line_height <= usable_height + f32::EPSILON {
+                    height_used += body_line;
+                }
             }
         }
         Ok(pages)
@@ -185,6 +194,37 @@ impl WriterDocument {
         }
 
         let pages = self.reference_paginate(style)?;
+        let usable_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
+        // Keep reference wrapping independent; share only glyph advances for its own ranges.
+        let mut shaped_widths = std::collections::HashMap::new();
+        for block in &self.blocks {
+            if block.kind == crate::TABLE_BLOCK_KIND
+                || block
+                    .object_display_size(usable_width, usable_height)
+                    .is_some()
+            {
+                continue;
+            }
+            let ranges: Vec<_> = pages
+                .iter()
+                .flat_map(|page| page.fragments.iter())
+                .filter(|fragment| fragment.block_id == block.id)
+                .map(|fragment| fragment.start..fragment.end)
+                .collect();
+            let font_size = style.font_size_for_kind(block.kind.as_str());
+            let shaped_lines = super::shaped_line::shape_block_lines(
+                block,
+                &ranges,
+                font_size,
+                block.text_column_width(style),
+            );
+            for (range, shaped) in ranges.into_iter().zip(shaped_lines) {
+                if let Some(shaped) = shaped {
+                    shaped_widths.insert((block.id, range.start, range.end), shaped.width_pt());
+                }
+            }
+        }
         let zoom = viewport.zoom;
         let scroll_x = viewport.scroll_x.max(0.0);
         let scroll_y = viewport.scroll_y.max(0.0);
@@ -220,13 +260,25 @@ impl WriterDocument {
                 let font_size = block
                     .map(|block| style.font_size_for_kind(block.kind.as_str()))
                     .unwrap_or(style.body_font_size_pt);
-                let line_height = font_size * style.line_height * zoom;
+                let object_size =
+                    block.and_then(|block| block.object_display_size(usable_width, usable_height));
+                let line_height =
+                    object_size.map_or(font_size * style.line_height, |(_, height)| height) * zoom;
                 let runs = block.map_or(&[][..], |block| block.runs.as_slice());
                 // The line's width is its place in the whole block's text.
                 let line_width = match block {
-                    Some(block) => {
-                        reference_measure(block, font_size).advance(source.start, source.end)
-                    }
+                    Some(block) => object_size.map_or_else(
+                        || {
+                            shaped_widths
+                                .get(&(block.id, source.start, source.end))
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    reference_measure(block, font_size)
+                                        .advance(source.start, source.end)
+                                })
+                        },
+                        |(width, _)| width,
+                    ),
                     None => crate::text_metrics::text_advance(
                         &source.text,
                         source.start,
@@ -248,15 +300,32 @@ impl WriterDocument {
                     bounds: fragment_bounds,
                 });
                 line_y += line_height;
-                let next_block_id = page
+                if let Some(next) = page
                     .fragments
                     .get(fragment_index + 1)
-                    .map(|fragment| fragment.block_id);
-                if next_block_id.is_some() && next_block_id != Some(source.block_id) {
-                    // Match the paginator's conservative paragraph break while
-                    // allowing larger heading metrics to occupy their actual
-                    // visual line box.
-                    line_y += body_line_height;
+                    .filter(|fragment| fragment.block_id != source.block_id)
+                {
+                    let next_height = self
+                        .blocks
+                        .iter()
+                        .find(|block| block.id == next.block_id)
+                        .map(|block| {
+                            block
+                                .object_display_size(usable_width, usable_height)
+                                .map_or_else(
+                                    || {
+                                        style.font_size_for_kind(block.kind.as_str())
+                                            * style.line_height
+                                            * zoom
+                                    },
+                                    |(_, height)| height * zoom,
+                                )
+                        })
+                        .unwrap_or(body_line_height);
+                    let body_bottom = page_y + (style.height_pt - style.margin_bottom_pt) * zoom;
+                    if line_y + body_line_height + next_height <= body_bottom + f32::EPSILON {
+                        line_y += body_line_height;
+                    }
                 }
             }
         }

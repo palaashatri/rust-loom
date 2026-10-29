@@ -13,6 +13,7 @@ use crate::{WriterError, WriterPaintedRun, WriterShapedVisualLine};
 #[derive(Default)]
 pub(crate) struct FontRegistry {
     faces: Vec<RegisteredFace>,
+    appearance: crate::PageAppearance,
 }
 
 struct RegisteredFace {
@@ -21,6 +22,13 @@ struct RegisteredFace {
 }
 
 impl FontRegistry {
+    pub(crate) fn for_appearance(appearance: crate::PageAppearance) -> Self {
+        Self {
+            appearance,
+            ..Self::default()
+        }
+    }
+
     fn id_for(
         &mut self,
         pdf: &mut PdfDocument,
@@ -41,65 +49,68 @@ impl FontRegistry {
         Ok(pdf_id)
     }
 }
+pub(crate) struct PdfLine<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) line_top_pdf: f32,
+    pub(crate) text_origin_x: f32,
+    pub(crate) shaped_line: &'a WriterShapedVisualLine,
+}
+
+pub(crate) struct PdfPrefix<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) origin_x: f32,
+    pub(crate) shaped_line: &'a WriterShapedVisualLine,
+}
+
+/// Add a PDF-only fallback for spans without a source foreground color.
+pub(crate) fn with_automatic_ink(block: &crate::RichBlock) -> crate::RichBlock {
+    let mut block = block.clone();
+    let end = block.text.len_bytes();
+    if end > 0 {
+        // CharacterStyle defaults to explicit black; PDF auto ink is appearance-aware.
+        block.runs.push(loom_text::StyleRun {
+            start: 0,
+            end,
+            style: loom_text::CharacterStyle {
+                color: None,
+                ..Default::default()
+            },
+        });
+    }
+    block
+}
 
 pub(crate) fn draw_line(
     pdf: &mut PdfDocument,
     fonts: &mut FontRegistry,
     page: PageIndex,
     context: &str,
-    text: &str,
-    line_top_pdf: f32,
-    text_origin_x: f32,
-    shaped_line: &WriterShapedVisualLine,
+    line: PdfLine<'_>,
 ) -> Result<(), WriterError> {
-    draw_line_with_prefix(
-        pdf,
-        fonts,
-        page,
-        context,
-        None,
-        text,
-        line_top_pdf,
-        text_origin_x,
-        shaped_line,
-    )
+    draw_line_with_prefix(pdf, fonts, page, context, None, line)
 }
 
-pub(crate) fn draw_line_with_prefix<'a>(
+pub(crate) fn draw_line_with_prefix(
     pdf: &mut PdfDocument,
     fonts: &mut FontRegistry,
     page: PageIndex,
     context: &str,
-    prefix: Option<(&'a str, &'a WriterShapedVisualLine, f32)>,
-    text: &'a str,
-    line_top_pdf: f32,
-    text_origin_x: f32,
-    shaped_line: &'a WriterShapedVisualLine,
+    prefix: Option<PdfPrefix<'_>>,
+    line: PdfLine<'_>,
 ) -> Result<(), WriterError> {
     let mut positioned = Vec::new();
-    if let Some((prefix_text, prefix_line, prefix_origin_x)) = prefix {
-        let prefix_top = line_top_pdf - shaped_line.ascent_pt() + prefix_line.ascent_pt();
-        append_positioned_runs(
-            pdf,
-            fonts,
-            context,
-            prefix_text,
-            prefix_top,
-            prefix_origin_x,
-            prefix_line,
-            &mut positioned,
-        )?;
+    if let Some(prefix) = prefix {
+        let prefix_top =
+            line.line_top_pdf - line.shaped_line.ascent_pt() + prefix.shaped_line.ascent_pt();
+        let prefix_line = PdfLine {
+            text: prefix.text,
+            line_top_pdf: prefix_top,
+            text_origin_x: prefix.origin_x,
+            shaped_line: prefix.shaped_line,
+        };
+        append_positioned_runs(pdf, fonts, context, &prefix_line, &mut positioned)?;
     }
-    append_positioned_runs(
-        pdf,
-        fonts,
-        context,
-        text,
-        line_top_pdf,
-        text_origin_x,
-        shaped_line,
-        &mut positioned,
-    )?;
+    append_positioned_runs(pdf, fonts, context, &line, &mut positioned)?;
     pdf.draw_styled_shaped_text_line(page, &positioned)
         .map_err(|error| pdf_error(format!("{context}: {error}")))
 }
@@ -108,13 +119,10 @@ fn append_positioned_runs<'a>(
     pdf: &mut PdfDocument,
     fonts: &mut FontRegistry,
     context: &str,
-    text: &'a str,
-    line_top_pdf: f32,
-    text_origin_x: f32,
-    shaped_line: &'a WriterShapedVisualLine,
+    line: &PdfLine<'a>,
     positioned: &mut Vec<StyledPositionedShapedRun<'a>>,
 ) -> Result<(), WriterError> {
-    let painted_runs = shaped_line.painted_runs();
+    let painted_runs = line.shaped_line.painted_runs();
     for (run_index, run) in painted_runs.iter().enumerate() {
         if !run.variations.is_empty() {
             return Err(pdf_error(format!(
@@ -127,7 +135,7 @@ fn append_positioned_runs<'a>(
     source_runs.sort_by_key(|run| run.source_range.start);
 
     for (run_index, run) in source_runs.into_iter().enumerate() {
-        let Some(run_text) = text.get(run.source_range.clone()) else {
+        let Some(run_text) = line.text.get(run.source_range.clone()) else {
             return Err(pdf_error(format!(
                 "{context} run {run_index} has an invalid source range"
             )));
@@ -138,14 +146,14 @@ fn append_positioned_runs<'a>(
                 run.face.collection_index()
             ))
         })?;
-        let baseline = line_top_pdf - shaped_line.ascent_pt() + run.baseline_shift_pt;
+        let baseline = line.line_top_pdf - line.shaped_line.ascent_pt() + run.baseline_shift_pt;
         let foreground_rgba = if run.foreground_color_explicit {
             run.rgba
         } else {
-            [0, 0, 0, 255]
+            fonts.appearance.auto_ink_rgba()
         };
         let shaped = PositionedShapedRun {
-            x: text_origin_x + run.x_pt,
+            x: line.text_origin_x + run.x_pt,
             y: baseline,
             text: run_text,
             shaped: &run.shaped,

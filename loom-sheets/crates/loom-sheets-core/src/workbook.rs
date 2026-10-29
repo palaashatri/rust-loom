@@ -345,7 +345,7 @@ fn eval_workbook_node(
 
 /// What a formula cell shows: a formula that only points at a blank cell
 /// (`=C7`) is 0, as in Excel, not a blank that falls back to its own text.
-fn formula_result(value: Value) -> Value {
+pub(crate) fn formula_result(value: Value) -> Value {
     if matches!(value, Value::Empty) {
         Value::Number(0.0)
     } else {

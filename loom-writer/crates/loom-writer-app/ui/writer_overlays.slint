@@ -4,10 +4,16 @@ import { LoomWindowResizeEdges, LocalMenuEntry, LocalMenuPopup } from "foundatio
 import { FindBar, FindBarOverlay } from "find_bar.slint";
 import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
 import { DocxImportWarningDialog } from "docx_import_warning.slint";
+import { DocxSaveWarningDialog, DocxSaveWarningState } from "docx_save_warning.slint";
+import { DocxExportReportDialog } from "docx_export_report.slint";
 import { WriterPaletteHost } from "palette_host.slint";
 import { PictureAltDialog } from "writer_components.slint";
 import { Theme } from "theme.slint";
 import { WriterTextColorDialog } from "writer_text_color_dialog.slint";
+import { WriterHeaderFooterDialog, WriterHeaderFooterState } from "writer_header_footer.slint";
+import { WriterFootnoteDialog, WriterFootnoteState } from "writer_footnotes.slint";
+import { WriterReviewPanel, WriterReviewState } from "writer_review.slint";
+import { WriterPdfExportDialog } from "writer_pdf_export_dialog.slint";
 import { WriterFormatState } from "alignment_state.slint";
 
 /// Dialogs, the in-window menu popup, the command palette, the find bar and the
@@ -16,10 +22,10 @@ import { WriterFormatState } from "alignment_state.slint";
 export component WriterOverlays inherits Rectangle {
     in property <bool> template-chooser-open;
     in property <int> template-refocus-tick;
-    in-out property <int> template-selected;
+    in-out property <string> template-selected;
     in-out property <int> template-category;
     callback cancel-template;
-    callback create-template(int);
+    callback create-template(string);
     in property <bool> save-changes-open;
     in property <string> save-changes-document;
     in property <bool> save-changes-closing;
@@ -30,11 +36,13 @@ export component WriterOverlays inherits Rectangle {
     in property <string> docx-import-warning-message;
     callback docx-import-continue;
     callback docx-import-cancel;
+    in-out property <bool> docx-export-report-open;
+    in property <string> docx-export-report-message;
     in property <bool> local-menu-visible;
     in property <[string]> local-menu-labels;
     in property <[LocalMenuEntry]> local-menu-popup-items;
     in-out property <int> local-menu-open-index;
-    in property <int> local-menu-popup-selected-index;
+    in-out property <int> local-menu-popup-selected-index;
     callback local-menu-opened(int);
     callback local-menu-move(int);
     callback menu-closed;
@@ -73,6 +81,14 @@ export component WriterOverlays inherits Rectangle {
     }
 
 PictureAltDialog {}
+    if WriterHeaderFooterState.dialog-open : WriterHeaderFooterDialog {
+        width: root.width;
+        height: root.height;
+    }
+    if WriterFootnoteState.dialog-open : WriterFootnoteDialog {
+        width: root.width;
+        height: root.height;
+    }
     if WriterFormatState.color-dialog-open : WriterTextColorDialog {
         width: root.width;
         height: root.height;
@@ -96,6 +112,22 @@ PictureAltDialog {}
         import-cancel => { root.docx-import-cancel(); }
     }
 
+    if root.docx-export-report-open : DocxExportReportDialog {
+        width: root.width;
+        height: root.height;
+        open <=> root.docx-export-report-open;
+        report-message: root.docx-export-report-message;
+    }
+
+    if DocxSaveWarningState.dialog-open : DocxSaveWarningDialog {
+        width: root.width;
+        height: root.height;
+        open: DocxSaveWarningState.dialog-open;
+        warning-message: DocxSaveWarningState.warning-message;
+        continue-docx => { DocxSaveWarningState.continue-docx(); }
+        cancel-docx => { DocxSaveWarningState.cancel-docx(); }
+    }
+
     LocalMenuPopup {
         x: 0px;
         y: 36px;
@@ -105,7 +137,7 @@ PictureAltDialog {}
         labels: root.local-menu-labels;
         items: root.local-menu-popup-items;
         open-index <=> root.local-menu-open-index;
-        selected-index: root.local-menu-popup-selected-index;
+        selected-index <=> root.local-menu-popup-selected-index;
         menu-opened(index) => { root.local-menu-opened(index); }
         menu-move(direction) => { root.local-menu-move(direction); }
         menu-closed => { root.menu-closed(); }
@@ -137,6 +169,24 @@ PictureAltDialog {}
         width: min(480px * max(1.0, Theme.text-scale), root.width - root.outline-width - root.inspector-width - 32px);
         x: root.rtl ? root.inspector-width + 16px : root.width - root.inspector-width - self.width - 16px;
         y: root.toolbar-bottom + 8px;
+    }
+
+    if WriterReviewState.panel-open : WriterReviewPanel {
+        width: min(420px * max(1.0, Theme.text-scale), root.width - 32px);
+        height: min(460px * max(1.0, Theme.text-scale), root.height - root.toolbar-bottom - 24px);
+        x: root.rtl ? root.inspector-width + 16px : root.width - root.inspector-width - self.width - 16px;
+        y: root.toolbar-bottom + 8px;
+    }
+
+    if WriterReviewState.pdf-export-open : WriterPdfExportDialog {
+        width: root.width;
+        height: root.height;
+        open <=> WriterReviewState.pdf-export-open;
+        export-view(view) => { WriterReviewState.export-pdf-view(view); }
+        cancel => {
+            WriterReviewState.pdf-export-open = false;
+            WriterReviewState.cancel-pdf-export();
+        }
     }
 
     LoomWindowResizeEdges {

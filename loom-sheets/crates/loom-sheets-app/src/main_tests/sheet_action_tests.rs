@@ -71,6 +71,12 @@ fn chart_insert_requires_range_and_can_replace_source() {
     }
     app.invoke_insert_chart();
     let chart = state.current.borrow().chart.clone().unwrap();
+    assert!(app.get_chart_exists());
+    assert!(crate::palette::master_palette(&app)
+        .iter()
+        .any(
+            |command| command.id == "sheets.insert_chart" && command.label == "Change Chart Source"
+        ));
     assert_eq!(chart.start_row, 1);
     assert_eq!(chart.end_row, Some(3));
     assert_eq!(app.get_chart_source_range().as_str(), "A1:B4");
@@ -110,7 +116,16 @@ fn chart_insert_requires_range_and_can_replace_source() {
     ));
     save_workbook(&path, &[state.current.borrow().clone()], 0).unwrap();
     let reopened = load_workbook(&path).unwrap();
-    assert_eq!(reopened.sheets[0].chart, Some(chart));
+    assert_eq!(reopened.sheets[0].chart.as_ref(), Some(&chart));
+    let hidden_app = SheetsApp::new().unwrap();
+    sync_chart_to_app(&hidden_app, &reopened.sheets[0]);
+    assert!(!hidden_app.get_chart_visible());
+    assert!(hidden_app.get_chart_exists());
+    assert!(crate::palette::master_palette(&hidden_app)
+        .iter()
+        .any(
+            |command| command.id == "sheets.insert_chart" && command.label == "Change Chart Source"
+        ));
 
     // A deliberate selection that includes Total must include that row.
     {
@@ -128,6 +143,30 @@ fn chart_insert_requires_range_and_can_replace_source() {
     assert_eq!(categories.row_count(), 4);
     assert_eq!(categories.row_data(3).unwrap().as_str(), "Total");
     assert_eq!(app.get_chart_source_range().as_str(), "A1:B5");
+    assert!(app
+        .get_status_left()
+        .contains("Changed chart source to A1:B5"));
+    let replacement = state.current.borrow().chart.clone().unwrap();
+    assert_eq!(replacement.title, chart.title);
+    assert_eq!(replacement.kind, chart.kind);
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().chart, Some(chart));
+    assert_eq!(app.get_chart_source_range().as_str(), "A1:B4");
+    app.invoke_close_chart();
+    assert!(
+        app.get_chart_exists(),
+        "hiding a chart keeps it in the worksheet model"
+    );
+    assert!(crate::palette::master_palette(&app)
+        .iter()
+        .any(
+            |command| command.id == "sheets.insert_chart" && command.label == "Change Chart Source"
+        ));
+    app.invoke_add_sheet();
+    assert!(!app.get_chart_exists());
+    assert!(crate::palette::master_palette(&app)
+        .iter()
+        .any(|command| command.id == "sheets.insert_chart" && command.label == "Insert Chart"));
     std::fs::remove_file(path).ok();
 }
 

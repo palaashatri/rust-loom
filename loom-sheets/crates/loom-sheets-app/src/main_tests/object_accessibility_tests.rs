@@ -427,6 +427,83 @@ fn f6_object_navigation_previews_keyboard_actions_and_keeps_saved_geometry() {
 }
 
 #[test]
+fn object_navigation_shift_tab_and_backtab_wrap_in_both_directions() {
+    use slint::platform::{Key, WindowEvent};
+
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let mut sheet = Sheet::new("Object navigation order");
+    for (row, col, label) in [(1, 1, "First"), (3, 3, "Second"), (5, 5, "Third")] {
+        sheet
+            .objects
+            .push(SheetObject::shape(CellRef { row, col }, label));
+    }
+    let state = Rc::new(GuiState::new(
+        sheet,
+        None,
+        dialogs,
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    ));
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_history_actions(&app, &state, &menu_service);
+    object_actions::register_object_actions(&app, &state, &menu_service);
+    project_current(&app, &state);
+    app.invoke_focus_grid();
+
+    let tap = |key: Key| {
+        let text: slint::SharedString = key.into();
+        app.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text });
+    };
+    let shift_tab = || {
+        let shift: slint::SharedString = Key::Shift.into();
+        let tab: slint::SharedString = Key::Tab.into();
+        app.window().dispatch_event(WindowEvent::KeyPressed {
+            text: shift.clone(),
+        });
+        app.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: tab.clone() });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: tab });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: shift });
+    };
+
+    tap(Key::F6);
+    assert_eq!(app.get_selected_object(), 0);
+    shift_tab();
+    assert_eq!(
+        app.get_selected_object(),
+        2,
+        "Shift+Tab wraps first to last"
+    );
+    tap(Key::Backtab);
+    assert_eq!(
+        app.get_selected_object(),
+        1,
+        "Backtab moves to the previous object"
+    );
+    tap(Key::Backtab);
+    assert_eq!(app.get_selected_object(), 0);
+    tap(Key::Backtab);
+    assert_eq!(app.get_selected_object(), 2, "Backtab wraps first to last");
+    tap(Key::Tab);
+    assert_eq!(app.get_selected_object(), 0, "Tab wraps last to first");
+    tap(Key::Tab);
+    assert_eq!(app.get_selected_object(), 1);
+    tap(Key::Tab);
+    assert_eq!(app.get_selected_object(), 2);
+    tap(Key::Tab);
+    assert_eq!(app.get_selected_object(), 0, "Tab wraps last to first");
+}
+
+#[test]
 fn keyboard_move_preview_beyond_committed_extent_remains_visible() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");

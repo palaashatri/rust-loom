@@ -84,7 +84,9 @@ pub(crate) fn insert_table_size(app: &WriterApp, state: &GuiState, rows: usize, 
     let caret = next.selection().anchor;
     match next.insert_table_block(caret, rows, cols) {
         Ok(_) => {
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(format!(
                 "Table inserted ({rows}x{cols})"
             )));
@@ -154,21 +156,15 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
     };
     match result {
         Ok(new_caret) => {
-            if matches!(
-                action,
-                "insert-row-above"
-                    | "insert-row-below"
-                    | "insert-col-left"
-                    | "insert-col-right"
-                    | "delete-row"
-                    | "delete-col"
-                    | "merge-cells"
-                    | "split-cell"
-            ) {
-                clear_table_cell_selection_range();
-            }
             next.set_selection(TextSelection::caret(new_caret));
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !crate::apply_table_action_with_history(
+                app,
+                state,
+                next,
+                HistoryKind::DocumentAction,
+            ) {
+                return;
+            }
             app.set_status_right(SharedString::from(table_action_status(action)));
         }
         Err(err) => {
@@ -222,7 +218,9 @@ pub(crate) fn set_table_style(app: &WriterApp, state: &GuiState, style_id: &str)
     let mut next = state.current.borrow().clone();
     match next.set_table_style_at_offset(caret, style_id) {
         Ok(()) => {
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             let status = match loom_objects::TableStyleCatalog::get(style_id) {
                 Some(style) => format!("Table style set: {}", style.name),
                 None => "Table style set".to_string(),
@@ -241,7 +239,9 @@ pub(crate) fn toggle_table_option(app: &WriterApp, state: &GuiState, option: &st
     let mut next = state.current.borrow().clone();
     match next.toggle_table_option_at_offset(caret, option) {
         Ok(()) => {
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(format!(
                 "Table option toggled: {}",
                 table_option_label(option)

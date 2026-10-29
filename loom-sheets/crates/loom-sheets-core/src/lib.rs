@@ -598,7 +598,7 @@ impl Sheet {
 /// Formats a numeric value as currency (e.g. "$1,234.50").
 pub fn format_number_currency(value: f64, symbol: &str, decimals: usize) -> String {
     let sign = if value < 0.0 { "-" } else { "" };
-    let abs_val = value.abs();
+    let abs_val = functions_format::round_decimals(value.abs(), decimals);
     let int_part = abs_val.trunc() as u64;
     let frac_part = abs_val.fract();
 
@@ -625,7 +625,11 @@ pub fn format_number_currency(value: f64, symbol: &str, decimals: usize) -> Stri
 
 /// Formats a fractional numeric value as percentage (e.g. "25.0%").
 pub fn format_number_percentage(value: f64, decimals: usize) -> String {
-    format!("{:.1$}%", value * 100.0, decimals)
+    format!(
+        "{:.1$}%",
+        functions_format::round_decimals(value * 100.0, decimals),
+        decimals
+    )
 }
 
 /// Standard spreadsheet cell numeric display formats.
@@ -664,7 +668,7 @@ pub fn format_cell_display(raw: &str, format: NumberFormat) -> String {
         }
         NumberFormat::Number => {
             if let Ok(num) = raw.parse::<f64>() {
-                format!("{num:.2}")
+                format!("{:.2}", functions_format::round_decimals(num, 2))
             } else {
                 raw.to_string()
             }
@@ -2563,7 +2567,7 @@ impl CalculationCache {
                             let lookup = |reference: CellRef| {
                                 self.values.get(&reference).cloned().unwrap_or(Value::Empty)
                             };
-                            eval_expr(&formula.root, &lookup)
+                            workbook::formula_result(eval_expr(&formula.root, &lookup))
                         }
                         Err(error) => Value::Error(error),
                     },
@@ -2624,7 +2628,7 @@ impl CalculationCache {
                                 let lookup = |reference: CellRef| {
                                     self.values.get(&reference).cloned().unwrap_or(Value::Empty)
                                 };
-                                eval_expr(&formula.root, &lookup)
+                                workbook::formula_result(eval_expr(&formula.root, &lookup))
                             }
                             Err(error) => Value::Error(error),
                         },

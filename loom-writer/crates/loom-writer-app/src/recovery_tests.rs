@@ -68,6 +68,7 @@ pub(super) fn make_test_state(
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
         save_path: RefCell::new(save_path),
+        compatibility_save: Cell::new(false),
         history: RefCell::new(history),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
@@ -86,14 +87,13 @@ pub(super) fn child_mode() -> Option<String> {
 }
 
 fn saved_fixture(root: &Path) -> PathBuf {
-    let path = root.join("saved-test.loomdoc");
+    let path = root.join("saved-test.docx");
     let mut document = WriterDocument::new("recovery-fixture", "Recovery fixture");
     document.replace_paragraphs("Saved before the test crash.");
-    std::fs::write(
-        &path,
-        loom_writer_core::save_document(&document).expect("serialize saved fixture"),
-    )
-    .expect("write saved fixture");
+    let bytes = loom_writer_core::export_docx(&document)
+        .expect("export saved recovery fixture")
+        .bytes;
+    std::fs::write(&path, bytes).expect("write saved fixture");
     path
 }
 
@@ -211,8 +211,8 @@ fn interactive_recovery_write_failures_are_visible() {
 
     let root = isolated_root();
     std::fs::create_dir_all(&root).expect("create isolated test root");
-    let open_path = root.join("opened.loomdoc");
-    let save_path = root.join("saved-after-error.loomdoc");
+    let open_path = root.join("opened.docx");
+    let save_path = root.join("saved-after-error.docx");
     assert!(run_child(
         WRITE_FAILURE_TEST,
         "fail-write",
@@ -246,7 +246,7 @@ fn interactive_recovery_write_failures_are_visible_via_injection() {
     let mut document = WriterDocument::new("write-failure-injected", "Write failure injected");
     document.replace_paragraphs("An edit whose recovery write fails.");
     let temp_save =
-        std::env::temp_dir().join(format!("loom-writer-save-{}.loomdoc", std::process::id()));
+        std::env::temp_dir().join(format!("loom-writer-save-{}.docx", std::process::id()));
     let (app, state) = make_test_state(document, Some(temp_save.clone()));
     state
         .current
@@ -859,4 +859,77 @@ fn a_draft_keeps_the_exact_path_it_was_edited_from() {
         crate::recovery_draft::decode(&package).expect("a legacy payload decodes");
     assert_eq!(decoded, None);
     assert_eq!(bytes, package.as_slice());
+}
+
+const FOOTNOTE_RESTART_TEST: &str =
+    "recovery_tests::footnotes_survive_a_fresh_recovery_session_after_restart";
+
+#[test]
+fn footnotes_survive_a_fresh_recovery_session_after_restart() {
+    match child_mode().as_deref() {
+        Some("record") => {
+            let open_path = PathBuf::from(std::env::var_os(OPEN_PATH).expect("fixture path"));
+            assert!(recovery::initialize_editing_session(Some(&open_path))
+                .expect("initialize recovery for the source document")
+                .draft
+                .is_none());
+            let mut document = load_file(&open_path).expect("load saved fixture");
+            let block = document.blocks.first().expect("fixture paragraph");
+            let block_id = block.id;
+            let offset = block
+                .text
+                .as_str()
+                .find("test")
+                .expect("stable footnote anchor");
+            document.footnotes.push(loom_writer_core::FootnoteEntry {
+                id: 91_007,
+                block_id,
+                offset,
+                body: "A footnote stored in the recovery draft.".into(),
+            });
+            let (app, state) = make_test_state(document, Some(open_path));
+            apply_state(&app, &state);
+            std::process::exit(0);
+        }
+        Some("restore") => {
+            let draft = recovery::initialize_editing_session(None)
+                .expect("open a fresh recovery session")
+                .draft
+                .expect("the unsaved draft survives process restart");
+            let document = draft.document;
+            let note = document
+                .footnotes
+                .iter()
+                .find(|note| note.id == 91_007)
+                .expect("stable note ID survives recovery");
+            assert_eq!(note.body, "A footnote stored in the recovery draft.");
+            assert_eq!(note.block_id, document.blocks[0].id);
+            assert_eq!(
+                note.offset,
+                document.blocks[0].text.as_str().find("test").unwrap()
+            );
+            std::process::exit(0);
+        }
+        Some(mode) => panic!("unknown child mode: {mode}"),
+        None => {}
+    }
+
+    let root = isolated_root();
+    std::fs::create_dir_all(&root).expect("create isolated test root");
+    let open_path = saved_fixture(&root);
+    let saved_bytes = std::fs::read(&open_path).expect("read saved fixture before recovery");
+    assert!(run_child(
+        FOOTNOTE_RESTART_TEST,
+        "record",
+        &root,
+        Some(&open_path),
+        None
+    )
+    .success());
+    assert_eq!(
+        std::fs::read(&open_path).expect("saved file remains unchanged"),
+        saved_bytes
+    );
+    assert!(run_child(FOOTNOTE_RESTART_TEST, "restore", &root, None, None).success());
+    std::fs::remove_dir_all(root).expect("remove isolated test data");
 }

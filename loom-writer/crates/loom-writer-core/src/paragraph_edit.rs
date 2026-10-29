@@ -221,4 +221,122 @@ impl WriterDocument {
 " && edit.old_start == edit.old_end
             && self.exit_empty_list_item_at(edit.old_start)
     }
+
+    /// Split a block at byte offset, preserving styles and moving right-side footnotes.
+    /// The offset is floored to a UTF-8 character boundary and clamped to the block.
+    pub fn split_block(
+        &mut self,
+        block_id: u64,
+        byte_offset: usize,
+    ) -> Result<u64, crate::WriterError> {
+        let index = self
+            .blocks
+            .iter()
+            .position(|block| block.id == block_id)
+            .ok_or_else(|| crate::WriterError::Invalid(format!("block {block_id} not found")))?;
+        let block = &self.blocks[index];
+        let original_id = block.id;
+        let text = block.text.as_str();
+        let text_len = text.len();
+        let offset = crate::floor_char_boundary(text, byte_offset.min(text_len));
+        let first_text = &text[..offset];
+        let second_text = &text[offset..];
+
+        let new_id = self.next_id();
+        let mut first_block = RichBlock::new(original_id, &block.kind, first_text);
+        first_block.style = block.style.clone();
+        for run in &block.runs {
+            if run.start < offset {
+                let start = crate::floor_char_boundary(text, run.start.min(text_len));
+                let end = crate::floor_char_boundary(text, run.end.min(offset));
+                if start < end {
+                    first_block.runs.push(StyleRun {
+                        start,
+                        end,
+                        style: run.style.clone(),
+                    });
+                }
+            }
+        }
+
+        let mut second_block = RichBlock::new(new_id, &block.kind, second_text);
+        second_block.style = block.style.clone();
+        for run in &block.runs {
+            if run.end > offset {
+                let start = run.start.saturating_sub(offset);
+                let end = run.end - offset;
+                if start < end {
+                    second_block.runs.push(StyleRun {
+                        start,
+                        end,
+                        style: run.style.clone(),
+                    });
+                }
+            }
+        }
+
+        self.blocks[index] = first_block;
+        self.blocks.insert(index + 1, second_block);
+        crate::footnotes::rebase_after_split(&mut self.footnotes, original_id, new_id, offset);
+        Ok(new_id)
+    }
+
+    /// Merge adjacent blocks, retaining their footnote anchors and stable IDs.
+    pub fn merge_blocks(
+        &mut self,
+        first_id: u64,
+        second_id: u64,
+    ) -> Result<(), crate::WriterError> {
+        let first_index = self
+            .blocks
+            .iter()
+            .position(|block| block.id == first_id)
+            .ok_or_else(|| crate::WriterError::Invalid(format!("block {first_id} not found")))?;
+        let second_index = self
+            .blocks
+            .iter()
+            .position(|block| block.id == second_id)
+            .ok_or_else(|| crate::WriterError::Invalid(format!("block {second_id} not found")))?;
+        if second_index != first_index + 1 {
+            return Err(crate::WriterError::Invalid(
+                "blocks must be adjacent to merge".into(),
+            ));
+        }
+
+        let first = &self.blocks[first_index];
+        let second = &self.blocks[second_index];
+        let first_len = first.text.as_str().len();
+        let combined_text = format!("{}{}", first.text.as_str(), second.text.as_str());
+        let mut combined_block = RichBlock::new(first.id, &first.kind, &combined_text);
+        combined_block.style = first.style.clone();
+        combined_block.runs.extend(first.runs.clone());
+        for run in &second.runs {
+            combined_block.runs.push(StyleRun {
+                start: run.start + first_len,
+                end: run.end + first_len,
+                style: run.style.clone(),
+            });
+        }
+        combined_block.runs.sort_by_key(|run| run.start);
+        let mut coalesced: Vec<StyleRun> = Vec::with_capacity(combined_block.runs.len());
+        for run in combined_block.runs.drain(..) {
+            if run.start == run.end {
+                continue;
+            }
+            if let Some(last) = coalesced.last_mut() {
+                if last.end == run.start && last.style == run.style {
+                    last.end = run.end;
+                    continue;
+                }
+            }
+            coalesced.push(run);
+        }
+        combined_block.runs = coalesced;
+        crate::footnotes::rebase_after_merge(&mut self.footnotes, first_id, second_id, first_len)
+            .map_err(crate::WriterError::Invalid)?;
+
+        self.blocks[first_index] = combined_block;
+        self.blocks.remove(second_index);
+        Ok(())
+    }
 }

@@ -217,3 +217,81 @@ fn numbered_items_stay_in_one_list_after_enter_and_join() {
     assert_eq!(texts(&doc), ["a", "b"]);
     assert_eq!(kinds(&doc), ["list-numbered"; 2]);
 }
+
+#[test]
+fn splitting_and_merging_rebase_footnote_anchors_without_changing_ids() {
+    let mut document = doc_of(vec![block(10, "paragraph", "ab🙂cd")]);
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 77,
+        block_id: 10,
+        offset: 7,
+        body: "stable note".into(),
+    });
+
+    let second_id = document
+        .split_block(10, 6)
+        .expect("split at UTF-8 boundary");
+    assert_eq!(document.footnotes[0].id, 77);
+    assert_eq!(document.footnotes[0].block_id, second_id);
+    assert_eq!(document.footnotes[0].offset, 1);
+    assert!(document.validate_footnotes().is_ok());
+
+    document
+        .merge_blocks(10, second_id)
+        .expect("merge the split blocks");
+    assert_eq!(document.footnotes[0].id, 77);
+    assert_eq!(document.footnotes[0].block_id, 10);
+    assert_eq!(document.footnotes[0].offset, 7);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn merging_blocks_rejects_footnotes_that_would_share_one_anchor() {
+    let mut document = doc_of(vec![
+        block(10, "paragraph", "ab"),
+        block(11, "paragraph", "cd"),
+    ]);
+    document.footnotes = vec![
+        crate::FootnoteEntry {
+            id: 1,
+            block_id: 10,
+            offset: 2,
+            body: "left".into(),
+        },
+        crate::FootnoteEntry {
+            id: 2,
+            block_id: 11,
+            offset: 0,
+            body: "right".into(),
+        },
+    ];
+    let before_blocks = document.blocks.clone();
+    let before_footnotes = document.footnotes.clone();
+
+    assert!(document.merge_blocks(10, 11).is_err());
+    assert_eq!(document.blocks, before_blocks);
+    assert_eq!(document.footnotes, before_footnotes);
+}
+
+#[test]
+fn insertion_and_deletion_rebase_or_drop_the_footnote_reference() {
+    let mut document = doc_of(vec![block(7, "paragraph", "abc")]);
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 41,
+        block_id: 7,
+        offset: 2,
+        body: "note".into(),
+    });
+    document.set_selection(TextSelection::caret(0));
+    document
+        .replace_selection_text("X")
+        .expect("insert ahead of anchor");
+    assert_eq!(document.footnotes[0].offset, 3);
+
+    document.footnotes[0].offset = 1;
+    document.set_selection(TextSelection::range(1, 2));
+    document
+        .replace_selection_text("")
+        .expect("delete anchored character");
+    assert!(document.footnotes.is_empty());
+}

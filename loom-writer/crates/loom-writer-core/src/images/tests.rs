@@ -73,6 +73,7 @@ fn a_picture_inserted_last_leaves_a_paragraph_to_type_in() {
 fn the_picture_line_is_as_tall_as_the_picture_and_never_wider_than_the_text() {
     let style = PageStyle::default();
     let usable = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+    let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
     let mut doc = document_with_text();
     doc.insert_image_block(6, picture(4000, 1000, 3)).unwrap();
     let viewport = PageViewport {
@@ -88,6 +89,21 @@ fn the_picture_line_is_as_tall_as_the_picture_and_never_wider_than_the_text() {
         .iter()
         .find(|line| doc.blocks[line.block_index].is_image())
         .expect("the picture has a line");
+    let fitted_size = doc.blocks[line.block_index]
+        .image_display_size(usable, usable_height)
+        .expect("the picture has a fitted size");
+    assert!(
+        (line.bounds.width - fitted_size.0).abs() < 0.01,
+        "live width {} vs fitted width {}",
+        line.bounds.width,
+        fitted_size.0
+    );
+    assert!(
+        (line.bounds.height - fitted_size.1).abs() < 0.01,
+        "live height {} vs fitted height {}",
+        line.bounds.height,
+        fitted_size.1
+    );
     assert!(
         (line.bounds.width - usable).abs() < 0.01,
         "{}",

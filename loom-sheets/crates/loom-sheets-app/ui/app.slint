@@ -146,8 +146,8 @@ export component SheetsApp inherits Window {
     in property <string> selection-announcement: "A1 selected; value: Empty";
     in property <string> table-rows-label: "1";
     in property <string> table-cols-label: "1";
-    in property <string> selected-row-height: "24 px";
-    in property <string> selected-col-width: "80 px";
+    in property <string> selected-row-height: "24";
+    in property <string> selected-col-width: "80";
     in-out property <string> inspector-search: "";
     in-out property <string> formula-feedback: "Ready";
     in-out property <bool> is-editing: false;
@@ -237,6 +237,9 @@ export component SheetsApp inherits Window {
     callback unfreeze-panes;
     callback adjust-row-height(int);
     callback adjust-col-width(int);
+    callback set-row-height(string) -> bool;
+    callback set-col-width(string) -> bool;
+    callback set-font-size(string) -> bool;
     callback set-cell-format(int);
     callback set-cell-alignment(int);
     callback toggle-bold;
@@ -257,6 +260,7 @@ export component SheetsApp inherits Window {
     callback copy-chart;
     callback pivot-summary(int);
     in-out property <bool> chart-visible: false;
+    in-out property <bool> chart-exists: false;
     in-out property <bool> chart-focused: false;
     in-out property <bool> chart-focus-request: false;
     in-out property <string> chart-title: "Chart";
@@ -658,6 +662,9 @@ export component SheetsApp inherits Window {
                     delete-table-col => { root.delete-col(); }
                     adjust-row-height(delta) => { root.adjust-row-height(delta); }
                     adjust-col-width(delta) => { root.adjust-col-width(delta); }
+                    set-row-height(value) => { return root.set-row-height(value); }
+                    set-col-width(value) => { return root.set-col-width(value); }
+                    set-font-size(value) => { return root.set-font-size(value); }
                     set-cell-format(fmt) => { root.set-cell-format(fmt); }
                     set-cell-alignment(align) => { root.set-cell-alignment(align); }
                     toggle-bold => { root.toggle-bold(); }

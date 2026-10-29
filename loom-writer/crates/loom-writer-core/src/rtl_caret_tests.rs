@@ -5,7 +5,7 @@
 //! drawn glyphs, not the logical advances.
 
 use super::*;
-use crate::{offset_at_x, text_advance, DocumentFlow, TextSelection};
+use crate::{offset_at_x, DocumentFlow, TextSelection};
 
 /// Alef then bet: two letters, two bytes each, right to left.
 const HEBREW: &str = "\u{5D0}\u{5D1}";
@@ -39,6 +39,30 @@ fn selection(anchor: usize, focus: usize, affinity: CaretAffinity) -> TextSelect
     }
 }
 
+fn glyph_span(line: &crate::layout::FlowLine, source: std::ops::Range<usize>) -> (f32, f32) {
+    let shaped = line
+        .shaped_line
+        .as_deref()
+        .expect("document flow retains shaped glyph geometry");
+    let mut left = f32::INFINITY;
+    let mut right = f32::NEG_INFINITY;
+    for run in shaped.painted_runs() {
+        let mut pen_x = run.x_pt;
+        for glyph in &run.shaped.glyphs {
+            if source.contains(&(run.source_range.start + glyph.cluster)) {
+                left = left.min(pen_x);
+                right = right.max(pen_x + glyph.advance);
+            }
+            pen_x += glyph.advance;
+        }
+    }
+    assert!(
+        left.is_finite() && right.is_finite(),
+        "no shaped glyphs in source range {source:?}"
+    );
+    (left, right)
+}
+
 #[test]
 fn a_pointer_on_the_left_of_hebrew_text_lands_on_the_glyph_drawn_there() {
     // Bet is drawn on the left, so a point in its left half is the end of the text.
@@ -69,10 +93,15 @@ fn the_caret_at_the_start_of_a_hebrew_line_sits_at_its_right_edge() {
 #[test]
 fn selecting_the_first_hebrew_letter_highlights_the_glyph_drawn_on_the_right() {
     let doc = hebrew_doc(HEBREW);
-    let size = doc.page.page_style().font_size_for_kind("paragraph");
     let flow = flow_of(&doc);
-    let alef = text_advance(&HEBREW[..2], 0, &[], size);
-    let bet = text_advance(&HEBREW[2..], 2, &[], size);
+    let line = &flow.lines()[0];
+    let (alef_left, alef_right) = glyph_span(line, 0..2);
+    let (_, bet_right) = glyph_span(line, 2..4);
+    assert!(
+        (alef_left - bet_right).abs() < 0.01,
+        "the shaped bet and alef advances are adjacent"
+    );
+
     let rects = flow.selection_rects(
         &doc,
         &selection(0, 2, CaretAffinity::Downstream),
@@ -80,27 +109,24 @@ fn selecting_the_first_hebrew_letter_highlights_the_glyph_drawn_on_the_right() {
     );
     assert_eq!(rects.len(), 1, "one highlight for alef: {rects:?}");
     let rect = rects[0].rect;
-    let drawn_left = origin(&doc);
     assert!(
-        (rect.x - (drawn_left + bet)).abs() < 0.01,
-        "alef is drawn after bet, at {bet}; highlight starts at {}",
-        rect.x - drawn_left
+        (rect.x - (line.bounds.x + alef_left)).abs() < 0.01,
+        "alef highlight starts at its shaped glyph position: {}",
+        rect.x - line.bounds.x
     );
     assert!(
-        (rect.width - alef).abs() < 0.01,
-        "highlight width {}",
+        (rect.width - (alef_right - alef_left)).abs() < 0.01,
+        "highlight width {} must match alef's shaped advance",
         rect.width
     );
-}
 
-/// Where the drawn Hebrew line starts: a paragraph with no alignment set starts
-/// at its reading start, so right-to-left text sits flush with the column's
-/// right edge and begins `text width` short of it.
-fn origin(doc: &WriterDocument) -> f32 {
-    let flow = flow_of(doc);
-    let size = doc.page.page_style().font_size_for_kind("paragraph");
-    let width = text_advance(HEBREW, 0, &[], size);
-    flow.lines()[0].bounds.x + right_edge(doc) - width
+    let caret = flow
+        .caret_rect(&doc, &selection(0, 0, CaretAffinity::Downstream))
+        .expect("caret at the logical start");
+    assert!(
+        (caret.rect.x - (line.bounds.x + alef_right)).abs() < 0.01,
+        "the logical start caret sits at the right edge of alef"
+    );
 }
 
 /// The right edge of the column the Hebrew line is aligned in, relative to the
@@ -112,12 +138,17 @@ fn right_edge(doc: &WriterDocument) -> f32 {
 #[test]
 fn left_and_right_move_through_hebrew_in_the_order_it_is_drawn() {
     // Drawn left to right: bet (logical 2..4), then alef (0..2). The end of the
-    // text, offset 4, is drawn on the left.
+    // text, offset 4, is drawn on the left. The shaped glyph advances are the
+    // geometry oracle for every navigation and caret assertion.
     let doc = hebrew_doc(HEBREW);
-    let size = doc.page.page_style().font_size_for_kind("paragraph");
-    let bet = text_advance(&HEBREW[2..], 2, &[], size);
-    let alef = text_advance(&HEBREW[..2], 0, &[], size);
-    let origin = origin(&doc);
+    let flow = flow_of(&doc);
+    let line = &flow.lines()[0];
+    let (bet_left, bet_right) = glyph_span(line, 2..4);
+    let (alef_left, alef_right) = glyph_span(line, 0..2);
+    assert!(
+        (bet_right - alef_left).abs() < 0.01,
+        "adjacent RTL glyph advances share their boundary"
+    );
 
     let first = visual_caret_move(&doc, 4, CaretAffinity::Upstream, VisualMove::Right, None)
         .expect("Right moves over bet");
@@ -125,7 +156,11 @@ fn left_and_right_move_through_hebrew_in_the_order_it_is_drawn() {
         (first.offset, first.affinity),
         (2, CaretAffinity::Downstream)
     );
-    assert!((first.x - (origin + bet)).abs() < 0.01, "at {}", first.x);
+    assert!(
+        (first.x - (line.bounds.x + bet_right)).abs() < 0.01,
+        "after bet at {}",
+        first.x
+    );
 
     let second = visual_caret_move(&doc, 2, CaretAffinity::Downstream, VisualMove::Right, None)
         .expect("Right moves over alef");
@@ -134,10 +169,23 @@ fn left_and_right_move_through_hebrew_in_the_order_it_is_drawn() {
         (0, CaretAffinity::Downstream)
     );
     assert!(
-        (second.x - (origin + bet + alef)).abs() < 0.01,
-        "at {}",
+        (second.x - (line.bounds.x + alef_right)).abs() < 0.01,
+        "after alef at {}",
         second.x
     );
+
+    let caret_x = |offset, affinity| {
+        flow.caret_rect(&doc, &selection(offset, offset, affinity))
+            .expect("caret for visual stop")
+            .rect
+            .x
+    };
+    for target in [&first, &second] {
+        assert!(
+            (caret_x(target.offset, target.affinity) - target.x).abs() < 0.01,
+            "keyboard move and painted caret use the same shaped stop"
+        );
+    }
 
     assert!(
         visual_caret_move(&doc, 0, CaretAffinity::Downstream, VisualMove::Right, None).is_none(),
@@ -147,9 +195,26 @@ fn left_and_right_move_through_hebrew_in_the_order_it_is_drawn() {
     let back = visual_caret_move(&doc, 0, CaretAffinity::Downstream, VisualMove::Left, None)
         .expect("Left moves back over alef");
     assert_eq!((back.offset, back.affinity), (2, CaretAffinity::Downstream));
+    assert!(
+        (back.x - (line.bounds.x + bet_right)).abs() < 0.01,
+        "back at the shared shaped boundary"
+    );
+    assert!(
+        (caret_x(back.offset, back.affinity) - back.x).abs() < 0.01,
+        "reverse movement and painted caret use the same shaped stop"
+    );
+
     let start = visual_caret_move(&doc, 2, CaretAffinity::Downstream, VisualMove::Left, None)
         .expect("Left moves back over bet");
     assert_eq!((start.offset, start.affinity), (4, CaretAffinity::Upstream));
+    assert!(
+        (start.x - (line.bounds.x + bet_left)).abs() < 0.01,
+        "at the left edge of the drawn text"
+    );
+    assert!(
+        (caret_x(start.offset, start.affinity) - start.x).abs() < 0.01,
+        "line-edge caret and visual movement use the same shaped stop"
+    );
     assert!(
         visual_caret_move(&doc, 4, CaretAffinity::Upstream, VisualMove::Left, None).is_none(),
         "the line's left edge falls back too"
@@ -176,8 +241,8 @@ fn a_selection_across_a_right_to_left_run_highlights_each_drawn_piece_without_ov
     // b, the space and alef; bet sits between the space and alef on screen.
     let text = "ab \u{5D0}\u{5D1} cd";
     let doc = hebrew_doc(text);
-    let size = doc.page.page_style().font_size_for_kind("paragraph");
     let flow = flow_of(&doc);
+    let line = &flow.lines()[0];
     let rects = flow.selection_rects(
         &doc,
         &selection(1, 5, CaretAffinity::Downstream),
@@ -187,16 +252,36 @@ fn a_selection_across_a_right_to_left_run_highlights_each_drawn_piece_without_ov
     let (first, second) = (&rects[0], &rects[1]);
     assert_eq!((first.start, first.end), (1, 3), "b and the space");
     assert_eq!((second.start, second.end), (3, 5), "alef");
-    let gap_from = first.rect.x + first.rect.width;
+
+    let (selected_left, selected_right) = glyph_span(line, 1..3);
     assert!(
-        gap_from <= second.rect.x + 0.01,
+        (first.rect.x - (line.bounds.x + selected_left)).abs() < 0.01,
+        "the LTR piece starts on its shaped glyph boundary"
+    );
+    assert!(
+        (first.rect.width - (selected_right - selected_left)).abs() < 0.01,
+        "the LTR highlight covers the selected shaped advances"
+    );
+    let (alef_left, alef_right) = glyph_span(line, 3..5);
+    assert!(
+        (second.rect.x - (line.bounds.x + alef_left)).abs() < 0.01,
+        "the RTL piece starts on alef's shaped boundary"
+    );
+    assert!(
+        (second.rect.width - (alef_right - alef_left)).abs() < 0.01,
+        "the RTL highlight covers alef's shaped advance"
+    );
+
+    let (bet_left, bet_right) = glyph_span(line, 5..7);
+    let first_right = first.rect.x + first.rect.width;
+    assert!(
+        first_right <= second.rect.x + 0.01,
         "highlights overlap: {rects:?}"
     );
-    let bet = text_advance(&text[5..7], 5, &[], size);
     assert!(
-        (second.rect.x - gap_from - bet).abs() < 0.01,
-        "bet is drawn between the two pieces: gap {}",
-        second.rect.x - gap_from
+        (first_right - (line.bounds.x + bet_left)).abs() < 0.01
+            && (second.rect.x - (line.bounds.x + bet_right)).abs() < 0.01,
+        "the unselected bet occupies the gap between selected pieces"
     );
 }
 

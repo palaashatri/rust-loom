@@ -355,30 +355,59 @@ fn the_pdf_spaces_runs_by_the_widths_it_wraps_with() {
         document.push(RichBlock::new(document.next_id(), "paragraph", text));
     }
     let pdf = export_pdf(&document);
-    let moved: f32 = loom_pdf::inspect::spacing_adjustments(&pdf)
-        .expect("adjustments")
+    let pages = loom_pdf::inspect::page_text(&pdf).expect("extracted PDF text");
+    // `page_text` separates shaped PDF text blocks with synthetic newlines.
+    let extracted = pages
         .iter()
-        .sum();
-    assert!(moved > 0.0, "kerned runs are spaced");
+        .map(|page| page.replace('\n', ""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for sample in SAMPLES.iter().take(3) {
+        assert!(extracted.contains(sample), "the PDF extracts {sample:?}");
+    }
 
-    // Every drawn run is one line here; its natural width less its measured
-    // width is what the file moved the pen back by.
+    // Shaped glyphs are positioned absolutely in the PDF, so measure the
+    // kerning from their emitted positions instead of expecting TJ operators.
+    let fonts = loom_pdf::inspect::embedded_fonts(&pdf).expect("embedded fonts");
+    let glyphs = loom_pdf::inspect::positioned_glyph_draws(&pdf).expect("positioned glyphs");
     let size = document.page.page_style().body_font_size_pt;
+    let moved: f32 = glyphs
+        .windows(2)
+        .map(|pair| {
+            let (previous, next) = (&pair[0], &pair[1]);
+            if previous.resource != next.resource
+                || (previous.y - next.y).abs() > 0.01
+                || next.x <= previous.x
+            {
+                return 0.0;
+            }
+            let font = fonts
+                .iter()
+                .find(|font| font.resource == previous.resource)
+                .expect("positioned glyph has an embedded font");
+            let nominal = font.widths[usize::from(previous.cid)] * size / 1000.0;
+            (nominal - (next.x - previous.x)).max(0.0)
+        })
+        .sum();
+    assert!(moved > 0.0, "kerning shortens positioned glyph advances");
+
+    // The unkerned PDF font widths less the wrapped Inter measurements give
+    // the same movement as the glyph positions, within serialized rounding.
     let style = loom_pdf::TextStyle {
         size_pt: size,
         ..Default::default()
     };
-    let lines = loom_pdf::inspect::page_text(&pdf).expect("text");
-    let expected: f32 = lines
+    let expected: f32 = pages
         .iter()
         .flat_map(|page| page.split('\n'))
         .map(|line| loom_pdf::text_width_pt(line, &style) - pdf_text_width(line, &style))
         .sum();
-    let in_points = moved * size / 1000.0;
-    // Runs end with their last glyph unadjusted, and the rounding is a tenth
-    // of a thousandth of an em per kerned pair.
+    let line_count = pages
+        .iter()
+        .map(|page| page.split('\n').count())
+        .sum::<usize>();
     assert!(
-        (in_points - expected).abs() < 0.05 * lines.len() as f32 + 0.5,
-        "the file moves the pen by {in_points} pt, the measure says {expected} pt"
+        (moved - expected).abs() < 0.05 * line_count as f32 + 0.5,
+        "glyph positions move by {moved} pt, the measure says {expected} pt"
     );
 }

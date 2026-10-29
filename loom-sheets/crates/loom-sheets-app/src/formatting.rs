@@ -293,6 +293,46 @@ pub(crate) fn adjust_selection_font_size(
     commit_transaction(sheet, undo_stack, redo_stack, tx)
 }
 
+/// Set an exact font size in px across the selection. The theme's 14 px size
+/// clears per-cell overrides so those cells keep following theme changes.
+pub(crate) fn set_selection_font_size(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+    size: u8,
+) -> bool {
+    let cells = range.cells();
+    if cells.is_empty() {
+        return false;
+    }
+    let target = if size == DEFAULT_FONT_SIZE {
+        None
+    } else {
+        Some(size)
+    };
+    let mut before = Vec::with_capacity(cells.len());
+    let mut after = Vec::with_capacity(cells.len());
+    let mut any_change = false;
+    for cell in cells {
+        let previous = sheet.cell_style(cell);
+        any_change |= previous.font_size != target;
+        before.push((cell, previous));
+        let mut next = previous;
+        next.font_size = target;
+        after.push((cell, next));
+    }
+    if !any_change {
+        return false;
+    }
+    commit_transaction(
+        sheet,
+        undo_stack,
+        redo_stack,
+        SheetTransaction::Style { before, after },
+    )
+}
+
 /// Resolve the effective font size in px for display.
 pub(crate) fn effective_font_size(style: loom_sheets_core::style::CellStyle) -> u8 {
     style.font_size.unwrap_or(DEFAULT_FONT_SIZE)

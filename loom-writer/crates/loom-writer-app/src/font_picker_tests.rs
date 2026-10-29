@@ -218,6 +218,29 @@ fn family_runs(state: &GuiState) -> Vec<(usize, usize, String)> {
         .collect()
 }
 
+fn rightmost_painted_glyph_x(app: &WriterApp) -> f32 {
+    let mut rightmost: Option<f32> = None;
+    for row in app.get_render_blocks().iter() {
+        for tile in row.glyph_tiles.iter() {
+            let Some(pixels) = tile.source.to_rgba8() else {
+                continue;
+            };
+            let pixel_width = pixels.width() as usize;
+            if pixel_width == 0 {
+                continue;
+            }
+            for (index, pixel) in pixels.as_bytes().chunks_exact(4).enumerate() {
+                if pixel[3] == 0 {
+                    continue;
+                }
+                let x = tile.x + (index % pixel_width) as f32 * tile.width / pixel_width as f32;
+                rightmost = Some(rightmost.map_or(x, |previous| previous.max(x)));
+            }
+        }
+    }
+    rightmost.expect("the rendered line has painted glyphs")
+}
+
 #[test]
 fn choosing_a_family_for_a_selection_is_one_undoable_edit() {
     let _fonts = test_fonts::install(&[("Wider", 200)]);
@@ -392,36 +415,27 @@ fn the_page_re_measures_when_the_scan_delivers_the_installed_fonts() {
         *state.current.borrow_mut() = document;
     }
     crate::apply_state(&app, &state);
-    let first_row_family = |app: &WriterApp| {
-        app.get_render_blocks()
-            .iter()
-            .next()
-            .unwrap()
-            .font_family
-            .to_string()
-    };
     let advance = || {
         let document = state.current.borrow();
         loom_writer_core::text_advance("Hello world", 0, &document.blocks[0].runs, 11.0)
     };
     let narrow = advance();
-    assert_eq!(
-        first_row_family(&app),
-        "",
-        "not installed: drawn in the document font"
-    );
+    let narrow_ink_right = rightmost_painted_glyph_x(&app);
     assert_eq!(
         app.global::<FontPicker>().get_current_note().as_str(),
         "Not installed"
     );
 
-    // The scan finishes: the family now exists, and everything follows.
+    // The scan finishes: the page is reprojected with the now-installed face.
     fonts.add(&[("Wider", 200)]);
     crate::font_picker::catalogue_ready(loom_writer_core::fonts::font_catalog());
-    assert_eq!(first_row_family(&app), "Wider");
     assert!(
         advance() > narrow * 1.5,
         "the line is measured in Wider now"
+    );
+    assert!(
+        rightmost_painted_glyph_x(&app) > narrow_ink_right + 5.0,
+        "the rasterized line's painted extent follows the wider measurement"
     );
     assert_eq!(app.global::<FontPicker>().get_current_note().as_str(), "");
 }
@@ -436,19 +450,30 @@ fn a_line_with_two_families_is_drawn_as_rows_placed_by_the_measurement() {
         *state.current.borrow_mut() = document;
     }
     crate::apply_state(&app, &state);
-    let rows: Vec<_> = app.get_render_blocks().iter().collect();
+
+    // The live page rasterizes one shaped line. Its family-separated fallback
+    // projection keeps the measured rows and offsets when glyph rasterization
+    // is not available.
+    let rasterized_rows: Vec<_> = app.get_render_blocks().iter().collect();
+    assert_eq!(rasterized_rows.len(), 1, "the shaped line is one page row");
+    assert!(
+        rasterized_rows[0].glyph_tiles.row_count() > 0,
+        "the live page paints its shaped glyph tiles"
+    );
+
+    let document = state.current.borrow();
+    let projection =
+        crate::projection::project(&document, loom_writer_core::PageViewport::default(), None);
+    let rows = projection.rows;
     let families: Vec<String> = rows.iter().map(|row| row.font_family.to_string()).collect();
     assert_eq!(
         families,
         ["", "Wider", ""],
-        "three stretches of the one line"
+        "the text fallback keeps the three measured family stretches"
     );
-    // Each stretch starts where the measurement says its first glyph is.
-    let document = state.current.borrow();
+
     let runs = &document.blocks[0].runs;
     let before = loom_writer_core::text_advance("Hello ", 0, runs, 11.0);
-    // The third stretch starts right after the wide word and draws its own
-    // leading space: nothing strips white space from the start of a row.
     let through = loom_writer_core::text_advance("Hello wide", 0, runs, 11.0);
     assert_eq!(
         rows[2].segments.row_data(0).map(|s| s.text.to_string()),

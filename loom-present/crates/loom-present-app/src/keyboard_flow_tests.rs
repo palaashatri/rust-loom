@@ -394,13 +394,16 @@ fn active_slide(s: &Session) -> usize {
 }
 
 pub(super) fn tab_to(app: &PresentApp, name: &str) {
-    for _ in 0..40 {
+    let starting_focus = focus_weak(app);
+    loop {
         if focus_name(app) == name {
             return;
         }
         tab(app);
+        if same_focus(&focus_weak(app), &starting_focus) {
+            panic!("Tab never reached {name:?}");
+        }
     }
-    panic!("Tab never reached {name:?}");
 }
 
 #[test]
@@ -1354,7 +1357,12 @@ fn speaker_notes_drawer_is_reachable_editable_and_closable_without_a_pointer() {
         "Remember the demo",
         "Tab did not type into the notes"
     );
-    tab_to(&s.app, "Close speaker notes");
+    // The close button precedes the notes editor, so reverse through the
+    // adjacent stops instead of cycling forward through the whole app.
+    shift_tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Speaker notes");
+    shift_tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Close speaker notes");
     press(&s.app, Key::Return);
     assert!(!s.app.get_show_notes_drawer(), "Enter closes the drawer");
 }

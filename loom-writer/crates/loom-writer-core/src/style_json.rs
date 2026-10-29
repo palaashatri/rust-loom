@@ -232,6 +232,16 @@ fn validate_color(color: Option<&str>) -> Result<(), &'static str> {
     }
 }
 
+pub(crate) fn validate_character_style(
+    style: &loom_text::CharacterStyle,
+) -> Result<(), &'static str> {
+    if !style.font_size.is_finite() {
+        return Err("invalid character style");
+    }
+    validate_color(style.color.as_deref())?;
+    validate_color(style.background.as_deref())
+}
+
 pub(crate) fn validate_table_text_colors(table: &loom_objects::Table) -> Result<(), &'static str> {
     for row in &table.rows {
         for cell in &row.cells {

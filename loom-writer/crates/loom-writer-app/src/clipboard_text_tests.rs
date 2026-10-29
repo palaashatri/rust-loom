@@ -3,11 +3,31 @@
 
 use crate::actions_tests::test_state;
 use crate::*;
-use loom_clipboard::{read_clipboard, set_mock_clipboard_enabled, write_clipboard, ClipboardData};
+use loom_clipboard::{
+    read_clipboard, set_mock_clipboard_enabled, set_mock_clipboard_fails, write_clipboard,
+    ClipboardData,
+};
 use loom_writer_core::TextSelection;
 use std::sync::Mutex;
 
 static MOCK_CLIPBOARD: Mutex<()> = Mutex::new(());
+
+struct ClipboardMockGuard;
+
+impl ClipboardMockGuard {
+    fn new() -> Self {
+        set_mock_clipboard_enabled(true);
+        set_mock_clipboard_fails(false);
+        Self
+    }
+}
+
+impl Drop for ClipboardMockGuard {
+    fn drop(&mut self) {
+        set_mock_clipboard_fails(false);
+        set_mock_clipboard_enabled(false);
+    }
+}
 
 fn app_with(text: &str) -> (WriterApp, std::rc::Rc<GuiState>) {
     let dialogs = std::rc::Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
@@ -99,4 +119,47 @@ fn pasting_lines_makes_paragraphs_and_normalises_line_endings() {
     app.invoke_paste();
     assert_eq!(state.current.borrow().editor_text(), "starta\nb end");
     set_mock_clipboard_enabled(false);
+}
+
+#[test]
+fn copy_write_failure_is_visible_and_preserves_the_document_and_clipboard() {
+    let _guard = MOCK_CLIPBOARD
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let _mock = ClipboardMockGuard::new();
+    let (app, state) = app_with("alpha beta gamma");
+    select(&state, 6, 10);
+    write_clipboard(&ClipboardData {
+        plain_text: Some("previous clipboard".into()),
+        ..Default::default()
+    })
+    .expect("seed the clipboard before inducing a write failure");
+    let before = state.current.borrow().clone();
+    let undo_before = state.history.borrow().undo.len();
+    let redo_before = state.history.borrow().redo.len();
+    app.set_status_left("Ready".into());
+
+    set_mock_clipboard_fails(true);
+    app.invoke_copy();
+    set_mock_clipboard_fails(false);
+
+    assert_eq!(
+        app.get_status_left().as_str(),
+        "Copy failed: Clipboard is unavailable"
+    );
+    assert_eq!(
+        *state.current.borrow(),
+        before,
+        "copy failure keeps the text and selection available for retry"
+    );
+    assert_eq!(state.history.borrow().undo.len(), undo_before);
+    assert_eq!(state.history.borrow().redo.len(), redo_before);
+    assert_eq!(
+        read_clipboard()
+            .expect("read the previous clipboard contents")
+            .plain_text
+            .as_deref(),
+        Some("previous clipboard"),
+        "failure leaves the old clipboard contents intact"
+    );
 }

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Line breaking for the PDF export. Lines are wrapped with the widths the PDF
 //! draws with: the embedded Inter faces, bold and italic per run, shaped with
 //! kerning exactly as the editor shapes them and spaced that way in the file

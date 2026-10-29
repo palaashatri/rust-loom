@@ -32,9 +32,9 @@ quick-xml = "0.41.0"
 loom-fonts = { workspace = true }
 unicode-segmentation = "1.13"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+roxmltree = "0.21"
 
 [dev-dependencies]
 # `loom_pdf::inspect` reads exported PDFs back; production builds do not carry it.
 loom-pdf = { workspace = true, features = ["test-support"] }
 loom-clipboard = { path = "../../../loom-core/crates/loom-clipboard" }
-roxmltree = "0.21"

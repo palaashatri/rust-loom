@@ -63,6 +63,7 @@ fn numeric_axis_value(raw: &str) -> Option<f64> {
 /// Synchronize active chart data from the worksheet model to the Slint UI.
 pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
     let Some(chart) = sheet.chart.clone() else {
+        app.set_chart_exists(false);
         let was_focused = app.get_chart_focused();
         clear_chart_points(app);
         app.set_chart_source_range(SharedString::default());
@@ -79,6 +80,7 @@ pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
         app.set_chart_visible(false);
         return;
     };
+    app.set_chart_exists(true);
     if !app.get_chart_visible() {
         return;
     }

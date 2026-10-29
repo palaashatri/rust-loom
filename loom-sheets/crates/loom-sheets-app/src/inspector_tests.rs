@@ -246,7 +246,7 @@ fn table_inspector_controls_stay_inside_the_panel_padding() {
     app.set_inspector_tab(0);
     let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Table inspector");
     for label in [
-        "Table name",
+        "Worksheet name",
         "Delete selected row",
         "Delete selected column",
     ] {
@@ -283,11 +283,24 @@ fn cell_inspector_rows_are_evenly_spaced_and_reachable_at_every_size() {
                 let el = found.into_iter().next().expect("field count checked");
                 (el.absolute_position().y, el.size().height)
             };
-            let (y1, h1) = top("Selected range");
-            let (y2, _) = top("Displayed value");
-            let (y3, _) = top("Raw formula");
-            let gap_a = y2 - y1;
-            let gap_b = y3 - y2;
+            let first_control: Vec<_> = ElementHandle::find_by_accessible_label(
+                &app,
+                "Toggle bold formatting (Cell inspector)",
+            )
+            .collect();
+            assert_eq!(
+                first_control.len(),
+                1,
+                "one bold toggle in the Cell inspector"
+            );
+            first_control[0].clone().scroll(0.0, -1_000.0);
+            let _ = snapshot_component(&app, width, height, 1.0).expect("render scrolled");
+
+            let (selection_y, h1) = top("Selected range");
+            let (value_y, _) = top("Displayed value");
+            let (formula_y, _) = top("Raw formula");
+            let gap_a = value_y - selection_y;
+            let gap_b = formula_y - value_y;
             assert!(
                 (gap_a - gap_b).abs() <= 2.0,
                 "{width}x{height} x{scale}: row pitches differ ({gap_a} vs {gap_b})"
@@ -302,29 +315,25 @@ fn cell_inspector_rows_are_evenly_spaced_and_reachable_at_every_size() {
             // inspector to its end, the Column width field lies inside the panel.
             // Controls below the fold are not in the tree until the inspector
             // scrolls, so scroll from a visible control the way a user would.
-            let anchor: Vec<_> = ElementHandle::find_by_accessible_label(
-                &app,
-                "Toggle bold formatting (Cell inspector)",
-            )
-            .collect();
-            assert_eq!(anchor.len(), 1, "one bold toggle in the Cell inspector");
-            anchor
-                .into_iter()
-                .next()
-                .expect("bold toggle")
-                .scroll(0.0, -1_000.0);
-            let _ = snapshot_component(&app, width, height, 1.0).expect("render scrolled");
             let field: Vec<_> =
                 ElementHandle::find_by_accessible_label(&app, "Selected column width").collect();
             let field = field.into_iter().next().expect("column-width field");
+            let row_field: Vec<_> =
+                ElementHandle::find_by_accessible_label(&app, "Selected row height").collect();
+            let row_field = row_field.into_iter().next().expect("row-height field");
             let panel = ElementHandle::find_by_element_id(&app, "SheetsApp::inspector-panel")
                 .next()
                 .expect("inspector panel");
             let panel_bottom = panel.absolute_position().y + panel.size().height;
             let field_bottom = field.absolute_position().y + field.size().height;
+            let row_bottom = row_field.absolute_position().y + row_field.size().height;
             assert!(
                 field_bottom <= panel_bottom + 0.5,
                 "{width}x{height} x{scale}: Column width field ends at {field_bottom}, panel at {panel_bottom}"
+            );
+            assert!(
+                row_bottom <= panel_bottom + 0.5,
+                "{width}x{height} x{scale}: Row height field ends at {row_bottom}, panel at {panel_bottom}"
             );
         }
     }
@@ -348,7 +357,7 @@ fn the_number_format_choices_are_named_by_what_they_do() {
             .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
             .collect()
     };
-    for name in ["Number", "Currency", "Percent", "Decimal places"] {
+    for name in ["General", "Currency", "Percentage", "Number"] {
         assert_eq!(
             buttons(name).len(),
             1,
@@ -436,10 +445,17 @@ fn cell_inspector_controls_sit_under_their_own_headings() {
         found[0].absolute_position().y
     };
     let font_style = y_of("Font Style");
-    let font_size = y_of("Font size in points");
+    let font_size = y_of("Font size in pixels");
     let borders = y_of("Borders & Fill");
     let fill = y_of("Fill red");
     let data_format = y_of("Data Format");
+    let number_format = y_of("General");
+    let alignment = y_of("Alignment");
+    let row_height = y_of("Selected row height");
+    let column_width = y_of("Selected column width");
+    let selection = y_of("Selected range");
+    let value = y_of("Displayed value");
+    let formula = y_of("Raw formula");
     assert!(
         font_style < font_size && font_size < borders,
         "Font size must sit under Font Style and above Borders & Fill ({font_style}, {font_size}, {borders})"
@@ -447,6 +463,18 @@ fn cell_inspector_controls_sit_under_their_own_headings() {
     assert!(
         borders < fill && fill < data_format,
         "fill swatches must sit under Borders & Fill ({borders}, {fill}, {data_format})"
+    );
+    assert!(
+        font_size < number_format && number_format < alignment,
+        "font size, number format and alignment should be easy to reach before repeated metadata"
+    );
+    assert!(
+        alignment < row_height && row_height < column_width && column_width < selection,
+        "editable geometry must precede selection metadata"
+    );
+    assert!(
+        selection < value && value < formula,
+        "metadata labels keep their order"
     );
 }
 
@@ -570,7 +598,7 @@ fn section_headings_start_where_the_controls_below_them_start() {
         (x_of("Borders & Fill", None) - switch).abs() < 1.0,
         "Borders & Fill must start at the x of the Border switch ({switch})"
     );
-    let choice = x_of("Number", Some(AccessibleRole::Button));
+    let choice = x_of("General", Some(AccessibleRole::Button));
     assert!(
         (x_of("Data Format", None) - choice).abs() < 1.0,
         "Data Format must start at the x of its choices ({choice})"
@@ -588,10 +616,10 @@ fn read_only_values_drop_the_input_outline_and_editable_fields_keep_it() {
     app.set_show_inspector(true);
     app.set_inspector_tab(0);
     let table = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Table tab");
-    let name: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Table name")
+    let name: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Worksheet name")
         .filter(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
         .collect();
-    assert_eq!(name.len(), 1, "one editable Table name field");
+    assert_eq!(name.len(), 1, "one editable Worksheet name field");
     let input = name[0].absolute_position();
     let mid = (input.y + name[0].size().height / 2.0) as u32;
     // The shared field insets its text by space.md (8 px) inside its outline box.
@@ -603,7 +631,13 @@ fn read_only_values_drop_the_input_outline_and_editable_fields_keep_it() {
     );
 
     app.set_inspector_tab(1);
-    let cell = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell tab");
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell tab");
+    let anchor: Vec<_> =
+        ElementHandle::find_by_accessible_label(&app, "Toggle bold formatting (Cell inspector)")
+            .collect();
+    assert_eq!(anchor.len(), 1, "one bold toggle in the Cell inspector");
+    anchor[0].clone().scroll(0.0, -1_000.0);
+    let cell = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render selection metadata");
     let value: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Selected range").collect();
     assert_eq!(value.len(), 1, "one Selected range value");
     let well = value[0].absolute_position();
@@ -633,6 +667,19 @@ fn the_formula_row_shows_a_formula_and_says_no_formula_for_a_value() {
         let at = CellRef::parse(cell).unwrap();
         update_selection_range(&app, &sheet, &values, GridSelection::new(at, at));
         let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Cell inspector");
+        if let Some(bottom) = ElementHandle::find_by_accessible_label(&app, "Raw formula").next() {
+            bottom.scroll(0.0, 1_000.0);
+            let _ = snapshot_component(&app, 1280.0, 800.0, 1.0)
+                .expect("render the inspector from the top");
+        }
+        let anchor: Vec<_> = ElementHandle::find_by_accessible_label(
+            &app,
+            "Toggle bold formatting (Cell inspector)",
+        )
+        .collect();
+        assert_eq!(anchor.len(), 1, "one bold toggle in the Cell inspector");
+        anchor[0].clone().scroll(0.0, -1_000.0);
+        let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render selection metadata");
         let rows: Vec<_> = ElementHandle::find_by_accessible_label(&app, "Raw formula").collect();
         assert_eq!(rows.len(), 1, "one Raw formula field");
         rows[0]

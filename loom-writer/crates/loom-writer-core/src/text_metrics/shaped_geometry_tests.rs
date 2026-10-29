@@ -135,8 +135,8 @@ fn writer_bidi_geometry_matches_one_contextually_shaped_styled_paragraph() {
         .iter()
         .filter_map(|run| catalog.face(run.face).map(|face| face.family.as_str()))
         .collect();
-    assert!(families.iter().any(|family| *family == "Noto Naskh Arabic"));
-    assert!(families.iter().any(|family| *family == "Noto Sans Hebrew"));
+    assert!(families.contains(&"Noto Naskh Arabic"));
+    assert!(families.contains(&"Noto Sans Hebrew"));
     assert!(shaped.runs.iter().any(|run| {
         run.range == (latin_start..latin_end)
             && run.size == latin_size
@@ -339,11 +339,13 @@ fn script_fallback_wrapping_uses_shaped_widths_and_preserves_graphemes() {
     }
     assert_eq!(next, text.len(), "line ranges retain every source byte");
 
-    let mut style = crate::PageStyle::default();
-    style.width_pt = width as f32;
-    style.margin_left_pt = 0.0;
-    style.margin_right_pt = 0.0;
-    style.body_font_size_pt = base_size;
+    let style = crate::PageStyle {
+        width_pt: width,
+        margin_left_pt: 0.0,
+        margin_right_pt: 0.0,
+        body_font_size_pt: base_size,
+        ..crate::PageStyle::default()
+    };
     let mut document = WriterDocument::new("wrapped", "Wrapped");
     document.blocks.push(block);
     let flow = document

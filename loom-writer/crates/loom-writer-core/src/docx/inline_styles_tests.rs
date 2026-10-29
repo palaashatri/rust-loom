@@ -58,7 +58,7 @@ fn property_values(xml: &str, element: &str, attribute: &str) -> Vec<String> {
         .collect()
 }
 
-fn import_body(body: &str) -> WriterDocument {
+fn import_body(body: &str) -> Result<WriterDocument, String> {
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
          <w:document xmlns:w=\"{W}\"><w:body>{body}</w:body></w:document>"
@@ -67,7 +67,7 @@ fn import_body(body: &str) -> WriterDocument {
     archive
         .add("word/document.xml", xml.into_bytes())
         .expect("add document part");
-    import_docx(&archive.to_bytes().expect("package test document")).expect("DOCX imports")
+    import_docx(&archive.to_bytes().expect("package test document"))
 }
 
 fn plain_run_paragraph(text: &str, properties: &str) -> String {
@@ -127,7 +127,7 @@ fn automatic_color_round_trips_and_unstyled_runs_stay_unstyled() {
     let imported = import_docx(&export.bytes).expect("DOCX imports");
     assert_eq!(run_style(&imported, "automatic").unwrap().color, None);
 
-    let plain = import_body(&plain_run_paragraph("plain", ""));
+    let plain = import_body(&plain_run_paragraph("plain", "")).expect("DOCX imports");
     assert!(
         plain.blocks[0].runs.is_empty(),
         "a run without w:rPr keeps the existing inherited/default behavior"
@@ -246,7 +246,7 @@ fn imported_superscript_and_subscript_vertical_alignment_are_preserved() {
         plain_run_paragraph("super", "<w:vertAlign w:val=\"superscript\"/>"),
         plain_run_paragraph("sub", "<w:vertAlign w:val=\"subscript\"/>")
     );
-    let imported = import_body(&body);
+    let imported = import_body(&body).expect("DOCX imports");
 
     let superscript = run_style(&imported, "super").expect("superscript style run");
     assert!(superscript.superscript);
@@ -323,7 +323,7 @@ fn inline_property_tags_are_exact_and_attributes_do_not_leak_from_siblings() {
         .iter()
         .map(|(text, properties)| plain_run_paragraph(text, properties))
         .collect::<String>();
-    let imported = import_body(&body);
+    let imported = import_body(&body).expect("DOCX imports");
 
     assert_eq!(imported.blocks.len(), cases.len());
     for (block, (text, _)) in imported.blocks.iter().zip(cases) {
@@ -341,7 +341,8 @@ fn commented_inline_property_does_not_create_a_style_run() {
     let imported = import_body(&plain_run_paragraph(
         "commented-color",
         "<!--<w:color w:val=\"AABBCC\"/>-->",
-    ));
+    ))
+    .expect("DOCX imports");
 
     assert!(
         imported.blocks[0].runs.is_empty(),
@@ -371,22 +372,23 @@ fn inline_attributes_accept_xml_whitespace_quotes_and_order() {
     ];
 
     for (text, properties, expected) in cases {
-        let imported = import_body(&plain_run_paragraph(text, properties));
+        let imported = import_body(&plain_run_paragraph(text, properties)).expect("DOCX imports");
         let style = run_style(&imported, text).expect("style run survives import");
         assert_eq!(style.color.as_deref(), Some(expected), "{text}");
     }
 }
 
 #[test]
-fn malformed_duplicate_attribute_is_ignored() {
-    let imported = import_body(&plain_run_paragraph(
+fn malformed_duplicate_attribute_returns_clear_import_error() {
+    let error = import_body(&plain_run_paragraph(
         "duplicate-value",
         "<w:color w:val=\"AABBCC\" w:val=\"112233\"/>",
-    ));
+    ))
+    .expect_err("duplicate XML attributes must reject the DOCX document");
 
     assert!(
-        imported.blocks[0].runs.is_empty(),
-        "a malformed duplicate attribute must not supply a color"
+        error.starts_with("invalid DOCX document.xml:"),
+        "duplicate attribute import error should identify the malformed document part: {error}"
     );
 }
 

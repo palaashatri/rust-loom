@@ -186,10 +186,13 @@ else:
     if workflow.get("application_order") != list(APPS):
         fail("serial application order drifted from AGENTS.md")
 
+LOCAL_ONLY_ROOTS = {".work", ".remember", ".serena"}
+
 for directory, child_directories, filenames in os.walk(ROOT):
     child_directories[:] = [
         name for name in child_directories
         if name not in {".git", "target", "node_modules", ".venv"}
+        and not (Path(directory) == ROOT and name in LOCAL_ONLY_ROOTS)
     ]
     for filename in filenames:
         path = Path(directory) / filename

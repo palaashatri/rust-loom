@@ -8,6 +8,11 @@ use std::collections::BTreeMap;
 pub(crate) type Snapshot = (PresentationDocument, BTreeMap<String, TransitionKind>);
 
 impl PresentationSession {
+    /// Ends the current in-place table cell text edit session.
+    pub fn end_table_text_edit(&mut self) {
+        self.active_table_text_edit = None;
+    }
+
     fn snapshot(&self) -> Snapshot {
         (self.document.clone(), self.transitions.clone())
     }
@@ -21,6 +26,7 @@ impl PresentationSession {
 
     /// Records the current document and transitions before a mutation.
     pub fn checkpoint(&mut self) {
+        self.end_table_text_edit();
         self.checkpoint_redo = Some(std::mem::take(&mut self.redo));
         self.undo.push(self.snapshot());
         if self.undo.len() > self.history_limit {
@@ -33,6 +39,7 @@ impl PresentationSession {
     /// starting geometry; cancelled gestures must not leave an undo entry or a
     /// partially transformed document.
     pub fn cancel_checkpoint(&mut self) -> bool {
+        self.end_table_text_edit();
         let Some(previous) = self.undo.pop() else {
             return false;
         };
@@ -43,6 +50,7 @@ impl PresentationSession {
 
     /// Restores the previous snapshot.
     pub fn undo(&mut self) -> bool {
+        self.end_table_text_edit();
         self.checkpoint_redo = None;
         let Some(previous) = self.undo.pop() else {
             return false;
@@ -54,6 +62,7 @@ impl PresentationSession {
 
     /// Reapplies the next snapshot.
     pub fn redo(&mut self) -> bool {
+        self.end_table_text_edit();
         self.checkpoint_redo = None;
         let Some(next) = self.redo.pop() else {
             return false;

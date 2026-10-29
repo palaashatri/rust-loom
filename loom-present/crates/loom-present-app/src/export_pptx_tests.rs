@@ -40,6 +40,11 @@ fn export_command_writes_a_real_pptx_through_the_save_dialog() {
         .borrow_mut()
         .document
         .add_slide("Last slide", "content");
+    let slide_id = state.session.borrow().document.slides[0].id.clone();
+    state
+        .session
+        .borrow_mut()
+        .set_transition(&slide_id, TransitionKind::Morph);
     let last = state.session.borrow().document.slides.len();
     state.session.borrow_mut().document.slides[last - 1].speaker_notes = "Say hello".into();
     wire_app_callbacks(&app, &state);
@@ -47,7 +52,8 @@ fn export_command_writes_a_real_pptx_through_the_save_dialog() {
     app.invoke_export_pptx();
 
     assert!(
-        app.get_status_left().starts_with("Exported "),
+        app.get_status_left()
+            .contains("Morph transitions exported as fades"),
         "{}",
         app.get_status_left()
     );

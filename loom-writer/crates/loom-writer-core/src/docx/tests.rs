@@ -11,8 +11,8 @@ use roxmltree::{Document, Node};
 
 use super::{export_docx, DocxExport};
 use crate::{
-    CommentThread, PageMarginsPreset, PageOrientation, PageSetup, PaperSize, RichBlock,
-    WriterDocument, TABLE_BLOCK_KIND,
+    CommentThread, PageAppearance, PageMarginsPreset, PageOrientation, PageSetup, PaperSize,
+    RevisionKind, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
 };
 
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -48,6 +48,27 @@ fn rewrite_document_xml(export: &DocxExport, rewrite: impl FnOnce(&str) -> Strin
     fixture.to_bytes().expect("write fixture package")
 }
 
+fn rewrite_package_part(
+    export: &DocxExport,
+    target: &str,
+    rewrite: impl FnOnce(&str) -> String,
+) -> Vec<u8> {
+    let archive = PackageArchive::from_bytes(&export.bytes).expect("read DOCX package");
+    let target_xml = std::str::from_utf8(archive.get(target).expect("target part exists"))
+        .expect("XML part is UTF-8");
+    let rewritten = rewrite(target_xml).into_bytes();
+    let mut fixture = PackageArchive::new();
+    for path in archive.paths() {
+        let data = if path == target {
+            rewritten.clone()
+        } else {
+            archive.get(path).expect("part exists").to_vec()
+        };
+        fixture.add(path, data).expect("copy package part");
+    }
+    fixture.to_bytes().expect("write fixture package")
+}
+
 /// A document touching every feature the export claims to carry.
 pub(super) fn rich_document() -> WriterDocument {
     let mut doc = WriterDocument::new("rich", "Quarterly <Report> & Notes");
@@ -55,6 +76,7 @@ pub(super) fn rich_document() -> WriterDocument {
         paper: PaperSize::Letter,
         orientation: PageOrientation::Landscape,
         margins: PageMarginsPreset::Moderate,
+        ..PageSetup::default()
     };
     doc.blocks.push(RichBlock::new(1, "heading1", "Overview"));
     let mut p = RichBlock::new(
@@ -520,6 +542,101 @@ fn justified_paragraph_alignment_round_trips_through_loomdoc_and_docx() {
 }
 
 #[test]
+fn paragraph_spacing_line_height_and_indents_round_trip_through_docx() {
+    let mut document = WriterDocument::new("paragraph-layout", "Paragraph layout");
+    let mut paragraph = RichBlock::new(1, "paragraph", "Layout values");
+    paragraph.style.space_before = 3.2;
+    paragraph.style.space_after = 10.4;
+    paragraph.style.line_spacing = 1.5;
+    paragraph.style.left_indent = 18.0;
+    paragraph.style.right_indent = 4.5;
+    paragraph.style.first_line_indent = 9.0;
+    let expected = paragraph.style.clone();
+    document.blocks.push(paragraph);
+
+    let exported = export_docx(&document).expect("export paragraph layout");
+    let parts = parts(&exported);
+    let body = parse(&parts["word/document.xml"]);
+    let p = body_paragraph(&body, "Layout values");
+    let p_pr = child(p, "pPr").expect("paragraph properties");
+    let spacing = child(p_pr, "spacing").expect("spacing");
+    assert_eq!(w_attr(spacing, "before"), Some("64"));
+    assert_eq!(w_attr(spacing, "after"), Some("208"));
+    assert_eq!(w_attr(spacing, "line"), Some("360"));
+    assert_eq!(w_attr(spacing, "lineRule"), Some("auto"));
+    let indent = child(p_pr, "ind").expect("indent");
+    assert_eq!(w_attr(indent, "left"), Some("360"));
+    assert_eq!(w_attr(indent, "right"), Some("90"));
+    assert_eq!(w_attr(indent, "firstLine"), Some("180"));
+
+    let imported = super::import_docx(&exported.bytes).expect("import paragraph layout");
+    assert_eq!(imported.blocks[0].style, expected);
+    let reopened = super::import_docx(
+        &export_docx(&imported)
+            .expect("re-export paragraph layout")
+            .bytes,
+    )
+    .expect("reopen paragraph layout");
+    assert_eq!(reopened.blocks[0].style, expected);
+}
+
+#[test]
+fn docx_list_marker_indents_do_not_become_user_paragraph_indents() {
+    let mut document = WriterDocument::new("nested-list", "Nested list");
+    let mut item = RichBlock::new(1, "list-bulleted", "nested item");
+    item.style.list_level = 1;
+    document.blocks.push(item);
+
+    let imported = super::import_docx(&export_docx(&document).expect("export nested list").bytes)
+        .expect("import nested list");
+    assert_eq!(imported.blocks[0].style.list_level, 1);
+    assert_eq!(imported.blocks[0].style.left_indent, 0.0);
+    assert_eq!(imported.blocks[0].style.first_line_indent, 0.0);
+
+    let reexport = export_docx(&imported).expect("re-export nested list");
+    let parts = parts(&reexport);
+    let body = parse(&parts["word/document.xml"]);
+    let p = body_paragraph(&body, "nested item");
+    let indent = child(child(p, "pPr").unwrap(), "ind").unwrap();
+    assert_eq!(w_attr(indent, "left"), Some("1080"));
+    assert_eq!(w_attr(indent, "hanging"), Some("360"));
+}
+
+#[test]
+fn malformed_or_unrepresented_docx_paragraph_layout_is_rejected() {
+    let cases = [
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:spacing w:before="invalid"/></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
+            "integer number of twips",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:spacing w:line="360" w:lineRule="exact"/></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
+            "exact or minimum line spacing",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:ind w:firstLine="180" w:hanging="120"/></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
+            "both firstLine and hanging",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:p><w:pPr><w:spacing w:before="20"/></w:pPr><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#,
+            "spacing and indents in DOCX table cells",
+        ),
+    ];
+    for (xml, expected_error) in cases {
+        let mut archive = PackageArchive::new();
+        archive
+            .add("word/document.xml", xml.as_bytes().to_vec())
+            .unwrap();
+        let error = super::import_docx(&archive.to_bytes().unwrap())
+            .expect_err("unrepresentable paragraph layout must fail");
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?} in error {error:?}"
+        );
+    }
+}
+
+#[test]
 fn docx_bidi_and_logical_start_alignment_survive_import_export() {
     let mut doc = WriterDocument::new("bidi-roundtrip", "BiDi round trip");
     let mut paragraph = RichBlock::new(1, "paragraph", "שלום world");
@@ -718,6 +835,105 @@ fn page_setup_becomes_section_properties() {
 }
 
 #[test]
+fn black_document_background_round_trips_and_unsupported_backgrounds_warn() {
+    let mut document = WriterDocument::new("black-background", "Black background");
+    document.page.appearance = PageAppearance::Black;
+    document
+        .blocks
+        .push(RichBlock::new(1, "paragraph", "Default ink"));
+
+    let exported = export_docx(&document).expect("export black background");
+    let package = parts(&exported);
+    let body = parse(&package["word/document.xml"]);
+    let background = child(body.root_element(), "background").expect("document background");
+    assert_eq!(w_attr(background, "color"), Some("000000"));
+    assert!(
+        package["word/styles.xml"].contains("<w:color w:val=\"FFFFFF\"/>"),
+        "default run ink is white on black"
+    );
+    let imported = super::import_docx(&exported.bytes).expect("import black background");
+    assert_eq!(imported.page.appearance, PageAppearance::Black);
+
+    let unsupported = rewrite_document_xml(&exported, |xml| {
+        xml.replace(
+            "<w:background w:color=\"000000\"/>",
+            "<w:background w:color=\"FF0000\"/>",
+        )
+    });
+    let warnings = super::inspect_docx_unsupported(&unsupported).expect("inspect background");
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("document background")),
+        "unsupported backgrounds use the existing import warning path: {warnings:?}"
+    );
+    let imported = super::import_docx(&unsupported).expect("import unsupported background");
+    assert_eq!(imported.page.appearance, PageAppearance::White);
+}
+
+#[test]
+fn custom_page_geometry_exports_exact_twips() {
+    let mut document = rich_document();
+    document
+        .page
+        .set_custom_geometry_points(612.25, 792.5, 24.0, 30.0, 36.0, 42.0)
+        .expect("valid custom page geometry");
+    let export = export_docx(&document).unwrap();
+    let parts = parts(&export);
+    let body = parse(&parts["word/document.xml"]);
+    let size = all(&body, "pgSz")[0];
+    assert_eq!(w_attr(size, "w"), Some("12245"));
+    assert_eq!(w_attr(size, "h"), Some("15850"));
+    assert_eq!(w_attr(size, "orient"), None);
+    let margins = all(&body, "pgMar")[0];
+    assert_eq!(w_attr(margins, "top"), Some("480"));
+    assert_eq!(w_attr(margins, "bottom"), Some("600"));
+    assert_eq!(w_attr(margins, "left"), Some("720"));
+    assert_eq!(w_attr(margins, "right"), Some("840"));
+}
+
+#[test]
+fn custom_page_geometry_round_trips_through_docx_import() {
+    let mut document = rich_document();
+    document
+        .page
+        .set_custom_geometry_points(612.25, 792.5, 24.0, 30.0, 36.0, 42.0)
+        .expect("valid custom page geometry");
+
+    let bytes = export_docx(&document).unwrap().bytes;
+    let imported = super::import_docx(&bytes).expect("custom geometry imports");
+
+    assert_eq!(imported.page, document.page);
+}
+
+#[test]
+fn docx_import_rejects_malformed_or_section_specific_page_geometry() {
+    let mut document = rich_document();
+    document
+        .page
+        .set_custom_geometry_points(612.25, 792.5, 24.0, 30.0, 36.0, 42.0)
+        .expect("valid custom page geometry");
+    let export = export_docx(&document).unwrap();
+
+    let malformed = rewrite_document_xml(&export, |xml| {
+        xml.replace("w:w=\"12245\" w:h=\"15850\"", "w:w=\"0\" w:h=\"15850\"")
+    });
+    assert!(super::import_docx(&malformed)
+        .unwrap_err()
+        .contains("invalid DOCX page geometry"));
+
+    let multiple_sections = rewrite_document_xml(&export, |xml| {
+        xml.replacen(
+            "</w:p>",
+            "</w:p><w:p><w:pPr><w:sectPr><w:pgSz w:w=\"14400\" w:h=\"21600\"/><w:pgMar w:top=\"720\" w:bottom=\"720\" w:left=\"720\" w:right=\"720\"/></w:sectPr></w:pPr><w:r><w:t>Second section</w:t></w:r></w:p>",
+            1,
+        )
+    });
+    let error = super::import_docx(&multiple_sections).unwrap_err();
+    assert!(error.contains("different page geometry"), "{error}");
+}
+
+#[test]
 fn text_survives_escaping_unicode_tabs_and_breaks() {
     let doc = rich_document();
     let export = export_docx(&doc).unwrap();
@@ -812,6 +1028,80 @@ fn comments_are_anchored_and_resolved_state_is_kept() {
 }
 
 #[test]
+fn docx_comments_round_trip_with_author_body_anchor_and_resolved_state() {
+    let exported = export_docx(&rich_document()).expect("export comments");
+    let imported = super::import_docx(&exported.bytes).expect("import comments");
+    assert_eq!(
+        imported.comments.len(),
+        2,
+        "orphaned comments stay unanchored"
+    );
+    let ada = imported
+        .comments
+        .iter()
+        .find(|comment| comment.author == "Ada Lovelace")
+        .expect("resolved Ada thread");
+    assert_eq!(
+        ada.id, "0",
+        "the numeric OOXML comment identity is retained"
+    );
+    assert_eq!(ada.body, "Check this\nsecond line");
+    assert!(ada.resolved);
+    let block = imported
+        .blocks
+        .iter()
+        .find(|block| block.id == ada.block_id)
+        .expect("comment paragraph exists");
+    assert_eq!(&block.text.as_str()[ada.start..ada.end], "bold");
+
+    let bob = imported
+        .comments
+        .iter()
+        .find(|comment| comment.author == "Bob")
+        .expect("unresolved Bob thread");
+    assert_eq!(bob.id, "1");
+    assert_eq!(bob.body, "Open");
+    assert!(!bob.resolved);
+    let block = imported
+        .blocks
+        .iter()
+        .find(|block| block.id == bob.block_id)
+        .expect("comment paragraph exists");
+    assert_eq!(&block.text.as_str()[bob.start..bob.end], "C");
+
+    let reopened = super::import_docx(
+        &export_docx(&imported)
+            .expect("re-export imported comments")
+            .bytes,
+    )
+    .expect("reopen comments");
+    assert_eq!(reopened.comments, imported.comments);
+}
+
+#[test]
+fn docx_dangling_comment_markers_and_records_are_rejected() {
+    let exported = export_docx(&rich_document()).expect("export comment fixture");
+    let missing_end = rewrite_document_xml(&exported, |xml| {
+        xml.replacen("<w:commentRangeEnd w:id=\"0\"/>", "", 1)
+    });
+    let error = super::import_docx(&missing_end).expect_err("incomplete anchor is rejected");
+    assert!(error.contains("incomplete range anchor"), "{error}");
+
+    let missing_record = rewrite_package_part(&exported, "word/comments.xml", |xml| {
+        xml.replacen("<w:comment w:id=\"0\"", "<w:comment w:id=\"99\"", 1)
+    });
+    let error =
+        super::import_docx(&missing_record).expect_err("dangling comment record is rejected");
+    assert!(error.contains("do not match"), "{error}");
+
+    let missing_author = rewrite_package_part(&exported, "word/comments.xml", |xml| {
+        xml.replacen(" w:author=\"Ada Lovelace\"", "", 1)
+    });
+    let error = super::import_docx(&missing_author).expect_err("malformed comment is rejected");
+    assert!(error.contains("missing w:author"), "{error}");
+}
+
+#[test]
 fn no_comments_means_no_comment_parts() {
     let mut doc = rich_document();
     doc.comments.clear();
@@ -820,6 +1110,163 @@ fn no_comments_means_no_comment_parts() {
     assert!(!parts.contains_key("word/comments.xml"));
     assert!(!parts["[Content_Types].xml"].contains("comments"));
     assert!(!parts["word/_rels/document.xml.rels"].contains("comments"));
+}
+
+#[test]
+fn imports_and_round_trips_unresolved_docx_text_and_format_revisions() {
+    let mut archive = PackageArchive::new();
+    let document_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>left</w:t></w:r>
+      <w:del w:id="0" w:author="Delete Reviewer"><w:r><w:delText>gone</w:delText></w:r></w:del>
+      <w:ins w:id="7" w:author="Insert Reviewer"><w:r><w:t>new</w:t></w:r></w:ins>
+      <w:r><w:rPr><w:b/><w:rPrChange w:id="8" w:author="Format Reviewer"><w:rPr/></w:rPrChange></w:rPr><w:t>bold</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let settings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:trackRevisions/></w:settings>"#;
+    archive
+        .add("word/document.xml", document_xml.as_bytes().to_vec())
+        .unwrap();
+    archive
+        .add("word/settings.xml", settings_xml.as_bytes().to_vec())
+        .unwrap();
+
+    let imported = super::import_docx(&archive.to_bytes().unwrap())
+        .expect("import standard OOXML tracked changes");
+    assert_eq!(imported.blocks[0].text.as_str(), "leftnewbold");
+    assert!(imported.tracked_changes.recording());
+    let revisions = imported.tracked_changes.revisions();
+    assert_eq!(revisions.len(), 3);
+
+    let deletion = revisions
+        .iter()
+        .find(|revision| revision.kind == RevisionKind::Deletion)
+        .expect("unresolved deletion is retained");
+    assert_eq!(deletion.id, 9, "reserved zero ID is normalized once");
+    assert_eq!(deletion.author, "Delete Reviewer");
+    assert_eq!(deletion.anchor.start, 4);
+    assert_eq!(deletion.anchor.end, 4);
+    assert_eq!(deletion.before.as_ref().unwrap().text, "gone");
+    assert!(deletion.after.is_none());
+
+    let insertion = revisions
+        .iter()
+        .find(|revision| revision.kind == RevisionKind::Insertion)
+        .expect("unresolved insertion is retained");
+    assert_eq!(insertion.id, 7);
+    assert_eq!(insertion.author, "Insert Reviewer");
+    assert_eq!(insertion.anchor.start, 4);
+    assert_eq!(insertion.anchor.end, 7);
+    assert!(insertion.before.is_none());
+    assert_eq!(insertion.after.as_ref().unwrap().text, "new");
+
+    let formatting = revisions
+        .iter()
+        .find(|revision| revision.kind == RevisionKind::Formatting)
+        .expect("unresolved formatting change is retained");
+    assert_eq!(formatting.id, 8);
+    assert_eq!(formatting.author, "Format Reviewer");
+    assert_eq!(formatting.before.as_ref().unwrap().text, "bold");
+    assert!(formatting.before.as_ref().unwrap().runs.is_empty());
+    assert_eq!(formatting.after.as_ref().unwrap().text, "bold");
+    assert_eq!(formatting.after.as_ref().unwrap().runs.len(), 1);
+    assert_eq!(
+        formatting.after.as_ref().unwrap().runs[0].style.weight,
+        FontWeight::Bold
+    );
+
+    let exported = export_docx(&imported).expect("export unresolved revisions");
+    let parts = parts(&exported);
+    assert!(parts["word/settings.xml"].contains("<w:trackRevisions/>"));
+    let xml = parse(&parts["word/document.xml"]);
+    let deleted = all(&xml, "del");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(w_attr(deleted[0], "id"), Some("9"));
+    assert_eq!(w_attr(deleted[0], "author"), Some("Delete Reviewer"));
+    assert_eq!(
+        deleted[0]
+            .descendants()
+            .find(|node| is_w(node, "delText"))
+            .and_then(|node| node.text()),
+        Some("gone")
+    );
+    let inserted = all(&xml, "ins");
+    assert_eq!(inserted.len(), 1);
+    assert_eq!(w_attr(inserted[0], "id"), Some("7"));
+    assert_eq!(w_attr(inserted[0], "author"), Some("Insert Reviewer"));
+    let format_change = all(&xml, "rPrChange");
+    assert_eq!(format_change.len(), 1);
+    assert_eq!(w_attr(format_change[0], "id"), Some("8"));
+    assert_eq!(w_attr(format_change[0], "author"), Some("Format Reviewer"));
+
+    let reopened = super::import_docx(&exported.bytes).expect("reopen exported DOCX");
+    assert_eq!(
+        reopened.tracked_changes.revisions(),
+        imported.tracked_changes.revisions(),
+        "IDs, authors, anchors, and unresolved before/after payloads survive DOCX save/open"
+    );
+    assert_eq!(reopened.blocks[0].text.as_str(), "leftnewbold");
+    assert!(reopened.tracked_changes.recording());
+}
+
+#[test]
+fn block_level_revision_wrappers_are_rejected_instead_of_flattened() {
+    let cases = [
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:ins w:id="1" w:author="Reviewer"><w:p><w:r><w:t>first</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p></w:ins></w:body></w:document>"#,
+            "block-level or paragraph-mark DOCX revision wrapper w:ins",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:del w:id="2" w:author="Reviewer"><w:p><w:r><w:delText>deleted</w:delText></w:r></w:p></w:del></w:body></w:document>"#,
+            "block-level or paragraph-mark DOCX revision wrapper w:del",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:moveFrom w:id="3" w:author="Reviewer"><w:p><w:r><w:t>moved</w:t></w:r></w:p></w:moveFrom></w:body></w:document>"#,
+            "DOCX move revision element w:moveFrom",
+        ),
+    ];
+    for (xml, expected_error) in cases {
+        let mut archive = PackageArchive::new();
+        archive
+            .add("word/document.xml", xml.as_bytes().to_vec())
+            .unwrap();
+        let error = super::import_docx(&archive.to_bytes().unwrap())
+            .expect_err("unsupported block-level revision markup must not become plain text");
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?} in error {error:?}"
+        );
+    }
+}
+
+#[test]
+fn malformed_and_unrepresentable_docx_revisions_are_rejected() {
+    let cases = [
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:ins w:id="1"><w:r><w:t>text</w:t></w:r></w:ins></w:p></w:body></w:document>"#,
+            "missing w:author",
+        ),
+        (
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#,
+            "w:pPrChange is not supported",
+        ),
+    ];
+    for (xml, expected_error) in cases {
+        let mut archive = PackageArchive::new();
+        archive
+            .add("word/document.xml", xml.as_bytes().to_vec())
+            .unwrap();
+        let error = super::import_docx(&archive.to_bytes().unwrap())
+            .expect_err("invalid or unrepresentable revision markup is not flattened");
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?} in error {error:?}"
+        );
+    }
 }
 
 #[test]
@@ -1019,7 +1466,7 @@ fn docx_warnings_name_only_what_is_lost() {
       <w:r><w:t>List Item</w:t></w:r>
     </w:p>
     <w:p>
-      <w:r><w:t>Footnote ref</w:t><w:footnoteReference w:id="2"/></w:r>
+      <w:r><w:t>Footnote ref</w:t><w:footnoteReference w:id="2"/><w:endnoteReference w:id="1"/></w:r>
     </w:p>
     <w:p>
       <w:r><w:drawing><w:pict/></w:drawing></w:r>
@@ -1038,6 +1485,9 @@ fn docx_warnings_name_only_what_is_lost() {
     archive
         .add("word/footnotes.xml", b"<w:footnotes/>".to_vec())
         .unwrap();
+    archive
+        .add("word/endnotes.xml", b"<w:endnotes/>".to_vec())
+        .unwrap();
 
     let docx_bytes = archive.to_bytes().expect("pack test archive");
     let warnings = super::inspect_docx_unsupported(&docx_bytes).expect("inspect succeeds");
@@ -1049,8 +1499,12 @@ fn docx_warnings_name_only_what_is_lost() {
         "old-format pictures are dropped: {warnings:?}"
     );
     assert!(
-        all.contains("footnote"),
-        "footnotes are dropped: {warnings:?}"
+        all.contains("endnote"),
+        "endnotes are still reported as unsupported: {warnings:?}"
+    );
+    assert!(
+        !all.contains("footnote"),
+        "supported footnotes are not reported as lost: {warnings:?}"
     );
     // Headings and flat lists import correctly, so warning about them is noise.
     assert!(!all.contains("heading"), "no heading warning: {warnings:?}");

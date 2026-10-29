@@ -189,16 +189,23 @@ impl CellStyle {
             match self.number_format {
                 NumberFormat::General | NumberFormat::PlainText => {
                     if let Some(dec) = self.decimal_places {
-                        format!("{:.1$}", num, dec as usize)
+                        let decimals = dec as usize;
+                        format!(
+                            "{:.1$}",
+                            crate::functions_format::round_decimals(num, decimals),
+                            decimals
+                        )
                     } else if self.number_format == NumberFormat::General {
                         general_display(num, raw)
                     } else {
                         raw.to_string()
                     }
                 }
-                NumberFormat::Number => {
-                    format!("{:.1$}", num, decimals)
-                }
+                NumberFormat::Number => format!(
+                    "{:.1$}",
+                    crate::functions_format::round_decimals(num, decimals),
+                    decimals
+                ),
                 NumberFormat::Currency => format_number_currency(num, "$", decimals),
                 NumberFormat::Percentage => format_number_percentage(num, decimals),
                 NumberFormat::Scientific => format!("{:e}", num),
@@ -269,7 +276,7 @@ mod tests {
             decimal_places: Some(0),
             ..Default::default()
         };
-        assert_eq!(style.format_value("1234.5"), "$1,234");
+        assert_eq!(style.format_value("1234.5"), "$1,235");
     }
 
     #[test]

@@ -253,7 +253,11 @@ fn wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_
     app.window().set_size(slint::PhysicalSize::new(1600, 900));
     configure_responsive_width(&app, 1600);
     assert_eq!(count(&app, "Table"), 1, "wide windows show Table");
-    assert_eq!(count(&app, "Chart"), 1, "wide windows show Chart");
+    assert_eq!(
+        count(&app, "Chart from Clipboard"),
+        1,
+        "wide windows show chart insertion"
+    );
 
     let before = state
         .session
@@ -272,5 +276,36 @@ fn wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_
     assert!(
         after > before,
         "the toolbar Table button leads to an inserted table"
+    );
+}
+
+#[test]
+fn chart_command_labels_disclose_clipboard_data() {
+    let (app, _) = launched(None);
+
+    assert_eq!(
+        build_present_menu_bar()
+            .find_item("slide.insert_chart")
+            .expect("chart menu command")
+            .label(),
+        Some("Insert Chart from Clipboard...")
+    );
+    assert_eq!(
+        master_palette(&app)
+            .into_iter()
+            .find(|command| matches!(command.action, PaletteAction::AddChart))
+            .expect("chart palette command")
+            .label,
+        "Insert Chart from Clipboard"
+    );
+
+    app.window().set_size(slint::PhysicalSize::new(1600, 900));
+    configure_responsive_width(&app, 1600);
+    render(&app);
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Chart from Clipboard")
+            .filter(|item| item.accessible_role() == Some(AccessibleRole::Button))
+            .count(),
+        1
     );
 }

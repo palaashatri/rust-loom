@@ -14,8 +14,8 @@ export component SheetInspector inherits LoomPanel {
     in property <string> sheet-name: "Untitled";
     in property <string> table-rows-label: "1";
     in property <string> table-cols-label: "1";
-    in property <string> selected-row-height: "24 px";
-    in property <string> selected-col-width: "80 px";
+    in property <string> selected-row-height: "24";
+    in property <string> selected-col-width: "80";
     in-out property <string> inspector-search: "";
     in-out property <int> inspector-tab: 0;
     in property <bool> inspector-show-table: true;
@@ -32,6 +32,12 @@ export component SheetInspector inherits LoomPanel {
     in property <int> cell-font-size: 14;
     in property <string> cell-font-label: "14";
     in property <string> cell-decimals-label: "2";
+    property <string> font-size-draft: "14";
+    property <bool> font-size-invalid: false;
+    property <string> row-height-draft: "24";
+    property <bool> row-height-invalid: false;
+    property <string> col-width-draft: "80";
+    property <bool> col-width-invalid: false;
     callback inspector-search-edited(string);
     callback inspector-context-changed(int);
     callback rename-sheet(string);
@@ -41,6 +47,9 @@ export component SheetInspector inherits LoomPanel {
     callback delete-table-col;
     callback adjust-row-height(int);
     callback adjust-col-width(int);
+    callback set-row-height(string) -> bool;
+    callback set-col-width(string) -> bool;
+    callback set-font-size(string) -> bool;
     callback set-cell-format(int);
     callback set-cell-alignment(int);
     callback toggle-bold;
@@ -68,6 +77,18 @@ export component SheetInspector inherits LoomPanel {
 
     changed inspector-tab => {
         inspector-scroll.viewport-y = 0px;
+    }
+    changed cell-font-label => {
+        root.font-size-draft = root.cell-font-label;
+        root.font-size-invalid = false;
+    }
+    changed selected-row-height => {
+        root.row-height-draft = root.selected-row-height;
+        root.row-height-invalid = false;
+    }
+    changed selected-col-width => {
+        root.col-width-draft = root.selected-col-width;
+        root.col-width-invalid = false;
     }
 
     panel-focus := FocusScope {
@@ -157,10 +178,10 @@ export component SheetInspector inherits LoomPanel {
 
                 if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
                     spacing: Theme.tokens.space.md;
-                    SheetHeading { title: "Table"; }
+                    SheetHeading { title: "Worksheet"; }
                     SheetFieldRow {
                         label: "Name";
-                        field-label: "Table name";
+                        field-label: "Worksheet name";
                         value: root.sheet-name;
                         editable: true;
                         edited(name) => { root.rename-sheet(name); }
@@ -194,9 +215,6 @@ export component SheetInspector inherits LoomPanel {
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     SheetHeading { title: "Cell"; }
-                    SheetFieldRow { label: "Selection"; field-label: "Selected range"; value: root.selection-range; }
-                    SheetFieldRow { label: "Value"; field-label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; }
-                    SheetFieldRow { label: "Formula"; field-label: "Raw formula"; value: root.selection-formula == "" ? "No formula" : root.selection-formula; placeholder: root.selection-formula == ""; }
                     SheetHeading { title: "Font Style"; }
                     if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
@@ -255,12 +273,22 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetStepperRow {
                         label: "Font size";
-                        field-label: "Font size in points";
-                        value: root.cell-font-label;
+                        field-label: "Font size in pixels";
+                        editable: true;
+                        edit-unit: "px";
+                        edit-description: "9–32 px; enter a whole-pixel font size.";
+                        edit-value <=> root.font-size-draft;
+                        invalid <=> root.font-size-invalid;
                         decrease-label: "Decrease selected cell font size";
                         decrease-tip: "Reduce the font size of selected cells by one step.";
                         increase-label: "Increase selected cell font size";
                         increase-tip: "Increase the font size of selected cells by one step.";
+                        edited(_) => { root.font-size-invalid = false; }
+                        accepted(value) => { return root.set-font-size(value); }
+                        cancelled => {
+                            root.font-size-draft = root.cell-font-label;
+                            root.font-size-invalid = false;
+                        }
                         decrease => { root.adjust-font(-1); }
                         increase => { root.adjust-font(1); }
                     }
@@ -307,7 +335,7 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
                     SheetHeading { title: "Data Format"; }
-                    SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; choice-names: ["Number", "Currency", "Percent", "Decimal places"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
+                    SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; choice-names: ["General", "Currency", "Percentage", "Number"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
                     SheetStepperRow {
                         label: "Decimals";
                         field-label: "Decimals count";
@@ -324,25 +352,48 @@ export component SheetInspector inherits LoomPanel {
                     SheetStepperRow {
                         label: "Row height";
                         field-label: "Selected row height";
-                        value: root.selected-row-height;
+                        editable: true;
+                        edit-unit: "px";
+                        edit-description: "16–160 px; fractions are allowed.";
+                        edit-value <=> root.row-height-draft;
+                        invalid <=> root.row-height-invalid;
                         decrease-label: "Decrease selected row height";
                         decrease-tip: "Reduce the selected row height by 4 px, down to 16 px.";
                         increase-label: "Increase selected row height";
                         increase-tip: "Increase the selected row height by 4 px, up to 160 px.";
+                        edited(_) => { root.row-height-invalid = false; }
+                        accepted(value) => { return root.set-row-height(value); }
+                        cancelled => {
+                            root.row-height-draft = root.selected-row-height;
+                            root.row-height-invalid = false;
+                        }
                         decrease => { root.adjust-row-height(-4); }
                         increase => { root.adjust-row-height(4); }
                     }
                     SheetStepperRow {
                         label: "Column width";
                         field-label: "Selected column width";
-                        value: root.selected-col-width;
+                        editable: true;
+                        edit-unit: "px";
+                        edit-description: "32–400 px; fractions are allowed.";
+                        edit-value <=> root.col-width-draft;
+                        invalid <=> root.col-width-invalid;
                         decrease-label: "Decrease selected column width";
                         decrease-tip: "Reduce the selected column width by 10 px, down to 32 px.";
                         increase-label: "Increase selected column width";
                         increase-tip: "Increase the selected column width by 10 px, up to 400 px.";
+                        edited(_) => { root.col-width-invalid = false; }
+                        accepted(value) => { return root.set-col-width(value); }
+                        cancelled => {
+                            root.col-width-draft = root.selected-col-width;
+                            root.col-width-invalid = false;
+                        }
                         decrease => { root.adjust-col-width(-10); }
                         increase => { root.adjust-col-width(10); }
                     }
+                    SheetFieldRow { label: "Selection"; field-label: "Selected range"; value: root.selection-range; }
+                    SheetFieldRow { label: "Value"; field-label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; }
+                    SheetFieldRow { label: "Formula"; field-label: "Raw formula"; value: root.selection-formula == "" ? "No formula" : root.selection-formula; placeholder: root.selection-formula == ""; }
                 }
 
                 if (root.inspector-tab == 0 && !root.inspector-show-table)

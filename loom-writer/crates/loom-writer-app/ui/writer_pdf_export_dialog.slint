@@ -1,0 +1,173 @@
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// Requires a deliberate final or review choice before opening the PDF save dialog.
+export component WriterPdfExportDialog inherits Rectangle {
+    in-out property <bool> open: false;
+    callback export-view(int);
+    callback cancel;
+
+    visible: root.open;
+
+    init => {
+        if (root.open) { final-button.grab-focus(); }
+    }
+
+    changed open => {
+        if (root.open) { final-button.grab-focus(); }
+    }
+
+    dialog-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.open;
+        visible: root.open;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.open = false;
+                root.cancel();
+                return accept;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                let backwards = event.text == Key.Backtab || event.modifiers.shift;
+                if (backwards) {
+                    if (final-button.has-focus) {
+                        cancel-button.grab-focus();
+                    } else if (review-button.has-focus) {
+                        final-button.grab-focus();
+                    } else {
+                        review-button.grab-focus();
+                    }
+                } else {
+                    if (final-button.has-focus) {
+                        review-button.grab-focus();
+                    } else if (review-button.has-focus) {
+                        cancel-button.grab-focus();
+                    } else {
+                        final-button.grab-focus();
+                    }
+                }
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            width: root.width;
+            height: root.height;
+            background: Theme.palette().scrim;
+
+            TouchArea {
+                clicked => { final-button.grab-focus(); }
+            }
+
+            Rectangle {
+                width: min(560px * max(1.0, Theme.text-scale), root.width - 32px);
+                height: min(dialog-layout.preferred-height, root.height - 32px);
+                x: (root.width - self.width) / 2;
+                y: (root.height - self.height) / 2;
+                background: Theme.palette().surface;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                border-radius: Theme.tokens.metrics.radius-large;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: Theme.palette().shadow;
+                accessible-role: AccessibleRole.region;
+
+                dialog-layout := VerticalLayout {
+                    padding: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.md;
+
+                    Text {
+                        text: "Export PDF";
+                        font-size: Theme.tokens.typography.heading * max(1.0, Theme.text-scale);
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                    }
+
+                    Text {
+                        text: "Choose which tracked-change view the PDF should contain.";
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                    }
+
+                    Text {
+                        text: "Final view";
+                        font-size: Theme.type.body;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                    }
+                    Text {
+                        text: "Shows the current document, keeping insertions and omitting unresolved deletions.";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                    }
+                    Rectangle {
+                        height: Theme.scaled-control-height;
+                        final-button := LoomButton {
+                            label: "Export Final PDF";
+                            variant: "primary";
+                            width: self.preferred-width;
+                            height: Theme.scaled-control-height;
+                            x: Theme.rtl ? 0px : parent.width - self.width;
+                            clicked => {
+                                root.open = false;
+                                root.export-view(0);
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Review view";
+                        font-size: Theme.type.body;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                    }
+                    Text {
+                        text: "Adds a PDF appendix with unresolved insertions, deletions, authors, anchors, and before/after formatting.";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                    }
+                    Rectangle {
+                        height: Theme.scaled-control-height;
+                        review-button := LoomButton {
+                            label: "Export Review PDF";
+                            variant: "secondary";
+                            width: self.preferred-width;
+                            height: Theme.scaled-control-height;
+                            x: Theme.rtl ? 0px : parent.width - self.width;
+                            clicked => {
+                                root.open = false;
+                                root.export-view(1);
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: Theme.scaled-control-height;
+                        cancel-button := LoomButton {
+                            label: "Cancel";
+                            variant: "ghost";
+                            width: self.preferred-width;
+                            height: Theme.scaled-control-height;
+                            x: Theme.rtl ? 0px : parent.width - self.width;
+                            clicked => {
+                                root.open = false;
+                                root.cancel();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

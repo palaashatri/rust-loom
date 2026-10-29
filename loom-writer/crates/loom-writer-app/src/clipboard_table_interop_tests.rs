@@ -663,7 +663,7 @@ fn pointer_reselecting_the_anchor_clears_table_range_when_caret_is_unchanged() {
 }
 
 #[test]
-fn a_styled_sheets_table_pasted_into_writer_keeps_bold_alignment_and_widths() {
+fn html_only_styled_table_paste_keeps_formatting_through_edit_undo_redo_and_exports() {
     use loom_clipboard::set_mock_clipboard_enabled;
     set_mock_clipboard_enabled(true);
     loom_test_support::capture::set_platform();
@@ -674,47 +674,128 @@ fn a_styled_sheets_table_pasted_into_writer_keeps_bold_alignment_and_widths() {
     crate::wire_writer_shared_callbacks(&app, &state, None);
 
     let mut source_table = Table::new(2, 2);
-    source_table.set_cell_rich_text(0, 0, vec![loom_objects::TextRun::bold("Product")]);
+    source_table.header_row = false;
+    source_table.set_cell_text(0, 0, "Product");
     source_table.set_cell_text(0, 1, "Q1");
-    source_table.set_cell_text(1, 0, "Widget");
+    let mut styled_run = loom_objects::TextRun::plain("Styled");
+    styled_run.bold = true;
+    styled_run.italic = true;
+    styled_run.underline = true;
+    styled_run.color = Some("#123456FF".to_owned());
+    source_table.set_cell_rich_text(1, 0, vec![styled_run]);
     source_table.set_cell_text(1, 1, "100");
     source_table.columns[0].width_pt = 210.0;
+    source_table.columns[1].width_pt = 91.0;
     source_table.cell_mut(1, 1).expect("cell").style_override =
         Some(loom_objects::CellStyleOverride {
+            background_color: Some("#E6F4EA".to_owned()),
             horizontal_align: Some(loom_objects::HorizontalAlign::Right),
             ..Default::default()
         });
 
-    write_clipboard(&ClipboardData::from_table(&source_table)).expect("write mock clipboard");
+    let html = loom_clipboard::table_to_html(&source_table);
+    write_clipboard(&ClipboardData {
+        html: Some(html),
+        ..Default::default()
+    })
+    .expect("write HTML-only mock clipboard");
     app.invoke_paste();
 
-    let doc = state.current.borrow();
-    let block = doc
-        .blocks
-        .iter()
-        .find(|b| b.kind == loom_writer_core::TABLE_BLOCK_KIND)
-        .expect("the paste inserts a table block");
-    let pasted = doc
-        .loom_table_from_block(block.id)
-        .expect("the table block keeps its typed cells");
-    let header_runs = &pasted.rows[0].cells[0].content.runs;
-    assert!(
-        header_runs
+    let assert_pasted_attributes = |document: &loom_writer_core::WriterDocument| {
+        let block = document
+            .blocks
             .iter()
-            .any(|run| run.bold && run.text == "Product"),
-        "bold on the pasted header cell survives: {header_runs:?}"
-    );
-    assert_eq!(
-        pasted.columns[0].width_pt, 210.0,
-        "the pasted column keeps its width"
-    );
-    assert_eq!(
-        pasted.rows[1].cells[1]
+            .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+            .expect("the paste inserts a table block");
+        let table = document
+            .loom_table_from_block(block.id)
+            .expect("the table block keeps its typed cells");
+        assert_eq!(
+            table
+                .columns
+                .iter()
+                .map(|column| column.width_pt)
+                .collect::<Vec<_>>(),
+            vec![210.0, 91.0],
+            "HTML column widths are retained"
+        );
+
+        let styled_run = table.rows[1].cells[0]
+            .content
+            .runs
+            .iter()
+            .find(|run| run.text == "Styled")
+            .expect("styled text run");
+        assert!(styled_run.bold && styled_run.italic && styled_run.underline);
+        assert_eq!(styled_run.color.as_deref(), Some("#123456FF"));
+
+        let cell_style = table.rows[1].cells[1]
             .style_override
             .as_ref()
-            .and_then(|style| style.horizontal_align),
-        Some(loom_objects::HorizontalAlign::Right),
-        "the pasted cell keeps its right alignment"
+            .expect("cell style override");
+        assert_eq!(
+            cell_style.horizontal_align,
+            Some(loom_objects::HorizontalAlign::Right)
+        );
+        assert_eq!(cell_style.background_color.as_deref(), Some("#E6F4EA"));
+    };
+
+    let pasted_text = state.current.borrow().editor_text();
+    assert_pasted_attributes(&state.current.borrow());
+
+    let edit_at = pasted_text.find("Intro").expect("intro paragraph") + "Intro".len();
+    let mut edited_text = pasted_text.clone();
+    edited_text.insert(edit_at, '!');
+    app.invoke_document_edited(
+        edited_text.clone().into(),
+        (edit_at + 1) as i32,
+        (edit_at + 1) as i32,
+    );
+    assert_eq!(state.current.borrow().editor_text(), edited_text);
+    assert_pasted_attributes(&state.current.borrow());
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().editor_text(), pasted_text);
+    assert_pasted_attributes(&state.current.borrow());
+    app.invoke_redo();
+    assert_eq!(state.current.borrow().editor_text(), edited_text);
+    assert_pasted_attributes(&state.current.borrow());
+
+    let document = state.current.borrow();
+    let docx = loom_writer_core::export_docx(&document).expect("export pasted table as DOCX");
+    let archive =
+        loom_package::zip::PackageArchive::from_bytes(&docx.bytes).expect("parse exported DOCX");
+    let xml = String::from_utf8(
+        archive
+            .get("word/document.xml")
+            .expect("DOCX document.xml")
+            .to_vec(),
+    )
+    .expect("valid DOCX XML");
+    for expected in [
+        "<w:gridCol w:w=\"4200\"/>",
+        "<w:gridCol w:w=\"1820\"/>",
+        "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E6F4EA\"/>",
+        "<w:jc w:val=\"right\"/>",
+        "<w:b/>",
+        "<w:i/>",
+        "<w:u w:val=\"single\"/>",
+        "<w:color w:val=\"123456\"/>",
+    ] {
+        assert!(xml.contains(expected), "DOCX XML must contain {expected}");
+    }
+
+    let pdf = loom_writer_core::export_pdf(&document).expect("export pasted table as PDF");
+    let page_text = loom_pdf::inspect::page_text(&pdf)
+        .expect("inspect exported PDF text")
+        .join("\n");
+    assert!(
+        page_text.contains("Styled"),
+        "PDF text includes the styled cell: {page_text:?}"
+    );
+    assert!(
+        page_text.contains("100"),
+        "PDF text includes the adjacent cell: {page_text:?}"
     );
 
     set_mock_clipboard_enabled(false);

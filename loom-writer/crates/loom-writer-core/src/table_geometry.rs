@@ -6,7 +6,8 @@ use std::ops::Range;
 
 use loom_objects::{table::Table, TableStyleCatalog, TableStyleOptions};
 
-use crate::{editor_column_widths, line_pitch, shape_wrapped_block_lines, table_cell_rich_block};
+use crate::layout::{shape_wrapped_block_lines_with_inline_advances, InlineAdvance};
+use crate::{editor_column_widths, line_pitch, table_cell_rich_block, WriterDocument};
 
 /// Horizontal inset applied on each side of table-cell text, in points.
 pub const TABLE_CELL_HORIZONTAL_INSET_PT: f32 = 6.0;
@@ -91,12 +92,46 @@ impl TableCellGeometry {
     }
 }
 
-/// Shape a table cell once and return the shared line records used by row
-/// measurement, screen rendering, pointer geometry, and PDF export.
 pub fn shape_table_cell_geometry(
     block: &crate::RichBlock,
     base_size_pt: f32,
     available_width_pt: f32,
+) -> Result<TableCellGeometry, TableGeometryError> {
+    shape_table_cell_geometry_with_advances(block, base_size_pt, available_width_pt, &[])
+}
+
+/// Shape one typed table cell with the reserved advances for its anchored footnotes.
+pub fn shape_table_cell_geometry_with_footnotes(
+    doc: &WriterDocument,
+    table_block_id: u64,
+    table: &Table,
+    row: usize,
+    column: usize,
+    block: &crate::RichBlock,
+    base_size_pt: f32,
+    available_width_pt: f32,
+) -> Result<TableCellGeometry, TableGeometryError> {
+    let inline_advances = crate::layout::inline_advances_for_table_cell(
+        doc,
+        table_block_id,
+        table,
+        row,
+        column,
+        base_size_pt,
+    );
+    shape_table_cell_geometry_with_advances(
+        block,
+        base_size_pt,
+        available_width_pt,
+        &inline_advances,
+    )
+}
+
+fn shape_table_cell_geometry_with_advances(
+    block: &crate::RichBlock,
+    base_size_pt: f32,
+    available_width_pt: f32,
+    inline_advances: &[InlineAdvance],
 ) -> Result<TableCellGeometry, TableGeometryError> {
     if !available_width_pt.is_finite() || available_width_pt <= 0.0 {
         return Err(TableGeometryError::InvalidAvailableWidth);
@@ -108,8 +143,21 @@ pub fn shape_table_cell_geometry(
     if !base_pitch.is_finite() || base_pitch <= 0.0 {
         return Err(TableGeometryError::InvalidLineMetrics);
     }
-    let shaped_lines = shape_wrapped_block_lines(block, base_size_pt, available_width_pt)
-        .ok_or(TableGeometryError::CouldNotShapeText)?;
+    let shaped_lines = shape_wrapped_block_lines_with_inline_advances(
+        block,
+        base_size_pt,
+        available_width_pt,
+        inline_advances,
+    )
+    .ok_or(TableGeometryError::CouldNotShapeText)?;
+    table_cell_geometry_from_lines(block, base_pitch, shaped_lines)
+}
+
+fn table_cell_geometry_from_lines(
+    block: &crate::RichBlock,
+    base_pitch: f32,
+    shaped_lines: Vec<(Range<usize>, Option<crate::WriterShapedVisualLine>)>,
+) -> Result<TableCellGeometry, TableGeometryError> {
     let mut lines = Vec::with_capacity(shaped_lines.len());
     let mut content_height_pt = 0.0;
     for (source_range, shaped) in shaped_lines {
@@ -232,10 +280,64 @@ pub fn measure_table_row_geometry(
     result
 }
 
+/// Measure table rows with footnote-marker widths included in cell wrapping.
+/// This document-aware path is intentionally uncached because note anchors can
+/// change independently of the typed table.
+pub fn measure_table_row_geometry_with_footnotes(
+    doc: &WriterDocument,
+    table_block_id: u64,
+    table: &Table,
+    available_width_pt: f32,
+    base_size_pt: f32,
+) -> Result<TableRowGeometry, TableGeometryError> {
+    if !available_width_pt.is_finite() || available_width_pt <= 0.0 {
+        return Err(TableGeometryError::InvalidAvailableWidth);
+    }
+    if !base_size_pt.is_finite() || base_size_pt <= 0.0 {
+        return Err(TableGeometryError::InvalidFontSize);
+    }
+    measure_uncached_with_cell_shape(
+        table,
+        available_width_pt,
+        base_size_pt,
+        |row, column, block, inner_width| {
+            shape_table_cell_geometry_with_footnotes(
+                doc,
+                table_block_id,
+                table,
+                row,
+                column,
+                block,
+                base_size_pt,
+                inner_width,
+            )
+        },
+    )
+}
+
 fn measure_uncached(
     table: &Table,
     available_width_pt: f32,
     base_size_pt: f32,
+) -> Result<TableRowGeometry, TableGeometryError> {
+    measure_uncached_with_cell_shape(
+        table,
+        available_width_pt,
+        base_size_pt,
+        |_, _, block, inner_width| shape_table_cell_geometry(block, base_size_pt, inner_width),
+    )
+}
+
+fn measure_uncached_with_cell_shape(
+    table: &Table,
+    available_width_pt: f32,
+    base_size_pt: f32,
+    mut shape_cell: impl FnMut(
+        usize,
+        usize,
+        &crate::RichBlock,
+        f32,
+    ) -> Result<TableCellGeometry, TableGeometryError>,
 ) -> Result<TableRowGeometry, TableGeometryError> {
     let columns = table.col_count().max(1);
     let widths = editor_column_widths(table, available_width_pt);
@@ -255,9 +357,10 @@ fn measure_uncached(
     }
 
     let mut row_heights_pt = Vec::with_capacity(table.row_count());
+    assert_eq!(widths.len(), columns, "table column widths are incomplete");
     for row in 0..table.row_count() {
         let mut row_content_height = baseline_pitch;
-        for column in 0..columns {
+        for (column, width) in widths.iter().enumerate().take(columns) {
             let format = style.resolve_cell(
                 row,
                 column,
@@ -271,9 +374,9 @@ fn measure_uncached(
             else {
                 continue;
             };
-            let inner_width = (widths[column] - 2.0 * TABLE_CELL_HORIZONTAL_INSET_PT).max(1.0);
-            let cell_geometry = shape_table_cell_geometry(&block, base_size_pt, inner_width)
-                .map_err(|error| match error {
+            let inner_width = (*width - 2.0 * TABLE_CELL_HORIZONTAL_INSET_PT).max(1.0);
+            let cell_geometry =
+                shape_cell(row, column, &block, inner_width).map_err(|error| match error {
                     TableGeometryError::CouldNotShapeText => {
                         TableGeometryError::CouldNotShapeCell { row, column }
                     }

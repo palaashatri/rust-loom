@@ -63,7 +63,9 @@ fn save_description(app: &WriterApp, state: &GuiState, text: &str) {
     };
     let mut next = state.current.borrow().clone();
     if next.set_image_block_alt(block, text) {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return;
+        }
         app.set_status_left("Picture description updated".into());
     }
     close_description_dialog(app);
@@ -109,7 +111,9 @@ pub(crate) fn insert_picture(app: &WriterApp, state: &GuiState, path: &Path) -> 
         }
     }
     next.set_selection(TextSelection::caret(after.min(next.editor_text().len())));
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+        return Err(app.get_status_left().to_string());
+    }
     app.set_status_left(SharedString::from(format!("Inserted picture: {name}")));
     Ok(())
 }
@@ -189,7 +193,9 @@ pub(crate) fn run_picture_command(app: &WriterApp, state: &GuiState, id: &str) -
         return true;
     };
     if apply(&mut next, block) {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return true;
+        }
         app.set_status_left("Picture resized".into());
     } else {
         app.set_status_left("The picture is already at that size limit".into());

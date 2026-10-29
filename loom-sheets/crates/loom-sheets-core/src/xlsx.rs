@@ -445,7 +445,18 @@ mod tests {
     fn xlsx_import_reports_single_unsupported_chart_types_before_dropping_them() {
         for (expected_label, chart_tag) in [
             ("unsupported area charts", "areaChart"),
+            ("unsupported 3-D area charts", "area3DChart"),
+            ("unsupported 3-D bar charts", "bar3DChart"),
+            ("unsupported bubble charts", "bubbleChart"),
             ("unsupported doughnut charts", "doughnutChart"),
+            ("unsupported 3-D line charts", "line3DChart"),
+            ("unsupported of-pie charts", "ofPieChart"),
+            ("unsupported 3-D pie charts", "pie3DChart"),
+            ("unsupported radar charts", "radarChart"),
+            ("unsupported stock charts", "stockChart"),
+            ("unsupported surface charts", "surfaceChart"),
+            ("unsupported 3-D surface charts", "surface3DChart"),
+            ("unsupported unrecognized chart types", "mysteryChart"),
         ] {
             let bytes = xlsx_with_single_chart_type(chart_tag);
             let imported = import_xlsx_sheets(&bytes).expect("import workbook");
@@ -1068,8 +1079,12 @@ mod tests {
 
     fn xlsx_with_single_chart_type_in_namespace(chart_tag: &str, namespace: &str) -> Vec<u8> {
         let (kind, source_tag) = match chart_tag {
-            "areaChart" => (ChartKind::Line, "lineChart"),
-            "doughnutChart" => (ChartKind::Pie, "pieChart"),
+            "areaChart" | "area3DChart" | "line3DChart" | "radarChart" | "stockChart"
+            | "surfaceChart" | "surface3DChart" => (ChartKind::Line, "lineChart"),
+            "bar3DChart" => (ChartKind::Bar, "barChart"),
+            "bubbleChart" => (ChartKind::Scatter, "scatterChart"),
+            "doughnutChart" | "ofPieChart" | "pie3DChart" => (ChartKind::Pie, "pieChart"),
+            "mysteryChart" => (ChartKind::Line, "lineChart"),
             _ => panic!("add a schema-appropriate source fixture for {chart_tag}"),
         };
         let mut sheet = Sheet::new("Budget");

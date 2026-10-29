@@ -47,8 +47,8 @@ fn table_block_saves_typed_table_and_no_markdown() {
     let document = document_with(table.clone());
     let json = document.to_content_json();
     assert!(
-        json.contains("\"format\":2"),
-        "content must declare format 2: {json}"
+        json.contains(&format!("\"format\":{}", crate::WRITER_CONTENT_FORMAT)),
+        "content must declare the current format: {json}"
     );
     assert!(
         json.contains("\"table\":{"),
@@ -141,8 +141,10 @@ fn legacy_migration_is_deterministic() {
         first.blocks[0].text.as_str()
     );
     assert!(
-        reloaded.to_content_json().contains("\"format\":2"),
-        "the next save writes format 2, so conversion happens once"
+        reloaded
+            .to_content_json()
+            .contains(&format!("\"format\":{}", crate::WRITER_CONTENT_FORMAT)),
+        "the next save writes the current format, so conversion happens once"
     );
 }
 
@@ -171,12 +173,13 @@ fn newer_format_and_untyped_flat_table_are_refused() {
         loom_package::manifest::json::escape(&flat)
     );
     let newer = format!(
-        "{{\"format\":3,\"id\":\"doc\",\"title\":\"Doc\",\"blocks\":[{}]}}",
+        "{{\"format\":{},\"id\":\"doc\",\"title\":\"Doc\",\"blocks\":[{}]}}",
+        crate::WRITER_CONTENT_FORMAT + 1,
         legacy_block(LEGACY)
     );
     assert!(
         WriterDocument::from_content_json(&newer).is_err(),
-        "a format above 2 must not open"
+        "a future format must not open"
     );
     let untyped_v1 = format!("{{\"id\":\"doc\",\"title\":\"Doc\",\"blocks\":[{block}]}}");
     assert!(
@@ -360,15 +363,14 @@ fn exports_read_the_typed_table() {
         "the centred column is marked: {markdown}"
     );
     let pdf = crate::export::test_support::export_valid_pdf(&document);
-    let content = loom_pdf::inspect::readable_content(&pdf).expect("readable PDF");
+    let text = loom_pdf::inspect::page_text(&pdf)
+        .expect("extracted PDF text")
+        .join("\n");
     assert!(
-        content.contains("Head"),
-        "the PDF prints the bold cell's text"
+        text.contains("Head"),
+        "the PDF prints the bold cell's text: {text}"
     );
-    assert!(
-        !content.contains('*'),
-        "no Markdown emphasis reaches the PDF"
-    );
+    assert!(!text.contains('*'), "no Markdown emphasis reaches the PDF");
 }
 
 #[test]
@@ -383,4 +385,310 @@ fn layout_has_one_line_per_table_row() {
         .filter(|line| line.block_index == 0)
         .count();
     assert_eq!(lines, 2, "a table is one line per row, never wrapped");
+}
+
+#[test]
+fn direct_table_text_changes_rebase_footnote_anchors() {
+    let mut document = document_with(two_by_two("t"));
+    let block_id = document.blocks[0].id;
+    let before = document.blocks[0].text.as_str().to_owned();
+    let anchor = before.find('D').expect("last cell text");
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 41,
+        block_id,
+        offset: anchor,
+        body: "table note".into(),
+    });
+
+    let updated = before.replace('C', "CC");
+    document
+        .edit_table_text(block_id, &updated)
+        .expect("edit a table cell without changing the grid");
+    assert_eq!(document.footnotes[0].id, 41);
+    assert_eq!(document.footnotes[0].offset, anchor + 1);
+    assert_eq!(document.blocks[0].text.as_str().find('D'), Some(anchor + 1));
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn direct_table_text_updates_preserve_anchors_in_unchanged_cells() {
+    let mut table = Table::new(1, 3);
+    table.id = "three-cells".into();
+    table.set_cell_text(0, 0, "foo");
+    table.set_cell_text(0, 1, "keep");
+    table.set_cell_text(0, 2, "foo");
+    let mut document = document_with(table);
+    let block_id = document.blocks[0].id;
+    let old_text = document.blocks[0].text.as_str().to_owned();
+    let anchor = old_text.find("keep").unwrap() + 2;
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 45,
+        block_id,
+        offset: anchor,
+        body: "middle cell note".into(),
+    });
+
+    let updated = old_text.replace("foo", "x");
+    document
+        .edit_table_text(block_id, &updated)
+        .expect("edit multiple table cells without changing the grid");
+    let new_anchor = document.blocks[0].text.as_str().find("keep").unwrap() + 2;
+    assert_eq!(new_anchor, anchor - 2);
+    assert_eq!(document.footnotes[0].id, 45);
+    assert_eq!(document.footnotes[0].offset, new_anchor);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn inserting_a_table_row_rebases_footnotes_in_later_cells() {
+    let mut document = document_with(two_by_two("t"));
+    let block_id = document.blocks[0].id;
+    let old_anchor = document.blocks[0].text.as_str().find('D').unwrap();
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 43,
+        block_id,
+        offset: old_anchor,
+        body: "later row note".into(),
+    });
+
+    document
+        .insert_table_row_at_offset(0, true)
+        .expect("insert a row after the first row");
+    let new_anchor = document.blocks[0].text.as_str().find('D').unwrap();
+    assert!(new_anchor > old_anchor);
+    assert_eq!(document.footnotes[0].id, 43);
+    assert_eq!(document.footnotes[0].offset, new_anchor);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn inserting_a_table_column_rebases_footnotes_by_cell() {
+    let mut document = document_with(two_by_two("t"));
+    let block_id = document.blocks[0].id;
+    let old_text = document.blocks[0].text.as_str().to_owned();
+    for (id, value) in [(51, 'C'), (52, 'D')] {
+        document.footnotes.push(crate::FootnoteEntry {
+            id,
+            block_id,
+            offset: old_text.find(value).unwrap(),
+            body: format!("note {value}"),
+        });
+    }
+
+    document
+        .insert_table_column_at_offset(old_text.find('A').unwrap(), true)
+        .expect("insert a column after the first");
+
+    let new_text = document.blocks[0].text.as_str();
+    for (id, value) in [(51, 'C'), (52, 'D')] {
+        let note = document
+            .footnotes
+            .iter()
+            .find(|note| note.id == id)
+            .unwrap();
+        assert_eq!(note.offset, new_text.find(value).unwrap());
+    }
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn deleting_a_table_column_drops_only_its_notes() {
+    let mut document = document_with(two_by_two("t"));
+    let block_id = document.blocks[0].id;
+    let old_text = document.blocks[0].text.as_str().to_owned();
+    for (id, value) in [(53, 'B'), (54, 'C'), (55, 'D')] {
+        document.footnotes.push(crate::FootnoteEntry {
+            id,
+            block_id,
+            offset: old_text.find(value).unwrap(),
+            body: format!("note {value}"),
+        });
+    }
+
+    document
+        .delete_table_column_at_offset(old_text.find('A').unwrap())
+        .expect("delete the first column");
+
+    let new_text = document.blocks[0].text.as_str();
+    for (id, value) in [(53, 'B'), (55, 'D')] {
+        let note = document
+            .footnotes
+            .iter()
+            .find(|note| note.id == id)
+            .unwrap();
+        assert_eq!(note.offset, new_text.find(value).unwrap());
+    }
+    assert!(document.footnotes.iter().all(|note| note.id != 54));
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn typing_in_a_table_rebases_a_footnote_at_the_caret() {
+    let mut document = WriterDocument::new("table-note", "Table note");
+    let block_id = document.insert_table_block(0, 2, 2).expect("insert table");
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 44,
+        block_id,
+        offset: 0,
+        body: "caret note".into(),
+    });
+
+    document
+        .replace_selection_text("x")
+        .expect("type in first table cell");
+    assert_eq!(document.footnotes[0].id, 44);
+    assert_eq!(document.footnotes[0].block_id, block_id);
+    assert_eq!(document.footnotes[0].offset, 1);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn table_replace_all_keeps_notes_between_changed_cells() {
+    let mut table = Table::new(1, 3);
+    table.id = "three-cells".into();
+    table.set_cell_text(0, 0, "foo");
+    table.set_cell_text(0, 1, "keep");
+    table.set_cell_text(0, 2, "foo");
+    let mut document = document_with(table);
+    let block_id = document.blocks[0].id;
+    let anchor = document.blocks[0].text.as_str().find("keep").unwrap() + 2;
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 42,
+        block_id,
+        offset: anchor,
+        body: "middle cell note".into(),
+    });
+
+    assert_eq!(document.replace_all("foo", "x", false), 2);
+    let rebased_anchor = document.blocks[0].text.as_str().find("keep").unwrap() + 2;
+    assert_eq!(rebased_anchor, anchor - 2);
+    assert_eq!(document.footnotes[0].offset, anchor - 2);
+    assert_eq!(document.footnotes[0].id, 42);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn table_replace_all_keeps_invalid_table_unchanged() {
+    let mut table = Table::new(1, 2);
+    table.set_cell_text(0, 0, "foo");
+    table.set_cell_text(0, 1, "foo");
+    let mut document = document_with(table);
+    let block_id = document.blocks[0].id;
+    let typed_before = flat_table_text(document.blocks[0].typed_table().unwrap());
+    let malformed = format!("{typed_before}{TABLE_CELL_SEPARATOR}tail");
+    let anchor = malformed.find("foo").unwrap() + 1;
+    document.blocks[0].text = crate::Text::from_str(&malformed);
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 43,
+        block_id,
+        offset: anchor,
+        body: "preserve on failure".into(),
+    });
+
+    assert_eq!(document.replace_all("foo", "x", false), 0);
+    assert_eq!(document.blocks[0].text.as_str(), malformed.as_str());
+    assert_eq!(
+        flat_table_text(document.blocks[0].typed_table().unwrap()),
+        typed_before
+    );
+    assert_eq!(document.footnotes.len(), 1);
+    assert_eq!(document.footnotes[0].id, 43);
+    assert_eq!(document.footnotes[0].block_id, block_id);
+    assert_eq!(document.footnotes[0].offset, anchor);
+}
+
+#[test]
+fn merging_table_cells_rebases_footnotes_with_their_text_and_split_keeps_them() {
+    let mut document = document_with(two_by_two("merge-notes"));
+    let block_id = document.blocks[0].id;
+    let old_text = document.blocks[0].text.as_str().to_owned();
+    for (id, marker) in [(71, "A"), (72, "B"), (73, "C"), (74, "D")] {
+        document.footnotes.push(crate::FootnoteEntry {
+            id,
+            block_id,
+            offset: old_text.find(marker).unwrap(),
+            body: format!("note {marker}"),
+        });
+    }
+
+    document
+        .merge_cells_at_offset(old_text.find('A').unwrap(), 2, 2)
+        .expect("merge the four cells");
+
+    let merged_text = document.blocks[0].text.as_str().to_owned();
+    for (id, marker) in [(71, "A"), (72, "B"), (73, "C"), (74, "D")] {
+        let note = document
+            .footnotes
+            .iter()
+            .find(|note| note.id == id)
+            .unwrap();
+        assert_eq!(note.offset, merged_text.find(marker).unwrap());
+    }
+    assert!(document.validate_footnotes().is_ok());
+
+    document
+        .split_cell_at_offset(merged_text.find('A').unwrap())
+        .expect("split the merged cell");
+    let split_text = document.blocks[0].text.as_str();
+    for (id, marker) in [(71, "A"), (72, "B"), (73, "C"), (74, "D")] {
+        let note = document
+            .footnotes
+            .iter()
+            .find(|note| note.id == id)
+            .unwrap();
+        assert_eq!(note.offset, split_text.find(marker).unwrap());
+    }
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn merging_table_cells_preserves_empty_cell_anchors_separately() {
+    let mut table = Table::new(1, 3);
+    table.id = "empty-merge".into();
+    table.set_cell_text(0, 0, "x");
+    table.set_cell_text(0, 2, "z");
+    let mut document = document_with(table);
+    let block_id = document.blocks[0].id;
+    let old_map = TableTextMap::new(document.blocks[0].typed_table().unwrap());
+    document.footnotes.extend([
+        crate::FootnoteEntry {
+            id: 75,
+            block_id,
+            offset: old_map.cell_range(0, 1).unwrap().start,
+            body: "empty cell note".into(),
+        },
+        crate::FootnoteEntry {
+            id: 76,
+            block_id,
+            offset: old_map.cell_range(0, 2).unwrap().start,
+            body: "moved cell note".into(),
+        },
+    ]);
+
+    document
+        .merge_cells_at_offset(old_map.cell_range(0, 0).unwrap().start, 1, 3)
+        .expect("merge the empty and populated cells");
+
+    let merged_table = document.blocks[0].typed_table().unwrap();
+    let merged_map = TableTextMap::new(merged_table);
+    let merged_text = document.blocks[0].text.as_str();
+    assert_eq!(
+        document
+            .footnotes
+            .iter()
+            .find(|note| note.id == 75)
+            .unwrap()
+            .offset,
+        merged_map.cell_range(0, 1).unwrap().start
+    );
+    assert_eq!(
+        document
+            .footnotes
+            .iter()
+            .find(|note| note.id == 76)
+            .unwrap()
+            .offset,
+        merged_text.find('z').unwrap()
+    );
+    assert!(document.validate_footnotes().is_ok());
 }

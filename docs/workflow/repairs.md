@@ -23,7 +23,7 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **CODE-15** Enforce plugin timeouts while sending input — OPEN
 - **CODE-16** Give every Present slide a unique ID — FIXED
 - **CODE-17** Move Writer comments with the text they describe — FIXED (2026-10-04, anchors rebase from the edit position; a paste over a selection falls back to a text diff)
-- **CODE-18** Do not consume a storage sequence when append fails — OPEN
+- **CODE-18** Do not consume a storage sequence when append fails — FIXED (2026-10-28; storage-journal open, write, rollback, and reopen recovery tests pass)
 - **CODE-19** Undo Present transitions with the rest of the slide — FIXED
 - **UI-01** Give every desktop a visible application menu — NEEDS_REVIEW
 - **UI-28** Fit the XLSX loss warning to its message — FIXED

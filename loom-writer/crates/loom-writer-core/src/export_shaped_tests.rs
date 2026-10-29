@@ -6,7 +6,9 @@ use loom_pdf::inspect;
 use loom_text::{Alignment, CharacterStyle, ParagraphDirection, StyleRun};
 
 use crate::export::test_support::export_valid_pdf as export_pdf;
-use crate::{fonts, test_fonts, RichBlock, WriterDocument};
+use crate::{
+    fonts, test_fonts, RichBlock, WriterDocument, WriterPaintedRun, WriterShapedVisualLine,
+};
 
 struct ResetCatalog;
 
@@ -212,6 +214,233 @@ fn public_pdf_export_uses_source_glyphs_for_mixed_rtl_scripts() {
     }
 }
 
+fn painted_run<'a>(
+    shaped: &'a WriterShapedVisualLine,
+    text: &str,
+    sample: &str,
+) -> &'a WriterPaintedRun {
+    let start = text.find(sample).expect("the text contains the styled run");
+    shaped
+        .painted_runs()
+        .iter()
+        .find(|run| run.source_range.start == start)
+        .expect("the shaped line retains the inline style boundary")
+}
+
+fn pdf_glyph_positions_for_run(
+    run: &WriterPaintedRun,
+    text_origin_x: f32,
+    baseline: f32,
+) -> Vec<(f32, f32)> {
+    let mut pen = 0.0;
+    run.shaped
+        .glyphs
+        .iter()
+        .map(|glyph| {
+            let position = (
+                text_origin_x + run.x_pt + pen + glyph.x_offset,
+                baseline + run.baseline_shift_pt + glyph.y_offset,
+            );
+            pen += glyph.advance;
+            position
+        })
+        .collect()
+}
+
+fn assert_pdf_run_positions(
+    run: &WriterPaintedRun,
+    font_suffix: &str,
+    embedded: &[inspect::EmbeddedFont],
+    draws: &[inspect::GlyphDraw],
+    text_origin_x: f32,
+    baseline: f32,
+) {
+    let font = embedded
+        .iter()
+        .find(|font| font.base_font.ends_with(font_suffix))
+        .unwrap_or_else(|| panic!("PDF embeds {font_suffix}: {embedded:?}"));
+    let mut expected = pdf_glyph_positions_for_run(run, text_origin_x, baseline);
+    let mut actual: Vec<_> = draws
+        .iter()
+        .filter(|draw| draw.resource == font.resource)
+        .map(|draw| (draw.x, draw.y))
+        .collect();
+    let sort_positions = |positions: &mut [(f32, f32)]| {
+        positions
+            .sort_by(|left, right| left.0.total_cmp(&right.0).then(left.1.total_cmp(&right.1)));
+    };
+    sort_positions(&mut expected);
+    sort_positions(&mut actual);
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "glyph count for {font_suffix}"
+    );
+    for (actual, expected) in actual.iter().zip(expected.iter()) {
+        assert!(
+            (actual.0 - expected.0).abs() < 0.01,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.1 - expected.1).abs() < 0.01,
+            "{actual:?} vs {expected:?}"
+        );
+    }
+}
+
+fn mixed_inline_style_document() -> WriterDocument {
+    let text = "Latin שלום مرحبا";
+    let mut document = WriterDocument::new("export-shaped-styles", "Shaped styled scripts");
+    let mut block = RichBlock::new(document.next_id(), "paragraph", text);
+    block.style.direction = ParagraphDirection::RightToLeft;
+    block.style.alignment = Alignment::Left;
+    for (sample, style) in [
+        (
+            "Latin",
+            CharacterStyle {
+                font_size: 19.0,
+                explicit_size: true,
+                weight: loom_text::FontWeight::Bold,
+                italic: true,
+                color: Some("#167A35FF".into()),
+                ..CharacterStyle::default()
+            },
+        ),
+        (
+            "שלום",
+            CharacterStyle {
+                font_size: 17.0,
+                explicit_size: true,
+                superscript: true,
+                color: Some("#145AC8FF".into()),
+                ..CharacterStyle::default()
+            },
+        ),
+        (
+            "مرحبا",
+            CharacterStyle {
+                font_size: 18.0,
+                explicit_size: true,
+                subscript: true,
+                color: Some("#C33218FF".into()),
+                ..CharacterStyle::default()
+            },
+        ),
+    ] {
+        let start = text.find(sample).expect("the fixture contains each script");
+        block.runs.push(StyleRun {
+            start,
+            end: start + sample.len(),
+            style,
+        });
+    }
+    document.push(block);
+    document
+}
+
+fn assert_mixed_script_style_geometry(shaped: &WriterShapedVisualLine, text: &str) {
+    let latin = painted_run(shaped, text, "Latin");
+    let hebrew = painted_run(shaped, text, "שלום");
+    let arabic = painted_run(shaped, text, "مرحبا");
+    assert_eq!(latin.rgba, [22, 122, 53, 255]);
+    assert_eq!(hebrew.rgba, [20, 90, 200, 255]);
+    assert_eq!(arabic.rgba, [195, 50, 24, 255]);
+    assert!((hebrew.size_pt - 17.0 * 0.7).abs() < 0.01);
+    assert!((arabic.size_pt - 18.0 * 0.7).abs() < 0.01);
+    assert!((hebrew.baseline_shift_pt - 17.0 * 0.35).abs() < 0.01);
+    assert!((arabic.baseline_shift_pt + 18.0 * 0.35).abs() < 0.01);
+}
+
+fn assert_pdf_matches_mixed_shaped_line(
+    document: &WriterDocument,
+    shaped: &WriterShapedVisualLine,
+    page_style: &crate::PageStyle,
+    text: &str,
+) {
+    let latin = painted_run(shaped, text, "Latin");
+    let hebrew = painted_run(shaped, text, "שלום");
+    let arabic = painted_run(shaped, text, "مرحبا");
+    let pdf = export_pdf(document);
+    assert_eq!(inspect::page_text(&pdf).expect("extract PDF text"), [text]);
+    inspect::verify(&pdf).expect("PDF glyph maps and embedded fonts are consistent");
+    let embedded = inspect::embedded_fonts(&pdf).expect("inspect embedded PDF fonts");
+    let draws = inspect::positioned_glyph_draws(&pdf).expect("inspect positioned glyphs");
+    let total_shaped_glyphs: usize = shaped
+        .painted_runs()
+        .iter()
+        .map(|run| run.shaped.glyphs.len())
+        .sum();
+    assert_eq!(draws.len(), total_shaped_glyphs);
+    let text_origin_x = page_style.margin_left_pt + document.blocks[0].text_start_pt(page_style);
+    let line_top_pdf = page_style.height_pt - page_style.margin_top_pt;
+    let baseline = line_top_pdf - shaped.ascent_pt();
+    assert_pdf_run_positions(
+        latin,
+        "Inter-BoldItalic",
+        &embedded,
+        &draws,
+        text_origin_x,
+        baseline,
+    );
+    assert_pdf_run_positions(
+        hebrew,
+        "NotoSansHebrew-Regular",
+        &embedded,
+        &draws,
+        text_origin_x,
+        baseline,
+    );
+    assert_pdf_run_positions(
+        arabic,
+        "NotoNaskhArabic-Regular",
+        &embedded,
+        &draws,
+        text_origin_x,
+        baseline,
+    );
+
+    let operators = inspect::readable_content(&pdf).expect("read PDF paint operators");
+    for color in [
+        "0.086 0.478 0.208 rg",
+        "0.078 0.353 0.784 rg",
+        "0.765 0.196 0.094 rg",
+    ] {
+        assert!(operators.contains(color), "PDF preserves run paint {color}");
+    }
+    for size in ["19.00 Tf", "11.90 Tf", "12.60 Tf"] {
+        assert!(
+            operators.contains(size),
+            "PDF emits effective style size {size}"
+        );
+    }
+}
+
+#[test]
+fn public_pdf_export_uses_shared_geometry_for_mixed_inline_script_styles() {
+    let _serial = test_fonts::serial();
+    let catalog = script_catalog();
+    fonts::install_font_catalog(catalog);
+    let _reset = ResetCatalog;
+
+    let document = mixed_inline_style_document();
+    let text = document.blocks[0].text.as_str();
+    let page_style = document.page.page_style();
+    let flow = document
+        .flow(&page_style, crate::PageViewport::default())
+        .expect("the mixed styled paragraph lays out");
+    assert_eq!(
+        flow.lines().len(),
+        1,
+        "the fixture stays on one visual line"
+    );
+    let shaped = flow.lines()[0]
+        .shaped_line
+        .as_deref()
+        .expect("the editor uses shared shaped geometry");
+    assert_mixed_script_style_geometry(shaped, text);
+    assert_pdf_matches_mixed_shaped_line(&document, shaped, &page_style, text);
+}
+
 #[test]
 fn public_pdf_export_preserves_inline_rgba_and_background_paint() {
     let _serial = test_fonts::serial();
@@ -219,11 +448,12 @@ fn public_pdf_export_preserves_inline_rgba_and_background_paint() {
     fonts::install_font_catalog(catalog);
     let _reset = ResetCatalog;
 
-    let text = "colored";
+    let text = "auto colored";
     let mut document = WriterDocument::new("export-painted-text", "Painted text");
+    document.page.appearance = crate::PageAppearance::Black;
     let mut block = RichBlock::new(document.next_id(), "paragraph", text);
     block.runs.push(StyleRun {
-        start: 0,
+        start: "auto ".len(),
         end: text.len(),
         style: CharacterStyle {
             color: Some("#11223380".into()),
@@ -251,6 +481,14 @@ fn public_pdf_export_preserves_inline_rgba_and_background_paint() {
     assert!(
         operators.contains("0.667 0.733 0.800 rg") && operators.contains(" re f"),
         "the run's background RGB is filled behind its glyphs: {operators}"
+    );
+    assert!(
+        operators.contains("0.000 0.000 0.000 rg 0.00 0.00 "),
+        "the black page background is painted: {operators}"
+    );
+    assert!(
+        operators.contains("1.000 1.000 1.000 rg"),
+        "runs without explicit foreground RGB use white ink: {operators}"
     );
     assert!(
         operators.contains("0.067 0.133 0.200 rg"),

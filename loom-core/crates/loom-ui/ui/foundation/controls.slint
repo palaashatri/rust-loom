@@ -13,6 +13,7 @@ export component LoomButton inherits Rectangle {
     // Left-align the icon and label (menu-style rows) instead of centering them.
     in property <bool> leading: false;
     callback clicked;
+    callback pointer-hovered;
     public function grab-focus() { focus.focus(); }
     out property <bool> has-focus: focus.has-focus;
 
@@ -44,7 +45,9 @@ export component LoomButton inherits Rectangle {
     background: !root.enabled ? (root.ghost ? transparent : Theme.palette().surface-sunken)
         : root.primary ? (touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
         : root.destructive ? (touch.pressed ? Theme.palette().danger-surface : touch.has-hover ? Theme.palette().danger-surface : Theme.palette().surface)
-        : root.ghost ? (touch.pressed ? Theme.palette().surface-sunken : touch.has-hover ? Theme.palette().surface-raised : transparent)
+        : root.ghost ? (touch.pressed ? Theme.palette().surface-sunken
+            : root.selected ? Theme.palette().selection-soft
+            : touch.has-hover ? Theme.palette().selection-soft : transparent)
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
         : touch.has-hover ? Theme.palette().surface-raised
@@ -108,6 +111,9 @@ export component LoomButton inherits Rectangle {
     touch := TouchArea {
         enabled: root.enabled;
         clicked => { focus.focus(); root.clicked(); }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.move) { root.pointer-hovered(); }
+        }
     }
 }
 
@@ -118,6 +124,7 @@ export component LoomIconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> selected: false;
     in property <bool> destructive: false;
+    in property <bool> inset-state-outline: false;
     in property <float> text-scale: 1.0;
     callback clicked;
     // Left (-1) and Right (+1); the key still bubbles, as in the toolbar item.
@@ -127,8 +134,9 @@ export component LoomIconButton inherits Rectangle {
     width: Theme.tokens.metrics.control-height * max(1.0, root.text-scale);
     height: Theme.tokens.metrics.control-height * max(1.0, root.text-scale);
     border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: focus.has-focus ? 2px : root.selected ? 1px : 0px;
-    border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().border : transparent;
+    border-width: root.inset-state-outline ? 0px : focus.has-focus ? 2px : root.selected ? 1px : 0px;
+    border-color: root.inset-state-outline ? transparent
+        : focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().border : transparent;
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
@@ -149,6 +157,18 @@ export component LoomIconButton inherits Rectangle {
             : root.destructive ? Theme.palette().danger
             : root.selected ? (Theme.control-accent)
             : Theme.palette().ink;
+    }
+
+    state-outline := Rectangle {
+        visible: root.inset-state-outline;
+        x: Theme.tokens.metrics.focus-offset;
+        y: Theme.tokens.metrics.focus-offset;
+        width: max(0px, root.width - 2 * Theme.tokens.metrics.focus-offset);
+        height: max(0px, root.height - 2 * Theme.tokens.metrics.focus-offset);
+        border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
+        border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.selected ? 1px : 0px;
+        border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().border : transparent;
+        background: transparent;
     }
 
     focus := FocusScope {

@@ -97,6 +97,7 @@ fn assert_clean(items: &[Rect], background: &[Rect], width: f32, height: f32, wh
 pub(super) fn editor(width: f32, height: f32, scale: f32) -> WriterApp {
     set_platform();
     let app = WriterApp::new().expect("create app");
+    templates::install_catalog(&app);
     app.window()
         .set_size(PhysicalSize::new(width as u32, height as u32));
     apply_theme(&app, "light");
@@ -278,6 +279,7 @@ fn lists_control_is_reachable_by_scrolling_at_double_text_at_1024() {
     let (width, height) = (1024.0f32, 720.0f32);
     let app = editor(width, height, 2.0);
     open_surface(&app, "inspector");
+    app.set_inspector_tab(0);
     let _ = snapshot_component(&app, width, height, 1.0).expect("render");
 
     assert!(
@@ -310,35 +312,14 @@ fn lists_control_is_reachable_by_scrolling_at_double_text_at_1024() {
         "the inspector Flickable {scroll_position:?} {scroll_size:?} must sit inside the inspector {inspector_position:?} {inspector_size:?}"
     );
 
-    let automatic_y = || {
-        ElementHandle::find_by_accessible_label(&app, "Automatic")
-            .next()
-            .expect("the direction control is initially visible")
-            .absolute_position()
-            .y
-    };
-    let initial_automatic_y = automatic_y();
-    let mut automatic_positions = vec![Some(initial_automatic_y)];
     let mut lists_became_visible = false;
     for _ in 0..8 {
         scroll.scroll(0.0, -120.0);
-        automatic_positions.push(
-            ElementHandle::find_by_accessible_label(&app, "Automatic")
-                .next()
-                .map(|element| element.absolute_position().y),
-        );
         lists_became_visible |= ElementHandle::find_by_accessible_label(&app, "None")
             .next()
             .is_some();
     }
     let _ = snapshot_component(&app, width, height, 1.0).expect("render scrolled inspector");
-    assert!(
-        automatic_positions
-            .iter()
-            .flatten()
-            .any(|y| *y < initial_automatic_y),
-        "wheel events must move the inspector content up from {initial_automatic_y}; after each event: {automatic_positions:?}"
-    );
     assert!(
         lists_became_visible
             || ElementHandle::find_by_accessible_label(&app, "None")

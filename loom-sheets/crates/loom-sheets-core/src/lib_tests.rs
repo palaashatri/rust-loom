@@ -412,6 +412,33 @@ fn calculation_cache_recalculates_transitive_dependents() {
 }
 
 #[test]
+fn calculation_cache_matches_rebuild_for_blank_references_and_literals() {
+    let mut sheet = Sheet::new("blank reference parity");
+    let blank_literal = CellRef::parse("A1").unwrap();
+    let formula_cell = CellRef::parse("B1").unwrap();
+    sheet.set_str("A1", "");
+    sheet.set_str("B1", "=A1");
+
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    assert_eq!(cache.values.get(&blank_literal), Some(&Value::Empty));
+
+    sheet.set_str("B1", "=Z99");
+    assert!(cache
+        .recalculate(&sheet, &[formula_cell])
+        .contains(&formula_cell));
+    let full = evaluate(&sheet);
+    assert_eq!(full.get(&formula_cell), Some(&Value::Number(0.0)));
+    assert_eq!(cache.values.get(&formula_cell), full.get(&formula_cell));
+    assert_eq!(cache.values.get(&blank_literal), Some(&Value::Empty));
+    assert_eq!(cache.values.get(&blank_literal), full.get(&blank_literal));
+
+    cache.rebuild(&sheet);
+    assert_eq!(cache.values.get(&formula_cell), full.get(&formula_cell));
+    assert_eq!(cache.values.get(&blank_literal), full.get(&blank_literal));
+}
+
+#[test]
 fn calculation_cache_marks_only_cycle_remainder_and_dependents_circular() {
     let mut sheet = Sheet::new("incremental cycle");
     sheet.set_str("A1", "=B1");
@@ -454,7 +481,7 @@ fn calculation_cache_marks_only_cycle_remainder_and_dependents_circular() {
     );
     assert_eq!(
         cache.values.get(&CellRef::parse("F1").unwrap()),
-        Some(&Value::Empty)
+        Some(&Value::Number(0.0))
     );
     assert_eq!(
         cache.values.get(&CellRef::parse("G1").unwrap()),
@@ -721,6 +748,7 @@ fn currency_and_percentage_formatting() {
     assert_eq!(format_number_currency(0.0, "$", 2), "$0.00");
 
     assert_eq!(format_number_percentage(0.255, 1), "25.5%");
+    assert_eq!(format_number_percentage(0.1225, 1), "12.3%");
     assert_eq!(format_number_percentage(1.0, 0), "100%");
 }
 
@@ -750,9 +778,47 @@ fn cell_number_format_display() {
         format_cell_display("0.75", NumberFormat::Percentage),
         "75.0%"
     );
+    assert_eq!(
+        format_cell_display("0.1225", NumberFormat::Percentage),
+        "12.3%"
+    );
     assert_eq!(format_cell_display("1000", NumberFormat::Scientific), "1e3");
     assert_eq!(format_cell_display("hello", NumberFormat::General), "hello");
     assert_eq!(format_cell_display("", NumberFormat::Currency), "");
+
+    let number_style = crate::style::CellStyle {
+        number_format: NumberFormat::Number,
+        ..Default::default()
+    };
+    let currency_style = crate::style::CellStyle {
+        number_format: NumberFormat::Currency,
+        ..Default::default()
+    };
+    let general_style = crate::style::CellStyle {
+        number_format: NumberFormat::General,
+        decimal_places: Some(2),
+        ..Default::default()
+    };
+    let text_style = crate::style::CellStyle {
+        number_format: NumberFormat::PlainText,
+        decimal_places: Some(2),
+        ..Default::default()
+    };
+    for (raw, number, currency) in [
+        ("0.125", "0.13", "$0.13"),
+        ("-0.125", "-0.13", "-$0.13"),
+        ("9.995", "10.00", "$10.00"),
+        ("-9.995", "-10.00", "-$10.00"),
+    ] {
+        assert_eq!(format_cell_display(raw, NumberFormat::Number), number);
+        assert_eq!(format_cell_display(raw, NumberFormat::Currency), currency);
+        assert_eq!(number_style.format_value(raw), number);
+        assert_eq!(currency_style.format_value(raw), currency);
+    }
+    assert_eq!(general_style.format_value("0.125"), "0.13");
+    assert_eq!(general_style.format_value("-0.125"), "-0.13");
+    assert_eq!(text_style.format_value("0.125"), "0.13");
+    assert_eq!(text_style.format_value("-0.125"), "-0.13");
 }
 
 #[test]

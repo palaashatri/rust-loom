@@ -1261,6 +1261,7 @@ fn save_current_deck(
         return Ok(false);
     };
 
+    state.session.borrow_mut().end_table_text_edit();
     let bytes = save_presentation_session(&state.session.borrow())?;
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
@@ -1816,7 +1817,7 @@ fn build_present_menu_bar() -> MenuBar {
                     MenuShortcut::primary_shift("N"),
                 ),
                 MenuItem::action("slide.insert_table", "Insert Table..."),
-                MenuItem::action("slide.insert_chart", "Insert Chart..."),
+                MenuItem::action("slide.insert_chart", "Insert Chart from Clipboard..."),
                 MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
@@ -2025,6 +2026,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     recovery_deferred::wire_callbacks(app, state);
     {
         let state = state.clone();
+        app.on_end_table_cell_edit(move || {
+            state.session.borrow_mut().end_table_text_edit();
+        });
+    }
+    {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_strip_window_changed(move |first, count| {
             if let Some(app) = app_ref.upgrade() {
@@ -2228,6 +2235,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     {
                         // Release the mutable borrow before `refresh` reads the session.
                         let mut session = state.session.borrow_mut();
+                        session.end_table_text_edit();
                         if session.document.select_slide(index as usize) {
                             session.clear_selection();
                         }
@@ -2247,6 +2255,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     return;
                 }
                 let mut session = state.session.borrow_mut();
+                session.end_table_text_edit();
                 let id = session
                     .document
                     .active_slide()
@@ -2335,44 +2344,43 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
             if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
                 let selected = state.selected_element.get();
-                if session
+                if let Some((element_id, element_type)) = session
                     .document
                     .active_slide()
                     .and_then(|slide| slide.elements.get(selected))
-                    .is_some()
+                    .map(|element| (element.id.clone(), element.element_type.clone()))
                 {
-                    let is_picture = session
-                        .document
-                        .active_slide()
-                        .and_then(|slide| slide.elements.get(selected))
-                        .is_some_and(|element| element.element_type == ElementType::Picture);
-                    if is_picture {
+                    if element_type == ElementType::Picture {
+                        session.end_table_text_edit();
                         return;
                     }
-                    session.checkpoint();
-                    let is_title = if let Some(element) = session
-                        .document
-                        .active_slide_mut()
-                        .and_then(|slide| slide.elements.get_mut(selected))
-                    {
-                        if element.element_type == ElementType::Table {
-                            let (r, c) = table_actions::get_active_table_cell(&element.id);
-                            element.update_table_cell_text(r, c, content.as_str());
-                        } else if element.element_type == ElementType::Chart {
-                            if let Some(mut chart) = element.chart() {
-                                chart.title = Some(content.as_str().to_string());
-                                element.set_chart(&chart);
-                            }
-                        } else {
-                            element.content = content.as_str().to_string();
-                        }
-                        element.element_type == ElementType::Title
+                    if element_type == ElementType::Table {
+                        let (row, col) = table_actions::get_active_table_cell(&element_id);
+                        session.edit_table_cell_text(&element_id, row, col, content.as_str());
                     } else {
-                        false
-                    };
-                    if is_title {
-                        if let Some(slide) = session.document.active_slide_mut() {
-                            slide.title = content.as_str().to_string();
+                        session.end_table_text_edit();
+                        session.checkpoint();
+                        let is_title = if let Some(element) = session
+                            .document
+                            .active_slide_mut()
+                            .and_then(|slide| slide.elements.get_mut(selected))
+                        {
+                            if element.element_type == ElementType::Chart {
+                                if let Some(mut chart) = element.chart() {
+                                    chart.title = Some(content.as_str().to_string());
+                                    element.set_chart(&chart);
+                                }
+                            } else {
+                                element.content = content.as_str().to_string();
+                            }
+                            element.element_type == ElementType::Title
+                        } else {
+                            false
+                        };
+                        if is_title {
+                            if let Some(slide) = session.document.active_slide_mut() {
+                                slide.title = content.as_str().to_string();
+                            }
                         }
                     }
                 }
@@ -2994,7 +3002,23 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                                 .map_err(|error| error.to_string())
                         });
                         match result {
-                            Ok(()) => set_status(&app, format!("Exported {}", path.display())),
+                            Ok(()) => {
+                                let morph = state
+                                    .session
+                                    .borrow()
+                                    .transitions
+                                    .values()
+                                    .any(|kind| kind == &TransitionKind::Morph);
+                                let status = if morph {
+                                    format!(
+                                        "Exported {}; Morph transitions exported as fades",
+                                        path.display()
+                                    )
+                                } else {
+                                    format!("Exported {}", path.display())
+                                };
+                                set_status(&app, status);
+                            }
                             Err(error) => set_status(&app, format!("Export failed: {error}")),
                         }
                     }

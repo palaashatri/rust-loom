@@ -42,6 +42,16 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
 }
 
 pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
+    copy_action_with(app, state, write_clipboard);
+}
+
+fn copy_action_with<E>(
+    app: &WriterApp,
+    state: &GuiState,
+    mut write: impl FnMut(&ClipboardData) -> Result<(), E>,
+) where
+    E: std::fmt::Display,
+{
     let doc = state.current.borrow();
     let selection = doc.selection();
 
@@ -51,9 +61,7 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
         let text = doc.selected_text();
         if !text.is_empty() {
             let clip = text_clipboard_data(text);
-            if write_clipboard(&clip).is_ok() {
-                app.set_status_left("Copied text".into());
-            }
+            write_copy_clipboard(app, &clip, "Copied text".into(), &mut write);
             return;
         }
     }
@@ -61,12 +69,13 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
     // 0. If a table cell selection range is active:
     if let Some(range) = crate::table_actions::get_table_cell_selection_range() {
         if let Some((clip, num_rows, num_cols, _)) = table_range_clipboard_data(&doc, range) {
-            if write_clipboard(&clip).is_ok() {
-                app.set_status_left(slint::SharedString::from(with_rich_note(format!(
-                    "Copied table cells ({num_rows}x{num_cols})"
-                ))));
-                return;
-            }
+            write_copy_clipboard(
+                app,
+                &clip,
+                with_rich_note(format!("Copied table cells ({num_rows}x{num_cols})")).into(),
+                &mut write,
+            );
+            return;
         }
     }
 
@@ -77,11 +86,23 @@ pub(crate) fn copy_action(app: &WriterApp, state: &GuiState) {
     let text = doc.selected_text();
     if !text.is_empty() {
         let clip = text_clipboard_data(text);
-        if write_clipboard(&clip).is_ok() {
-            app.set_status_left("Copied text".into());
-        }
+        write_copy_clipboard(app, &clip, "Copied text".into(), &mut write);
     } else {
         app.set_status_left("Nothing selected".into());
+    }
+}
+
+fn write_copy_clipboard<E>(
+    app: &WriterApp,
+    data: &ClipboardData,
+    success: slint::SharedString,
+    mut write: impl FnMut(&ClipboardData) -> Result<(), E>,
+) where
+    E: std::fmt::Display,
+{
+    match write(data) {
+        Ok(()) => app.set_status_left(success),
+        Err(error) => app.set_status_left(format!("Copy failed: {error}").into()),
     }
 }
 
@@ -228,10 +249,13 @@ pub(crate) fn cut_action(app: &WriterApp, state: &GuiState) {
                 return;
             }
 
-            crate::table_actions::clear_table_cell_selection_range();
             if table_changed {
-                apply_with_history(app, state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
+                crate::table_actions::clear_table_cell_selection_range();
             } else {
+                crate::table_actions::clear_table_cell_selection_range();
                 state
                     .current
                     .borrow_mut()
@@ -266,7 +290,9 @@ pub(crate) fn cut_action(app: &WriterApp, state: &GuiState) {
 
     let mut next = state.current.borrow().clone();
     if replace_selection(&mut next, "") {
-        apply_with_history(app, state, next, HistoryKind::DocumentAction);
+        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+            return;
+        }
         app.set_status_left("Cut".into());
     }
 }
@@ -335,7 +361,9 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
         // Insert table block
         match next.insert_table_object(caret, &table) {
             Ok(_) => {
-                apply_with_history(app, state, next, HistoryKind::DocumentAction);
+                if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
                 let mut status =
                     format!("Pasted table ({}x{})", table.row_count(), table.col_count());
                 if let Some(note) = note {
@@ -358,7 +386,9 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
         .filter(|text| !text.is_empty());
     if let Some(text) = text {
         if replace_selection(&mut next, &text) {
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_left("Pasted text".into());
         } else {
             app.set_status_left("Paste failed: the text cannot be placed here".into());

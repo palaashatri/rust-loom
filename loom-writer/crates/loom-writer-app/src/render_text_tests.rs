@@ -5,12 +5,15 @@
 use super::actions_tests::text_document;
 use super::projection::render_text::{row_text, row_text_with_spaces, Align};
 use super::*;
-use i_slint_backend_testing::ElementHandle;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use loom_text::{CharacterStyle, FontWeight, ParagraphDirection, StyleRun};
 use loom_writer_core::fonts::{
     FallbackPolicy, FontCatalog, Paragraph, ScanConfig, StyledSpan, TextDirection,
 };
 use std::sync::Arc;
+
+#[path = "mixed_direction_styling_tests.rs"]
+mod mixed_direction_styling_tests;
 
 fn rows_of(document: &WriterDocument) -> Vec<WriterRenderBlock> {
     projection::project(document, PageViewport::default(), None).rows
@@ -575,6 +578,65 @@ fn a_larger_run_is_a_segment_drawn_at_its_own_size() {
 }
 
 #[test]
+fn fallback_segments_keep_inline_color_and_script_geometry() {
+    let mut document = text_document("plain super sub");
+    document.blocks[0].runs = vec![
+        StyleRun {
+            start: 6,
+            end: 11,
+            style: CharacterStyle {
+                font_size: 14.0,
+                explicit_size: true,
+                superscript: true,
+                color: Some("#145AC8CC".into()),
+                ..CharacterStyle::default()
+            },
+        },
+        StyleRun {
+            start: 12,
+            end: 15,
+            style: CharacterStyle {
+                font_size: 14.0,
+                explicit_size: true,
+                subscript: true,
+                color: Some("#C33218".into()),
+                ..CharacterStyle::default()
+            },
+        },
+    ];
+
+    let rows = rows_of(&document);
+    let segments: Vec<_> = rows[0].segments.iter().collect();
+    let find = |text: &str| {
+        segments
+            .iter()
+            .find(|segment| segment.text.as_str().contains(text))
+            .expect("styled text is a separate page segment")
+    };
+    let plain = find("plain");
+    let superscript = find("super");
+    let subscript = find("sub");
+
+    assert!(!plain.has_color);
+    assert!(superscript.has_color);
+    assert_eq!(
+        superscript.color,
+        slint::Color::from_argb_encoded(0xCC14_5AC8)
+    );
+    assert_eq!(
+        subscript.color,
+        slint::Color::from_argb_encoded(0xFF_C3_32_18)
+    );
+    assert!((superscript.size - 9.8).abs() < 0.01);
+    assert!((subscript.size - 9.8).abs() < 0.01);
+    assert!(
+        superscript.y < plain.y,
+        "superscript rises above the baseline"
+    );
+    assert!(subscript.y > plain.y, "subscript drops below the baseline");
+}
+
+#[test]
 fn a_bold_word_draws_heavier_than_the_same_word_plain() {
     fn dark_pixels(document: &WriterDocument) -> usize {
         set_platform();
@@ -611,9 +673,27 @@ fn the_page_exposes_each_drawn_segment_to_assistive_technology() {
     apply_document(&app, &document);
     let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
 
+    let render_blocks = app.get_render_blocks();
+    assert!(
+        render_blocks
+            .iter()
+            .any(|block| block.glyph_tiles.iter().next().is_some()),
+        "the styled line is rasterized into glyph tiles for painting"
+    );
     for label in ["Read ", "bold", " words"] {
-        let found = ElementHandle::find_by_accessible_label(&app, label).count();
-        assert!(found >= 1, "no text exposed for segment {label:?}");
+        let segments: Vec<_> = ElementHandle::find_by_accessible_label(&app, label)
+            .filter(|element| element.accessible_role() == Some(AccessibleRole::Text))
+            .collect();
+        assert!(
+            !segments.is_empty(),
+            "no text exposed for segment {label:?}"
+        );
+        assert!(
+            segments
+                .iter()
+                .all(|segment| segment.computed_opacity() == 0.0),
+            "rasterized segment {label:?} remains semantic while glyph tiles supply visible pixels"
+        );
     }
 }
 
@@ -624,7 +704,7 @@ fn enlarging_body_text_to_12_pt_reads_back_as_12_pt() {
 
     let state = formatting_state_for_selection(&document, DocumentSelection::range(0, 4));
     assert_eq!(
-        state.font_size_pt, 12,
+        state.font_size_pt, 12.0,
         "a chosen 12 pt inside 11 pt body text reads back as 12 pt: {state:?}"
     );
 }

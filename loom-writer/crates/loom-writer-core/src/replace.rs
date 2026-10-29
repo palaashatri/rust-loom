@@ -159,29 +159,106 @@ pub(crate) fn replace_all(
     replace_all_with(document, query, replacement, options)
 }
 
-/// Replaces every match under `options` and returns how many were replaced.
+/// Replaces every match under options and returns how many were replaced.
 pub(crate) fn replace_all_with(
     document: &mut WriterDocument,
     query: &str,
     replacement: &str,
     options: FindOptions,
 ) -> usize {
-    let mut replacements = 0;
-    for index in 0..document.blocks.len() {
-        let spans = block_matches(&document.blocks[index], query, options);
-        if spans.is_empty() {
-            continue;
-        }
-        replacements += spans.len();
-        let insert = if document.blocks[index].kind == TABLE_BLOCK_KIND {
+    replace_all_with_edits(document, query, replacement, options).0
+}
+
+/// Replaces every match under options and returns the count and exact changed hunks.
+fn replace_all_with_edits(
+    document: &mut WriterDocument,
+    query: &str,
+    replacement: &str,
+    options: FindOptions,
+) -> (usize, Vec<crate::revisions::RevisionTextEdit>) {
+    let mut plans = Vec::with_capacity(document.blocks.len());
+    for block in &document.blocks {
+        let mut spans = block_matches(block, query, options);
+        let insert = if block.kind == TABLE_BLOCK_KIND {
             cell_replacement(replacement)
         } else {
             replacement.to_string()
         };
+        let updated_table = if block.kind == TABLE_BLOCK_KIND && !spans.is_empty() {
+            let mut table = block.typed_table().cloned();
+            let mut current = block.text.as_str().to_string();
+            let mut valid = table.is_some();
+            if let Some(updated) = table.as_mut() {
+                for &(start, end) in spans.iter().rev() {
+                    let mut next = current.clone();
+                    next.replace_range(start..end, &insert);
+                    match crate::tables::apply_flat_text(updated, &next) {
+                        Ok(next_table) => {
+                            *updated = next_table;
+                            current = next;
+                        }
+                        Err(_) => {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if valid {
+                table
+            } else {
+                spans.clear();
+                None
+            }
+        } else {
+            None
+        };
+        plans.push((spans, insert, updated_table));
+    }
+    let replacements = plans.iter().map(|(spans, _, _)| spans.len()).sum();
+    let mut block_starts = Vec::with_capacity(document.blocks.len());
+    let mut start = 0usize;
+    for block in &document.blocks {
+        block_starts.push(start);
+        start = start.saturating_add(block.text.len_bytes().saturating_add(1));
+    }
+
+    let mut edits = Vec::new();
+    let mut cumulative_delta = 0i128;
+    for (index, (spans, insert, _)) in plans.iter().enumerate() {
+        let old_block_text = document.blocks[index].text.as_str();
+        for &(start, end) in spans {
+            if old_block_text.get(start..end) == Some(insert.as_str()) {
+                continue;
+            }
+            let old_start = block_starts[index].saturating_add(start);
+            let new_start =
+                usize::try_from(old_start as i128 + cumulative_delta).unwrap_or(usize::MAX);
+            let new_end = new_start.saturating_add(insert.len());
+            edits.push(crate::revisions::RevisionTextEdit {
+                old_start,
+                old_end: block_starts[index].saturating_add(end),
+                new_start,
+                new_end,
+            });
+            cumulative_delta += insert.len() as i128 - (end - start) as i128;
+        }
+    }
+
+    for (index, (spans, insert, updated_table)) in plans.into_iter().enumerate() {
+        if spans.is_empty() {
+            continue;
+        }
         let before = document.blocks[index].text.as_str().to_string();
         let changes: Vec<(usize, usize, usize)> = spans
             .iter()
-            .map(|&(start, end)| (start, end, insert.len()))
+            .filter_map(|&(start, end)| {
+                (before.get(start..end) != Some(insert.as_str())).then_some((
+                    start,
+                    end,
+                    insert.len(),
+                ))
+            })
             .collect();
         let block_id = document.blocks[index].id;
         rebase_block_comments(document, block_id, &before, &changes);
@@ -198,17 +275,31 @@ pub(crate) fn replace_all_with(
         }
         if current != before {
             if document.blocks[index].kind == TABLE_BLOCK_KIND {
-                // The replacement keeps the grid (no separators, no line breaks),
-                // so the cells take the change and keep their own runs.
-                let _ = document.edit_table_text(block_id, &current);
+                if let Some(table) = updated_table {
+                    document.blocks[index].set_table(table);
+                    crate::footnotes::rebase_block_changes(
+                        &mut document.footnotes,
+                        block_id,
+                        &before,
+                        &current,
+                        &changes,
+                    );
+                }
             } else {
+                crate::footnotes::rebase_block_changes(
+                    &mut document.footnotes,
+                    block_id,
+                    &before,
+                    &current,
+                    &changes,
+                );
                 let block = &mut document.blocks[index];
                 block.runs = runs;
                 block.text = Text::from_str(&current);
             }
         }
     }
-    replacements
+    (replacements, edits)
 }
 
 /// Replacement text as a table cell holds it: separators are dropped and line
@@ -299,6 +390,18 @@ impl WriterDocument {
         let replacements = replace_all_with(self, query, replacement, options);
         self.selection = self.clamp_selection(self.selection.clone());
         replacements
+    }
+
+    /// Replaces every match and returns exact hunks for the transaction finalizer.
+    pub fn replace_all_with_edits(
+        &mut self,
+        query: &str,
+        replacement: &str,
+        options: FindOptions,
+    ) -> (usize, Vec<crate::revisions::RevisionTextEdit>) {
+        let result = replace_all_with_edits(self, query, replacement, options);
+        self.selection = self.clamp_selection(self.selection.clone());
+        result
     }
 }
 

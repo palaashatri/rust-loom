@@ -181,9 +181,11 @@ fn mutate_selected_table_blocks(
         }
         block_start = block_end + 1;
     }
-    segments.into_iter().fold(false, |changed, range| {
-        document.set_table_text_runs(range, change).unwrap_or(false) || changed
-    })
+    let mut changed = false;
+    for range in segments {
+        changed |= document.set_table_text_runs(range, change).unwrap_or(false);
+    }
+    changed
 }
 
 pub(crate) fn set_selection_superscript(
@@ -346,22 +348,23 @@ pub(crate) fn selected_character_styles(
 }
 
 fn character_style(run: &TextRun) -> CharacterStyle {
-    let mut style = CharacterStyle::default();
-    style.weight = if run.bold {
-        FontWeight::Bold
-    } else {
-        FontWeight::Regular
-    };
-    style.italic = run.italic;
-    style.underline = run.underline;
-    style.strikethrough = run.strikethrough;
-    style.superscript = run.superscript;
-    style.subscript = run.subscript;
-    style.font_size = run.font_size_pt.unwrap_or(TABLE_CELL_BASE_FONT_SIZE_PT);
-    style.explicit_size = run.font_size_pt.is_some();
-    style.font_family = run.font_family.clone().unwrap_or_default();
-    style.color = run.color.clone();
-    style
+    CharacterStyle {
+        weight: if run.bold {
+            FontWeight::Bold
+        } else {
+            FontWeight::Regular
+        },
+        italic: run.italic,
+        underline: run.underline,
+        strikethrough: run.strikethrough,
+        superscript: run.superscript,
+        subscript: run.subscript,
+        font_size: run.font_size_pt.unwrap_or(TABLE_CELL_BASE_FONT_SIZE_PT),
+        explicit_size: run.font_size_pt.is_some(),
+        font_family: run.font_family.clone().unwrap_or_default(),
+        color: run.color.clone(),
+        ..CharacterStyle::default()
+    }
 }
 
 /// Shows a message in the status line and announces it to assistive technology.
@@ -419,7 +422,9 @@ pub(crate) fn toggle_emphasis(app: &WriterApp, state: &GuiState, emphasis: Empha
     match applied {
         Ok(()) => {
             next.set_selection(selection);
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return true;
+            }
             let verb = if on { "applied to" } else { "removed from" };
             announce(app, format!("{} {verb} {what}", emphasis.name()));
         }
@@ -483,7 +488,9 @@ pub(crate) fn align_table_columns_for_index(app: &WriterApp, state: &GuiState, i
     match next.set_table_column_alignment(block_id, columns, align) {
         Ok(()) => {
             next.set_selection(selection);
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return true;
+            }
             let noun = if count == 1 { "column" } else { "columns" };
             announce(
                 app,

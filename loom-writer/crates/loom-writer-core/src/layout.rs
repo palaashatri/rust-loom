@@ -18,14 +18,18 @@ use std::sync::Arc;
 
 use loom_text::StyleRun;
 
+mod footnote_layout;
+pub(crate) use footnote_layout::{inline_advances_for_block, inline_advances_for_table_cell};
 mod metrics;
 mod placement;
 mod selection;
 mod shaped_line;
+pub use footnote_layout::{FootnoteLinePlacement, FootnoteReferencePlacement};
 pub(crate) use metrics::{block_bidi_runs, block_positions};
 use placement::{Placer, Segment};
 use selection::{floor_in_blocks, rects_for_lines};
 pub use shaped_line::shape_wrapped_block_lines;
+pub(crate) use shaped_line::shape_wrapped_block_lines_with_inline_advances;
 pub(crate) use shaped_line::{parse_rgba, shape_block_line, shape_block_lines};
 pub use shaped_line::{
     shape_text_line, WriterCaretStop, WriterPaintedRun, WriterSelectionSpan, WriterShapedVisualLine,
@@ -38,6 +42,12 @@ use crate::{
     DocumentPage, LayoutFragment, PageFragment, PageLayout, PageRect, PageStyle, PageViewport,
     RichBlock, SelectionRect, TextSelection, VisibleRange, WriterDocument, PAGE_GAP_PT,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InlineAdvance {
+    pub(crate) offset: usize,
+    pub(crate) width_pt: f32,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 struct WrappedLine {
@@ -208,6 +218,66 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
     })
 }
 
+fn wrapped_with_inline_advances(
+    block: &RichBlock,
+    font_size: f32,
+    width: f32,
+    inline_advances: &[InlineAdvance],
+) -> BlockInfo {
+    if inline_advances.is_empty() {
+        return wrapped(block, font_size, width);
+    }
+    let base = wrapped(block, font_size, width);
+    let Some(shaped) =
+        shape_wrapped_block_lines_with_inline_advances(block, font_size, width, inline_advances)
+    else {
+        let mut lines = base.lines.to_vec();
+        for line in &mut lines {
+            line.advance_pt += inline_advances
+                .iter()
+                .filter(|advance| advance.offset > line.start && advance.offset <= line.end)
+                .map(|advance| advance.width_pt)
+                .sum::<f32>();
+        }
+        return BlockInfo {
+            lines: lines.into(),
+            ..base
+        };
+    };
+    let lines = shaped
+        .into_iter()
+        .map(|(range, shaped_line)| WrappedLine {
+            start: range.start,
+            end: range.end,
+            advance_pt: shaped_line.as_ref().map_or(0.0, |line| line.width_pt()),
+            shaped_line: shaped_line.map(Arc::new),
+        })
+        .collect::<Vec<_>>();
+    let line_height_pt = lines
+        .iter()
+        .filter_map(|line| line.shaped_line.as_deref())
+        .map(|line| line.ascent_pt() + line.descent_pt() + line.line_gap_pt())
+        .fold(base.line_height_pt, f32::max);
+    BlockInfo {
+        lines: lines.into(),
+        line_height_pt,
+        ..base
+    }
+}
+
+fn wrapped_document_block(
+    doc: &WriterDocument,
+    block: &RichBlock,
+    font_size: f32,
+    width: f32,
+) -> BlockInfo {
+    if block.kind == crate::TABLE_BLOCK_KIND {
+        return wrapped(block, font_size, width);
+    }
+    let advances = footnote_layout::inline_advances_for_block(doc, block.id, font_size);
+    wrapped_with_inline_advances(block, font_size, width, &advances)
+}
+
 /// Start a pass over a document's blocks and, after a pass, drop entries for
 /// blocks that no longer exist.
 fn begin_pass() {
@@ -324,6 +394,8 @@ struct Pagination {
     lines: Vec<FlowLine>,
     page_lines: Vec<Range<usize>>,
     block_starts: Vec<usize>,
+    footnote_references: Vec<FootnoteReferencePlacement>,
+    footnote_lines: Vec<FootnoteLinePlacement>,
 }
 
 fn invalid_style(style: &PageStyle) -> bool {
@@ -366,14 +438,17 @@ impl WriterDocument {
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let picture = block.object_display_size(usable_width, usable_height);
-            let info = wrapped(block, font_size, block.text_column_width(style));
+            let info =
+                wrapped_document_block(self, block, font_size, block.text_column_width(style));
             // Typed table cells may wrap and carry larger run metrics than the
             // table's flat editor text can express. Keep one reserved height
             // per typed row, falling back only when shaping itself is refused;
             // the projection reports that refusal visibly.
             let table_row_heights = if block.kind == crate::TABLE_BLOCK_KIND {
                 block.typed_table().and_then(|table| {
-                    crate::measure_table_row_geometry(
+                    crate::measure_table_row_geometry_with_footnotes(
+                        self,
+                        block.id,
                         table,
                         block.text_column_width(style),
                         crate::TABLE_CELL_BASE_FONT_SIZE_PT,
@@ -398,7 +473,12 @@ impl WriterDocument {
                 }
                 if let Some(next) = self.blocks.get(block_index + 1) {
                     let next_size = style.font_size_for_kind(next.kind.as_str());
-                    let next_lines = wrapped(next, next_size, next.text_column_width(style));
+                    let next_lines = wrapped_document_block(
+                        self,
+                        next,
+                        next_size,
+                        next.text_column_width(style),
+                    );
                     let next_height = next
                         .object_display_size(usable_width, usable_height)
                         .map_or(text_line_height(style, next), |(_, h)| h);
@@ -432,22 +512,54 @@ impl WriterDocument {
                     segment_start = index + 1;
                 }
             }
-            // Paragraph spacing consumes one body line unless the next block
-            // starts on a fresh page.
-            if block_index + 1 < self.blocks.len()
-                && placer.used > 0.0
-                && placer.used + body_line <= usable_height + f32::EPSILON
+            // Keep paragraph spacing only when the next line also fits.
+            if let Some(next) = self
+                .blocks
+                .get(block_index + 1)
+                .filter(|_| placer.used > 0.0)
             {
-                placer.used += body_line;
+                let next_size = style.font_size_for_kind(next.kind.as_str());
+                let next_info =
+                    wrapped_document_block(self, next, next_size, next.text_column_width(style));
+                let next_height = next
+                    .object_display_size(usable_width, usable_height)
+                    .map_or_else(
+                        || text_line_height(style, next).max(next_info.line_height_pt),
+                        |(_, height)| height,
+                    );
+                let next_height = if next.kind == crate::TABLE_BLOCK_KIND {
+                    next.typed_table()
+                        .and_then(|table| {
+                            crate::measure_table_row_geometry_with_footnotes(
+                                self,
+                                next.id,
+                                table,
+                                next.text_column_width(style),
+                                crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+                            )
+                            .ok()
+                        })
+                        .and_then(|geometry| geometry.row_heights_pt().first().copied())
+                        .unwrap_or(next_height)
+                } else {
+                    next_height
+                };
+                if placer.used + body_line + next_height <= usable_height + f32::EPSILON {
+                    placer.used += body_line;
+                }
             }
             block_start += block.text.len_bytes() + 1;
         }
         let (lines, page_lines) = placer.finish();
         end_pass(self.blocks.len());
+        let (lines, page_lines, footnote_references, footnote_lines) =
+            footnote_layout::paginate(self, style, lines, page_lines, &block_starts)?;
         Ok(Pagination {
             lines,
             page_lines,
             block_starts,
+            footnote_references,
+            footnote_lines,
         })
     }
 
@@ -489,6 +601,8 @@ impl WriterDocument {
             mut lines,
             page_lines,
             block_starts,
+            footnote_references,
+            footnote_lines,
         } = self.pagination(style)?;
         let zoom = viewport.zoom;
         let scroll_x = viewport.scroll_x.max(0.0);
@@ -519,22 +633,20 @@ impl WriterDocument {
                     shaped.ascent_pt() + shaped.descent_pt() + shaped.line_gap_pt()
                 });
                 let reserved_height_pt = line.bounds.height;
-                let line_height = block
-                    .object_display_size(usable_width, usable_height)
-                    .map_or_else(
-                        || {
-                            let base_height = if block.kind == crate::TABLE_BLOCK_KIND
-                                && block.typed_table().is_some()
-                            {
-                                reserved_height_pt
-                            } else {
-                                reserved_height_pt.max(text_line_height(style, block))
-                            };
-                            base_height.max(shaped_height)
-                        },
-                        |(_, h)| h,
-                    )
-                    * zoom;
+                let object_size = block.object_display_size(usable_width, usable_height);
+                let line_height = object_size.map_or_else(
+                    || {
+                        let base_height = if block.kind == crate::TABLE_BLOCK_KIND
+                            && block.typed_table().is_some()
+                        {
+                            reserved_height_pt
+                        } else {
+                            reserved_height_pt.max(text_line_height(style, block))
+                        };
+                        base_height.max(shaped_height)
+                    },
+                    |(_, h)| h,
+                ) * zoom;
                 let geometry = line_geometry_with_measure(
                     block,
                     line.start..line.end,
@@ -543,15 +655,20 @@ impl WriterDocument {
                     block.style.alignment.resolve(block.text.as_str())
                         == loom_text::Alignment::Justify,
                 );
-                let width = line.shaped_line.as_ref().map_or_else(
+                let width = object_size.map_or_else(
                     || {
-                        if geometry.gaps.is_empty() {
-                            line.bounds.width * zoom
-                        } else {
-                            geometry.width * zoom
-                        }
+                        line.shaped_line.as_ref().map_or_else(
+                            || {
+                                if geometry.gaps.is_empty() {
+                                    line.bounds.width * zoom
+                                } else {
+                                    geometry.width * zoom
+                                }
+                            },
+                            |shaped| shaped.width_pt() * zoom,
+                        )
                     },
-                    |shaped| shaped.width_pt() * zoom,
+                    |(width, _)| width * zoom,
                 );
                 lines[at].bounds = PageRect {
                     x: content_x + block.text_start_pt(style) * zoom,
@@ -561,18 +678,37 @@ impl WriterDocument {
                 };
                 line_y += line_height;
                 if at + 1 < range.end && lines[at + 1].block_index != lines[at].block_index {
-                    // Match the paginator's conservative paragraph break while
-                    // letting larger heading metrics occupy their real box.
-                    line_y += body_line_height;
+                    let next_line_height = lines[at + 1].bounds.height * zoom;
+                    let body_bottom = page_y + (style.height_pt - style.margin_bottom_pt) * zoom;
+                    if line_y + body_line_height + next_line_height <= body_bottom + f32::EPSILON {
+                        line_y += body_line_height;
+                    }
                 }
             }
         }
+        let footnote_lines = footnote_lines
+            .into_iter()
+            .map(|mut line| {
+                let page = page_bounds[line.page];
+                let local = |rect: &mut PageRect| {
+                    rect.x = page.x + rect.x * zoom;
+                    rect.y = page.y + rect.y * zoom;
+                    rect.width *= zoom;
+                    rect.height *= zoom;
+                };
+                local(&mut line.number_bounds);
+                local(&mut line.text_bounds);
+                line
+            })
+            .collect();
         Ok(DocumentFlow {
             style: style.clone(),
             lines,
             page_lines,
             page_bounds,
             block_starts,
+            footnote_references,
+            footnote_lines,
             zoom,
             scroll_x,
             scroll_y,
@@ -673,6 +809,7 @@ impl WriterDocument {
             .collect();
         let mut lines = Vec::with_capacity(layout.fragments.len());
         let mut fragments = layout.fragments.iter();
+        let mut cached_block: Option<(usize, BlockInfo)> = None;
         for page in &layout.pages {
             for source in &page.fragments {
                 let Some(fragment) = fragments.next() else {
@@ -681,6 +818,35 @@ impl WriterDocument {
                 let Some(&block_index) = index_of.get(&source.block_id) else {
                     continue;
                 };
+                let block = &self.blocks[block_index];
+                let font_size = style.font_size_for_kind(block.kind.as_str());
+                let info = match &cached_block {
+                    Some((cached_index, info)) if *cached_index == block_index => info.clone(),
+                    _ => {
+                        let info = wrapped_document_block(
+                            self,
+                            block,
+                            font_size,
+                            block.text_column_width(style),
+                        );
+                        cached_block = Some((block_index, info.clone()));
+                        info
+                    }
+                };
+                let shaped_line = match info
+                    .lines
+                    .iter()
+                    .find(|line| line.start == source.start && line.end == source.end)
+                {
+                    Some(line) => line.shaped_line.clone(),
+                    None => shape_block_line(
+                        block,
+                        source.start..source.end,
+                        font_size,
+                        block.text_column_width(style),
+                    )
+                    .map(Arc::new),
+                };
                 lines.push(FlowLine {
                     block_index,
                     start: source.start,
@@ -688,13 +854,7 @@ impl WriterDocument {
                     global_start: block_starts[block_index] + source.start,
                     page: page.index,
                     bounds: fragment.bounds,
-                    shaped_line: shape_block_line(
-                        &self.blocks[block_index],
-                        source.start..source.end,
-                        style.font_size_for_kind(self.blocks[block_index].kind.as_str()),
-                        self.blocks[block_index].text_column_width(style),
-                    )
-                    .map(Arc::new),
+                    shaped_line,
                 });
             }
         }
@@ -790,6 +950,8 @@ pub struct DocumentFlow {
     page_lines: Vec<Range<usize>>,
     page_bounds: Vec<PageRect>,
     block_starts: Vec<usize>,
+    footnote_references: Vec<FootnoteReferencePlacement>,
+    footnote_lines: Vec<FootnoteLinePlacement>,
     zoom: f32,
     scroll_x: f32,
     scroll_y: f32,
@@ -816,8 +978,15 @@ impl DocumentFlow {
         if start >= end {
             return None;
         }
-        let first = self.page_lines.get(start)?.start;
-        let last = self.page_lines.get(end - 1)?.end;
+        let first = self.page_lines[start..end]
+            .iter()
+            .find(|range| !range.is_empty())?
+            .start;
+        let last = self.page_lines[start..end]
+            .iter()
+            .rev()
+            .find(|range| !range.is_empty())?
+            .end;
         let (first, last) = (
             self.lines.get(first)?,
             self.lines.get(last.checked_sub(1)?)?,
@@ -833,6 +1002,131 @@ impl DocumentFlow {
     /// Every line, in document order.
     pub fn lines(&self) -> &[FlowLine] {
         &self.lines
+    }
+
+    /// Inline footnote references in document order, with their page placement.
+    pub fn footnote_references(&self) -> &[FootnoteReferencePlacement] {
+        &self.footnote_references
+    }
+
+    /// Page-space rectangle reserved for an inline footnote ordinal.
+    pub fn footnote_reference_rect(
+        &self,
+        doc: &WriterDocument,
+        reference: &FootnoteReferencePlacement,
+    ) -> Option<PageRect> {
+        if let Some(line) = self.lines.iter().find(|line| {
+            line.page == reference.page
+                && line.block_index == reference.block_index
+                && line.start <= reference.offset
+                && reference.offset <= line.end
+                && line
+                    .shaped_line
+                    .as_ref()
+                    .is_some_and(|shaped| shaped.inline_marker_x(reference.offset).is_some())
+        }) {
+            let shaped = line.shaped_line.as_deref()?;
+            let x = shaped.inline_marker_x(reference.offset)?;
+            return Some(PageRect {
+                x: line.bounds.x + x * self.zoom,
+                y: line.bounds.y,
+                width: reference.marker_width_pt * self.zoom,
+                height: line.bounds.height,
+            });
+        }
+
+        let block = doc.blocks.get(reference.block_index)?;
+        let table = block.typed_table()?;
+        let map = crate::TableTextMap::new(table);
+        let (row, column) = map.cell_at(reference.offset)?;
+        let cell_range = map.cell_range(row, column)?;
+        let line = self.lines.iter().find(|line| {
+            line.page == reference.page
+                && line.block_index == reference.block_index
+                && line.start <= reference.offset
+                && reference.offset <= line.end
+        })?;
+        let catalog = loom_objects::TableStyleCatalog::get(&table.style_id)
+            .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
+        let options = loom_objects::TableStyleOptions {
+            header_row: table.header_row,
+            total_row: table.total_row,
+            first_column: table.first_column,
+            last_column: table.last_column,
+            banded_rows: table.banded_rows,
+            banded_columns: table.banded_columns,
+        };
+        let resolved = catalog.resolve_cell(
+            row,
+            column,
+            table.row_count(),
+            table.col_count(),
+            &options,
+            table.cell(row, column),
+        );
+        let cell_block = crate::table_cell_rich_block(
+            block.id,
+            table,
+            row,
+            column,
+            crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+            resolved.bold,
+            resolved.text_color.as_deref(),
+        )
+        .unwrap_or_else(|| crate::RichBlock::new(block.id, "paragraph", ""));
+        let geometry = crate::shape_table_cell_geometry_with_footnotes(
+            doc,
+            block.id,
+            table,
+            row,
+            column,
+            &cell_block,
+            crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+            (block.text_column_width(&self.style) - crate::TABLE_CELL_HORIZONTAL_INSET_PT * 2.0)
+                .max(1.0),
+        )
+        .ok()?;
+        let cell_offset = reference.offset.checked_sub(cell_range.start)?;
+        let column_starts =
+            crate::editor_column_widths(table, block.text_column_width(&self.style));
+        let column_x = column_starts.iter().take(column).sum::<f32>();
+        let Some((line_index, cell_line)) =
+            geometry.lines().iter().enumerate().find(|(_, cell_line)| {
+                cell_line
+                    .shaped()
+                    .is_some_and(|shaped| shaped.inline_marker_x(cell_offset).is_some())
+            })
+        else {
+            if cell_range.is_empty() && cell_offset == 0 {
+                let cell_line = geometry.lines().first()?;
+                return Some(PageRect {
+                    x: line.bounds.x
+                        + (column_x + crate::TABLE_CELL_HORIZONTAL_INSET_PT) * self.zoom,
+                    y: line.bounds.y + crate::TABLE_CELL_VERTICAL_INSET_PT * self.zoom,
+                    width: reference.marker_width_pt * self.zoom,
+                    height: cell_line.pitch_pt() * self.zoom,
+                });
+            }
+            return None;
+        };
+        let shaped = cell_line.shaped()?;
+        let marker_x = shaped.inline_marker_x(cell_offset)?;
+        let line_top = geometry.lines()[..line_index]
+            .iter()
+            .map(|cell_line| cell_line.pitch_pt())
+            .sum::<f32>();
+        Some(PageRect {
+            x: line.bounds.x
+                + (column_x + crate::TABLE_CELL_HORIZONTAL_INSET_PT + marker_x) * self.zoom,
+            y: line.bounds.y + (crate::TABLE_CELL_VERTICAL_INSET_PT + line_top) * self.zoom,
+            width: reference.marker_width_pt * self.zoom,
+            height: cell_line.pitch_pt() * self.zoom,
+        })
+    }
+
+    /// Wrapped note-body lines, including deterministic continuation pages.
+    pub fn footnote_lines(&self) -> &[FootnoteLinePlacement] {
+        &self.footnote_lines
     }
 
     /// The lines on the given pages.
@@ -879,7 +1173,7 @@ impl DocumentFlow {
             (Some(first), Some(last)) if start < end => first.start..last.end,
             _ => 0..0,
         };
-        rects_for_lines(
+        let rects = rects_for_lines(
             doc,
             &self.style,
             self.zoom,
@@ -887,7 +1181,31 @@ impl DocumentFlow {
             &self.lines,
             selection,
             window,
-        )
+        );
+        let mut merged: Vec<SelectionRect> = Vec::with_capacity(rects.len());
+        for rect in rects {
+            if let Some(previous) = merged.last_mut() {
+                let previous_right = previous.rect.x + previous.rect.width;
+                let rect_right = rect.rect.x + rect.rect.width;
+                let touches = (previous_right - rect.rect.x).abs() <= 0.01
+                    || (rect_right - previous.rect.x).abs() <= 0.01;
+                if previous.page_index == rect.page_index
+                    && previous.block_id == rect.block_id
+                    && (previous.end == rect.start || rect.end == previous.start)
+                    && (previous.rect.y - rect.rect.y).abs() <= 0.01
+                    && (previous.rect.height - rect.rect.height).abs() <= 0.01
+                    && touches
+                {
+                    previous.start = previous.start.min(rect.start);
+                    previous.end = previous.end.max(rect.end);
+                    previous.rect.x = previous.rect.x.min(rect.rect.x);
+                    previous.rect.width = previous_right.max(rect_right) - previous.rect.x;
+                    continue;
+                }
+            }
+            merged.push(rect);
+        }
+        merged
     }
 
     /// The rectangle of a collapsed caret at `offset`, wherever it falls in

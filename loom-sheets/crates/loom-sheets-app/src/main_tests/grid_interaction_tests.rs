@@ -466,14 +466,80 @@ fn selection_announcement_and_inspector_values_follow_live_cell_state() {
 }
 
 #[test]
-fn inspector_search_filters_table_and_cell_sections() {
+fn inspector_search_filters_worksheet_and_cell_sections() {
     assert_eq!(inspector_section_visibility(""), (true, true));
+    assert_eq!(inspector_section_visibility(" worksheet "), (true, false));
+    assert_eq!(
+        inspector_section_visibility("worksheet name"),
+        (true, false)
+    );
+    assert_eq!(inspector_section_visibility("table"), (false, false));
     assert_eq!(inspector_section_visibility(" rows "), (true, false));
     assert_eq!(inspector_section_visibility("formula"), (false, true));
+    for label in [
+        "font style",
+        "bold",
+        "italic",
+        "underline",
+        "font size",
+        "font size in pixels",
+        "pixels",
+        "text colour",
+        "text color",
+        "wrap text",
+        "border",
+        "borders",
+        "fill",
+        "data format",
+        "general",
+        "number",
+        "currency",
+        "percent",
+        "percentage",
+        "decimal places",
+        "decimals",
+        "decimals count",
+        "alignment",
+        "left",
+        "center",
+        "right",
+        "row height",
+        "column width",
+        "selected row height",
+        "selected column width",
+        "selected range",
+        "displayed value",
+        "raw formula",
+    ] {
+        assert_eq!(
+            inspector_section_visibility(label),
+            (false, true),
+            "{label}"
+        );
+    }
     assert_eq!(
         inspector_section_visibility("does-not-exist"),
         (false, false)
     );
+}
+
+#[test]
+fn inspector_search_switches_context_and_preserves_selection() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    inspector_search::wire(&app);
+    app.set_selection_range("B3".into());
+    app.set_inspector_tab(0);
+    app.set_inspector_search("font".into());
+    app.invoke_inspector_search_edited("font".into());
+    assert_eq!(app.get_inspector_tab(), 1);
+    assert!(app.get_inspector_show_cell());
+    assert!(!app.get_inspector_show_table());
+    app.set_inspector_search("".into());
+    app.invoke_inspector_search_edited("".into());
+    assert_eq!(app.get_selection_range(), "B3");
+    assert!(app.get_inspector_show_cell());
+    assert!(app.get_inspector_show_table());
 }
 
 #[test]

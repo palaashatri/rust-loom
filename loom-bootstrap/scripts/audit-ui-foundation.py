@@ -14,6 +14,10 @@ TOKEN_FILE = ROOT / "loom-design-bible/tokens/loom.toml"
 DESKTOP_UI = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
 THEME_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/theme.slint"
 SHEETS_OBJECTS_SOURCE = ROOT / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+TOOLBAR_ITEM_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/toolbar_item.slint"
+TOOLKIT_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/toolkit.slint"
+FOUNDATION_CONTROLS_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/foundation/controls.slint"
+FOUNDATION_CHROME_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/foundation/chrome.slint"
 FACADE = ROOT / "loom-core/crates/loom-ui/ui/foundation.slint"
 FOUNDATION = ROOT / "loom-core/crates/loom-ui/ui/foundation"
 GALLERY = FOUNDATION / "gallery.slint"
@@ -397,9 +401,246 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
     return result
 
 
+def toolbar_caption_errors(desktop_ui: dict, tokens: dict, theme_source: str,
+                           toolbar_item_source: str) -> list[str]:
+    """Keep shared toolbar action captions tied to full shared typography."""
+    result: list[str] = []
+    typography = desktop_ui.get("type", {})
+    type_tokens = tokens.get("type", {})
+    type_roles = type_tokens.get("role", {})
+    leading_tokens = type_tokens.get("leading", {})
+    try:
+        caption_size = float(typography["caption"])
+        caption_leading = float(typography["line-height-caption"])
+        token_caption_size = float(type_roles["caption"])
+        token_caption_leading = float(leading_tokens["caption"])
+    except (KeyError, TypeError, ValueError):
+        result.append("toolbar caption size and line height must be declared in shared tokens")
+        return result
+
+    if caption_size != token_caption_size:
+        result.append("desktop caption size differs from the shared type caption token")
+    if caption_leading != token_caption_leading:
+        result.append("desktop caption line height differs from the shared leading token")
+
+    components = desktop_ui.get("component", {})
+    for name in ("labeled-toolbar-item", "icon-over-label-toolbar-item"):
+        policy = components.get(name, {})
+        if policy.get("label-size") != caption_size:
+            result.append(f"{name} label-size must match type.caption")
+        if policy.get("label-line-height") != caption_leading:
+            result.append(f"{name} label-line-height must match type.line-height-caption")
+        if policy.get("allow-label-elision") is not False:
+            result.append(f"{name} must forbid action-caption elision")
+
+    if desktop_ui.get("toolbar", {}).get("allow-labeled-item-elision") is not False:
+        result.append("toolbar policy must forbid labeled action-caption elision")
+    if desktop_ui.get("truncation", {}).get("allow-labeled-toolbar-label") is not False:
+        result.append("truncation policy must forbid labeled action-caption ellipsis")
+    if desktop_ui.get("forbidden", {}).get("labeled-toolbar-label-ellipsis") is not True:
+        result.append("forbidden policy must reject labeled toolbar caption ellipsis")
+
+    code = slint_code_without_comments_or_strings(theme_source)
+    runtime_themes = (
+        ("light", r"private\s+property\s*<ThemeTokens>\s*light-tokens\s*:\s*\{", False),
+        ("dark", r"export\s+global\s+ThemeDark\s*\{", True),
+        ("high-contrast", r"export\s+global\s+ThemeHighContrast\s*\{", True),
+    )
+    for name, declaration, nested_tokens in runtime_themes:
+        try:
+            theme_block = braced_block(code, declaration, f"{name} theme tokens")
+            token_block = (
+                braced_block(
+                    theme_block,
+                    r"in-out\s+property\s*<ThemeTokens>\s*tokens\s*:\s*\{",
+                    f"{name} ThemeTokens",
+                )
+                if nested_tokens
+                else theme_block
+            )
+            type_block = braced_block(token_block, r"typography\s*:\s*\{", f"{name} typography")
+            leading_block = braced_block(token_block, r"leading\s*:\s*\{", f"{name} leading")
+        except ValueError as error:
+            result.append(str(error))
+            continue
+        for label, block, key, expected in (
+            ("caption size", type_block, "caption", token_caption_size),
+            ("caption leading", leading_block, "caption", token_caption_leading),
+        ):
+            values = re.findall(rf"\b{key}\s*:\s*([0-9]+(?:\.[0-9]+)?)px\b", block)
+            if len(values) != 1 or float(values[0]) != expected:
+                result.append(f"runtime theme {name} {label} must match its shared token")
+
+    for label, declaration, expected in (
+        ("scaled caption size", r"in-out\s+property\s*<TypeScale>\s*type\s*:\s*\{",
+         r"caption\s*:\s*tokens\.typography\.caption\s*\*\s*max\(1\.0,\s*root\.text-scale\)"),
+        ("scaled caption leading", r"out\s+property\s*<Leading>\s*leading\s*:\s*\{",
+         r"caption\s*:\s*tokens\.leading\.caption\s*\*\s*max\(1\.0,\s*root\.text-scale\)"),
+    ):
+        try:
+            block = braced_block(code, declaration, label)
+        except ValueError as error:
+            result.append(str(error))
+            continue
+        if not re.search(expected, block):
+            result.append(f"Theme must scale {label} from its shared token")
+
+    component_code = slint_code_without_comments_or_strings(toolbar_item_source)
+    component_declaration = (
+        r"export\s+component\s+IconOverLabelToolbarItem\s+inherits\s+Rectangle\s*\{"
+    )
+    try:
+        component = braced_block(component_code, component_declaration, "toolbar action item")
+        label_text = braced_block(component, r"label-text\s*:=\s*Text\s*\{", "toolbar caption")
+    except ValueError as error:
+        result.append(str(error))
+    else:
+        if not re.search(r"font-size\s*:\s*Theme\.type\.caption\s*;", label_text):
+            result.append("toolbar action caption must use Theme.type.caption")
+        if not re.search(r"min-height\s*:\s*Theme\.leading\.caption\s*;", label_text):
+            result.append("toolbar action caption must use Theme.leading.caption")
+        if not re.search(r"wrap\s*:\s*no-wrap\s*;", label_text):
+            result.append("toolbar action captions must remain on one line")
+        if re.search(r"overflow\s*:\s*elide\b", label_text):
+            result.append("toolbar action captions must not elide")
+        if not re.search(
+            r"min-width\s*:\s*max\(48px,\s*label-text\.preferred-width\s*\+\s*16px\)",
+            component,
+        ):
+            result.append("toolbar action width must preserve the full measured caption")
+
+    return result
+
+
+def toolbar_focus_outline_errors(desktop_ui: dict, tokens: dict, theme_source: str,
+                                 sources: dict[str, str]) -> list[str]:
+    """Keep toolbar state outlines inside targets using the shared geometry."""
+    result: list[str] = []
+    try:
+        focus_ring = float(desktop_ui["controls"]["focus-ring"])
+        focus_offset = float(desktop_ui["controls"]["focus-offset"])
+        token_focus_ring = float(tokens["metrics"]["focus-ring"])
+        token_focus_offset = float(tokens["metrics"]["focus-offset"])
+    except (KeyError, TypeError, ValueError):
+        result.append("toolbar focus ring and offset must be declared in shared metrics")
+        return result
+
+    if focus_ring != token_focus_ring:
+        result.append("desktop focus-ring size differs from the shared focus-ring token")
+    if focus_offset != token_focus_offset:
+        result.append("desktop focus-offset differs from the shared focus-offset token")
+
+    theme_code = slint_code_without_comments_or_strings(theme_source)
+    themes = (
+        ("light", r"private\s+property\s*<ThemeTokens>\s*light-tokens\s*:\s*\{", False),
+        ("dark", r"export\s+global\s+ThemeDark\s*\{", True),
+        ("high-contrast", r"export\s+global\s+ThemeHighContrast\s*\{", True),
+    )
+    for name, declaration, nested_tokens in themes:
+        try:
+            theme_block = braced_block(theme_code, declaration, f"{name} theme tokens")
+            token_block = (
+                braced_block(
+                    theme_block,
+                    r"in-out\s+property\s*<ThemeTokens>\s*tokens\s*:\s*\{",
+                    f"{name} ThemeTokens",
+                )
+                if nested_tokens
+                else theme_block
+            )
+            metrics = braced_block(token_block, r"metrics\s*:\s*\{", f"{name} metrics")
+        except ValueError as error:
+            result.append(str(error))
+            continue
+        for label, key, expected in (
+            ("focus-ring", "focus-ring", token_focus_ring),
+            ("focus-offset", "focus-offset", token_focus_offset),
+        ):
+            values = re.findall(rf"\b{re.escape(key)}\s*:\s*([0-9]+(?:\.[0-9]+)?)px\b", metrics)
+            if len(values) != 1 or float(values[0]) != expected:
+                result.append(f"runtime theme {name} {label} must match its shared token")
+
+    def check_outline(source: str, declaration: str, name: str, *, selected: bool,
+                      selection_property: str = "checked") -> None:
+        code = slint_code_without_comments_or_strings(source)
+        try:
+            component = braced_block(code, declaration, name)
+            outline = braced_block(component, r"state-outline\s*:=\s*Rectangle\s*\{", f"{name} outline")
+        except ValueError as error:
+            result.append(str(error))
+            return
+        expected_properties = (
+            (r"x\s*:\s*Theme\.tokens\.metrics\.focus-offset\s*;", "x inset"),
+            (r"y\s*:\s*Theme\.tokens\.metrics\.focus-offset\s*;", "y inset"),
+            (r"width\s*:\s*max\(0px,\s*root\.width\s*-\s*2\s*\*\s*Theme\.tokens\.metrics\.focus-offset\s*\)", "horizontal inset"),
+            (r"height\s*:\s*max\(0px,\s*root\.height\s*-\s*2\s*\*\s*Theme\.tokens\.metrics\.focus-offset\s*\)", "vertical inset"),
+        )
+        for pattern, label in expected_properties:
+            if not re.search(pattern, outline):
+                result.append(f"{name} focus/selection outline must preserve the contract {label}")
+        if not re.search(r"focus\.has-focus\s*\?\s*Theme\.tokens\.metrics\.focus-ring", outline):
+            result.append(f"{name} focused outline must use the shared focus-ring width")
+        if selected and not re.search(rf"root\.{selection_property}\s*\?\s*1px", outline):
+            result.append(f"{name} selected outline must retain its 1px contract border")
+
+    check_outline(
+        sources["toolbar_item"],
+        r"export\s+component\s+IconOverLabelToolbarItem\s+inherits\s+Rectangle\s*\{",
+        "toolbar action",
+        selected=True,
+    )
+    toolkit = slint_code_without_comments_or_strings(sources["toolkit"])
+    check_outline(
+        toolkit,
+        r"export\s+component\s+IconOnlyToolbarItem\s+inherits\s+Rectangle\s*\{",
+        "icon-only toolbar action",
+        selected=True,
+    )
+    check_outline(
+        toolkit,
+        r"export\s+component\s+Overflow\s+inherits\s+Rectangle\s*\{",
+        "toolkit overflow action",
+        selected=False,
+    )
+    check_outline(
+        sources["foundation_controls"],
+        r"export\s+component\s+LoomIconButton\s+inherits\s+Rectangle\s*\{",
+        "foundation icon button",
+        selected=True,
+        selection_property="selected",
+    )
+    chrome = slint_code_without_comments_or_strings(sources["foundation_chrome"])
+    try:
+        overflow = braced_block(
+            chrome,
+            r"export\s+component\s+LoomOverflowButton\s+inherits\s+LoomIconButton\s*\{",
+            "foundation overflow action",
+        )
+    except ValueError as error:
+        result.append(str(error))
+    else:
+        if not re.search(r"inset-state-outline\s*:\s*true\s*;", overflow):
+            result.append("foundation overflow action must enable the inset state outline")
+
+    return result
+
+
 tokens = tomllib.loads(TOKEN_FILE.read_text(encoding="utf-8"))
 desktop_ui = tomllib.loads(DESKTOP_UI.read_text(encoding="utf-8"))
 theme_source = THEME_SOURCE.read_text(encoding="utf-8")
+try:
+    toolbar_item_source = TOOLBAR_ITEM_SOURCE.read_text(encoding="utf-8")
+    toolbar_focus_sources = {
+        "toolbar_item": toolbar_item_source,
+        "toolkit": TOOLKIT_SOURCE.read_text(encoding="utf-8"),
+        "foundation_controls": FOUNDATION_CONTROLS_SOURCE.read_text(encoding="utf-8"),
+        "foundation_chrome": FOUNDATION_CHROME_SOURCE.read_text(encoding="utf-8"),
+    }
+except OSError as error:
+    errors.append(f"shared toolbar item source is missing or unreadable: {error}")
+else:
+    errors.extend(toolbar_caption_errors(desktop_ui, tokens, theme_source, toolbar_item_source))
+    errors.extend(toolbar_focus_outline_errors(desktop_ui, tokens, theme_source, toolbar_focus_sources))
 try:
     accents = THEME_SOURCE.with_name("app-accents.slint").read_text(encoding="utf-8")
 except OSError as error:

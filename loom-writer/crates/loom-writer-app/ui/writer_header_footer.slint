@@ -1,0 +1,189 @@
+import { LoomButton, LoomSegmentedControl, LoomTextField } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export struct WriterHeaderFooterLine {
+    text: string,
+    accessible-label: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    font-size: length,
+    alignment: int,
+}
+
+export global WriterHeaderFooterState {
+    in-out property <bool> dialog-open: false;
+    in-out property <string> header-text: "";
+    in-out property <string> footer-text: "";
+    in-out property <int> alignment: 0;
+    in-out property <int> page-number-format: 0;
+    in-out property <bool> different-first-page: false;
+    in-out property <string> error: "";
+    in-out property <[WriterHeaderFooterLine]> page-lines: [];
+    callback open-editor;
+    callback apply;
+    callback cancel;
+}
+
+/// Edit document-owned headers and footers without mutating until Apply.
+export component WriterHeaderFooterDialog inherits FocusScope {
+    private property <int> tab-index: 0;
+
+    public function focus-tab(index: int) {
+        tab-index = index;
+        if (index == 0) { header-field.focus-input(); }
+        else if (index == 1) { footer-field.focus-input(); }
+        else if (index == 2) { alignment.grab-focus(); }
+        else if (index == 3) { number-format.grab-focus(); }
+        else if (index == 4) { first-page.grab-focus(); }
+        else if (index == 5) { apply-button.grab-focus(); }
+        else { cancel-button.grab-focus(); }
+    }
+
+    init => { root.focus-tab(0); }
+    key-pressed(event) => {
+        if (event.text == Key.Escape) { WriterHeaderFooterState.cancel(); return accept; }
+        if (event.text == Key.Tab || event.text == Key.Backtab) {
+            if (event.text == Key.Backtab || event.modifiers.shift) {
+                if (root.tab-index == 0) { root.focus-tab(6); }
+                else { root.focus-tab(root.tab-index - 1); }
+            } else {
+                if (root.tab-index == 6) { root.focus-tab(0); }
+                else { root.focus-tab(root.tab-index + 1); }
+            }
+            return accept;
+        }
+        return reject;
+    }
+
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+        TouchArea { clicked => { root.focus-tab(0); } }
+
+        Rectangle {
+            width: min(600px * max(1.0, Theme.text-scale), root.width - 48px);
+            height: min(layout.preferred-height, root.height - 48px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            layout := VerticalLayout {
+                padding: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.md;
+
+                Text {
+                    text: "Headers and Footers";
+                    font-size: Theme.type.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
+                Text {
+                    text: "Use {page} and {total} to insert page numbers and the document page count.";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink-secondary;
+                    wrap: word-wrap;
+                }
+                header-field := LoomTextField {
+                    title: "Header";
+                    label: "Header text";
+                    placeholder: "Optional text at the top of each page";
+                    value <=> WriterHeaderFooterState.header-text;
+                    edited(_) => { root.tab-index = 0; WriterHeaderFooterState.error = ""; }
+                    accepted(_) => { root.tab-index = 0; }
+                    cancelled => { WriterHeaderFooterState.cancel(); }
+                }
+                footer-field := LoomTextField {
+                    title: "Footer";
+                    label: "Footer text";
+                    placeholder: "Optional text at the bottom of each page";
+                    value <=> WriterHeaderFooterState.footer-text;
+                    edited(_) => { root.tab-index = 1; WriterHeaderFooterState.error = ""; }
+                    accepted(_) => { root.tab-index = 1; }
+                    cancelled => { WriterHeaderFooterState.cancel(); }
+                }
+                Text {
+                    text: "Alignment";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                alignment := LoomSegmentedControl {
+                    items: ["Left", "Center", "Right"];
+                    current <=> WriterHeaderFooterState.alignment;
+                    label: "Header and footer alignment";
+                    selected(_) => { root.tab-index = 2; }
+                }
+                Text {
+                    text: "Page number format";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                number-format := LoomSegmentedControl {
+                    items: ["1, 2, 3", "I, II, III", "i, ii, iii", "A, B, C"];
+                    current <=> WriterHeaderFooterState.page-number-format;
+                    label: "Page number format";
+                    selected(_) => { root.tab-index = 3; }
+                }
+                first-page := LoomSegmentedControl {
+                    items: ["Every page", "Skip first page"];
+                    current: WriterHeaderFooterState.different-first-page ? 1 : 0;
+                    label: "First-page headers and footers";
+                    selected(index) => {
+                        root.tab-index = 4;
+                        WriterHeaderFooterState.different-first-page = index == 1;
+                    }
+                }
+                if WriterHeaderFooterState.error != "" : Text {
+                    text: WriterHeaderFooterState.error;
+                    color: Theme.palette().danger;
+                    font-size: Theme.type.caption;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: WriterHeaderFooterState.error;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    apply-button := LoomButton {
+                        label: "Apply";
+                        variant: "primary";
+                        x: Theme.rtl ? cancel-button.width + Theme.tokens.space.sm : parent.width - self.width;
+                        clicked => { WriterHeaderFooterState.apply(); }
+                    }
+                    cancel-button := LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        x: Theme.rtl ? 0px : apply-button.x - Theme.tokens.space.sm - self.width;
+                        clicked => { WriterHeaderFooterState.cancel(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component WriterHeaderFooterText inherits Text {
+    in property <WriterHeaderFooterLine> line;
+    in property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
+    x: root.line.x * root.page-zoom;
+    y: root.line.y * root.page-zoom;
+    width: root.line.width * root.page-zoom;
+    height: root.line.height * root.page-zoom;
+    text: root.line.text;
+    font-size: root.line.font-size * root.page-zoom;
+    color: root.page-appearance == "black" ? #FFFFFF : Theme.palette().ink-secondary;
+    vertical-alignment: center;
+    horizontal-alignment: root.line.alignment == 1 ? center
+        : root.line.alignment == 2 ? right : left;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.line.accessible-label;
+}

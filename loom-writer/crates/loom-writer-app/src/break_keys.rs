@@ -78,7 +78,9 @@ pub(crate) fn insert_break(app: &WriterApp, state: &GuiState, soft: bool) {
     match next.replace_editor_text_at(&edited, Some(caret)) {
         Ok(_) => {
             next.set_selection(TextSelection::caret(caret));
-            apply_with_history(app, state, next, HistoryKind::DocumentAction);
+            if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                return;
+            }
             app.set_status_right(SharedString::from(if soft {
                 "Line break inserted"
             } else {

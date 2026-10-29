@@ -97,7 +97,16 @@ fn table() -> Vec<(&'static str, Action)> {
         }),
         a("set_cell_alignment", |app| app.invoke_set_cell_alignment(1)),
         a("set_cell_format", |app| app.invoke_set_cell_format(1)),
+        a("set_col_width", |app| {
+            let _ = app.invoke_set_col_width("96".into());
+        }),
         a("set_fill", |app| app.invoke_set_fill(1)),
+        a("set_font_size", |app| {
+            let _ = app.invoke_set_font_size("18".into());
+        }),
+        a("set_row_height", |app| {
+            let _ = app.invoke_set_row_height("32".into());
+        }),
         a("sort_ascending", |app| app.invoke_sort_ascending()),
         a("sort_descending", |app| app.invoke_sort_descending()),
         a("toggle_bold", |app| app.invoke_toggle_bold()),

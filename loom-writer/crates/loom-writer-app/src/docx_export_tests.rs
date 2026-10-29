@@ -147,8 +147,72 @@ fn skipped_comments_are_named_in_the_status() {
     });
     let export = loom_writer_core::export_docx(&document).unwrap();
     let message = docx_export::success_message(Path::new("a.docx"), &export);
-    assert_eq!(
-        message,
-        "Exported a.docx (1 comment could not be placed and was left out)"
+    assert_eq!(message, "Warning: 1 comment was left out. Exported a.docx");
+}
+
+#[test]
+fn long_path_comment_warning_is_readable_in_the_compact_export_report() {
+    let root = scratch_dir("long-warning");
+    let mut parent = root.clone();
+    let separator = std::path::MAIN_SEPARATOR.len_utf8();
+    let path_chars = |path: &Path| path.display().to_string().chars().count();
+    let mut target_chars = path_chars(&parent) + separator + "review.docx".len();
+    while target_chars < 245 {
+        let segment_chars = (245 - target_chars - separator).min(64);
+        if segment_chars == 0 {
+            break;
+        }
+        parent = parent.join("x".repeat(segment_chars));
+        target_chars = path_chars(&parent) + separator + "review.docx".len();
+    }
+    std::fs::create_dir_all(&parent).unwrap();
+    let target = parent.join("review.docx");
+    let target_len = path_chars(&target);
+    assert!((241..=246).contains(&target_len));
+
+    let mut document = text_document("one two");
+    document.comments.push(loom_writer_core::CommentThread {
+        id: "orphaned-comment".into(),
+        author: "A".into(),
+        block_id: document.blocks[0].id,
+        start: 0,
+        end: 3,
+        body: "This comment cannot be anchored in Word.".into(),
+        resolved: false,
+        orphaned: true,
+    });
+    let (app, state) = test_state(document, scripted(vec![Some(target.clone())]));
+    wire_writer_shared_callbacks(&app, &state, None);
+    app.window().set_size(slint::PhysicalSize::new(480, 360));
+
+    app.invoke_export_docx();
+
+    assert!(
+        target.is_file(),
+        "the requested long destination was written"
     );
+    let status = app.get_status_left().to_string();
+    let warning_position = status.find("Warning:").expect("warning leads the status");
+    let path_position = status
+        .find(&target.display().to_string())
+        .expect("the status still names the destination");
+    assert!(warning_position < path_position);
+    assert!(app.get_docx_export_report_open());
+
+    let report = app.get_docx_export_report_message().to_string();
+    assert!(report.starts_with("1 comment could not be placed in Word and was left out."));
+    let (_, displayed_path) = report
+        .split_once("Saved to:\n")
+        .expect("the full destination follows the loss details");
+    assert_eq!(
+        displayed_path.replace('\n', ""),
+        target.display().to_string(),
+        "visual line breaks preserve every character of a long path"
+    );
+    assert!(
+        !displayed_path.contains('…'),
+        "the report does not elide the path"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
 }

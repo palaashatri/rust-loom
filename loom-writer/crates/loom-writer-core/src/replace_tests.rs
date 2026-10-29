@@ -192,3 +192,124 @@ fn whole_word_only_checks_the_sides_where_the_query_has_a_word_character() {
     assert_eq!(doc.find_all_with("foo ", whole).len(), 1);
     assert_eq!(doc.find_all_with("bar", whole).len(), 1);
 }
+
+#[test]
+fn replace_all_rebases_footnotes_between_multiple_matches() {
+    let mut document = paragraph("foo keep foo");
+    let block_id = document.blocks[0].id;
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 9,
+        block_id,
+        offset: 6,
+        body: "keeps its place".into(),
+    });
+
+    assert_eq!(document.replace_all("foo", "x", false), 2);
+    assert_eq!(document.blocks[0].text.as_str(), "x keep x");
+    assert_eq!(document.footnotes[0].offset, 4);
+    assert_eq!(document.footnotes[0].id, 9);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn paragraph_rebuild_keeps_notes_on_exact_unchanged_blocks() {
+    let mut document = document_with(&[
+        ("paragraph", "first"),
+        ("paragraph", "middle"),
+        ("paragraph", "last"),
+    ]);
+    let middle_id = document.blocks[1].id;
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 11,
+        block_id: middle_id,
+        offset: 3,
+        body: "middle note".into(),
+    });
+
+    document.replace_paragraphs("FIRST\nmiddle\nLAST");
+    assert_eq!(document.blocks[1].id, middle_id);
+    assert_eq!(document.footnotes[0].block_id, middle_id);
+    assert_eq!(document.footnotes[0].offset, 3);
+    assert_eq!(document.footnotes[0].id, 11);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn paragraph_rebuild_rebases_notes_inside_a_changed_block_locally() {
+    let mut document = document_with(&[
+        ("paragraph", "first"),
+        ("paragraph", "mid text"),
+        ("paragraph", "last"),
+    ]);
+    let middle_id = document.blocks[1].id;
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 12,
+        block_id: middle_id,
+        offset: 5,
+        body: "middle suffix note".into(),
+    });
+
+    document.replace_paragraphs("FIRST\nmid Xtext\nLAST");
+    assert_eq!(document.blocks[1].id, middle_id);
+    assert_eq!(document.blocks[1].text.as_str(), "mid Xtext");
+    assert_eq!(document.footnotes[0].block_id, middle_id);
+    assert_eq!(document.footnotes[0].offset, 6);
+    assert_eq!(document.footnotes[0].id, 12);
+    assert!(document.validate_footnotes().is_ok());
+}
+
+#[test]
+fn footnote_numbering_uses_block_order_anchor_offset_and_id_ties() {
+    let mut document = WriterDocument::new("order", "Footnote order");
+    document.push(crate::RichBlock::new(1, "paragraph", "first"));
+    document.push(crate::RichBlock::new(2, "paragraph", "second"));
+    document.footnotes = vec![
+        crate::FootnoteEntry {
+            id: 30,
+            block_id: 1,
+            offset: 4,
+            body: "later".into(),
+        },
+        crate::FootnoteEntry {
+            id: 50,
+            block_id: 2,
+            offset: 0,
+            body: "next block".into(),
+        },
+        crate::FootnoteEntry {
+            id: 20,
+            block_id: 1,
+            offset: 1,
+            body: "earlier".into(),
+        },
+    ];
+    let numbering = |doc: &WriterDocument| {
+        doc.numbered_footnotes()
+            .into_iter()
+            .map(|(number, note)| (number, note.id))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(numbering(&document), vec![(1, 20), (2, 30), (3, 50)]);
+    document.blocks.swap(0, 1);
+    assert_eq!(numbering(&document), vec![(1, 50), (2, 20), (3, 30)]);
+    document.footnotes.push(crate::FootnoteEntry {
+        id: 10,
+        block_id: 1,
+        offset: 1,
+        body: "same anchor tie".into(),
+    });
+    assert_eq!(
+        numbering(&document),
+        vec![(1, 50), (2, 10), (3, 20), (4, 30)]
+    );
+    assert_eq!(
+        document
+            .footnotes
+            .iter()
+            .map(|note| note.id)
+            .collect::<Vec<_>>(),
+        vec![30, 50, 20, 10],
+        "renumbering never mutates stable IDs or stored note order"
+    );
+}

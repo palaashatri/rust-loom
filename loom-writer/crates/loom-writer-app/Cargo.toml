@@ -26,6 +26,12 @@ loom-package = { path = "../../../loom-core/crates/loom-package" }
 slint = "1.17.1"
 i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry"] }
+raw-window-handle = "0.6.2"
+
 [build-dependencies]
 slint-build = "1.17.1"
 

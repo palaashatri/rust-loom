@@ -6,53 +6,89 @@
 
 use loom_objects::table::TextRun;
 use loom_package::zip::PackageArchive;
-use loom_text::{
-    Alignment, CharacterStyle, FontWeight, ParagraphDirection, ParagraphStyle, StyleRun,
+use loom_text::{CharacterStyle, FontWeight, StyleRun};
+use roxmltree::Node;
+
+use super::header_footer;
+use super::inline_style::{attribute_value, property_tag_with_start, writer_color};
+use super::xml::W_NS;
+use crate::{
+    PageAppearance, PageOrientation, PageSetup, RevisionAnchor, RevisionBoundaryKind, RevisionKind,
+    RevisionPayload, RevisionRecord, RichBlock, TrackedChanges, WriterDocument,
 };
 
-use super::inline_style::{attribute_value, property_tag, property_tag_with_start, writer_color};
-use crate::{RichBlock, WriterDocument};
+mod table;
+use table::parse_table;
 
-/// Unescapes the five predefined XML entities in one left-to-right pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FootnoteReference {
+    pub ooxml_id: i32,
+    pub block_id: u64,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LocalFootnoteReference {
+    ooxml_id: i32,
+    offset: usize,
+}
+
+#[derive(Clone)]
+struct RevisionMarkup {
+    id: u64,
+    author: String,
+    kind: RevisionKind,
+}
+
+struct LocalRevision {
+    id: u64,
+    author: String,
+    kind: RevisionKind,
+    boundary_kind: RevisionBoundaryKind,
+    start: usize,
+    end: usize,
+    before: Option<RevisionPayload>,
+    after: Option<RevisionPayload>,
+}
+
+/// Unescapes predefined and numeric XML entities without splitting UTF-8 bytes.
 pub(crate) fn xml_unescape(value: &str) -> String {
-    if !value.contains('&') {
-        return value.to_string();
-    }
     let mut out = String::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] == b'&' {
-            let rest = &value[index..];
-            if rest.starts_with("&lt;") {
-                out.push('<');
-                index += 4;
-                continue;
+    let mut cursor = 0usize;
+    while let Some(relative_ampersand) = value[cursor..].find('&') {
+        let start = cursor + relative_ampersand;
+        out.push_str(&value[cursor..start]);
+        let Some(relative_semicolon) = value[start..].find(';') else {
+            out.push('&');
+            cursor = start + 1;
+            continue;
+        };
+        let end = start + relative_semicolon;
+        let entity = &value[start + 1..end];
+        let decoded = match entity {
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "amp" => Some('&'),
+            value if value.starts_with("#x") || value.starts_with("#X") => {
+                u32::from_str_radix(&value[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
             }
-            if rest.starts_with("&gt;") {
-                out.push('>');
-                index += 4;
-                continue;
+            value if value.starts_with('#') => {
+                value[1..].parse::<u32>().ok().and_then(char::from_u32)
             }
-            if rest.starts_with("&quot;") {
-                out.push('"');
-                index += 6;
-                continue;
-            }
-            if rest.starts_with("&apos;") {
-                out.push('\'');
-                index += 6;
-                continue;
-            }
-            if rest.starts_with("&amp;") {
-                out.push('&');
-                index += 5;
-                continue;
-            }
+            _ => None,
+        };
+        if let Some(character) = decoded {
+            out.push(character);
+        } else {
+            out.push_str(&value[start..=end]);
         }
-        out.push(bytes[index] as char);
-        index += 1;
+        cursor = end + 1;
     }
+    out.push_str(&value[cursor..]);
     out
 }
 
@@ -87,10 +123,12 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         {
             warnings.push("Macros and VBA code are not supported.".to_string());
         }
-        if (path.ends_with("footnotes.xml") || path.ends_with("endnotes.xml"))
-            && !warnings.iter().any(|w: &String| w.contains("Footnotes"))
+        if path.ends_with("endnotes.xml")
+            && !warnings
+                .iter()
+                .any(|warning: &String| warning.contains("Endnotes"))
         {
-            warnings.push("Footnotes and endnotes are not supported.".to_string());
+            warnings.push("Endnotes are not supported and will be omitted.".to_string());
         }
         let lower = path.to_ascii_lowercase();
         if (path.starts_with("word/media/") || path.starts_with("media/"))
@@ -108,15 +146,39 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
 
     if let Some(doc_bytes) = archive.get("word/document.xml") {
         let xml = String::from_utf8_lossy(doc_bytes);
+        let unsupported_background =
+            roxmltree::Document::parse(&xml)
+                .ok()
+                .is_some_and(|document| {
+                    document
+                        .root_element()
+                        .children()
+                        .find(|node| node.has_tag_name((W_NS, "background")))
+                        .is_some_and(|background| {
+                            supported_background_appearance(background).is_none()
+                        })
+                });
+        if unsupported_background
+            && !warnings
+                .iter()
+                .any(|warning: &String| warning.contains("document background"))
+        {
+            warnings.push(
+                "Non-black/white, theme, or drawing document backgrounds are not supported and will be omitted."
+                    .to_string(),
+            );
+        }
         if (xml.contains("<m:oMath") || xml.contains("<m:oMathPara"))
             && !warnings.iter().any(|w: &String| w.contains("Equation"))
         {
             warnings.push("Mathematical equations (OMML) are not supported.".to_string());
         }
-        if (xml.contains("<w:footnoteReference") || xml.contains("<w:endnoteReference"))
-            && !warnings.iter().any(|w: &String| w.contains("Footnotes"))
+        if xml.contains("<w:endnoteReference")
+            && !warnings
+                .iter()
+                .any(|warning: &String| warning.contains("Endnotes"))
         {
-            warnings.push("Footnotes and endnotes are not supported.".to_string());
+            warnings.push("Endnotes are not supported and will be omitted.".to_string());
         }
         if (xml.contains("<w:pict") || xml.contains("<v:imagedata"))
             && !warnings.iter().any(|w: &String| w.contains("older"))
@@ -134,7 +196,6 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
     Ok(warnings)
 }
 
-/// Imports a `.docx` package archive into a complete [`WriterDocument`].
 pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
     let archive = PackageArchive::from_bytes(docx_bytes)
         .map_err(|e| format!("unreadable docx archive: {e}"))?;
@@ -151,10 +212,148 @@ pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
         .and_then(extract_core_title)
         .unwrap_or_else(|| "Untitled Document".to_string());
 
+    let (blocks, references, revisions, comment_anchors) =
+        parse_document_body_and_references(xml, Some(&archive))?;
+    let document = roxmltree::Document::parse(xml)
+        .map_err(|error| format!("invalid DOCX document.xml: {error}"))?;
+    let reference_count = document
+        .descendants()
+        .filter(|node| node.has_tag_name((W_NS, "footnoteReference")))
+        .count();
+    if reference_count != references.len() {
+        return Err(
+            "DOCX footnote reference is outside a supported paragraph or table cell".into(),
+        );
+    }
+    let footnotes = super::footnotes::import_document(&archive, &references, &blocks)?;
+    let comments = super::comments_import::import_document(&archive, &comment_anchors, &blocks)?;
+    let recording = import_track_revisions(&archive)?;
+
     let mut doc = WriterDocument::new("imported-doc", title);
-    doc.blocks = parse_document_body_with_archive(xml, Some(&archive))?;
+    doc.page = import_page_setup(xml)?;
+    doc.header_footer = header_footer::import_config(xml, &archive)?;
+    doc.blocks = blocks;
+    doc.footnotes = footnotes;
+    doc.comments = comments;
+    doc.header_footer
+        .validate_for_page_style(&doc.page.page_style())
+        .map_err(str::to_owned)?;
+    doc.import_docx_revisions(revisions, recording)?;
 
     Ok(doc)
+}
+
+fn supported_background_appearance(background: roxmltree::Node<'_, '_>) -> Option<PageAppearance> {
+    if background.children().any(|child| child.is_element())
+        || background
+            .attributes()
+            .any(|attribute| attribute.name() != "color" || attribute.namespace() != Some(W_NS))
+    {
+        return None;
+    }
+    match background.attribute((W_NS, "color"))? {
+        color if color.eq_ignore_ascii_case("000000") => Some(PageAppearance::Black),
+        color if color.eq_ignore_ascii_case("FFFFFF") => Some(PageAppearance::White),
+        _ => None,
+    }
+}
+
+fn import_page_setup(xml: &str) -> Result<PageSetup, String> {
+    let document = roxmltree::Document::parse(xml)
+        .map_err(|error| format!("invalid DOCX document.xml: {error}"))?;
+    let appearance = document
+        .root_element()
+        .children()
+        .find(|node| node.has_tag_name((W_NS, "background")))
+        .and_then(supported_background_appearance)
+        .unwrap_or_default();
+    let mut style = PageSetup::default().page_style();
+    let mut orientation = PageOrientation::Portrait;
+    let mut imported = None;
+
+    for section in document
+        .descendants()
+        .filter(|node| node.has_tag_name((W_NS, "sectPr")))
+    {
+        let size = section
+            .children()
+            .find(|node| node.has_tag_name((W_NS, "pgSz")));
+        let margins = section
+            .children()
+            .find(|node| node.has_tag_name((W_NS, "pgMar")));
+        if let Some(size) = size {
+            style.width_pt = twips(size, "w")?;
+            style.height_pt = twips(size, "h")?;
+            orientation = match size.attribute((W_NS, "orient")) {
+                Some("landscape") if style.width_pt >= style.height_pt => {
+                    PageOrientation::Landscape
+                }
+                Some("portrait") if style.width_pt <= style.height_pt => PageOrientation::Portrait,
+                Some("landscape" | "portrait") => {
+                    return Err("DOCX page orientation does not match its dimensions".into());
+                }
+                Some(_) => return Err("DOCX page orientation is invalid".into()),
+                None if style.width_pt > style.height_pt => PageOrientation::Landscape,
+                None if style.width_pt < style.height_pt => PageOrientation::Portrait,
+                None => orientation,
+            };
+        }
+        if let Some(margins) = margins {
+            if let Some(value) = optional_twips(margins, "top")? {
+                style.margin_top_pt = value;
+            }
+            if let Some(value) = optional_twips(margins, "bottom")? {
+                style.margin_bottom_pt = value;
+            }
+            if let Some(value) = optional_twips(margins, "left")? {
+                style.margin_left_pt = value;
+            }
+            if let Some(value) = optional_twips(margins, "right")? {
+                style.margin_right_pt = value;
+            }
+        }
+        if size.is_some() || margins.is_some() {
+            let mut setup = PageSetup::default();
+            setup
+                .set_custom_geometry_points(
+                    style.width_pt,
+                    style.height_pt,
+                    style.margin_top_pt,
+                    style.margin_bottom_pt,
+                    style.margin_left_pt,
+                    style.margin_right_pt,
+                )
+                .map_err(|error| format!("invalid DOCX page geometry: {error}"))?;
+            setup.select_orientation(orientation);
+            if imported.is_some_and(|previous| previous != setup) {
+                return Err("DOCX sections with different page geometry are not supported".into());
+            }
+            imported = Some(setup);
+        }
+    }
+
+    let mut imported = imported.unwrap_or_default();
+    imported.appearance = appearance;
+    Ok(imported)
+}
+
+fn twips(node: roxmltree::Node<'_, '_>, name: &str) -> Result<f32, String> {
+    node.attribute((W_NS, name))
+        .ok_or_else(|| format!("DOCX page geometry is missing {name}"))?
+        .parse::<u32>()
+        .map(|value| value as f32 / 20.0)
+        .map_err(|_| format!("DOCX page geometry has invalid {name}"))
+}
+
+fn optional_twips(node: roxmltree::Node<'_, '_>, name: &str) -> Result<Option<f32>, String> {
+    node.attribute((W_NS, name))
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map(|value| value as f32 / 20.0)
+                .map_err(|_| format!("DOCX page geometry has invalid {name}"))
+        })
+        .transpose()
 }
 
 /// Parses the contents of `<w:body>` into a list of [`RichBlock`]s.
@@ -162,11 +361,27 @@ pub fn parse_document_body(xml: &str) -> Result<Vec<RichBlock>, String> {
     parse_document_body_with_archive(xml, None)
 }
 
-/// Parses the contents of `<w:body>` with optional archive for embedded media/charts.
 pub fn parse_document_body_with_archive(
     xml: &str,
     archive: Option<&PackageArchive>,
 ) -> Result<Vec<RichBlock>, String> {
+    parse_document_body_and_references(xml, archive).map(|(blocks, _, _, _)| blocks)
+}
+
+fn parse_document_body_and_references(
+    xml: &str,
+    archive: Option<&PackageArchive>,
+) -> Result<
+    (
+        Vec<RichBlock>,
+        Vec<FootnoteReference>,
+        Vec<RevisionRecord>,
+        Vec<super::comments_import::CommentAnchor>,
+    ),
+    String,
+> {
+    validate_revision_markup_scope(xml)?;
+    let root_tag = document_root_tag(xml)?;
     let body_start_tag = "<w:body";
     let body_start = match xml.find(body_start_tag) {
         Some(pos) => {
@@ -186,6 +401,9 @@ pub fn parse_document_body_with_archive(
 
     let body_xml = &xml[body_start..body_end];
     let mut blocks = Vec::new();
+    let mut references = Vec::new();
+    let mut revisions: Vec<RevisionRecord> = Vec::new();
+    let mut comment_anchors = Vec::new();
     let mut cursor = 0usize;
     let mut next_id = 1u64;
 
@@ -197,8 +415,18 @@ pub fn parse_document_body_with_archive(
         match (p_pos, tbl_pos) {
             (Some(p_rel), Some(tbl_rel)) if tbl_rel < p_rel => {
                 let tbl_abs = cursor + tbl_rel;
-                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id)? {
+                if let Some((block, next_cursor, table_references, table_revisions)) =
+                    parse_table(body_xml, tbl_abs, next_id, root_tag)?
+                {
+                    if table_revisions
+                        .iter()
+                        .any(|revision| revisions.iter().any(|existing| existing.id == revision.id))
+                    {
+                        return Err("DOCX revision ID is reused across document blocks".into());
+                    }
+                    revisions.extend(table_revisions);
                     blocks.push(block);
+                    references.extend(table_references);
                     next_id += 1;
                     cursor = next_cursor;
                 } else {
@@ -208,12 +436,47 @@ pub fn parse_document_body_with_archive(
             (Some(_), Some(_)) | (Some(_), None) => {
                 let p_rel = p_pos.unwrap();
                 let p_abs = cursor + p_rel;
-                if let Some((block_opt, next_cursor)) =
-                    parse_paragraph(body_xml, p_abs, next_id, archive)?
-                {
+                let mut local_references = Vec::new();
+                let mut local_revisions = Vec::new();
+                if let Some((block_opt, next_cursor)) = parse_paragraph(
+                    body_xml,
+                    p_abs,
+                    next_id,
+                    archive,
+                    root_tag,
+                    &mut local_references,
+                    &mut local_revisions,
+                    &mut comment_anchors,
+                )? {
                     if let Some(block) = block_opt {
+                        references.extend(local_references.into_iter().map(|reference| {
+                            FootnoteReference {
+                                ooxml_id: reference.ooxml_id,
+                                block_id: block.id,
+                                offset: reference.offset,
+                            }
+                        }));
+                        for revision in local_revisions {
+                            if let Some(existing) = revisions
+                                .iter_mut()
+                                .find(|existing| existing.id == revision.id)
+                            {
+                                let previous = blocks.last().ok_or_else(|| {
+                                    "DOCX revision ID cannot span an empty document".to_string()
+                                })?;
+                                WriterDocument::merge_docx_paragraph_revision(
+                                    existing, revision, previous, &block,
+                                )?;
+                            } else {
+                                revisions.push(revision);
+                            }
+                        }
                         blocks.push(block);
                         next_id += 1;
+                    } else if !local_references.is_empty() {
+                        return Err("DOCX footnote reference has no paragraph block".into());
+                    } else if !local_revisions.is_empty() {
+                        return Err("DOCX tracked change has no paragraph block".into());
                     }
                     cursor = next_cursor;
                 } else {
@@ -222,8 +485,18 @@ pub fn parse_document_body_with_archive(
             }
             (None, Some(tbl_rel)) => {
                 let tbl_abs = cursor + tbl_rel;
-                if let Some((block, next_cursor)) = parse_table(body_xml, tbl_abs, next_id)? {
+                if let Some((block, next_cursor, table_references, table_revisions)) =
+                    parse_table(body_xml, tbl_abs, next_id, root_tag)?
+                {
+                    if table_revisions
+                        .iter()
+                        .any(|revision| revisions.iter().any(|existing| existing.id == revision.id))
+                    {
+                        return Err("DOCX revision ID is reused across document blocks".into());
+                    }
+                    revisions.extend(table_revisions);
                     blocks.push(block);
+                    references.extend(table_references);
                     next_id += 1;
                     cursor = next_cursor;
                 } else {
@@ -234,7 +507,14 @@ pub fn parse_document_body_with_archive(
         }
     }
 
-    Ok(blocks)
+    table::normalize_paragraph_mark_revisions(
+        &mut blocks,
+        &references,
+        &mut revisions,
+        &comment_anchors,
+    )?;
+    super::comments_import::validate_document_markers(xml, &comment_anchors)?;
+    Ok((blocks, references, revisions, comment_anchors))
 }
 
 fn find_tag_start(xml: &str, tag_name: &str) -> Option<usize> {
@@ -300,40 +580,569 @@ fn parse_picture(p_xml: &str, id: u64, archive: &PackageArchive) -> Option<RichB
     let text = crate::images::picture_text(id as u32);
     let mut block = RichBlock::new(id, crate::IMAGE_BLOCK_KIND, &text);
     block.image = Some(image);
-    block.style = paragraph_style_from_docx(p_xml);
     Some(block)
 }
 
-fn paragraph_style_from_docx(p_xml: &str) -> ParagraphStyle {
-    let mut style = ParagraphStyle::default();
-    // These exact QName tags are paragraph properties in WordprocessingML.
-    // Search the complete paragraph with the event reader, so comments or
-    // quoted attribute text cannot truncate `<w:pPr>` before its properties.
-    if let Some(tag) = property_tag(p_xml, "w:jc") {
-        if let Some(value) = attribute_value(tag, "w:val") {
-            style.alignment = match value.to_ascii_lowercase().as_str() {
-                "start" => Alignment::Start,
-                "end" => Alignment::End,
-                "left" => Alignment::Left,
-                "center" => Alignment::Center,
-                "right" => Alignment::Right,
-                "both" => Alignment::Justify,
-                _ => style.alignment,
-            };
+fn validate_revision_markup_scope(xml: &str) -> Result<(), String> {
+    let document = roxmltree::Document::parse(xml)
+        .map_err(|error| format!("invalid DOCX document.xml: {error}"))?;
+    let body = document
+        .root_element()
+        .descendants()
+        .find(|node| node.has_tag_name((W_NS, "body")))
+        .ok_or_else(|| "docx missing <w:body>".to_string())?;
+
+    for node in body
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().namespace() == Some(W_NS))
+    {
+        let name = node.tag_name().name();
+        let has_ancestor = |tag| {
+            node.ancestors()
+                .any(|ancestor| ancestor.has_tag_name((W_NS, tag)))
+        };
+        if name.starts_with("move") || name.starts_with("customXmlMove") {
+            return Err(format!(
+                "DOCX move revision element w:{name} is not supported"
+            ));
+        }
+        if name.starts_with("customXmlIns")
+            || name.starts_with("customXmlDel")
+            || matches!(name, "cellIns" | "cellDel")
+        {
+            return Err(format!("DOCX revision element w:{name} is not supported"));
+        }
+        if name == "ins" || name == "del" {
+            if has_ancestor("pPr") {
+                let in_paragraph_mark_properties =
+                    has_ancestor("p") && has_ancestor("rPr") && !has_ancestor("r");
+                if !in_paragraph_mark_properties {
+                    return Err(format!(
+                        "DOCX paragraph-mark revision w:{name} is outside w:pPr/w:rPr"
+                    ));
+                }
+                continue;
+            }
+            if !has_ancestor("p") || has_ancestor("r") {
+                return Err(format!(
+                    "block-level DOCX revision wrapper w:{name} is not supported"
+                ));
+            }
+            continue;
+        }
+        if name == "rPrChange" {
+            if !has_ancestor("r") || has_ancestor("pPr") {
+                return Err("DOCX run-property revision is outside a supported run".into());
+            }
+            continue;
+        }
+        if name.ends_with("Change") {
+            return Err(format!("DOCX revision element w:{name} is not supported"));
         }
     }
-    if let Some(tag) = property_tag(p_xml, "w:bidi") {
-        style.direction = match attribute_value(tag, "w:val")
-            .as_deref()
-            .map(str::to_ascii_lowercase)
-            .as_deref()
-        {
-            None | Some("true" | "1" | "on") => ParagraphDirection::RightToLeft,
-            Some("false" | "0" | "off") => ParagraphDirection::LeftToRight,
-            Some(_) => ParagraphDirection::Auto,
-        };
+    Ok(())
+}
+
+fn document_root_tag(xml: &str) -> Result<&str, String> {
+    let start = xml
+        .find("<w:document")
+        .ok_or_else(|| "DOCX is missing its w:document root".to_string())?;
+    let end = xml[start..]
+        .find('>')
+        .map(|relative| start + relative + 1)
+        .ok_or_else(|| "malformed DOCX w:document tag".to_string())?;
+    Ok(&xml[start..end])
+}
+
+fn import_track_revisions(archive: &PackageArchive) -> Result<bool, String> {
+    let Some(bytes) = archive.get("word/settings.xml") else {
+        return Ok(false);
+    };
+    let settings = std::str::from_utf8(bytes)
+        .map_err(|_| "DOCX settings.xml is not valid UTF-8".to_string())?;
+    let document = roxmltree::Document::parse(settings)
+        .map_err(|error| format!("invalid DOCX settings.xml: {error}"))?;
+    let mut nodes = document
+        .descendants()
+        .filter(|node| node.has_tag_name((W_NS, "trackRevisions")));
+    let Some(node) = nodes.next() else {
+        return Ok(false);
+    };
+    if nodes.next().is_some() {
+        return Err("DOCX settings contain duplicate trackRevisions elements".into());
     }
-    style
+    match node.attribute((W_NS, "val")) {
+        None | Some("1" | "true" | "on") => Ok(true),
+        Some("0" | "false" | "off") => Ok(false),
+        Some(value) => Err(format!("DOCX trackRevisions has invalid value {value:?}")),
+    }
+}
+
+fn revision_markup(node: Node<'_, '_>, kind: RevisionKind) -> Result<RevisionMarkup, String> {
+    let raw_id = node
+        .attribute((W_NS, "id"))
+        .ok_or_else(|| "DOCX tracked change is missing w:id".to_string())?;
+    let id = raw_id
+        .parse::<u64>()
+        .map_err(|_| format!("DOCX tracked change has invalid w:id {raw_id:?}"))?;
+    let author = node
+        .attribute((W_NS, "author"))
+        .ok_or_else(|| "DOCX tracked change is missing w:author".to_string())?
+        .to_owned();
+    let mut settings = TrackedChanges::default();
+    settings
+        .set_author(author.clone())
+        .map_err(|error| format!("invalid DOCX tracked-change author: {error}"))?;
+    Ok(RevisionMarkup { id, author, kind })
+}
+
+fn collect_revision_runs<'a, 'input>(
+    node: Node<'a, 'input>,
+    context: Option<RevisionMarkup>,
+    runs: &mut Vec<(Node<'a, 'input>, Option<RevisionMarkup>)>,
+) -> Result<(), String> {
+    if node.is_element() && node.tag_name().namespace() == Some(W_NS) {
+        let name = node.tag_name().name();
+        if name == "r" {
+            runs.push((node, context));
+            return Ok(());
+        }
+        if name == "ins" || name == "del" {
+            if has_paragraph_properties_ancestor(node) {
+                return Ok(());
+            }
+            if context.is_some() {
+                return Err("nested DOCX insertion/deletion revisions are unsupported".into());
+            }
+            let kind = if name == "ins" {
+                RevisionKind::Insertion
+            } else {
+                RevisionKind::Deletion
+            };
+            let markup = revision_markup(node, kind)?;
+            let count = runs.len();
+            for child in node.children() {
+                collect_revision_runs(child, Some(markup.clone()), runs)?;
+            }
+            if runs.len() == count {
+                return Err("DOCX tracked change has no supported text runs".into());
+            }
+            return Ok(());
+        }
+        if name == "rPrChange" && has_paragraph_properties_ancestor(node) {
+            return Err("paragraph-mark formatting revisions are not supported".into());
+        }
+        if (name.ends_with("Change") && name != "rPrChange")
+            || name.starts_with("move")
+            || name.starts_with("customXmlMove")
+        {
+            return Err(format!("DOCX revision element w:{name} is not supported"));
+        }
+    }
+    for child in node.children() {
+        if child.is_element() {
+            collect_revision_runs(child, context.clone(), runs)?;
+        }
+    }
+    Ok(())
+}
+
+fn has_paragraph_properties_ancestor(node: Node<'_, '_>) -> bool {
+    let mut parent = node.parent();
+    while let Some(ancestor) = parent {
+        if ancestor.has_tag_name((W_NS, "pPr")) {
+            return true;
+        }
+        parent = ancestor.parent();
+    }
+    false
+}
+
+fn parse_run_properties(properties: Node<'_, '_>) -> Result<CharacterStyle, String> {
+    let mut style = CharacterStyle::default();
+    let elements = properties.children().filter(Node::is_element);
+    for property in elements {
+        if property.tag_name().namespace() != Some(W_NS) {
+            continue;
+        }
+        match property.tag_name().name() {
+            "b" | "bCs" if xml_property_is_enabled(property) => style.weight = FontWeight::Bold,
+            "i" | "iCs" if xml_property_is_enabled(property) => style.italic = true,
+            "u" if xml_property_is_enabled(property) => style.underline = true,
+            "strike" if xml_property_is_enabled(property) => style.strikethrough = true,
+            "sz" | "szCs" => {
+                if let Some(value) = property.attribute((W_NS, "val")) {
+                    if let Ok(half_points) = value.parse::<f32>() {
+                        style.font_size = half_points / 2.0;
+                        style.explicit_size = true;
+                    }
+                }
+            }
+            "color" => {
+                if let Some(value) = property.attribute((W_NS, "val")) {
+                    style.color = if value == "auto" {
+                        None
+                    } else {
+                        Some(writer_color(value).ok_or_else(|| {
+                            "DOCX color value must be six hexadecimal digits".to_string()
+                        })?)
+                    };
+                }
+            }
+            "rFonts" => {
+                if let Some(value) = property.attribute((W_NS, "ascii")) {
+                    if !value.is_empty() {
+                        style.font_family = value.to_owned();
+                    }
+                }
+            }
+            "vertAlign" => {
+                if let Some(value) = property.attribute((W_NS, "val")) {
+                    style.superscript = value == "superscript";
+                    style.subscript = value == "subscript";
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(style)
+}
+
+fn xml_property_is_enabled(property: Node<'_, '_>) -> bool {
+    !matches!(
+        property.attribute((W_NS, "val")),
+        Some("0" | "false" | "off" | "none")
+    )
+}
+
+fn parse_run_style(run: Node<'_, '_>) -> Result<CharacterStyle, String> {
+    let Some(properties) = run.children().find(|node| node.has_tag_name((W_NS, "rPr"))) else {
+        return Ok(CharacterStyle::default());
+    };
+    parse_run_properties(properties)
+}
+
+fn validate_tracked_run_properties(
+    properties: Node<'_, '_>,
+    allow_change: bool,
+) -> Result<(), String> {
+    for property in properties.children().filter(Node::is_element) {
+        if property.tag_name().namespace() != Some(W_NS) {
+            continue;
+        }
+        let name = property.tag_name().name();
+        if allow_change && name == "rPrChange" {
+            continue;
+        }
+        if !matches!(
+            name,
+            "b" | "bCs"
+                | "i"
+                | "iCs"
+                | "u"
+                | "strike"
+                | "sz"
+                | "szCs"
+                | "color"
+                | "rFonts"
+                | "vertAlign"
+        ) {
+            return Err(format!(
+                "DOCX tracked formatting property w:{name} is not supported"
+            ));
+        }
+        if name == "u"
+            && !matches!(
+                property.attribute((W_NS, "val")),
+                None | Some("single" | "none")
+            )
+        {
+            return Err("DOCX tracked underline style is not supported".into());
+        }
+        if name == "rFonts" {
+            let ascii = property.attribute((W_NS, "ascii"));
+            if ["hAnsi", "eastAsia", "cs"].into_iter().any(|slot| {
+                property
+                    .attribute((W_NS, slot))
+                    .is_some_and(|value| Some(value) != ascii)
+            }) {
+                return Err("DOCX tracked script-specific fonts are not supported".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_run_format_revision(
+    run: Node<'_, '_>,
+) -> Result<Option<(RevisionMarkup, CharacterStyle)>, String> {
+    let Some(properties) = run.children().find(|node| node.has_tag_name((W_NS, "rPr"))) else {
+        return Ok(None);
+    };
+    let mut changes = properties
+        .children()
+        .filter(|node| node.has_tag_name((W_NS, "rPrChange")));
+    let Some(change) = changes.next() else {
+        return Ok(None);
+    };
+    if changes.next().is_some() {
+        return Err("DOCX run has multiple formatting revisions".into());
+    }
+    validate_tracked_run_properties(properties, true)?;
+    let mut old_properties = change
+        .children()
+        .filter(|node| node.has_tag_name((W_NS, "rPr")));
+    let Some(old) = old_properties.next() else {
+        return Err("DOCX rPrChange is missing its previous w:rPr".into());
+    };
+    if old_properties.next().is_some()
+        || old
+            .children()
+            .any(|node| node.has_tag_name((W_NS, "rPrChange")))
+    {
+        return Err("DOCX nested or duplicate formatting revisions are unsupported".into());
+    }
+    validate_tracked_run_properties(old, false)?;
+    let markup = revision_markup(change, RevisionKind::Formatting)?;
+    Ok(Some((markup, parse_run_properties(old)?)))
+}
+
+fn payload_piece(text: &str, style: &CharacterStyle) -> RevisionPayload {
+    let runs = if text.is_empty() || *style == CharacterStyle::default() {
+        Vec::new()
+    } else {
+        vec![StyleRun {
+            start: 0,
+            end: text.len(),
+            style: style.clone(),
+        }]
+    };
+    RevisionPayload {
+        text: text.to_owned(),
+        runs,
+    }
+}
+
+fn append_payload(target: &mut RevisionPayload, piece: RevisionPayload) {
+    let offset = target.text.len();
+    target.runs.extend(piece.runs.into_iter().map(|mut run| {
+        run.start += offset;
+        run.end += offset;
+        run
+    }));
+    target.text.push_str(&piece.text);
+}
+
+fn append_local_revision(
+    revisions: &mut Vec<LocalRevision>,
+    markup: &RevisionMarkup,
+    start: usize,
+    end: usize,
+    text: &str,
+    before_style: Option<&CharacterStyle>,
+    after_style: Option<&CharacterStyle>,
+) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("DOCX tracked change has no supported text".into());
+    }
+    let before = before_style.map(|style| payload_piece(text, style));
+    let after = after_style.map(|style| payload_piece(text, style));
+    let boundary_kind = if text.contains('\u{b}') {
+        RevisionBoundaryKind::SoftBreak
+    } else {
+        RevisionBoundaryKind::Text
+    };
+    if let Some(existing) = revisions
+        .iter_mut()
+        .find(|revision| revision.id == markup.id)
+    {
+        if existing.kind != markup.kind || existing.author != markup.author {
+            return Err("DOCX revision ID has conflicting kind or author".into());
+        }
+        let contiguous = match markup.kind {
+            RevisionKind::Deletion => existing.start == start && existing.end == end,
+            RevisionKind::Insertion | RevisionKind::Formatting => existing.end == start,
+        };
+        if !contiguous {
+            return Err("DOCX revision ID describes disjoint text ranges".into());
+        }
+        match (&mut existing.before, before) {
+            (Some(target), Some(piece)) => append_payload(target, piece),
+            (None, None) => {}
+            _ => return Err("DOCX revision payload is inconsistent".into()),
+        }
+        match (&mut existing.after, after) {
+            (Some(target), Some(piece)) => append_payload(target, piece),
+            (None, None) => {}
+            _ => return Err("DOCX revision payload is inconsistent".into()),
+        }
+        if existing.boundary_kind != RevisionBoundaryKind::ParagraphMark {
+            existing.boundary_kind = if existing.boundary_kind == RevisionBoundaryKind::SoftBreak
+                && boundary_kind == RevisionBoundaryKind::SoftBreak
+            {
+                RevisionBoundaryKind::SoftBreak
+            } else if existing.boundary_kind == RevisionBoundaryKind::SoftBreak
+                || boundary_kind == RevisionBoundaryKind::SoftBreak
+            {
+                RevisionBoundaryKind::Mixed
+            } else {
+                RevisionBoundaryKind::Text
+            };
+        }
+        if markup.kind != RevisionKind::Deletion {
+            existing.end = end;
+        }
+        return Ok(());
+    }
+    revisions.push(LocalRevision {
+        id: markup.id,
+        author: markup.author.clone(),
+        kind: markup.kind,
+        boundary_kind,
+        start,
+        end,
+        before,
+        after,
+    });
+    Ok(())
+}
+
+fn parse_paragraph_runs(
+    paragraph_xml: &str,
+    root_tag: &str,
+    text: &mut String,
+    runs: &mut Vec<StyleRun>,
+    footnotes: &mut Vec<LocalFootnoteReference>,
+    revisions: &mut Vec<LocalRevision>,
+) -> Result<(), String> {
+    let wrapped = format!("{root_tag}<w:body>{paragraph_xml}</w:body></w:document>");
+    let document = roxmltree::Document::parse(&wrapped)
+        .map_err(|error| format!("invalid DOCX paragraph XML: {error}"))?;
+    let paragraph = document
+        .root_element()
+        .descendants()
+        .find(|node| node.has_tag_name((W_NS, "p")))
+        .ok_or_else(|| "DOCX paragraph element is missing".to_string())?;
+    let mut revision_runs = Vec::new();
+    collect_revision_runs(paragraph, None, &mut revision_runs)?;
+    let prefix_len = root_tag.len() + "<w:body>".len();
+    for (run, context) in revision_runs {
+        let range = run.range();
+        let start = range
+            .start
+            .checked_sub(prefix_len)
+            .ok_or_else(|| "invalid DOCX run location".to_string())?;
+        let end = range
+            .end
+            .checked_sub(prefix_len)
+            .ok_or_else(|| "invalid DOCX run location".to_string())?;
+        let run_xml = paragraph_xml
+            .get(start..end)
+            .ok_or_else(|| "invalid DOCX run boundary".to_string())?;
+        let current_style = parse_run_style(run)?;
+        let format_revision = parse_run_format_revision(run)?;
+        if run_xml.contains("<w:delText")
+            && context
+                .as_ref()
+                .is_none_or(|markup| markup.kind != RevisionKind::Deletion)
+        {
+            return Err("DOCX delText appears outside a deletion revision".into());
+        }
+        let (run_text, references) = parse_run_content(run_xml)?;
+        if !references.is_empty() && (context.is_some() || format_revision.is_some()) {
+            return Err("tracked DOCX footnote references are not supported".into());
+        }
+        if let Some(markup) = context
+            .as_ref()
+            .filter(|markup| markup.kind == RevisionKind::Deletion)
+        {
+            if format_revision.is_some() {
+                return Err("formatting changes inside DOCX deletions are unsupported".into());
+            }
+            let offset = text.len();
+            append_local_revision(
+                revisions,
+                markup,
+                offset,
+                offset,
+                &run_text,
+                Some(&current_style),
+                None,
+            )?;
+            continue;
+        }
+        let start = text.len();
+        footnotes.extend(
+            references
+                .into_iter()
+                .map(|reference| LocalFootnoteReference {
+                    ooxml_id: reference.ooxml_id,
+                    offset: start + reference.offset,
+                }),
+        );
+        text.push_str(&run_text);
+        let end = text.len();
+        if end > start && current_style != CharacterStyle::default() {
+            runs.push(StyleRun {
+                start,
+                end,
+                style: current_style.clone(),
+            });
+        }
+        if let Some(markup) = context.as_ref() {
+            append_local_revision(
+                revisions,
+                markup,
+                start,
+                end,
+                &run_text,
+                None,
+                Some(&current_style),
+            )?;
+        }
+        if let Some((markup, old_style)) = format_revision {
+            append_local_revision(
+                revisions,
+                &markup,
+                start,
+                end,
+                &run_text,
+                Some(&old_style),
+                Some(&current_style),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn local_revision_records(
+    block_id: u64,
+    text: &str,
+    revisions: Vec<LocalRevision>,
+) -> Result<Vec<RevisionRecord>, String> {
+    revisions
+        .into_iter()
+        .map(|revision| {
+            let prefix = text
+                .get(..revision.start)
+                .ok_or_else(|| "DOCX revision anchor is outside its paragraph".to_string())?;
+            Ok(RevisionRecord {
+                id: revision.id,
+                author: revision.author,
+                anchor: RevisionAnchor {
+                    block_id,
+                    start: revision.start,
+                    end: revision.end,
+                    end_block_id: None,
+                    prefix_sha256: crate::zip::sha256(prefix.as_bytes()),
+                },
+                kind: revision.kind,
+                boundary_kind: revision.boundary_kind,
+                before: revision.before,
+                after: revision.after,
+            })
+        })
+        .collect()
 }
 
 /// Parses a single `<w:p>...</w:p>` block.
@@ -342,6 +1151,10 @@ fn parse_paragraph(
     start: usize,
     id: u64,
     archive: Option<&PackageArchive>,
+    root_tag: &str,
+    footnotes: &mut Vec<LocalFootnoteReference>,
+    revisions: &mut Vec<RevisionRecord>,
+    comment_anchors: &mut Vec<super::comments_import::CommentAnchor>,
 ) -> Result<Option<(Option<RichBlock>, usize)>, String> {
     let Some(tag_open_end) = xml[start..].find('>') else {
         return Ok(None);
@@ -358,10 +1171,32 @@ fn parse_paragraph(
     };
     let p_xml = &xml[start..start + end_rel + close_tag.len()];
     let next_cursor = start + end_rel + close_tag.len();
+    let has_revision_markup = [
+        "<w:ins",
+        "<w:del",
+        "<w:rPrChange",
+        "<w:pPrChange",
+        "<w:moveFrom",
+        "<w:moveTo",
+    ]
+    .iter()
+    .any(|tag| p_xml.contains(tag));
+    let paragraph_style = super::paragraph_style_import::paragraph_style_from_docx(p_xml)?;
+    let local_comment_anchors = super::comments_import::paragraph_anchors(p_xml, root_tag, id)?;
 
     // A picture: `<a:blip r:embed>` in a drawing, bytes from the package.
     if let Some(archive) = archive {
-        if let Some(block) = parse_picture(p_xml, id, archive) {
+        if let Some(mut block) = parse_picture(p_xml, id, archive) {
+            block.style = paragraph_style.clone();
+            if !local_comment_anchors.is_empty() {
+                return Err("DOCX comments anchored to pictures are not supported".into());
+            }
+            if has_revision_markup {
+                return Err("tracked changes to DOCX pictures are unsupported".into());
+            }
+            if find_tag_start(p_xml, "w:footnoteReference").is_some() {
+                return Err("DOCX footnote reference on a picture paragraph is unsupported".into());
+            }
             return Ok(Some((Some(block), next_cursor)));
         }
     }
@@ -371,6 +1206,12 @@ fn parse_paragraph(
         if let Some(drawing_pos) = p_xml.find("<w:drawing") {
             let drawing_xml = &p_xml[drawing_pos..];
             if drawing_xml.contains("<c:chart") {
+                if !local_comment_anchors.is_empty() {
+                    return Err("DOCX comments anchored to charts are not supported".into());
+                }
+                if has_revision_markup {
+                    return Err("tracked changes to DOCX charts are unsupported".into());
+                }
                 if let Some(rid) = extract_attribute_value(drawing_xml, "r:id") {
                     let rels_xml = archive
                         .get("word/_rels/document.xml.rels")
@@ -392,7 +1233,10 @@ fn parse_paragraph(
                                 if let Ok(json) = chart.to_json() {
                                     let text = crate::images::picture_text(id as u32);
                                     let mut block = RichBlock::chart_block(id, &text, json);
-                                    block.style = paragraph_style_from_docx(p_xml);
+                                    block.style = paragraph_style.clone();
+                                    if find_tag_start(p_xml, "w:footnoteReference").is_some() {
+                                        return Err("DOCX footnote reference on a chart paragraph is unsupported".into());
+                                    }
                                     return Ok(Some((Some(block), next_cursor)));
                                 }
                             }
@@ -447,7 +1291,7 @@ fn parse_paragraph(
         }
     }
 
-    let mut paragraph_style = paragraph_style_from_docx(p_xml);
+    let mut paragraph_style = paragraph_style;
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
     if crate::list_levels::is_list_kind(&kind) {
@@ -455,269 +1299,155 @@ fn parse_paragraph(
             num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
     }
 
-    // Runs
     let mut text = String::new();
     let mut runs = Vec::new();
-    let mut r_cursor = 0usize;
+    let mut local_revisions = Vec::new();
+    parse_paragraph_runs(
+        p_xml,
+        root_tag,
+        &mut text,
+        &mut runs,
+        footnotes,
+        &mut local_revisions,
+    )?;
+    table::append_paragraph_mark_revisions(root_tag, p_xml, &text, &mut local_revisions)?;
 
-    while let Some(r_open_rel) = find_tag_start(&p_xml[r_cursor..], "w:r") {
-        let r_start = r_cursor + r_open_rel;
-        let r_open_end = match p_xml[r_start..].find('>') {
-            Some(end) => r_start + end + 1,
-            None => break,
-        };
-        let r_tag_str = &p_xml[r_start..r_open_end];
-        if r_tag_str.ends_with("/>") {
-            r_cursor = r_open_end;
-            continue;
-        }
-
-        let r_close_rel = match p_xml[r_start..].find("</w:r>") {
-            Some(end) => end,
-            None => break,
-        };
-        let r_xml = &p_xml[r_start..r_start + r_close_rel + "</w:r>".len()];
-        r_cursor = r_start + r_close_rel + "</w:r>".len();
-
-        let run_style = parse_run_style(r_xml)?;
-        let run_text = parse_run_text(r_xml);
-        if !run_text.is_empty() {
-            let start_byte = text.len();
-            text.push_str(&run_text);
-            let end_byte = text.len();
-            if run_style != CharacterStyle::default() {
-                runs.push(StyleRun {
-                    start: start_byte,
-                    end: end_byte,
-                    style: run_style,
-                });
-            }
-        }
-    }
-
-    if text.trim().is_empty() {
+    if text.trim().is_empty()
+        && footnotes.is_empty()
+        && local_revisions.is_empty()
+        && local_comment_anchors.is_empty()
+    {
         return Ok(Some((None, next_cursor)));
     }
+    if local_comment_anchors
+        .iter()
+        .any(|anchor| anchor.end > text.len())
+    {
+        return Err("DOCX comment range exceeds its paragraph text".into());
+    }
+    comment_anchors.extend(local_comment_anchors);
 
     let mut block = RichBlock::new(id, &kind, &text);
     block.style = paragraph_style;
     block.runs = runs;
+    revisions.extend(local_revision_records(id, &text, local_revisions)?);
     Ok(Some((Some(block), next_cursor)))
 }
 
-fn parse_run_style(r_xml: &str) -> Result<CharacterStyle, String> {
-    let mut style = CharacterStyle::default();
-    let Some(pr_start) = r_xml.find("<w:rPr") else {
-        return Ok(style);
-    };
-    let pr_end = r_xml[pr_start..]
-        .find("</w:rPr>")
-        .unwrap_or(r_xml.len() - pr_start);
-    let pr = &r_xml[pr_start..pr_start + pr_end];
-
-    if tag_is_enabled(pr, "w:b") {
-        style.weight = FontWeight::Bold;
-    }
-    if tag_is_enabled(pr, "w:i") {
-        style.italic = true;
-    }
-    if tag_is_enabled(pr, "w:u") {
-        style.underline = true;
-    }
-    if tag_is_enabled(pr, "w:strike") {
-        style.strikethrough = true;
-    }
-    if let Some(sz_tag) = property_tag(pr, "w:sz") {
-        if let Some(val) = extract_attribute_value(sz_tag, "w:val") {
-            if let Ok(half_pts) = val.parse::<f32>() {
-                style.font_size = half_pts / 2.0;
-                // The file sets this size on the run, so it is the run's own.
-                style.explicit_size = true;
-            }
-        }
-    }
-    if let Some(color_tag) = property_tag(pr, "w:color") {
-        if let Some(val) = extract_attribute_value(color_tag, "w:val") {
-            if val == "auto" {
-                style.color = None;
-            } else {
-                style.color = Some(writer_color(&val).ok_or_else(|| {
-                    "DOCX color value must be six hexadecimal digits".to_string()
-                })?);
-            }
-        }
-    }
-    if let Some(fonts_tag) = property_tag(pr, "w:rFonts") {
-        if let Some(val) = extract_attribute_value(fonts_tag, "w:ascii") {
-            if !val.is_empty() {
-                style.font_family = val;
-            }
-        }
-    }
-    if let Some(vertical_tag) = property_tag(pr, "w:vertAlign") {
-        if let Some(val) = extract_attribute_value(vertical_tag, "w:val") {
-            style.superscript = val == "superscript";
-            style.subscript = val == "subscript";
-        }
-    }
-    Ok(style)
-}
-
-fn tag_is_enabled(xml: &str, tag_name: &str) -> bool {
-    let Some(tag) = property_tag(xml, tag_name) else {
-        return false;
-    };
-    match extract_attribute_value(tag, "w:val") {
-        Some(val) => val != "0" && val != "false" && val != "none",
-        None => true,
-    }
-}
-
-/// Parses text from `<w:t>`, `<w:tab/>`, `<w:br/>` inside a run.
-fn parse_run_text(r_xml: &str) -> String {
+/// Parses text and inline footnote references from one WordprocessingML run.
+fn parse_run_content(r_xml: &str) -> Result<(String, Vec<LocalFootnoteReference>), String> {
     let mut out = String::new();
+    let mut footnotes = Vec::new();
     let mut cursor = 0usize;
     while cursor < r_xml.len() {
         let rest = &r_xml[cursor..];
         let t_pos = find_tag_start(rest, "w:t");
+        let del_text_pos = find_tag_start(rest, "w:delText");
         let tab_pos = find_tag_start(rest, "w:tab");
         let br_pos = find_tag_start(rest, "w:br");
+        let cr_pos = find_tag_start(rest, "w:cr");
+        let footnote_pos = find_tag_start(rest, "w:footnoteReference");
 
         let mut next_action: Option<(&str, usize)> = None;
-        if let Some(p) = t_pos {
-            next_action = Some(("t", p));
-        }
-        if let Some(p) = tab_pos {
-            if next_action.map_or(true, |(_, cur)| p < cur) {
-                next_action = Some(("tab", p));
-            }
-        }
-        if let Some(p) = br_pos {
-            if next_action.map_or(true, |(_, cur)| p < cur) {
-                next_action = Some(("br", p));
+        for (kind, position) in [
+            ("t", t_pos),
+            ("delText", del_text_pos),
+            ("tab", tab_pos),
+            ("br", br_pos),
+            ("cr", cr_pos),
+            ("footnote", footnote_pos),
+        ] {
+            if let Some(position) = position {
+                if next_action.map_or(true, |(_, current)| position < current) {
+                    next_action = Some((kind, position));
+                }
             }
         }
 
         match next_action {
-            Some(("t", p)) => {
-                let tag_abs = cursor + p;
-                let Some(open_close) = r_xml[tag_abs..].find('>') else {
-                    break;
+            Some(("t", position)) | Some(("delText", position)) => {
+                let tag_name = if next_action.is_some_and(|(kind, _)| kind == "delText") {
+                    "w:delText"
+                } else {
+                    "w:t"
                 };
-                let content_start = tag_abs + open_close + 1;
-                let Some(close_rel) = r_xml[content_start..].find("</w:t>") else {
-                    break;
-                };
-                let content = &r_xml[content_start..content_start + close_rel];
-                out.push_str(&xml_unescape(content));
-                cursor = content_start + close_rel + "</w:t>".len();
-            }
-            Some(("tab", p)) => {
-                out.push('\t');
-                let tag_abs = cursor + p;
-                cursor = tag_abs + "<w:tab".len();
-                if let Some(end) = r_xml[cursor..].find('>') {
-                    cursor += end + 1;
-                }
-            }
-            Some(("br", p)) => {
-                let tag_abs = cursor + p;
-                cursor = tag_abs + "<w:br".len();
-                let tag_end = r_xml[cursor..]
+                let tag_start = cursor + position;
+                let open_end = r_xml[tag_start..]
                     .find('>')
-                    .map_or(r_xml.len(), |end| cursor + end);
-                // A page break is a form feed; every other break is a line
-                // break inside the paragraph (vertical tab).
-                let page = r_xml[cursor..tag_end].contains("w:type=\"page\"");
+                    .ok_or_else(|| format!("malformed DOCX {tag_name} tag"))?
+                    + tag_start;
+                let content_start = open_end + 1;
+                let close_tag = format!("</{tag_name}>");
+                let close_relative = r_xml[content_start..]
+                    .find(&close_tag)
+                    .ok_or_else(|| format!("malformed DOCX {tag_name} element"))?;
+                let content = &r_xml[content_start..content_start + close_relative];
+                out.push_str(&xml_unescape(content));
+                cursor = content_start + close_relative + close_tag.len();
+            }
+            Some(("tab", position)) => {
+                out.push('\t');
+                let tag_start = cursor + position;
+                let open_end = r_xml[tag_start..]
+                    .find('>')
+                    .ok_or_else(|| "malformed DOCX w:tab tag".to_string())?;
+                cursor = tag_start + open_end + 1;
+            }
+            Some(("br", position)) => {
+                let tag_start = cursor + position;
+                let open_end = r_xml[tag_start..]
+                    .find('>')
+                    .ok_or_else(|| "malformed DOCX w:br tag".to_string())?
+                    + tag_start;
+                let page = r_xml[tag_start..open_end].contains("w:type=\"page\"");
                 out.push(if page { '\u{c}' } else { '\u{b}' });
-                cursor = (tag_end + 1).min(r_xml.len());
+                cursor = open_end + 1;
+            }
+            Some(("cr", position)) => {
+                out.push('\u{b}');
+                let tag_start = cursor + position;
+                let open_end = r_xml[tag_start..]
+                    .find('>')
+                    .ok_or_else(|| "malformed DOCX w:cr tag".to_string())?;
+                cursor = tag_start + open_end + 1;
+            }
+            Some(("footnote", position)) => {
+                let tag_start = cursor + position;
+                let open_end = r_xml[tag_start..]
+                    .find('>')
+                    .ok_or_else(|| "malformed DOCX w:footnoteReference tag".to_string())?
+                    + tag_start;
+                let tag = &r_xml[tag_start..=open_end];
+                let raw_id = extract_attribute_value(tag, "w:id")
+                    .ok_or_else(|| "DOCX footnote reference is missing w:id".to_string())?;
+                let ooxml_id = raw_id
+                    .parse::<i32>()
+                    .map_err(|_| format!("DOCX footnote reference has invalid w:id {raw_id:?}"))?;
+                footnotes.push(LocalFootnoteReference {
+                    ooxml_id,
+                    offset: out.len(),
+                });
+                if tag.ends_with("/>") {
+                    cursor = open_end + 1;
+                } else {
+                    let close = "</w:footnoteReference>";
+                    let content_start = open_end + 1;
+                    let close_relative = r_xml[content_start..]
+                        .find(close)
+                        .ok_or_else(|| "malformed DOCX footnote reference element".to_string())?;
+                    if !r_xml[content_start..content_start + close_relative]
+                        .trim()
+                        .is_empty()
+                    {
+                        return Err("DOCX footnote reference must be empty".into());
+                    }
+                    cursor = content_start + close_relative + close.len();
+                }
             }
             _ => break,
         }
     }
-    out
-}
-
-/// Parses a table `<w:tbl>...</w:tbl>`.
-fn parse_table(xml: &str, start: usize, id: u64) -> Result<Option<(RichBlock, usize)>, String> {
-    let close_tag = "</w:tbl>";
-    let Some(end_rel) = xml[start..].find(close_tag) else {
-        return Ok(None);
-    };
-    let tbl_xml = &xml[start..start + end_rel + close_tag.len()];
-    let next_cursor = start + end_rel + close_tag.len();
-
-    let mut rows: Vec<Vec<Vec<TextRun>>> = Vec::new();
-    let mut header_row = false;
-    let mut tr_cursor = 0usize;
-
-    while let Some(tr_rel) = find_tag_start(&tbl_xml[tr_cursor..], "w:tr") {
-        let tr_start = tr_cursor + tr_rel;
-        let tr_close_rel = match tbl_xml[tr_start..].find("</w:tr>") {
-            Some(end) => end,
-            None => break,
-        };
-        let tr_xml = &tbl_xml[tr_start..tr_start + tr_close_rel + "</w:tr>".len()];
-        tr_cursor = tr_start + tr_close_rel + "</w:tr>".len();
-
-        if tr_xml.contains("<w:tblHeader") {
-            header_row = true;
-        }
-
-        let mut row_cells: Vec<Vec<TextRun>> = Vec::new();
-        let mut tc_cursor = 0usize;
-        while let Some(tc_rel) = find_tag_start(&tr_xml[tc_cursor..], "w:tc") {
-            let tc_start = tc_cursor + tc_rel;
-            let tc_close_rel = match tr_xml[tc_start..].find("</w:tc>") {
-                Some(end) => end,
-                None => break,
-            };
-            let tc_xml = &tr_xml[tc_start..tc_start + tc_close_rel + "</w:tc>".len()];
-            tc_cursor = tc_start + tc_close_rel + "</w:tc>".len();
-
-            let mut cell_runs = Vec::new();
-            let mut p_cursor = 0usize;
-            while let Some(p_rel) = find_tag_start(&tc_xml[p_cursor..], "w:p") {
-                let p_start = p_cursor + p_rel;
-                if let Some((block_opt, next_p)) = parse_paragraph(tc_xml, p_start, 0, None)? {
-                    if let Some(block) = block_opt {
-                        if !cell_runs.is_empty() {
-                            cell_runs.push(TextRun::plain(" "));
-                        }
-                        cell_runs.extend(paragraph_text_runs(&block));
-                    }
-                    p_cursor = next_p;
-                } else {
-                    break;
-                }
-            }
-
-            row_cells.push(trim_text_runs(cell_runs));
-        }
-
-        if !row_cells.is_empty() {
-            rows.push(row_cells);
-        }
-    }
-
-    if rows.is_empty() {
-        return Ok(None);
-    }
-
-    let columns = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-    let mut table = loom_objects::Table::new(rows.len(), columns);
-    table.id = format!("tbl-{id}");
-    table.header_row = header_row;
-    for (row, cells) in rows.iter().enumerate() {
-        for (column, runs) in cells.iter().enumerate() {
-            if runs.is_empty() {
-                table.set_cell_text(row, column, "");
-            } else {
-                table.set_cell_rich_text(row, column, runs.clone());
-            }
-        }
-    }
-    Ok(Some((RichBlock::table_block(id, table), next_cursor)))
+    Ok((out, footnotes))
 }
 
 fn paragraph_text_runs(block: &RichBlock) -> Vec<TextRun> {

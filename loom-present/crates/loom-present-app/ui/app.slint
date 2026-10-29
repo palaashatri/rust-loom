@@ -201,7 +201,7 @@ export component PresentApp inherits Window {
     out property <float> transition-progress: root.reveal;
     property <float> reveal-eased: 1.0 - (1.0 - root.reveal) * (1.0 - root.reveal);
     changed active-slide-index => {
-        if root.is-preview-mode && root.transition-index != 0 {
+        if root.is-preview-mode && (root.transition-index == 1 || root.transition-index == 2) {
             root.reveal = 0.0;
         }
     }
@@ -277,6 +277,7 @@ export component PresentApp inherits Window {
     callback transform-element(string, float, float, float, float);
     callback set-element-rotation(string, float);
     callback update-element-content(string);
+    callback end-table-cell-edit;
     callback apply-template(int);
     callback set-transition(int);
     callback create-theme(int);
@@ -528,7 +529,7 @@ export component PresentApp inherits Window {
                         y: 0px;
                         width: parent.width;
                         height: parent.height;
-                        opacity: root.is-preview-mode && root.transition-index != 2 ? root.reveal-eased : 1.0;
+                        opacity: root.is-preview-mode && root.transition-index == 1 ? root.reveal-eased : 1.0;
                         editing-enabled: !root.is-preview-mode;
                         fit-screen: root.is-preview-mode;
                         zoom: root.zoom-factor;
@@ -556,6 +557,7 @@ export component PresentApp inherits Window {
                         handle-released(idx, kind) => { root.handle-released(idx, kind); }
                         handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
                         content-edited(text) => { root.update-element-content(text); }
+                        table-text-edit-ended => { root.end-table-cell-edit(); }
                         region-key(backwards) => { root.cycle-region(0, backwards); }
                     }
                     }

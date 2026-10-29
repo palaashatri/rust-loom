@@ -6,12 +6,15 @@
 
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer,
-    ToolbarButton, ToolbarIconButton, SidebarSurface, InspectorSurface,
+    ToolbarButton, ToolbarIconButton, IconOnlyToolbarItem, ToolbarOverflowButton,
+    IconOverLabelToolbarItem, LabeledToolbar,
+    SidebarSurface, InspectorSurface,
     SectionHeader, ToolkitStatusBar, SearchField, TextField, DirectionalLayout,
     SegmentedControl, Toggle, RangeSlider, PropertyRow, TabStrip
 } from "toolkit.slint";
 import { EmptyState, StatusPill, CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
+import { LoomOverflowButton } from "foundation/chrome.slint";
 export { Theme } from "theme.slint";
 // Lets a test play the platform: the widget palette is where Slint publishes the
 // operating system's light or dark preference.
@@ -155,6 +158,71 @@ export component SmokeWindow inherits Window {
         selected: 0;
         query: "";
         commands: root.palette-commands;
+    }
+}
+
+/// Focused runtime probe for complete shared toolbar captions at scaled
+/// boundary widths. Kept separate from the visual reference window.
+export component ToolbarCaptionProbeWindow inherits Window {
+    in-out property <length> probe-width: 1280px;
+    in-out property <string> probe-label: "Export every selected worksheet as a complete accessible spreadsheet";
+    out property <length> required-caption-width: measure-caption.preferred-width;
+    out property <length> required-caption-line-height: Theme.leading.caption;
+
+    width: root.probe-width;
+    height: 80px;
+    background: Theme.palette().chrome;
+
+    measure-caption := Text {
+        visible: false;
+        text: root.probe-label;
+        font-size: Theme.type.caption;
+        min-height: Theme.leading.caption;
+        font-weight: 500;
+    }
+
+    LabeledToolbar {
+        width: root.probe-width;
+        action := IconOverLabelToolbarItem {
+            icon: "export";
+            label: root.probe-label;
+        }
+    }
+}
+
+/// Shared toolbar state geometry probe. The labeled row stays 48 logical
+/// pixels high while compact controls remain 28px hit targets.
+export component ToolbarStateInsetProbeWindow inherits Window {
+    width: 300px;
+    height: 48px;
+    background: Theme.palette().chrome;
+
+    public function focus-image() { focused-item.focus-item(); }
+    public function focus-toolkit-overflow() { toolkit-overflow.focus-item(); }
+    public function focus-overflow() { loom-overflow.grab-focus(); }
+
+    toolbar := LabeledToolbar {
+        width: root.width;
+        height: 48px;
+        min-height: 48px;
+        max-height: 48px;
+
+        selected-item := IconOverLabelToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: true;
+        }
+        focused-item := IconOverLabelToolbarItem {
+            icon: "image";
+            label: "Image";
+        }
+        icon-only := IconOnlyToolbarItem {
+            icon: "edit";
+            label: "Edit";
+            checked: true;
+        }
+        toolkit-overflow := ToolbarOverflowButton { label: "More toolkit"; }
+        loom-overflow := LoomOverflowButton { label: "More Loom"; }
     }
 }
 

@@ -211,8 +211,9 @@ pub(super) fn set_shaped_glyphs(
     frame: Frame,
     pixels_per_point: f32,
     clip: RasterClip,
+    default_ink_rgba: [u8; 4],
 ) -> Result<(), GlyphPaintError> {
-    let tiles = rasterize_shaped_tiles(shaped, frame, pixels_per_point, clip)?;
+    let tiles = rasterize_shaped_tiles(shaped, frame, pixels_per_point, clip, default_ink_rgba)?;
     row.glyph_tiles = ModelRc::new(VecModel::from(tiles));
     Ok(())
 }
@@ -226,6 +227,7 @@ pub(super) fn set_shaped_block_glyphs(
     font_size: f32,
     pixels_per_point: f32,
     clip: RasterClip,
+    default_ink_rgba: [u8; 4],
 ) -> Result<(), GlyphPaintError> {
     if frame.x >= clip.right
         || frame.x + frame.width <= clip.left
@@ -253,6 +255,66 @@ pub(super) fn set_shaped_block_glyphs(
                 line_frame,
                 pixels_per_point,
                 clip,
+                default_ink_rgba,
+            )?);
+        }
+        line_y += line.pitch_pt();
+    }
+    row.glyph_tiles = ModelRc::new(VecModel::from(tiles));
+    Ok(())
+}
+
+/// Rasterize a table cell while retaining the inline advances reserved for its footnotes.
+pub(super) fn set_shaped_block_glyphs_with_footnotes(
+    row: &mut WriterRenderBlock,
+    doc: &loom_writer_core::WriterDocument,
+    table_block_id: u64,
+    table: &loom_writer_core::loom_objects::table::Table,
+    cell_row: usize,
+    column: usize,
+    block: &RichBlock,
+    frame: Frame,
+    font_size: f32,
+    pixels_per_point: f32,
+    clip: RasterClip,
+    default_ink_rgba: [u8; 4],
+) -> Result<(), GlyphPaintError> {
+    if frame.x >= clip.right
+        || frame.x + frame.width <= clip.left
+        || frame.y >= clip.bottom
+        || frame.y + frame.height <= clip.top
+    {
+        return Ok(());
+    }
+    let geometry = loom_writer_core::shape_table_cell_geometry_with_footnotes(
+        doc,
+        table_block_id,
+        table,
+        cell_row,
+        column,
+        block,
+        font_size,
+        frame.width,
+    )
+    .map_err(GlyphPaintError::CellGeometry)?;
+    let required_height = geometry.content_height_pt();
+    if required_height > frame.height + f32::EPSILON {
+        return Err(GlyphPaintError::LineBoxTooShort {
+            required: required_height,
+            available: frame.height,
+        });
+    }
+    let mut tiles = Vec::new();
+    let mut line_y = frame.y;
+    for line in geometry.lines() {
+        if let Some(shaped) = line.shaped() {
+            let line_frame = Frame::new(frame.x, line_y, frame.width, line.pitch_pt());
+            tiles.extend(rasterize_shaped_tiles(
+                shaped,
+                line_frame,
+                pixels_per_point,
+                clip,
+                default_ink_rgba,
             )?);
         }
         line_y += line.pitch_pt();
@@ -266,6 +328,7 @@ fn rasterize_shaped_tiles(
     frame: Frame,
     pixels_per_point: f32,
     clip: RasterClip,
+    default_ink_rgba: [u8; 4],
 ) -> Result<Vec<WriterGlyphTile>, GlyphPaintError> {
     if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
         return Err(RasterError::InvalidRunGeometry.into());
@@ -330,7 +393,11 @@ fn rasterize_shaped_tiles(
             variations: &run.variations,
             synthetic_bold: run.synthetic_bold,
             synthetic_italic: run.synthetic_italic,
-            color: run.rgba,
+            color: if run.foreground_color_explicit {
+                run.rgba
+            } else {
+                default_ink_rgba
+            },
         };
         raster_runs.push(raster_run);
     }
@@ -359,7 +426,14 @@ fn rasterize_shaped_tiles(
             let glyphs = rasterize_glyph_tile(&raster_runs, bounds, RasterLimits::default())?;
             composite_premultiplied(&mut pixels, &glyphs.rgba_premultiplied)?;
             drop(glyphs);
-            paint_run_decorations(&mut pixels, bounds, shaped, frame, pixels_per_point);
+            paint_run_decorations(
+                &mut pixels,
+                bounds,
+                shaped,
+                frame,
+                pixels_per_point,
+                default_ink_rgba,
+            );
             push_glyph_tile(&mut tiles, bounds, frame, scale, pixels_per_point, pixels);
         }
     }
@@ -442,6 +516,7 @@ fn paint_run_decorations(
     shaped: &WriterShapedVisualLine,
     frame: Frame,
     pixels_per_point: f32,
+    default_ink_rgba: [u8; 4],
 ) {
     for run in shaped.painted_runs() {
         let baseline = frame.y + shaped.ascent_pt() - run.baseline_shift_pt;
@@ -474,7 +549,11 @@ fn paint_run_decorations(
                 f64::from(top) * f64::from(pixels_per_point),
                 f64::from(frame.x + run.x_pt + run.shaped.width) * f64::from(pixels_per_point),
                 f64::from(top + thickness) * f64::from(pixels_per_point),
-                run.rgba,
+                if run.foreground_color_explicit {
+                    run.rgba
+                } else {
+                    default_ink_rgba
+                },
             );
         }
     }
@@ -564,7 +643,21 @@ pub(crate) fn fragment_justification_spaces(
         .collect()
 }
 
-/// The attributes the page draws per run, and the size it draws them at.
+fn run_color(color: Option<&str>) -> Option<u32> {
+    let hex = color?.strip_prefix('#')?;
+    if !hex.is_ascii() || !matches!(hex.len(), 6 | 8) {
+        return None;
+    }
+    let channel = |start| u8::from_str_radix(&hex[start..start + 2], 16).ok();
+    let (red, green, blue, alpha) = (
+        channel(0)?,
+        channel(2)?,
+        channel(4)?,
+        if hex.len() == 8 { channel(6)? } else { u8::MAX },
+    );
+    Some(u32::from_be_bytes([alpha, red, green, blue]))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Look {
     bold: bool,
@@ -572,27 +665,45 @@ struct Look {
     underline: bool,
     strikethrough: bool,
     size: f32,
+    baseline_shift_pt: f32,
+    color: Option<u32>,
 }
 
 impl Look {
-    /// The look of a run inside a block whose own size is `block_size`; text
-    /// outside every run has the block's look. A heading block is bold, as the
-    /// PDF draws it, and a run can add emphasis but not take it away.
     fn of(style: Option<&CharacterStyle>, block_size: f32, heading: bool) -> Self {
         match style {
-            Some(style) => Self {
-                bold: heading || style.weight.numeric() >= FontWeight::Bold.numeric(),
-                italic: style.italic,
-                underline: style.underline,
-                strikethrough: style.strikethrough,
-                size: loom_writer_core::run_size(style, block_size),
-            },
+            Some(style) => {
+                let requested_size = loom_writer_core::run_size(style, block_size);
+                let superscript = style.superscript && !style.subscript;
+                let subscript = style.subscript && !style.superscript;
+                Self {
+                    bold: heading || style.weight.numeric() >= FontWeight::Bold.numeric(),
+                    italic: style.italic,
+                    underline: style.underline,
+                    strikethrough: style.strikethrough,
+                    size: if superscript || subscript {
+                        requested_size * 0.7
+                    } else {
+                        requested_size
+                    },
+                    baseline_shift_pt: if superscript {
+                        requested_size * 0.35
+                    } else if subscript {
+                        -(requested_size * 0.35)
+                    } else {
+                        0.0
+                    },
+                    color: run_color(style.color.as_deref()),
+                }
+            }
             None => Self {
                 bold: heading,
                 italic: false,
                 underline: false,
                 strikethrough: false,
                 size: block_size,
+                baseline_shift_pt: 0.0,
+                color: None,
             },
         }
     }
@@ -646,8 +757,7 @@ impl Measure<'_> {
     }
 }
 
-/// The block's text cut wherever its look changes. Runs that differ only in
-/// colour or family share one piece.
+/// The block's text cut wherever a visible run attribute changes.
 fn pieces(block: &RichBlock, block_size: f32) -> Vec<Piece> {
     let text = block.text.as_str();
     let mut cuts = BTreeSet::from([0, text.len()]);
@@ -687,6 +797,8 @@ fn segment(text: String, look: Look, x: f32, y: f32) -> WriterTextSegment {
         italic: look.italic,
         underline: look.underline,
         strikethrough: look.strikethrough,
+        has_color: look.color.is_some(),
+        color: slint::Color::from_argb_encoded(look.color.unwrap_or_default()),
     }
 }
 
@@ -721,11 +833,15 @@ pub(crate) fn row_text_with_spaces(
     let paragraph_start = Alignment::Start.resolve_with_direction(text, block.style.direction);
     let justified_block_row = align == Align::Block && resolved_alignment == Alignment::Justify;
     let positioned_spaces = supplied_spaces.is_some_and(|spaces| !spaces.is_empty());
+    let shifted = shown
+        .iter()
+        .any(|piece| piece.look.baseline_shift_pt != 0.0);
     if shown.len() <= 1
         && !decorated
         && !broken_inside
         && !justified_block_row
         && !positioned_spaces
+        && !shifted
     {
         let segments = shown
             .first()
@@ -843,7 +959,8 @@ fn draw_piece(
         let x = line.shift
             + line.measure.width(line.line_start, start)
             + extra_before(line.spaces, start);
-        let y = line.line_top + (line.line_size - piece.look.size) * BASELINE_EM;
+        let y = line.line_top + (line.line_size - piece.look.size) * BASELINE_EM
+            - piece.look.baseline_shift_pt;
         if !words.is_empty() {
             segments.push(segment(words, piece.look, x, y));
         }
@@ -991,6 +1108,7 @@ mod shaped_raster_tests {
                 right: 100.0,
                 bottom: 100.0,
             },
+            loom_writer_core::PageAppearance::White.auto_ink_rgba(),
         )
         .expect_err("the cell must not silently clip lines that do not fit");
         assert!(matches!(

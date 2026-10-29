@@ -439,6 +439,68 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
                 out.push(dot_part(x, y, 8.0, w, h, fill));
             }
         }
+    } else if chart.chart_type == ChartType::Bar {
+        let max_abs = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(f64::abs)
+            .fold(0.0f64, f64::max);
+        let scale = if max_abs > 0.0 { max_abs } else { 1.0 };
+        let min = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(|value| value / scale)
+            .fold(0.0f64, f64::min);
+        let max = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(|value| value / scale)
+            .fold(0.0f64, f64::max);
+        let span = max - min;
+        let span = if span > 0.0 { span } else { 1.0 };
+        let plot_x = 0.32f32;
+        let plot_w = 0.64f32;
+        let zero_x = plot_x + plot_w * (-min / span) as f32;
+        let row_h = ph / categories as f32;
+        let bar_h = row_h * 0.8 / chart.series.len() as f32;
+
+        let mut baseline = part(zero_x, py, 0.0015, ph);
+        baseline.has_bg = true;
+        baseline.bg = Color::from_argb_encoded(0xFF90_9090);
+        out.push(baseline);
+
+        for (si, series) in chart.series.iter().enumerate() {
+            let fill = colour(si, series);
+            for (ci, value) in series.values.iter().copied().enumerate().take(categories) {
+                if !value.is_finite() {
+                    continue;
+                }
+                let end = plot_x + plot_w * (((value / scale - min) / span) as f32);
+                let mut bar = part(
+                    zero_x.min(end),
+                    py + ci as f32 * row_h + row_h * 0.1 + si as f32 * bar_h,
+                    (end - zero_x).abs(),
+                    bar_h * 0.94,
+                );
+                bar.has_bg = true;
+                bar.bg = fill;
+                out.push(bar);
+            }
+        }
+        for ci in 0..categories {
+            let mut label = part(0.04, py + ci as f32 * row_h, 0.24, row_h);
+            label.text = SharedString::from(chart.categories.get(ci).cloned().unwrap_or_default());
+            label.align = 2;
+            label.fs = 11.0;
+            label.wrap = true;
+            out.push(label);
+        }
     } else {
         let bar_w = group_w * 0.8 / chart.series.len() as f32;
         for (si, series) in chart.series.iter().enumerate() {
@@ -570,6 +632,98 @@ mod tests {
         assert!(
             slice_colors.len() >= 3,
             "each slice must get its own colour, got {slice_colors:?}"
+        );
+    }
+
+    #[test]
+    fn bar_charts_draw_horizontal_rows_around_zero_for_positive_negative_and_zero_values() {
+        let mut chart = Chart::new("c", ChartType::Bar);
+        chart.categories = vec!["Positive".into(), "Negative".into(), "Zero".into()];
+        chart.add_series("One", vec![10.0, -5.0, 0.0], Some("#ff0000".into()));
+        chart.add_series("Two", vec![-10.0, 5.0, 0.0], Some("#00ff00".into()));
+        let element = SlideElement::new_chart("c", 0.0, 0.0, 400.0, 300.0, chart);
+        let parts = parts_for(&element);
+        let bars: Vec<_> = parts
+            .iter()
+            .filter(|p| p.has_bg && p.bg.as_argb_encoded() != 0xFF90_9090 && !p.has_border)
+            .collect();
+        assert_eq!(bars.len(), 6);
+        let near = |actual: f32, expected: f32| (actual - expected).abs() < 0.001;
+        let zero_x = 0.64;
+        assert!(near(bars[0].fx, zero_x));
+        assert!(near(bars[0].fw, 0.32));
+        assert!(near(bars[1].fx, 0.48));
+        assert!(near(bars[1].fw, 0.16));
+        assert!(near(bars[2].fx, zero_x) && bars[2].fw == 0.0);
+        assert!(near(bars[3].fx, 0.32));
+        assert!(near(bars[3].fw, 0.32));
+        assert!(near(bars[5].fx, zero_x) && bars[5].fw == 0.0);
+        let baseline = parts
+            .iter()
+            .find(|part| part.has_bg && part.bg.as_argb_encoded() == 0xFF90_9090)
+            .expect("the zero axis is visible");
+        assert!(near(baseline.fx, zero_x) && near(baseline.fy, 0.18) && near(baseline.fh, 0.62));
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.text.as_str() == "Positive" && p.align == 2)
+                && parts
+                    .iter()
+                    .any(|p| p.text.as_str() == "Negative" && p.align == 2)
+                && parts
+                    .iter()
+                    .any(|p| p.text.as_str() == "Zero" && p.align == 2),
+            "categories label their horizontal rows"
+        );
+    }
+
+    #[test]
+    fn bar_charts_keep_extreme_and_zero_data_finite_and_skip_invalid_values() {
+        let mut chart = Chart::new("c", ChartType::Bar);
+        chart.categories = vec![
+            "large positive".into(),
+            "nan".into(),
+            "infinite".into(),
+            "large negative".into(),
+        ];
+        chart.add_series(
+            "s",
+            vec![f64::MAX, f64::NAN, f64::INFINITY, -f64::MAX],
+            None,
+        );
+        let parts = chart_parts(&chart, 400.0, 300.0);
+        let bars: Vec<_> = parts
+            .iter()
+            .filter(|part| {
+                part.has_bg && !part.has_border && part.bg.as_argb_encoded() != 0xFF90_9090
+            })
+            .collect();
+        assert_eq!(bars.len(), 2);
+        assert!(bars.iter().all(|part| {
+            part.fx.is_finite() && part.fy.is_finite() && part.fw.is_finite() && part.fh.is_finite()
+        }));
+        assert!(
+            parts.iter().any(|part| part.text.as_str() == "Chart"),
+            "invalid chart values must not remove the title"
+        );
+
+        let mut zero_chart = Chart::new("zero", ChartType::Bar);
+        zero_chart.categories = vec!["zero one".into(), "zero two".into()];
+        zero_chart.add_series("s", vec![0.0, 0.0], None);
+        let zero_parts = chart_parts(&zero_chart, 400.0, 300.0);
+        let zero_bars: Vec<_> = zero_parts
+            .iter()
+            .filter(|part| {
+                part.has_bg && !part.has_border && part.bg.as_argb_encoded() != 0xFF90_9090
+            })
+            .collect();
+        assert_eq!(zero_bars.len(), 2);
+        assert!(zero_bars.iter().all(|bar| bar.fw == 0.0 && bar.fx == 0.32));
+        assert!(
+            zero_parts.iter().any(|part| {
+                part.has_bg && part.bg.as_argb_encoded() == 0xFF90_9090 && part.fx == 0.32
+            }),
+            "all-zero charts retain a finite zero axis"
         );
     }
 }

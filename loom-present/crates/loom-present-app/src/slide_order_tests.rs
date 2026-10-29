@@ -226,6 +226,41 @@ fn a_move_command_is_one_undoable_edit_and_keeps_the_slide_selected() {
 }
 
 #[test]
+fn palette_add_slide_shortcut_matches_menu_and_adds_a_slide() {
+    let s = launched();
+    let app = &s.app;
+    rebuild_palette(app, "add slide");
+    let palette = app
+        .get_palette_commands()
+        .row_data(0)
+        .expect("Add Slide palette result");
+    let menu_shortcut = match build_present_menu_bar()
+        .find_item("slide.new")
+        .expect("New Slide menu command")
+    {
+        loom_desktop::MenuItem::Action {
+            shortcut: Some(shortcut),
+            ..
+        } => shortcut.display_string(),
+        item => panic!("New Slide menu shortcut missing: {item:?}"),
+    };
+    assert_eq!(palette.label.as_str(), "Add Slide");
+    assert_eq!(palette.shortcut.as_str(), menu_shortcut);
+
+    let primary = if cfg!(target_os = "macos") {
+        Key::Meta
+    } else {
+        Key::Control
+    };
+    chord(app, &[primary, Key::Shift], "N");
+    assert_eq!(
+        s.state.session.borrow().document.slides.len(),
+        4,
+        "the advertised shortcut adds a slide"
+    );
+}
+
+#[test]
 fn the_slide_menu_and_the_palette_run_the_move() {
     let s = launched();
     let app = &s.app;

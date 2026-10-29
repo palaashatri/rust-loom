@@ -10,14 +10,14 @@ use loom_text::{Alignment, CharacterStyle, FontWeight, StyleRun};
 use loom_writer_core::{RichBlock, WriterDocument};
 
 /// Formatting state reflected by the current document-wide toolbar controls.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DocumentFormattingState {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
     pub strikethrough: bool,
     pub heading_level: i32,
-    pub font_size_pt: i32,
+    pub font_size_pt: f32,
     pub alignment: i32,
     pub line_spacing_index: i32,
     pub list_style_index: i32,
@@ -598,7 +598,7 @@ pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
         underline: all_non_empty_blocks_match(document, |style| style.underline),
         strikethrough: all_non_empty_blocks_match(document, |style| style.strikethrough),
         heading_level: uniform_heading_level(document),
-        font_size_pt: 11,
+        font_size_pt: 11.0,
         alignment: uniform_alignment(document),
         line_spacing_index: 1,
         list_style_index: 0,
@@ -665,13 +665,11 @@ pub fn formatting_state_for_selection(
 
     // A run with no size of its own is drawn at its block kind's size (a heading
     // is larger than body), so that is the size the field must show.
-    let drawn_size = |kind: &str, style: &CharacterStyle| -> i32 {
+    let drawn_size = |kind: &str, style: &CharacterStyle| -> f32 {
         if style.has_own_size() {
-            style.font_size as i32
+            style.font_size
         } else {
-            loom_writer_core::PageStyle::default()
-                .font_size_for_kind(kind)
-                .round() as i32
+            loom_writer_core::PageStyle::default().font_size_for_kind(kind)
         }
     };
     let font_size_pt = if spans.is_empty() {
@@ -681,13 +679,13 @@ pub fn formatting_state_for_selection(
             block_at_offset(document, start),
         ) {
             (Some(style), Some(index)) => drawn_size(document.blocks[index].kind.as_str(), &style),
-            (Some(style), None) => style.font_size as i32,
-            _ => 11,
+            (Some(style), None) => style.font_size,
+            _ => 11.0,
         }
     } else {
         let (first_block, first_start, _) = spans[0];
         let block = &document.blocks[first_block];
-        drawn_size(block.kind.as_str(), &style_at(block, first_start)).max(6)
+        drawn_size(block.kind.as_str(), &style_at(block, first_start)).max(6.0)
     };
 
     let line_spacing_index = selected_blocks
@@ -709,7 +707,11 @@ pub fn formatting_state_for_selection(
         underline: style_matches(&|style| style.underline),
         strikethrough: style_matches(&|style| style.strikethrough),
         heading_level,
-        font_size_pt: if font_size_pt <= 0 { 11 } else { font_size_pt },
+        font_size_pt: if !font_size_pt.is_finite() || font_size_pt <= 0.0 {
+            11.0
+        } else {
+            font_size_pt
+        },
         alignment,
         line_spacing_index,
         list_style_index: uniform_list_style_index(&selected_blocks, document),
@@ -828,7 +830,7 @@ mod tests {
         let caret_in_heading =
             formatting_state_for_selection(&document, DocumentSelection::caret(2));
         assert_eq!(
-            caret_in_heading.font_size_pt, 24,
+            caret_in_heading.font_size_pt, 24.0,
             "H1 draws at 24 pt, not the 12 pt default"
         );
         let body_start = "Title
@@ -837,7 +839,7 @@ mod tests {
             + 2;
         let caret_in_body =
             formatting_state_for_selection(&document, DocumentSelection::caret(body_start));
-        assert_eq!(caret_in_body.font_size_pt, 11, "body draws at 11 pt");
+        assert_eq!(caret_in_body.font_size_pt, 11.0, "body draws at 11 pt");
     }
 
     #[test]

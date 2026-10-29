@@ -379,12 +379,22 @@ fn test_committed_word_roundtrip_fixture() {
     assert!(
         warnings
             .iter()
-            .any(|w| w.to_lowercase().contains("footnote")),
-        "Committed Word fixture with footnotes must produce footnote warning: {warnings:?}"
+            .any(|w| w.to_lowercase().contains("endnote")),
+        "Committed Word fixture has unsupported endnotes that must be disclosed: {warnings:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.to_lowercase().contains("footnote")),
+        "supported footnotes should not be reported as unsupported: {warnings:?}"
     );
 
     // 2. Import check
     let imported = import_docx(&docx_bytes).expect("import committed word fixture");
+    assert!(
+        !imported.footnotes.is_empty(),
+        "the fixture's supported footnotes must survive import"
+    );
 
     // Heading survived
     assert!(
@@ -412,4 +422,162 @@ fn test_committed_word_roundtrip_fixture() {
         table_text.contains("DocxParser") && table_text.contains("Verified"),
         "Table content must survive: {table_text}"
     );
+}
+
+#[test]
+fn docx_inspection_errors_abort_before_document_replacement() {
+    let (app, state) = make_test_app();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "loom-writer-docx-inspect-failure-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("invalid.docx");
+    std::fs::write(&path, b"not a DOCX archive").unwrap();
+    let path_text = path.to_string_lossy().into_owned();
+
+    let startup_error =
+        crate::docx_actions::startup_documents_with_prepared_docx(None, Some(&path_text), None)
+            .err()
+            .expect("startup must reject a DOCX inspection error");
+    assert!(
+        startup_error.starts_with("inspect docx "),
+        "startup should report the preflight error: {startup_error}"
+    );
+
+    let open_error =
+        open_docx_path(&app, &state, path.clone(), &None).expect_err("open must reject inspection");
+    assert!(
+        open_error.starts_with("inspect docx "),
+        "open should report the preflight error: {open_error}"
+    );
+    assert_eq!(state.current.borrow().title, "Original Document");
+    assert_eq!(
+        state.current.borrow().blocks[0].text.as_str(),
+        "Original baseline text"
+    );
+    assert!(!app.get_docx_import_warning_open());
+    PENDING_DOCX_IMPORT.with(|pending| assert!(pending.borrow().is_none()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn startup_docx_import_uses_discard_guard_before_replacing_a_dirty_draft() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "loom-writer-docx-startup-discard-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("supported.docx");
+    std::fs::write(&path, create_test_docx(false, false)).unwrap();
+
+    let mut recovered_document = WriterDocument::new("recovered", "Recovered draft");
+    recovered_document.replace_paragraphs("Recovered draft text");
+    let recovered = crate::recovery_draft::RecoveredDraft {
+        document: recovered_document,
+        source: Some(path.clone()),
+    };
+    let path_text = path.to_string_lossy().into_owned();
+    let (draft, saved, prepared) = crate::docx_actions::startup_documents_with_prepared_docx(
+        Some(recovered),
+        Some(&path_text),
+        None,
+    )
+    .expect("prepare startup DOCX");
+    let (app, state) = make_test_app();
+    *state.current.borrow_mut() = draft;
+    *state.last_saved.borrow_mut() = saved;
+
+    let replaced = crate::docx_actions::open_prepared_docx_import(
+        &app,
+        &state,
+        prepared.expect("prepared startup DOCX"),
+        &None,
+        true,
+    );
+    assert!(
+        !replaced,
+        "a dirty recovered draft must open the save-changes guard"
+    );
+    assert!(app.get_save_changes_open());
+    assert!(!app.get_docx_import_warning_open());
+    assert_eq!(
+        state.current.borrow().blocks[0].text.as_str(),
+        "Recovered draft text"
+    );
+
+    app.invoke_save_changes_discard();
+    assert!(!app.get_save_changes_open());
+    assert!(
+        state.current.borrow().blocks[0]
+            .text
+            .as_str()
+            .contains("Imported document paragraph from DOCX"),
+        "discarding the draft should then apply the staged import"
+    );
+    PENDING_DOCX_IMPORT.with(|pending| assert!(pending.borrow().is_none()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn warning_continue_guards_a_dirty_startup_draft_and_cancel_keeps_it() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "loom-writer-docx-warning-guard-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("unsupported.docx");
+    std::fs::write(&path, create_test_docx(true, false)).unwrap();
+
+    let mut recovered_document = WriterDocument::new("recovered", "Recovered draft");
+    recovered_document.replace_paragraphs("Recovered draft text");
+    let recovered = crate::recovery_draft::RecoveredDraft {
+        document: recovered_document,
+        source: Some(path.clone()),
+    };
+    let path_text = path.to_string_lossy().into_owned();
+    let (draft, saved, prepared) = crate::docx_actions::startup_documents_with_prepared_docx(
+        Some(recovered),
+        Some(&path_text),
+        None,
+    )
+    .expect("prepare startup DOCX");
+    let (app, state) = make_test_app();
+    *state.current.borrow_mut() = draft;
+    *state.last_saved.borrow_mut() = saved;
+
+    let replaced = crate::docx_actions::open_prepared_docx_import(
+        &app,
+        &state,
+        prepared.expect("prepared startup DOCX"),
+        &None,
+        true,
+    );
+    assert!(!replaced);
+    assert!(app.get_docx_import_warning_open());
+    assert_eq!(
+        state.current.borrow().blocks[0].text.as_str(),
+        "Recovered draft text"
+    );
+
+    app.invoke_docx_import_continue();
+    assert!(!app.get_docx_import_warning_open());
+    assert!(app.get_save_changes_open());
+    assert_eq!(
+        state.current.borrow().blocks[0].text.as_str(),
+        "Recovered draft text",
+        "continuing past import warnings must preserve the draft pending a decision"
+    );
+
+    app.invoke_save_changes_cancel();
+    assert!(!app.get_save_changes_open());
+    assert_eq!(
+        state.current.borrow().blocks[0].text.as_str(),
+        "Recovered draft text"
+    );
+    PENDING_DOCX_IMPORT.with(|pending| assert!(pending.borrow().is_none()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

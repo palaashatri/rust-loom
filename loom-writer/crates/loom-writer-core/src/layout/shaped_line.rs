@@ -6,6 +6,8 @@
 //! the same glyph positions.
 
 use std::collections::BTreeMap;
+
+use super::InlineAdvance;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -115,6 +117,11 @@ pub struct WriterSelectionSpan {
     pub width_pt: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct InlineAdvancePlacement {
+    offset: usize,
+    x_pt: f32,
+}
 /// One authoritative shaped visual line used by Writer geometry consumers.
 /// Natural widths are retained for diagnostics; public paint/caret geometry
 /// uses the expanded and aligned positions.
@@ -134,6 +141,7 @@ pub struct WriterShapedVisualLine {
     painted_runs: Vec<WriterPaintedRun>,
     carets_by_offset: Vec<(usize, f32, f32)>,
     visual_carets: Vec<WriterCaretStop>,
+    inline_advances: Vec<InlineAdvancePlacement>,
 }
 
 #[derive(Clone)]
@@ -205,15 +213,22 @@ impl WriterShapedVisualLine {
         else {
             return self.alignment_shift_pt;
         };
-        let x = if known == offset {
+        if known == offset {
             match affinity {
                 Affinity::Leading => leading,
                 Affinity::Trailing => trailing,
             }
         } else {
             leading
-        };
-        x
+        }
+    }
+
+    /// X of the visible footnote ordinal inserted at `offset`, from the line origin.
+    pub fn inline_marker_x(&self, offset: usize) -> Option<f32> {
+        self.inline_advances
+            .iter()
+            .find(|advance| advance.offset == offset)
+            .map(|advance| advance.x_pt)
     }
 
     /// The closest shaped caret stop to an x coordinate from the text-column
@@ -367,13 +382,19 @@ pub(crate) fn shape_block_lines(
     )
 }
 
-/// Wrap and shape one block from its styled paragraph geometry. Candidate line
-/// ends come from UAX #14; an overlong unbreakable word falls back to grapheme
-/// boundaries. The returned ranges and glyph geometry are both authoritative.
 pub fn shape_wrapped_block_lines(
     block: &RichBlock,
     base_size_pt: f32,
     available_width_pt: f32,
+) -> Option<Vec<(Range<usize>, Option<WriterShapedVisualLine>)>> {
+    shape_wrapped_block_lines_with_inline_advances(block, base_size_pt, available_width_pt, &[])
+}
+
+pub(crate) fn shape_wrapped_block_lines_with_inline_advances(
+    block: &RichBlock,
+    base_size_pt: f32,
+    available_width_pt: f32,
+    inline_advances: &[InlineAdvance],
 ) -> Option<Vec<(Range<usize>, Option<WriterShapedVisualLine>)>> {
     let text = block.text.as_str();
     if text.is_empty() {
@@ -414,13 +435,25 @@ pub fn shape_wrapped_block_lines(
         ParagraphDirection::RightToLeft => TextDirection::RightToLeft,
     };
     let paragraph = Paragraph::new(text, &styled_spans, base);
-    let ranges = shaped_wrap_ranges(text, available_width_pt, &catalog, &paragraph)?;
+    let ranges = shaped_wrap_ranges(
+        text,
+        available_width_pt,
+        &catalog,
+        &paragraph,
+        inline_advances,
+    )?;
     let mut lines = Vec::with_capacity(ranges.len());
     for range in ranges {
-        if range.is_empty() {
+        let line_advances = inline_advances_for_line(text, &range, inline_advances);
+        if range.is_empty() && line_advances.is_empty() {
             lines.push((range, None));
             continue;
         }
+        let marker_width = line_advances
+            .iter()
+            .map(|advance| advance.width_pt)
+            .sum::<f32>();
+        let text_width = (available_width_pt - marker_width).max(0.0);
         let shaped = shape_line_from_paragraph(
             text,
             &span_styles,
@@ -429,11 +462,283 @@ pub fn shape_wrapped_block_lines(
             block.style.direction,
             block.style.alignment,
             range.clone(),
-            available_width_pt,
+            text_width,
         )?;
+        let shaped = apply_inline_advances(
+            shaped,
+            text,
+            &line_advances,
+            block.style.alignment,
+            block.style.direction,
+            available_width_pt,
+        );
         lines.push((range, Some(shaped)));
     }
     Some(lines)
+}
+
+fn inline_width_for_candidate(
+    advances: &[InlineAdvance],
+    line_start: usize,
+    candidate_end: usize,
+    segment_start: usize,
+) -> f32 {
+    advances
+        .iter()
+        .filter(|advance| {
+            advance.offset > line_start && advance.offset <= candidate_end
+                || line_start == segment_start && advance.offset == line_start
+        })
+        .map(|advance| advance.width_pt)
+        .sum()
+}
+
+fn inline_advances_for_line(
+    text: &str,
+    range: &Range<usize>,
+    advances: &[InlineAdvance],
+) -> Vec<InlineAdvance> {
+    let starts_after_break = range.start == 0
+        || text[..range.start]
+            .chars()
+            .next_back()
+            .is_some_and(is_hard_break_char);
+    let ends_with_break = text[range.clone()]
+        .chars()
+        .next_back()
+        .is_some_and(is_hard_break_char);
+    advances
+        .iter()
+        .copied()
+        .filter(|advance| {
+            advance.offset > range.start && advance.offset <= range.end
+                || advance.offset == range.start && starts_after_break
+        })
+        .filter(|advance| !(ends_with_break && advance.offset == range.end))
+        .collect()
+}
+
+fn is_hard_break_char(ch: char) -> bool {
+    matches!(ch, '\n' | '\r' | '\u{b}' | '\u{c}')
+}
+
+fn apply_inline_advances(
+    mut line: WriterShapedVisualLine,
+    text: &str,
+    advances: &[InlineAdvance],
+    alignment: Alignment,
+    direction: ParagraphDirection,
+    available_width_pt: f32,
+) -> WriterShapedVisualLine {
+    if advances.is_empty() {
+        return line;
+    }
+    let old_shift = line.alignment_shift_pt;
+    let was_justified = alignment.resolve_with_direction(text, direction) == Alignment::Justify
+        && line.width_pt > line.natural_width_pt + f32::EPSILON;
+    for run in &mut line.painted_runs {
+        run.x_pt -= old_shift;
+        for stop in &mut run.caret_stops {
+            stop.x_pt -= old_shift;
+        }
+    }
+    for (_, leading, trailing) in &mut line.carets_by_offset {
+        *leading -= old_shift;
+        *trailing -= old_shift;
+    }
+    for stop in &mut line.visual_carets {
+        stop.x_pt -= old_shift;
+    }
+    line.alignment_shift_pt = 0.0;
+    for advance in advances {
+        if !advance.width_pt.is_finite() || advance.width_pt <= 0.0 {
+            continue;
+        }
+        let after_existing = line
+            .inline_advances
+            .iter()
+            .any(|existing| existing.offset == advance.offset);
+        let affinity = if after_existing {
+            Affinity::Trailing
+        } else {
+            Affinity::Leading
+        };
+        let boundary_x = line.caret_x(advance.offset, affinity);
+        let flow_sign = inline_flow_sign(&line, text, advance.offset, boundary_x, direction);
+        let marker_x = boundary_x + flow_sign.min(0.0) * advance.width_pt;
+        insert_advance_in_runs(
+            &mut line.painted_runs,
+            boundary_x,
+            advance.width_pt,
+            flow_sign,
+        );
+        for run in &mut line.painted_runs {
+            for stop in &mut run.caret_stops {
+                if flow_sign > 0.0 && stop.x_pt > boundary_x + f32::EPSILON {
+                    stop.x_pt += advance.width_pt;
+                } else if flow_sign < 0.0 && stop.x_pt < boundary_x - f32::EPSILON {
+                    stop.x_pt -= advance.width_pt;
+                }
+            }
+        }
+        for (offset, leading, trailing) in &mut line.carets_by_offset {
+            if *offset > advance.offset {
+                *leading += flow_sign * advance.width_pt;
+                *trailing += flow_sign * advance.width_pt;
+            } else if *offset == advance.offset {
+                *trailing += flow_sign * advance.width_pt;
+            }
+        }
+        for stop in &mut line.visual_carets {
+            if flow_sign > 0.0 && stop.x_pt > boundary_x + f32::EPSILON {
+                stop.x_pt += advance.width_pt;
+            } else if flow_sign < 0.0 && stop.x_pt < boundary_x - f32::EPSILON {
+                stop.x_pt -= advance.width_pt;
+            }
+        }
+        line.visual_carets.push(WriterCaretStop {
+            offset: advance.offset,
+            affinity: Affinity::Trailing,
+            x_pt: boundary_x + flow_sign * advance.width_pt,
+        });
+        line.inline_advances.push(InlineAdvancePlacement {
+            offset: advance.offset,
+            x_pt: marker_x,
+        });
+        line.width_pt += advance.width_pt;
+    }
+    let physical_alignment = alignment.resolve_with_direction(text, direction);
+    let paragraph_start = Alignment::Start.resolve_with_direction(text, direction);
+    let shift = match physical_alignment {
+        Alignment::Center => ((available_width_pt - line.width_pt) / 2.0).max(0.0),
+        Alignment::Right => (available_width_pt - line.width_pt).max(0.0),
+        Alignment::Justify if !was_justified && paragraph_start == Alignment::Right => {
+            (available_width_pt - line.width_pt).max(0.0)
+        }
+        Alignment::Left | Alignment::Justify => 0.0,
+        Alignment::Start | Alignment::End => unreachable!("logical alignment was resolved"),
+    };
+    for run in &mut line.painted_runs {
+        run.x_pt += shift;
+        for stop in &mut run.caret_stops {
+            stop.x_pt += shift;
+        }
+    }
+    for (_, leading, trailing) in &mut line.carets_by_offset {
+        *leading += shift;
+        *trailing += shift;
+    }
+    for stop in &mut line.visual_carets {
+        stop.x_pt += shift;
+    }
+    for advance in &mut line.inline_advances {
+        advance.x_pt += shift;
+    }
+    line.visual_carets.sort_by(|left, right| {
+        left.x_pt
+            .total_cmp(&right.x_pt)
+            .then(left.offset.cmp(&right.offset))
+            .then_with(|| match (left.affinity, right.affinity) {
+                (Affinity::Leading, Affinity::Trailing) => std::cmp::Ordering::Less,
+                (Affinity::Trailing, Affinity::Leading) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
+    });
+    line.alignment_shift_pt = shift;
+    line
+}
+
+fn inline_flow_sign(
+    line: &WriterShapedVisualLine,
+    text: &str,
+    offset: usize,
+    boundary_x: f32,
+    direction: ParagraphDirection,
+) -> f32 {
+    if offset < line.source_range.end {
+        if let Some(next) = text
+            .get(offset..line.source_range.end)
+            .and_then(|remaining| remaining.graphemes(true).next())
+            .map(|grapheme| offset + grapheme.len())
+        {
+            let delta = line.caret_x(next, Affinity::Leading) - boundary_x;
+            if delta.abs() > f32::EPSILON {
+                return delta.signum();
+            }
+        }
+    }
+    if offset > line.source_range.start {
+        if let Some(previous) = text
+            .get(line.source_range.start..offset)
+            .and_then(|prefix| prefix.grapheme_indices(true).next_back())
+            .map(|(start, _)| line.source_range.start + start)
+        {
+            let delta = boundary_x - line.caret_x(previous, Affinity::Leading);
+            if delta.abs() > f32::EPSILON {
+                return delta.signum();
+            }
+        }
+    }
+    match direction {
+        ParagraphDirection::RightToLeft => -1.0,
+        ParagraphDirection::Auto if line.contains_rtl => -1.0,
+        ParagraphDirection::LeftToRight | ParagraphDirection::Auto => 1.0,
+    }
+}
+
+fn insert_advance_in_runs(
+    runs: &mut [WriterPaintedRun],
+    boundary_x: f32,
+    width_pt: f32,
+    direction: f32,
+) {
+    let target = runs.iter().enumerate().find(|(_, run)| {
+        boundary_x >= run.x_pt - f32::EPSILON
+            && boundary_x <= run.x_pt + run.shaped.width + f32::EPSILON
+    });
+    let Some((target_index, target_run)) = target else {
+        if direction > 0.0 {
+            for run in runs {
+                run.x_pt += width_pt;
+            }
+        }
+        return;
+    };
+    let local_x = (boundary_x - target_run.x_pt).clamp(0.0, target_run.shaped.width);
+    let mut pen = 0.0;
+    let mut before = None;
+    for (index, glyph) in target_run.shaped.glyphs.iter().enumerate() {
+        if pen + glyph.advance <= local_x + f32::EPSILON {
+            before = Some(index);
+        } else {
+            break;
+        }
+        pen += glyph.advance;
+    }
+    let Some(glyph_index) = before else {
+        if direction > 0.0 {
+            for run in &mut runs[target_index..] {
+                run.x_pt += width_pt;
+            }
+        }
+        return;
+    };
+    runs[target_index].shaped.glyphs[glyph_index].advance += width_pt;
+    runs[target_index].shaped.width = runs[target_index]
+        .shaped
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.advance)
+        .sum();
+    if direction > 0.0 {
+        for run in &mut runs[target_index + 1..] {
+            run.x_pt += width_pt;
+        }
+    } else {
+        for run in &mut runs[..=target_index] {
+            run.x_pt -= width_pt;
+        }
+    }
 }
 
 fn shaped_wrap_ranges(
@@ -441,6 +746,7 @@ fn shaped_wrap_ranges(
     available_width_pt: f32,
     catalog: &FontCatalog,
     paragraph: &Paragraph<'_>,
+    inline_advances: &[InlineAdvance],
 ) -> Option<Vec<Range<usize>>> {
     let mut ranges = Vec::new();
     let mut segment_start = 0;
@@ -456,6 +762,7 @@ fn shaped_wrap_ranges(
             available_width_pt,
             catalog,
             paragraph,
+            inline_advances,
             &mut ranges,
         )?;
         if ranges.len() > segment_line_start {
@@ -472,6 +779,7 @@ fn shaped_wrap_ranges(
         available_width_pt,
         catalog,
         paragraph,
+        inline_advances,
         &mut ranges,
     )?;
     if segment_start == text.len() && !text.ends_with('\u{c}') {
@@ -490,6 +798,7 @@ fn wrap_segment(
     available_width_pt: f32,
     catalog: &FontCatalog,
     paragraph: &Paragraph<'_>,
+    inline_advances: &[InlineAdvance],
     ranges: &mut Vec<Range<usize>>,
 ) -> Option<()> {
     if segment.is_empty() {
@@ -508,7 +817,13 @@ fn wrap_segment(
     while line_start < segment.end {
         let mut last_fitting_legal_end = None;
         for candidate_end in legal_ends.iter().copied().filter(|end| *end > line_start) {
-            let width = shaped_ink_width(text, line_start..candidate_end, catalog, paragraph)?;
+            let width = shaped_ink_width(text, line_start..candidate_end, catalog, paragraph)?
+                + inline_width_for_candidate(
+                    inline_advances,
+                    line_start,
+                    candidate_end,
+                    segment.start,
+                );
             if width <= available_width_pt {
                 last_fitting_legal_end = Some(candidate_end);
             } else {
@@ -524,7 +839,13 @@ fn wrap_segment(
                 .copied()
                 .filter(|end| *end > line_start)
             {
-                let width = shaped_ink_width(text, line_start..candidate_end, catalog, paragraph)?;
+                let width = shaped_ink_width(text, line_start..candidate_end, catalog, paragraph)?
+                    + inline_width_for_candidate(
+                        inline_advances,
+                        line_start,
+                        candidate_end,
+                        segment.start,
+                    );
                 if width <= available_width_pt {
                     last_fitting_grapheme_end = Some(candidate_end);
                 } else {
@@ -794,6 +1115,7 @@ fn shape_line_from_paragraph(
         painted_runs: paint_runs,
         carets_by_offset,
         visual_carets,
+        inline_advances: Vec::new(),
     })
 }
 

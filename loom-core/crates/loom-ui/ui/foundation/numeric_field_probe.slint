@@ -1,0 +1,36 @@
+import { Theme } from "../theme.slint";
+import { LoomNumericField } from "../foundation.slint";
+export { Theme } from "../theme.slint";
+
+export component NumericFieldProbeWindow inherits Window {
+    title: "Numeric field probe";
+    width: 420px;
+    height: 120px;
+    background: Theme.palette().canvas;
+
+    in-out property <string> field-value: "12.5";
+    in property <bool> field-invalid: false;
+    out property <string> field-unit: numeric-field.unit;
+    in-out property <string> accepted-value: "";
+    in-out property <int> accepted-count: 0;
+    in-out property <int> cancelled-count: 0;
+
+    public function focus-field() { numeric-field.focus-input(); }
+
+    HorizontalLayout {
+        padding: 16px;
+        numeric-field := LoomNumericField {
+            width: 180px;
+            label: "Font size";
+            description: "Font size in points";
+            unit: "pt";
+            value <=> root.field-value;
+            invalid: root.field-invalid;
+            accepted(value) => {
+                root.accepted-value = value;
+                root.accepted-count += 1;
+            }
+            cancelled => { root.cancelled-count += 1; }
+        }
+    }
+}

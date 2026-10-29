@@ -1,0 +1,214 @@
+import { LoomButton, LoomTextField } from "foundation.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+/// Mark kinds: 0 insertion, 1 deletion, 2 formatting.
+export struct WriterRevisionMark {
+    kind: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    label: string,
+    accessible-text: string,
+    right-aligned: bool,
+}
+
+export global WriterReviewState {
+    in-out property <bool> panel-open: false;
+    in-out property <bool> pdf-export-open: false;
+    in-out property <bool> recording: false;
+    in-out property <string> author: "Anonymous";
+    in-out property <[WriterRevisionMark]> revision-marks: [];
+    in-out property <int> current-index: 0;
+    in-out property <int> revision-count: 0;
+    in-out property <string> current-kind: "";
+    in-out property <string> current-author: "";
+    in-out property <string> current-before: "";
+    in-out property <string> current-after: "";
+    in-out property <string> current-before-style: "";
+    in-out property <string> current-after-style: "";
+    in-out property <string> current-location: "";
+    callback toggle-recording;
+    callback set-author(string);
+    callback navigate(int);
+    callback resolve-current(bool);
+    callback resolve-all(bool);
+    callback export-pdf-view(int);
+    callback cancel-pdf-export;
+}
+
+export component WriterReviewPanel inherits Rectangle {
+    background: Theme.palette().surface;
+    border-radius: Theme.tokens.metrics.radius-large;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: groupbox;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.lg;
+        spacing: Theme.tokens.space.sm;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            Text {
+                horizontal-stretch: 1;
+                text: "Tracked Changes";
+                font-size: Theme.type.heading;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+            LoomButton {
+                label: "Close";
+                variant: "ghost";
+                height: Theme.scaled-control-height;
+                clicked => { WriterReviewState.panel-open = false; }
+            }
+        }
+
+        LoomButton {
+            label: WriterReviewState.recording ? "Stop Recording" : "Start Recording";
+            variant: WriterReviewState.recording ? "primary" : "secondary";
+            height: Theme.scaled-control-height;
+            clicked => { WriterReviewState.toggle-recording(); }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            LoomTextField {
+                horizontal-stretch: 1;
+                label: "Author for future changes";
+                title: "Author for future changes";
+                description: "This name is saved with the document and attached to new tracked changes.";
+                value <=> WriterReviewState.author;
+                accepted(value) => { WriterReviewState.set-author(value); }
+            }
+            LoomButton {
+                label: "Apply";
+                variant: "secondary";
+                height: Theme.scaled-control-height;
+                clicked => { WriterReviewState.set-author(WriterReviewState.author); }
+            }
+        }
+
+        if WriterReviewState.revision-count == 0 : Text {
+            text: "No unresolved changes";
+            font-size: Theme.type.body;
+            color: Theme.palette().ink-secondary;
+        }
+
+        if WriterReviewState.revision-count > 0 : VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+
+            Text {
+                text: "Change \{WriterReviewState.current-index + 1} of \{WriterReviewState.revision-count} · \{WriterReviewState.current-kind}";
+                font-size: Theme.type.body;
+                font-weight: 700;
+                color: WriterReviewState.current-kind == "Insertion" ? Theme.palette().success
+                    : WriterReviewState.current-kind == "Deletion" ? Theme.palette().danger
+                    : Theme.palette().info;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "By \{WriterReviewState.current-author} · \{WriterReviewState.current-location}";
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+            }
+
+            if WriterReviewState.current-kind == "Insertion" : Text {
+                text: "+ Inserted: “\{WriterReviewState.current-after}”";
+                font-size: Theme.type.body;
+                color: Theme.palette().ink;
+                wrap: word-wrap;
+            }
+            if WriterReviewState.current-kind == "Deletion" : ScrollView {
+                height: 112px;
+                horizontal-stretch: 1;
+                viewport-width: self.width;
+                viewport-height: max(self.height, deleted-content.preferred-height);
+                deleted-content := Rectangle {
+                    width: parent.viewport-width;
+                    preferred-height: deleted-text.preferred-height;
+                    background: transparent;
+                    deleted-text := Text {
+                        width: parent.width;
+                        text: "− Deleted: “\{WriterReviewState.current-before}”";
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink;
+                        wrap: word-wrap;
+                        accessible-role: AccessibleRole.text;
+                        accessible-label: WriterReviewState.current-before;
+                    }
+                }
+            }
+            if WriterReviewState.current-kind == "Formatting" : VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Formatting change on: “\{WriterReviewState.current-before}”";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "Before: \{WriterReviewState.current-before-style}\nAfter: \{WriterReviewState.current-after-style}";
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().ink-secondary;
+                    wrap: word-wrap;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                LoomButton {
+                    label: "Previous";
+                    variant: "secondary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.navigate(-1); }
+                }
+                LoomButton {
+                    label: "Next";
+                    variant: "secondary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.navigate(1); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                LoomButton {
+                    label: "Accept";
+                    variant: "primary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.resolve-current(true); }
+                }
+                LoomButton {
+                    label: "Reject";
+                    variant: "secondary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.resolve-current(false); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                LoomButton {
+                    label: "Accept All";
+                    variant: "secondary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.resolve-all(true); }
+                }
+                LoomButton {
+                    label: "Reject All";
+                    variant: "secondary";
+                    height: Theme.scaled-control-height;
+                    clicked => { WriterReviewState.resolve-all(false); }
+                }
+            }
+        }
+    }
+}

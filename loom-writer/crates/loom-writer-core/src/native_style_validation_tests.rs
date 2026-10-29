@@ -1,4 +1,4 @@
-use crate::{load_document, save_document, RichBlock, WriterDocument};
+use crate::{load_document, save_document, RichBlock, WriterDocument, WRITER_CONTENT_FORMAT};
 use loom_objects::table::{Table, TextRun};
 use loom_text::{CharacterStyle, StyleRun};
 
@@ -141,7 +141,16 @@ fn legacy_content_versions_accept_supported_colors_and_missing_fields() {
     let document = document_with_colors(Some("#a1B2c3"), Some("#12345680"), Some("#AABBccFF"));
     let content = document
         .to_content_json()
-        .replace("\"format\":3", "\"format\":2");
+        .replace(
+            &format!("\"format\":{WRITER_CONTENT_FORMAT}"),
+            "\"format\":2",
+        )
+        .replace(",\"appearance\":\"white\"", "")
+        .replace(",\"footnotes\":[]", "")
+        .replace(
+            ",\"tracked_changes\":{\"recording\":false,\"author\":\"Anonymous\",\"next_id\":1,\"revisions\":[]}",
+            "",
+        );
     let loaded = WriterDocument::from_content_json(&content).expect("format 2 colors load");
     assert_eq!(
         loaded.blocks[0].runs[0].style.color.as_deref(),

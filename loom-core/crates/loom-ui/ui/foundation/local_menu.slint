@@ -50,6 +50,9 @@ export component LocalMenuBar inherits Rectangle {
             label: root.labels[self.index];
             variant: "ghost";
             selected: root.open-index == self.index;
+            pointer-hovered => {
+                if (root.open-index >= 0) { root.open-index = self.index; }
+            }
             clicked => {
                 root.open-index = root.open-index == self.index ? -1 : self.index;
             }
@@ -80,6 +83,9 @@ export component LocalMenuLabels inherits HorizontalLayout {
         label: root.labels[self.index];
         variant: "ghost";
         selected: root.open-index == self.index;
+        pointer-hovered => {
+            if (root.open-index >= 0) { root.open-index = self.index; }
+        }
         clicked => {
             root.open-index = root.open-index == self.index ? -1 : self.index;
         }
@@ -90,7 +96,7 @@ export component LocalMenuPopup inherits Rectangle {
     in property <bool> menu-enabled: true;
     in property <[string]> labels: [];
     in property <[LocalMenuEntry]> items: [];
-    in property <int> selected-index: -1;
+    in-out property <int> selected-index: -1;
     in-out property <int> open-index: -1;
     callback menu-action(string);
     callback menu-opened(int);
@@ -194,6 +200,12 @@ export component LocalMenuPopup inherits Rectangle {
                     checkable: item.checkable;
                     selected: root.selected-index == index;
                     enabled: item.enabled;
+                    pointer-hovered => {
+                        if (item.enabled && !item.separator) {
+                            root.selected-index = index;
+                            root.menu-move(0);
+                        }
+                    }
                     activated => {
                         root.open-index = -1;
                         root.menu-action(item.command_id);

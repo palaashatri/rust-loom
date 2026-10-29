@@ -573,6 +573,55 @@ impl crate::PresentationSession {
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)
     }
+
+    /// Updates a table cell while grouping consecutive edits to that cell into one undo step.
+    pub fn edit_table_cell_text(
+        &mut self,
+        element_id: &str,
+        row: usize,
+        col: usize,
+        text: &str,
+    ) -> bool {
+        let Some(slide_id) = self.document.active_slide().map(|slide| slide.id.clone()) else {
+            return false;
+        };
+        let Some(current_text) = self
+            .document
+            .active_slide()
+            .and_then(|slide| {
+                slide
+                    .elements
+                    .iter()
+                    .find(|element| element.id == element_id)
+            })
+            .and_then(|element| {
+                let table = element.table()?;
+                let cell = table.cell(row, col)?;
+                Some(cell.content.text())
+            })
+        else {
+            return false;
+        };
+        if current_text == text {
+            return true;
+        }
+
+        let edit_key = (slide_id, element_id.to_owned(), row, col);
+        if self.active_table_text_edit.as_ref() != Some(&edit_key) {
+            self.checkpoint();
+            self.active_table_text_edit = Some(edit_key);
+        }
+
+        self.document
+            .active_slide_mut()
+            .and_then(|slide| {
+                slide
+                    .elements
+                    .iter_mut()
+                    .find(|element| element.id == element_id)
+            })
+            .is_some_and(|element| element.update_table_cell_text(row, col, text))
+    }
 }
 
 #[cfg(test)]

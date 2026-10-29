@@ -3,10 +3,11 @@
 
 use std::collections::BTreeSet;
 
-use loom_objects::table::{HorizontalAlign, Table, TextRun};
+use loom_objects::table::{HorizontalAlign, Table};
 use loom_text::{Alignment, CharacterStyle, FontWeight, ParagraphDirection, ParagraphStyle};
 
 use super::comments::{self, Anchor, CommentPlan};
+use super::footnotes::{ExportPlan as FootnoteExportPlan, InlineReference as FootnoteReference};
 use super::inline_style::docx_rgb;
 use super::package::{
     DEFAULT_LINE_TWIPS, DEFAULT_SPACE_AFTER_TWIPS, SANS_FAMILY, STYLE_LIST, STYLE_QUOTE,
@@ -14,7 +15,8 @@ use super::package::{
 };
 use super::xml::{self, R_NS, W_NS, XML_DECLARATION};
 use crate::{
-    PageOrientation, PageStyle, PaperSize, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
+    PageMarginsPreset, PageOrientation, PageStyle, PaperSize, RevisionBoundaryKind, RevisionKind,
+    RevisionPayload, RevisionRecord, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
     TABLE_CELL_BASE_FONT_SIZE_PT,
 };
 
@@ -55,6 +57,8 @@ fn paper_twips(paper: PaperSize) -> (i32, i32) {
         PaperSize::Executive => (10_440, 15_120),
         PaperSize::A3 => (16_838, 23_811),
         PaperSize::A5 => (8_391, 11_906),
+        // A custom size uses its stored twips in Geometry::of.
+        PaperSize::Custom => (11_906, 16_838),
     }
 }
 
@@ -71,14 +75,32 @@ struct Geometry {
 
 impl Geometry {
     fn of(doc: &WriterDocument) -> Self {
-        let (short, long) = paper_twips(doc.page.paper);
-        let landscape = doc.page.orientation == PageOrientation::Landscape;
-        let (width, height) = if landscape {
-            (long, short)
+        let custom = doc.page.custom_geometry_points();
+        let (width, height, landscape) = if doc.page.paper == PaperSize::Custom {
+            if let Some((width, height, _, _, _, _)) = custom {
+                let landscape = width > height;
+                (twips(width), twips(height), landscape)
+            } else {
+                let (short, long) = paper_twips(PaperSize::A4);
+                (short, long, false)
+            }
         } else {
-            (short, long)
+            let (short, long) = paper_twips(doc.page.paper);
+            let landscape = doc.page.orientation == PageOrientation::Landscape;
+            let (width, height) = if landscape {
+                (long, short)
+            } else {
+                (short, long)
+            };
+            (width, height, landscape)
         };
-        let (top, bottom, left, right) = doc.page.margins.margins_pt();
+        let (top, bottom, left, right) = if doc.page.margins == PageMarginsPreset::Custom {
+            custom
+                .map(|(_, _, top, bottom, left, right)| (top, bottom, left, right))
+                .unwrap_or_else(|| PageMarginsPreset::Normal.margins_pt())
+        } else {
+            doc.page.margins.margins_pt()
+        };
         Self {
             width,
             height,
@@ -95,7 +117,7 @@ impl Geometry {
         (self.width - self.left - self.right).max(720)
     }
 
-    fn section_xml(&self) -> String {
+    fn section_xml(&self, header_references: &str, header_settings: &str) -> String {
         let header = (self.top / 2).min(720);
         let orient = if self.landscape {
             " w:orient=\"landscape\""
@@ -103,16 +125,22 @@ impl Geometry {
             ""
         };
         format!(
-            "<w:sectPr><w:pgSz w:w=\"{}\" w:h=\"{}\"{orient}/>\
+            "<w:sectPr>{header_references}<w:pgSz w:w=\"{}\" w:h=\"{}\"{orient}/>\
              <w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{header}\" w:footer=\"{header}\" w:gutter=\"0\"/>\
-             <w:cols w:space=\"720\"/></w:sectPr>",
+             {header_settings}<w:cols w:space=\"720\"/></w:sectPr>",
             self.width, self.height, self.top, self.right, self.bottom, self.left
         )
     }
 }
 
 /// Builds the document part.
-pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
+pub(super) fn build(
+    doc: &WriterDocument,
+    plan: &CommentPlan,
+    footnotes: &FootnoteExportPlan,
+    header_references: &str,
+    header_settings: &str,
+) -> Result<Body, String> {
     let geometry = Geometry::of(doc);
     let tables: Vec<Option<Table>> = doc
         .blocks
@@ -125,15 +153,24 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
         })
         .collect();
 
-    let mut xml =
-        format!("{XML_DECLARATION}<w:document xmlns:w=\"{W_NS}\" xmlns:r=\"{R_NS}\"><w:body>");
+    let mut xml = format!("{XML_DECLARATION}<w:document xmlns:w=\"{W_NS}\" xmlns:r=\"{R_NS}\">");
+    if doc.page.appearance.is_black() {
+        xml.push_str("<w:background w:color=\"000000\"/>");
+    }
+    xml.push_str("<w:body>");
     let mut numbered_lists = 0usize;
     let mut previous_numbered = false;
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut images: Vec<BodyImage> = Vec::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         if let Some(table) = &tables[index] {
-            xml.push_str(&table_xml(table, geometry.text_width()));
+            xml.push_str(&table_xml(
+                table,
+                geometry.text_width(),
+                block.id,
+                footnotes,
+                doc.tracked_changes.revisions(),
+            ));
             // Word needs a paragraph to end the body and to keep two tables
             // from merging into one.
             let followed_by_table = tables.get(index + 1).is_some_and(Option::is_some);
@@ -163,12 +200,22 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
             if let Some(chart) = crate::chart_from_block(block) {
                 let chart_idx = charts.len() + 1;
                 let rid = format!("rIdChart{chart_idx}");
-                let chart_xml = loom_objects::chart_ooxml::chart_to_c_chart_xml(&chart);
+                let chart_xml = crate::charts::writer_chart_to_c_chart_xml(&chart)
+                    .map_err(|error| format!("chart {}: {error}", chart.id))?;
                 charts.push((chart_idx, chart_xml));
                 xml.push_str(&chart_xml_paragraph(&rid, chart_idx, block));
                 previous_numbered = false;
                 continue;
             }
+        }
+        if let Some(revision) = doc.tracked_changes.revisions().iter().find(|revision| {
+            revision.kind == RevisionKind::Deletion
+                && revision.boundary_kind == RevisionBoundaryKind::ParagraphMark
+                && revision.anchor.block_id == block.id
+        }) {
+            xml.push_str(&deleted_paragraph_mark_xml(block, revision));
+            previous_numbered = false;
+            continue;
         }
         let list = ListKind::of(block.kind.as_str());
         let num_id = match list {
@@ -190,18 +237,27 @@ pub(super) fn build(doc: &WriterDocument, plan: &CommentPlan) -> Body {
             None => false,
         };
         xml.push_str("<w:p>");
-        xml.push_str(&paragraph_properties(block, num_id));
-        xml.push_str(&paragraph_content(block, plan.anchors_for(block.id)));
+        let paragraph_marks =
+            paragraph_mark_revisions(index, &doc.blocks, doc.tracked_changes.revisions());
+        xml.push_str(&paragraph_properties(block, num_id, &paragraph_marks));
+        xml.push_str(&paragraph_content(
+            block,
+            index,
+            &doc.blocks,
+            plan.anchors_for(block.id),
+            footnotes.references_for(block.id),
+            doc.tracked_changes.revisions(),
+        ));
         xml.push_str("</w:p>");
     }
-    xml.push_str(&geometry.section_xml());
+    xml.push_str(&geometry.section_xml(header_references, header_settings));
     xml.push_str("</w:body></w:document>");
-    Body {
+    Ok(Body {
         xml,
         numbered_lists,
         charts,
         images,
-    }
+    })
 }
 
 /// A paragraph holding one inline picture of `w` by `h` points.
@@ -214,7 +270,7 @@ fn picture_paragraph(
 ) -> String {
     let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
     let name = xml::attr(&image.name);
-    let alignment = paragraph_properties(block, None);
+    let alignment = paragraph_properties(block, None, &[]);
     format!(
         "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
         id = 1000 + index
@@ -222,7 +278,7 @@ fn picture_paragraph(
 }
 
 fn chart_xml_paragraph(rid: &str, chart_id: usize, block: &RichBlock) -> String {
-    let properties = paragraph_properties(block, None);
+    let properties = paragraph_properties(block, None, &[]);
     format!(
         "<w:p>{properties}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\
          <wp:extent cx=\"5486400\" cy=\"3200400\"/>\
@@ -267,7 +323,11 @@ fn style_id(kind: &str) -> Option<String> {
 /// `<w:pPr>` for a block. Direct spacing and indentation are written only
 /// where the block differs from Writer's defaults, so the Word styles keep
 /// control of everything the user did not change.
-fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
+fn paragraph_properties(
+    block: &RichBlock,
+    num_id: Option<usize>,
+    paragraph_marks: &[&RevisionRecord],
+) -> String {
     let style = &block.style;
     let mut out = String::new();
     if let Some(id) = style_id(block.kind.as_str()) {
@@ -348,6 +408,18 @@ fn paragraph_properties(block: &RichBlock, num_id: Option<usize>) -> String {
         }
     ));
 
+    if !paragraph_marks.is_empty() {
+        out.push_str("<w:rPr>");
+        for revision in paragraph_marks {
+            let tag = match revision.kind {
+                RevisionKind::Insertion => "ins",
+                RevisionKind::Deletion => "del",
+                RevisionKind::Formatting => continue,
+            };
+            out.push_str(&format!("<w:{tag} {}/>", revision_attributes(revision)));
+        }
+        out.push_str("</w:rPr>");
+    }
     if out.is_empty() {
         out
     } else {
@@ -493,44 +565,428 @@ fn kind_size_pt(kind: &str) -> f32 {
     }
 }
 
-/// Appends one run of `piece` with `props`, skipping runs with nothing to say.
-fn push_run(out: &mut String, props: &RunProps, piece: &str) {
-    let mut children = String::new();
-    if xml::push_run_children(&mut children, piece) {
-        out.push_str("<w:r>");
-        out.push_str(&props.xml());
-        out.push_str(&children);
-        out.push_str("</w:r>");
-    }
+fn push_footnote_reference(out: &mut String, id: i32) {
+    out.push_str(&format!("<w:r><w:footnoteReference w:id=\"{id}\"/></w:r>"));
 }
 
-/// The runs of a block. The text is cut wherever the inline style changes or
-/// a comment starts or ends, so every piece is uniform. Pieces are styled by
-/// the first run that covers them, the same rule the PDF export uses.
-fn paragraph_content(block: &RichBlock, anchors: &[Anchor]) -> String {
+fn revision_attributes(revision: &RevisionRecord) -> String {
+    format!(
+        "w:id=\"{}\" w:author=\"{}\"",
+        revision.id,
+        xml::attr(&revision.author)
+    )
+}
+
+fn revision_style_at(revision: &RevisionRecord, offset: usize) -> Option<&CharacterStyle> {
+    revision
+        .before
+        .as_ref()?
+        .runs
+        .iter()
+        .find(|run| run.start <= offset && offset < run.end)
+        .map(|run| &run.style)
+}
+
+fn revision_style_xml(style: Option<&CharacterStyle>, kind_size: f32) -> String {
+    let mut properties = RunProps::of(style, false, kind_size).xml();
+    if style.is_none_or(|style| style.font_family.is_empty()) {
+        remove_run_property(&mut properties, "w:rFonts");
+    }
+    if style.is_none_or(|style| !style.has_own_size()) {
+        remove_run_property(&mut properties, "w:sz");
+        remove_run_property(&mut properties, "w:szCs");
+    }
+    if style.is_some_and(|style| style.color.is_none()) {
+        remove_run_property(&mut properties, "w:color");
+    }
+    properties
+}
+
+fn remove_run_property(properties: &mut String, property: &str) {
+    let Some(start) = properties.find(&format!("<{property}")) else {
+        return;
+    };
+    let Some(end) = properties[start..].find("/>") else {
+        return;
+    };
+    properties.replace_range(start..start + end + 2, "");
+}
+
+fn push_deleted_revision(out: &mut String, revision: &RevisionRecord, kind_size: f32) {
+    let Some(payload) = revision.before.as_ref() else {
+        return;
+    };
+    out.push_str(&format!("<w:del {}>", revision_attributes(revision)));
+    let mut cuts = BTreeSet::from([0, payload.text.len()]);
+    cuts.extend(
+        payload
+            .runs
+            .iter()
+            .flat_map(|run| [run.start, run.end])
+            .filter(|&at| at <= payload.text.len() && payload.text.is_char_boundary(at)),
+    );
+    let cuts: Vec<usize> = cuts.into_iter().collect();
+    for pair in cuts.windows(2) {
+        let [start, end] = pair else {
+            continue;
+        };
+        let style = payload
+            .runs
+            .iter()
+            .find(|run| run.start <= *start && *start < run.end)
+            .map(|run| &run.style);
+        let mut children = String::new();
+        if xml::push_deleted_run_children(&mut children, &payload.text[*start..*end]) {
+            out.push_str("<w:r>");
+            out.push_str(&revision_style_xml(style, kind_size));
+            out.push_str(&children);
+            out.push_str("</w:r>");
+        }
+    }
+    out.push_str("</w:del>");
+}
+
+fn push_deleted_revision_slice(
+    out: &mut String,
+    revision: &RevisionRecord,
+    range: std::ops::Range<usize>,
+    kind_size: f32,
+) {
+    let Some(payload) = revision.before.as_ref() else {
+        return;
+    };
+    let text = payload.text.get(range.clone()).unwrap_or_default();
+    if text.is_empty() {
+        return;
+    }
+    let mut fragment = revision.clone();
+    fragment.before = Some(RevisionPayload {
+        text: text.to_owned(),
+        runs: payload
+            .runs
+            .iter()
+            .filter_map(|run| {
+                let start = run.start.max(range.start);
+                let end = run.end.min(range.end);
+                (start < end).then(|| loom_text::StyleRun {
+                    start: start - range.start,
+                    end: end - range.start,
+                    style: run.style.clone(),
+                })
+            })
+            .collect(),
+    });
+    push_deleted_revision(out, &fragment, kind_size);
+}
+
+fn rich_block_text_slice(block: &RichBlock, range: std::ops::Range<usize>) -> RichBlock {
+    let mut slice = RichBlock::new(block.id, &block.kind, &block.text.as_str()[range.clone()]);
+    slice.style = block.style.clone();
+    slice.runs = block
+        .runs
+        .iter()
+        .filter_map(|run| {
+            let start = run.start.max(range.start);
+            let end = run.end.min(range.end);
+            (start < end).then(|| loom_text::StyleRun {
+                start: start - range.start,
+                end: end - range.start,
+                style: run.style.clone(),
+            })
+        })
+        .collect();
+    slice
+}
+
+fn deleted_paragraph_mark_xml(block: &RichBlock, revision: &RevisionRecord) -> String {
+    let split = revision.anchor.start;
     let text = block.text.as_str();
+    let first = rich_block_text_slice(block, 0..split);
+    let second = rich_block_text_slice(block, split..text.len());
+    let deleted_payload = revision
+        .before
+        .as_ref()
+        .expect("preflight checked deletion payload");
+    let mark_offset = deleted_payload
+        .text
+        .find('\n')
+        .expect("preflight checked paragraph-mark payload");
+    let size = kind_size_pt(&block.kind);
+    let mut xml = String::new();
+
+    xml.push_str("<w:p>");
+    xml.push_str(&paragraph_properties(&first, None, &[revision]));
+    xml.push_str(&paragraph_content(
+        &first,
+        0,
+        std::slice::from_ref(&first),
+        &[],
+        &[],
+        &[],
+    ));
+    push_deleted_revision_slice(&mut xml, revision, 0..mark_offset, size);
+    xml.push_str("</w:p>");
+
+    xml.push_str("<w:p>");
+    xml.push_str(&paragraph_properties(&second, None, &[]));
+    push_deleted_revision_slice(
+        &mut xml,
+        revision,
+        mark_offset + 1..deleted_payload.text.len(),
+        size,
+    );
+    xml.push_str(&paragraph_content(
+        &second,
+        0,
+        std::slice::from_ref(&second),
+        &[],
+        &[],
+        &[],
+    ));
+    xml.push_str("</w:p>");
+    xml
+}
+
+fn push_revision_run(
+    out: &mut String,
+    props: &RunProps,
+    style: Option<&CharacterStyle>,
+    piece: &str,
+    formatting: Option<(&RevisionRecord, usize)>,
+    kind_size: f32,
+    tracked: bool,
+) {
+    let mut children = String::new();
+    if !xml::push_run_children(&mut children, piece) {
+        return;
+    }
+    let mut run_props = if tracked {
+        revision_style_xml(style, kind_size)
+    } else {
+        props.xml()
+    };
+    if let Some((revision, offset)) = formatting {
+        let previous = revision_style_xml(revision_style_at(revision, offset), kind_size);
+        let previous = previous
+            .strip_prefix("<w:rPr>")
+            .and_then(|value| value.strip_suffix("</w:rPr>"))
+            .unwrap_or(&previous);
+        let change = format!(
+            "<w:rPrChange {}><w:rPr>{previous}</w:rPr></w:rPrChange>",
+            revision_attributes(revision)
+        );
+        let close = run_props
+            .rfind("</w:rPr>")
+            .expect("revision style always writes a closing rPr");
+        run_props.insert_str(close, &change);
+    }
+    out.push_str("<w:r>");
+    out.push_str(&run_props);
+    out.push_str(&children);
+    out.push_str("</w:r>");
+}
+
+fn paragraph_revision_segments<'a>(
+    block_index: usize,
+    blocks: &'a [RichBlock],
+    revisions: &'a [RevisionRecord],
+) -> Vec<(&'a RevisionRecord, usize, usize, usize)> {
+    let block = &blocks[block_index];
+    let block_start = blocks[..block_index]
+        .iter()
+        .map(|block| block.text.len_bytes() + 1)
+        .sum::<usize>();
+    let mut segments = Vec::new();
+    for revision in revisions {
+        let Some(start_index) = blocks
+            .iter()
+            .position(|candidate| candidate.id == revision.anchor.block_id)
+        else {
+            continue;
+        };
+        let end_id = revision
+            .anchor
+            .end_block_id
+            .unwrap_or(revision.anchor.block_id);
+        let Some(end_index) = blocks.iter().position(|candidate| candidate.id == end_id) else {
+            continue;
+        };
+        if block_index < start_index || block_index > end_index {
+            continue;
+        }
+        let start = if block_index == start_index {
+            revision.anchor.start
+        } else {
+            0
+        };
+        let end = if block_index == end_index {
+            revision.anchor.end
+        } else {
+            block.text.len_bytes()
+        };
+        if start > end
+            || end > block.text.len_bytes()
+            || (start == end && revision.kind != RevisionKind::Deletion)
+        {
+            continue;
+        }
+        let revision_start = blocks[..start_index]
+            .iter()
+            .map(|block| block.text.len_bytes() + 1)
+            .sum::<usize>()
+            + revision.anchor.start;
+        let payload_offset = block_start + start - revision_start;
+        segments.push((revision, start, end, payload_offset));
+    }
+    segments
+}
+
+fn paragraph_mark_revisions<'a>(
+    block_index: usize,
+    blocks: &[RichBlock],
+    revisions: &'a [RevisionRecord],
+) -> Vec<&'a RevisionRecord> {
+    let mut starts = Vec::with_capacity(blocks.len());
+    let mut offset = 0usize;
+    for (index, block) in blocks.iter().enumerate() {
+        starts.push(offset);
+        offset += block.text.len_bytes() + usize::from(index + 1 < blocks.len());
+    }
+    let separator = starts[block_index] + blocks[block_index].text.len_bytes();
+    revisions
+        .iter()
+        .filter(|revision| {
+            if revision.kind != RevisionKind::Insertion
+                || revision.boundary_kind != RevisionBoundaryKind::ParagraphMark
+            {
+                return false;
+            }
+            let Some(start_index) = blocks
+                .iter()
+                .position(|block| block.id == revision.anchor.block_id)
+            else {
+                return false;
+            };
+            let end_block_id = revision
+                .anchor
+                .end_block_id
+                .unwrap_or(revision.anchor.block_id);
+            let Some(end_index) = blocks.iter().position(|block| block.id == end_block_id) else {
+                return false;
+            };
+            let start = starts[start_index] + revision.anchor.start;
+            let end = starts[end_index] + revision.anchor.end;
+            start <= separator && separator < end
+        })
+        .collect()
+}
+
+/// The runs of a block. The text is cut at style, comment, footnote, and
+/// revision boundaries so each generated run has one stable set of properties.
+fn paragraph_content(
+    block: &RichBlock,
+    block_index: usize,
+    blocks: &[RichBlock],
+    anchors: &[Anchor],
+    footnotes: &[FootnoteReference],
+    all_revisions: &[RevisionRecord],
+) -> String {
+    let text = block.text.as_str();
+    let revisions = paragraph_revision_segments(block_index, blocks, all_revisions);
     let mut cuts: BTreeSet<usize> = BTreeSet::from([0, text.len()]);
     let boundaries = block
         .runs
         .iter()
         .flat_map(|run| [run.start, run.end])
-        .chain(anchors.iter().flat_map(|anchor| [anchor.start, anchor.end]));
+        .chain(anchors.iter().flat_map(|anchor| [anchor.start, anchor.end]))
+        .chain(footnotes.iter().map(|reference| reference.offset));
     cuts.extend(boundaries.filter(|&at| at <= text.len() && text.is_char_boundary(at)));
+    for (revision, start, end, payload_offset) in revisions.iter().copied() {
+        cuts.extend([start, end]);
+        if revision.kind == RevisionKind::Formatting {
+            if let Some(before) = &revision.before {
+                let payload_end = payload_offset + end - start;
+                for run in &before.runs {
+                    let run_start = run.start.max(payload_offset);
+                    let run_end = run.end.min(payload_end);
+                    if run_start < run_end {
+                        cuts.insert(start + run_start - payload_offset);
+                        cuts.insert(start + run_end - payload_offset);
+                    }
+                }
+            }
+        }
+    }
     let cuts: Vec<usize> = cuts.into_iter().collect();
 
     let size = kind_size_pt(&block.kind);
     let mut out = String::new();
+    let mut footnote_index = 0usize;
+    let mut open_insertion = None;
     for (index, &at) in cuts.iter().enumerate() {
         comments::push_events(&mut out, anchors, at);
+        for (revision, start, _, _) in
+            revisions.iter().copied().filter(|(revision, start, _, _)| {
+                revision.kind == RevisionKind::Deletion && *start == at
+            })
+        {
+            let _ = start;
+            push_deleted_revision(&mut out, revision, size);
+        }
+        while let Some(reference) = footnotes
+            .get(footnote_index)
+            .filter(|reference| reference.offset == at)
+        {
+            push_footnote_reference(&mut out, reference.ooxml_id);
+            footnote_index += 1;
+        }
         let Some(&next) = cuts.get(index + 1) else {
             break;
         };
+        let insertion = revisions.iter().copied().find(|(revision, start, end, _)| {
+            revision.kind == RevisionKind::Insertion && *start <= at && next <= *end
+        });
+        let insertion_id = insertion.map(|(revision, _, _, _)| revision.id);
+        if open_insertion != insertion_id {
+            if open_insertion.is_some() {
+                out.push_str("</w:ins>");
+                open_insertion = None;
+            }
+            if let Some((revision, _, _, _)) = insertion {
+                out.push_str(&format!("<w:ins {}>", revision_attributes(revision)));
+                open_insertion = Some(revision.id);
+            }
+        }
         let style = block
             .runs
             .iter()
             .find(|run| run.start <= at && at < run.end)
             .map(|run| &run.style);
-        push_run(&mut out, &RunProps::of(style, false, size), &text[at..next]);
+        let props = RunProps::of(style, false, size);
+        let formatting = revisions
+            .iter()
+            .copied()
+            .find(|(revision, start, end, _)| {
+                revision.kind == RevisionKind::Formatting && *start <= at && next <= *end
+            })
+            .map(|(revision, start, _, payload_offset)| (revision, payload_offset + at - start));
+        let tracked = insertion.is_some() || formatting.is_some();
+        push_revision_run(
+            &mut out,
+            &props,
+            style,
+            &text[at..next],
+            formatting,
+            size,
+            tracked,
+        );
+        if insertion.is_some_and(|(_, _, end, _)| end == next) {
+            out.push_str("</w:ins>");
+            open_insertion = None;
+        }
+    }
+    if open_insertion.is_some() {
+        out.push_str("</w:ins>");
     }
     out
 }
@@ -543,30 +999,6 @@ fn cell_paragraph(alignment: Option<&HorizontalAlign>) -> &'static str {
         Some(HorizontalAlign::Right) => "<w:p><w:pPr><w:jc w:val=\"right\"/></w:pPr>",
         Some(HorizontalAlign::Justify) => "<w:p><w:pPr><w:jc w:val=\"both\"/></w:pPr>",
         _ => "<w:p>",
-    }
-}
-
-/// Writes one cell's text as runs. Each run keeps its stored bold and italic;
-/// `bold` is the cell's own bold, from the header row or the table style.
-fn push_cell_runs(out: &mut String, runs: &[TextRun], bold: bool) {
-    for piece in runs {
-        let mut style = CharacterStyle::default();
-        style.weight = if piece.bold {
-            FontWeight::Bold
-        } else {
-            FontWeight::Regular
-        };
-        style.italic = piece.italic;
-        style.underline = piece.underline;
-        style.strikethrough = piece.strikethrough;
-        style.superscript = piece.superscript;
-        style.subscript = piece.subscript;
-        style.font_family = piece.font_family.clone().unwrap_or_default();
-        style.font_size = piece.font_size_pt.unwrap_or(TABLE_CELL_BASE_FONT_SIZE_PT);
-        style.explicit_size = piece.font_size_pt.is_some();
-        style.color = piece.color.clone();
-        let props = RunProps::of(Some(&style), bold, TABLE_CELL_BASE_FONT_SIZE_PT);
-        push_run(out, &props, &piece.text);
     }
 }
 
@@ -595,11 +1027,24 @@ fn merge_spans(table: &Table) -> Vec<(usize, usize, usize, usize)> {
     spans
 }
 
-/// The runs of one cell, each keeping its bold and italic.
-fn cell_runs(table: &Table, row: usize, column: usize) -> Vec<TextRun> {
-    table
-        .cell(row, column)
-        .map_or_else(Vec::new, |cell| cell.content.runs.clone())
+fn cell_footnote_references(
+    references: &[FootnoteReference],
+    map: &crate::tables::TableTextMap,
+    row: usize,
+    column: usize,
+) -> Vec<FootnoteReference> {
+    let Some(range) = map.cell_range(row, column) else {
+        return Vec::new();
+    };
+    let start = references.partition_point(|reference| reference.offset < range.start);
+    let end = references.partition_point(|reference| reference.offset <= range.end);
+    references[start..end]
+        .iter()
+        .map(|reference| FootnoteReference {
+            offset: reference.offset - range.start,
+            ooxml_id: reference.ooxml_id,
+        })
+        .collect()
 }
 
 /// The column widths of a table in twips across the text area: the typed widths
@@ -632,11 +1077,68 @@ fn column_widths(table: &Table, text_width: i32) -> Vec<i32> {
     widths
 }
 
+fn cell_content(
+    block_id: u64,
+    table: &Table,
+    map: &crate::tables::TableTextMap,
+    row: usize,
+    column: usize,
+    bold: bool,
+    footnotes: &[FootnoteReference],
+    all_revisions: &[RevisionRecord],
+) -> String {
+    let Some(range) = map.cell_range(row, column) else {
+        return String::new();
+    };
+    let Some(block) = crate::table_text::table_cell_rich_block(
+        block_id,
+        table,
+        row,
+        column,
+        TABLE_CELL_BASE_FONT_SIZE_PT,
+        bold,
+        None,
+    ) else {
+        return String::new();
+    };
+    let local_revisions: Vec<RevisionRecord> = all_revisions
+        .iter()
+        .filter(|revision| {
+            revision.anchor.block_id == block_id
+                && revision.anchor.end_block_id.is_none()
+                && revision.anchor.start >= range.start
+                && revision.anchor.end <= range.end
+        })
+        .cloned()
+        .map(|mut revision| {
+            revision.anchor.start -= range.start;
+            revision.anchor.end -= range.start;
+            revision
+        })
+        .collect();
+    paragraph_content(
+        &block,
+        0,
+        std::slice::from_ref(&block),
+        &[],
+        footnotes,
+        &local_revisions,
+    )
+}
+
 /// A table as a real Word table: the typed column widths across
 /// the text area and a repeating, shaded, bold header row when the source
 /// has a header separator. Short rows are padded to a rectangle.
-fn table_xml(table: &Table, text_width: i32) -> String {
+fn table_xml(
+    table: &Table,
+    text_width: i32,
+    block_id: u64,
+    footnotes: &FootnoteExportPlan,
+    all_revisions: &[RevisionRecord],
+) -> String {
     let merges = merge_spans(table);
+    let table_text_map = crate::tables::TableTextMap::new(table);
+    let footnote_anchors = footnotes.references_for(block_id);
     let columns = table.col_count();
     let widths = column_widths(table, text_width);
 
@@ -709,8 +1211,21 @@ fn table_xml(table: &Table, text_width: i32) -> String {
                     "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr>{paragraph}"
                 ));
                 if row_index == mr {
-                    let runs = cell_runs(table, row_index, column);
-                    push_cell_runs(&mut out, &runs, header || resolved.bold);
+                    out.push_str(&cell_content(
+                        block_id,
+                        table,
+                        &table_text_map,
+                        row_index,
+                        column,
+                        header || resolved.bold,
+                        &cell_footnote_references(
+                            footnote_anchors,
+                            &table_text_map,
+                            row_index,
+                            column,
+                        ),
+                        all_revisions,
+                    ));
                 }
                 out.push_str("</w:p></w:tc>");
                 continue;
@@ -735,8 +1250,16 @@ fn table_xml(table: &Table, text_width: i32) -> String {
             out.push_str(&format!(
                 "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr>{paragraph}"
             ));
-            let runs = cell_runs(table, row_index, column);
-            push_cell_runs(&mut out, &runs, header || resolved.bold);
+            out.push_str(&cell_content(
+                block_id,
+                table,
+                &table_text_map,
+                row_index,
+                column,
+                header || resolved.bold,
+                &cell_footnote_references(footnote_anchors, &table_text_map, row_index, column),
+                all_revisions,
+            ));
             out.push_str("</w:p></w:tc>");
         }
         out.push_str("</w:tr>");

@@ -5,11 +5,11 @@
 
 use std::collections::BTreeMap;
 
-use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
+use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle, text_width_pt};
 
 use crate::{
-    normalize_angle_degrees, pictures, ElementType, PresentationDocument, SlideElement,
-    SLIDE_HEIGHT, SLIDE_WIDTH,
+    ElementType, PresentationDocument, SLIDE_HEIGHT, SLIDE_WIDTH, SlideElement,
+    normalize_angle_degrees, pictures,
 };
 
 /// The page in points: the 16:9 slide at PowerPoint's standard 13.33 by 7.5 inches.
@@ -490,7 +490,6 @@ fn draw_chart(
         draw_pie_chart(pdf, page, transform, elem, chart);
         return;
     }
-    let norm_values = chart.normalized_series_values_from_zero();
     let cat_count = chart.categories.len();
     let series_count = chart.series.len();
     let plot_top = 28.0 * UNITS_PER_EDITOR_PX;
@@ -498,6 +497,73 @@ fn draw_chart(
     let plot_h = (plot_bottom - plot_top).max(20.0);
     let plot_left = 24.0 * UNITS_PER_EDITOR_PX;
     let plot_w = (elem.width - 48.0 * UNITS_PER_EDITOR_PX).max(40.0);
+    if chart.chart_type == loom_objects::ChartType::Bar {
+        let max_abs = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(f64::abs)
+            .fold(0.0f64, f64::max);
+        let scale = if max_abs > 0.0 { max_abs } else { 1.0 };
+        let min = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(|value| value / scale)
+            .fold(0.0f64, f64::min);
+        let max = chart
+            .series
+            .iter()
+            .flat_map(|series| series.values.iter().copied())
+            .filter(|value| value.is_finite())
+            .map(|value| value / scale)
+            .fold(0.0f64, f64::max);
+        let span = max - min;
+        let span = if span > 0.0 { span } else { 1.0 };
+        let zero = (-min / span) as f32;
+        let label_width = (elem.width * 0.2).min(80.0 * UNITS_PER_EDITOR_PX);
+        let left = plot_left + label_width;
+        let width = (plot_w - label_width).max(1.0);
+        let row_height = plot_h / cat_count as f32;
+        let bar_height = row_height * 0.8 / series_count as f32;
+        for (s_idx, series) in chart.series.iter().enumerate() {
+            for (c_idx, value) in series.values.iter().copied().enumerate().take(cat_count) {
+                if !value.is_finite() {
+                    continue;
+                }
+                let end = ((value / scale - min) / span) as f32;
+                pdf.draw_rect_with_transform(
+                    page,
+                    (
+                        left + width * zero.min(end),
+                        plot_top + row_height * (c_idx as f32 + 0.1) + bar_height * s_idx as f32,
+                        width * (end - zero).abs(),
+                        (bar_height - 1.0).max(1.0),
+                    ),
+                    PathStyle::filled(CHART_COLORS[s_idx % CHART_COLORS.len()]),
+                    transform,
+                );
+            }
+        }
+        let label_style = TextStyle {
+            size_pt: 8.5 * UNITS_PER_EDITOR_PX,
+            ..TextStyle::default()
+        };
+        for (c_idx, cat) in chart.categories.iter().enumerate() {
+            pdf.draw_text_with_transform(
+                page,
+                2.0 * UNITS_PER_EDITOR_PX,
+                plot_top + row_height * (c_idx as f32 + 0.5),
+                cat,
+                &label_style,
+                transform,
+            );
+        }
+        return;
+    }
+    let norm_values = chart.normalized_series_values_from_zero();
     let cat_w = plot_w / cat_count as f32;
     let bar_slot = cat_w * 0.8;
     let bar_w = (bar_slot / series_count as f32).max(2.0);

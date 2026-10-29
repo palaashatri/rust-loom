@@ -1,6 +1,6 @@
 import { Theme } from "../theme.slint";
 import {
-    LoomButton, LoomIconButton, LoomTextField, LoomSearchField,
+    LoomButton, LoomIconButton, LoomTextField, LoomNumericField, LoomSearchField,
     LoomToggle, LoomSegmentedControl, LoomProgressBar,
     LoomTabStrip,
 } from "../foundation.slint";
@@ -69,7 +69,7 @@ export component FieldsSection inherits Rectangle {
     fields-layout := VerticalLayout {
         GallerySection {
             title: "Fields";
-            detail: "Normal, invalid, search, long content";
+            detail: "Text, numeric units, invalid, search, long content";
             HorizontalLayout {
                 spacing: Theme.tokens.space.lg;
                 alignment: start;
@@ -85,6 +85,13 @@ export component FieldsSection inherits Rectangle {
                     value: "Invalid value";
                     label: "Invalid example";
                     title: "Invalid example";
+                    invalid: true;
+                }
+                LoomNumericField {
+                    width: 180px;
+                    value: "12.5";
+                    label: "Font size";
+                    unit: "pt";
                     invalid: true;
                 }
                 LoomSearchField {

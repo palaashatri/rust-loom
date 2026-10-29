@@ -63,6 +63,19 @@ pub(super) fn rects_for_lines(
         let block = &doc.blocks[line.block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let source = &block.text.as_str()[line.start..line.end];
+        if block.kind == crate::TABLE_BLOCK_KIND {
+            result.extend(table_cell_selection_rects(
+                doc,
+                style,
+                zoom,
+                block_starts[line.block_index],
+                line,
+                selection,
+                selection_start,
+                selection_end,
+            ));
+            continue;
+        }
         if let Some(shaped) = &line.shaped_line {
             let (global_start, global_end) = (line.global_start, line.global_end());
             let overlap_start = selection_start.max(global_start);
@@ -255,6 +268,183 @@ pub(super) fn rects_for_lines(
                         height: line.bounds.height,
                     },
                 });
+            }
+        }
+    }
+    result
+}
+
+fn table_cell_selection_rects(
+    doc: &WriterDocument,
+    style: &PageStyle,
+    zoom: f32,
+    block_start: usize,
+    line: &FlowLine,
+    selection: &TextSelection,
+    selection_start: usize,
+    selection_end: usize,
+) -> Vec<SelectionRect> {
+    let block = &doc.blocks[line.block_index];
+    let Some(table) = block.typed_table() else {
+        return Vec::new();
+    };
+    let map = crate::TableTextMap::new(table);
+    let widths = crate::editor_column_widths(table, block.text_column_width(style));
+    let options = loom_objects::TableStyleOptions {
+        header_row: table.header_row,
+        total_row: table.total_row,
+        first_column: table.first_column,
+        last_column: table.last_column,
+        banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
+    };
+    let catalog = loom_objects::TableStyleCatalog::get(&table.style_id)
+        .unwrap_or_else(loom_objects::TableStyleCatalog::default_style);
+    let mut result = Vec::new();
+    let collapsed = selection_start == selection_end;
+    let caret_cell = collapsed
+        .then(|| map.cell_at(selection_start.saturating_sub(block_start)))
+        .flatten();
+    for row in 0..table.row_count() {
+        for column in 0..table.col_count() {
+            let Some(cell_range) = map.cell_range(row, column) else {
+                continue;
+            };
+            if cell_range.start > line.end || cell_range.end < line.start {
+                continue;
+            }
+            if !collapsed {
+                let global_start = block_start + cell_range.start;
+                let global_end = block_start + cell_range.end;
+                if selection_start.max(global_start) >= selection_end.min(global_end) {
+                    continue;
+                }
+            } else if caret_cell != Some((row, column)) {
+                continue;
+            }
+            let resolved = catalog.resolve_cell(
+                row,
+                column,
+                table.row_count(),
+                table.col_count(),
+                &options,
+                table.cell(row, column),
+            );
+            let cell_block = crate::table_cell_rich_block(
+                block.id,
+                table,
+                row,
+                column,
+                crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+                resolved.bold,
+                resolved.text_color.as_deref(),
+            )
+            .unwrap_or_else(|| crate::RichBlock::new(block.id, "paragraph", ""));
+            let Some(cell_geometry) = crate::shape_table_cell_geometry_with_footnotes(
+                doc,
+                block.id,
+                table,
+                row,
+                column,
+                &cell_block,
+                crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+                (widths[column] - 2.0 * crate::TABLE_CELL_HORIZONTAL_INSET_PT).max(1.0),
+            )
+            .ok() else {
+                continue;
+            };
+            let column_x = widths.iter().take(column).sum::<f32>();
+            let cell_offset = selection_start
+                .saturating_sub(block_start + cell_range.start)
+                .min(cell_block.text.as_str().len());
+            if collapsed {
+                let caret_line = cell_geometry
+                    .lines()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, cell_line)| {
+                        cell_line
+                            .shaped()
+                            .is_some_and(|shaped| shaped.inline_marker_x(cell_offset).is_some())
+                    })
+                    .or_else(|| {
+                        cell_geometry
+                            .lines()
+                            .iter()
+                            .enumerate()
+                            .find(|(_, cell_line)| {
+                                let range = cell_line.source_range();
+                                range.start <= cell_offset && cell_offset < range.end
+                            })
+                    })
+                    .or_else(|| {
+                        (cell_offset == cell_block.text.as_str().len())
+                            .then(|| cell_geometry.lines().len().checked_sub(1))
+                            .flatten()
+                            .map(|index| (index, &cell_geometry.lines()[index]))
+                    });
+                let Some((line_index, cell_line)) = caret_line else {
+                    continue;
+                };
+                let line_top = cell_geometry.lines()[..line_index]
+                    .iter()
+                    .map(|cell_line| cell_line.pitch_pt())
+                    .sum::<f32>();
+                let x = cell_line.shaped().map_or(0.0, |shaped| {
+                    shaped.caret_x(
+                        cell_offset,
+                        match selection.affinity {
+                            crate::CaretAffinity::Downstream => loom_fonts::Affinity::Leading,
+                            crate::CaretAffinity::Upstream => loom_fonts::Affinity::Trailing,
+                        },
+                    )
+                });
+                result.push(SelectionRect {
+                    page_index: line.page,
+                    block_id: block.id,
+                    start: cell_range.start + cell_offset,
+                    end: cell_range.start + cell_offset,
+                    rect: PageRect {
+                        x: line.bounds.x
+                            + (column_x + crate::TABLE_CELL_HORIZONTAL_INSET_PT + x) * zoom,
+                        y: line.bounds.y + (crate::TABLE_CELL_VERTICAL_INSET_PT + line_top) * zoom,
+                        width: 1.0,
+                        height: cell_line.pitch_pt() * zoom,
+                    },
+                });
+                continue;
+            }
+            let selected_start = (selection_start - block_start).max(cell_range.start);
+            let selected_end = (selection_end - block_start).min(cell_range.end);
+            if selected_start >= selected_end {
+                continue;
+            }
+            let from = selected_start - cell_range.start;
+            let to = selected_end - cell_range.start;
+            let mut line_top = 0.0;
+            for cell_line in cell_geometry.lines() {
+                if let Some(shaped) = cell_line.shaped() {
+                    for span in shaped.selection_spans(from..to) {
+                        result.push(SelectionRect {
+                            page_index: line.page,
+                            block_id: block.id,
+                            start: cell_range.start + span.source_range.start,
+                            end: cell_range.start + span.source_range.end,
+                            rect: PageRect {
+                                x: line.bounds.x
+                                    + (column_x
+                                        + crate::TABLE_CELL_HORIZONTAL_INSET_PT
+                                        + span.x_pt)
+                                        * zoom,
+                                y: line.bounds.y
+                                    + (crate::TABLE_CELL_VERTICAL_INSET_PT + line_top) * zoom,
+                                width: span.width_pt * zoom,
+                                height: cell_line.pitch_pt() * zoom,
+                            },
+                        });
+                    }
+                }
+                line_top += cell_line.pitch_pt();
             }
         }
     }

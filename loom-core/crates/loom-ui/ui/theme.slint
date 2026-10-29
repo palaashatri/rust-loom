@@ -38,6 +38,10 @@ struct TypeScale {
     title: length, heading: length, display: length, display-large: length,
 }
 
+struct Leading {
+    ui: length, caption: length, body: length, title: length,
+}
+
 struct Spacing {
     xs: length, sm: length, md: length, lg: length,
     xl: length, xxl: length, xxxl: length, xxxxl: length,
@@ -62,6 +66,8 @@ struct Metrics {
     formula-bar-height: length,
     icon-size: length,
     icon-small: length,
+    focus-ring: length,
+    focus-offset: length,
     radius-small: length,
     radius-medium: length,
     radius-large: length,
@@ -70,6 +76,7 @@ struct Metrics {
 struct ThemeTokens {
     palette: Palette,
     typography: TypeScale,
+    leading: Leading,
     space: Spacing,
     motion: Motion,
     metrics: Metrics,
@@ -101,6 +108,7 @@ export global Theme {
             micro: 10px, caption: 11px, body: 13px, body-large: 14px,
             title: 13px, heading: 20px, display: 24px, display-large: 32px,
         },
+        leading: { ui: 18px, caption: 15px, body: 20px, title: 18px },
         space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
         motion: {
             instant-ms: 0, fast-ms: 120, standard-ms: 180, deliberate-ms: 220,
@@ -113,6 +121,7 @@ export global Theme {
             header-height: 40px, panel-header-height: 32px,
             status-height: 28px, sheet-tab-height: 30px,
             formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
+            focus-ring: 2px, focus-offset: 2px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: false,
@@ -171,6 +180,12 @@ export global Theme {
         display: tokens.typography.display * max(1.0, root.text-scale),
         display-large: tokens.typography.display-large * max(1.0, root.text-scale),
     };
+    out property <Leading> leading: {
+        ui: tokens.leading.ui * max(1.0, root.text-scale),
+        caption: tokens.leading.caption * max(1.0, root.text-scale),
+        body: tokens.leading.body * max(1.0, root.text-scale),
+        title: tokens.leading.title * max(1.0, root.text-scale),
+    };
     function update-tokens() {
         tokens = active-theme == "dark" ? ThemeDark.tokens
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens
@@ -218,6 +233,7 @@ export global ThemeDark {
             micro: 10px, caption: 11px, body: 13px, body-large: 14px,
             title: 13px, heading: 20px, display: 24px, display-large: 32px,
         },
+        leading: { ui: 18px, caption: 15px, body: 20px, title: 18px },
         space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
         motion: {
             instant-ms: 0, fast-ms: 120, standard-ms: 180, deliberate-ms: 220,
@@ -230,6 +246,7 @@ export global ThemeDark {
             header-height: 40px, panel-header-height: 32px,
             status-height: 28px, sheet-tab-height: 30px,
             formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
+            focus-ring: 2px, focus-offset: 2px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: false,
@@ -258,6 +275,7 @@ export global ThemeHighContrast {
             micro: 10px, caption: 11px, body: 13px, body-large: 14px,
             title: 13px, heading: 20px, display: 24px, display-large: 32px,
         },
+        leading: { ui: 18px, caption: 15px, body: 20px, title: 18px },
         space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
         motion: {
             instant-ms: 0, fast-ms: 0, standard-ms: 0, deliberate-ms: 0,
@@ -270,6 +288,7 @@ export global ThemeHighContrast {
             header-height: 40px, panel-header-height: 32px,
             status-height: 28px, sheet-tab-height: 30px,
             formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
+            focus-ring: 2px, focus-offset: 2px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: true,
@@ -286,9 +305,10 @@ export global ResponsivePolicy {
     in-out property <length> context-toolbar-height: 40px;
     in-out property <length> labeled-toolbar-min-height: 48px;
     in-out property <length> labeled-toolbar-max-height: 52px;
-    /// Extra labeled-row height for a scaled 10 px caption and the 18 px toolbar
-    /// icon, which both grow with Theme.text-scale (14 px caption + 18 px icon per unit).
-    out property <length> toolbar-label-extra: (max(1.0, Theme.text-scale) - 1.0) * 32px;
+    /// Extra row height for the shared scaled caption line and 18 px toolbar
+    /// icon, so the label and icon keep their full token-sized geometry.
+    out property <length> toolbar-label-extra:
+        (max(1.0, Theme.text-scale) - 1.0) * (Theme.tokens.leading.caption + 18px);
 
     public pure function priority-1-icon-only(width: length) -> bool {
         return width < priority-1-icon-only-below;

@@ -470,6 +470,121 @@ fn closing_a_clean_document_does_not_prompt() {
 }
 
 #[test]
+fn menu_quit_uses_the_application_route_for_a_clean_document() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    let quit_calls = Rc::new(Cell::new(0));
+    let calls = quit_calls.clone();
+    wire_application_quit_with(&app, &state, Rc::new(move || calls.set(calls.get() + 1)));
+
+    assert!(dispatch_command(&app, local_menu::QUIT_COMMAND_ID));
+
+    assert_eq!(quit_calls.get(), 1, "a clean Quit exits immediately");
+    assert!(!app.get_save_changes_open());
+    assert_eq!(state.pending_replacement.get(), None);
+}
+
+#[test]
+fn menu_quit_uses_the_application_route_for_a_dirty_document() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    let quit_calls = Rc::new(Cell::new(0));
+    let calls = quit_calls.clone();
+    wire_application_quit_with(&app, &state, Rc::new(move || calls.set(calls.get() + 1)));
+    *state.current.borrow_mut() = text_document("edited since the last save");
+
+    assert!(dispatch_command(&app, local_menu::QUIT_COMMAND_ID));
+
+    assert_eq!(quit_calls.get(), 0, "dirty Quit waits for a user decision");
+    assert!(app.get_save_changes_open());
+    assert!(app.get_save_changes_closing());
+    assert_eq!(
+        state.pending_replacement.get(),
+        Some(PendingReplacement::QuitApplication)
+    );
+}
+
+#[test]
+fn cancelling_a_dirty_menu_quit_keeps_the_application_open() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    let quit_calls = Rc::new(Cell::new(0));
+    let calls = quit_calls.clone();
+    wire_application_quit_with(&app, &state, Rc::new(move || calls.set(calls.get() + 1)));
+    *state.current.borrow_mut() = text_document("edited since the last save");
+    assert!(dispatch_command(&app, local_menu::QUIT_COMMAND_ID));
+
+    cancel_pending_replacement(&app, &state);
+
+    assert_eq!(quit_calls.get(), 0);
+    assert!(!app.get_save_changes_open());
+    assert_eq!(state.pending_replacement.get(), None);
+    assert!(
+        document_is_dirty(&state),
+        "Cancel keeps the unsaved document"
+    );
+}
+
+#[test]
+fn successful_save_for_menu_quit_exits_the_application() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    state
+        .pending_replacement
+        .set(Some(PendingReplacement::QuitApplication));
+    let quit_calls = Rc::new(Cell::new(0));
+    let calls = quit_calls.clone();
+
+    continue_pending_replacement_with_quit(&app, &state, &None, move || calls.set(calls.get() + 1));
+
+    assert_eq!(quit_calls.get(), 1);
+    assert_eq!(state.pending_replacement.get(), None);
+}
+
+#[test]
+fn discard_for_menu_quit_exits_the_application_even_while_document_is_dirty() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    *state.current.borrow_mut() = text_document("edited since the last save");
+    assert!(document_is_dirty(&state));
+    state
+        .pending_replacement
+        .set(Some(PendingReplacement::QuitApplication));
+    let quit_calls = Rc::new(Cell::new(0));
+    let calls = quit_calls.clone();
+
+    continue_pending_replacement_with_quit(&app, &state, &None, move || calls.set(calls.get() + 1));
+
+    assert_eq!(quit_calls.get(), 1);
+    assert_eq!(state.pending_replacement.get(), None);
+}
+
+#[test]
+fn quit_menu_item_is_enabled_and_registered() {
+    let menu = local_menu::writer_menu_bar();
+    let quit = menu
+        .find_item(local_menu::QUIT_COMMAND_ID)
+        .expect("platform Quit item");
+    assert!(quit.is_enabled());
+
+    let registry = build_writer_registry();
+    let command = registry
+        .get(&CommandId::new(local_menu::QUIT_COMMAND_ID))
+        .expect("Quit command in Writer registry");
+    assert!(command.enabled);
+}
+
+#[test]
 fn adjacent_runs_that_render_alike_merge_into_one_segment() {
     // Runs that differ only in font size or family (attributes the page does
     // not draw per run) are one look, so they are one segment and one rule.

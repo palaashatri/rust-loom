@@ -110,11 +110,12 @@ export component IconOnlyToolbarItem inherits Rectangle {
     in property <bool> checked: false;
     in property <bool> compact-slot: true;
     callback clicked;
+    public function focus-item() { focus.focus(); }
     width: Theme.tokens.metrics.control-height;
     height: Theme.tokens.metrics.control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: focus.has-focus ? 2px : checked ? 1px : 0px;
-    border-color: focus.has-focus ? Theme.palette().focus : checked ? Theme.palette().border-strong : transparent;
+    border-width: 0px;
+    border-color: transparent;
     background: !enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : checked ? Theme.palette().selection-soft
@@ -126,6 +127,16 @@ export component IconOnlyToolbarItem inherits Rectangle {
     Icon {
         x: (root.width - 16px) / 2; y: (root.height - 16px) / 2; size: 16px; icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
+    }
+    state-outline := Rectangle {
+        x: Theme.tokens.metrics.focus-offset;
+        y: Theme.tokens.metrics.focus-offset;
+        width: max(0px, root.width - 2 * Theme.tokens.metrics.focus-offset);
+        height: max(0px, root.height - 2 * Theme.tokens.metrics.focus-offset);
+        border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
+        border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.checked ? 1px : 0px;
+        border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().border-strong : transparent;
+        background: transparent;
     }
     focus := FocusScope {
         enabled: root.enabled;
@@ -149,11 +160,12 @@ export component Overflow inherits Rectangle {
     in property <string> label: "More actions";
     in property <bool> enabled: true;
     callback clicked;
+    public function focus-item() { focus.focus(); }
     width: Theme.tokens.metrics.control-height;
     height: Theme.tokens.metrics.control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: focus.has-focus ? 2px : 0px;
-    border-color: focus.has-focus ? Theme.palette().focus : transparent;
+    border-width: 0px;
+    border-color: transparent;
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : touch.has-hover ? Theme.palette().surface-raised
@@ -169,8 +181,20 @@ export component Overflow inherits Rectangle {
         icon: "more";
         tint: !root.enabled ? Theme.palette().ink-disabled : Theme.palette().ink-secondary;
     }
+    state-outline := Rectangle {
+        x: Theme.tokens.metrics.focus-offset;
+        y: Theme.tokens.metrics.focus-offset;
+        width: max(0px, root.width - 2 * Theme.tokens.metrics.focus-offset);
+        height: max(0px, root.height - 2 * Theme.tokens.metrics.focus-offset);
+        border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
+        border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : 0px;
+        border-color: focus.has-focus ? Theme.palette().focus : transparent;
+        background: transparent;
+    }
     focus := FocusScope {
         enabled: root.enabled;
+        // The 28px hit target remains intact; hosts place only the visible
+        // focus outline inside the target using the shared 2px offset.
         key-pressed(event) => {
             if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
             return reject;

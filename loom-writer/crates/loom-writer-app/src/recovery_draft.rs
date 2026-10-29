@@ -54,24 +54,20 @@ impl RecoveredDraft {
         crate::file_title::display_title(self.source.as_deref(), &self.document.title)
     }
 
-    /// Whether this draft is unchanged from the file on disk, or is an untouched empty document.
     pub(crate) fn is_clean_against_source(&self) -> bool {
         match &self.source {
-            Some(path) => {
-                if let Ok(bytes) = std::fs::read(path) {
-                    if let Ok(on_disk) = loom_writer_core::load_document(&bytes) {
-                        return self.document.same_content_as(&on_disk);
-                    }
-                }
-                false
-            }
+            Some(path) => crate::save_flow::load_file(path)
+                .is_ok_and(|on_disk| self.document.same_content_as(&on_disk)),
             None => {
                 let WriterDocument {
                     id: _,
                     title,
                     page,
+                    header_footer,
                     comments,
+                    tracked_changes,
                     blocks,
+                    footnotes,
                     selection: _,
                 } = &self.document;
                 let empty_blocks = match blocks.as_slice() {
@@ -83,7 +79,10 @@ impl RecoveredDraft {
                 };
                 matches!(title.as_str(), "Untitled" | "Untitled Document")
                     && *page == Default::default()
+                    && *header_footer == Default::default()
                     && comments.is_empty()
+                    && footnotes.is_empty()
+                    && *tracked_changes == loom_writer_core::TrackedChanges::default()
                     && empty_blocks
             }
         }
@@ -155,6 +154,10 @@ pub(crate) fn kept_entries(root: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 #[path = "m3_persistence_tests.rs"]
 mod m3_persistence_tests;
+
+#[cfg(test)]
+#[path = "recovery_docx_tests.rs"]
+mod recovery_docx_tests;
 
 /// The payload one kept entry holds, if it holds one.
 pub(crate) fn read_kept(entry: &Path) -> Result<Option<Vec<u8>>, String> {

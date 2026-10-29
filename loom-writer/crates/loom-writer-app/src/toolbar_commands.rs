@@ -6,7 +6,10 @@ use std::cell::RefCell;
 
 use slint::{ComponentHandle, Global};
 
-use crate::{dispatch_command, FindBar, ResponsivePolicy, Theme, WriterApp};
+use crate::{dispatch_command, FindBar, ResponsivePolicy, Theme, WriterApp, WriterReviewState};
+
+/// Keep the same breathing room that the page canvas reserves around a sheet.
+const PAGE_FIT_GUTTER: f32 = 48.0;
 
 /// One zoom step, as a fraction of actual size.
 const ZOOM_STEP: f32 = 0.25;
@@ -32,11 +35,51 @@ pub(crate) fn dispatch(app: &WriterApp, id: &str) -> bool {
         "view.zoom_in" => app.invoke_page_zoom_changed(app.get_page_zoom() + ZOOM_STEP),
         "view.zoom_out" => app.invoke_page_zoom_changed(app.get_page_zoom() - ZOOM_STEP),
         "view.zoom_actual" => app.invoke_page_zoom_changed(1.0),
+        "view.zoom_fit_width" => fit_page(app, FitMode::Width),
+        "view.zoom_fit_page" => fit_page(app, FitMode::Page),
         "insert.comment" => app.invoke_open_comment_composer(),
         "edit.find" => app.global::<FindBar>().invoke_open_requested(false),
+        "writer.review.open" => {
+            let review = app.global::<WriterReviewState>();
+            review.set_panel_open(true);
+            review.invoke_navigate(0);
+        }
         _ => return dispatch_command(app, id),
     }
     true
+}
+
+#[derive(Clone, Copy)]
+enum FitMode {
+    Width,
+    Page,
+}
+
+fn fit_page(app: &WriterApp, mode: FitMode) {
+    let width = fit_scale(app.get_view_width(), app.get_page_width_pt());
+    let height = match mode {
+        FitMode::Width => None,
+        FitMode::Page => fit_scale(app.get_page_view_height(), app.get_page_height_pt()),
+    };
+    let Some(scale) = width.and_then(|width| match (mode, height) {
+        (FitMode::Width, _) => Some(width),
+        (FitMode::Page, Some(height)) => Some(width.min(height)),
+        (FitMode::Page, None) => None,
+    }) else {
+        app.set_status_right("Fit unavailable: page viewport geometry is not ready".into());
+        return;
+    };
+    app.invoke_page_zoom_changed(crate::normalize_page_zoom(scale, app.get_page_zoom()));
+}
+
+fn fit_scale(viewport_extent: f32, page_extent: f32) -> Option<f32> {
+    let available = viewport_extent - PAGE_FIT_GUTTER;
+    if !available.is_finite() || available <= 0.0 || !page_extent.is_finite() || page_extent <= 0.0
+    {
+        return None;
+    }
+    let scale = available / page_extent;
+    scale.is_finite().then_some(scale)
 }
 
 /// Routes toolbar and menu commands.

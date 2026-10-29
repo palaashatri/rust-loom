@@ -101,6 +101,70 @@ fn history_charges_owned_style_capacity_in_both_snapshots() {
 }
 
 #[test]
+fn history_charges_header_footer_owned_capacity_in_both_snapshots() {
+    let mut original = text_document("header footer");
+    original.header_footer = loom_writer_core::HeaderFooterConfig {
+        header_text: "Header".into(),
+        footer_text: "Footer".into(),
+        alignment: "center".into(),
+        ..Default::default()
+    };
+    let original = original.clone();
+    let mut larger = original.clone();
+    let config = &mut larger.header_footer;
+    let extra = increase_string_capacity(&mut config.header_text)
+        + increase_string_capacity(&mut config.footer_text)
+        + increase_string_capacity(&mut config.alignment);
+
+    let before = super::history::retained_bytes(&original, &original);
+    let after = super::history::retained_bytes(&larger, &larger);
+    assert!(
+        after >= before + 2 * extra,
+        "both owned header/footer snapshots must be charged for reserved storage: {before} -> {after}, extra {extra}"
+    );
+}
+
+#[test]
+fn history_charges_footnote_body_capacity_in_both_snapshots() {
+    let mut original = text_document("footnote");
+    let block_id = original.blocks[0].id;
+    original.footnotes.push(loom_writer_core::FootnoteEntry {
+        id: 1,
+        block_id,
+        offset: 0,
+        body: "Note".into(),
+    });
+    let original = original.clone();
+    let mut larger = original.clone();
+    let extra = increase_string_capacity(&mut larger.footnotes[0].body);
+
+    let before = super::history::retained_bytes(&original, &original);
+    let after = super::history::retained_bytes(&larger, &larger);
+    assert!(
+        after >= before + 2 * extra,
+        "both owned footnote snapshots must be charged for reserved storage: {before} -> {after}, extra {extra}"
+    );
+}
+
+#[test]
+fn header_footer_settings_undo_and_redo_with_document_actions() {
+    let before = text_document("body");
+    let mut after = before.clone();
+    after.header_footer.footer_text = "Page {page} of {total}".into();
+
+    let mut history = EditorHistory::new();
+    history.record(
+        before.clone(),
+        after.clone(),
+        HistoryKind::DocumentAction,
+        1,
+    );
+
+    assert_eq!(history.undo(), Some(before));
+    assert_eq!(history.redo(), Some(after));
+}
+
+#[test]
 fn history_charges_nested_table_allocations_and_shares_the_same_table() {
     use loom_objects::table::{Border, CellBorders, CellStyleOverride, Table, TextRun};
 

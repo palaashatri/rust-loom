@@ -34,7 +34,6 @@ fn painted_table_cell_geometry(
         banded_rows: table.banded_rows,
         banded_columns: table.banded_columns,
         first_column: table.first_column,
-        ..Default::default()
     };
     let resolved = style.resolve_cell(
         row,

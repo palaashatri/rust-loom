@@ -1,11 +1,19 @@
 import {
     LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton,
-    LoomTextField,
+    LoomTextField, LoomNumericField,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import { WriterFormatState } from "alignment_state.slint";
+import { WriterHeaderFooterState } from "writer_header_footer.slint";
 import { WriterFormatTab } from "text_formatting.slint";
+
+/// Exact page geometry displayed by Writer's document inspector, in millimeters.
+export struct WriterPageGeometry {
+    width_mm: float, height_mm: float,
+    top_mm: float, bottom_mm: float, left_mm: float, right_mm: float,
+    margin_top_pt: float, margin_bottom_pt: float, margin_left_pt: float, margin_right_pt: float,
+}
 
 /// One anchored comment thread shown in the format inspector.
 export struct WriterCommentEntry {
@@ -25,16 +33,24 @@ export component WriterInspector inherits LoomPanel {
     in property <string> shortcut-modifier: "Ctrl";
     in-out property <int> heading-level: 0;
     in-out property <int> font-size-pt: 11;
+    in-out property <string> font-size-value: "11";
     in-out property <int> text-alignment <=> WriterFormatState.text-alignment;
     in-out property <int> line-spacing-index: 1;
     in-out property <int> page-paper-index: 0;
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
+    in property <WriterPageGeometry> page-geometry: {
+        width_mm: 210.00, height_mm: 297.00,
+        top_mm: 25.40, bottom_mm: 25.40, left_mm: 25.40, right_mm: 25.40,
+        margin_top_pt: 72.0, margin_bottom_pt: 72.0, margin_left_pt: 72.0, margin_right_pt: 72.0,
+    };
     in-out property <int> list-style-index: 0;
     in property <[WriterCommentEntry]> comment-entries: [];
     in property <bool> active: false;
-    /// 0 = Format, 1 = Document (page setup and comments).
+    /// 0 = Format, 1 = Document (with Page Setup and Review sections).
     in-out property <int> inspector-tab: 0;
+    /// 0 = Page Setup, 1 = Review within the Document tab.
+    in-out property <int> document-tab: 0;
     /// Set to put the keyboard caret in the new-comment field.
     in-out property <bool> comment-focus-pending: false;
     /// Set by the composer when it takes focus; cleared by the next activation change.
@@ -46,7 +62,37 @@ export component WriterInspector inherits LoomPanel {
     in property <int> word-count: 83;
     in property <int> char-count: 507;
     in property <int> page-count: 1;
+    property <string> page-summary: root.page-count == 1 ? "1 page" : "" + root.page-count + " pages";
     in property <int> reading-time-mins: 0;
+
+    property <string> page-width-draft: "" + root.page-geometry.width_mm;
+    property <string> page-height-draft: "" + root.page-geometry.height_mm;
+    property <string> page-top-draft: "" + root.page-geometry.top_mm;
+    property <string> page-bottom-draft: "" + root.page-geometry.bottom_mm;
+    property <string> page-left-draft: "" + root.page-geometry.left_mm;
+    property <string> page-right-draft: "" + root.page-geometry.right_mm;
+    property <bool> page-width-invalid: false;
+    property <bool> page-height-invalid: false;
+    property <bool> page-top-invalid: false;
+    property <bool> page-bottom-invalid: false;
+    property <bool> page-left-invalid: false;
+    property <bool> page-right-invalid: false;
+    property <bool> geometry-invalid: page-width-invalid || page-height-invalid || page-top-invalid || page-bottom-invalid || page-left-invalid || page-right-invalid;
+
+    changed page-geometry => {
+        page-width-draft = "" + page-geometry.width_mm;
+        page-height-draft = "" + page-geometry.height_mm;
+        page-top-draft = "" + page-geometry.top_mm;
+        page-bottom-draft = "" + page-geometry.bottom_mm;
+        page-left-draft = "" + page-geometry.left_mm;
+        page-right-draft = "" + page-geometry.right_mm;
+        page-width-invalid = false;
+        page-height-invalid = false;
+        page-top-invalid = false;
+        page-bottom-invalid = false;
+        page-left-invalid = false;
+        page-right-invalid = false;
+    }
 
     callback toggle-bold;
     callback toggle-italic;
@@ -55,6 +101,7 @@ export component WriterInspector inherits LoomPanel {
     callback select-heading(int);
     callback increase-font-size;
     callback decrease-font-size;
+    callback apply-font-size(string) -> bool;
     callback select-alignment(int);
     callback indent-text;
     callback outdent-text;
@@ -62,6 +109,7 @@ export component WriterInspector inherits LoomPanel {
     callback select-paper-size(int);
     callback select-orientation(int);
     callback select-margins(int);
+    callback edit-page-geometry(string, string) -> bool;
     callback select-list-style(int);
     callback add-comment(string);
     callback set-comment-resolved(string, bool);
@@ -178,6 +226,7 @@ export component WriterInspector inherits LoomPanel {
                 table-first-column <=> root.table-first-column;
                 heading-level <=> root.heading-level;
                 font-size-pt <=> root.font-size-pt;
+                font-size-value <=> root.font-size-value;
                 text-alignment <=> root.text-alignment;
                 line-spacing-index <=> root.line-spacing-index;
                 list-style-index <=> root.list-style-index;
@@ -192,6 +241,7 @@ export component WriterInspector inherits LoomPanel {
                 select-heading(idx) => { root.select-heading(idx); }
                 increase-font-size => { root.increase-font-size(); }
                 decrease-font-size => { root.decrease-font-size(); }
+                apply-font-size(value) => { return root.apply-font-size(value); }
                 toggle-bold => { root.toggle-bold(); }
                 toggle-italic => { root.toggle-italic(); }
                 toggle-underline => { root.toggle-underline(); }
@@ -204,11 +254,36 @@ export component WriterInspector inherits LoomPanel {
             }
             if root.inspector-tab == 1 : VerticalLayout {
                 spacing: Theme.tokens.space.md;
-                property <bool> focus-pending: root.comment-focus-pending;
-                init => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; root.composer-took-focus = true; } }
-                changed focus-pending => { if (root.active && root.comment-focus-pending) { comment-field.focus-input(); root.comment-focus-pending = false; root.composer-took-focus = true; } }
+                VerticalLayout {
+                    padding-left: Theme.tokens.space.xl;
+                    padding-right: Theme.tokens.space.xl;
+                    LoomSegmentedControl {
+                        horizontal-stretch: 1;
+                        items: ["Page Setup", "Review"];
+                        current <=> root.document-tab;
+                        label: "Document section";
+                    }
+                }
 
-            LoomSectionHeader { title: "Comments"; }
+            if root.document-tab == 1 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                property <bool> focus-pending: root.comment-focus-pending;
+                init => {
+                    if (root.active && root.comment-focus-pending) {
+                        comment-field.focus-input();
+                        root.comment-focus-pending = false;
+                        root.composer-took-focus = true;
+                    }
+                }
+                changed focus-pending => {
+                    if (root.active && root.comment-focus-pending) {
+                        comment-field.focus-input();
+                        root.comment-focus-pending = false;
+                        root.composer-took-focus = true;
+                    }
+                }
+
+                LoomSectionHeader { title: "Comments"; }
 
             VerticalLayout {
                 padding-left: Theme.tokens.space.xl;
@@ -312,11 +387,20 @@ export component WriterInspector inherits LoomPanel {
                     }
                 }
             }
+            }
 
+            if root.document-tab == 0 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
             LoomSectionHeader { title: "Page Setup"; }
+            LoomButton {
+                label: "Headers and Footers";
+                variant: "secondary";
+                horizontal-stretch: 1;
+                clicked => { WriterHeaderFooterState.open-editor(); }
+            }
 
-            // The page summary sits at the top of Page Setup, inside the scroll area,
-            // so the sections above it, including Lists, are never covered at large text.
+            // Keep the page summary at the start of this independently selected
+            // region so comment volume cannot move Page Setup down the inspector.
             HorizontalLayout {
                 padding-left: Theme.tokens.space.xl;
                 padding-right: Theme.tokens.space.xl;
@@ -324,7 +408,7 @@ export component WriterInspector inherits LoomPanel {
                 Rectangle {
                     height: 52px;
                     accessible-role: AccessibleRole.text;
-                    accessible-label: "Page 1 of " + root.page-count;
+                    accessible-label: root.page-summary;
                     border-radius: Theme.tokens.metrics.radius-medium;
                     background: Theme.palette().surface-sunken;
                     border-width: 1px;
@@ -337,7 +421,7 @@ export component WriterInspector inherits LoomPanel {
                         alignment: center;
 
                         Text {
-                            text: "Page 1 of " + root.page-count;
+                            text: root.page-summary;
                             font-size: Theme.type.caption;
                             font-weight: 600;
                             color: Theme.palette().ink;
@@ -358,7 +442,7 @@ export component WriterInspector inherits LoomPanel {
                     horizontal-alignment: Theme.rtl ? right : left;
                 }
             LoomSegmentedControl {
-                items: ["A4", "US Letter"];
+                items: ["A4", "US Letter", "Custom"];
                 current <=> root.page-paper-index;
                 label: "Paper Size";
                 selected(idx) => { root.select-paper-size(idx); }
@@ -394,10 +478,113 @@ export component WriterInspector inherits LoomPanel {
                     horizontal-alignment: Theme.rtl ? right : left;
                 }
             LoomSegmentedControl {
-                items: ["Normal", "Narrow", "Wide"];
+                items: ["Normal", "Narrow", "Wide", "Custom"];
                 current <=> root.page-margins-index;
                 label: "Margins";
                 selected(idx) => { root.select-margins(idx); }
+            }
+            }
+
+            if root.page-paper-index == 2 : VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Custom paper size";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomNumericField {
+                        label: "Page width";
+                        description: "25.40–705.56 mm";
+                        unit: "mm";
+                        value <=> root.page-width-draft;
+                        invalid: root.page-width-invalid;
+                        edited(_) => { root.page-width-invalid = false; }
+                        accepted(value) => { root.page-width-invalid = !root.edit-page-geometry("width", value); }
+                        cancelled => { root.page-width-draft = "" + root.page-geometry.width_mm; root.page-width-invalid = false; }
+                    }
+                    LoomNumericField {
+                        label: "Page height";
+                        description: "25.40–705.56 mm";
+                        unit: "mm";
+                        value <=> root.page-height-draft;
+                        invalid: root.page-height-invalid;
+                        edited(_) => { root.page-height-invalid = false; }
+                        accepted(value) => { root.page-height-invalid = !root.edit-page-geometry("height", value); }
+                        cancelled => { root.page-height-draft = "" + root.page-geometry.height_mm; root.page-height-invalid = false; }
+                    }
+                }
+            }
+
+            if root.page-margins-index == 3 : VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Custom margins";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomNumericField {
+                        label: "Top margin";
+                        description: "0–705.56 mm; preserve at least 12.70 mm of text area";
+                        unit: "mm";
+                        value <=> root.page-top-draft;
+                        invalid: root.page-top-invalid;
+                        edited(_) => { root.page-top-invalid = false; }
+                        accepted(value) => { root.page-top-invalid = !root.edit-page-geometry("top", value); }
+                        cancelled => { root.page-top-draft = "" + root.page-geometry.top_mm; root.page-top-invalid = false; }
+                    }
+                    LoomNumericField {
+                        label: "Bottom margin";
+                        description: "0–705.56 mm; preserve at least 12.70 mm of text area";
+                        unit: "mm";
+                        value <=> root.page-bottom-draft;
+                        invalid: root.page-bottom-invalid;
+                        edited(_) => { root.page-bottom-invalid = false; }
+                        accepted(value) => { root.page-bottom-invalid = !root.edit-page-geometry("bottom", value); }
+                        cancelled => { root.page-bottom-draft = "" + root.page-geometry.bottom_mm; root.page-bottom-invalid = false; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomNumericField {
+                        label: "Left margin";
+                        description: "0–705.56 mm; preserve at least 12.70 mm of text area";
+                        unit: "mm";
+                        value <=> root.page-left-draft;
+                        invalid: root.page-left-invalid;
+                        edited(_) => { root.page-left-invalid = false; }
+                        accepted(value) => { root.page-left-invalid = !root.edit-page-geometry("left", value); }
+                        cancelled => { root.page-left-draft = "" + root.page-geometry.left_mm; root.page-left-invalid = false; }
+                    }
+                    LoomNumericField {
+                        label: "Right margin";
+                        description: "0–705.56 mm; preserve at least 12.70 mm of text area";
+                        unit: "mm";
+                        value <=> root.page-right-draft;
+                        invalid: root.page-right-invalid;
+                        edited(_) => { root.page-right-invalid = false; }
+                        accepted(value) => { root.page-right-invalid = !root.edit-page-geometry("right", value); }
+                        cancelled => { root.page-right-draft = "" + root.page-geometry.right_mm; root.page-right-invalid = false; }
+                    }
+                }
+            }
+            if root.geometry-invalid && (root.page-paper-index == 2 || root.page-margins-index == 3) : VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+                Text {
+                    text: "Enter valid millimeter values and leave at least 12.70 mm for text.";
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().danger;
+                    wrap: word-wrap;
+                    accessible-role: AccessibleRole.text;
+                }
             }
             }
             }

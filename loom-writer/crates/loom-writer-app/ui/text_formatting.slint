@@ -1,4 +1,4 @@
-import { LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton } from "foundation.slint";
+import { LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton, LoomNumericField } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { FontPicker, WriterFontField, WriterFontList } from "font_picker.slint";
 import { WriterFormatState } from "alignment_state.slint";
@@ -12,6 +12,7 @@ export component WriterFormatTab inherits VerticalLayout {
     in-out property <bool> table-first-column: false;
     in-out property <int> heading-level: 0;
     in-out property <int> font-size-pt: 11;
+    in-out property <string> font-size-value: "11";
     in-out property <int> text-alignment: 0;
     in-out property <int> line-spacing-index: 1;
     in-out property <int> list-style-index: 0;
@@ -26,6 +27,7 @@ export component WriterFormatTab inherits VerticalLayout {
     callback select-heading(int);
     callback increase-font-size;
     callback decrease-font-size;
+    callback apply-font-size(string) -> bool;
     callback toggle-bold;
     callback toggle-italic;
     callback toggle-underline;
@@ -35,6 +37,16 @@ export component WriterFormatTab inherits VerticalLayout {
     callback outdent-text;
     callback select-line-spacing(int);
     callback select-list-style(int);
+
+    property <string> font-size-draft: "11";
+    property <bool> font-size-invalid: false;
+    property <bool> paragraph-options-expanded: false;
+    property <bool> baseline-options-expanded: false;
+
+    changed font-size-value => {
+        root.font-size-draft = root.font-size-value;
+        root.font-size-invalid = false;
+    }
             spacing: Theme.tokens.space.md;
 
             if root.is-table-selected : WriterTableInspector {
@@ -47,94 +59,7 @@ export component WriterFormatTab inherits VerticalLayout {
                 table-action(act) => { root.table-action(act); }
             }
 
-        LoomSectionHeader { title: "Paragraph Style"; }
-
-        VerticalLayout {
-            padding-left: Theme.tokens.space.lg;
-            padding-right: Theme.tokens.space.lg;
-            Text {
-                text: "Paragraph Direction";
-                font-size: Theme.type.body;
-                color: Theme.palette().ink;
-            }
-            Rectangle {
-                height: Theme.scaled-control-height;
-                accessible-role: radio-group;
-                accessible-label: "Paragraph Direction";
-                if !Theme.rtl : HorizontalLayout {
-                    spacing: Theme.tokens.space.xs;
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Automatic";
-                        variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 0;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 0;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
-                        clicked => { WriterFormatState.select-direction(0); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Left to Right";
-                        variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 1;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 1;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
-                        clicked => { WriterFormatState.select-direction(1); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Right to Left";
-                        variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 2;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 2;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
-                        clicked => { WriterFormatState.select-direction(2); }
-                    }
-                }
-                if Theme.rtl : HorizontalLayout {
-                    spacing: Theme.tokens.space.xs;
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Right to Left";
-                        variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 2;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 2;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
-                        clicked => { WriterFormatState.select-direction(2); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Left to Right";
-                        variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 1;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 1;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
-                        clicked => { WriterFormatState.select-direction(1); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs * 2) / 3;
-                        label: "Automatic";
-                        variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
-                        selected: WriterFormatState.paragraph-direction == 0;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.paragraph-direction == 0;
-                        accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
-                        clicked => { WriterFormatState.select-direction(0); }
-                    }
-                }
-            }
-        }
+        LoomSectionHeader { title: "Text Style"; }
 
         VerticalLayout {
             padding-left: Theme.tokens.space.xl;
@@ -167,7 +92,7 @@ export component WriterFormatTab inherits VerticalLayout {
                 x: Theme.rtl ? 0px : parent.width - self.width;
                 y: (parent.height - self.height) / 2;
                 // Grows with text scale so its two icon buttons and the size fit.
-                width: 104px * max(1.0, Theme.text-scale);
+                width: min(164px * max(1.0, Theme.text-scale), 220px);
                 height: Theme.scaled-control-height;
                 border-radius: Theme.tokens.metrics.radius-medium;
                 border-width: 1px;
@@ -188,14 +113,20 @@ export component WriterFormatTab inherits VerticalLayout {
                         clicked => { root.decrease-font-size(); }
                     }
 
-                    Text {
+                    LoomNumericField {
                         horizontal-stretch: 1;
-                        text: root.font-size-pt + " pt";
-                        font-size: Theme.type.caption;
-                        font-weight: 600;
-                        color: Theme.palette().ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        label: "Font size";
+                        description: "6–72 pt in half-point increments";
+                        unit: "pt";
+                        field-min-width: 74px;
+                        value <=> root.font-size-draft;
+                        invalid: root.font-size-invalid;
+                        edited(_) => { root.font-size-invalid = false; }
+                        accepted(value) => { root.font-size-invalid = !root.apply-font-size(value); }
+                        cancelled => {
+                            root.font-size-draft = root.font-size-value;
+                            root.font-size-invalid = false;
+                        }
                     }
 
                     LoomIconButton {
@@ -220,14 +151,20 @@ export component WriterFormatTab inherits VerticalLayout {
                         clicked => { root.increase-font-size(); }
                     }
 
-                    Text {
+                    LoomNumericField {
                         horizontal-stretch: 1;
-                        text: root.font-size-pt + " pt";
-                        font-size: Theme.type.caption;
-                        font-weight: 600;
-                        color: Theme.palette().ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        label: "Font size";
+                        description: "6–72 pt in half-point increments";
+                        unit: "pt";
+                        field-min-width: 74px;
+                        value <=> root.font-size-draft;
+                        invalid: root.font-size-invalid;
+                        edited(_) => { root.font-size-invalid = false; }
+                        accepted(value) => { root.font-size-invalid = !root.apply-font-size(value); }
+                        cancelled => {
+                            root.font-size-draft = root.font-size-value;
+                            root.font-size-invalid = false;
+                        }
                     }
 
                     LoomIconButton {
@@ -339,132 +276,9 @@ export component WriterFormatTab inherits VerticalLayout {
                         : "Choose foreground color";
                 clicked => { WriterFormatState.open-foreground-color(); }
             }
-            if !Theme.rtl : HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                LoomButton {
-                    width: (parent.width - Theme.tokens.space.xs) / 2;
-                    label: "Superscript";
-                    selected: WriterFormatState.superscript-selected;
-                    variant: WriterFormatState.superscript-selected ? "secondary" : "ghost";
-                    enabled: WriterFormatState.inline-formatting-available;
-                    accessible-checkable: true;
-                    accessible-checked: WriterFormatState.superscript-selected;
-                    accessible-description: WriterFormatState.superscript-mixed
-                        ? "Superscript is mixed across the selection"
-                        : "Toggle superscript";
-                    clicked => { WriterFormatState.toggle-superscript(); }
-                }
-                LoomButton {
-                    width: (parent.width - Theme.tokens.space.xs) / 2;
-                    label: "Subscript";
-                    selected: WriterFormatState.subscript-selected;
-                    variant: WriterFormatState.subscript-selected ? "secondary" : "ghost";
-                    enabled: WriterFormatState.inline-formatting-available;
-                    accessible-checkable: true;
-                    accessible-checked: WriterFormatState.subscript-selected;
-                    accessible-description: WriterFormatState.subscript-mixed
-                        ? "Subscript is mixed across the selection"
-                        : "Toggle subscript";
-                    clicked => { WriterFormatState.toggle-subscript(); }
-                }
-            }
-            if Theme.rtl : HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                LoomButton {
-                    width: (parent.width - Theme.tokens.space.xs) / 2;
-                    label: "Subscript";
-                    selected: WriterFormatState.subscript-selected;
-                    variant: WriterFormatState.subscript-selected ? "secondary" : "ghost";
-                    enabled: WriterFormatState.inline-formatting-available;
-                    accessible-checkable: true;
-                    accessible-checked: WriterFormatState.subscript-selected;
-                    accessible-description: WriterFormatState.subscript-mixed
-                        ? "Subscript is mixed across the selection"
-                        : "Toggle subscript";
-                    clicked => { WriterFormatState.toggle-subscript(); }
-                }
-                LoomButton {
-                    width: (parent.width - Theme.tokens.space.xs) / 2;
-                    label: "Superscript";
-                    selected: WriterFormatState.superscript-selected;
-                    variant: WriterFormatState.superscript-selected ? "secondary" : "ghost";
-                    enabled: WriterFormatState.inline-formatting-available;
-                    accessible-checkable: true;
-                    accessible-checked: WriterFormatState.superscript-selected;
-                    accessible-description: WriterFormatState.superscript-mixed
-                        ? "Superscript is mixed across the selection"
-                        : "Toggle superscript";
-                    clicked => { WriterFormatState.toggle-superscript(); }
-                }
-            }
         }
 
         LoomSectionHeader { title: "Alignment & Spacing"; }
-
-        VerticalLayout {
-            padding-left: Theme.tokens.space.lg;
-            padding-right: Theme.tokens.space.lg;
-            Text {
-                text: "Logical Alignment";
-                font-size: Theme.type.body;
-                color: Theme.palette().ink;
-            }
-            Rectangle {
-                height: Theme.scaled-control-height;
-                accessible-role: radio-group;
-                accessible-label: "Logical Alignment";
-                if !Theme.rtl : HorizontalLayout {
-                    spacing: Theme.tokens.space.xs;
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs) / 2;
-                        label: "Start";
-                        variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
-                        selected: WriterFormatState.logical-alignment == 0;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.logical-alignment == 0;
-                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
-                        clicked => { WriterFormatState.select-logical-alignment(0); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs) / 2;
-                        label: "End";
-                        variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
-                        selected: WriterFormatState.logical-alignment == 1;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.logical-alignment == 1;
-                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
-                        clicked => { WriterFormatState.select-logical-alignment(1); }
-                    }
-                }
-                if Theme.rtl : HorizontalLayout {
-                    spacing: Theme.tokens.space.xs;
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs) / 2;
-                        label: "End";
-                        variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
-                        selected: WriterFormatState.logical-alignment == 1;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.logical-alignment == 1;
-                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
-                        clicked => { WriterFormatState.select-logical-alignment(1); }
-                    }
-                    LoomButton {
-                        width: (parent.width - Theme.tokens.space.xs) / 2;
-                        label: "Start";
-                        variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
-                        selected: WriterFormatState.logical-alignment == 0;
-                        enabled: WriterFormatState.paragraph-formatting-available;
-                        accessible-checkable: true;
-                        accessible-checked: WriterFormatState.logical-alignment == 0;
-                        accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
-                        clicked => { WriterFormatState.select-logical-alignment(0); }
-                    }
-                }
-            }
-        }
 
         // Alignment fills the row; the two indent buttons sit at the reading end.
         // One layout holds both, so the buttons can never be placed past the row.
@@ -564,5 +378,248 @@ export component WriterFormatTab inherits VerticalLayout {
             label: "List Style";
             selected(idx) => { root.select-list-style(idx); }
         }
+        }
+
+        LoomButton {
+            horizontal-stretch: 1;
+            label: "Paragraph options";
+            icon: root.paragraph-options-expanded ? "chevron-down" : "chevron-right";
+            variant: "ghost";
+            leading: true;
+            selected: root.paragraph-options-expanded;
+            accessible-expandable: true;
+            accessible-expanded: root.paragraph-options-expanded;
+            clicked => { root.paragraph-options-expanded = !root.paragraph-options-expanded; }
+        }
+        if root.paragraph-options-expanded : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                Text {
+                    text: "Paragraph Direction";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    accessible-role: radio-group;
+                    accessible-label: "Paragraph Direction";
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Automatic";
+                            variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 0;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
+                            clicked => { WriterFormatState.select-direction(0); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Left to Right";
+                            variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 1;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
+                            clicked => { WriterFormatState.select-direction(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Right to Left";
+                            variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 2;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 2;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
+                            clicked => { WriterFormatState.select-direction(2); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Right to Left";
+                            variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 2;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 2;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
+                            clicked => { WriterFormatState.select-direction(2); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Left to Right";
+                            variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 1;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
+                            clicked => { WriterFormatState.select-direction(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Automatic";
+                            variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 0;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
+                            clicked => { WriterFormatState.select-direction(0); }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                Text {
+                    text: "Logical Alignment";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    accessible-role: radio-group;
+                    accessible-label: "Logical Alignment";
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "Start";
+                            variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 0;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
+                            clicked => { WriterFormatState.select-logical-alignment(0); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "End";
+                            variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 1;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
+                            clicked => { WriterFormatState.select-logical-alignment(1); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "End";
+                            variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 1;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
+                            clicked => { WriterFormatState.select-logical-alignment(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "Start";
+                            variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 0;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
+                            clicked => { WriterFormatState.select-logical-alignment(0); }
+                        }
+                    }
+                }
+            }
+        }
+
+        LoomButton {
+            horizontal-stretch: 1;
+            label: "Baseline options";
+            icon: root.baseline-options-expanded ? "chevron-down" : "chevron-right";
+            variant: "ghost";
+            leading: true;
+            selected: root.baseline-options-expanded;
+            accessible-expandable: true;
+            accessible-expanded: root.baseline-options-expanded;
+            clicked => { root.baseline-options-expanded = !root.baseline-options-expanded; }
+        }
+        if root.baseline-options-expanded : VerticalLayout {
+            VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                spacing: Theme.tokens.space.xs;
+                if !Theme.rtl : HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        width: (parent.width - Theme.tokens.space.xs) / 2;
+                        label: "Superscript";
+                        selected: WriterFormatState.superscript-selected;
+                        variant: WriterFormatState.superscript-selected ? "secondary" : "ghost";
+                        enabled: WriterFormatState.inline-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.superscript-selected;
+                        accessible-description: WriterFormatState.superscript-mixed
+                            ? "Superscript is mixed across the selection"
+                            : "Toggle superscript";
+                        clicked => { WriterFormatState.toggle-superscript(); }
+                    }
+                    LoomButton {
+                        width: (parent.width - Theme.tokens.space.xs) / 2;
+                        label: "Subscript";
+                        selected: WriterFormatState.subscript-selected;
+                        variant: WriterFormatState.subscript-selected ? "secondary" : "ghost";
+                        enabled: WriterFormatState.inline-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.subscript-selected;
+                        accessible-description: WriterFormatState.subscript-mixed
+                            ? "Subscript is mixed across the selection"
+                            : "Toggle subscript";
+                        clicked => { WriterFormatState.toggle-subscript(); }
+                    }
+                }
+                if Theme.rtl : HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        width: (parent.width - Theme.tokens.space.xs) / 2;
+                        label: "Subscript";
+                        selected: WriterFormatState.subscript-selected;
+                        variant: WriterFormatState.subscript-selected ? "secondary" : "ghost";
+                        enabled: WriterFormatState.inline-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.subscript-selected;
+                        accessible-description: WriterFormatState.subscript-mixed
+                            ? "Subscript is mixed across the selection"
+                            : "Toggle subscript";
+                        clicked => { WriterFormatState.toggle-subscript(); }
+                    }
+                    LoomButton {
+                        width: (parent.width - Theme.tokens.space.xs) / 2;
+                        label: "Superscript";
+                        selected: WriterFormatState.superscript-selected;
+                        variant: WriterFormatState.superscript-selected ? "secondary" : "ghost";
+                        enabled: WriterFormatState.inline-formatting-available;
+                        accessible-checkable: true;
+                        accessible-checked: WriterFormatState.superscript-selected;
+                        accessible-description: WriterFormatState.superscript-mixed
+                            ? "Superscript is mixed across the selection"
+                            : "Toggle superscript";
+                        clicked => { WriterFormatState.toggle-superscript(); }
+                    }
+                }
+            }
         }
 }

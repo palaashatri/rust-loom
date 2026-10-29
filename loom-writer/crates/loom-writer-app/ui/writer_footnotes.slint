@@ -1,0 +1,225 @@
+import { LoomButton } from "foundation.slint";
+import { TextEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct WriterFootnoteLine {
+    number: string,
+    text: string,
+    accessible-label: string,
+    number-x: length,
+    text-x: length,
+    y: length,
+    number-width: length,
+    text-width: length,
+    font-size: length,
+    line-height: length,
+}
+
+export struct WriterFootnoteReference {
+    id: string,
+    label: string,
+    accessible-label: string,
+    x: length,
+    y: length,
+    font-size: length,
+    width: length,
+}
+
+export global WriterFootnoteState {
+    in-out property <bool> dialog-open: false;
+    in-out property <string> selected-id: "";
+    in-out property <string> draft-body: "";
+    in-out property <string> error: "";
+    in property <[WriterFootnoteLine]> page-lines: [];
+    in property <[WriterFootnoteReference]> page-references: [];
+    callback open-editor;
+    callback reference-selected(string);
+    callback apply;
+    callback remove;
+    callback cancel;
+}
+
+/// Edit one anchored footnote without changing the document until Apply.
+export component WriterFootnoteDialog inherits FocusScope {
+    private property <int> tab-index: 0;
+
+    public function focus-tab(index: int) {
+        let last = WriterFootnoteState.selected-id == "" ? 2 : 3;
+        tab-index = Math.mod(index + last + 1, last + 1);
+        if (tab-index == 0) { body-field.focus(); }
+        else if (tab-index == 1) { apply-button.grab-focus(); }
+        else if (WriterFootnoteState.selected-id != "" && tab-index == 2) {
+            remove-button.grab-focus();
+        }
+        else { cancel-button.grab-focus(); }
+    }
+
+    init => { root.focus-tab(0); }
+    key-pressed(event) => {
+        if (event.text == Key.Escape) { WriterFootnoteState.cancel(); return accept; }
+        if (event.text == Key.Tab || event.text == Key.Backtab) {
+            let backwards = event.text == Key.Backtab || event.modifiers.shift;
+            root.focus-tab(root.tab-index + (backwards ? -1 : 1));
+            return accept;
+        }
+        return reject;
+    }
+
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+        TouchArea { clicked => { root.focus-tab(0); } }
+
+        Rectangle {
+            width: min(600px * max(1.0, Theme.text-scale), root.width - 48px);
+            height: min(320px * max(1.0, Theme.text-scale), root.height - 48px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            layout := VerticalLayout {
+                padding: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.md;
+
+                Text {
+                    text: WriterFootnoteState.selected-id == "" ? "Add Footnote" : "Edit Footnote";
+                    font-size: Theme.type.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                }
+                Text {
+                    text: "Write the note body. Apply saves one undoable change.";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink-secondary;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: 144px * max(1.0, Theme.text-scale);
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    border-width: 1px;
+                    border-color: body-field.has-focus ? Theme.palette().focus : Theme.palette().border;
+                    background: Theme.palette().surface;
+                    body-field := TextEdit {
+                        x: Theme.tokens.space.sm;
+                        y: Theme.tokens.space.sm;
+                        width: parent.width - 2 * Theme.tokens.space.sm;
+                        height: parent.height - 2 * Theme.tokens.space.sm;
+                        font-size: Theme.type.body;
+                        font-family: Theme.document-font-family;
+                        wrap: word-wrap;
+                        placeholder-text: "Footnote body";
+                        text <=> WriterFootnoteState.draft-body;
+                        accessible-role: AccessibleRole.text-input;
+                        accessible-label: "Footnote body";
+                        edited(_) => { WriterFootnoteState.error = ""; }
+                    }
+                }
+                if WriterFootnoteState.error != "" : Text {
+                    text: WriterFootnoteState.error;
+                    color: Theme.palette().danger;
+                    font-size: Theme.type.caption;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: WriterFootnoteState.error;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    apply-button := LoomButton {
+                        label: "Apply";
+                        variant: "primary";
+                        x: parent.width - self.width;
+                        clicked => { WriterFootnoteState.apply(); }
+                    }
+                    remove-button := LoomButton {
+                        label: "Remove";
+                        variant: "danger";
+                        enabled: WriterFootnoteState.selected-id != "";
+                        x: apply-button.x - Theme.tokens.space.sm - self.width;
+                        clicked => { WriterFootnoteState.remove(); }
+                    }
+                    cancel-button := LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        x: remove-button.x - Theme.tokens.space.sm - self.width;
+                        clicked => { WriterFootnoteState.cancel(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component WriterFootnoteBodyLine inherits Rectangle {
+    in property <WriterFootnoteLine> line;
+    in property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
+    x: root.line.number-x * root.page-zoom;
+    y: root.line.y * root.page-zoom;
+    width: (root.line.number-width + root.line.text-width) * root.page-zoom;
+    height: root.line.line-height * root.page-zoom;
+    background: transparent;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.line.accessible-label;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: root.line.number-width * root.page-zoom;
+        height: parent.height;
+        text: root.line.number;
+        font-family: Theme.document-font-family;
+        font-size: root.line.font-size * root.page-zoom;
+        color: root.page-appearance == "black" ? #FFFFFF : #000000;
+        horizontal-alignment: Theme.rtl ? right : left;
+        vertical-alignment: center;
+        wrap: no-wrap;
+        accessible-role: AccessibleRole.none;
+    }
+    Text {
+        x: (root.line.text-x - root.line.number-x) * root.page-zoom;
+        y: 0px;
+        width: root.line.text-width * root.page-zoom;
+        height: parent.height;
+        text: root.line.text;
+        font-family: Theme.document-font-family;
+        font-size: root.line.font-size * root.page-zoom;
+        color: root.page-appearance == "black" ? #FFFFFF : #000000;
+        horizontal-alignment: Theme.rtl ? right : left;
+        vertical-alignment: center;
+        wrap: no-wrap;
+        accessible-role: AccessibleRole.none;
+    }
+}
+
+export component WriterFootnoteReferenceText inherits TouchArea {
+    in property <WriterFootnoteReference> reference;
+    in property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
+    x: root.reference.x * root.page-zoom;
+    y: root.reference.y * root.page-zoom;
+    width: max(20px, root.reference.width) * root.page-zoom;
+    height: max(20px, root.reference.font-size * 1.4) * root.page-zoom;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.reference.accessible-label;
+    accessible-action-default => { root.clicked(); }
+    clicked => { WriterFootnoteState.reference-selected(root.reference.id); }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.reference.label;
+        font-family: Theme.document-font-family;
+        font-size: root.reference.font-size * root.page-zoom;
+        color: root.page-appearance == "black" ? #FFFFFF : #000000;
+        vertical-alignment: center;
+        accessible-role: AccessibleRole.none;
+    }
+}

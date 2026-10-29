@@ -7,7 +7,7 @@
 use crate::DesktopError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Callback invoked after a menu adapter has validated and accepted a command
@@ -978,12 +978,38 @@ pub trait MenuBarService: Send + Sync {
     }
 }
 
+/// Result of checking whether the native menu bar is actually installed.
+///
+/// On macOS, `Installed` means the AppKit main menu is the same root menu
+/// created by this service and the check ran on the main thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeMenuInstallationStatus {
+    /// No menu installation has been confirmed.
+    NotInstalled,
+    /// AppKit inspection must run on the main thread.
+    MainThreadRequired,
+    /// The AppKit main menu matches this service's root menu.
+    Installed,
+    /// AppKit has a different main menu than this service's root menu.
+    AppKitRootMismatch,
+    /// AppKit's current menu could not be inspected.
+    VerificationUnavailable,
+}
+
+static NEXT_NATIVE_MENU_INSTALLATION_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_native_menu_installation_id() -> u64 {
+    NEXT_NATIVE_MENU_INSTALLATION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Production native global menu bar service for macOS and Linux.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct NativeMenuBar {
     current: Arc<Mutex<Option<MenuBar>>>,
     action_sink: Arc<Mutex<Option<MenuActionSink>>>,
-    installed: Arc<AtomicBool>,
+    installation_status: Arc<Mutex<NativeMenuInstallationStatus>>,
+    installation_id: Arc<AtomicU64>,
+    route_quit_through_command: bool,
 }
 
 impl NativeMenuBar {
@@ -992,13 +1018,53 @@ impl NativeMenuBar {
         Self::default()
     }
 
-    /// Check if native menus are currently installed.
-    pub fn is_installed(&self) -> bool {
-        self.installed.load(Ordering::SeqCst)
+    /// Route macOS Quit through this service's normal command sink.
+    ///
+    /// This is intended for applications that guard Quit with unsaved-change
+    /// handling. The default retains AppKit's standard Quit item behavior.
+    pub fn with_command_routed_quit(mut self) -> Self {
+        self.route_quit_through_command = true;
+        self
     }
 
-    /// Returns a snapshot of the currently installed menu bar for diagnostics
-    /// and deterministic adapter tests.  The snapshot is detached from the
+    /// Install a menu bar and return the resulting native installation state.
+    ///
+    /// This preserves the legacy `MenuBarService::install_menu_bar` behavior
+    /// while giving callers an explicit result before they hide a local fallback.
+    pub fn install_menu_bar_with_status(
+        &self,
+        menu_bar: &MenuBar,
+    ) -> Result<NativeMenuInstallationStatus, DesktopError> {
+        <Self as MenuBarService>::install_menu_bar(self, menu_bar)?;
+        Ok(self.installation_status())
+    }
+
+    /// Check the current native installation state.
+    ///
+    /// On macOS this confirms that AppKit's main menu still points at this
+    /// service's root menu, and reports `MainThreadRequired` off the main thread.
+    pub fn installation_status(&self) -> NativeMenuInstallationStatus {
+        let last_status = *self.installation_status.lock().unwrap();
+        #[cfg(target_os = "macos")]
+        {
+            crate::macos_menu::native_menu_installation_status(
+                self.installation_id.load(Ordering::Relaxed),
+                last_status,
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            last_status
+        }
+    }
+
+    /// Check whether the adapter currently reports a confirmed installation.
+    pub fn is_installed(&self) -> bool {
+        self.installation_status() == NativeMenuInstallationStatus::Installed
+    }
+
+    /// Returns a snapshot of the currently registered menu bar for diagnostics
+    /// and deterministic adapter tests. The snapshot is detached from the
     /// platform object, so callers cannot mutate live menu state accidentally.
     pub fn installed_menu_bar(&self) -> Option<MenuBar> {
         self.current.lock().unwrap().clone()
@@ -1013,10 +1079,26 @@ impl NativeMenuBar {
     }
 }
 
+impl Default for NativeMenuBar {
+    fn default() -> Self {
+        Self {
+            current: Arc::new(Mutex::new(None)),
+            action_sink: Arc::new(Mutex::new(None)),
+            installation_status: Arc::new(Mutex::new(NativeMenuInstallationStatus::NotInstalled)),
+            installation_id: Arc::new(AtomicU64::new(next_native_menu_installation_id())),
+            route_quit_through_command: false,
+        }
+    }
+}
+
 impl MenuBarService for NativeMenuBar {
     fn install_menu_bar(&self, menu_bar: &MenuBar) -> Result<(), DesktopError> {
+        let installation_id = next_native_menu_installation_id();
+        self.installation_id
+            .store(installation_id, Ordering::Relaxed);
         *self.current.lock().unwrap() = Some(menu_bar.clone());
-        self.installed.store(true, Ordering::SeqCst);
+        *self.installation_status.lock().unwrap() = NativeMenuInstallationStatus::NotInstalled;
+
         #[cfg(target_os = "macos")]
         {
             let current = self.current.clone();
@@ -1035,8 +1117,20 @@ impl MenuBarService for NativeMenuBar {
                 }
                 Ok(())
             });
-            crate::macos_menu::install_native_macos_menu(menu_bar, dispatcher)?;
+            let status = crate::macos_menu::install_native_macos_menu(
+                menu_bar,
+                dispatcher,
+                self.route_quit_through_command,
+                installation_id,
+            )?;
+            *self.installation_status.lock().unwrap() = status;
         }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            *self.installation_status.lock().unwrap() = NativeMenuInstallationStatus::Installed;
+        }
+
         Ok(())
     }
 
@@ -1088,7 +1182,7 @@ impl MenuBarService for NativeMenuBar {
         item_id: &str,
         source: CommandSource,
     ) -> Result<CommandAction, DesktopError> {
-        // Drop the menu-state lock before invoking application code.  A sink
+        // Drop the menu-state lock before invoking application code. A sink
         // commonly synchronizes the menu after mutating document state and
         // therefore may need to acquire `current` again.
         let action = {

@@ -2,6 +2,24 @@ import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 
+export struct WriterTemplatePreviewBlock {
+    kind: string,
+    text: string,
+}
+
+export struct WriterTemplateDescriptor {
+    stable-id: string,
+    display-name: string,
+    category: int,
+    preview-kind: string,
+    appearance: string,
+    preview-blocks: [WriterTemplatePreviewBlock],
+}
+
+export global WriterTemplateCatalog {
+    in-out property <[WriterTemplateDescriptor]> templates: [];
+}
+
 component WriterTemplateCard inherits Rectangle {
     in property <string> title: "Blank";
     in property <bool> selected: false;
@@ -9,6 +27,8 @@ component WriterTemplateCard inherits Rectangle {
     in property <length> preview-width: 140px;
     in property <length> preview-height: 180px;
     in property <color> preview-background: Theme.palette().paper;
+    in property <string> preview-label: "Template preview";
+    in property <string> preview-kind: "";
     callback clicked;
 
     width: 160px;
@@ -36,6 +56,9 @@ component WriterTemplateCard inherits Rectangle {
             drop-shadow-offset-y: 4px;
             drop-shadow-color: Theme.palette().shadow;
             clip: true;
+            accessible-role: groupbox;
+            accessible-label: root.preview-label;
+            accessible-description: root.preview-kind;
             @children
         }
 
@@ -108,139 +131,54 @@ component CategoryRow inherits Rectangle {
     TouchArea { clicked => { root.clicked(); } }
 }
 
-/// One template card, whose miniature document is chosen by its number. The
-/// same six cards appear in either reading order.
+/// A template card is selected and dispatched by its stable catalog ID. Its
+/// position is only for layout and keyboard order; it never determines output.
 component WriterTemplateOption inherits WriterTemplateCard {
-    in property <int> index: 0;
-    in property <int> current: 0;
+    in property <WriterTemplateDescriptor> descriptor;
+    in property <string> current-template-id: "blank";
 
-    title: ["Blank", "Blank Black", "Executive Report", "Business Letter", "Curriculum Vitae", "Newsletter"][root.index];
-    selected: root.current == root.index;
-    preview-background: root.index == 1 ? #18181b : Theme.palette().paper;
+    title: root.descriptor.display-name;
+    accessible-description: "Preview: " + root.descriptor.preview-kind;
+    selected: root.current-template-id == root.descriptor.stable-id;
+    preview-background: root.descriptor.appearance == "black" ? #000000 : Theme.palette().paper;
+    preview-label: root.descriptor.display-name + " preview";
+    preview-kind: root.descriptor.preview-kind;
 
-    if root.index == 0 : VerticalLayout {
-        spacing: 8px;
-        padding: 16px;
-        Text {
-            text: "Aa";
-            font-size: Theme.tokens.typography.display-large;
-            font-weight: 700;
-            color: Theme.palette().paper-ink;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            vertical-stretch: 1;
-        }
-        Rectangle { height: 1px; background: Theme.palette().paper-line; }
-    }
-    if root.index == 1 : VerticalLayout {
-        spacing: 8px;
-        padding: 16px;
-        Text {
-            text: "Aa";
-            font-size: Theme.tokens.typography.display-large;
-            font-weight: 700;
-            color: #f4f4f5;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            vertical-stretch: 1;
-        }
-        Rectangle { height: 1px; background: #3f3f46; }
-    }
-    if root.index == 2 : VerticalLayout {
-        spacing: 6px;
-        padding: 14px;
-        Text { text: "REPORT TITLE"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().paper-ink; }
-        Rectangle { height: 2px; background: Theme.palette().accent; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
-        Rectangle { height: 6px; background: transparent; }
-        Text { text: "Executive Summary"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
-        Rectangle { vertical-stretch: 1; background: transparent; }
-    }
-    if root.index == 3 : VerticalLayout {
-        spacing: 6px;
-        padding: 14px;
-        Text { text: "Your Name"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().paper-ink; }
-        Text { text: "October 24, 2026"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; }
-        Rectangle { height: 1px; background: Theme.palette().paper-line; }
-        Text { text: "Dear Recipient,"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-ink; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
-        Rectangle { vertical-stretch: 1; background: transparent; }
-    }
-    if root.index == 4 : VerticalLayout {
-        spacing: 5px;
-        padding: 12px;
-        Text { text: "YOUR NAME"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().paper-ink; }
-        Rectangle { height: 2px; background: Theme.palette().content-cool; }
-        Text { text: "EXPERIENCE"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
-        Text { text: "EDUCATION"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
-        Rectangle { height: 3px; background: Theme.palette().paper-line; }
-        Rectangle { vertical-stretch: 1; background: transparent; }
-    }
-    if root.index == 5 : VerticalLayout {
+    if root.descriptor.preview-blocks.length > 0 : VerticalLayout {
         spacing: 4px;
         padding: 12px;
-        Rectangle {
-            height: 20px;
-            background: Theme.palette().content-accent-soft;
-            border-radius: 2px;
-            Text { text: "NEWSLETTER"; font-size: 8px; font-weight: 700; color: Theme.palette().accent; horizontal-alignment: center; vertical-alignment: center; }
-        }
-        HorizontalLayout {
-            spacing: 6px;
-            vertical-stretch: 1;
-            VerticalLayout {
-                spacing: 3px;
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-            VerticalLayout {
-                spacing: 3px;
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
+        for block[idx] in root.descriptor.preview-blocks : Text {
+            text: block.text;
+            accessible-label: block.text;
+            font-size: block.kind == "heading1" ? Theme.tokens.typography.caption
+                : block.kind == "heading2" ? Theme.tokens.typography.micro
+                : Theme.tokens.typography.micro;
+            font-weight: block.kind == "paragraph" ? 400 : 600;
+            color: root.descriptor.appearance == "black" ? #ffffff
+                : block.kind == "paragraph" ? Theme.palette().paper-muted : Theme.palette().paper-ink;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            vertical-stretch: 0;
         }
     }
 }
 
 export component TemplateChooserModal inherits Rectangle {
-    in-out property <int> template-selected: 0;
+    in-out property <string> template-selected: "blank";
     in-out property <int> template-category: 0;
+    property <int> template-columns: root.width <= 1024px && Theme.text-scale >= 2.0 ? 2 : 3;
+    property <length> template-scroll-y: 0px;
     callback cancel-template;
-    callback create-template(int);
+    callback create-template(string);
 
-    function template-visible(template-index: int) -> bool {
-        return root.template-category == 0
-            || (root.template-category == 1 && (template-index == 0 || template-index == 1))
-            || (root.template-category == 2 && template-index == 2)
-            || (root.template-category == 3 && template-index == 3)
-            || (root.template-category == 4 && template-index == 4)
-            || (root.template-category == 5 && template-index == 5);
+    function template-visible(category: int) -> bool {
+        return root.template-category == 0 || category == root.template-category;
     }
 
     function choose-template-category(category-index: int) {
         root.template-category = category-index;
-        if (category-index == 1 && root.template-selected > 1) {
-            root.template-selected = 0;
-        } else if (category-index == 2) {
-            root.template-selected = 2;
-        } else if (category-index == 3) {
-            root.template-selected = 3;
-        } else if (category-index == 4) {
-            root.template-selected = 4;
-        } else if (category-index == 5) {
-            root.template-selected = 5;
+        if (category-index > 0) {
+            root.template-selected = root.template-id-for-category(category-index);
         }
     }
 
@@ -253,16 +191,50 @@ export component TemplateChooserModal inherits Rectangle {
     // Cancel button and its Create button without leaving the dialog.
     in property <int> refocus-tick: 0;
     changed refocus-tick => { chooser-focus.focus(); }
+    changed template-selected => { root.reveal-selected-template(); }
+    changed template-columns => { root.reveal-selected-template(); }
 
-    // The nearest visible template in the direction of `delta`, or the current one.
-    function pick-template(delta: int) -> int {
-        let s = root.template-selected;
-        if (s + delta >= 0 && s + delta <= 5 && root.template-visible(s + delta)) { return s + delta; }
-        if (s + 2 * delta >= 0 && s + 2 * delta <= 5 && root.template-visible(s + 2 * delta)) { return s + 2 * delta; }
-        if (s + 3 * delta >= 0 && s + 3 * delta <= 5 && root.template-visible(s + 3 * delta)) { return s + 3 * delta; }
-        if (s + 4 * delta >= 0 && s + 4 * delta <= 5 && root.template-visible(s + 4 * delta)) { return s + 4 * delta; }
-        if (s + 5 * delta >= 0 && s + 5 * delta <= 5 && root.template-visible(s + 5 * delta)) { return s + 5 * delta; }
-        return s;
+    function template-id-for-category(category: int) -> string {
+        if (WriterTemplateCatalog.templates.length > 0 && WriterTemplateCatalog.templates[0].category == category) { return WriterTemplateCatalog.templates[0].stable-id; }
+        if (WriterTemplateCatalog.templates.length > 1 && WriterTemplateCatalog.templates[1].category == category) { return WriterTemplateCatalog.templates[1].stable-id; }
+        if (WriterTemplateCatalog.templates.length > 2 && WriterTemplateCatalog.templates[2].category == category) { return WriterTemplateCatalog.templates[2].stable-id; }
+        if (WriterTemplateCatalog.templates.length > 3 && WriterTemplateCatalog.templates[3].category == category) { return WriterTemplateCatalog.templates[3].stable-id; }
+        if (WriterTemplateCatalog.templates.length > 4 && WriterTemplateCatalog.templates[4].category == category) { return WriterTemplateCatalog.templates[4].stable-id; }
+        if (WriterTemplateCatalog.templates.length > 5 && WriterTemplateCatalog.templates[5].category == category) { return WriterTemplateCatalog.templates[5].stable-id; }
+        return root.template-id-at(root.template-index(root.template-selected));
+    }
+
+    function template-index(template-id: string) -> int {
+        if (WriterTemplateCatalog.templates.length > 0 && WriterTemplateCatalog.templates[0].stable-id == template-id) { return 0; }
+        if (WriterTemplateCatalog.templates.length > 1 && WriterTemplateCatalog.templates[1].stable-id == template-id) { return 1; }
+        if (WriterTemplateCatalog.templates.length > 2 && WriterTemplateCatalog.templates[2].stable-id == template-id) { return 2; }
+        if (WriterTemplateCatalog.templates.length > 3 && WriterTemplateCatalog.templates[3].stable-id == template-id) { return 3; }
+        if (WriterTemplateCatalog.templates.length > 4 && WriterTemplateCatalog.templates[4].stable-id == template-id) { return 4; }
+        return 5;
+    }
+
+    function template-id-at(index: int) -> string {
+        return WriterTemplateCatalog.templates[index].stable-id;
+    }
+
+    function template-row(template-id: string) -> int {
+        return floor(root.template-index(template-id) / root.template-columns);
+    }
+
+    function reveal-selected-template() {
+        root.template-scroll-y = -root.template-row(root.template-selected)
+            * (236px + 22px * (max(1.0, Theme.text-scale) - 1.0) + Theme.tokens.space.xl);
+    }
+
+    // The nearest visible stable ID in the reading direction, or the current one.
+    function pick-template(delta: int) -> string {
+        let s = root.template-index(root.template-selected);
+        if (s + delta >= 0 && s + delta < WriterTemplateCatalog.templates.length && root.template-visible(WriterTemplateCatalog.templates[s + delta].category)) { return root.template-id-at(s + delta); }
+        if (s + 2 * delta >= 0 && s + 2 * delta < WriterTemplateCatalog.templates.length && root.template-visible(WriterTemplateCatalog.templates[s + 2 * delta].category)) { return root.template-id-at(s + 2 * delta); }
+        if (s + 3 * delta >= 0 && s + 3 * delta < WriterTemplateCatalog.templates.length && root.template-visible(WriterTemplateCatalog.templates[s + 3 * delta].category)) { return root.template-id-at(s + 3 * delta); }
+        if (s + 4 * delta >= 0 && s + 4 * delta < WriterTemplateCatalog.templates.length && root.template-visible(WriterTemplateCatalog.templates[s + 4 * delta].category)) { return root.template-id-at(s + 4 * delta); }
+        if (s + 5 * delta >= 0 && s + 5 * delta < WriterTemplateCatalog.templates.length && root.template-visible(WriterTemplateCatalog.templates[s + 5 * delta].category)) { return root.template-id-at(s + 5 * delta); }
+        return root.template-id-at(s);
     }
 
     chooser-focus := FocusScope {
@@ -376,9 +348,10 @@ export component TemplateChooserModal inherits Rectangle {
                     y: 0px;
                     width: parent.width - sidebar.width;
                     height: parent.height;
-                    viewport-height: 640px;
+                    viewport-height: max(self.height, template-content.preferred-height);
+                    viewport-y <=> root.template-scroll-y;
 
-                    VerticalLayout {
+                    template-content := VerticalLayout {
                         padding-top: Theme.tokens.space.xl;
                         padding-bottom: Theme.tokens.space.xl;
                         padding-left: Theme.tokens.space.xxl;
@@ -393,36 +366,44 @@ export component TemplateChooserModal inherits Rectangle {
                             horizontal-alignment: Theme.rtl ? right : left;
                         }
 
-                        // Row 1: Basic & Reports. Right-to-left reads each row from the right.
-                        if !Theme.rtl : HorizontalLayout {
+                        if root.template-columns == 2 : VerticalLayout {
                             spacing: Theme.tokens.space.xl;
-                            alignment: center;
-                            if root.template-visible(0) : WriterTemplateOption { index: 0; current: root.template-selected; clicked => { root.template-selected = 0; } }
-                            if root.template-visible(1) : WriterTemplateOption { index: 1; current: root.template-selected; clicked => { root.template-selected = 1; } }
-                            if root.template-visible(2) : WriterTemplateOption { index: 2; current: root.template-selected; clicked => { root.template-selected = 2; } }
-                        }
-                        if Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            alignment: center;
-                            if root.template-visible(2) : WriterTemplateOption { index: 2; current: root.template-selected; clicked => { root.template-selected = 2; } }
-                            if root.template-visible(1) : WriterTemplateOption { index: 1; current: root.template-selected; clicked => { root.template-selected = 1; } }
-                            if root.template-visible(0) : WriterTemplateOption { index: 0; current: root.template-selected; clicked => { root.template-selected = 0; } }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                            }
                         }
 
-                        // Row 2: Letters, CV & Newsletters
-                        if !Theme.rtl : HorizontalLayout {
+                        if root.template-columns == 3 : VerticalLayout {
                             spacing: Theme.tokens.space.xl;
-                            alignment: center;
-                            if root.template-visible(3) : WriterTemplateOption { index: 3; current: root.template-selected; clicked => { root.template-selected = 3; } }
-                            if root.template-visible(4) : WriterTemplateOption { index: 4; current: root.template-selected; clicked => { root.template-selected = 4; } }
-                            if root.template-visible(5) : WriterTemplateOption { index: 5; current: root.template-selected; clicked => { root.template-selected = 5; } }
-                        }
-                        if Theme.rtl : HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            alignment: center;
-                            if root.template-visible(5) : WriterTemplateOption { index: 5; current: root.template-selected; clicked => { root.template-selected = 5; } }
-                            if root.template-visible(4) : WriterTemplateOption { index: 4; current: root.template-selected; clicked => { root.template-selected = 4; } }
-                            if root.template-visible(3) : WriterTemplateOption { index: 3; current: root.template-selected; clicked => { root.template-selected = 3; } }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { layout-order: Theme.rtl ? 2 : 0; descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { layout-order: 1; descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 2; descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { layout-order: Theme.rtl ? 2 : 0; descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { layout-order: 1; descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 2; descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                            }
                         }
                     }
                 }

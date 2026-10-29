@@ -6,21 +6,28 @@ import {
 import { Icon } from "icons.slint";
 import { WriterShortcutScope } from "shortcut_scope.slint";
 import { WriterFormatState } from "alignment_state.slint";
+import { DocxSaveWarningState } from "docx_save_warning.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarMenu, WriterPageCanvas,
     WriterStatusBar, WriterRenderBlock, WriterSelectionRect,
     WriterCommentRect, WriterTableCellRect, WriterOutlinePane, WriterOutlineEntry
 } from "writer_components.slint";
-import { WriterInspector, WriterCommentEntry } from "inspector.slint";
+import { WriterInspector, WriterCommentEntry, WriterPageGeometry } from "inspector.slint";
 import { WriterOverlays } from "writer_overlays.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { WriterFormatState }
+export { DocxSaveWarningState } from "docx_save_warning.slint";
+export { WriterHeaderFooterState, WriterHeaderFooterLine } from "writer_header_footer.slint";
+export { WriterFootnoteState, WriterFootnoteLine, WriterFootnoteReference } from "writer_footnotes.slint";
+export { WriterReviewState } from "writer_review.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
 export { FindBar, FindRect } from "find_bar.slint";
 export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 export { WriterTableCellRect, WriterPageImage, PageImages, PictureAlt } from "writer_components.slint";
+export { WriterTemplateCatalog } from "template_chooser.slint";
+export { WriterPageGeometry } from "inspector.slint";
 
 export component WriterApp inherits Window {
     init => { Theme.application = "writer"; }
@@ -32,6 +39,7 @@ export component WriterApp inherits Window {
     no-frame: root.custom-chrome;
     callback window-drag;
     callback window-close;
+    callback application-quit-requested;
     callback window-resize(int);
     in property <bool> local-menu-visible: true;
     in property <[string]> local-menu-labels: ["File", "Edit", "View", "Format"];
@@ -47,6 +55,8 @@ export component WriterApp inherits Window {
     min-height: 680px;
     preferred-width: 1280px;
     preferred-height: 800px;
+    out property <length> macos-toolbar-y: action-toolbar.absolute-position.y;
+    out property <length> macos-toolbar-height: action-toolbar.height;
     background: Theme.palette().canvas;
 
     in property <bool> wide-toolbar: false;
@@ -63,6 +73,7 @@ export component WriterApp inherits Window {
     property <int> toolbar-menu-kind: root.toolbar-overflow-open ? 8 : root.toolbar-menu;
     in-out property <bool> show-inspector: false;
     in-out property <int> inspector-tab: 0;
+    in-out property <int> document-tab: 0;
     in-out property <bool> comment-focus-pending: false;
     in-out property <bool> show-navigator: false;
     in property <[WriterOutlineEntry]> outline-entries: [];
@@ -73,13 +84,10 @@ export component WriterApp inherits Window {
     in property <bool> inspector-available: true;
     in-out property <bool> compact-inspector-layout: false;
     in-out property <bool> inspector-quiet-open: false;
-    // The compact toolbar still exposes Format. Keep the panel available at
-    // every width so the button always does something when activated.
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     property <bool> docked-inspector-visible: root.inspector-visible && !root.compact-inspector-layout;
     property <bool> compact-inspector-visible: root.inspector-visible && root.compact-inspector-layout;
-    /// Width the open inspector takes from the window's reading-end side
-    /// (the left side in RTL); zero while it is closed.
+    /// Open inspector width at the reading end; zero while closed.
     property <length> inspector-width: root.compact-inspector-visible ? compact-inspector.width : docked-inspector.width;
     callback window-resized(length);
     changed rtl => {
@@ -92,9 +100,6 @@ export component WriterApp inherits Window {
         }
     }
 
-    /// Toolbar Format/Document: show that inspector tab, or close the
-    /// inspector when its tab is already showing. Opening and closing go
-    /// through `toggle-inspector`, so the command registry and menu see it.
     public function show-inspector-tab(tab: int) {
         if (root.inspector-visible && root.inspector-tab == tab) {
             root.toggle-inspector();
@@ -104,10 +109,10 @@ export component WriterApp inherits Window {
         }
     }
 
-    /// Insert > Comment: open the Document tab and put the caret in the
-    /// new-comment field.
+    /// Open Document for a new comment.
     public function open-comment-composer() {
         root.inspector-tab = 1;
+        root.document-tab = 1;
         root.comment-focus-pending = true;
         if (!root.inspector-visible) { root.toggle-inspector(); }
     }
@@ -130,6 +135,7 @@ export component WriterApp inherits Window {
     in property <string> status-right: "";
     in property <string> selection-announcement: "No text selected";
     in-out property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
     in-out property <length> scroll-x: 0px;
     in-out property <length> scroll-y: 0px;
     in-out property <length> page-view-height: 0px;
@@ -147,6 +153,8 @@ export component WriterApp inherits Window {
     in-out property <bool> save-changes-closing: false;
     in-out property <bool> docx-import-warning-open: false;
     in-out property <string> docx-import-warning-message: "";
+    in-out property <bool> docx-export-report-open: false;
+    in-out property <string> docx-export-report-message: "";
 
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
@@ -154,6 +162,7 @@ export component WriterApp inherits Window {
     in-out property <bool> is-strikethrough: false;
     in-out property <int> heading-level: 0;
     in-out property <int> font-size-pt: 11;
+    in-out property <string> font-size-value: "11";
     in-out property <int> text-alignment <=> WriterFormatState.text-alignment;
     in-out property <int> line-spacing-index: 1;
     in property <int> word-count: 0;
@@ -162,7 +171,7 @@ export component WriterApp inherits Window {
 
     in property <float> page-width-pt: 595.0;
     in property <float> page-height-pt: 842.0;
-    in property <float> page-margin-pt: 72.0;
+    in property <WriterPageGeometry> page-geometry: { width_mm: 210.0, height_mm: 297.0, top_mm: 25.4, bottom_mm: 25.4, left_mm: 25.4, right_mm: 25.4, margin_top_pt: 72.0, margin_bottom_pt: 72.0, margin_left_pt: 72.0, margin_right_pt: 72.0 };
     in-out property <int> page-paper-index: 0;
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
@@ -171,7 +180,7 @@ export component WriterApp inherits Window {
     in-out property <string> comment-draft: "";
 
     in-out property <bool> template-chooser-open: false;
-    in-out property <int> template-selected: 0;
+    in-out property <string> template-selected: "blank";
     in-out property <int> template-category: 0;
 
     callback new-doc;
@@ -189,6 +198,7 @@ export component WriterApp inherits Window {
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
     callback insert-tab;
+    callback move-document-edge(bool, bool);
     callback page-move(int, bool);
     callback pointer-pressed(length, length, bool);
     callback pointer-moved(length, length);
@@ -203,6 +213,7 @@ export component WriterApp inherits Window {
     callback select-heading(int);
     callback increase-font-size;
     callback decrease-font-size;
+    callback apply-font-size(string) -> bool;
     callback select-alignment(int);
     callback indent-text;
     callback outdent-text;
@@ -210,6 +221,7 @@ export component WriterApp inherits Window {
     callback select-paper-size(int);
     callback select-orientation(int);
     callback select-margins(int);
+    callback edit-page-geometry(string, string) -> bool;
     callback select-list-style(int);
     callback insert-table;
     callback insert-table-size(int, int);
@@ -225,7 +237,7 @@ export component WriterApp inherits Window {
     callback delete-comment(string);
     callback toggle-inspector;
     callback navigate-comment(string);
-    callback create-template(int);
+    callback create-template(string);
     callback cancel-template;
     callback save-changes-save;
     callback save-changes-discard;
@@ -236,9 +248,9 @@ export component WriterApp inherits Window {
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
     in-out property <string> palette-query: "";
-    // Ctrl+A selects the search text: the next typed text replaces it.
+    // Ctrl+A selects the query for replacement.
     in-out property <bool> palette-query-selected: false;
-    // The platform modifier that shortcut hints name: "Ctrl", or "Cmd" on macOS.
+    // Modifier shown in shortcut hints.
     in-out property <string> shortcut-modifier: "Ctrl";
     in-out property <int> palette-selected: 0;
     callback palette-invoked(int);
@@ -252,17 +264,12 @@ export component WriterApp inherits Window {
     changed scroll-x => { root.page-scroll-changed(root.scroll-x, root.scroll-y); }
     changed scroll-y => { root.page-scroll-changed(root.scroll-x, root.scroll-y); }
 
-    // Hand keyboard focus to the page editor (and the window-level shortcut
-    // scope above it), so typing and shortcuts work without a prior click.
+    /// Restore page focus for immediate typing.
     public function focus-page() {
-        page-canvas.focus();
+        page-canvas.focus-document();
     }
 
-    /// F6 cycles the keyboard through the page, the toolbar and the open
-    /// inspector: page, toolbar, inspector, page. Shift+F6 runs the cycle
-    /// backwards. Tab inside the page types a tab, so the page passes F6 on.
-    /// Alt+letter or F10 opens the in-window menu named by that key. The page
-    /// text box would otherwise type the letter, so it asks first too.
+    /// F6/Shift+F6 cycle page, toolbar and inspector; Alt+letter/F10 opens its menu.
     function open-menu-for-key(event: KeyEvent) -> bool {
         let target = LocalMenu.target(event);
         if (!root.local-menu-visible || target < 0) { return false; }
@@ -278,14 +285,12 @@ export component WriterApp inherits Window {
         }
     }
 
-    /// The user closed the inspector: its Format or Document tab takes focus.
-    /// Called from the close action only, never from a change handler.
+    /// Restore the inspector tab focus after its close action.
     public function focus-inspector-tab() {
         action-toolbar.focus-inspector-trigger();
     }
 
-    /// From the page: F6 goes to the toolbar; Shift+F6 goes back to the open
-    /// inspector, or to the toolbar when no inspector is open.
+    /// Move from the page to the toolbar; Shift+F6 returns to the inspector.
     public function leave-page(backwards: bool) {
         if (backwards && root.inspector-visible) {
             root.focus-inspector();
@@ -294,8 +299,7 @@ export component WriterApp inherits Window {
         }
     }
 
-    /// From the toolbar, or any control outside the page and inspector: F6 goes
-    /// to the open inspector, or to the page; Shift+F6 goes to the page.
+    /// Move from chrome to the inspector, or to the page; reverse to the page.
     public function leave-chrome(backwards: bool) {
         if (!backwards && root.inspector-visible) {
             root.focus-inspector();
@@ -304,7 +308,7 @@ export component WriterApp inherits Window {
         }
     }
 
-    /// From the inspector: F6 goes to the page; Shift+F6 goes back to the toolbar.
+    /// Move from the inspector to the page, or back to the toolbar.
     public function leave-inspector(backwards: bool) {
         if (backwards) {
             action-toolbar.focus-first();
@@ -324,8 +328,7 @@ export component WriterApp inherits Window {
         return root.wide-toolbar ? full-label : "";
     }
 
-    /// Escape (or a click outside) closes the open toolbar menu and puts focus
-    /// back on the toolbar item that opened it.
+    /// Close the menu and return focus to its toolbar item.
     public function dismiss-toolbar-menu() {
         let kind = root.toolbar-menu-kind;
         if (kind != 0) {
@@ -344,9 +347,7 @@ export component WriterApp inherits Window {
         }
     }
 
-    // The chooser owns its own keyboard focus (see `TemplateChooserModal`);
-    // closing it returns focus to the page. `template-refocus-tick` hands focus
-    // back when a dialog stacked on top of it closes.
+    // Closing the chooser restores page focus, including after stacked dialogs.
     property <int> template-refocus-tick: 0;
     changed template-chooser-open => {
         if (!root.template-chooser-open) { root.focus-page(); }
@@ -362,6 +363,10 @@ export component WriterApp inherits Window {
         if (!root.docx-import-warning-open) { root.focus-page(); }
     }
 
+    changed docx-export-report-open => {
+        if (!root.docx-export-report-open) { root.focus-page(); }
+    }
+
     changed palette-open => {
         if (root.palette-open) {
             overlays.focus-palette();
@@ -373,7 +378,7 @@ export component WriterApp inherits Window {
     app-focus := WriterShortcutScope {
         palette-open: root.palette-open;
         template-chooser-open: root.template-chooser-open;
-        save-changes-open: root.save-changes-open || root.docx-import-warning-open;
+        save-changes-open: root.save-changes-open || root.docx-import-warning-open || root.docx-export-report-open || DocxSaveWarningState.dialog-open;
         toolbar-menu-kind: root.toolbar-menu-kind;
         open-menu-for-key(event) => { return root.open-menu-for-key(event); }
         leave-chrome(backwards) => { root.leave-chrome(backwards); }
@@ -396,7 +401,7 @@ export component WriterApp inherits Window {
                 title: root.doc-title + (root.document-dirty ? " \u{2022}" : "");
                 maximized: root.maximized;
                 drag-requested => { root.window-drag(); }
-                // `maximized` and `minimized` are Slint's own window properties.
+                // Slint provides these window properties.
                 toggle-maximize => { root.maximized = !root.maximized; }
                 minimize => { root.minimized = true; }
                 close => { root.window-close(); }
@@ -413,6 +418,7 @@ export component WriterApp inherits Window {
             action-toolbar := WriterActionToolbar {
                 inspector-visible: root.inspector-visible;
                 inspector-tab: root.inspector-tab;
+                page-zoom: root.page-zoom;
                 menu-kind: root.toolbar-menu-kind;
                 toggle-menu(kind, x) => {
                     root.toolbar-menu-x = x;
@@ -428,13 +434,10 @@ export component WriterApp inherits Window {
                 show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
             }
 
-            // Outline, page and inspector. Left-to-right puts the outline at the left and
-            // the inspector at the right; right-to-left mirrors them. They are placed by
-            // position so one page canvas serves both directions.
             Rectangle {
                 vertical-stretch: 1;
-                // The page stack is taller than the window; it scrolls, so it
-                // must not raise the row's minimum and push the status bar off.
+                background: Theme.palette().canvas;
+                // Keep the status bar visible.
                 min-height: 0px;
 
                 if root.show-navigator : WriterOutlinePane {
@@ -446,8 +449,6 @@ export component WriterApp inherits Window {
                     close-requested => { root.show-navigator = false; root.focus-page(); }
                 }
 
-                // The page fills what the outline and the inspector leave; the layout
-                // gives it its size, and two spacers hold the side panels' room.
                 HorizontalLayout {
                     x: 0px;
                     y: 0px;
@@ -478,7 +479,8 @@ export component WriterApp inherits Window {
                         page-gap-pt: root.page-gap-pt;
                         page-width-pt: root.page-width-pt;
                         page-height-pt: root.page-height-pt;
-                        page-margin-pt: root.page-margin-pt;
+                        page-appearance: root.page-appearance;
+                        page-geometry: root.page-geometry;
                         page-zoom-changed(value) => { root.page-zoom-changed(value); }
                         page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                         document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
@@ -488,7 +490,15 @@ export component WriterApp inherits Window {
                         pointer-released(x, y) => { root.pointer-released(x, y); }
                         pointer-cancelled => { root.pointer-cancelled(); }
                         key-pressed(event) => {
-                            if (root.handle-table-key(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.alt)) { return accept; }
+                            let move-to-start = (event.modifiers.control && event.text == Key.Home)
+                                || (event.modifiers.meta && (event.text == Key.Home || event.text == Key.UpArrow));
+                            let move-to-end = (event.modifiers.control && event.text == Key.End)
+                                || (event.modifiers.meta && (event.text == Key.End || event.text == Key.DownArrow));
+                            if (move-to-start || move-to-end) {
+                                root.move-document-edge(move-to-end, event.modifiers.shift);
+                                return accept;
+                            }
+                            if (root.handle-table-key(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta, event.modifiers.alt)) { return accept; }
                             if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
                                 if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                                 return accept;
@@ -520,6 +530,7 @@ export component WriterApp inherits Window {
                     visible: root.docked-inspector-visible;
                     active: root.docked-inspector-visible;
                     inspector-tab <=> root.inspector-tab;
+                    document-tab <=> root.document-tab;
                     comment-focus-pending <=> root.comment-focus-pending;
                     comment-draft <=> root.comment-draft;
                     quiet-open <=> root.inspector-quiet-open;
@@ -531,10 +542,12 @@ export component WriterApp inherits Window {
                     is-strikethrough <=> root.is-strikethrough;
                     heading-level <=> root.heading-level;
                     font-size-pt <=> root.font-size-pt;
+                    font-size-value <=> root.font-size-value;
                     line-spacing-index <=> root.line-spacing-index;
                     page-paper-index <=> root.page-paper-index;
                     page-orientation-index <=> root.page-orientation-index;
                     page-margins-index <=> root.page-margins-index;
+                    page-geometry: root.page-geometry;
                     list-style-index <=> root.list-style-index;
                     comment-entries: root.comment-entries;
                     add-comment(body) => { root.add-comment(body); }
@@ -553,6 +566,7 @@ export component WriterApp inherits Window {
                     select-heading(idx) => { root.select-heading(idx); }
                     increase-font-size => { root.increase-font-size(); }
                     decrease-font-size => { root.decrease-font-size(); }
+                    apply-font-size(value) => { return root.apply-font-size(value); }
                     select-alignment(idx) => { root.select-alignment(idx); }
                     indent-text => { root.indent-text(); }
                     outdent-text => { root.outdent-text(); }
@@ -560,6 +574,7 @@ export component WriterApp inherits Window {
                     select-paper-size(idx) => { root.select-paper-size(idx); }
                     select-orientation(idx) => { root.select-orientation(idx); }
                     select-margins(idx) => { root.select-margins(idx); }
+            edit-page-geometry(field, value) => { return root.edit-page-geometry(field, value); }
                     select-list-style(idx) => { root.select-list-style(idx); }
                     is-table-selected <=> root.is-table-selected;
                     table-style-id <=> root.table-style-id;
@@ -601,6 +616,7 @@ export component WriterApp inherits Window {
             height: parent.height;
             active: root.compact-inspector-visible;
             inspector-tab <=> root.inspector-tab;
+            document-tab <=> root.document-tab;
             comment-focus-pending <=> root.comment-focus-pending;
             comment-draft <=> root.comment-draft;
             quiet-open <=> root.inspector-quiet-open;
@@ -612,10 +628,12 @@ export component WriterApp inherits Window {
             is-strikethrough <=> root.is-strikethrough;
             heading-level <=> root.heading-level;
             font-size-pt <=> root.font-size-pt;
+            font-size-value <=> root.font-size-value;
             line-spacing-index <=> root.line-spacing-index;
             page-paper-index <=> root.page-paper-index;
             page-orientation-index <=> root.page-orientation-index;
             page-margins-index <=> root.page-margins-index;
+            page-geometry: root.page-geometry;
             list-style-index <=> root.list-style-index;
             comment-entries: root.comment-entries;
             add-comment(body) => { root.add-comment(body); }
@@ -634,6 +652,7 @@ export component WriterApp inherits Window {
             select-heading(idx) => { root.select-heading(idx); }
             increase-font-size => { root.increase-font-size(); }
             decrease-font-size => { root.decrease-font-size(); }
+            apply-font-size(value) => { return root.apply-font-size(value); }
             select-alignment(idx) => { root.select-alignment(idx); }
             indent-text => { root.indent-text(); }
             outdent-text => { root.outdent-text(); }
@@ -641,6 +660,7 @@ export component WriterApp inherits Window {
             select-paper-size(idx) => { root.select-paper-size(idx); }
             select-orientation(idx) => { root.select-orientation(idx); }
             select-margins(idx) => { root.select-margins(idx); }
+            edit-page-geometry(field, value) => { return root.edit-page-geometry(field, value); }
             select-list-style(idx) => { root.select-list-style(idx); }
             is-table-selected <=> root.is-table-selected;
             table-style-id <=> root.table-style-id;
@@ -665,6 +685,10 @@ export component WriterApp inherits Window {
         inspector-visible: root.inspector-visible;
         navigator-visible: root.show-navigator;
         page-zoom: root.page-zoom;
+        view-width: root.view-width;
+        view-height: root.page-view-height;
+        page-width-pt: root.page-width-pt;
+        page-height-pt: root.page-height-pt;
         can-undo: root.can-undo;
         can-redo: root.can-redo;
         is-bold: root.is-bold;
@@ -696,6 +720,8 @@ export component WriterApp inherits Window {
         docx-import-warning-message: root.docx-import-warning-message;
         docx-import-continue => { root.docx-import-continue(); }
         docx-import-cancel => { root.docx-import-cancel(); }
+        docx-export-report-open <=> root.docx-export-report-open;
+        docx-export-report-message: root.docx-export-report-message;
         local-menu-visible: root.local-menu-visible;
         local-menu-labels: root.local-menu-labels;
         local-menu-popup-items: root.local-menu-popup-items;

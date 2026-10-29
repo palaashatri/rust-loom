@@ -53,7 +53,9 @@ pub(crate) fn handle(
     if !done {
         return false;
     }
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+        return true;
+    }
     app.set_status_right(SharedString::from(if nested {
         "List level decreased"
     } else if enter {

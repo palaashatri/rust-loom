@@ -272,7 +272,7 @@ fn format_section(section: &str, n: f64, negative: bool) -> Result<String, CalcE
 }
 
 /// Round half away from zero at `decimals` places, ignoring binary noise.
-fn round_decimals(value: f64, decimals: usize) -> f64 {
+pub(crate) fn round_decimals(value: f64, decimals: usize) -> f64 {
     let scale = 10f64.powi(decimals as i32);
     let scaled = value * scale;
     let cleaned: f64 = format!("{scaled:.14e}").parse().unwrap_or(scaled);

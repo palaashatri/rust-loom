@@ -5,8 +5,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use loom_desktop::{FileFilter, ScriptedFileDialogs};
-use loom_present_core::{ElementType, SlideElement};
+use loom_present_core::{ElementType, SlideElement, PALETTE};
+use slint::platform::Key;
 use slint::{ComponentHandle, Model};
 
 use crate::{
@@ -345,7 +347,7 @@ fn typed_position_size_and_rotation_move_the_selected_object_as_undoable_steps()
     );
 
     ink.invoke_geometry_requested("x".into(), "250".into());
-    ink.invoke_geometry_requested("h".into(), " 150 pt ".into());
+    ink.invoke_geometry_requested("h".into(), " 144 pt ".into());
     ink.invoke_geometry_requested("rot".into(), "30°".into());
     let (x, y, w, h, rot) = geometry_of(&state, 0);
     assert_eq!(
@@ -368,6 +370,38 @@ fn typed_position_size_and_rotation_move_the_selected_object_as_undoable_steps()
     );
     app.invoke_undo();
     assert_eq!(geometry_of(&state, 0).3, 80.0, "and one more the height");
+}
+
+#[test]
+fn geometry_units_convert_and_invalid_suffixes_leave_the_object_unchanged() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Typed",
+        100.0,
+        120.0,
+        400.0,
+        80.0,
+    )]);
+    select(&app, &state, "t");
+    let ink = app.global::<ElementInk>();
+
+    ink.invoke_geometry_requested("x".into(), "2 in".into());
+    assert_eq!(geometry_of(&state, 0).0, 150.0);
+    app.invoke_undo();
+    assert_eq!(geometry_of(&state, 0).0, 100.0);
+    for text in ["72 pt", "2.54 cm", "25.4 mm"] {
+        ink.invoke_geometry_requested("x".into(), text.into());
+        assert!((geometry_of(&state, 0).0 - 75.0).abs() < 0.001, "{text}");
+    }
+    for text in ["2 frogs", "NaN", "inf", "3e38 in", "2°"] {
+        ink.invoke_geometry_requested("x".into(), text.into());
+        assert!((geometry_of(&state, 0).0 - 75.0).abs() < 0.001, "{text}");
+        assert!(app.get_status_left().contains("not a number"), "{text}");
+    }
+    ink.invoke_geometry_requested("rot".into(), "2 in".into());
+    assert_eq!(geometry_of(&state, 0).4, 0.0);
+    assert!(app.get_status_left().contains("not a number"));
 }
 
 #[test]
@@ -410,4 +444,234 @@ fn an_impossible_or_unreadable_entry_changes_nothing_and_the_field_shows_the_rea
     ink.invoke_geometry_requested("y".into(), "".into());
     assert_eq!(ink.get_y_text().as_str(), "120");
     assert_eq!(geometry_of(&state, 0).1, 120.0);
+}
+
+fn focus_named(app: &PresentApp, label: &str) {
+    for _ in 0..64 {
+        if crate::keyboard_flow_tests::focus_name(app) == label {
+            return;
+        }
+        crate::keyboard_flow_tests::press(app, Key::Tab);
+        crate::keyboard_flow_tests::render(app);
+    }
+    panic!(
+        "could not reach {label:?}; focused {:?}",
+        crate::keyboard_flow_tests::focus_name(app)
+    );
+}
+
+#[test]
+fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
+    let session = crate::keyboard_flow_tests::launched();
+    session.app.set_show_inspector(true);
+    let title_index = session.state.session.borrow().document.slides[0]
+        .elements
+        .iter()
+        .position(|element| element.id == "cover-title")
+        .expect("selected cover title");
+    let labels = [
+        "Text colour Red",
+        "Text colour Orange",
+        "Text colour Green",
+        "Text colour Blue",
+        "Text colour Purple",
+        "Text colour Gray",
+        "Text colour Black",
+        "Automatic text colour",
+        "Fill Red",
+        "Fill Orange",
+        "Fill Green",
+        "Fill Blue",
+        "Fill Purple",
+        "Fill Gray",
+        "Fill Black",
+        "Remove fill",
+    ];
+
+    for (appearance, theme) in [
+        (loom_desktop::appearance::Appearance::Light, "light"),
+        (loom_desktop::appearance::Appearance::Dark, "dark"),
+        (
+            loom_desktop::appearance::Appearance::HighContrast,
+            "high-contrast",
+        ),
+    ] {
+        crate::appearance::choose(&session.app, appearance);
+        crate::keyboard_flow_tests::render(&session.app);
+        assert!(
+            ElementHandle::find_by_accessible_label(&session.app, "Selected element text")
+                .next()
+                .is_some(),
+            "the selected text control exists in {theme}"
+        );
+        for label in labels {
+            let button = ElementHandle::find_by_accessible_label(&session.app, label)
+                .next()
+                .unwrap_or_else(|| panic!("{label:?} is absent in {theme}"));
+            assert_eq!(
+                button.accessible_role(),
+                Some(AccessibleRole::Button),
+                "{label:?} has button semantics in {theme}"
+            );
+        }
+
+        session.app.invoke_focus_editor();
+        crate::keyboard_flow_tests::render(&session.app);
+        crate::keyboard_flow_tests::press(&session.app, Key::F6);
+        crate::keyboard_flow_tests::press(&session.app, Key::F6);
+        crate::keyboard_flow_tests::render(&session.app);
+
+        focus_named(&session.app, "Text colour Red");
+        crate::keyboard_flow_tests::press(&session.app, Key::RightArrow);
+        crate::keyboard_flow_tests::press(&session.app, Key::RightArrow);
+        crate::keyboard_flow_tests::render(&session.app);
+        assert_eq!(
+            crate::keyboard_flow_tests::focus_name(&session.app),
+            "Text colour Green",
+            "arrow keys move the visible focus in {theme}"
+        );
+        crate::keyboard_flow_tests::press(&session.app, Key::Space);
+        assert_eq!(
+            style_of(&session.state, title_index).color.as_deref(),
+            Some(PALETTE[2]),
+            "Space applies the named text colour in {theme}"
+        );
+        session.app.invoke_undo();
+        assert_eq!(
+            style_of(&session.state, title_index).color,
+            None,
+            "one undo restores the previous text colour in {theme}"
+        );
+
+        focus_named(&session.app, "Fill Red");
+        for _ in 0..3 {
+            crate::keyboard_flow_tests::press(&session.app, Key::RightArrow);
+        }
+        crate::keyboard_flow_tests::render(&session.app);
+        assert_eq!(
+            crate::keyboard_flow_tests::focus_name(&session.app),
+            "Fill Blue"
+        );
+        crate::keyboard_flow_tests::press(&session.app, Key::Return);
+        assert_eq!(
+            style_of(&session.state, title_index).fill.as_deref(),
+            Some(PALETTE[3]),
+            "Enter applies the named fill in {theme}"
+        );
+        session.app.invoke_undo();
+        assert_eq!(
+            style_of(&session.state, title_index).fill,
+            None,
+            "one undo removes the fill in {theme}"
+        );
+    }
+}
+
+#[test]
+fn geometry_requires_a_single_selected_object() {
+    let (app, state) = fixture(vec![
+        text_element(
+            "first",
+            ElementType::BodyText,
+            "First",
+            100.0,
+            120.0,
+            400.0,
+            80.0,
+        ),
+        text_element(
+            "second",
+            ElementType::BodyText,
+            "Second",
+            300.0,
+            220.0,
+            200.0,
+            60.0,
+        ),
+    ]);
+    app.set_show_inspector(true);
+    {
+        let mut session = state.session.borrow_mut();
+        assert!(session.select_element("first", false));
+        assert!(session.select_element("second", true));
+    }
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+
+    assert!(ElementHandle::find_by_accessible_label(
+        &app,
+        "Select one object to edit its geometry."
+    )
+    .next()
+    .is_some());
+    for label in ["X position", "Y position", "Width", "Height", "Rotation"] {
+        assert!(
+            ElementHandle::find_by_accessible_label(&app, label)
+                .next()
+                .is_none(),
+            "{label} must not appear to edit only the first selected object"
+        );
+    }
+
+    let first_before = geometry_of(&state, 0);
+    let second_before = geometry_of(&state, 1);
+    app.global::<ElementInk>()
+        .invoke_geometry_requested("x".into(), "250".into());
+    assert_eq!(geometry_of(&state, 0), first_before);
+    assert_eq!(geometry_of(&state, 1), second_before);
+    assert!(!state.session.borrow().can_undo());
+}
+
+#[test]
+fn geometry_uses_live_selection_when_selection_contains_stale_ids() {
+    let (app, state) = fixture(vec![
+        text_element(
+            "first",
+            ElementType::BodyText,
+            "First",
+            100.0,
+            120.0,
+            400.0,
+            80.0,
+        ),
+        text_element(
+            "second",
+            ElementType::BodyText,
+            "Second",
+            300.0,
+            220.0,
+            200.0,
+            60.0,
+        ),
+    ]);
+    app.set_show_inspector(true);
+
+    state.session.borrow_mut().selected_elements =
+        vec!["first".to_string(), "stale-id".to_string()];
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+    assert_eq!(app.get_selection_count(), 1);
+    assert!(ElementHandle::find_by_accessible_label(&app, "X position")
+        .next()
+        .is_some());
+
+    let second_before = geometry_of(&state, 1);
+    app.global::<ElementInk>()
+        .invoke_geometry_requested("x".into(), "250".into());
+    assert_eq!(geometry_of(&state, 0).0, 250.0);
+    assert_eq!(geometry_of(&state, 1), second_before);
+    app.invoke_undo();
+    assert_eq!(geometry_of(&state, 0).0, 100.0);
+
+    state.session.borrow_mut().selected_elements = vec!["stale-id".to_string()];
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+    assert_eq!(app.get_selection_count(), 0);
+    assert!(ElementHandle::find_by_accessible_label(&app, "X position")
+        .next()
+        .is_none());
+    app.global::<ElementInk>()
+        .invoke_geometry_requested("x".into(), "250".into());
+    assert_eq!(geometry_of(&state, 0).0, 100.0);
+    assert!(!state.session.borrow().can_undo());
 }

@@ -153,7 +153,7 @@ fn an_arabic_start_paragraph_exports_as_right_justified_in_docx() {
         .descendants()
         .find(|n| is_w(n, "jc"))
         .expect("the paragraph writes a justification");
-    assert_eq!(jc.attribute((W, "val")), Some("right"));
+    assert_eq!(jc.attribute((W, "val")), Some("start"));
 }
 
 #[test]

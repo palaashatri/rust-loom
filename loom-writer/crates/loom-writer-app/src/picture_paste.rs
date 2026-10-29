@@ -44,7 +44,9 @@ fn insert_pasted_picture(app: &WriterApp, state: &GuiState, bytes: Vec<u8>) -> R
         }
     }
     next.set_selection(TextSelection::caret(after.min(next.editor_text().len())));
-    apply_with_history(app, state, next, HistoryKind::DocumentAction);
+    if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+        return Err(app.get_status_left().to_string());
+    }
     app.set_status_left(SharedString::from("Pasted picture"));
     Ok(())
 }

@@ -411,6 +411,20 @@ class GovernanceTests(unittest.TestCase):
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_local_markdown_caches_are_outside_repository_documentation_scan(self):
+        local_markdown = {
+            ".work/registry/src/example/CHANGELOG.md": "Generated dependency changelog",
+            ".remember/notes.md": "Local working memory",
+            ".serena/memories/conventions.md": "Local code memory",
+        }
+        for name, content in local_markdown.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_marked_current_truth_section_is_required(self):
         path = self.root / "docs/workflow/current.md"
         path.write_text(path.read_text(encoding="utf-8").replace("<!-- CURRENT TRUTH START -->", "", 1), encoding="utf-8")

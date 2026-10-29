@@ -24,6 +24,7 @@ from typing import Any
 
 try:
     import release  # type: ignore
+    from writer_pe_icon import validate_writer_pe_icon
 except Exception as exc:  # pragma: no cover - startup contract
     raise SystemExit(f"package validation error: cannot import release metadata: {exc}")
 
@@ -266,6 +267,8 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
                 raise RuntimeError(f"expected one extracted loom-{app}.exe, found {len(candidates)}")
             if pe_machine(candidates[0]) != expected_machine:
                 raise RuntimeError(f"PE architecture mismatch for loom-{app}")
+            if app == "writer":
+                validate_writer_pe_icon(candidates[0])
 
     assertions.extend(
         [
@@ -273,6 +276,7 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
             "MSI decompilation verified all application/file-association/open-command metadata",
             "MSI administrative extraction succeeded",
             "MSI shortcut icon declarations, indices and original ICO payloads verified",
+            "Writer PE group icon references canonical ICO frame payloads",
             "all packaged PE executables match the requested architecture",
         ]
     )

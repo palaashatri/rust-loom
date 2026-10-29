@@ -150,15 +150,24 @@ pub(crate) fn retained_bytes(before: &WriterDocument, after: &WriterDocument) ->
             id,
             title,
             page: _,
+            header_footer,
             comments,
+            footnotes,
+            tracked_changes,
             blocks,
             selection: _,
         } = document;
         sum_bytes([
             id.capacity(),
             title.capacity(),
+            header_footer.header_text.capacity(),
+            header_footer.footer_text.capacity(),
+            header_footer.alignment.capacity(),
             vec_bytes(blocks),
             vec_bytes(comments),
+            vec_bytes(footnotes),
+            sum_bytes(footnotes.iter().map(|note| note.body.capacity())),
+            tracked_changes.heap_capacity_bytes(),
             sum_bytes(comments.iter().map(|thread| {
                 sum_bytes([
                     thread.id.capacity(),

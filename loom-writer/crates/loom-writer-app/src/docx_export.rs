@@ -69,19 +69,62 @@ pub(crate) fn export_docx_file(
     Ok((path, export))
 }
 
-/// Status line after a successful export. Comments that Word cannot anchor
-/// are reported, not silently dropped.
+/// Status line after a successful export. The warning stays ahead of the
+/// destination, so an eliding status bar keeps the consequential part visible.
 pub(crate) fn success_message(path: &Path, export: &DocxExport) -> String {
-    let mut message = format!("Exported {}", path.display());
     if export.comments_skipped > 0 {
         let count = export.comments_skipped;
-        message.push_str(&format!(
-            " ({count} comment{} could not be placed and {} left out)",
-            if count == 1 { "" } else { "s" },
-            if count == 1 { "was" } else { "were" }
-        ));
+        let omitted = if count == 1 {
+            "comment was left out"
+        } else {
+            "comments were left out"
+        };
+        return format!("Warning: {count} {omitted}. Exported {}", path.display());
     }
+    format!("Exported {}", path.display())
+}
+
+/// Full content-loss report shown in a bounded, scrollable dialog. Explicit
+/// line breaks keep even a single long path component readable at narrow widths.
+pub(crate) fn report_message(path: &Path, export: &DocxExport) -> String {
+    let count = export.comments_skipped;
+    let omitted = if count == 1 {
+        "comment could not be placed in Word and was left out"
+    } else {
+        "comments could not be placed in Word and were left out"
+    };
+    let mut message = format!("{count} {omitted}.");
+    if export.comments_exported > 0 {
+        let included = export.comments_exported;
+        let other_comments = if included == 1 {
+            "other comment was included"
+        } else {
+            "other comments were included"
+        };
+        message.push_str(&format!("\n{included} {other_comments}."));
+    }
+    message.push_str("\n\nSaved to:\n");
+    message.push_str(&readable_path(path));
     message
+}
+
+fn readable_path(path: &Path) -> String {
+    const MAX_LINE_CHARS: usize = 48;
+
+    let mut readable = String::new();
+    let mut line_chars = 0;
+    for character in path.display().to_string().chars() {
+        readable.push(character);
+        line_chars += 1;
+        if character == std::path::MAIN_SEPARATOR || line_chars >= MAX_LINE_CHARS {
+            readable.push('\n');
+            line_chars = 0;
+        }
+    }
+    if readable.ends_with('\n') {
+        readable.pop();
+    }
+    readable
 }
 
 /// Handler of the `export-docx` callback.
@@ -105,6 +148,15 @@ pub(crate) fn run(app: &WriterApp, state: &GuiState) {
     match state.dialogs.save_file(&request) {
         Ok(Some(path)) => match export_docx_file(&path, &state.current.borrow()) {
             Ok((path, export)) => {
+                if export.comments_skipped > 0 {
+                    app.set_docx_export_report_message(SharedString::from(report_message(
+                        &path, &export,
+                    )));
+                    app.set_docx_export_report_open(true);
+                } else {
+                    app.set_docx_export_report_open(false);
+                    app.set_docx_export_report_message("".into());
+                }
                 app.set_status_left(SharedString::from(success_message(&path, &export)));
             }
             Err(error) => {

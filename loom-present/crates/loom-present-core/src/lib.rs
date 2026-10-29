@@ -1546,6 +1546,7 @@ pub struct PresentationSession {
     redo: Vec<Snapshot>,
     checkpoint_redo: Option<Vec<Snapshot>>,
     history_limit: usize,
+    active_table_text_edit: Option<(String, String, usize, usize)>,
 }
 
 impl PresentationSession {
@@ -1560,6 +1561,7 @@ impl PresentationSession {
             redo: Vec::new(),
             checkpoint_redo: None,
             history_limit: 64,
+            active_table_text_edit: None,
         }
     }
 

@@ -253,6 +253,24 @@ fn affinity_on(lines: &[FlowLine], index: usize, offset: usize) -> CaretAffinity
     }
 }
 
+/// Keep a visual-step target's line-edge affinity consistent with caret layout.
+/// Interior bidi stops retain the shaping engine's affinity; line edges use
+/// the affinity that makes the stop paint on this visual line.
+fn visual_edge_affinity(
+    lines: &[FlowLine],
+    index: usize,
+    offset: usize,
+    affinity: CaretAffinity,
+) -> CaretAffinity {
+    let line = &lines[index];
+    let end = line.global_start + (line.end - line.start);
+    if offset == line.global_start || offset == end {
+        affinity_on(lines, index, offset)
+    } else {
+        affinity
+    }
+}
+
 fn end_of(
     doc: &WriterDocument,
     style: &PageStyle,
@@ -347,22 +365,27 @@ fn visual_step(
             CaretAffinity::Upstream => loom_fonts::Affinity::Trailing,
         };
         let target = shaped.visual_neighbor(at, affinity, forward)?;
+        let offset = line.global_start + target.offset.saturating_sub(line.start);
+        let affinity = match target.affinity {
+            loom_fonts::Affinity::Leading => CaretAffinity::Downstream,
+            loom_fonts::Affinity::Trailing => CaretAffinity::Upstream,
+        };
+        let affinity = visual_edge_affinity(lines, index, offset, affinity);
         return Some(CaretTarget {
-            offset: line.global_start + target.offset.saturating_sub(line.start),
-            x: line.bounds.x + target.x_pt,
-            affinity: match target.affinity {
-                loom_fonts::Affinity::Leading => CaretAffinity::Downstream,
-                loom_fonts::Affinity::Trailing => CaretAffinity::Upstream,
-            },
+            offset,
+            x: caret_x(style, block, line, offset, affinity),
+            affinity,
         });
     }
     let order = block.visual_line(font_size, line.start..line.end)?;
     let at = line.start + offset.checked_sub(line.global_start)?;
     let target = order.neighbour(at, affinity, forward)?;
+    let offset = line.global_start + (target.offset - line.start);
+    let affinity = visual_edge_affinity(lines, index, offset, target.affinity);
     Some(CaretTarget {
-        offset: line.global_start + (target.offset - line.start),
-        x: line_origin(style, block, line) + target.x,
-        affinity: target.affinity,
+        offset,
+        x: caret_x(style, block, line, offset, affinity),
+        affinity,
     })
 }
 

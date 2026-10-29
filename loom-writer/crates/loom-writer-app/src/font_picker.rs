@@ -468,8 +468,10 @@ pub(crate) fn apply_family(app: &WriterApp, state: &Rc<GuiState>, family: &str) 
             family,
         );
         next.set_selection(selection);
-        if next != *state.current.borrow() {
-            apply_with_history(app, state, next, crate::HistoryKind::DocumentAction);
+        if next != *state.current.borrow()
+            && !apply_with_history(app, state, next, crate::HistoryKind::DocumentAction)
+        {
+            return;
         }
         let name = if family.is_empty() {
             DEFAULT_FAMILY

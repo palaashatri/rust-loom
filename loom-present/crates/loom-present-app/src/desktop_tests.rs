@@ -1035,7 +1035,7 @@ fn slideshow_plays_the_arrival_slides_transition_and_the_editor_never_animates()
     );
 
     app.set_is_preview_mode(true);
-    for (index, transition, name) in [(2, 1, "dissolve"), (3, 2, "push"), (4, 3, "morph")] {
+    for (index, transition, name) in [(2, 1, "dissolve"), (3, 2, "push")] {
         app.set_transition_index(transition);
         app.set_active_slide_index(index);
         let started = settle(&app);
@@ -1052,6 +1052,15 @@ fn slideshow_plays_the_arrival_slides_transition_and_the_editor_never_animates()
         play_to_end(&app);
         assert!((settle(&app) - 1.0).abs() < f32::EPSILON, "{name} finishes");
     }
+
+    // Imported Morph stays recorded but plays as a cut until Loom supports it.
+    app.set_transition_index(3);
+    app.set_active_slide_index(4);
+    assert_eq!(
+        settle(&app),
+        1.0,
+        "unsupported Morph must not masquerade as a fade"
+    );
 
     // A slide with no transition appears at once.
     app.set_transition_index(0);

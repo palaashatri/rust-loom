@@ -14,7 +14,7 @@ use loom_present_core::{
 use slint::{ComponentHandle, SharedString};
 
 use crate::{
-    dispatch_command, empty_session, master_palette, refresh,
+    dispatch_command, empty_session, master_palette, refresh, save_current_deck,
     table_actions::{self, get_active_table_cell, set_active_table_cell},
     DragState, GuiState, PaletteAction, PresentApp,
 };
@@ -386,6 +386,227 @@ fn test_table_cell_text_editing_and_a11y_label() {
             Some("Table 3 by 3, cell A1: Quarterly Revenue".to_string())
         );
     }
+}
+
+#[test]
+fn table_typing_undoes_per_cell_session_without_crossing_other_actions() {
+    let (app, state) = make_test_fixture();
+    app.invoke_add_table();
+    let id = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .unwrap()
+        .elements[0]
+        .id
+        .clone();
+    set_active_table_cell(&id, 0, 0);
+    for text in [
+        "h",
+        "he",
+        "hel",
+        "hell",
+        "hello",
+        "hello ",
+        "hello w",
+        "hello wo",
+        "hello wor",
+        "hello worl",
+        "hello world",
+    ] {
+        app.invoke_update_element_content(text.into());
+    }
+    let text = || {
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .text()
+    };
+
+    app.invoke_undo();
+    assert_eq!(text(), "Header 1");
+    app.invoke_redo();
+    assert_eq!(text(), "hello world");
+
+    set_active_table_cell(&id, 0, 1);
+    app.invoke_update_element_content("x".into());
+    app.invoke_update_element_content("xy".into());
+    app.invoke_undo();
+    assert_eq!(text(), "hello world");
+    assert_eq!(
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 1)
+            .unwrap()
+            .content
+            .text(),
+        "Header 2"
+    );
+    app.invoke_undo();
+    assert_eq!(text(), "Header 1");
+    assert_eq!(
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 1)
+            .unwrap()
+            .content
+            .text(),
+        "Header 2"
+    );
+}
+
+#[test]
+fn table_cell_edit_sessions_flush_on_focus_loss_and_other_actions() {
+    let (app, state) = make_test_fixture();
+    app.invoke_add_table();
+    let id = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .unwrap()
+        .elements[0]
+        .id
+        .clone();
+    set_active_table_cell(&id, 0, 0);
+    let text = || {
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .text()
+    };
+
+    app.invoke_update_element_content("Cell edit".into());
+    app.invoke_update_element_content("Cell edit complete".into());
+    app.invoke_end_table_cell_edit();
+    app.invoke_update_element_content("After focus".into());
+    app.invoke_update_element_content("After focus loss".into());
+
+    app.invoke_undo();
+    assert_eq!(text(), "Cell edit complete");
+    app.invoke_undo();
+    assert_eq!(text(), "Header 1");
+    app.invoke_redo();
+    app.invoke_redo();
+    assert_eq!(text(), "After focus loss");
+
+    app.invoke_add_text();
+    assert_eq!(
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .len(),
+        2
+    );
+    app.invoke_undo();
+    assert_eq!(
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .len(),
+        1
+    );
+    assert_eq!(text(), "After focus loss");
+    app.invoke_undo();
+    assert_eq!(text(), "Cell edit complete");
+}
+
+#[test]
+fn saving_a_table_cell_edit_preserves_text_and_flushes_the_undo_session() {
+    let (app, state) = make_test_fixture();
+    let directory = TestDirectory::new("table-cell-undo-save");
+    let path = directory.0.join("saved.loomdeck");
+    app.invoke_add_table();
+    let id = state
+        .session
+        .borrow()
+        .document
+        .active_slide()
+        .unwrap()
+        .elements[0]
+        .id
+        .clone();
+    set_active_table_cell(&id, 0, 0);
+    app.invoke_update_element_content("Saved".into());
+    app.invoke_update_element_content("Saved value".into());
+    *state.save_path.borrow_mut() = Some(path.clone());
+
+    assert!(save_current_deck(&app, &state, false).expect("save table deck"));
+    let loaded = loom_present_core::load_presentation_session(
+        &std::fs::read(&path).expect("read saved table deck"),
+    )
+    .expect("load saved table deck");
+    assert_eq!(
+        loaded.document.active_slide().unwrap().elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .text(),
+        "Saved value"
+    );
+
+    app.invoke_update_element_content("Saved value after save".into());
+    app.invoke_update_element_content("Saved value after save!".into());
+    app.invoke_undo();
+    assert_eq!(
+        state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .unwrap()
+            .elements[0]
+            .table()
+            .unwrap()
+            .cell(0, 0)
+            .unwrap()
+            .content
+            .text(),
+        "Saved value"
+    );
 }
 
 #[test]

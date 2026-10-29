@@ -1,5 +1,7 @@
 //! Sheet and toolbar action handlers for Loom Sheets.
 
+mod dimension_actions;
+
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,9 +19,9 @@ use crate::analysis::{
     label_value_columns, plan_chart_in_range, plan_pivot_sheet, unique_sheet_name,
 };
 use crate::formatting::{
-    adjust_selection_font_size, cycle_selection_fill, set_selection_decimal_places,
-    set_selection_fill, set_selection_number_format, toggle_selection_bold,
-    toggle_selection_borders, toggle_selection_italic, toggle_selection_underline,
+    cycle_selection_fill, set_selection_decimal_places, set_selection_fill,
+    set_selection_number_format, toggle_selection_bold, toggle_selection_borders,
+    toggle_selection_italic, toggle_selection_underline,
 };
 use crate::{
     apply_sheet, apply_sheet_view_change, clear_selection, commit_formula_edit, commit_transaction,
@@ -108,6 +110,7 @@ pub(crate) fn register_sheet_actions(
     menu_service: &Arc<NativeMenuBar>,
 ) {
     wire_template_navigation(app);
+    dimension_actions::register(app, state, menu_service);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -484,34 +487,6 @@ pub(crate) fn register_sheet_actions(
         let state = state.clone();
         let app_ref = app.as_weak();
         let menu_service = menu_service.clone();
-        app.on_adjust_font(move |delta| {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let sel = selection_from_app(&app);
-                if adjust_selection_font_size(
-                    &mut state.current.borrow_mut(),
-                    &mut state.undo_stack.borrow_mut(),
-                    &mut state.redo_stack.borrow_mut(),
-                    sel.range(),
-                    delta,
-                ) {
-                    let size = crate::formatting::effective_font_size(
-                        state.current.borrow().cell_style(sel.anchor),
-                    );
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left(SharedString::from(format!("Font size {size}")));
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
         app.on_set_fill(move |swatch_idx| {
             if let Some(app) = app_ref.upgrade() {
                 if crate::mutation_guard::refused(&app, &state) {
@@ -553,6 +528,7 @@ pub(crate) fn register_sheet_actions(
                 let explicit_range =
                     range.end.col == range.start.col + 1 && range.end.row > range.start.row;
                 let existing = state.current.borrow().chart.clone();
+                let replacing_chart = existing.is_some();
                 if let Some(existing) = existing.as_ref().filter(|_| !explicit_range) {
                     app.set_chart_visible(true);
                     sync_chart_to_app(&app, &state.current.borrow());
@@ -601,11 +577,12 @@ pub(crate) fn register_sheet_actions(
                         sync_chart_to_app(&app, &state.current.borrow());
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
-                        app.set_status_left(SharedString::from(format!(
-                            "Inserted {} ({})",
-                            chart.title,
-                            chart.kind.as_str()
-                        )));
+                        let status = if replacing_chart {
+                            format!("Changed chart source to {}", app.get_chart_source_range())
+                        } else {
+                            format!("Inserted {} ({})", chart.title, chart.kind.as_str())
+                        };
+                        app.set_status_left(status.into());
                     }
                     Err(hint) => {
                         app.set_status_left(SharedString::from(hint));
@@ -1220,79 +1197,6 @@ pub(crate) fn register_sheet_actions(
                 apply_sheet(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left("Unfrozen panes".into());
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_adjust_row_height(move |delta| {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let cell_str = app.get_selected_cell();
-                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
-                    let cur_h = state.current.borrow().row_height(cell.row);
-                    let new_h = (cur_h + delta as f32).clamp(16.0, 160.0);
-                    let before = state.current.borrow().clone();
-                    let mut after = before.clone();
-                    after.set_row_height(cell.row, new_h);
-                    commit_transaction(
-                        &mut state.current.borrow_mut(),
-                        &mut state.undo_stack.borrow_mut(),
-                        &mut state.redo_stack.borrow_mut(),
-                        SheetTransaction::Snapshot {
-                            before: Box::new(before),
-                            after: Box::new(after),
-                        },
-                    );
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left(SharedString::from(format!(
-                        "Row {} height: {:.0} px",
-                        cell.row + 1,
-                        new_h
-                    )));
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_adjust_col_width(move |delta| {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let cell_str = app.get_selected_cell();
-                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
-                    let cur_w = state.current.borrow().col_width(cell.col);
-                    let new_w = (cur_w + delta as f32).clamp(32.0, 400.0);
-                    let before = state.current.borrow().clone();
-                    let mut after = before.clone();
-                    after.set_col_width(cell.col, new_w);
-                    commit_transaction(
-                        &mut state.current.borrow_mut(),
-                        &mut state.undo_stack.borrow_mut(),
-                        &mut state.redo_stack.borrow_mut(),
-                        SheetTransaction::Snapshot {
-                            before: Box::new(before),
-                            after: Box::new(after),
-                        },
-                    );
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left(SharedString::from(format!(
-                        "Column width: {:.0} px",
-                        new_w
-                    )));
-                }
             }
         });
     }
