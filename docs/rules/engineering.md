@@ -31,6 +31,8 @@ Only Markdown paths declared in `loom-bootstrap/contracts/documentation.toml`, r
 
 Delete obsolete agent residue instead of preserving it "for context". Stale instructions are defects because they mislead future agents.
 
+Standing instruction — plan, audit and issue disposition: every plan, audit or investigation produced while executing this workflow must be written into the declared documentation locations or filed as a GitHub issue, and committed as part of the repository work or tracked in that issue. Ignored temporary paths such as `.work/` and dated archives are historical or scratch records, not standing dispositions for new findings. A plan that was never written out is not done, and an audit that was not recorded does not close its card.
+
 ## 7. No facade-first development
 
 A visible enabled control may exist only when its operation has real semantics.

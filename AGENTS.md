@@ -25,3 +25,5 @@ The former root current-truth section moved to [docs/workflow/current.md](docs/w
 ## Start here — one small repair at a time
 
 Follow the [bounded repair procedure](docs/rules/workflow.md#start-here--one-small-repair-at-a-time): reproduce, make a small complete change, verify behavior, record exact results/gaps and stop at the authorized boundary. Full acceptance requires every applicable gate; a build or screenshot alone is not proof.
+
+Plans or audits produced along the way must be written into the declared documentation or filed as a GitHub issue and committed as part of the repo; notes kept only under ignored paths are not records.
