@@ -1,0 +1,10 @@
+[package]
+name = "rotated-chart-repro"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+loom-present-core = { path = "../../loom-present/crates/loom-present-core" }
+loom-objects = { path = "../../loom-core/crates/loom-objects" }

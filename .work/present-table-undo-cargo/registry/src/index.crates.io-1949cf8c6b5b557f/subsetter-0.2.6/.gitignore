@@ -1,0 +1,17 @@
+# General
+.vscode
+_things
+desktop.ini
+.DS_Store
+
+# Rust
+/target
+bench/target
+debug
+.idea
+
+# Tests
+tests/subsets
+tests/ttx/*.otf
+tests/cff/*.otf
+tests/ttx/*_ref.ttx

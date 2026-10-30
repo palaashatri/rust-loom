@@ -1,0 +1,40 @@
+   Compiling loom-writer-core v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-core)
+warning: unused variable: `bet_left`
+  --> crates/loom-writer-core/src/rtl_caret_tests.rs:99:10
+   |
+99 |     let (bet_left, bet_right) = glyph_span(line, 2..4);
+   |          ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_bet_left`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `drawn_runs` is never used
+   --> crates/loom-writer-core/src/list_levels_tests.rs:341:4
+    |
+341 | fn drawn_runs(content: &str) -> Vec<crate::export::test_support::DrawnTextRun> {
+    |    ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom-writer-core` (lib test) generated 2 warnings (run `cargo fix --lib -p loom-writer-core --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.44s
+     Running unittests src/lib.rs (target/debug/deps/loom_writer_core-71911d5e22c3f632)
+
+running 1 test
+test tables::typed_tests::table_replace_all_keeps_notes_between_changed_cells ... replace-all before="foo\u{1f}keep\u{1f}foo" current="x\u{1f}keep\u{1f}x" spans=[(0, 3), (9, 12)] changes=[(0, 3, 1), (9, 12, 1)] notes=[FootnoteEntry { id: 42, block_id: 1, offset: 6, body: "middle cell note" }]
+rebase note=42 old_offset=6 computed=4 changes=[(0, 3, 1), (9, 12, 1)]
+
+thread 'tables::typed_tests::table_replace_all_keeps_notes_between_changed_cells' (8060703) panicked at crates/loom-writer-core/src/tables/typed_tests.rs:563:5:
+assertion `left == right` failed
+  left: Some(2)
+ right: Some(4)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    tables::typed_tests::table_replace_all_keeps_notes_between_changed_cells
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 546 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p loom-writer-core --lib`

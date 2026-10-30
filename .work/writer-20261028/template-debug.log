@@ -1,0 +1,803 @@
+warning: loom-ui@0.1.0: warning: Exported component 'ButtonsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:21
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:48
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                                ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ChoiceSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:52
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                    ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DataSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:35
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                                   ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FieldsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:37
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                     ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'GallerySection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'NavigationSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:21:67
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 21 |     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+warning: loom-ui@0.1.0:    |                                                                   ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverlaysSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:18
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RowsSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:   --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/foundation/gallery.slint:25:5
+warning: loom-ui@0.1.0:    |
+warning: loom-ui@0.1.0: 25 |     RowsSection, OverlaysSection, DataSection, CanvasSection,
+warning: loom-ui@0.1.0:    |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'AppHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:551:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 551 | export component AppHeader inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: warning: Exported component 'AppleToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CanvasBackdrop' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:655:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 655 | export component CanvasBackdrop inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CollapsiblePanel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:311:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 311 | export component CollapsiblePanel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'CommandPalette' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:717:30
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 717 | export { CommandPaletteItem, CommandPalette, CommandPaletteTestWindow } from "command_palette.slint";
+warning: loom-ui@0.1.0:     |                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ContextToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'DirectionalLayout' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'EmptyState' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:403:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 403 | export component EmptyState inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Field' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'FormulaBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Hairline' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:617:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 617 | export component Hairline inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:82:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  82 | export component IconButton inherits IconOnlyToolbarItem { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOnlyToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'IconOverLabelToolbarItem' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSection' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:58
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                                                          ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'InspectorSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'LabeledToolbar' doesn't inherit Window. This is deprecated
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'MetricChip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:676:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 676 | export component MetricChip inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ModalDialog' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:204:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 204 | export component ModalDialog inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Overflow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'OverflowMenuButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:46
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                              ^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PaneTabs' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:667:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 667 | export component PaneTabs inherits TabStrip {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Panel' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:428:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 428 | export component Panel inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PanelHeader' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:66
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                  ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PrimaryButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:86:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  86 | export component PrimaryButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'PropertyRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |     ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RailButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:593:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 593 | export component RailButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'RangeSlider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SearchField' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SegmentedControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:36
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                    ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SheetTabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:727:31
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 727 |     IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+warning: loom-ui@0.1.0:     |                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'SidebarSurface' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:79
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                                                                               ^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Slider' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:107:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 107 | export component Slider inherits RangeSlider { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:728:25
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 728 |     PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+warning: loom-ui@0.1.0:     |                         ^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'StatusPill' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:496:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 496 | export component StatusPill inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Switch' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:110:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 110 | export component Switch inherits Toggle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabControl' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:116:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 116 | export component TabControl inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TabStrip' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:5
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |     ^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TitleChrome' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toggle' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:725:54
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 725 |     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+warning: loom-ui@0.1.0:     |                                                      ^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:78:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0:  78 | export component ToolButton inherits ToolbarButton { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'Toolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:24
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                        ^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:62
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                              ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarGroup' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:33
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                 ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarIconButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:77
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                                                             ^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarOverflowButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:724:23
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 724 |     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+warning: loom-ui@0.1.0:     |                       ^^^^^^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolbarSpacer' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:723:47
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 723 |     DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+warning: loom-ui@0.1.0:     |                                               ^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'ToolkitStatusBar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:726:15
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 726 |     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+warning: loom-ui@0.1.0:     |               ^^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'TransportButton' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:697:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 697 | export component TransportButton inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceRow' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:634:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 634 | export component WorkspaceRow inherits Rectangle {
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^
+warning: loom-ui@0.1.0: warning: Exported component 'WorkspaceToolbar' doesn't inherit Window. No code will be generated for it
+warning: loom-ui@0.1.0:    --> /Users/palaashatri/Code/personal/rust-loom/loom-core/crates/loom-ui/ui/components.slint:631:18
+warning: loom-ui@0.1.0:     |
+warning: loom-ui@0.1.0: 631 | export component WorkspaceToolbar inherits Toolbar { }
+warning: loom-ui@0.1.0:     |                  ^^^^^^^^^^^^^^^^
+   Compiling loom-writer-app v0.1.0 (/Users/palaashatri/Code/personal/rust-loom/loom-writer/crates/loom-writer-app)
+warning: function `table_inspector_delete_row_button_stays_inside_its_reading_edge_padding` is never used
+   --> crates/loom-writer-app/src/toolbar_tests.rs:424:4
+    |
+424 | fn table_inspector_delete_row_button_stays_inside_its_reading_edge_padding() {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loom-writer-app` (bin "loom-writer" test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 44.56s
+     Running unittests src/main.rs (target/debug/deps/loom_writer-7e9ff9649e98c789)
+
+running 1 test
+test keyboard_flow_tests::template_catalog_drives_accessible_cards_preview_blocks_and_document_flow ... state category=2 selected=report catalog count=5
+catalog index=0 id=blank category=1 name=Blank
+catalog index=1 id=report category=2 name=Executive Report
+catalog index=2 id=letter category=3 name=Business Letter
+catalog index=3 id=cv category=4 name=Curriculum Vitae
+catalog index=4 id=newsletter category=5 name=Newsletter
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("File"), role=Some(Button), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 24.5, y: 10.0 }, size=LogicalSize { width: 23.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 4.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("Edit"), role=Some(Button), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 88.0, y: 10.0 }, size=LogicalSize { width: 24.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 68.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("View"), role=Some(Button), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 148.0, y: 10.0 }, size=LogicalSize { width: 32.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 132.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("Format"), role=Some(Button), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 208.0, y: 10.0 }, size=LogicalSize { width: 45.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 196.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("Insert"), role=Some(Button), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 273.5, y: 10.0 }, size=LogicalSize { width: 37.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 260.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=Some("Table"), role=Some(Button), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 338.5, y: 10.0 }, size=LogicalSize { width: 35.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 324.0, y: 0.0 }, size=LogicalSize { width: 64.0, height: 36.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 35.0 }, size=LogicalSize { width: 1280.0, height: 1.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 36.0 }, size=LogicalSize { width: 1280.0, height: 52.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 36.0 }, size=LogicalSize { width: 1280.0, height: 52.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 8.0, y: 38.0 }, size=LogicalSize { width: 1264.0, height: 48.0 }
+a11y: label=Some("View options"), role=Some(Button), pos=LogicalPosition { x: 8.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 8.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 23.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 23.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("View"), role=Some(Text), pos=LogicalPosition { x: 20.0, y: 65.5 }, size=LogicalSize { width: 24.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 8.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 8.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=Some("Zoom 100%"), role=Some(Button), pos=LogicalPosition { x: 60.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 75.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 75.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("100%"), role=Some(Text), pos=LogicalPosition { x: 70.5, y: 65.5 }, size=LogicalSize { width: 27.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 112.0, y: 38.0 }, size=LogicalSize { width: 370.0, height: 48.0 }
+a11y: label=Some("Insert"), role=Some(Button), pos=LogicalPosition { x: 486.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 486.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 501.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 501.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Insert"), role=Some(Text), pos=LogicalPosition { x: 496.0, y: 65.5 }, size=LogicalSize { width: 28.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 486.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 486.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=Some("Text"), role=Some(Button), pos=LogicalPosition { x: 538.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 538.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 553.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 553.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Text"), role=Some(Text), pos=LogicalPosition { x: 551.5, y: 65.5 }, size=LogicalSize { width: 21.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 538.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 538.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=Some("Style"), role=Some(Button), pos=LogicalPosition { x: 590.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 590.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 605.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 605.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Style"), role=Some(Text), pos=LogicalPosition { x: 601.5, y: 65.5 }, size=LogicalSize { width: 25.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 590.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 590.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=Some("List"), role=Some(Button), pos=LogicalPosition { x: 642.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 642.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 657.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 657.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("List"), role=Some(Text), pos=LogicalPosition { x: 657.5, y: 65.5 }, size=LogicalSize { width: 17.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 642.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 642.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 694.0, y: 38.0 }, size=LogicalSize { width: 370.0, height: 48.0 }
+a11y: label=Some("Export"), role=Some(Button), pos=LogicalPosition { x: 1068.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1068.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1083.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1083.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Export"), role=Some(Text), pos=LogicalPosition { x: 1076.0, y: 65.5 }, size=LogicalSize { width: 32.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1068.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1068.0, y: 38.0 }, size=LogicalSize { width: 48.0, height: 48.0 }
+a11y: label=Some("Format inspector"), role=Some(Button), pos=LogicalPosition { x: 1120.0, y: 38.0 }, size=LogicalSize { width: 50.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 38.0 }, size=LogicalSize { width: 50.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1136.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1136.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Format"), role=Some(Text), pos=LogicalPosition { x: 1128.0, y: 65.5 }, size=LogicalSize { width: 34.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 38.0 }, size=LogicalSize { width: 50.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 38.0 }, size=LogicalSize { width: 50.0, height: 48.0 }
+a11y: label=Some("Document"), role=Some(Button), pos=LogicalPosition { x: 1174.0, y: 38.0 }, size=LogicalSize { width: 66.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1174.0, y: 38.0 }, size=LogicalSize { width: 66.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1198.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1198.0, y: 45.5 }, size=LogicalSize { width: 18.0, height: 18.0 }
+a11y: label=Some("Document"), role=Some(Text), pos=LogicalPosition { x: 1182.0, y: 65.5 }, size=LogicalSize { width: 50.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1174.0, y: 38.0 }, size=LogicalSize { width: 66.0, height: 48.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1174.0, y: 38.0 }, size=LogicalSize { width: 66.0, height: 48.0 }
+a11y: label=Some("More actions"), role=Some(Button), pos=LogicalPosition { x: 1244.0, y: 38.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1250.0, y: 44.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1250.0, y: 44.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1244.0, y: 38.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1244.0, y: 38.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 87.0 }, size=LogicalSize { width: 1280.0, height: 1.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 1280.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 1280.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 0.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 960.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 960.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 960.0, height: 890.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 182.5, y: 112.0 }, size=LogicalSize { width: 595.0, height: 842.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 182.5, y: 112.0 }, size=LogicalSize { width: 595.0, height: 842.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 182.5, y: 112.0 }, size=LogicalSize { width: 595.0, height: 842.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 182.5, y: 112.0 }, size=LogicalSize { width: 595.0, height: 842.0 }
+a11y: label=Some("Document body"), role=Some(TextInput), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 698.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 698.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 698.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 236.5, y: 184.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 14.85 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("Hello"), role=Some(Text), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 14.85 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 251.5, y: 184.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 251.5, y: 184.0 }, size=LogicalSize { width: 1.0, height: 14.85 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 698.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 254.5, y: 184.0 }, size=LogicalSize { width: 451.0, height: 698.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 88.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 1.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 88.0 }, size=LogicalSize { width: 320.0, height: 684.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 96.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("Inspector tab"), role=Some(RadioGroup), pos=LogicalPosition { x: 976.0, y: 96.0 }, size=LogicalSize { width: 256.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 96.0 }, size=LogicalSize { width: 256.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 98.0 }, size=LogicalSize { width: 116.5, height: 24.0 }
+a11y: label=Some("Format"), role=Some(Button), pos=LogicalPosition { x: 978.0, y: 98.0 }, size=LogicalSize { width: 116.5, height: 24.0 }
+a11y: label=Some("Format"), role=Some(Text), pos=LogicalPosition { x: 1013.75, y: 102.0 }, size=LogicalSize { width: 45.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 98.0 }, size=LogicalSize { width: 116.5, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1094.5, y: 98.0 }, size=LogicalSize { width: 135.5, height: 24.0 }
+a11y: label=Some("Document"), role=Some(Button), pos=LogicalPosition { x: 1094.5, y: 98.0 }, size=LogicalSize { width: 135.5, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1094.5, y: 104.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("Document"), role=Some(Text), pos=LogicalPosition { x: 1130.25, y: 102.0 }, size=LogicalSize { width: 64.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1094.5, y: 98.0 }, size=LogicalSize { width: 135.5, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 96.0 }, size=LogicalSize { width: 256.0, height: 28.0 }
+a11y: label=Some("Close inspector"), role=Some(Button), pos=LogicalPosition { x: 1236.0, y: 96.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1242.0, y: 102.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1242.0, y: 102.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1236.0, y: 96.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1236.0, y: 96.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 132.0 }, size=LogicalSize { width: 320.0, height: 640.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 132.0 }, size=LogicalSize { width: 320.0, height: 640.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 132.0 }, size=LogicalSize { width: 320.0, height: 640.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 132.0 }, size=LogicalSize { width: 320.0, height: 640.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 140.0 }, size=LogicalSize { width: 320.0, height: 496.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 140.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 140.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=Some("Text Style"), role=Some(Text), pos=LogicalPosition { x: 976.0, y: 148.0 }, size=LogicalSize { width: 292.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 180.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("Heading Style"), role=Some(RadioGroup), pos=LogicalPosition { x: 976.0, y: 180.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 180.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 182.0 }, size=LogicalSize { width: 71.75, height: 24.0 }
+a11y: label=Some("Body"), role=Some(Button), pos=LogicalPosition { x: 978.0, y: 182.0 }, size=LogicalSize { width: 71.75, height: 24.0 }
+a11y: label=Some("Body"), role=Some(Text), pos=LogicalPosition { x: 997.375, y: 186.0 }, size=LogicalSize { width: 33.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 182.0 }, size=LogicalSize { width: 71.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.75, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=Some("H1"), role=Some(Button), pos=LogicalPosition { x: 1049.75, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.75, y: 188.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("H1"), role=Some(Text), pos=LogicalPosition { x: 1077.125, y: 186.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.75, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.5, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=Some("H2"), role=Some(Button), pos=LogicalPosition { x: 1120.5, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.5, y: 188.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.5, y: 188.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("H2"), role=Some(Text), pos=LogicalPosition { x: 1146.875, y: 186.0 }, size=LogicalSize { width: 18.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.5, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.25, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=Some("H3"), role=Some(Button), pos=LogicalPosition { x: 1191.25, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.25, y: 188.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.25, y: 188.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("H3"), role=Some(Text), pos=LogicalPosition { x: 1217.625, y: 186.0 }, size=LogicalSize { width: 18.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.25, y: 182.0 }, size=LogicalSize { width: 70.75, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 180.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 216.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 216.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=Some("Font & Size"), role=Some(Text), pos=LogicalPosition { x: 976.0, y: 224.0 }, size=LogicalSize { width: 292.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 256.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 256.0 }, size=LogicalSize { width: 288.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 258.0 }, size=LogicalSize { width: 120.0, height: 28.0 }
+a11y: label=Some("Font family"), role=Some(Combobox), pos=LogicalPosition { x: 976.0, y: 258.0 }, size=LogicalSize { width: 120.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 258.0 }, size=LogicalSize { width: 120.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 258.0 }, size=LogicalSize { width: 120.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 984.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1016.0, y: 265.0 }, size=LogicalSize { width: 14.0, height: 14.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1016.0, y: 265.0 }, size=LogicalSize { width: 14.0, height: 14.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1100.0, y: 258.0 }, size=LogicalSize { width: 164.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1100.0, y: 258.0 }, size=LogicalSize { width: 164.0, height: 28.0 }
+a11y: label=Some("Smaller"), role=Some(Button), pos=LogicalPosition { x: 1104.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1110.0, y: 264.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1110.0, y: 264.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1104.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1104.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1134.0, y: 258.0 }, size=LogicalSize { width: 96.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1134.0, y: 258.0 }, size=LogicalSize { width: 96.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1134.0, y: 258.0 }, size=LogicalSize { width: 96.0, height: 28.0 }
+a11y: label=Some("Font size"), role=Some(TextInput), pos=LogicalPosition { x: 1142.0, y: 258.0 }, size=LogicalSize { width: 65.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1211.0, y: 265.0 }, size=LogicalSize { width: 11.0, height: 14.0 }
+a11y: label=Some("Larger"), role=Some(Button), pos=LogicalPosition { x: 1232.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1238.0, y: 264.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1238.0, y: 264.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1232.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1232.0, y: 258.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 296.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("Bold"), role=Some(Button), pos=LogicalPosition { x: 976.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 982.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 982.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=Some("Italic"), role=Some(Button), pos=LogicalPosition { x: 1006.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1012.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1012.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1006.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1006.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=Some("Underline"), role=Some(Button), pos=LogicalPosition { x: 1036.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1042.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1042.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1036.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1036.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=Some("Strikethrough"), role=Some(Button), pos=LogicalPosition { x: 1066.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1072.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1072.0, y: 302.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1066.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1066.0, y: 296.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 332.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 296.0, height: 28.0 }
+a11y: label=Some("Text Color"), role=Some(Button), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 296.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 296.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1087.5, y: 338.0 }, size=LogicalSize { width: 65.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 296.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 332.0 }, size=LogicalSize { width: 296.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 368.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 368.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=Some("Alignment & Spacing"), role=Some(Text), pos=LogicalPosition { x: 976.0, y: 376.0 }, size=LogicalSize { width: 292.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 408.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 408.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=Some("Text Alignment"), role=Some(RadioGroup), pos=LogicalPosition { x: 976.0, y: 408.0 }, size=LogicalSize { width: 226.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 408.0 }, size=LogicalSize { width: 226.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=Some("Left"), role=Some(Button), pos=LogicalPosition { x: 978.0, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=Some("Left"), role=Some(Text), pos=LogicalPosition { x: 991.125, y: 414.0 }, size=LogicalSize { width: 24.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1028.25, y: 410.0 }, size=LogicalSize { width: 60.25, height: 24.0 }
+a11y: label=Some("Center"), role=Some(Button), pos=LogicalPosition { x: 1028.25, y: 410.0 }, size=LogicalSize { width: 60.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1028.25, y: 416.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1028.25, y: 416.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("Center"), role=Some(Text), pos=LogicalPosition { x: 1037.375, y: 414.0 }, size=LogicalSize { width: 42.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1028.25, y: 410.0 }, size=LogicalSize { width: 60.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1088.5, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=Some("Right"), role=Some(Button), pos=LogicalPosition { x: 1088.5, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1088.5, y: 416.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1088.5, y: 416.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("Right"), role=Some(Text), pos=LogicalPosition { x: 1097.625, y: 414.0 }, size=LogicalSize { width: 32.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1088.5, y: 410.0 }, size=LogicalSize { width: 50.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1138.75, y: 410.0 }, size=LogicalSize { width: 61.25, height: 24.0 }
+a11y: label=Some("Justify"), role=Some(Button), pos=LogicalPosition { x: 1138.75, y: 410.0 }, size=LogicalSize { width: 61.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1138.75, y: 416.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1138.75, y: 416.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("Justify"), role=Some(Text), pos=LogicalPosition { x: 1147.875, y: 414.0 }, size=LogicalSize { width: 43.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1138.75, y: 410.0 }, size=LogicalSize { width: 61.25, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 408.0 }, size=LogicalSize { width: 226.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1206.0, y: 408.0 }, size=LogicalSize { width: 58.0, height: 28.0 }
+a11y: label=Some("Outdent"), role=Some(Button), pos=LogicalPosition { x: 1206.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1212.0, y: 414.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1212.0, y: 414.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1206.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1206.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=Some("Indent"), role=Some(Button), pos=LogicalPosition { x: 1236.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1242.0, y: 414.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1242.0, y: 414.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1236.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1236.0, y: 408.0 }, size=LogicalSize { width: 28.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 444.0 }, size=LogicalSize { width: 320.0, height: 44.0 }
+a11y: label=Some("Line Spacing"), role=Some(Text), pos=LogicalPosition { x: 976.0, y: 444.0 }, size=LogicalSize { width: 288.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 460.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=Some("Line Spacing"), role=Some(RadioGroup), pos=LogicalPosition { x: 976.0, y: 460.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 460.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=Some("1.0"), role=Some(Button), pos=LogicalPosition { x: 978.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=Some("1.0"), role=Some(Text), pos=LogicalPosition { x: 1004.5, y: 466.0 }, size=LogicalSize { width: 18.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=Some("1.15"), role=Some(Button), pos=LogicalPosition { x: 1049.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.0, y: 468.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("1.15"), role=Some(Text), pos=LogicalPosition { x: 1073.0, y: 466.0 }, size=LogicalSize { width: 23.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1049.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=Some("1.5"), role=Some(Button), pos=LogicalPosition { x: 1120.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 468.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("1.5"), role=Some(Text), pos=LogicalPosition { x: 1146.5, y: 466.0 }, size=LogicalSize { width: 18.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1120.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=Some("2.0"), role=Some(Button), pos=LogicalPosition { x: 1191.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.0, y: 468.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.0, y: 468.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("2.0"), role=Some(Text), pos=LogicalPosition { x: 1216.5, y: 466.0 }, size=LogicalSize { width: 20.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1191.0, y: 462.0 }, size=LogicalSize { width: 71.0, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 460.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 496.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 496.0 }, size=LogicalSize { width: 320.0, height: 32.0 }
+a11y: label=Some("Lists"), role=Some(Text), pos=LogicalPosition { x: 976.0, y: 504.0 }, size=LogicalSize { width: 292.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 536.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("List Style"), role=Some(RadioGroup), pos=LogicalPosition { x: 976.0, y: 536.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 536.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 538.0 }, size=LogicalSize { width: 78.333336, height: 24.0 }
+a11y: label=Some("None"), role=Some(Button), pos=LogicalPosition { x: 978.0, y: 538.0 }, size=LogicalSize { width: 78.333336, height: 24.0 }
+a11y: label=Some("None"), role=Some(Text), pos=LogicalPosition { x: 1000.1667, y: 542.0 }, size=LogicalSize { width: 34.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 978.0, y: 538.0 }, size=LogicalSize { width: 78.333336, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1056.3334, y: 538.0 }, size=LogicalSize { width: 95.333336, height: 24.0 }
+a11y: label=Some("Bulleted"), role=Some(Button), pos=LogicalPosition { x: 1056.3334, y: 538.0 }, size=LogicalSize { width: 95.333336, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1056.3334, y: 544.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=Some("Bulleted"), role=Some(Text), pos=LogicalPosition { x: 1078.5, y: 542.0 }, size=LogicalSize { width: 51.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1056.3334, y: 538.0 }, size=LogicalSize { width: 95.333336, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1151.6666, y: 538.0 }, size=LogicalSize { width: 110.333336, height: 24.0 }
+a11y: label=Some("Numbered"), role=Some(Button), pos=LogicalPosition { x: 1151.6666, y: 538.0 }, size=LogicalSize { width: 110.333336, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1151.6666, y: 544.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1151.6666, y: 544.0 }, size=LogicalSize { width: 1.0, height: 12.0 }
+a11y: label=Some("Numbered"), role=Some(Text), pos=LogicalPosition { x: 1173.8333, y: 542.0 }, size=LogicalSize { width: 66.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1151.6666, y: 538.0 }, size=LogicalSize { width: 110.333336, height: 24.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 976.0, y: 536.0 }, size=LogicalSize { width: 288.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("Paragraph options"), role=Some(Button), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 578.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 578.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 996.0, y: 578.0 }, size=LogicalSize { width: 116.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 572.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=Some("Baseline options"), role=Some(Button), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 614.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 972.0, y: 614.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 996.0, y: 614.0 }, size=LogicalSize { width: 104.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 960.0, y: 608.0 }, size=LogicalSize { width: 320.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 772.0 }, size=LogicalSize { width: 1280.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 772.0 }, size=LogicalSize { width: 1280.0, height: 1.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 772.0 }, size=LogicalSize { width: 1280.0, height: 28.0 }
+a11y: label=Some("1 word · 5 chars · 1 paragraph · ~1 min read"), role=Some(Text), pos=LogicalPosition { x: 12.0, y: 779.0 }, size=LogicalSize { width: 1141.0, height: 14.0 }
+a11y: label=Some("Caret at character 1"), role=Some(Text), pos=LogicalPosition { x: 1165.0, y: 779.0 }, size=LogicalSize { width: 103.0, height: 14.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 1160.0, height: 752.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 1160.0, height: 752.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 1160.0, height: 752.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 1160.0, height: 752.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 1160.0, height: 696.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 220.0, height: 696.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 24.0 }, size=LogicalSize { width: 220.0, height: 696.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 40.0 }, size=LogicalSize { width: 196.0, height: 17.0 }
+a11y: label=Some("TEMPLATES"), role=Some(Text), pos=LogicalPosition { x: 80.0, y: 40.0 }, size=LogicalSize { width: 61.0, height: 13.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 61.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 61.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 69.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 69.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("All Templates"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 69.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 61.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 97.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 97.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 105.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 105.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("Basic"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 105.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 97.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 133.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 133.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 141.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 141.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("Reports"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 141.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 133.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 169.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 169.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 177.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 177.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("Letters"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 177.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 169.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 205.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 205.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 213.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 213.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("Curricula Vitae"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 213.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 205.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 241.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 241.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 249.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 80.0, y: 249.0 }, size=LogicalSize { width: 16.0, height: 16.0 }
+a11y: label=Some("Newsletters"), role=Some(Text), pos=LogicalPosition { x: 104.0, y: 249.0 }, size=LogicalSize { width: 156.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 241.0 }, size=LogicalSize { width: 196.0, height: 32.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 277.0 }, size=LogicalSize { width: 196.0, height: 393.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 72.0, y: 674.0 }, size=LogicalSize { width: 196.0, height: 30.0 }
+a11y: label=Some("English (US)"), role=Some(Text), pos=LogicalPosition { x: 80.0, y: 682.0 }, size=LogicalSize { width: 64.0, height: 14.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 148.0, y: 682.0 }, size=LogicalSize { width: 12.0, height: 12.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 148.0, y: 682.0 }, size=LogicalSize { width: 12.0, height: 12.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 279.0, y: 24.0 }, size=LogicalSize { width: 1.0, height: 696.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 280.0, y: 24.0 }, size=LogicalSize { width: 940.0, height: 696.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 280.0, y: 24.0 }, size=LogicalSize { width: 940.0, height: 640.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 280.0, y: 24.0 }, size=LogicalSize { width: 940.0, height: 640.0 }
+a11y: label=Some("Choose a Template"), role=Some(Text), pos=LogicalPosition { x: 304.0, y: 40.0 }, size=LogicalSize { width: 892.0, height: 104.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 304.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 304.0, y: 160.0 }, size=LogicalSize { width: 892.0, height: 236.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 318.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 494.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 670.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 846.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1022.0, y: 160.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 304.0, y: 412.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 720.0 }, size=LogicalSize { width: 1160.0, height: 56.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 60.0, y: 720.0 }, size=LogicalSize { width: 1160.0, height: 1.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 68.0, height: 28.0 }
+a11y: label=Some("Cancel"), role=Some(Button), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 68.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 68.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1002.0, y: 740.0 }, size=LogicalSize { width: 44.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 68.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 990.0, y: 734.0 }, size=LogicalSize { width: 68.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 134.0, height: 28.0 }
+a11y: label=Some("Create Document"), role=Some(Button), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 134.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 134.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1082.0, y: 740.0 }, size=LogicalSize { width: 110.0, height: 16.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 134.0, height: 28.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 1070.0, y: 734.0 }, size=LogicalSize { width: 134.0, height: 28.0 }
+a11y: label=Some("Escape to cancel • Return to create"), role=Some(Text), pos=LogicalPosition { x: 76.0, y: 720.0 }, size=LogicalSize { width: 902.0, height: 56.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 1280.0, height: 800.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+a11y: label=None, role=Some(None), pos=LogicalPosition { x: 0.0, y: 0.0 }, size=LogicalSize { width: 0.0, height: 0.0 }
+
+thread 'keyboard_flow_tests::template_catalog_drives_accessible_cards_preview_blocks_and_document_flow' (5981155) panicked at crates/loom-writer-app/src/keyboard_flow_tests.rs:887:32:
+visible catalog card report
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    keyboard_flow_tests::template_catalog_drives_accessible_cards_preview_blocks_and_document_flow
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 629 filtered out; finished in 1.76s
+
+error: test failed, to rerun pass `-p loom-writer-app --bin loom-writer`
