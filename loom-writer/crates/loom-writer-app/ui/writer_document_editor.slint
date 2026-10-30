@@ -1,0 +1,367 @@
+import { FindBar } from "find_bar.slint";
+import { Theme } from "theme.slint";
+import { PageImages, WriterCommentRect, WriterRenderBlock, WriterSelectionRect, WriterTableCellRect } from "writer_projection.slint";
+
+component PictureCornerHandle inherits Rectangle {
+    width: 8px;
+    height: 8px;
+    background: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+    border-width: 1px;
+    border-color: Theme.palette().paper;
+    accessible-role: none;
+}
+
+/// The page-margin chip that marks a comment's first line. It is drawn in page
+/// ink on page paper in every theme, so it reads the same in dark and high
+/// contrast. Its label is spoken, never drawn, so it cannot run past the page.
+
+export component WriterDocumentEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
+    in property <[WriterCommentRect]> comment-rects: [];
+    in property <[WriterTableCellRect]> table-cell-rects: [];
+    in property <string> document-accessible-label: "Document body";
+    in property <float> page-zoom: 1.0;
+    in property <string> page-appearance: "white";
+    in property <string> placeholder: "Type your text here...";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    in property <int> selection-anchor: 0;
+    in property <int> selection-focus: 0;
+    // Estimate relative luminance for contrast checks.
+    pure function luminance(c: color) -> float {
+        return (0.2126 * c.red * c.red + 0.7152 * c.green * c.green + 0.0722 * c.blue * c.blue) / 65025.0;
+    }
+    pure function contrast(a: float, b: float) -> float {
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05);
+    }
+    // Choose a separator that reaches 3:1 contrast against the cell fill.
+    pure function table-line(fill: float) -> color {
+        return root.contrast(root.luminance(Theme.palette().paper-muted), fill) >= 3.0
+            ? Theme.palette().paper-muted
+            : root.contrast(root.luminance(Theme.palette().paper), fill) >= 3.0
+                ? Theme.palette().paper
+                : Theme.palette().paper-ink;
+    }
+    callback edited(string, int, int);
+    callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    public function focus-editor() { editor.focus(); }
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-width: 0px;
+    min-height: 0px;
+    background: transparent;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.document-accessible-label;
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder;
+    accessible-action-default => { editor.focus(); }
+    forward-focus: editor;
+
+    focus-touch := TouchArea { clicked => { editor.focus(); } }
+
+    if root.text == "" : Text {
+        // Keep the empty-page prompt clear of the insertion caret at column one.
+        x: 2px * root.page-zoom;
+        y: 0px;
+        width: max(0px, root.width - 2px * root.page-zoom);
+        height: root.height;
+        text: root.placeholder;
+        font-family: Theme.document-font-family;
+        font-size: root.font-size;
+        color: root.page-appearance == "black" ? #AAAAAA : Theme.palette().paper-muted;
+        vertical-alignment: top;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    preview := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        for comment in root.comment-rects : Rectangle {
+            x: comment.x * root.page-zoom;
+            y: comment.y * root.page-zoom;
+            width: max(1px, comment.width * root.page-zoom);
+            height: max(1px, comment.height * root.page-zoom);
+            border-radius: 2px;
+            background: comment.fill;
+            // High contrast outlines each anchor in page ink, so its edge does not
+            // depend on the highlight colour.
+            border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
+            border-color: Theme.palette().paper-ink;
+            accessible-role: none;
+        }
+        // Secondary highlights for the other find matches; the current match
+        // is the ordinary selection drawn after them.
+        for found in FindBar.match-rects : Rectangle {
+            x: found.x * root.page-zoom;
+            y: found.y * root.page-zoom;
+            width: max(1px, found.width * root.page-zoom);
+            height: max(1px, found.height * root.page-zoom);
+            border-radius: 2px;
+            background: Theme.palette().warning.with-alpha(0.35);
+            accessible-role: none;
+        }
+        for cell in root.table-cell-rects : Rectangle {
+            x: cell.x * root.page-zoom;
+            y: cell.y * root.page-zoom;
+            // Extend right/bottom borders into neighbours so shared edges draw once.
+            width: max(1px, cell.width * root.page-zoom)
+                + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
+            height: max(1px, cell.height * root.page-zoom)
+                + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
+            background: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? Theme.palette().paper
+                : cell.has-bg ? cell.bg-color : transparent;
+            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? Theme.palette().paper-ink
+                : cell.table-cell
+                    ? root.table-line(cell.has-bg ? root.luminance(cell.bg-color) : 1.0)
+                    : cell.border-color;
+            border-width: cell.border-width * root.page-zoom;
+            accessible-role: none;
+            // The table style's own rules, drawn over the grid line on that side.
+            if cell.edge-top.visible : Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: cell.edge-top.width * root.page-zoom;
+                background: cell.edge-top.color;
+                accessible-role: none;
+            }
+            if cell.edge-bottom.visible : Rectangle {
+                x: 0px;
+                y: parent.height - self.height;
+                width: parent.width;
+                height: cell.edge-bottom.width * root.page-zoom;
+                background: cell.edge-bottom.color;
+                accessible-role: none;
+            }
+            if cell.edge-left.visible : Rectangle {
+                x: 0px;
+                y: 0px;
+                width: cell.edge-left.width * root.page-zoom;
+                height: parent.height;
+                background: cell.edge-left.color;
+                accessible-role: none;
+            }
+            if cell.edge-right.visible : Rectangle {
+                x: parent.width - self.width;
+                y: 0px;
+                width: cell.edge-right.width * root.page-zoom;
+                height: parent.height;
+                background: cell.edge-right.color;
+                accessible-role: none;
+            }
+        }
+        for cell in root.table-cell-rects : Rectangle {
+            x: cell.x * root.page-zoom;
+            y: cell.y * root.page-zoom;
+            width: max(1px, cell.width * root.page-zoom);
+            height: max(1px, cell.height * root.page-zoom);
+            background: Theme.palette().selection.with-alpha(0.22);
+            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+                ? cell.selection-border-color
+                : Theme.palette().selection;
+            border-width: max(1px, 2px * root.page-zoom);
+            visible: cell.selected;
+            accessible-role: none;
+        }
+        for pic in PageImages.items : Rectangle {
+            x: pic.x * root.page-zoom;
+            y: pic.y * root.page-zoom;
+            width: max(1px, pic.width * root.page-zoom);
+            height: max(1px, pic.height * root.page-zoom);
+            accessible-role: none;
+            Image {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                source: pic.source;
+                image-fit: fill;
+                accessible-role: image;
+                accessible-label: pic.label;
+            }
+            // The outline and corner handles of the selected picture.
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                border-width: 2px;
+                border-color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+                visible: pic.selected;
+                accessible-role: none;
+            }
+            PictureCornerHandle { x: -4px; y: -4px; visible: pic.selected; }
+            PictureCornerHandle { x: parent.width - 4px; y: -4px; visible: pic.selected; }
+            PictureCornerHandle { x: -4px; y: parent.height - 4px; visible: pic.selected; }
+            PictureCornerHandle { x: parent.width - 4px; y: parent.height - 4px; visible: pic.selected; }
+        }
+        for selection in root.selection-rects : Rectangle {
+            x: selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: max(1px, selection.width * root.page-zoom);
+            height: max(1px, selection.height * root.page-zoom);
+            background: selection.caret ? transparent : Theme.palette().selection;
+            visible: !selection.caret;
+            accessible-role: none;
+        }
+        for block in root.render-blocks : Text {
+            // The layout reserves this gutter so list markers align with text.
+            x: block.x * root.page-zoom - 4px * root.page-zoom - self.width;
+            y: block.y * root.page-zoom;
+            width: max(14px, block.marker.character-count * block.font-size * 0.62) * root.page-zoom;
+            height: block.height * root.page-zoom;
+            text: block.marker;
+            font-family: Theme.document-font-family;
+            visible: block.marker != "";
+            font-size: block.font-size * root.page-zoom;
+            color: root.page-appearance == "black" ? #FFFFFF : #000000;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            accessible-role: none;
+        }
+        for block in root.render-blocks : Rectangle {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
+            width: max(1px, block.width * root.page-zoom);
+            height: block.height * root.page-zoom;
+            accessible-role: none;
+            property <color> ink: block.has-color ? block.color
+                : root.page-appearance == "black" ? #FFFFFF : #000000;
+            for tile in block.glyph-tiles : Image {
+                x: tile.x * root.page-zoom;
+                y: tile.y * root.page-zoom;
+                width: tile.width * root.page-zoom;
+                height: tile.height * root.page-zoom;
+                source: tile.source;
+                image-fit: fill;
+                accessible-role: none;
+            }
+            // Uniform rows wrap in Slint; styled rows use Rust-measured positions.
+            for segment in block.segments : Text {
+                x: block.positioned ? segment.x * root.page-zoom : 0px;
+                y: block.positioned ? segment.y * root.page-zoom : 0px;
+                width: block.positioned
+                    ? max(1px, (block.width - segment.x + 4px) * root.page-zoom)
+                    : parent.width;
+                height: block.positioned
+                    ? max(block.font-size * 1.4, block.height - segment.y) * root.page-zoom
+                    : parent.height;
+                text: segment.text;
+                // Keep an accessible text node while glyph tiles provide the visible pixels.
+                accessible-role: text;
+                accessible-label: segment.text;
+                opacity: block.glyph-tiles.length == 0 ? 1.0 : 0.0;
+                font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
+                font-size: segment.size * 1px * root.page-zoom;
+                font-weight: segment.weight;
+                font-italic: segment.italic;
+                color: segment.has-color ? segment.color : parent.ink;
+                wrap: block.positioned ? TextWrap.no-wrap : TextWrap.word-wrap;
+                horizontal-alignment: !block.positioned && block.alignment == 1
+                    ? TextHorizontalAlignment.center
+                    : !block.positioned && block.alignment == 2
+                        ? TextHorizontalAlignment.right
+                        : TextHorizontalAlignment.left;
+                vertical-alignment: top;
+            }
+            for rule in block.rules : Rectangle {
+                x: rule.x * root.page-zoom;
+                y: rule.y * root.page-zoom;
+                width: max(1px, rule.width * root.page-zoom);
+                height: max(1px, rule.height * root.page-zoom);
+                background: parent.ink;
+                accessible-role: none;
+            }
+        }
+        for block in root.render-blocks : Text {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
+            width: max(1px, block.width * root.page-zoom);
+            height: max(14px, min(18px, block.height * root.page-zoom));
+            text: block.unsupported ? block.unsupported-label : "";
+            color: Theme.palette().warning;
+            font-size: 10px * root.page-zoom;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            visible: block.unsupported;
+            accessible-role: none;
+        }
+        for selection in root.selection-rects : Rectangle {
+            // Keep the caret clear of its glyph at every zoom.
+            property <length> mark-width: max(1px, selection.width * root.page-zoom);
+            x: selection.caret
+                ? selection.x * root.page-zoom - 2px * root.page-zoom - mark-width
+                : selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: mark-width;
+            height: max(1px, selection.height * root.page-zoom);
+            background: selection.has-color ? selection.color
+                : root.page-appearance == "black" ? #FFFFFF : #000000;
+            visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
+            accessible-role: none;
+        }
+    }
+
+    editor := TextInput {
+        font-family: Theme.document-font-family;
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: transparent;
+        selection-background-color: transparent;
+        selection-foreground-color: transparent;
+        accessible-role: none;
+        edited => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+            root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+        }
+        cursor-position-changed(_) => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+        }
+        key-pressed(event) => { return root.key-pressed(event); }
+    }
+
+    pointer-surface := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                editor.focus();
+                root.pointer-pressed(self.mouse-x, self.mouse-y, event.modifiers.shift);
+            } else if (event.kind == PointerEventKind.up) {
+                root.pointer-released(self.mouse-x, self.mouse-y);
+            } else if (event.kind == PointerEventKind.cancel) {
+                root.pointer-cancelled();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.pointer-moved(self.mouse-x, self.mouse-y);
+            }
+        }
+    }
+
+    changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+    changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+}

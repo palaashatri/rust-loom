@@ -836,13 +836,7 @@ fn draw_chart_card(
             let fraction = tick as f64 / 4.0;
             let x = plot_left + plot_w * fraction as f32;
             let value = axis.min + fraction * (axis.max - axis.min);
-            pdf.draw_text(
-                page,
-                x,
-                bottom + 10.0,
-                &format!("{value:.2}"),
-                &label_style,
-            );
+            pdf.draw_text(page, x, bottom + 10.0, &format!("{value:.2}"), &label_style);
         }
     } else {
         for (c_idx, cat) in chart.categories.iter().enumerate() {

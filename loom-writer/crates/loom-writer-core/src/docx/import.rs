@@ -13,7 +13,7 @@ use super::header_footer;
 use super::inline_style::{attribute_value, property_tag_with_start, writer_color};
 use super::paragraph_style_import::LocalParagraphFormatChange;
 use super::xml::W_NS;
-use crate::revisions::{RevisionBlockFormat, RevisionBlockFormatChange};
+use crate::revisions::RevisionBlockFormatChange;
 use crate::{
     PageAppearance, PageOrientation, PageSetup, RevisionAnchor, RevisionBoundaryKind, RevisionKind,
     RevisionPayload, RevisionRecord, RichBlock, TrackedChanges, WriterDocument,
@@ -1332,7 +1332,7 @@ fn parse_paragraph(
     }
 
     // The live paragraph properties exclude the nested previous pPr in pPrChange.
-    let mut kind = super::paragraph_style_import::paragraph_kind_from_docx(
+    let kind = super::paragraph_style_import::paragraph_kind_from_docx(
         &paragraph_properties.current_xml,
         archive,
         false,

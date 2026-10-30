@@ -61,6 +61,7 @@ pub(super) fn parse_table(
                 let p_start = p_cursor + p_rel;
                 let mut paragraph_references = Vec::new();
                 let mut paragraph_revisions = Vec::new();
+                let mut paragraph_formats = Vec::new();
                 let mut paragraph_comments = Vec::new();
                 if let Some((block_opt, next_p)) = parse_paragraph(
                     tc_xml,
@@ -70,11 +71,18 @@ pub(super) fn parse_table(
                     root_tag,
                     &mut paragraph_references,
                     &mut paragraph_revisions,
+                    &mut paragraph_formats,
                     &mut paragraph_comments,
                 )? {
                     if !paragraph_comments.is_empty() {
                         return Err(
                             "DOCX comments anchored to table cells are not supported".into()
+                        );
+                    }
+                    if !paragraph_formats.is_empty() {
+                        return Err(
+                            "DOCX paragraph-format revisions in table cells are not supported"
+                                .into(),
                         );
                     }
                     if paragraph_revisions.iter().any(|revision| {
@@ -410,4 +418,20 @@ pub(super) fn normalize_paragraph_mark_revisions(
         blocks.remove(index + 1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_table;
+
+    #[test]
+    fn paragraph_format_revisions_in_table_cells_fail_closed() {
+        let xml = r#"<w:tbl><w:tr><w:tc><w:p><w:pPr><w:jc w:val="right"/><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr><w:jc w:val="center"/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#;
+        let root_tag = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#;
+        let error = match parse_table(xml, 0, 1, root_tag) {
+            Err(error) => error,
+            Ok(_) => panic!("table-cell paragraph-format revisions must fail closed"),
+        };
+        assert!(error.contains("paragraph-format revisions in table cells are not supported"));
+    }
 }

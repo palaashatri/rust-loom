@@ -9,8 +9,8 @@ use loom_desktop::{FileFilter, NativeMenuBar, OpenFileRequest, SaveFileRequest};
 use slint::{ComponentHandle, SharedString};
 
 use crate::{
-    DocxSaveWarningState, GuiState, WriterApp, WriterDocument, document_content_equal,
-    document_is_dirty, file_title, recovery, set_recovery_notice,
+    document_content_equal, document_is_dirty, file_title, recovery, set_recovery_notice,
+    DocxSaveWarningState, GuiState, WriterApp, WriterDocument,
 };
 
 const SAVE_FILENAME: &str = "loom-writer-document.docx";
@@ -574,7 +574,7 @@ fn prepare_docx_for_test(document: &WriterDocument) -> Result<Vec<String>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{SaveFormat, normalize_save_path, prepare_docx_for_test};
+    use super::{normalize_save_path, prepare_docx_for_test, SaveFormat};
     use loom_writer_core::{
         CommentThread, FootnoteEntry, ImageFormat, InlineImage, PageAppearance, RichBlock,
         WriterDocument,

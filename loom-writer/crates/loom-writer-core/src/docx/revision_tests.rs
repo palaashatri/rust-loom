@@ -455,6 +455,14 @@ fn inline_and_paragraph_format_revisions_keep_separate_ooxml_properties() {
 }
 
 #[test]
+fn tracked_paragraph_format_revisions_inside_tables_fail_closed() {
+    let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:p><w:pPr><w:jc w:val="right"/><w:pPrChange w:id="1" w:author="Reviewer"><w:pPr><w:jc w:val="center"/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#;
+    let error = import_document_xml(xml)
+        .expect_err("tracked paragraph formatting inside DOCX tables must fail closed");
+    assert!(error.contains("tracked paragraph formatting inside DOCX tables is unsupported"));
+}
+
+#[test]
 fn paragraph_property_import_separates_live_and_previous_ppr_and_rejects_bad_changes() {
     let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:jc w:val="right"/><w:pPrChange w:id="7" w:author="Paragraph Reviewer"><w:pPr><w:jc w:val="center"/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>"#;
     let imported = import_document_xml(xml).expect("import live and previous paragraph styles");

@@ -348,6 +348,48 @@ fn the_view_menu_works_from_the_keyboard() {
 }
 
 #[test]
+fn local_menu_highlight_is_visible_on_hover_and_remains_when_open() {
+    let h = launched("menu-highlight", Some("light"));
+    settle(h.app());
+    let file = ElementHandle::find_by_accessible_label(h.app(), "File")
+        .find(|item| item.accessible_role() == Some(AccessibleRole::Button))
+        .expect("File menu button");
+    let position = file.absolute_position();
+    let size = file.size();
+    let sample_x = (position.x + size.width - 8.0).round() as u32;
+    let sample_y = (position.y + size.height / 2.0).round() as u32;
+    let sample = |shot: &Shot| shot.pixels[(sample_y * shot.width + sample_x) as usize];
+
+    let idle = Shot::take(h.app());
+    h.app().window().dispatch_event(WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(
+            position.x + size.width / 2.0,
+            position.y + size.height / 2.0,
+        ),
+    });
+    settle(h.app());
+    let hovered = Shot::take(h.app());
+    assert_ne!(
+        sample(&hovered),
+        sample(&idle),
+        "light-theme menu hover must be visible against the menu-bar surface"
+    );
+
+    chord_alt(h.app(), "f");
+    assert_eq!(h.app().get_local_menu_open_index(), 0);
+    h.app().window().dispatch_event(WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(1200.0, 700.0),
+    });
+    settle(h.app());
+    let selected_without_hover = Shot::take(h.app());
+    assert_eq!(
+        sample(&selected_without_hover),
+        sample(&hovered),
+        "an open menu's selected header must keep its highlight after pointer exit"
+    );
+}
+
+#[test]
 fn the_toolbar_view_menu_offers_the_same_choices() {
     let h = launched("toolbar", Some("light"));
     settle(h.app());

@@ -98,6 +98,8 @@ mod workbook_interop_tests;
 mod workbook_state_tests;
 #[path = "main_tests/worker_tests.rs"]
 mod worker_tests;
+#[path = "main_tests/xlsx_warning_dispatch_tests.rs"]
+mod xlsx_warning_dispatch_tests;
 
 fn cross_sheet_state() -> Rc<GuiState> {
     cross_sheet_state_with_dialogs(Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])))

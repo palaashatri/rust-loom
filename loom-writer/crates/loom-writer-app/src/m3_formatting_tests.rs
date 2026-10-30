@@ -778,12 +778,11 @@ fn native_color_save_refuses_bad_content_without_overwriting_the_file() {
     assert_eq!(std::fs::read(&path).unwrap(), previous);
     assert_eq!(*state.current.borrow(), before);
     assert!(app.get_status_left().as_str().contains("Save failed"));
-    assert!(
-        app.get_status_left()
-            .as_str()
-            .to_ascii_lowercase()
-            .contains("color")
-    );
+    assert!(app
+        .get_status_left()
+        .as_str()
+        .to_ascii_lowercase()
+        .contains("color"));
 }
 
 struct NativeColorClipboardGuard;

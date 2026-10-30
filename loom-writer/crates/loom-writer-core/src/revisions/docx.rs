@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::{
-    RevisionBlockFormat, RevisionBlockFormatChange, RevisionBoundaryKind, RevisionKind,
-    RevisionPayload, RevisionRecord, TrackedChanges,
+    RevisionBlockFormatChange, RevisionBoundaryKind, RevisionKind, RevisionPayload, RevisionRecord,
+    TrackedChanges,
 };
 use crate::{RichBlock, WriterDocument};
 

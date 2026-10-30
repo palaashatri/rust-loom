@@ -284,7 +284,7 @@ pub(super) fn import_tracked_changes_author(
     if values.next().is_some()
         || !value.has_tag_name((CUSTOM_VALUES_NS, "lpwstr"))
         || value.attributes().next().is_some()
-        || value.children().any(Node::is_element)
+        || value.children().any(|node| node.is_element())
     {
         return Err("DOCX LoomTrackedChangesAuthor must be a string custom property".into());
     }

@@ -51,7 +51,7 @@ fn has_button_border_near_bottom(image: &image::RgbaImage, surface_height: u32) 
     })
 }
 
-fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
+pub(super) fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
     let mut source = Sheet::new("Imported");
     source.set_str("A1", "Quarter");
     source.set_str("B1", "Revenue");
@@ -78,7 +78,7 @@ fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
         .expect("write XLSX fixture");
 }
 
-fn write_xlsx_with_absolute_anchor_shape(path: &std::path::Path) {
+pub(super) fn write_xlsx_with_absolute_anchor_shape(path: &std::path::Path) {
     let mut source = Sheet::new("Imported");
     source.objects.push(loom_sheets_core::SheetObject::shape(
         CellRef { row: 0, col: 0 },

@@ -1,0 +1,139 @@
+export struct WriterTextSegment {
+    text: string,
+    /// Left edge and top from the row's own, for a positioned row.
+    x: length,
+    y: length,
+    /// The point size the segment is drawn at: its run's size, or the block's.
+    size: float,
+    /// 700 for a bold run, else 400: the page measures weights below Bold as
+    /// Regular, so it draws them that way too.
+    weight: int,
+    italic: bool,
+    underline: bool,
+    strikethrough: bool,
+    has-color: bool,
+    color: color,
+}
+
+/// A line drawn under (underline) or through (strikethrough) a segment, in the
+/// row's own coordinates. Slint's text item cannot draw either by itself.
+export struct WriterTextRule {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
+/// One viewport-clipped tile of glyphs painted from the core's shaped IDs.
+/// Coordinates and dimensions are in page points; the canvas applies zoom.
+export struct WriterGlyphTile {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    source: image,
+}
+
+/// A rendered paragraph projected from the Writer document model.
+export struct WriterRenderBlock {
+    segments: [WriterTextSegment],
+    rules: [WriterTextRule],
+    glyph-tiles: [WriterGlyphTile],
+    /// False: one segment that the text item aligns and wraps itself. True:
+    /// each segment sits at its own `x`/`y` and the row is not wrapped again.
+    positioned: bool,
+    x: length,
+    y: length,
+    width: length,
+    font-size: length,
+    /// The family this row is drawn in; empty draws in the document font.
+    font-family: string,
+    height: length,
+    alignment: int,
+    marker: string,
+    unsupported: bool,
+    unsupported-label: string,
+    /// A colour from the block's own style (table cell text); when false the
+    /// page ink is used.
+    has-color: bool,
+    color: color,
+    /// True for generated table-cell text, whose High Contrast ink is forced
+    /// to black over the High Contrast-only white cell surface.
+    table-cell: bool,
+}
+
+/// A selection highlight or collapsed caret rectangle projected from the
+/// authoritative Writer page layout.
+export struct WriterSelectionRect {
+    page-index: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    caret: bool,
+    /// A caret drawn over a filled table cell takes that cell's text colour.
+    has-color: bool,
+    color: color,
+}
+
+/// A comment range projected from the same page layout as text selection.
+export struct WriterCommentRect {
+    comment-id: string,
+    label: string,
+    page-index: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    marker: bool,
+    /// The highlight behind the commented text: a document colour from Rust,
+    /// so it is the same in light, dark and high contrast.
+    fill: color,
+}
+
+/// One side of a table cell that the table style sets a rule on.
+export struct WriterCellEdge {
+    visible: bool,
+    color: color,
+    width: length,
+}
+
+/// A table cell rectangle projected with borders and background fills.
+export struct WriterTableCellRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    bg-color: color,
+    has-bg: bool,
+    border-color: color,
+    selection-border-color: color,
+    border-width: length,
+    selected: bool,
+    /// True for actual table cells; chart surfaces keep their own appearance.
+    table-cell: bool,
+    /// Canonical editor byte offset for a table cell; -1 for non-cell shapes.
+    caret-offset: int,
+    /// The table style's rule on each side of the cell, when it sets one.
+    edge-top: WriterCellEdge,
+    edge-bottom: WriterCellEdge,
+    edge-left: WriterCellEdge,
+    edge-right: WriterCellEdge,
+}
+
+/// An inline picture placed on the page stack.
+export struct WriterPageImage {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    source: image,
+    label: string,
+    /// True for the picture the caret is on: it draws an outline and corner handles.
+    selected: bool,
+}
+
+/// The pictures the page shows; set from Rust with the rest of the projection.
+export global PageImages {
+    in-out property <[WriterPageImage]> items: [];
+}

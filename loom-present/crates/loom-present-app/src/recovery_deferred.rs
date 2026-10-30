@@ -513,6 +513,11 @@ pub(crate) fn retry_is_armed_for_test() -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn auto_retry_used_for_test() -> bool {
+    with_state(|state| state.auto_retry_used)
+}
+
+#[cfg(test)]
 pub(crate) fn edit_timer_is_armed_for_test() -> bool {
     ARMED.with(Cell::get)
 }
@@ -602,6 +607,9 @@ pub(crate) fn report_checkpoint_failure(app: &PresentApp, error: String) {
 /// Explicit Retry replaces the pending automatic retry and uses the latest
 /// session supplied by the existing recovery-flush callback.
 pub(crate) fn retry_now(app: &PresentApp) {
+    if import_warning_pending() {
+        return;
+    }
     cancel_retry();
     let should_retry = with_state(|state| {
         if !state.stale {
@@ -638,7 +646,7 @@ fn cancel_retry() {
 }
 
 fn schedule_retry_if_needed(app: &PresentApp) {
-    if RETRY_ARMED.with(Cell::get) {
+    if import_warning_pending() || RETRY_ARMED.with(Cell::get) {
         return;
     }
     let should_schedule = with_state(|state| {
