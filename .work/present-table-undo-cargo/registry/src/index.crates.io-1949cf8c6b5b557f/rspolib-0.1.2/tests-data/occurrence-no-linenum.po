@@ -1,3 +1,0 @@
-#: path/to/file/noocc.rs path/to/file/occ.rs:45
-msgid "Hello"
-msgstr "Bonjour"

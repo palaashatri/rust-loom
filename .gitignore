@@ -10,8 +10,8 @@ target
 .serena/
 
 # # Temporary work directories
-# .work/
-# **/.work/
+.work/
+**/.work/
 
 # Generated zip and report archives
 Loom-Complete.zip*
@@ -45,6 +45,7 @@ Loom-Complete.zip*
 __MACOSX/
 .serena/
 .superpowers/
+.vscode/
 
 # Python cache
 __pycache__/

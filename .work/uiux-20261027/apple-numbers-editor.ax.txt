@@ -1,2 +1,0 @@
-There has been no change in the accessibility tree for Window: "Untitled".
-The focused UI element is 21 table (selected) Table 1, 22 rows, 7 columns, Secondary Actions: Add caption, Deselect all, Edit table title, Help: Use the press action to edit the table’s name, Size: 686.0 points wide, 441.9 points tall, Position: 28.3 points from top, 0.0 points from left

@@ -1,2 +1,0 @@
-There has been no change in the accessibility tree for Window: "Untitled 2".
-The focused UI element is 25 text entry area (selectable, settable) Description: Body, Help: Format text quickly by VoiceOver jumping to the formatter, Secondary Actions: Hide headers and footers, Jump to page format, Bookmark

@@ -1,7 +1,0 @@
-#
-msgid ""
-msgstr ""
-
-msgid ""
-"foo bar baz qux fox quick" brown jumps foo bar baz qux fox quick brown jumps"
-msgstr ""

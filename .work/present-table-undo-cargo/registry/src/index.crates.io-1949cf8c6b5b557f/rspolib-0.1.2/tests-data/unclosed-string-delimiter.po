@@ -1,5 +1,0 @@
-#
-msgid ""
-msgstr ""
-
-msgid "Foo bar bazá

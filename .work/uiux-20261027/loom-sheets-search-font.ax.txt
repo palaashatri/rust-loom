@@ -1,2 +1,0 @@
-There has been no change in the accessibility tree for Window: "Budget *".
-The focused UI element is 112 text field (settable) Search, Value: font

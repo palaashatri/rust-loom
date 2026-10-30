@@ -1,7 +1,0 @@
-msgid "FOO"
-msgstr "BAR"
-
-#| msgid ""
-#| "Bar baz qux"
-msgid "Foo bar baz"
-msgstr "Foo bar baz"
