@@ -819,3 +819,188 @@ fn geometry_units_are_visible_before_any_error() {
         app.get_status_left()
     );
 }
+
+#[test]
+fn a_font_family_from_the_picker_reaches_the_canvas_model_and_undoes_in_one_step() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Family",
+        100.0,
+        100.0,
+        400.0,
+        80.0,
+    )]);
+    app.set_show_inspector(true);
+    select(&app, &state, "t");
+    crate::keyboard_flow_tests::render(&app);
+
+    let field = ElementHandle::find_by_accessible_label(&app, "Font family")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+        .expect("the font family picker is a keyboard-reachable text field");
+    assert!(field.size().width > 0.0 && field.size().height > 0.0);
+
+    let ink = app.global::<ElementInk>();
+    ink.set_font_family("  Aptos Display  ".into());
+    ink.invoke_font_requested("  Aptos Display  ".into());
+    assert_eq!(
+        style_of(&state, 0).font_family.as_deref(),
+        Some("Aptos Display"),
+        "the field's padding is trimmed before it reaches the document"
+    );
+    assert_eq!(ink.get_font_family().as_str(), "Aptos Display");
+    let parts = parts_of(&app, 0);
+    assert_eq!(parts.len(), 1);
+    assert_eq!(
+        parts[0].family.as_str(),
+        "Aptos Display",
+        "the canvas model carries the element's family"
+    );
+    assert!(app.get_status_left().contains("Aptos Display"));
+
+    ink.invoke_font_requested("".into());
+    assert_eq!(
+        style_of(&state, 0).font_family,
+        None,
+        "an empty field means follow the theme again"
+    );
+    assert!(
+        parts_of(&app, 0).is_empty(),
+        "the canvas draws the theme look again"
+    );
+    assert_eq!(ink.get_font_family().as_str(), "");
+
+    app.invoke_undo();
+    assert_eq!(
+        style_of(&state, 0).font_family.as_deref(),
+        Some("Aptos Display"),
+        "one undo returns the family only"
+    );
+    app.invoke_undo();
+    assert!(
+        style_of(&state, 0).is_default(),
+        "and one more the whole style"
+    );
+}
+
+#[test]
+fn differing_font_families_show_a_mixed_picker_and_apply_as_one_step() {
+    let (app, state) = fixture(vec![
+        text_element("a", ElementType::BodyText, "one", 50.0, 50.0, 300.0, 80.0),
+        text_element("b", ElementType::BodyText, "two", 50.0, 200.0, 300.0, 80.0),
+    ]);
+    app.set_show_inspector(true);
+    {
+        let mut session = state.session.borrow_mut();
+        let slide = session.document.active_slide_mut().expect("slide");
+        slide.elements[0].style.font_family = Some("Arial".into());
+        slide.elements[1].style.font_family = Some("Georgia".into());
+        assert!(session.select_element("a", false));
+        assert!(session.select_element("b", true));
+    }
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+    let ink = app.global::<ElementInk>();
+    assert!(
+        ink.get_font_family_mixed(),
+        "a selection whose families differ must not show one object's family"
+    );
+    assert_eq!(ink.get_font_family().as_str(), "");
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Font family, mixed")
+            .find(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+            .is_some(),
+        "the picker names the mixed state for assistive technology"
+    );
+
+    ink.invoke_font_requested("Aptos".into());
+    assert!(!ink.get_font_family_mixed());
+    assert_eq!(ink.get_font_family().as_str(), "Aptos");
+    for index in 0..2 {
+        assert_eq!(
+            style_of(&state, index).font_family.as_deref(),
+            Some("Aptos"),
+            "object {index}"
+        );
+        assert!(
+            parts_of(&app, index)
+                .iter()
+                .any(|part| part.family.as_str() == "Aptos"),
+            "object {index} draws in the chosen family"
+        );
+    }
+
+    app.invoke_undo();
+    assert_eq!(style_of(&state, 0).font_family.as_deref(), Some("Arial"));
+    assert_eq!(style_of(&state, 1).font_family.as_deref(), Some("Georgia"));
+    assert!(
+        ink.get_font_family_mixed(),
+        "one undo restores both families and the mixed state"
+    );
+}
+
+#[test]
+fn an_invalid_font_family_is_refused_truthfully_and_changes_nothing() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Family",
+        100.0,
+        100.0,
+        400.0,
+        80.0,
+    )]);
+    app.set_show_inspector(true);
+    select(&app, &state, "t");
+    let ink = app.global::<ElementInk>();
+    ink.set_font_family("Georgia".into());
+    ink.invoke_font_requested("Bad\u{0007}Face".into());
+    assert_eq!(style_of(&state, 0).font_family, None);
+    assert!(
+        !state.session.borrow().can_undo(),
+        "a rejected name leaves no history entry"
+    );
+    assert!(
+        app.get_status_left().contains("control characters"),
+        "the status says why: {:?}",
+        app.get_status_left()
+    );
+    assert_eq!(
+        ink.get_font_family().as_str(),
+        "",
+        "the field shows the document's real (theme) family again"
+    );
+}
+
+#[test]
+fn the_font_picker_is_reachable_in_right_to_left_and_large_text() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Family",
+        100.0,
+        100.0,
+        400.0,
+        80.0,
+    )]);
+    app.set_show_inspector(true);
+    select(&app, &state, "t");
+    crate::configure_direction(&app, true);
+    app.global::<crate::Theme>().set_text_scale(1.5);
+    app.window().set_size(slint::PhysicalSize::new(1280, 800));
+    crate::configure_responsive_layout(&app, (1280, 800));
+    crate::keyboard_flow_tests::render(&app);
+
+    let field = ElementHandle::find_by_accessible_label(&app, "Font family")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+        .expect("the picker exists in a right-to-left, large-text inspector");
+    let position = field.absolute_position();
+    let size = field.size();
+    assert!(
+        position.x >= 0.0
+            && position.y >= 0.0
+            && position.x + size.width <= 1281.0
+            && position.y + size.height <= 801.0,
+        "the picker must stay inside the window: {position:?} {size:?}"
+    );
+}

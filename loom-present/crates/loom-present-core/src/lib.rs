@@ -21,7 +21,9 @@ pub use pptx_titles::{export_pptx_from_titles, extract_pptx_titles, slides_from_
 use session_history::Snapshot;
 pub mod charts;
 pub use charts::*;
-pub use element_style::{ElementStyle, TextAlign, FONT_SIZE_RANGE, PALETTE};
+pub use element_style::{
+    normalize_font_family, ElementStyle, TextAlign, FONT_FAMILY_MAX_CHARS, FONT_SIZE_RANGE, PALETTE,
+};
 pub use tables::*;
 
 /// Authoring-plane dimensions used by Present's scene and transform APIs.

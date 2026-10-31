@@ -41,6 +41,7 @@ fn part(fx: f32, fy: f32, fw: f32, fh: f32) -> ObjectPart {
         wrap: false,
         pad: false,
         italic: false,
+        family: SharedString::default(),
         ink: 0,
         round: false,
     }
@@ -113,6 +114,9 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
             text.ink = 0;
         }
         None => text.ink = ink,
+    }
+    if let Some(family) = style.font_family.as_deref() {
+        text.family = SharedString::from(family);
     }
     Some(text)
 }
@@ -675,6 +679,52 @@ mod tests {
                     .any(|p| p.text.as_str() == "Zero" && p.align == 2),
             "categories label their horizontal rows"
         );
+    }
+
+    #[test]
+    fn a_styled_text_object_carries_its_family_into_the_canvas_and_edit_surface() {
+        let element = SlideElement {
+            id: "family".into(),
+            element_type: ElementType::BodyText,
+            content: "Words".into(),
+            x: 0.0,
+            y: 0.0,
+            width: 300.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: loom_present_core::ElementStyle {
+                font_family: Some("Aptos Display".into()),
+                ..Default::default()
+            },
+        };
+        let parts = parts_for(&element);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].family.as_str(), "Aptos Display");
+        let edit = active_cell_for(&element);
+        assert_eq!(
+            edit.family.as_str(),
+            "Aptos Display",
+            "editing replaces the text without changing its face"
+        );
+    }
+
+    #[test]
+    fn an_unstyled_text_object_leaves_the_family_empty_so_the_theme_applies() {
+        let element = SlideElement {
+            id: "plain".into(),
+            element_type: ElementType::BodyText,
+            content: "Words".into(),
+            x: 0.0,
+            y: 0.0,
+            width: 300.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+        };
+        assert!(parts_for(&element).is_empty());
+        assert_eq!(active_cell_for(&element).family.as_str(), "");
     }
 
     #[test]

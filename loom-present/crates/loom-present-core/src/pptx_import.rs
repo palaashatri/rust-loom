@@ -376,6 +376,35 @@ fn first_srgb(xml: &str) -> Option<String> {
         .then(|| format!("#{}", value.to_ascii_uppercase()))
 }
 
+/// The first explicit latin typeface in a shape's run properties, skipping
+/// PowerPoint's theme references (`+mj-lt`, `+mn-lt`, ...). The editor styles
+/// one element at a time, so the first run that sets a family names it.
+fn first_run_family(sp_xml: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    while let Some(pos) = find_tag_start(&sp_xml[cursor..], "a:rPr") {
+        let start = cursor + pos;
+        let Some(close) = sp_xml[start..].find("</a:rPr>") else {
+            break;
+        };
+        let block = &sp_xml[start..start + close];
+        if let Some(latin) = find_tag_start(block, "a:latin") {
+            let latin_tag = block[latin..]
+                .find('>')
+                .map_or(&block[latin..], |end| &block[latin..=latin + end]);
+            if let Some(typeface) = extract_attr(latin_tag, "typeface") {
+                let typeface = xml_unescape(&typeface);
+                if !typeface.trim_start().starts_with('+') {
+                    if let Ok(family) = crate::normalize_font_family(&typeface) {
+                        return Some(family);
+                    }
+                }
+            }
+        }
+        cursor = start + close + "</a:rPr>".len();
+    }
+    None
+}
+
 /// Size, weight, italics, colours and alignment a shape sets itself, beyond
 /// what its type already draws.
 fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
@@ -410,6 +439,10 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
             }
         }
     }
+    // The run's explicit latin typeface is the element's family. Theme
+    // references (+mj-lt, +mn-lt, ...) describe the deck's theme instead, so an
+    // element that never set a family stays unset.
+    style.font_family = first_run_family(sp_xml);
     if let Some(pos) = find_tag_start(sp_xml, "a:pPr") {
         let tag_end = sp_xml[pos..].find('>').map_or(sp_xml.len(), |e| pos + e);
         let align = match extract_attr(&sp_xml[pos..tag_end], "algn").as_deref() {

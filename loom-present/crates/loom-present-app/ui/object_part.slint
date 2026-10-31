@@ -22,6 +22,8 @@ export struct ObjectPart {
     /// Inset the text like an unstyled text object does, so styling it moves nothing.
     pad: bool,
     italic: bool,
+    /// The element's own font family; empty follows the document theme face.
+    family: string,
     /// Text colour: 0 is `fg`, 1 the paper's ink, 2 its muted ink, 3 the interface ink.
     ink: int,
     /// Draw the background as an ellipse (a circle shape).
@@ -54,11 +56,20 @@ export global ElementInk {
     /// Palette slot of the text colour, or -1 for the type's own.
     in-out property <int> color-slot: -1;
     in-out property <int> fill-slot: -1;
+    /// The selected text objects' family; empty follows the theme. `mixed` is
+    /// true when the selection disagrees, so one object's family is never shown
+    /// as if all of them used it.
+    in-out property <string> font-family: "";
+    in-out property <bool> font-family-mixed: false;
     /// The seven colours the swatches offer (the eighth swatch resets).
     in property <[color]> palette: [];
     /// `kind` is size, bold, italic, align, color or fill; `value` is the step,
     /// the alignment or the palette slot (7 resets).
     callback requested(string, int);
+    /// A family was submitted; empty text means "follow the theme again".
+    callback font-requested(string);
+    /// Escape in the family field: show the document's real family again.
+    callback font-cancelled;
 
     /// The selected object's position, size and rotation as the fields show them
     /// (plain numbers in slide units and degrees).
@@ -94,7 +105,7 @@ export component ObjectPartView inherits Rectangle {
         height: root.part.pad ? max(1px, parent.height - Theme.tokens.space.sm * 2 * root.text-scale)
             : parent.height;
         text: root.part.text;
-        font-family: Theme.document-font-family;
+        font-family: root.part.family == "" ? Theme.document-font-family : root.part.family;
         font-size: root.part.fs * root.slide-height / 562.5;
         font-weight: root.part.bold ? 700 : 400;
         font-italic: root.part.italic;

@@ -112,14 +112,21 @@ struct TextSpec {
     /// The paragraph's `algn`: `l`, `ctr` or `r`.
     algn: &'static str,
     heading_font: bool,
+    /// The element's own family; `None` follows the theme's face.
+    font_family: Option<String>,
 }
 
 fn text_body(content: &str, spec: &TextSpec) -> String {
     let algn = spec.algn;
-    let font = if spec.heading_font {
-        "<a:latin typeface=\"+mj-lt\"/>"
-    } else {
-        ""
+    let font = match &spec.font_family {
+        Some(family) => {
+            let family = esc(family);
+            format!(
+                "<a:latin typeface=\"{family}\"/><a:ea typeface=\"{family}\"/><a:cs typeface=\"{family}\"/>"
+            )
+        }
+        None if spec.heading_font => "<a:latin typeface=\"+mj-lt\"/>".to_string(),
+        None => String::new(),
     };
     let rpr = format!(
         "sz=\"{}\" b=\"{}\"{} dirty=\"0\"",
@@ -199,6 +206,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "ctr",
                 italic: false,
                 heading_font: true,
+                font_family: None,
             },
         ),
         ElementType::Subtitle => (
@@ -211,6 +219,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "l",
                 italic: false,
                 heading_font: false,
+                font_family: None,
             },
         ),
         ElementType::BodyText => (
@@ -223,6 +232,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "l",
                 italic: false,
                 heading_font: false,
+                font_family: None,
             },
         ),
         ElementType::ShapeRectangle => (
@@ -235,6 +245,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "l",
                 italic: false,
                 heading_font: false,
+                font_family: None,
             },
         ),
         ElementType::ShapeCircle => (
@@ -247,6 +258,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "l",
                 italic: false,
                 heading_font: false,
+                font_family: None,
             },
         ),
         // Pictures, tables, and charts are written by their own shape emitters.
@@ -261,6 +273,7 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 algn: "ctr",
                 italic: false,
                 heading_font: false,
+                font_family: None,
             },
         ),
     };
@@ -284,6 +297,12 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
             crate::TextAlign::Right => "r",
         };
     }
+    // A validated explicit family replaces the theme reference; a hand-edited
+    // theme token or an unusable name writes nothing rather than a bad typeface.
+    text.font_family = style
+        .font_family
+        .as_deref()
+        .and_then(|family| crate::normalize_font_family(family).ok());
     let fill = style
         .fill
         .as_deref()
@@ -335,6 +354,7 @@ fn fallback_title_shape(id: u32, slide: &Slide, background: &str) -> String {
         algn: "l",
         italic: false,
         heading_font: true,
+        font_family: None,
     };
     format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Slide title\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>{}</p:sp>",
@@ -422,6 +442,7 @@ fn notes_slide_xml(notes: &str) -> String {
         algn: "l",
         italic: false,
         heading_font: false,
+        font_family: None,
     };
     let body = text_body(notes, &spec).replace(
         "<a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr>",

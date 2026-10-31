@@ -350,7 +350,8 @@ export component PresentSlideCanvas inherits Rectangle {
                 }
 
                 if root.editing-enabled && root.editing-idx == idx : TextInput {
-                    font-family: Theme.document-font-family;
+                    font-family: (self.in-cell || self.styled) && ObjectParts.active-cells[idx].family != ""
+                        ? ObjectParts.active-cells[idx].family : Theme.document-font-family;
                     // A table edits one cell, in place, with that cell's own text.
                     property <bool> in-cell: root.element-types[idx] == 7 && ObjectParts.active-cells.length > idx;
                     // A text object with its own style edits in that style.
