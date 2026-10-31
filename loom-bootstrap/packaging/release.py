@@ -486,6 +486,8 @@ def package_windows(
         msi = output / f"Loom-Creator-Suite-{version}-{architecture}.msi"
         wix_arch = "x64" if architecture == "x86_64" else "arm64"
         run([wix, "build", "-arch", wix_arch, "-o", str(msi), str(source)])
+        if not msi.is_file():
+            fail(f"WiX did not produce {msi}")
     makensis = require_program("makensis")
     setup = output / f"Loom-Creator-Suite-{version}-{architecture}-Setup.exe"
     with tempfile.TemporaryDirectory(prefix="loom-nsis-") as temporary:
@@ -496,7 +498,7 @@ def package_windows(
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 Name "Loom Creator Suite"
-OutFile "{setup.as_posix()}"
+OutFile "{setup}"
 InstallDir "$PROGRAMFILES64\\Loom Creator Suite"
 RequestExecutionLevel admin
 !insertmacro MUI_PAGE_WELCOME
@@ -506,7 +508,7 @@ RequestExecutionLevel admin
 Section "Install"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
-  File "/oname=loom.msi" "{msi.as_posix()}"
+  File "/oname=loom.msi" "{msi}"
   ExecWait '"$SYSDIR\\msiexec.exe" /i "$PLUGINSDIR\\loom.msi" /qb' $0
   ${{If}} $0 == 3010
     SetErrorLevel 0
