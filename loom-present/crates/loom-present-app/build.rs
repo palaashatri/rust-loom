@@ -91,13 +91,7 @@ fn resource_compiler() -> std::ffi::OsString {
             // ARM64 Windows can run the SDK's x64 resource compiler under
             // emulation when the SDK does not ship an arm64 build.
             if resource_arch != "x64" {
-                sdk_candidates.push(
-                    sdk_dir
-                        .join("bin")
-                        .join(version)
-                        .join("x64")
-                        .join("rc.exe"),
-                );
+                sdk_candidates.push(sdk_dir.join("bin").join(version).join("x64").join("rc.exe"));
             }
         }
         sdk_candidates.push(sdk_dir.join("bin").join(resource_arch).join("rc.exe"));
