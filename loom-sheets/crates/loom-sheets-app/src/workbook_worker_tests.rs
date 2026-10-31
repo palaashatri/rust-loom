@@ -684,7 +684,7 @@ fn startup_migrates_legacy_recovery_after_v1_baseline_publication() {
     let mut image =
         loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 3 }, "legacy-chart.png")
             .expect("image object");
-    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10]);
+    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10].into());
     data.objects.push(image);
     let mut report = Sheet::new("Report");
     report.set_str("A1", "=Data!B1+3");
@@ -767,7 +767,7 @@ fn versioned_cell_recovery_replays_exact_edits_after_a_complete_checkpoint() {
     data.set_str("B1", "=A1*2");
     let mut image = loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 3 }, "chart.png")
         .expect("image object");
-    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10]);
+    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10].into());
     data.objects.push(image);
     let mut report = Sheet::new("Report");
     report.set_str("A1", "=Data!B1+1");

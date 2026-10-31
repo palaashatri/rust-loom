@@ -36,10 +36,7 @@ use loom_sheets_core::{
     SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{
-    ComponentHandle, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
-    VecModel,
-};
+use slint::{ComponentHandle, Image, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -81,6 +78,8 @@ use xlsx_import::{cancel_pending_xlsx_import, continue_pending_xlsx_import, Pend
 use xlsx_import::{prepare_startup_import, stage_xlsx_import};
 
 mod object_actions;
+
+mod object_images;
 
 mod object_layout;
 use object_layout::editor_dimensions_with_preview;
@@ -576,12 +575,6 @@ fn project_sheet_objects(
             .unwrap_or((object.anchor, object.width, object.height));
         let absolute_x = dimension_offset(anchor.col, geometry.default_col_width, &scaled_cols);
         let absolute_y = dimension_offset(anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
-        let details = format!(
-                "Anchor {}; size {} by {} document pixels. Tab and Shift+Tab browse objects; M moves one cell; R resizes by 10 pixels; arrow keys preview; Enter commits one undo step; Escape cancels.",
-                anchor.to_a1(),
-                width,
-                height,
-            );
         let x = absolute_x + scroll_x;
         let y = absolute_y + scroll_y;
         let rendered_width = object_layout::rendered_object_extent(
@@ -594,24 +587,37 @@ fn project_sheet_objects(
             zoom,
             object_layout::MIN_RENDERED_OBJECT_HEIGHT,
         );
+        let visible = object_layout::intersects_object_viewport(
+            x,
+            y,
+            rendered_width as f32,
+            rendered_height as f32,
+            geometry.visible_width,
+            geometry.visible_height,
+        );
+        let details = format!(
+                "Anchor {}; size {} by {} document pixels. Tab and Shift+Tab browse objects; M moves one cell; R resizes by 10 pixels; arrow keys preview; Enter commits one undo step; Escape cancels.",
+                anchor.to_a1(),
+                width,
+                height,
+            );
         projected.views.push(SheetObjectView {
             kind: object.kind.as_str().into(),
             label: object.label.as_str().into(),
             details: details.into(),
-            image: image_for(index, object),
+            // Culling happens before any image work: an object outside the
+            // viewport must not decode or copy its pixels.
+            image: if visible {
+                image_for(index, object)
+            } else {
+                Image::default()
+            },
             x,
             y,
             width: rendered_width,
             height: rendered_height,
             fill: object.fill.swatch_index(),
-            visible: object_layout::intersects_object_viewport(
-                x,
-                y,
-                rendered_width as f32,
-                rendered_height as f32,
-                geometry.visible_width,
-                geometry.visible_height,
-            ),
+            visible,
             display_name: object_actions::object_display_name_for(index, object).into(),
             anchor_column: column_label(anchor.col).into(),
             anchor_row: (anchor.row + 1).to_string().into(),
@@ -620,31 +626,6 @@ fn project_sheet_objects(
         });
     }
     projected
-}
-
-fn load_sheet_object_image(object: &loom_sheets_core::SheetObject) -> Image {
-    if object.kind != loom_sheets_core::SheetObjectKind::Image {
-        return Image::default();
-    }
-    if let Some(bytes) = object.embedded.as_deref() {
-        let is_svg = object
-            .path
-            .rsplit_once('.')
-            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("svg"));
-        if is_svg {
-            if let Ok(image) = Image::load_from_svg_data(bytes) {
-                return image;
-            }
-        } else if let Ok(decoded) = image::load_from_memory(bytes) {
-            let rgba = decoded.to_rgba8();
-            return Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                rgba.as_raw(),
-                rgba.width(),
-                rgba.height(),
-            ));
-        }
-    }
-    Image::load_from_path(Path::new(&object.path)).unwrap_or_default()
 }
 
 fn grid_geometry(
@@ -1081,7 +1062,7 @@ fn project_sheet_inner_with_preview(
         app.get_grid_scroll_x(),
         app.get_grid_scroll_y(),
         preview,
-        &|_, object| load_sheet_object_image(object),
+        &|_, object| object_images::image_for(object),
     );
 
     scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);

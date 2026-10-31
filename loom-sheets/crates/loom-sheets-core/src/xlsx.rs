@@ -112,7 +112,7 @@ mod tests {
         });
         let mut image =
             SheetObject::image(CellRef { row: 4, col: 0 }, "hero.png").expect("image object");
-        image.embedded = Some(vec![137, 80, 78, 71]);
+        image.embedded = Some(vec![137, 80, 78, 71].into());
         sheet.objects.push(image);
 
         let bytes = export_xlsx_sheets(&[sheet]).expect("rich export");
@@ -708,7 +708,7 @@ mod tests {
         let mut sheet = Sheet::new("Budget");
         let mut image =
             SheetObject::image(CellRef { row: 0, col: 1 }, "chart.png").expect("create image");
-        image.embedded = Some(vec![137, 80, 78, 71]);
+        image.embedded = Some(vec![137, 80, 78, 71].into());
         sheet.objects.push(image);
         let base = export_xlsx_sheets(&[sheet]).expect("export workbook");
         let bytes = test_xlsx_with_parts(&[], &["xl/media/sheet1-object0.png"], &[], Some(&base));
