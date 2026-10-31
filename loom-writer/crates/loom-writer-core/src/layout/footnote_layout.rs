@@ -300,7 +300,6 @@ pub(super) fn paginate(
     let mut references = Vec::with_capacity(notes.len());
     let mut note_lines = Vec::new();
     let mut reference_pages = vec![0usize; notes.len()];
-    let mut continuations: Vec<(usize, NoteLine)> = Vec::new();
     for (body_page, mut body) in body_pages.into_iter().enumerate() {
         let reference_page = body_output.len();
         for line in &mut body {
@@ -396,9 +395,13 @@ pub(super) fn paginate(
         }
         body_output.push(body);
 
+        // An overflowing note continues on note-only pages immediately after
+        // its reference page, before any later body page. Later body page
+        // numbers are remapped by `reference_page = body_output.len()`.
+        let mut remaining = Vec::new();
         for note_index in &notes_by_page[body_page] {
             while next_line[*note_index] < notes[*note_index].ranges.len() {
-                continuations.push((
+                remaining.push((
                     reference_page,
                     NoteLine {
                         note: *note_index,
@@ -408,20 +411,20 @@ pub(super) fn paginate(
                 next_line[*note_index] += 1;
             }
         }
+        append_continuation_pages(
+            &remaining,
+            &notes,
+            &reference_pages,
+            &mut ContinuationContext {
+                style,
+                usable_height,
+                usable_width,
+                font_size_pt: font_size,
+                pages: &mut body_output,
+                placements: &mut note_lines,
+            },
+        )?;
     }
-    append_continuation_pages(
-        &continuations,
-        &notes,
-        &reference_pages,
-        &mut ContinuationContext {
-            style,
-            usable_height,
-            usable_width,
-            font_size_pt: font_size,
-            pages: &mut body_output,
-            placements: &mut note_lines,
-        },
-    )?;
 
     let mut lines = Vec::new();
     let mut page_lines = Vec::with_capacity(body_output.len());
@@ -783,6 +786,75 @@ mod tests {
     }
 
     #[test]
+    fn overflowing_note_continuations_follow_their_reference_before_later_body() {
+        let mut doc = paragraph_doc("Source line\nLater one\nLater two\nLater three\nLater four");
+        let note = (0..10)
+            .map(|n| format!("note {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        add_note(&mut doc, 41, 7, 0, &note);
+        let flow = flow(&doc, &tiny_style());
+
+        let reference = &flow.footnote_references()[0];
+        assert_eq!(reference.page, 0);
+        let continuation_pages = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == reference.note_id && line.continued)
+            .map(|line| line.page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            !continuation_pages.is_empty(),
+            "the fixture note must overflow its reference page"
+        );
+        let last_continuation = *continuation_pages.iter().next_back().unwrap();
+        assert_eq!(
+            continuation_pages.iter().copied().collect::<Vec<_>>(),
+            (reference.page + 1..=last_continuation).collect::<Vec<_>>(),
+            "continuation pages must be contiguous immediately after the reference page"
+        );
+        for page in reference.page + 1..=last_continuation {
+            assert!(
+                flow.lines_on(page..page + 1).is_empty(),
+                "page {page} is a note-only continuation page"
+            );
+            assert!(
+                flow.footnote_lines()
+                    .iter()
+                    .any(|line| line.page == page && line.note_id == reference.note_id),
+                "page {page} carries the overflowing note"
+            );
+        }
+        let later_body_pages = flow
+            .lines()
+            .iter()
+            .filter(|line| line.page > reference.page)
+            .map(|line| line.page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            later_body_pages
+                .iter()
+                .all(|page| *page > last_continuation),
+            "later body text starts after the note's continuation pages: {later_body_pages:?}"
+        );
+        assert_eq!(
+            later_body_pages.iter().next().copied(),
+            Some(last_continuation + 1),
+            "the first later body page is the page after the last continuation"
+        );
+        let note_pages = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == reference.note_id)
+            .map(|line| line.page)
+            .collect::<Vec<_>>();
+        assert!(
+            note_pages.windows(2).all(|pair| pair[0] <= pair[1]),
+            "note lines stay in document order across pages: {note_pages:?}"
+        );
+    }
+
+    #[test]
     fn reference_numbers_follow_document_order_not_storage_order() {
         let mut doc = WriterDocument::new("footnote-order", "Footnote order");
         doc.blocks.push(RichBlock::new(7, "paragraph", "first"));
@@ -886,8 +958,25 @@ mod tests {
             references
                 .iter()
                 .map(|reference| (reference.note_id, reference.page))
-                .collect::<Vec<_>>(),
-            vec![(10, 0), (20, 1)],
+                .collect::<Vec<_>>()
+                .first()
+                .copied(),
+            Some((10, 0)),
+        );
+        let first_note_last_page = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == references[0].note_id)
+            .map(|line| line.page)
+            .max()
+            .expect("the first note has placed lines");
+        assert_eq!(
+            references[1].page,
+            first_note_last_page + 1,
+            "the later anchor moves to the body page after the first note's continuous pages",
+        );
+        assert!(
+            references[1].page > references[0].page,
             "the later anchor moves when one page cannot open both notes",
         );
         for reference in references {

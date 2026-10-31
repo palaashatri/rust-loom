@@ -148,18 +148,14 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
 
     if let Some(doc_bytes) = archive.get("word/document.xml") {
         let xml = String::from_utf8_lossy(doc_bytes);
-        let unsupported_background =
-            roxmltree::Document::parse(&xml)
-                .ok()
-                .is_some_and(|document| {
-                    document
-                        .root_element()
-                        .children()
-                        .find(|node| node.has_tag_name((W_NS, "background")))
-                        .is_some_and(|background| {
-                            supported_background_appearance(background).is_none()
-                        })
-                });
+        let document = roxmltree::Document::parse(&xml).ok();
+        let unsupported_background = document.as_ref().is_some_and(|document| {
+            document
+                .root_element()
+                .children()
+                .find(|node| node.has_tag_name((W_NS, "background")))
+                .is_some_and(|background| supported_background_appearance(background).is_none())
+        });
         if unsupported_background
             && !warnings
                 .iter()
@@ -193,9 +189,80 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         if xml.contains("<wp:anchor") && !warnings.iter().any(|w: &String| w.contains("Floating")) {
             warnings.push("Floating pictures are placed in the text, one to a line.".to_string());
         }
+        let losses = document
+            .as_ref()
+            .map(complex_script_only_losses)
+            .unwrap_or_default();
+        if !losses.is_empty()
+            && !warnings
+                .iter()
+                .any(|warning: &String| warning.contains("Complex-script"))
+        {
+            warnings.push(format!(
+                "Complex-script (Arabic/Hebrew) run formatting is not supported: {} \
+                 cannot be represented and is ignored; the affected text itself is imported.",
+                losses.join(", ")
+            ));
+        }
     }
 
     Ok(warnings)
+}
+
+/// Complex-script run properties that differ from the run's Latin formatting.
+/// Writer stores one character style per run, so it reads `w:b`, `w:i`, `w:sz`
+/// and `w:rFonts w:ascii` and cannot apply a script-specific alternative.
+fn complex_script_only_losses(document: &roxmltree::Document<'_>) -> Vec<&'static str> {
+    const BOLD: &str = "bold (w:bCs)";
+    const ITALIC: &str = "italic (w:iCs)";
+    const SIZE: &str = "size (w:szCs)";
+    const FONT: &str = "font (w:rFonts w:cs)";
+    let mut losses = Vec::new();
+    let record = |loss: &'static str, losses: &mut Vec<&'static str>| {
+        if !losses.contains(&loss) {
+            losses.push(loss);
+        }
+    };
+    for run in document
+        .descendants()
+        .filter(|node| node.has_tag_name((W_NS, "r")))
+    {
+        let Some(properties) = run.children().find(|node| node.has_tag_name((W_NS, "rPr"))) else {
+            continue;
+        };
+        let toggled = |name: &str| {
+            properties
+                .children()
+                .find(|node| node.has_tag_name((W_NS, name)))
+                .map(xml_property_is_enabled)
+        };
+        let half_points = |name: &str| {
+            properties
+                .children()
+                .find(|node| node.has_tag_name((W_NS, name)))
+                .and_then(|node| node.attribute((W_NS, "val")))
+                .and_then(|value| value.parse::<f32>().ok())
+        };
+        let fonts = properties
+            .children()
+            .find(|node| node.has_tag_name((W_NS, "rFonts")));
+
+        if toggled("bCs").is_some_and(|cs| cs != toggled("b").unwrap_or(false)) {
+            record(BOLD, &mut losses);
+        }
+        if toggled("iCs").is_some_and(|cs| cs != toggled("i").unwrap_or(false)) {
+            record(ITALIC, &mut losses);
+        }
+        if half_points("szCs").is_some_and(|cs| Some(cs) != half_points("sz")) {
+            record(SIZE, &mut losses);
+        }
+        let script_font = fonts.and_then(|fonts| fonts.attribute((W_NS, "cs")));
+        let latin_font = fonts.and_then(|fonts| fonts.attribute((W_NS, "ascii")));
+        if script_font.is_some_and(|font| Some(font) != latin_font) {
+            record(FONT, &mut losses);
+        }
+    }
+    losses
 }
 
 pub fn import_docx(docx_bytes: &[u8]) -> Result<WriterDocument, String> {
@@ -913,15 +980,11 @@ fn parse_run_style(run: Node<'_, '_>) -> Result<CharacterStyle, String> {
     parse_run_properties(properties)
 }
 
-/// Drop explicit values that only restate the block's inherited defaults, so a
-/// plain Word run stays an unstyled Writer run after import.
+/// Drop an explicit size that only restates the block's inherited size, so a
+/// plain Word run stays an unstyled Writer run after import. Run fonts are
+/// never cleared: the exporter omits `w:rFonts` for inherited text, so any
+/// `w:rFonts` an external document declares is the author's choice.
 fn normalize_imported_run_style(style: &mut CharacterStyle, kind: &str) {
-    if style
-        .font_family
-        .eq_ignore_ascii_case(super::package::SANS_FAMILY)
-    {
-        style.font_family.clear();
-    }
     let default_size = CharacterStyle::default().font_size;
     let kind_size = if kind.starts_with("heading") {
         crate::PageStyle::default().font_size_for_kind(kind)

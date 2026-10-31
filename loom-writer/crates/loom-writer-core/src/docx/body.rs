@@ -500,8 +500,11 @@ fn bidi_property(style: &ParagraphStyle) -> Option<&'static str> {
 }
 
 /// Character formatting of one run, in the order WordprocessingML lists it.
-/// Every run states its font family and size, so Word never falls back to its
-/// own defaults for text the editor draws.
+/// Every run states its size, so Word never falls back to its own default size
+/// for text the editor draws. A run only states a font family when the author
+/// chose one; inherited text uses `w:docDefaults`, which names
+/// [`SANS_FAMILY`], so a reopened document can tell an authored Arial run from
+/// an unstyled one.
 #[derive(PartialEq)]
 struct RunProps {
     bold: bool,
@@ -510,7 +513,7 @@ struct RunProps {
     strike: bool,
     vertical: Option<&'static str>,
     color: Option<RunColor>,
-    family: String,
+    family: Option<String>,
     half_points: u32,
 }
 
@@ -526,6 +529,7 @@ impl RunProps {
     /// `kind_pt` is the size the block kind gives text that names none, so a
     /// heading keeps its heading size.
     fn of(style: Option<&CharacterStyle>, force_bold: bool, kind_pt: f32) -> Self {
+        let requested_family = style.map_or("", |style| style.font_family.as_str());
         let mut props = Self {
             bold: force_bold,
             italic: false,
@@ -533,7 +537,7 @@ impl RunProps {
             strike: false,
             vertical: None,
             color: None,
-            family: family_name(style.map_or("", |style| style.font_family.as_str())),
+            family: (!requested_family.trim().is_empty()).then(|| family_name(requested_family)),
             half_points: half_points_of(kind_pt),
         };
         let Some(style) = style else { return props };
@@ -564,11 +568,13 @@ impl RunProps {
 
     fn xml(&self) -> String {
         let mut out = String::new();
-        let family = xml::attr(&self.family);
-        out.push_str(&format!(
-            "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" \
-             w:cs=\"{family}\"/>"
-        ));
+        if let Some(family) = &self.family {
+            let family = xml::attr(family);
+            out.push_str(&format!(
+                "<w:rFonts w:ascii=\"{family}\" w:hAnsi=\"{family}\" w:eastAsia=\"{family}\" \
+                 w:cs=\"{family}\"/>"
+            ));
+        }
         match &self.color {
             Some(RunColor::Automatic) => out.push_str("<w:color w:val=\"auto\"/>"),
             Some(RunColor::Rgb(rgb)) => out.push_str(&format!("<w:color w:val=\"{rgb}\"/>")),
