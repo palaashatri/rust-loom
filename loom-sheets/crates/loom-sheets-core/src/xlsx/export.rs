@@ -233,7 +233,8 @@ fn render_drawing_parts(
             SheetObjectKind::Image => {
                 let payload = object
                     .embedded
-                    .clone()
+                    .as_deref()
+                    .map(<[u8]>::to_vec)
                     .or_else(|| std::fs::read(&object.path).ok())
                     .ok_or_else(|| {
                         if object.path.trim().is_empty() {

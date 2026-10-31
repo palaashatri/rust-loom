@@ -199,8 +199,10 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
         let generated = templates::template_document(descriptor.id);
         assert_eq!(generated.id, format!("template-{}", descriptor.stable_id));
         assert_eq!(generated.title, descriptor.document_title);
-        let mut expected_page = loom_writer_core::PageSetup::default();
-        expected_page.appearance = descriptor.appearance;
+        let expected_page = loom_writer_core::PageSetup {
+            appearance: descriptor.appearance,
+            ..Default::default()
+        };
         assert_eq!(generated.page, expected_page);
         assert_eq!(
             generated

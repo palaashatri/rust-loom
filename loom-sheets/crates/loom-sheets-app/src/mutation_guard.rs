@@ -53,6 +53,8 @@ pub(crate) const MUTATING: &[&str] = &[
     "set_cell_alignment",
     "set_cell_format",
     "set_col_width",
+    "set_decimals",
+    "set_object_field",
     "set_fill",
     "set_font_size",
     "set_row_height",

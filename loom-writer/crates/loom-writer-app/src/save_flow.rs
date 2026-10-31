@@ -48,6 +48,7 @@ pub(super) fn load_file(path: &Path) -> Result<WriterDocument, String> {
 }
 
 /// Native package write retained for benchmark and recovery fixtures.
+#[cfg(test)]
 pub(super) fn save_file(path: &Path, document: &WriterDocument) -> Result<(), String> {
     let bytes = loom_writer_core::save_document(document).map_err(|error| error.to_string())?;
     loom_storage::atomic_write(path, &bytes)
@@ -323,12 +324,17 @@ fn page_geometry_matches(
 ) -> bool {
     let source = source.page_style();
     let reopened = reopened.page_style();
-    source.width_pt == reopened.width_pt
-        && source.height_pt == reopened.height_pt
-        && source.margin_top_pt == reopened.margin_top_pt
-        && source.margin_bottom_pt == reopened.margin_bottom_pt
-        && source.margin_left_pt == reopened.margin_left_pt
-        && source.margin_right_pt == reopened.margin_right_pt
+    // DOCX stores geometry in twips and paper sizes are written from their
+    // millimetre definitions, so an equal page can differ by several tenths of
+    // a point after a round trip. Half a point is still far below a visibly
+    // different page and rejects a 1 pt or larger change.
+    let same = |left: f32, right: f32| (left - right).abs() < 0.5;
+    same(source.width_pt, reopened.width_pt)
+        && same(source.height_pt, reopened.height_pt)
+        && same(source.margin_top_pt, reopened.margin_top_pt)
+        && same(source.margin_bottom_pt, reopened.margin_bottom_pt)
+        && same(source.margin_left_pt, reopened.margin_left_pt)
+        && same(source.margin_right_pt, reopened.margin_right_pt)
 }
 
 fn footnotes_match(source: &WriterDocument, reopened: &WriterDocument) -> bool {
@@ -568,6 +574,7 @@ fn save_filters() -> Vec<FileFilter> {
     ]
 }
 
+#[cfg(test)]
 fn prepare_docx_for_test(document: &WriterDocument) -> Result<Vec<String>, String> {
     Ok(prepare_docx(document)?.losses)
 }
@@ -576,8 +583,8 @@ fn prepare_docx_for_test(document: &WriterDocument) -> Result<Vec<String>, Strin
 mod tests {
     use super::{normalize_save_path, prepare_docx_for_test, SaveFormat};
     use loom_writer_core::{
-        CommentThread, FootnoteEntry, ImageFormat, InlineImage, PageAppearance, RichBlock,
-        WriterDocument,
+        CommentThread, FootnoteEntry, ImageFormat, InlineImage, PageAppearance, PageSetup,
+        RichBlock, WriterDocument,
     };
     use std::path::Path;
     use std::sync::Arc;
@@ -639,6 +646,59 @@ mod tests {
             .expect("represent the same geometry as custom settings");
 
         assert!(super::docx_round_trip_differences(&source, &reopened, 0).is_empty());
+    }
+
+    #[test]
+    fn page_geometry_matches_twip_rounding_but_not_a_real_size_change() {
+        let default = PageSetup::default();
+        let style = default.page_style();
+        let mut rounded = PageSetup::default();
+        rounded
+            .set_custom_geometry_points(
+                595.3,
+                841.9,
+                style.margin_top_pt,
+                style.margin_bottom_pt,
+                style.margin_left_pt,
+                style.margin_right_pt,
+            )
+            .expect("A4 rounding is valid geometry");
+        assert!(
+            super::page_geometry_matches(default, rounded),
+            "A4 imported from DOCX twips is the same page"
+        );
+
+        let mut one_point_wider = rounded;
+        one_point_wider
+            .set_custom_geometry_points(
+                596.3,
+                841.9,
+                style.margin_top_pt,
+                style.margin_bottom_pt,
+                style.margin_left_pt,
+                style.margin_right_pt,
+            )
+            .expect("valid width");
+        assert!(
+            !super::page_geometry_matches(default, one_point_wider),
+            "a 1 pt width change must be reported"
+        );
+
+        let mut one_centimetre_narrower = rounded;
+        one_centimetre_narrower
+            .set_custom_geometry_points(
+                595.3 - 28.346,
+                841.9,
+                style.margin_top_pt,
+                style.margin_bottom_pt,
+                style.margin_left_pt,
+                style.margin_right_pt,
+            )
+            .expect("valid width");
+        assert!(
+            !super::page_geometry_matches(default, one_centimetre_narrower),
+            "a 1 cm width change must be reported"
+        );
     }
 
     #[test]

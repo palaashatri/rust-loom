@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Build native Loom suite installers from already-built release binaries.
 
-The script never labels an archive as a native installer. Linux emits a real
-Debian package and, when appimagetool is installed, one AppImage per app.
-Windows emits a WiX MSI. macOS emits code-signable .app bundles and a DMG.
-Production signing is mandatory unless --allow-unsigned is explicitly passed
-for development validation.
+The script never labels an archive as a native installer. Linux emits real
+Debian and RPM suite packages and, when appimagetool is installed, one AppImage
+per app. Windows emits a WiX MSI and an NSIS `.exe` bootstrapper that installs
+it. macOS emits code-signable .app bundles inside a DMG. Production signing is
+mandatory unless --allow-unsigned is explicitly passed for development
+validation.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Iterable, NoReturn
 
 APPS = ("writer", "sheets", "present")
-PE_ICON_EMBEDDED_APPS = ("writer", "sheets")
+PE_ICON_EMBEDDED_APPS = ("writer", "sheets", "present")
 DISPLAY_NAMES = {
     "writer": "Loom Writer",
     "sheets": "Loom Sheets",
@@ -98,16 +99,21 @@ def require_program(name: str) -> str:
     return path
 
 
-def binary_path(root: Path, app: str, platform: str) -> Path:
+def binary_path(
+    root: Path, app: str, platform: str, bin_dir: Path | None = None
+) -> Path:
     suffix = ".exe" if platform == "windows" else ""
-    candidate = root / f"loom-{app}" / "target" / "release" / f"loom-{app}{suffix}"
+    directory = bin_dir if bin_dir is not None else root / f"loom-{app}" / "target" / "release"
+    candidate = directory / f"loom-{app}{suffix}"
     if not candidate.is_file():
         fail(f"missing release binary: {candidate}")
     return candidate.resolve()
 
 
-def collect_binaries(root: Path, platform: str) -> dict[str, Path]:
-    return {app: binary_path(root, app, platform) for app in APPS}
+def collect_binaries(
+    root: Path, platform: str, bin_dir: Path | None = None
+) -> dict[str, Path]:
+    return {app: binary_path(root, app, platform, bin_dir) for app in APPS}
 
 
 def validate_version(version: str) -> str:
@@ -207,9 +213,10 @@ def package_linux(
     version: str,
     architecture: str,
     allow_unsigned: bool,
+    bin_dir: Path | None = None,
 ) -> list[Artifact]:
     del allow_unsigned
-    binaries = collect_binaries(root, "linux")
+    binaries = collect_binaries(root, "linux", bin_dir)
     dpkg_deb = require_program("dpkg-deb")
     output.mkdir(parents=True, exist_ok=True)
     artifacts: list[Artifact] = []
@@ -262,7 +269,7 @@ def package_linux(
                     "Depends: libasound2, libfontconfig1, libx11-6, libxkbcommon0, libwayland-client0, libgl1",
                     f"Installed-Size: {(installed_size + 1023) // 1024}",
                     "Description: Local-first professional creative suite",
-                    " Loom Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode.",
+                    " Loom Writer, Sheets, and Present.",
                     "",
                 ]
             ),
@@ -270,6 +277,75 @@ def package_linux(
         deb = output / f"loom-creator-suite_{version}_{architecture_name}.deb"
         run([dpkg_deb, "--root-owner-group", "--build", str(package_root), str(deb)])
         artifacts.append(artifact(deb, "linux", architecture, False, "deb"))
+
+        rpmbuild = shutil.which("rpmbuild")
+        if rpmbuild:
+            with tempfile.TemporaryDirectory(prefix="loom-rpm-") as rpm_temporary:
+                topdir = Path(rpm_temporary)
+                for directory in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"):
+                    (topdir / directory).mkdir(parents=True)
+                rpm_arch = {"x86_64": "x86_64", "aarch64": "aarch64"}[architecture]
+                files = []
+                for app in APPS:
+                    files.extend(
+                        [
+                            f"/usr/bin/loom-{app}",
+                            f"/usr/share/applications/loom-{app}.desktop",
+                            f"/usr/share/icons/hicolor/512x512/apps/loom-{app}.png",
+                        ]
+                    )
+                files.append("/usr/share/mime/packages/loom.xml")
+                spec = f"""Name: loom-creator-suite
+Version: {version}
+Release: 1
+Summary: Local-first professional creative suite
+License: Proprietary
+URL: https://loom.local
+BuildArch: {rpm_arch}
+Requires: alsa-lib fontconfig libX11 libxkbcommon wayland mesa-libGL
+
+%description
+Loom Writer, Sheets and Present: a local-first professional office suite.
+
+%install
+rm -rf %{{buildroot}}
+mkdir -p %{{buildroot}}/usr/bin
+mkdir -p %{{buildroot}}/usr/share/applications
+mkdir -p %{{buildroot}}/usr/share/icons/hicolor/512x512/apps
+mkdir -p %{{buildroot}}/usr/share/mime/packages
+for app in {chr(32).join(APPS)}; do
+  install -m 0755 "{package_root}/usr/bin/loom-$app" "%{{buildroot}}/usr/bin/loom-$app"
+  install -m 0644 "{package_root}/usr/share/applications/loom-$app.desktop" "%{{buildroot}}/usr/share/applications/loom-$app.desktop"
+  install -m 0644 "{package_root}/usr/share/icons/hicolor/512x512/apps/loom-$app.png" "%{{buildroot}}/usr/share/icons/hicolor/512x512/apps/loom-$app.png"
+done
+install -m 0644 "{package_root}/usr/share/mime/packages/loom.xml" "%{{buildroot}}/usr/share/mime/packages/loom.xml"
+
+%files
+{chr(10).join(files)}
+
+%changelog
+* Sat Oct 31 2026 Loom Project <noreply@loom.local> - {version}-1
+- Build the Sheets, Writer and Present suite package.
+"""
+                spec_path = topdir / "SPECS" / "loom-creator-suite.spec"
+                write_text(spec_path, spec)
+                run(
+                    [
+                        rpmbuild,
+                        "-bb",
+                        "--define",
+                        f"_topdir {topdir}",
+                        "--define",
+                        "_build_id_links none",
+                        str(spec_path),
+                    ]
+                )
+                built = sorted((topdir / "RPMS").rglob("*.rpm"))
+                if len(built) != 1:
+                    fail(f"rpmbuild produced {len(built)} packages, expected one")
+                rpm = output / f"Loom-Creator-Suite-{version}-1.{rpm_arch}.rpm"
+                shutil.copy2(built[0], rpm)
+                artifacts.append(artifact(rpm, "linux", architecture, False, "rpm"))
 
     appimagetool = shutil.which("appimagetool")
     if appimagetool:
@@ -371,7 +447,7 @@ def wix_source(
         {''.join(install_components)}
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="CommonProgramMenuFolder">
+    <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="Loom Creator Suite">
         {''.join(shortcut_components)}
       </Directory>
@@ -399,8 +475,9 @@ def package_windows(
     version: str,
     architecture: str,
     allow_unsigned: bool,
+    bin_dir: Path | None = None,
 ) -> list[Artifact]:
-    binaries = collect_binaries(root, "windows")
+    binaries = collect_binaries(root, "windows", bin_dir)
     wix = require_program("wix")
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="loom-wix-") as temporary:
@@ -409,30 +486,68 @@ def package_windows(
         msi = output / f"Loom-Creator-Suite-{version}-{architecture}.msi"
         wix_arch = "x64" if architecture == "x86_64" else "arm64"
         run([wix, "build", "-arch", wix_arch, "-o", str(msi), str(source)])
+        if not msi.is_file():
+            fail(f"WiX did not produce {msi}")
+    makensis = require_program("makensis")
+    setup = output / f"Loom-Creator-Suite-{version}-{architecture}-Setup.exe"
+    with tempfile.TemporaryDirectory(prefix="loom-nsis-") as temporary:
+        script = Path(temporary) / "loom-setup.nsi"
+        write_text(
+            script,
+            f"""Unicode true
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+Name "Loom Creator Suite"
+OutFile "{setup}"
+InstallDir "$PROGRAMFILES64\\Loom Creator Suite"
+RequestExecutionLevel admin
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_LANGUAGE "English"
+Section "Install"
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File "/oname=loom.msi" "{msi}"
+  ExecWait '"$SYSDIR\\msiexec.exe" /i "$PLUGINSDIR\\loom.msi" /qb' $0
+  ${{If}} $0 == 3010
+    SetErrorLevel 0
+  ${{Else}}
+    SetErrorLevel $0
+  ${{EndIf}}
+SectionEnd
+""",
+        )
+        run([makensis, str(script)])
+
     signed = False
     thumbprint = os.environ.get("LOOM_WINDOWS_CERT_SHA1", "").strip()
     if thumbprint:
         signtool = require_program("signtool")
         timestamp = os.environ.get("LOOM_TIMESTAMP_URL", "http://timestamp.digicert.com")
-        run(
-            [
-                signtool,
-                "sign",
-                "/sha1",
-                thumbprint,
-                "/fd",
-                "SHA256",
-                "/tr",
-                timestamp,
-                "/td",
-                "SHA256",
-                str(msi),
-            ]
-        )
+        for artifact_path in (msi, setup):
+            run(
+                [
+                    signtool,
+                    "sign",
+                    "/sha1",
+                    thumbprint,
+                    "/fd",
+                    "SHA256",
+                    "/tr",
+                    timestamp,
+                    "/td",
+                    "SHA256",
+                    str(artifact_path),
+                ]
+            )
         signed = True
     elif not allow_unsigned:
-        fail("LOOM_WINDOWS_CERT_SHA1 is required for a production MSI")
-    return [artifact(msi, "windows", architecture, signed, "msi")]
+        fail("LOOM_WINDOWS_CERT_SHA1 is required for production Windows packages")
+    return [
+        artifact(msi, "windows", architecture, signed, "msi"),
+        artifact(setup, "windows", architecture, signed, "exe-setup"),
+    ]
 
 
 def package_macos(
@@ -441,8 +556,9 @@ def package_macos(
     version: str,
     architecture: str,
     allow_unsigned: bool,
+    bin_dir: Path | None = None,
 ) -> list[Artifact]:
-    binaries = collect_binaries(root, "macos")
+    binaries = collect_binaries(root, "macos", bin_dir)
     hdiutil = require_program("hdiutil")
     output.mkdir(parents=True, exist_ok=True)
     identity = os.environ.get("LOOM_MACOS_CODESIGN_IDENTITY", "").strip()
@@ -546,6 +662,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--architecture", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--allow-unsigned", action="store_true")
+    parser.add_argument(
+        "--bin-dir",
+        type=Path,
+        help="directory holding the three release binaries (default: each workspace target/release)",
+    )
     parser.add_argument("--validate-only", action="store_true")
     return parser.parse_args()
 
@@ -556,7 +677,7 @@ def main() -> int:
     output = arguments.output.resolve()
     version = validate_version(arguments.version)
     validate_architecture(arguments.platform, arguments.architecture)
-    collect_binaries(root, arguments.platform)
+    collect_binaries(root, arguments.platform, arguments.bin_dir)
     if arguments.validate_only:
         print(
             json.dumps(
@@ -582,6 +703,7 @@ def main() -> int:
         version,
         arguments.architecture,
         arguments.allow_unsigned,
+        arguments.bin_dir,
     )
     manifest = write_manifest(output, artifacts, version)
     print(manifest)

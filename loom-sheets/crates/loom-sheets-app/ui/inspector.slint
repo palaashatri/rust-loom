@@ -4,6 +4,8 @@ import {
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetTextColorRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
+import { SheetInspectorActions, SheetObjectGeometry, SheetObjectGeometryFields } from "object_inspector.slint";
+export { SheetInspectorActions, SheetObjectGeometry } from "object_inspector.slint";
 import { CellInk } from "grid_pointer.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
 
@@ -38,6 +40,12 @@ export component SheetInspector inherits LoomPanel {
     property <bool> row-height-invalid: false;
     property <string> col-width-draft: "80";
     property <bool> col-width-invalid: false;
+    property <string> decimals-draft: "2";
+    property <bool> decimals-invalid: false;
+    // The object list and selection come from the same projection the canvas
+    // draws, so an object inspector field cannot show stale geometry.
+    property <bool> object-selected: SheetObjectGeometry.selected >= 0
+        && SheetObjectGeometry.selected < SheetObjectGeometry.views.length;
     callback inspector-search-edited(string);
     callback inspector-context-changed(int);
     callback rename-sheet(string);
@@ -90,6 +98,10 @@ export component SheetInspector inherits LoomPanel {
         root.col-width-draft = root.selected-col-width;
         root.col-width-invalid = false;
     }
+    changed cell-decimals-label => {
+        root.decimals-draft = root.cell-decimals-label;
+        root.decimals-invalid = false;
+    }
 
     panel-focus := FocusScope {
         enabled: root.active;
@@ -119,7 +131,7 @@ export component SheetInspector inherits LoomPanel {
                 min-width: 0px;
                 wrap: no-wrap;
                 overflow: elide;
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: root.selection-range + " selection";
             }
             LoomButton {
@@ -145,7 +157,7 @@ export component SheetInspector inherits LoomPanel {
                 horizontal-alignment: right;
                 wrap: no-wrap;
                 overflow: elide;
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: root.selection-range + " selection";
             }
         }
@@ -210,6 +222,18 @@ export component SheetInspector inherits LoomPanel {
                         increase => { root.add-table-col(); }
                         decrease => { root.delete-table-col(); }
                     }
+                }
+
+                // Object geometry is shown while an object is selected and the
+                // cell property search is idle. It sits above cell formatting
+                // so exact X/Y/size entry does not require hunting below it.
+                if root.inspector-tab == 1 && root.object-selected && root.inspector-search == "" : SheetObjectGeometryFields {
+                    selection: SheetObjectGeometry.selected;
+                    heading: SheetObjectGeometry.views[SheetObjectGeometry.selected].display-name;
+                    column-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].anchor-column;
+                    row-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].anchor-row;
+                    width-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].width-label;
+                    height-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].height-label;
                 }
 
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
@@ -297,7 +321,7 @@ export component SheetInspector inherits LoomPanel {
                         font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         horizontal-alignment: Theme.rtl ? right : left;
-                        accessible-role: text;
+                        accessible-role: AccessibleRole.text;
                         accessible-label: "Text colour";
                     }
                     SheetTextColorRow { }
@@ -330,7 +354,7 @@ export component SheetInspector inherits LoomPanel {
                         font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         horizontal-alignment: Theme.rtl ? right : left;
-                        accessible-role: text;
+                        accessible-role: AccessibleRole.text;
                         accessible-label: "Fill";
                     }
                     SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
@@ -339,11 +363,21 @@ export component SheetInspector inherits LoomPanel {
                     SheetStepperRow {
                         label: "Decimals";
                         field-label: "Decimals count";
-                        value: root.cell-decimals-label;
+                        editable: true;
+                        edit-unit: "places";
+                        edit-description: "0–10 decimal places; whole numbers only.";
+                        edit-value <=> root.decimals-draft;
+                        invalid <=> root.decimals-invalid;
                         decrease-label: "Decrease displayed decimal places";
                         decrease-tip: "Show one fewer decimal place in the selected cells.";
                         increase-label: "Increase displayed decimal places";
                         increase-tip: "Show one more decimal place in the selected cells.";
+                        edited(_) => { root.decimals-invalid = false; }
+                        accepted(value) => { return SheetInspectorActions.set-decimals(value); }
+                        cancelled => {
+                            root.decimals-draft = root.cell-decimals-label;
+                            root.decimals-invalid = false;
+                        }
                         decrease => { root.adjust-decimals(-1); }
                         increase => { root.adjust-decimals(1); }
                     }

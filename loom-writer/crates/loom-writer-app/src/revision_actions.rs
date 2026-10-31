@@ -561,7 +561,8 @@ mod tests {
         assert_eq!(state.current.borrow().editor_text(), "dog");
         assert_eq!(state.current.borrow().tracked_changes.revisions().len(), 2);
 
-        review.invoke_navigate(1);
+        let to_deletion = -review.get_current_index();
+        review.invoke_navigate(to_deletion);
         review.invoke_resolve_current(true);
         assert_eq!(state.current.borrow().editor_text(), "dog");
         assert_eq!(state.current.borrow().tracked_changes.revisions().len(), 1);
@@ -676,7 +677,10 @@ mod tests {
         assert_eq!(state.current.borrow().editor_text(), "");
         assert_eq!(state.current.borrow().tracked_changes.revisions().len(), 1);
         app.invoke_undo();
-        assert_eq!(*state.current.borrow(), before);
+        assert!(
+            state.current.borrow().same_content_as(&before),
+            "undo restores the content and revision metadata; navigation's caret stays"
+        );
 
         // Accepting a newer replacement before its deletion is also blocked;
         // accepting the older deletion first then accepts the insertion.
@@ -685,10 +689,14 @@ mod tests {
         let before = state.current.borrow().clone();
         review.invoke_navigate(1);
         review.invoke_resolve_current(true);
-        assert_eq!(*state.current.borrow(), before);
+        assert!(
+            state.current.borrow().same_content_as(&before),
+            "a refused accept keeps content and revision metadata"
+        );
         assert_eq!(state.history.borrow().undo_len(), 0);
 
-        review.invoke_navigate(-1);
+        let to_deletion = -review.get_current_index();
+        review.invoke_navigate(to_deletion);
         review.invoke_resolve_current(true);
         assert_eq!(state.current.borrow().editor_text(), "dog");
         assert_eq!(state.current.borrow().tracked_changes.revisions().len(), 1);

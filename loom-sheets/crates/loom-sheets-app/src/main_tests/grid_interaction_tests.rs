@@ -160,7 +160,7 @@ fn embedded_image_object_projects_without_a_source_path() {
     let mut object =
         loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 0 }, "missing.png")
             .expect("image object");
-    object.embedded = Some(PNG_BYTES.to_vec());
+    object.embedded = Some(PNG_BYTES.to_vec().into());
     sheet.objects.push(object);
 
     project_sheet(&app, &sheet);
@@ -491,6 +491,7 @@ fn inspector_search_filters_worksheet_and_cell_sections() {
         "borders",
         "fill",
         "data format",
+        "number format",
         "general",
         "number",
         "currency",

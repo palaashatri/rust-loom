@@ -85,7 +85,7 @@ component TextStyleRow inherits HorizontalLayout {
             color: Theme.palette().ink;
             horizontal-alignment: center;
             vertical-alignment: center;
-            accessible-role: text;
+            accessible-role: AccessibleRole.text;
             accessible-label: "Text size " + ElementInk.size-label;
         }
         if k == 2 : LoomButton {
@@ -180,6 +180,8 @@ component InspectorHeading inherits Rectangle {
 
 export component PresentInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
+    /// Icon-only chrome: a narrower dock leaves more of the slide visible.
+    in property <bool> compact: false;
     in-out property <int> active-template-index: 1;
     in-out property <int> transition-index: 0;
     in property <string> slide-count-text: "1 slide";
@@ -228,7 +230,7 @@ export component PresentInspector inherits LoomPanel {
 
     accessible-role: groupbox;
     accessible-label: "Slide inspector";
-    width: 280px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
+    width: (root.compact ? 248px : 280px) * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
 
     // Keys from inside the inspector pass through this scope on their way up, so F6
     // can move between the window's regions. It is not a Tab stop and takes no click.
@@ -285,7 +287,9 @@ export component PresentInspector inherits LoomPanel {
                         font-size: Theme.type.body;
                         color: Theme.palette().ink-secondary;
                     }
-                    if root.selection-count > 0 : InspectorHeading { title: "Selected Element"; }
+                    if root.selection-count > 0 : InspectorHeading {
+                        title: root.selection-count > 1 ? "Selected Elements" : "Selected Element";
+                    }
                     if root.selection-count > 0 : Rectangle {
                         min-height: 48px * max(1.0, Theme.text-scale);
                         border-radius: Theme.tokens.metrics.radius-small;
@@ -296,7 +300,9 @@ export component PresentInspector inherits LoomPanel {
                             padding: Theme.tokens.space.sm;
                             spacing: Theme.tokens.space.xs;
                             Text {
-                                text: root.active-element-label;
+                                text: root.selection-count > 1
+                                    ? root.selection-count + " objects selected"
+                                    : root.active-element-label;
                                 font-size: Theme.type.body;
                                 font-weight: 600;
                                 color: Theme.palette().ink;
@@ -304,7 +310,9 @@ export component PresentInspector inherits LoomPanel {
                                 overflow: elide;
                             }
                             Text {
-                                text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
+                                text: root.selection-count > 1
+                                    ? "Style and colour apply to every selected object."
+                                    : root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
                                 font-size: Theme.type.micro;
                                 color: Theme.palette().ink-secondary;
                                 horizontal-alignment: Theme.rtl ? right : left;
@@ -313,7 +321,14 @@ export component PresentInspector inherits LoomPanel {
                         }
                     }
 
-                    if root.selection-count > 0 && root.content-editable : InspectorPropertyRow {
+                    if root.selection-count > 1 && root.content-editable : Text {
+                        text: "Select one object to edit its text content.";
+                        wrap: word-wrap;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    if root.selection-count == 1 && root.content-editable : InspectorPropertyRow {
                         label: "Content";
                         Rectangle {
                             height: Theme.scaled-control-height;
@@ -345,6 +360,19 @@ export component PresentInspector inherits LoomPanel {
 
                     if root.selection-count > 0 && ElementInk.available : InspectorHeading { title: "Text"; }
                     if root.selection-count > 0 && ElementInk.available : TextStyleRow { }
+                    if root.selection-count > 0 && ElementInk.available : LoomTextField {
+                        label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
+                        title: ElementInk.font-family-mixed ? "Font family (mixed)" : "Font family";
+                        description: ElementInk.font-family-mixed
+                            ? "The selected objects use different font families. Type one to apply it to all of them."
+                            : "Type a font family such as Inter or Aptos. Leave empty to follow the theme.";
+                        placeholder: ElementInk.font-family-mixed ? "Mixed - type to apply" : "Theme font";
+                        field-min-width: 120px;
+                        value <=> ElementInk.font-family;
+                        accepted(text) => { ElementInk.font-requested(text); }
+                        cancelled => { ElementInk.font-cancelled(); }
+                        changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                    }
                     if root.selection-count > 0 && ElementInk.available : LoomSegmentedControl {
                         items: ["Left", "Center", "Right"];
                         current: ElementInk.align;
@@ -373,6 +401,13 @@ export component PresentInspector inherits LoomPanel {
                     if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
                     if root.selection-count > 1 : Text {
                         text: "Select one object to edit its geometry.";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    if root.selection-count == 1 : Text {
+                        text: "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg.";
                         font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         wrap: word-wrap;

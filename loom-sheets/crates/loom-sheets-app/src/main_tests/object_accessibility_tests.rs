@@ -22,6 +22,34 @@ fn press_control_text(app: &SheetsApp, text: &str) {
         });
 }
 
+fn render(app: &SheetsApp) {
+    let _ = snapshot_component(app, 1280.0, 800.0, 1.0).expect("render object inspector");
+}
+
+/// Focus the live text field with this accessible name through its default
+/// action, as a screen-reader user can.
+fn focus_object_field(app: &SheetsApp, label: &str) -> ElementHandle {
+    let fields: Vec<_> = ElementHandle::find_by_accessible_label(app, label)
+        .filter(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+        .collect();
+    assert_eq!(fields.len(), 1, "one text field named {label:?}");
+    fields[0].invoke_accessible_default_action();
+    render(app);
+    fields.into_iter().next().expect("field count checked")
+}
+
+fn type_object_field(app: &SheetsApp, label: &str, value: &str, commit: bool) {
+    focus_object_field(app, label);
+    press_control_text(app, "a");
+    for character in value.chars() {
+        press_text(app, &character.to_string());
+    }
+    if commit {
+        press_key(app, slint::platform::Key::Return);
+    }
+    render(app);
+}
+
 #[test]
 fn worksheet_objects_expose_distinct_names_and_persisted_geometry_to_accessibility() {
     set_platform();
@@ -38,11 +66,14 @@ fn worksheet_objects_expose_distinct_names_and_persisted_geometry_to_accessibili
     sheet.objects.push(second);
     let mut image =
         SheetObject::image(CellRef { row: 7, col: 8 }, "photo.png").expect("valid image path");
-    image.embedded = Some(vec![
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
-        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
-        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-    ]);
+    image.embedded = Some(
+        vec![
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+            8, 4, 0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15,
+            0, 1, 5, 1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ]
+        .into(),
+    );
     image.label = "Callout".into();
     sheet.objects.push(image);
 
@@ -201,6 +232,183 @@ fn keyboard_object_move_and_resize_support_cancel_undo_and_save_reopen() {
             state.current.borrow().objects[0].height
         ),
         (301, 121)
+    );
+}
+
+#[test]
+fn object_geometry_fields_are_typed_validated_undoable_and_persistent() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let mut sheet = Sheet::new("Typed object geometry");
+    let mut object = SheetObject::shape(CellRef { row: 1, col: 2 }, "Callout");
+    object.width = 301;
+    object.height = 121;
+    sheet.objects.push(object);
+    let mut note = SheetObject::shape(CellRef { row: 8, col: 7 }, "Note");
+    note.width = 222;
+    note.height = 99;
+    sheet.objects.push(note);
+    let state = Rc::new(GuiState::new(
+        sheet,
+        None,
+        dialogs,
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    ));
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_history_actions(&app, &state, &menu_service);
+    object_actions::register_object_actions(&app, &state, &menu_service);
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    app.set_selected_object(0);
+    project_current(&app, &state);
+    render(&app);
+
+    for (label, value) in [
+        ("Object X column", "C"),
+        ("Object Y row", "2"),
+        ("Object width in pixels", "301 px"),
+        ("Object height in pixels", "121 px"),
+    ] {
+        assert_eq!(
+            focus_object_field(&app, label)
+                .accessible_value()
+                .as_deref(),
+            Some(value),
+            "{label}"
+        );
+    }
+
+    // Selecting another object refreshes every draft instead of carrying the
+    // previous object's field text across.
+    app.set_selected_object(1);
+    project_current(&app, &state);
+    render(&app);
+    for (label, value) in [
+        ("Object X column", "H"),
+        ("Object Y row", "9"),
+        ("Object width in pixels", "222 px"),
+        ("Object height in pixels", "99 px"),
+    ] {
+        assert_eq!(
+            focus_object_field(&app, label)
+                .accessible_value()
+                .as_deref(),
+            Some(value),
+            "{label} after selecting object 2"
+        );
+    }
+    app.set_selected_object(-1);
+    project_current(&app, &state);
+    render(&app);
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Object X column")
+            .filter(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+            .count(),
+        0,
+        "object geometry hides when no object is selected"
+    );
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Font size in pixels")
+            .filter(|element| element.accessible_role() == Some(AccessibleRole::TextInput))
+            .count(),
+        1,
+        "cell formatting remains available without an object selection"
+    );
+
+    app.set_selected_object(0);
+    project_current(&app, &state);
+    render(&app);
+
+    type_object_field(&app, "Object X column", "E", true);
+    assert_eq!(state.current.borrow().objects[0].anchor.col, 4);
+    assert_eq!(
+        state.undo_stack.borrow().len(),
+        1,
+        "column is one undo step"
+    );
+
+    type_object_field(&app, "Object Y row", "5", true);
+    assert_eq!(state.current.borrow().objects[0].anchor.row, 4);
+    assert_eq!(state.undo_stack.borrow().len(), 2, "row is one undo step");
+
+    type_object_field(&app, "Object width in pixels", "333", true);
+    assert_eq!(state.current.borrow().objects[0].width, 333);
+    assert_eq!(state.undo_stack.borrow().len(), 3, "width is one undo step");
+
+    // A rejected value keeps the draft visible, reports the range, and adds no
+    // history entry.
+    type_object_field(&app, "Object width in pixels", "79", true);
+    assert_eq!(state.current.borrow().objects[0].width, 333);
+    assert_eq!(state.undo_stack.borrow().len(), 3);
+    assert!(
+        app.get_status_left().contains("80 and 4096"),
+        "unexpected error: {}",
+        app.get_status_left()
+    );
+
+    // Escape restores the accepted value rather than the rejected draft.
+    type_object_field(&app, "Object width in pixels", "999", false);
+    press_key(&app, slint::platform::Key::Escape);
+    render(&app);
+    assert_eq!(
+        focus_object_field(&app, "Object width in pixels")
+            .accessible_value()
+            .as_deref(),
+        Some("333 px")
+    );
+    assert_eq!(state.current.borrow().objects[0].width, 333);
+    assert_eq!(state.undo_stack.borrow().len(), 3);
+
+    // A non-letter X is refused before the model changes.
+    type_object_field(&app, "Object X column", "1", true);
+    assert_eq!(state.current.borrow().objects[0].anchor.col, 4);
+    assert_eq!(state.undo_stack.borrow().len(), 3);
+    assert!(
+        app.get_status_left().contains("column letter"),
+        "unexpected error: {}",
+        app.get_status_left()
+    );
+
+    let path = std::env::temp_dir().join(format!(
+        "loom-sheets-typed-object-{}-{}.loomtable",
+        std::process::id(),
+        state.next_worker_revision()
+    ));
+    save_workbook(&path, &[state.current.borrow().clone()], 0).expect("save typed geometry");
+    let reopened = load_workbook(&path).expect("reopen typed geometry");
+    let persisted = reopened.sheets[0].objects[0].clone();
+    assert_eq!(persisted.anchor, CellRef { row: 4, col: 4 });
+    assert_eq!((persisted.width, persisted.height), (333, 121));
+    std::fs::remove_file(&path).expect("remove test workbook");
+
+    app.invoke_undo();
+    app.invoke_undo();
+    app.invoke_undo();
+    assert_eq!(
+        state.current.borrow().objects[0].anchor,
+        CellRef { row: 1, col: 2 }
+    );
+    assert_eq!(
+        (
+            state.current.borrow().objects[0].width,
+            state.current.borrow().objects[0].height
+        ),
+        (301, 121),
+        "three typed edits undo one at a time"
+    );
+
+    // Keyboard object actions still operate on the same model afterwards.
+    app.invoke_object_move_started(0);
+    app.invoke_object_keyboard_action(0, 1, 1, 0);
+    app.invoke_object_keyboard_action(0, -1, 0, 0);
+    assert_eq!(
+        state.current.borrow().objects[0].anchor,
+        CellRef { row: 1, col: 3 }
     );
 }
 

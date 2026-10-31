@@ -461,7 +461,7 @@ fn import_drawings(
             object.width = anchor.width;
             object.height = anchor.height;
             object.label = label;
-            object.embedded = Some(bytes.to_vec());
+            object.embedded = Some(bytes.to_vec().into());
             sheet.objects.push(object);
             continue;
         }

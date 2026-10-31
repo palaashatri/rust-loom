@@ -117,7 +117,7 @@ fn every_toolbar_item_is_a_named_button_in_three_groups() {
         );
         p.x
     };
-    let left = ["View", "Zoom", "Add Slide"].map(x_of);
+    let left = ["View menu", "Zoom", "Add Slide"].map(x_of);
     let centre = ["Insert", "Text", "Shape"].map(x_of);
     let right = ["Play", "Format", "Animate", "Document"].map(x_of);
     assert!(left.windows(2).all(|w| w[0] < w[1]));
@@ -186,17 +186,16 @@ fn inspector_requested_visibility_survives_responsive_resizes() {
     );
 
     for size in sizes {
-        let available = configure_responsive_width(&app, size.0);
+        let _available = configure_responsive_width(&app, size.0);
         render_at(&app, size);
         assert!(
             app.get_show_inspector(),
             "open request survives {} px",
             size.0
         );
-        assert_eq!(
+        assert!(
             app.get_inspector_visible(),
-            available,
-            "effective visibility follows availability at {} px",
+            "the open inspector is effective at {} px, including compact widths",
             size.0
         );
     }
@@ -205,6 +204,7 @@ fn inspector_requested_visibility_survives_responsive_resizes() {
     render_at(&app, (1440, 900));
     button(&app, "Format");
     for size in sizes {
+        app.set_view_menu_open(false);
         configure_responsive_width(&app, size.0);
         render_at(&app, size);
         assert!(
@@ -230,9 +230,10 @@ fn inspector_mode_toolbar_buttons_remain_keyboard_reachable_at_responsive_widths
         render_at(&app, size);
         crate::keyboard_flow_tests::press(&app, slint::platform::Key::F6);
         render_at(&app, size);
+        let toolbar_name = "View menu";
         assert_eq!(
             crate::keyboard_flow_tests::focus_name(&app),
-            "View",
+            toolbar_name,
             "F6 reaches the toolbar at {} px",
             size.0
         );
@@ -247,9 +248,8 @@ fn inspector_mode_toolbar_buttons_remain_keyboard_reachable_at_responsive_widths
                 size.0
             );
             assert_eq!(app.get_inspector_tab(), tab);
-            assert_eq!(
+            assert!(
                 app.get_inspector_visible(),
-                available,
                 "effective inspector visibility at {} px",
                 size.0
             );
@@ -282,7 +282,7 @@ fn view_toolbar_menu_toggles_the_navigator_and_notes() {
     assert!(app.get_show_navigator());
     assert!(!app.get_show_notes_drawer());
 
-    button(&app, "View");
+    button(&app, "View menu");
     assert!(app.get_view_menu_open());
     press(&app, AccessibleRole::ListItem, "Navigator");
     assert!(!app.get_show_navigator());
@@ -291,11 +291,11 @@ fn view_toolbar_menu_toggles_the_navigator_and_notes() {
         "choosing an entry closes the menu"
     );
 
-    button(&app, "View");
+    button(&app, "View menu");
     press(&app, AccessibleRole::ListItem, "Speaker Notes");
     assert!(app.get_show_notes_drawer());
 
-    button(&app, "View");
+    button(&app, "View menu");
     press(&app, AccessibleRole::ListItem, "Navigator");
     assert!(app.get_show_navigator());
 }
@@ -344,7 +344,7 @@ fn view_menu_commands_toggle_panes_and_checkmarks_follow_every_control() {
     assert!(checked("view.notes"));
 
     // A toolbar control flips the same state and the menu follows it.
-    button(&app, "View");
+    button(&app, "View menu");
     press(&app, AccessibleRole::ListItem, "Speaker Notes");
     assert!(!app.get_show_notes_drawer());
     render(&app);
@@ -358,7 +358,7 @@ fn view_menu_commands_toggle_panes_and_checkmarks_follow_every_control() {
 fn escape_closes_an_open_toolbar_menu() {
     use slint::platform::WindowEvent;
     let (app, _state) = launched(None);
-    button(&app, "View");
+    button(&app, "View menu");
     assert!(app.get_view_menu_open());
     app.window().dispatch_event(WindowEvent::KeyPressed {
         text: slint::platform::Key::Escape.into(),
@@ -382,7 +382,7 @@ fn wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_
     configure_responsive_width(&app, 1600);
     assert_eq!(count(&app, "Table"), 1, "wide windows show Table");
     assert_eq!(
-        count(&app, "Chart from Clipboard"),
+        count(&app, "Paste Chart from Sheets"),
         1,
         "wide windows show chart insertion"
     );
@@ -408,7 +408,7 @@ fn wide_windows_put_table_and_chart_in_the_toolbar_and_narrow_ones_keep_them_in_
 }
 
 #[test]
-fn chart_command_labels_disclose_clipboard_data() {
+fn chart_command_labels_disclose_the_sheets_prerequisite() {
     let (app, _) = launched(None);
 
     assert_eq!(
@@ -416,7 +416,7 @@ fn chart_command_labels_disclose_clipboard_data() {
             .find_item("slide.insert_chart")
             .expect("chart menu command")
             .label(),
-        Some("Insert Chart from Clipboard...")
+        Some("Paste Chart from Sheets...")
     );
     assert_eq!(
         master_palette(&app)
@@ -424,16 +424,367 @@ fn chart_command_labels_disclose_clipboard_data() {
             .find(|command| matches!(command.action, PaletteAction::AddChart))
             .expect("chart palette command")
             .label,
-        "Insert Chart from Clipboard"
+        "Paste Chart from Sheets"
     );
 
     app.window().set_size(slint::PhysicalSize::new(1600, 900));
     configure_responsive_width(&app, 1600);
     render(&app);
     assert_eq!(
-        ElementHandle::find_by_accessible_label(&app, "Chart from Clipboard")
+        ElementHandle::find_by_accessible_label(&app, "Paste Chart from Sheets")
             .filter(|item| item.accessible_role() == Some(AccessibleRole::Button))
             .count(),
         1
     );
+}
+
+fn rectangles_overlap(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
+    let overlap_x = (a.0 + a.2).min(b.0 + b.2) - a.0.max(b.0);
+    let overlap_y = (a.1 + a.3).min(b.1 + b.3) - a.1.max(b.1);
+    overlap_x > 0.0 && overlap_y > 0.0
+}
+
+#[test]
+fn twelve_mixed_insertions_avoid_occupied_rectangles_and_skip_preoccupied_slots() {
+    // The production text and shape boxes are too large to fit twelve disjoint
+    // rectangles on one slide (6 * 520x100 + 6 * 300x140 alone exceeds the
+    // 1000x562.5 slide area), so compact mixed boxes exercise the placement
+    // contract itself: first rectangle-free slot, every insertion disjoint.
+    let text_size = (200.0, 60.0);
+    let shape_size = (120.0, 60.0);
+    let mut session =
+        PresentationSession::new(PresentationDocument::new("placement-test", "Placement"));
+    {
+        let slide = session.document.active_slide_mut().unwrap();
+        slide.elements.clear();
+        slide.add_element(text_element(
+            "occupied-text-base",
+            ElementType::BodyText,
+            "Occupied text base",
+            120.0,
+            220.0,
+            text_size.0,
+            text_size.1,
+        ));
+        slide.add_element(text_element(
+            "occupied-shape-base",
+            ElementType::ShapeRectangle,
+            "Occupied shape base",
+            120.0,
+            260.0,
+            shape_size.0,
+            shape_size.1,
+        ));
+        slide.add_element(text_element(
+            "occupied-text-next",
+            ElementType::BodyText,
+            "Occupied text slot",
+            168.0,
+            268.0,
+            text_size.0,
+            text_size.1,
+        ));
+    }
+    let expected = [
+        (240.0, 340.0),
+        (264.0, 404.0),
+        (408.0, 462.5),
+        (624.0, 462.5),
+        (760.0, 462.5),
+        (384.0, 260.0),
+        (528.0, 220.0),
+        (744.0, 260.0),
+        (528.0, 292.0),
+        (744.0, 332.0),
+        (456.0, 364.0),
+        (120.0, 404.0),
+    ];
+
+    for (index, expected_origin) in expected.iter().enumerate() {
+        let (kind, base, size, content) = if index % 2 == 0 {
+            (ElementType::BodyText, (120.0, 220.0), text_size, "New text")
+        } else {
+            (
+                ElementType::ShapeRectangle,
+                (120.0, 260.0),
+                shape_size,
+                "Shape",
+            )
+        };
+        let origin = added_object_origin(&session, base, size);
+        assert_eq!(
+            origin, *expected_origin,
+            "insertion {index} did not take the first rectangle-free slot"
+        );
+        let slide = session.document.active_slide().unwrap();
+        let candidate = (origin.0, origin.1, size.0, size.1);
+        for existing in &slide.elements {
+            assert!(
+                !rectangles_overlap(
+                    candidate,
+                    (existing.x, existing.y, existing.width, existing.height)
+                ),
+                "insertion {index} at ({}, {}) {}x{} overlaps {} at ({}, {}) {}x{}",
+                origin.0,
+                origin.1,
+                size.0,
+                size.1,
+                existing.id,
+                existing.x,
+                existing.y,
+                existing.width,
+                existing.height
+            );
+        }
+        session
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .add_element(text_element(
+                &format!("inserted-{index}"),
+                kind,
+                content,
+                origin.0,
+                origin.1,
+                size.0,
+                size.1,
+            ));
+    }
+
+    let slide = session.document.active_slide().unwrap();
+    for element in &slide.elements {
+        assert!(
+            element.x >= 0.0
+                && element.y >= 0.0
+                && element.x + element.width <= 1000.0
+                && element.y + element.height <= 562.5,
+            "a cascaded object left the slide: {} at ({}, {}) {}x{}",
+            element.id,
+            element.x,
+            element.y,
+            element.width,
+            element.height
+        );
+    }
+}
+
+#[test]
+fn first_text_and_shape_keep_their_base_origin_on_an_empty_slide() {
+    let (app, state) = launched(None);
+    let origins = |state: &GuiState| -> Vec<(f32, f32)> {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .iter()
+            .map(|element| (element.x, element.y))
+            .collect()
+    };
+    let clear = |state: &GuiState| {
+        state
+            .session
+            .borrow_mut()
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .elements
+            .clear();
+    };
+
+    clear(&state);
+    button(&app, "Text");
+    assert_eq!(origins(&state), vec![(120.0, 220.0)]);
+
+    clear(&state);
+    button(&app, "Shape");
+    assert_eq!(origins(&state), vec![(120.0, 260.0)]);
+}
+
+#[test]
+fn toolbar_insertions_skip_preoccupied_default_rectangles() {
+    let (app, state) = launched(None);
+    let clear = |state: &GuiState| {
+        state
+            .session
+            .borrow_mut()
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .elements
+            .clear();
+    };
+
+    clear(&state);
+    {
+        let mut session = state.session.borrow_mut();
+        session
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .add_element(text_element(
+                "occupied-text-base",
+                ElementType::BodyText,
+                "Occupied text base",
+                120.0,
+                220.0,
+                520.0,
+                100.0,
+            ));
+    }
+    button(&app, "Text");
+    {
+        let session = state.session.borrow();
+        let elements = &session.document.active_slide().unwrap().elements;
+        let inserted = elements.last().unwrap();
+        assert_eq!((inserted.x, inserted.y), (240.0, 340.0));
+        assert!(
+            !rectangles_overlap(
+                (inserted.x, inserted.y, inserted.width, inserted.height),
+                (
+                    elements[0].x,
+                    elements[0].y,
+                    elements[0].width,
+                    elements[0].height
+                )
+            ),
+            "new text overlapped the pre-occupied rectangle"
+        );
+    }
+
+    clear(&state);
+    {
+        let mut session = state.session.borrow_mut();
+        session
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .add_element(text_element(
+                "occupied-shape-base",
+                ElementType::ShapeRectangle,
+                "Occupied shape base",
+                120.0,
+                260.0,
+                300.0,
+                140.0,
+            ));
+    }
+    button(&app, "Shape");
+    {
+        let session = state.session.borrow();
+        let elements = &session.document.active_slide().unwrap().elements;
+        let inserted = elements.last().unwrap();
+        assert_eq!((inserted.x, inserted.y), (432.0, 382.5));
+        assert!(
+            !rectangles_overlap(
+                (inserted.x, inserted.y, inserted.width, inserted.height),
+                (
+                    elements[0].x,
+                    elements[0].y,
+                    elements[0].width,
+                    elements[0].height
+                )
+            ),
+            "new shape overlapped the pre-occupied rectangle"
+        );
+    }
+}
+
+#[test]
+fn compact_1024_keeps_each_inspector_mode_open_visible_and_keyboard_reachable() {
+    let (app, state) = launched(None);
+    state
+        .session
+        .borrow_mut()
+        .select_element("cover-title", false);
+    refresh(&app, &state);
+    let available = configure_responsive_width(&app, 1024);
+    assert!(!available, "1024 px is the compact icon-only toolbar width");
+    assert!(
+        !app.get_show_inspector(),
+        "the compact inspector starts closed"
+    );
+
+    for (label, tab, focus_label, marker) in [
+        ("Format", 0, "Layout Template", "Text colour Red"),
+        ("Animate", 1, "Transition Type", "Transition Type"),
+        ("Document", 2, "New from Template...", "Deck Information"),
+    ] {
+        app.set_show_inspector(false);
+        render_at(&app, (1024, 720));
+        button(&app, label);
+        render_at(&app, (1024, 720));
+
+        assert!(app.get_show_inspector(), "{label} requests the inspector");
+        assert_eq!(app.get_inspector_tab(), tab, "{label} selects its mode");
+        assert!(
+            app.get_inspector_visible(),
+            "{label} must make the compact inspector visible"
+        );
+        let panel = ElementHandle::find_by_element_type_name(&app, "PresentInspector")
+            .next()
+            .expect("inspector panel");
+        assert!(
+            panel.size().width > 0.0 && panel.size().height > 0.0,
+            "{label} inspector has no visible box"
+        );
+        assert!(
+            ElementHandle::find_by_accessible_label(&app, marker)
+                .next()
+                .is_some(),
+            "{label} inspector content {marker:?} is missing"
+        );
+
+        // The compact panel stays a real keyboard region: F6 still reaches
+        // the first control in the selected mode.
+        app.invoke_focus_editor();
+        render_at(&app, (1024, 720));
+        crate::keyboard_flow_tests::press(&app, slint::platform::Key::F6);
+        render_at(&app, (1024, 720));
+        assert_eq!(
+            crate::keyboard_flow_tests::focus_name(&app),
+            "View menu",
+            "F6 reaches the compact toolbar"
+        );
+        crate::keyboard_flow_tests::press(&app, slint::platform::Key::F6);
+        render_at(&app, (1024, 720));
+        assert_eq!(
+            crate::keyboard_flow_tests::focus_name(&app),
+            focus_label,
+            "{label} content is keyboard reachable"
+        );
+    }
+}
+
+#[test]
+fn compact_toolbar_and_local_menu_expose_distinct_view_names() {
+    let (app, _state) = launched(None);
+    for size in [(1024, 720), (1280, 800)] {
+        app.set_view_menu_open(false);
+        configure_responsive_width(&app, size.0);
+        render_at(&app, size);
+
+        let view_buttons: Vec<_> = ElementHandle::find_by_accessible_label(&app, "View")
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .collect();
+        assert_eq!(
+            view_buttons.len(),
+            1,
+            "only the local menu bar keeps an actionable View control at {} px",
+            size.0
+        );
+        let toolbar_view = toolbar_button(&app, "View menu");
+        assert!(
+            toolbar_view.absolute_position().y > 25.0,
+            "the View menu button is the toolbar item, not the menu bar"
+        );
+
+        toolbar_view.invoke_accessible_default_action();
+        assert!(
+            app.get_view_menu_open(),
+            "the deduplicated toolbar name still operates the View menu at {} px",
+            size.0
+        );
+    }
 }

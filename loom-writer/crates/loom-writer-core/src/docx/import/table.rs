@@ -1,20 +1,19 @@
 use super::*;
 
+type ParsedTable = (
+    RichBlock,
+    usize,
+    Vec<FootnoteReference>,
+    Vec<RevisionRecord>,
+);
+
 /// Parses a table w:tbl element.
 pub(super) fn parse_table(
     xml: &str,
     start: usize,
     id: u64,
     root_tag: &str,
-) -> Result<
-    Option<(
-        RichBlock,
-        usize,
-        Vec<FootnoteReference>,
-        Vec<RevisionRecord>,
-    )>,
-    String,
-> {
+) -> Result<Option<ParsedTable>, String> {
     let close_tag = "</w:tbl>";
     let Some(end_rel) = xml[start..].find(close_tag) else {
         return Ok(None);
@@ -69,10 +68,12 @@ pub(super) fn parse_table(
                     0,
                     None,
                     root_tag,
-                    &mut paragraph_references,
-                    &mut paragraph_revisions,
-                    &mut paragraph_formats,
-                    &mut paragraph_comments,
+                    super::ParagraphOutput {
+                        footnotes: &mut paragraph_references,
+                        revisions: &mut paragraph_revisions,
+                        paragraph_formats: &mut paragraph_formats,
+                        comment_anchors: &mut paragraph_comments,
+                    },
                 )? {
                     if !paragraph_comments.is_empty() {
                         return Err(
@@ -316,11 +317,10 @@ pub(super) fn normalize_paragraph_mark_revisions(
         .iter()
         .map(|revision| (revision.id, revision.anchor.block_id))
         .collect();
-    for revision_index in 0..revisions.len() {
-        if revisions[revision_index].boundary_kind != RevisionBoundaryKind::ParagraphMark {
+    for revision in revisions.iter_mut() {
+        if revision.boundary_kind != RevisionBoundaryKind::ParagraphMark {
             continue;
         }
-        let revision = &mut revisions[revision_index];
         let index = blocks
             .iter()
             .position(|block| block.id == revision.anchor.block_id)
@@ -392,7 +392,7 @@ pub(super) fn normalize_paragraph_mark_revisions(
             );
         }
         if revision.anchor.start != blocks[index].text.len_bytes()
-            || revision.anchor.end != 0
+            || (revision.anchor.end != 0 && revision.anchor.end != revision.anchor.start)
             || (revision.anchor.end_block_id.is_some()
                 && revision.anchor.end_block_id != Some(next.id))
         {
@@ -413,7 +413,7 @@ pub(super) fn normalize_paragraph_mark_revisions(
         revision.anchor.end = revision.anchor.start;
         revision.anchor.end_block_id = None;
         revision.anchor.prefix_sha256 =
-            crate::zip::sha256(merged.text.as_str()[..revision.anchor.start].as_bytes());
+            crate::zip::sha256(&merged.text.as_str().as_bytes()[..revision.anchor.start]);
         blocks[index] = merged;
         blocks.remove(index + 1);
     }

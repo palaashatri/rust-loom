@@ -11,6 +11,13 @@ export struct SheetObjectView {
     height: int,
     fill: int,
     visible: bool,
+    // Editable geometry shown by the object inspector. The anchor is split
+    // into its column letter and 1-based row so each field has one unit.
+    display-name: string,
+    anchor-column: string,
+    anchor-row: string,
+    width-label: string,
+    height-label: string,
 }
 
 /// Non-cell content placed on a worksheet at a cell anchor.

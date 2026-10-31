@@ -132,6 +132,89 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+/// The distance a newly added object steps down and right after a collision.
+const ADDED_OBJECT_STEP: f32 = 24.0;
+/// The margin kept between a newly added object and the slide edge.
+const ADDED_OBJECT_MARGIN: f32 = 40.0;
+/// Rectangles closer than this are treated as overlapping.
+const ADDED_OBJECT_TOLERANCE: f32 = 1.0;
+
+/// Where a newly added object goes: start at `base` (the established position
+/// for the first object of its kind), then walk the diagonal cascade until the
+/// first slot whose full rectangle is clear of every existing element. If the
+/// diagonal is full, scan the remaining in-bounds lattice in reading order.
+/// A slide can run out of room; then the least-overlapping candidate is used so
+/// the object still lands deterministically inside the slide. Every candidate
+/// stays inside the 1000 x 562.5 slide.
+fn added_object_origin(
+    session: &PresentationSession,
+    base: (f32, f32),
+    size: (f32, f32),
+) -> (f32, f32) {
+    let max_x = (loom_present_core::SLIDE_WIDTH - size.0 - ADDED_OBJECT_MARGIN).max(0.0);
+    let max_y = (loom_present_core::SLIDE_HEIGHT - size.1 - ADDED_OBJECT_MARGIN).max(0.0);
+    let anchor = (base.0.clamp(0.0, max_x), base.1.clamp(0.0, max_y));
+    // Round up so the clamped position at the far edge stays a candidate, as
+    // the previous min(...) clamp did.
+    let columns = ((max_x - anchor.0) / ADDED_OBJECT_STEP).ceil() as usize;
+    let rows = ((max_y - anchor.1) / ADDED_OBJECT_STEP).ceil() as usize;
+    let position = |column: usize, row: usize| {
+        (
+            (anchor.0 + column as f32 * ADDED_OBJECT_STEP).min(max_x),
+            (anchor.1 + row as f32 * ADDED_OBJECT_STEP).min(max_y),
+        )
+    };
+    let overlap_area = |x: f32, y: f32| {
+        let left = x - ADDED_OBJECT_TOLERANCE;
+        let top = y - ADDED_OBJECT_TOLERANCE;
+        let right = x + size.0 + ADDED_OBJECT_TOLERANCE;
+        let bottom = y + size.1 + ADDED_OBJECT_TOLERANCE;
+        session.document.active_slide().map_or(0.0, |slide| {
+            slide
+                .elements
+                .iter()
+                .map(|element| {
+                    let overlap_x = right.min(element.x + element.width) - left.max(element.x);
+                    let overlap_y = bottom.min(element.y + element.height) - top.max(element.y);
+                    if overlap_x > 0.0 && overlap_y > 0.0 {
+                        overlap_x * overlap_y
+                    } else {
+                        0.0
+                    }
+                })
+                .sum()
+        })
+    };
+
+    let mut least_overlap = anchor;
+    let mut least_area = f32::INFINITY;
+    let mut consider = |origin: (f32, f32)| -> Option<(f32, f32)> {
+        let area = overlap_area(origin.0, origin.1);
+        if area <= 0.0 {
+            return Some(origin);
+        }
+        if area < least_area {
+            least_area = area;
+            least_overlap = origin;
+        }
+        None
+    };
+
+    for index in 0..=columns.max(rows) {
+        if let Some(origin) = consider(position(index, index)) {
+            return origin;
+        }
+    }
+    for row in 0..=rows {
+        for column in 0..=columns {
+            if let Some(origin) = consider(position(column, row)) {
+                return origin;
+            }
+        }
+    }
+    least_overlap
+}
+
 fn text_element(
     id: &str,
     kind: ElementType,
@@ -782,7 +865,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_width_text(format!("{:.0} pt", element.width).into());
             app.set_element_height_text(format!("{:.0} pt", element.height).into());
             app.set_element_rotation_text(format!("{:.0}°", element.rotation_deg).into());
-            element_style_ui::publish(app, element);
+            element_style_ui::publish(app, &session, element);
             element_style_ui::publish_geometry(app, element);
             if element.element_type == ElementType::Table {
                 app.set_inspector_is_table(true);
@@ -1384,7 +1467,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             .ok_or("shape was not added")?
     };
     app.invoke_select_element(shape_index as i32);
-    let shape_id = {
+    let (shape_id, shape_x, shape_y) = {
         let session = state.session.borrow();
         let slide = session
             .document
@@ -1397,7 +1480,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         if !session.selected_elements.contains(&element.id) {
             return Err("journey shape was not selected".into());
         }
-        element.id.clone()
+        (element.id.clone(), element.x, element.y)
     };
     let baseline_document = state.session.borrow().document.clone();
     screenshots.push(capture_present_journey_step(
@@ -1410,7 +1493,14 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     // Move near the title/body edges. The controller applies the correction
     // and keeps the guides visible until pointer release.
     app.invoke_element_pressed(shape_index as i32, false);
-    app.invoke_element_moved(shape_index as i32, -27.0, -29.0);
+    // New objects cascade, so derive the drag from the real origin instead of
+    // assuming the pre-cascade (120, 260) position. Land three points left and
+    // one point above the body edge so the snap guides still engage.
+    app.invoke_element_moved(
+        shape_index as i32,
+        90.0 + 3.0 - shape_x,
+        230.0 + 1.0 - shape_y,
+    );
     if state.drag_state.borrow().guides.is_empty() {
         return Err("journey move did not produce snap guides".into());
     }
@@ -1647,6 +1737,18 @@ fn main() -> Result<(), String> {
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
+    // macOS: Slint's winit backend otherwise installs its app-only default
+    // menu over Loom's native File/Edit/View/Slide menu. Writer and Sheets
+    // disable it the same way before building their shared menu.
+    #[cfg(target_os = "macos")]
+    {
+        let backend = i_slint_backend_winit::Backend::builder()
+            .with_default_menu_bar(false)
+            .build()
+            .map_err(|error| error.to_string())?;
+        slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
+    }
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
@@ -1771,6 +1873,21 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.set_palette_open(true);
     }
     app.show().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        // The native window handle is available only after the event loop has
+        // created the window; apply the titlebar appearance then.
+        let weak = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                loom_desktop::macos_window::apply(
+                    &app.window().window_handle(),
+                    app.global::<crate::Theme>().get_active_theme().as_str(),
+                );
+            }
+        })
+        .ok();
+    }
     focus_editor_at_launch(&app);
     slint::run_event_loop().map_err(|error| error.to_string())
 }
@@ -1817,7 +1934,7 @@ fn build_present_menu_bar() -> MenuBar {
                     MenuShortcut::primary_shift("N"),
                 ),
                 MenuItem::action("slide.insert_table", "Insert Table..."),
-                MenuItem::action("slide.insert_chart", "Insert Chart from Clipboard..."),
+                MenuItem::action("slide.insert_chart", "Paste Chart from Sheets..."),
                 MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
@@ -2282,12 +2399,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .active_slide()
                         .map(|slide| slide.elements.len() + 1)
                         .unwrap_or(1);
+                    let (x, y) = added_object_origin(&session, (120.0, 260.0), (300.0, 140.0));
                     session.add_element(text_element(
                         &format!("shape-{count}"),
                         ElementType::ShapeRectangle,
                         "Shape",
-                        120.0,
-                        260.0,
+                        x,
+                        y,
                         300.0,
                         140.0,
                     ));
@@ -2313,12 +2431,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .active_slide()
                         .map(|slide| slide.elements.len() + 1)
                         .unwrap_or(1);
+                    let (x, y) = added_object_origin(&session, (120.0, 220.0), (520.0, 100.0));
                     session.add_element(text_element(
                         &format!("text-{count}"),
                         ElementType::BodyText,
                         "New text",
-                        120.0,
-                        220.0,
+                        x,
+                        y,
                         520.0,
                         100.0,
                     ));
@@ -3053,11 +3172,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
-                if state.inspector_available.get() || app.get_show_inspector() {
-                    app.set_show_inspector(!app.get_show_inspector());
-                    if let Some(menu_service) = &state.menu_service {
-                        sync_menu_state(menu_service, &app, &state);
-                    }
+                app.set_show_inspector(!app.get_show_inspector());
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
                 }
             }
         });

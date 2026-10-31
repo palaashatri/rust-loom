@@ -27,7 +27,7 @@ mod shaped_line;
 pub use footnote_layout::{FootnoteLinePlacement, FootnoteReferencePlacement};
 pub(crate) use metrics::{block_bidi_runs, block_positions};
 use placement::{Placer, Segment};
-use selection::{floor_in_blocks, rects_for_lines};
+use selection::{floor_in_blocks, merge_selection_rects, rects_for_lines};
 pub use shaped_line::shape_wrapped_block_lines;
 pub(crate) use shaped_line::shape_wrapped_block_lines_with_inline_advances;
 pub(crate) use shaped_line::{parse_rgba, shape_block_line, shape_block_lines};
@@ -858,7 +858,7 @@ impl WriterDocument {
                 });
             }
         }
-        rects_for_lines(
+        let rects = rects_for_lines(
             self,
             style,
             layout.zoom,
@@ -866,7 +866,8 @@ impl WriterDocument {
             &lines,
             selection,
             0..lines.len(),
-        )
+        );
+        merge_selection_rects(rects)
     }
 
     /// Floor an editor-stream offset to a grapheme boundary and clamp it to
@@ -1078,8 +1079,7 @@ impl DocumentFlow {
             doc,
             block.id,
             table,
-            row,
-            column,
+            (row, column),
             &cell_block,
             crate::TABLE_CELL_BASE_FONT_SIZE_PT,
             (block.text_column_width(&self.style) - crate::TABLE_CELL_HORIZONTAL_INSET_PT * 2.0)
@@ -1182,30 +1182,7 @@ impl DocumentFlow {
             selection,
             window,
         );
-        let mut merged: Vec<SelectionRect> = Vec::with_capacity(rects.len());
-        for rect in rects {
-            if let Some(previous) = merged.last_mut() {
-                let previous_right = previous.rect.x + previous.rect.width;
-                let rect_right = rect.rect.x + rect.rect.width;
-                let touches = (previous_right - rect.rect.x).abs() <= 0.01
-                    || (rect_right - previous.rect.x).abs() <= 0.01;
-                if previous.page_index == rect.page_index
-                    && previous.block_id == rect.block_id
-                    && (previous.end == rect.start || rect.end == previous.start)
-                    && (previous.rect.y - rect.rect.y).abs() <= 0.01
-                    && (previous.rect.height - rect.rect.height).abs() <= 0.01
-                    && touches
-                {
-                    previous.start = previous.start.min(rect.start);
-                    previous.end = previous.end.max(rect.end);
-                    previous.rect.x = previous.rect.x.min(rect.rect.x);
-                    previous.rect.width = previous_right.max(rect_right) - previous.rect.x;
-                    continue;
-                }
-            }
-            merged.push(rect);
-        }
-        merged
+        merge_selection_rects(rects)
     }
 
     /// The rectangle of a collapsed caret at `offset`, wherever it falls in

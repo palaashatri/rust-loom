@@ -1201,16 +1201,21 @@ fn inspector_numeric_entry_is_exact_validated_undoable_and_persistent() {
     assert_eq!(s.state.current.borrow().row_height(0), 44.5);
     edit("Selected column width", "123.25");
     assert_eq!(s.state.current.borrow().col_width(0), 123.25);
+    edit("Decimals count", "4");
+    assert_eq!(
+        s.state.current.borrow().cell_style(cell).decimal_places,
+        Some(4)
+    );
     assert_eq!(
         s.state.undo_stack.borrow().len(),
-        3,
+        4,
         "each field is one undo step"
     );
 
     // Rejected input stays visible for correction and does not add a history entry.
     edit("Selected row height", "161");
     assert_eq!(s.state.current.borrow().row_height(0), 44.5);
-    assert_eq!(s.state.undo_stack.borrow().len(), 3);
+    assert_eq!(s.state.undo_stack.borrow().len(), 4);
     assert!(s.app.get_status_left().contains("16 to 160 px"));
     press(&s.app, Key::Escape);
     render(&s.app);
@@ -1223,6 +1228,26 @@ fn inspector_numeric_entry_is_exact_validated_undoable_and_persistent() {
         "Escape restores the current model value"
     );
 
+    // Decimals accept the same exact-entry contract: whole numbers 0–10 only,
+    // one history entry, and Escape restores the accepted count.
+    edit("Decimals count", "11");
+    assert_eq!(
+        s.state.current.borrow().cell_style(cell).decimal_places,
+        Some(4)
+    );
+    assert_eq!(s.state.undo_stack.borrow().len(), 4);
+    assert!(s.app.get_status_left().contains("0 to 10"));
+    press(&s.app, Key::Escape);
+    render(&s.app);
+    let decimals_field: Vec<_> =
+        ElementHandle::find_by_accessible_label(&s.app, "Decimals count").collect();
+    assert_eq!(decimals_field.len(), 1, "one decimals input");
+    assert_eq!(
+        decimals_field[0].accessible_value().as_deref(),
+        Some("4 places"),
+        "Escape restores the accepted decimal count"
+    );
+
     let path = std::env::temp_dir().join(format!(
         "loom-inspector-dimensions-{}.loomtable",
         std::process::id()
@@ -1230,6 +1255,7 @@ fn inspector_numeric_entry_is_exact_validated_undoable_and_persistent() {
     save_workbook(&path, &[s.state.current.borrow().clone()], 0).expect("save dimensions");
     let reopened = load_workbook(&path).expect("reopen dimensions");
     assert_eq!(reopened.sheets[0].cell_style(cell).font_size, Some(19));
+    assert_eq!(reopened.sheets[0].cell_style(cell).decimal_places, Some(4));
     assert_eq!(reopened.sheets[0].row_height(0), 44.5);
     assert_eq!(reopened.sheets[0].col_width(0), 123.25);
     std::fs::remove_file(path).ok();
@@ -1237,9 +1263,14 @@ fn inspector_numeric_entry_is_exact_validated_undoable_and_persistent() {
     s.app.invoke_undo();
     s.app.invoke_undo();
     s.app.invoke_undo();
+    s.app.invoke_undo();
     assert_eq!(s.state.current.borrow().col_width(0), 80.0);
     assert_eq!(s.state.current.borrow().row_height(0), 24.0);
     assert_eq!(s.state.current.borrow().cell_style(cell).font_size, None);
+    assert_eq!(
+        s.state.current.borrow().cell_style(cell).decimal_places,
+        None
+    );
 }
 
 #[test]

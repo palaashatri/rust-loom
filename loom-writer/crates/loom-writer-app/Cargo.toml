@@ -23,7 +23,7 @@ loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
 loom-objects = { path = "../../../loom-core/crates/loom-objects" }
 loom-clipboard = { path = "../../../loom-core/crates/loom-clipboard" }
 loom-package = { path = "../../../loom-core/crates/loom-package" }
-slint = "1.17.1"
+slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
 i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]

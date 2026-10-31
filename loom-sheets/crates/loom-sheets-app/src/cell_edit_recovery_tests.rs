@@ -98,7 +98,7 @@ fn package_with_recovery_content() -> Vec<u8> {
         "chart.png",
     )
     .expect("image object");
-    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10]);
+    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10].into());
     data.objects.push(image);
     let mut report = Sheet::new("Report");
     report.set_str("A1", "=Data!B1+1");

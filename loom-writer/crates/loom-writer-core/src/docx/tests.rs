@@ -15,6 +15,8 @@ use crate::{
     RevisionKind, RichBlock, WriterDocument, TABLE_BLOCK_KIND,
 };
 
+mod font_tests;
+
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 fn run(start: usize, end: usize, style: CharacterStyle) -> StyleRun {
@@ -25,6 +27,14 @@ fn styled(f: impl FnOnce(&mut CharacterStyle)) -> CharacterStyle {
     let mut style = CharacterStyle::default();
     f(&mut style);
     style
+}
+
+/// Reads a committed DOCX fixture authored outside Writer's exporter.
+fn committed_fixture(name: &str) -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 fn rewrite_document_xml(export: &DocxExport, rewrite: impl FnOnce(&str) -> String) -> Vec<u8> {
@@ -225,6 +235,7 @@ fn every_part_is_well_formed_and_declared() {
         "word/commentsExtended.xml",
         "docProps/core.xml",
         "docProps/app.xml",
+        "docProps/custom.xml",
     ]
     .into();
     assert_eq!(
@@ -396,7 +407,7 @@ fn inline_runs_carry_bold_italic_underline_and_strike() {
 }
 
 #[test]
-fn every_text_run_states_its_font_family_and_size() {
+fn runs_state_their_size_and_only_an_authored_font_family() {
     let mut doc = WriterDocument::new("fonts", "Fonts");
     doc.push(RichBlock::new(
         doc.next_id(),
@@ -418,8 +429,10 @@ fn every_text_run_states_its_font_family_and_size() {
     let parts = parts(&export);
     let body = parse(&parts["word/document.xml"]);
 
-    // Word substitutes its own font and size for any run that does not name
-    // them, so every run with text carries both.
+    // Word substitutes its own size for any run that does not name one, so
+    // every run with text states its size. Inherited text names no family and
+    // relies on the Arial document default; an authored family is stated so a
+    // reopened document can tell it apart from inherited text.
     for r in all(&body, "r") {
         let text: String = r
             .children()
@@ -430,12 +443,6 @@ fn every_text_run_states_its_font_family_and_size() {
             continue;
         }
         let props = child(r, "rPr").unwrap_or_else(|| panic!("run {text:?} has no run properties"));
-        assert!(
-            child(props, "rFonts")
-                .and_then(|f| w_attr(f, "ascii"))
-                .is_some(),
-            "run {text:?} names no font family"
-        );
         assert!(
             child(props, "sz").and_then(|s| w_attr(s, "val")).is_some(),
             "run {text:?} names no font size"
@@ -453,14 +460,15 @@ fn every_text_run_states_its_font_family_and_size() {
         let size = child(props, "sz").and_then(|s| w_attr(s, "val"));
         (family.map(str::to_string), size.map(str::to_string))
     };
-    let font =
-        |family: &str, half_points: &str| (Some(family.to_string()), Some(half_points.to_string()));
-    // The editor's default is 12 pt Sans; Sans is written as Arial, a sans face
-    // every Word install has (the PDF export embeds Inter).
-    assert_eq!(run_font("Plain body text"), font("Arial", "24"));
+    let font = |family: Option<&str>, half_points: &str| {
+        (family.map(str::to_string), Some(half_points.to_string()))
+    };
+    // The editor's default is 12 pt Sans; text that names no family inherits
+    // the Arial document default below (the PDF export embeds Inter).
+    assert_eq!(run_font("Plain body text"), font(None, "24"));
     // A heading keeps the 24 pt its heading style gives.
-    assert_eq!(run_font("Heading text"), font("Arial", "48"));
-    assert_eq!(run_font("Serif text"), font("Times New Roman", "36"));
+    assert_eq!(run_font("Heading text"), font(None, "48"));
+    assert_eq!(run_font("Serif text"), font(Some("Times New Roman"), "36"));
 
     // Unstyled text, the Normal style and new text typed in Word agree.
     let styles = parse(&parts["word/styles.xml"]);
@@ -1067,7 +1075,7 @@ fn docx_comments_round_trip_with_author_body_anchor_and_resolved_state() {
         .iter()
         .find(|block| block.id == bob.block_id)
         .expect("comment paragraph exists");
-    assert_eq!(&block.text.as_str()[bob.start..bob.end], "C");
+    assert_eq!(&block.text.as_str()[bob.start..bob.end], "Centered");
 
     let reopened = super::import_docx(
         &export_docx(&imported)
@@ -1218,11 +1226,11 @@ fn block_level_revision_wrappers_are_rejected_instead_of_flattened() {
     let cases = [
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:ins w:id="1" w:author="Reviewer"><w:p><w:r><w:t>first</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p></w:ins></w:body></w:document>"#,
-            "block-level or paragraph-mark DOCX revision wrapper w:ins",
+            "block-level DOCX revision wrapper w:ins is not supported",
         ),
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:del w:id="2" w:author="Reviewer"><w:p><w:r><w:delText>deleted</w:delText></w:r></w:p></w:del></w:body></w:document>"#,
-            "block-level or paragraph-mark DOCX revision wrapper w:del",
+            "block-level DOCX revision wrapper w:del is not supported",
         ),
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:moveFrom w:id="3" w:author="Reviewer"><w:p><w:r><w:t>moved</w:t></w:r></w:p></w:moveFrom></w:body></w:document>"#,
@@ -1314,7 +1322,7 @@ fn a_chosen_family_is_written_for_every_script_slot_and_reads_back() {
     let parts = parts(&export);
     let body = parse(&parts["word/document.xml"]);
 
-    // Read every text run back with the family it states.
+    // Read every authored text run back with the family it states.
     let mut read_back: Vec<(String, String)> = Vec::new();
     for r in all(&body, "r") {
         let text: String = r
@@ -1325,7 +1333,15 @@ fn a_chosen_family_is_written_for_every_script_slot_and_reads_back() {
         if text.trim().is_empty() {
             continue;
         }
-        let fonts = child(child(r, "rPr").expect("run properties"), "rFonts").expect("rFonts");
+        let fonts = child(child(r, "rPr").expect("run properties"), "rFonts");
+        if text.trim() == "Plain" {
+            assert!(
+                fonts.is_none(),
+                "inherited text names no family and takes the document default"
+            );
+            continue;
+        }
+        let fonts = fonts.expect("an authored family is stated on its run");
         // All four slots name the same family, so Word uses it for any script.
         let ascii = w_attr(fonts, "ascii").expect("ascii");
         for slot in ["hAnsi", "eastAsia", "cs"] {
@@ -1342,8 +1358,21 @@ fn a_chosen_family_is_written_for_every_script_slot_and_reads_back() {
     // The generic names are written as the concrete Word faces.
     assert!(pairs.contains(&("Mono", "Courier New")), "{pairs:?}");
     assert!(pairs.contains(&("Sans", "Arial")), "{pairs:?}");
-    // The run that names no family keeps the default.
-    assert!(pairs.contains(&("Plain", "Arial")), "{pairs:?}");
+    assert!(!pairs.iter().any(|(text, _)| *text == "Plain"), "{pairs:?}");
+    let styles = parse(&parts["word/styles.xml"]);
+    let defaults = child(
+        all(&styles, "rPrDefault")
+            .first()
+            .copied()
+            .expect("document defaults"),
+        "rPr",
+    )
+    .expect("default run properties");
+    assert_eq!(
+        child(defaults, "rFonts").and_then(|fonts| w_attr(fonts, "ascii")),
+        Some("Arial"),
+        "inherited text takes the Arial document default"
+    );
 }
 
 /// Opt-in: writes the rich sample to `$LOOM_INTEROP_OUT/loom-writer-rich.docx`

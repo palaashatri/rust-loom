@@ -277,7 +277,9 @@ pub fn set_mock_clipboard_fails(fails: bool) {
 /// copied table or chart will paste as text. `None` where rich formats work
 /// (and while the in-memory test clipboard is active).
 pub fn rich_format_note() -> Option<&'static str> {
-    let has_display = cfg!(windows)
+    // Windows and macOS always provide a native rich clipboard. On Linux the
+    // X11/Wayland connection is required before the formats can be shared.
+    let has_display = cfg!(any(windows, target_os = "macos"))
         || std::env::var_os("DISPLAY").is_some()
         || std::env::var_os("WAYLAND_DISPLAY").is_some();
     if MOCK_ENABLED.with(std::cell::Cell::get) || has_display {
@@ -460,6 +462,15 @@ mod note_tests {
         set_mock_clipboard_enabled(true);
         assert!(rich_format_note().is_none());
         set_mock_clipboard_enabled(false);
-        assert_eq!(rich_format_note().is_some(), !cfg!(windows));
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(
+            rich_format_note().is_none(),
+            "the native rich clipboard is always available on this platform"
+        );
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(
+            rich_format_note().is_some(),
+            std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none()
+        );
     }
 }

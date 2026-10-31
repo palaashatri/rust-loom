@@ -5,7 +5,7 @@
 use super::*;
 use crate::actions_tests::{test_state, text_document};
 use crate::document_formatting::{set_selection_font_family, DocumentSelection};
-use crate::{FontPicker, FontPickerLine, GuiState, WriterApp};
+use crate::{FontPicker, FontPickerLine, GuiState, WriterApp, WriterReviewState};
 use loom_writer_core::fonts::{FamilyResolution, FamilyStanding};
 use loom_writer_core::test_fonts;
 use loom_writer_core::TextSelection;
@@ -509,9 +509,15 @@ fn a_pdf_export_status_does_not_claim_unverified_font_substitution() {
     crate::wire_writer_shared_callbacks(&app, &state, None);
     crate::apply_state(&app, &state);
     app.invoke_export_pdf();
+    let review = app.global::<WriterReviewState>();
+    assert!(
+        review.get_pdf_export_open(),
+        "PDF export offers the Final and Review views before writing"
+    );
+    review.invoke_export_pdf_view(0);
     let status = app.get_status_left().to_string();
     assert!(path.is_file(), "the PDF was written: {status}");
-    assert_eq!(status, format!("Exported {}", path.display()));
+    assert_eq!(status, format!("Exported {} (Final view)", path.display()));
 
     // A document in the document font gets no note.
     assert_eq!(

@@ -141,14 +141,50 @@ pub fn inspect_pptx_unsupported(pptx_bytes: &[u8]) -> Result<Vec<String>, String
     Ok(warnings)
 }
 
-/// Unescapes standard XML entities.
+/// Unescapes XML entities, including decimal and hexadecimal character
+/// references (`&#71;` and `&#x47;`), which are legal in typeface names and
+/// slide text.
 fn xml_unescape(value: &str) -> String {
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let tail = &rest[amp..];
+        let Some(end) = tail.find(';') else {
+            out.push('&');
+            rest = &tail[1..];
+            continue;
+        };
+        let entity = &tail[1..end];
+        let decoded = match entity {
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "amp" => Some('&'),
+            _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+                u32::from_str_radix(&entity[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+            }
+            _ if entity.starts_with('#') => {
+                entity[1..].parse::<u32>().ok().and_then(char::from_u32)
+            }
+            _ => None,
+        };
+        match decoded {
+            Some(ch) => {
+                out.push(ch);
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn extract_attr(tag_snippet: &str, attr_name: &str) -> Option<String> {
@@ -376,6 +412,32 @@ fn first_srgb(xml: &str) -> Option<String> {
         .then(|| format!("#{}", value.to_ascii_uppercase()))
 }
 
+/// The first explicit latin typeface in a shape, skipping PowerPoint's theme
+/// references (`+mj-lt`, `+mn-lt`, ...). The editor styles one element at a
+/// time, so the first run/default that sets a family names it; this covers
+/// `a:rPr`, `a:defRPr` and `a:endParaRPr`, so an empty text object keeps its
+/// family too.
+fn first_run_family(sp_xml: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    while let Some(pos) = find_tag_start(&sp_xml[cursor..], "a:latin") {
+        let start = cursor + pos;
+        let Some(tag_end) = sp_xml[start..].find('>') else {
+            break;
+        };
+        let tag = &sp_xml[start..=start + tag_end];
+        if let Some(typeface) = extract_attr(tag, "typeface") {
+            let typeface = xml_unescape(&typeface);
+            if !typeface.trim_start().starts_with('+') {
+                if let Ok(family) = crate::normalize_font_family(&typeface) {
+                    return Some(family);
+                }
+            }
+        }
+        cursor = start + tag_end + 1;
+    }
+    None
+}
+
 /// Size, weight, italics, colours and alignment a shape sets itself, beyond
 /// what its type already draws.
 fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
@@ -410,6 +472,10 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
             }
         }
     }
+    // The run's explicit latin typeface is the element's family. Theme
+    // references (+mj-lt, +mn-lt, ...) describe the deck's theme instead, so an
+    // element that never set a family stays unset.
+    style.font_family = first_run_family(sp_xml);
     if let Some(pos) = find_tag_start(sp_xml, "a:pPr") {
         let tag_end = sp_xml[pos..].find('>').map_or(sp_xml.len(), |e| pos + e);
         let align = match extract_attr(&sp_xml[pos..tag_end], "algn").as_deref() {
@@ -566,6 +632,37 @@ mod tests {
     use crate::export_pptx;
     use loom_objects::chart::{Chart, ChartSeries, ChartType};
     use loom_objects::Table;
+
+    #[test]
+    fn numeric_character_references_and_paragraph_defaults_name_fonts() {
+        assert_eq!(xml_unescape("&#71;eorgia"), "Georgia");
+        assert_eq!(xml_unescape("&#x47;eorgia"), "Georgia");
+        assert_eq!(xml_unescape("&amp;#71;"), "&#71;", "decode once only");
+        assert_eq!(
+            xml_unescape("&unknown;"),
+            "&unknown;",
+            "unknown stays literal"
+        );
+
+        let ending = r#"<p:sp><p:txBody><a:p><a:endParaRPr lang="en-US"><a:latin typeface="Georgia"/></a:endParaRPr></a:p></p:txBody></p:sp>"#;
+        assert_eq!(
+            first_run_family(ending).as_deref(),
+            Some("Georgia"),
+            "an empty object's end-paragraph properties name its family"
+        );
+        let default = r#"<p:sp><p:txBody><a:p><a:pPr algn="ctr"><a:defRPr sz="2400"><a:latin typeface="Aptos"/></a:defRPr></a:pPr></a:p></p:txBody></p:sp>"#;
+        assert_eq!(
+            first_run_family(default).as_deref(),
+            Some("Aptos"),
+            "a paragraph default run property names the element's family"
+        );
+        let numeric = r#"<a:r><a:rPr><a:latin typeface="&#71;eorgia"/></a:rPr></a:r>"#;
+        assert_eq!(
+            first_run_family(numeric).as_deref(),
+            Some("Georgia"),
+            "a numeric reference names the same font"
+        );
+    }
 
     #[test]
     fn morph_transition_is_reported_as_omitted() {

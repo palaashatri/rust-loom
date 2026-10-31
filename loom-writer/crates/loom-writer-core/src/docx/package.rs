@@ -195,9 +195,7 @@ pub(super) fn app_properties() -> String {
 /// `docProps/custom.xml` stores the future tracked-changes author.
 pub(super) fn custom_properties(tracked_changes_author: &str) -> String {
     format!(
-        "{XML_DECLARATION}<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/custom-properties\" \\
-         xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\">\\
-         <property fmtid=\"{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}\" pid=\"2\" name=\"LoomTrackedChangesAuthor\"><vt:lpwstr>{}</vt:lpwstr></property></Properties>",
+        "{XML_DECLARATION}<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/custom-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><property fmtid=\"{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}\" pid=\"2\" name=\"LoomTrackedChangesAuthor\"><vt:lpwstr>{}</vt:lpwstr></property></Properties>",
         xml::text(tracked_changes_author)
     )
 }
@@ -253,10 +251,10 @@ pub(super) fn import_tracked_changes_author(
         if id < 2 || !property_ids.insert(id) {
             return Err("DOCX custom property pids must be unique and at least 2".into());
         }
-        if property.attribute("name") == Some("LoomTrackedChangesAuthor") {
-            if author_property.replace(property).is_some() {
-                return Err("DOCX has duplicate LoomTrackedChangesAuthor properties".into());
-            }
+        if property.attribute("name") == Some("LoomTrackedChangesAuthor")
+            && author_property.replace(property).is_some()
+        {
+            return Err("DOCX has duplicate LoomTrackedChangesAuthor properties".into());
         }
     }
     let Some(property) = author_property else {

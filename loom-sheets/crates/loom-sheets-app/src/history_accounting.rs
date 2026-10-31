@@ -68,14 +68,24 @@ fn sheet_history_bytes(sheet: &Sheet, counted: &mut HashSet<usize>) -> usize {
         .map(|object| {
             object.label.capacity()
                 + object.path.capacity()
-                + object.embedded.as_ref().map_or(0, Vec::capacity)
                 + object.asset.as_ref().map_or(0, String::capacity)
         })
+        .sum::<usize>();
+    // Embedded payloads are shared immutable buffers: clones of a sheet keep
+    // the same buffer, so charge each live buffer once rather than copying its
+    // cost into every undo entry.
+    let embedded = sheet
+        .objects
+        .iter()
+        .filter_map(|object| object.embedded.as_deref())
+        .filter(|bytes| counted.insert(bytes.as_ptr() as usize))
+        .map(<[u8]>::len)
         .sum::<usize>();
     std::mem::size_of_val(sheet)
         + sheet.name.capacity()
         + maps
         + objects
+        + embedded
         + sheet.col_widths.len() * std::mem::size_of::<(u32, f32)>()
         + sheet.row_heights.len() * std::mem::size_of::<(u32, f32)>()
 }

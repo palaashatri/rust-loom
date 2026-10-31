@@ -264,21 +264,36 @@ pub(super) fn set_shaped_block_glyphs(
     Ok(())
 }
 
+pub(super) struct FootnoteCellGlyphs<'a> {
+    pub doc: &'a loom_writer_core::WriterDocument,
+    pub table_block_id: u64,
+    pub table: &'a loom_writer_core::loom_objects::table::Table,
+    pub cell: (usize, usize),
+    pub block: &'a RichBlock,
+    pub frame: Frame,
+    pub font_size: f32,
+    pub pixels_per_point: f32,
+    pub clip: RasterClip,
+    pub default_ink_rgba: [u8; 4],
+}
+
 /// Rasterize a table cell while retaining the inline advances reserved for its footnotes.
 pub(super) fn set_shaped_block_glyphs_with_footnotes(
     row: &mut WriterRenderBlock,
-    doc: &loom_writer_core::WriterDocument,
-    table_block_id: u64,
-    table: &loom_writer_core::loom_objects::table::Table,
-    cell_row: usize,
-    column: usize,
-    block: &RichBlock,
-    frame: Frame,
-    font_size: f32,
-    pixels_per_point: f32,
-    clip: RasterClip,
-    default_ink_rgba: [u8; 4],
+    request: FootnoteCellGlyphs<'_>,
 ) -> Result<(), GlyphPaintError> {
+    let FootnoteCellGlyphs {
+        doc,
+        table_block_id,
+        table,
+        cell,
+        block,
+        frame,
+        font_size,
+        pixels_per_point,
+        clip,
+        default_ink_rgba,
+    } = request;
     if frame.x >= clip.right
         || frame.x + frame.width <= clip.left
         || frame.y >= clip.bottom
@@ -290,8 +305,7 @@ pub(super) fn set_shaped_block_glyphs_with_footnotes(
         doc,
         table_block_id,
         table,
-        cell_row,
-        column,
+        cell,
         block,
         font_size,
         frame.width,

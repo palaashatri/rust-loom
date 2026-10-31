@@ -16,18 +16,38 @@ use super::store::TableTextMap;
 use super::{block_insert_index, TableArrowDirection, TableCellLocation, TABLE_BLOCK_KIND};
 use crate::{RichBlock, TextSelection, WriterDocument, WriterTable};
 
-fn rebase_table_merge_footnotes(
-    footnotes: &mut [crate::FootnoteEntry],
-    block_id: u64,
-    old_table: &Table,
-    new_table: &Table,
-    old_text: &str,
-    new_text: &str,
+struct MergeTables<'a> {
+    old_table: &'a Table,
+    new_table: &'a Table,
+    old_text: &'a str,
+    new_text: &'a str,
+}
+
+struct MergeRegion {
     start_row: usize,
     start_column: usize,
     row_span: usize,
     column_span: usize,
+}
+
+fn rebase_table_merge_footnotes(
+    footnotes: &mut [crate::FootnoteEntry],
+    block_id: u64,
+    tables: MergeTables<'_>,
+    region: MergeRegion,
 ) -> Result<(), String> {
+    let MergeTables {
+        old_table,
+        new_table,
+        old_text,
+        new_text,
+    } = tables;
+    let MergeRegion {
+        start_row,
+        start_column,
+        row_span,
+        column_span,
+    } = region;
     let old_map = TableTextMap::new(old_table);
     let new_map = TableTextMap::new(new_table);
     let origin_old = old_map
@@ -391,21 +411,32 @@ impl WriterDocument {
         let index = self
             .table_index(block_id)
             .ok_or_else(|| "Not a table block".to_string())?;
+        if self.blocks[index].typed_table().is_none() {
+            return Err("Table block has no table".to_string());
+        }
+        if self.footnotes.is_empty() {
+            let block = &mut self.blocks[index];
+            let table = std::sync::Arc::make_mut(
+                block
+                    .table
+                    .as_mut()
+                    .ok_or_else(|| "Table block has no table".to_string())?,
+            );
+            super::editing::apply_flat_text_in_place(table, new_flat)?;
+            block.text = crate::Text::from_str(&super::flat_table_text(table));
+            return Ok(());
+        }
         let table = self.blocks[index]
             .typed_table()
             .ok_or_else(|| "Table block has no table".to_string())?;
         let updated = apply_flat_text(table, new_flat)?;
-        if self.footnotes.is_empty() {
-            self.blocks[index].set_table(updated);
-        } else {
-            let old_text = self.blocks[index].text.as_str().to_owned();
-            let new_text = super::flat_table_text(&updated);
-            let changes = table_text_changes(table, &updated, &old_text, &new_text)
-                .unwrap_or_else(|| vec![flat_text_change(&old_text, &new_text)]);
-            self.set_table_rebasing_footnotes_with_changes(
-                index, updated, &old_text, &new_text, &changes,
-            );
-        }
+        let old_text = self.blocks[index].text.as_str().to_owned();
+        let new_text = super::flat_table_text(&updated);
+        let changes = table_text_changes(table, &updated, &old_text, &new_text)
+            .unwrap_or_else(|| vec![flat_text_change(&old_text, &new_text)]);
+        self.set_table_rebasing_footnotes_with_changes(
+            index, updated, &old_text, &new_text, &changes,
+        );
         Ok(())
     }
 
@@ -649,14 +680,18 @@ impl WriterDocument {
         rebase_table_merge_footnotes(
             &mut self.footnotes,
             block_id,
-            &old_table,
-            &table,
-            &old_text,
-            &new_text,
-            loc.row,
-            loc.col,
-            row_span,
-            col_span,
+            MergeTables {
+                old_table: &old_table,
+                new_table: &table,
+                old_text: &old_text,
+                new_text: &new_text,
+            },
+            MergeRegion {
+                start_row: loc.row,
+                start_column: loc.col,
+                row_span,
+                column_span: col_span,
+            },
         )?;
         self.blocks[index].set_table(table);
         Ok(())

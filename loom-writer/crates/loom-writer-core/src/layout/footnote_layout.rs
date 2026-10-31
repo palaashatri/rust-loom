@@ -123,6 +123,13 @@ pub(crate) fn reference_marker_advance(number: usize, body_size_pt: f32) -> f32 
         .unwrap_or_else(|| measure_block(&marker, size_pt).advance(0, label.len()))
 }
 
+type FootnotePagination = (
+    Vec<FlowLine>,
+    Vec<Range<usize>>,
+    Vec<FootnoteReferencePlacement>,
+    Vec<FootnoteLinePlacement>,
+);
+
 /// Add reference-page note reservations and deterministic note-only
 /// continuation pages to the body pagination.
 pub(super) fn paginate(
@@ -131,15 +138,7 @@ pub(super) fn paginate(
     lines: Vec<FlowLine>,
     page_lines: Vec<Range<usize>>,
     block_starts: &[usize],
-) -> Result<
-    (
-        Vec<FlowLine>,
-        Vec<Range<usize>>,
-        Vec<FootnoteReferencePlacement>,
-        Vec<FootnoteLinePlacement>,
-    ),
-    String,
-> {
+) -> Result<FootnotePagination, String> {
     if doc.footnotes.is_empty() {
         return Ok((lines, page_lines, Vec::new(), Vec::new()));
     }
@@ -178,7 +177,7 @@ pub(super) fn paginate(
             )
         };
         let ranges = if ranges.is_empty() {
-            vec![0..entry.body.len()]
+            std::iter::once(0..entry.body.len()).collect()
         } else {
             ranges
         };
@@ -300,6 +299,7 @@ pub(super) fn paginate(
     let mut body_output = Vec::new();
     let mut references = Vec::with_capacity(notes.len());
     let mut note_lines = Vec::new();
+    let mut reference_pages = vec![0usize; notes.len()];
     for (body_page, mut body) in body_pages.into_iter().enumerate() {
         let reference_page = body_output.len();
         for line in &mut body {
@@ -308,6 +308,7 @@ pub(super) fn paginate(
         for note_index in &notes_by_page[body_page] {
             let note = &notes[*note_index];
             let (anchor_page, _) = anchors[*note_index];
+            reference_pages[*note_index] = reference_page;
             debug_assert_eq!(anchor_page, body_page);
             let block_index = doc
                 .blocks
@@ -377,39 +378,51 @@ pub(super) fn paginate(
             note_lines.push(make_placement(
                 note,
                 line.line,
-                reference_page,
-                reference_page,
-                note_y,
-                height,
-                style.margin_left_pt,
-                usable_width,
-                font_size,
+                PlacementPages {
+                    page: reference_page,
+                    reference_page,
+                },
+                PlacementGeometry {
+                    y: note_y,
+                    height,
+                    left: style.margin_left_pt,
+                    width: usable_width,
+                    font_size_pt: font_size,
+                },
                 line.line == 0 || position > 0 && reference_lines[position - 1].note != line.note,
             ));
             note_y += height;
         }
         body_output.push(body);
 
+        // An overflowing note continues on note-only pages immediately after
+        // its reference page, before any later body page. Later body page
+        // numbers are remapped by `reference_page = body_output.len()`.
         let mut remaining = Vec::new();
         for note_index in &notes_by_page[body_page] {
             while next_line[*note_index] < notes[*note_index].ranges.len() {
-                remaining.push(NoteLine {
-                    note: *note_index,
-                    line: next_line[*note_index],
-                });
+                remaining.push((
+                    reference_page,
+                    NoteLine {
+                        note: *note_index,
+                        line: next_line[*note_index],
+                    },
+                ));
                 next_line[*note_index] += 1;
             }
         }
         append_continuation_pages(
             &remaining,
             &notes,
-            reference_page,
-            style,
-            usable_height,
-            usable_width,
-            font_size,
-            &mut body_output,
-            &mut note_lines,
+            &reference_pages,
+            &mut ContinuationContext {
+                style,
+                usable_height,
+                usable_width,
+                font_size_pt: font_size,
+                pages: &mut body_output,
+                placements: &mut note_lines,
+            },
         )?;
     }
 
@@ -426,27 +439,42 @@ pub(super) fn paginate(
     Ok((lines, page_lines, references, note_lines))
 }
 
-fn make_placement(
-    note: &NoteText<'_>,
-    line: usize,
+struct PlacementPages {
     page: usize,
     reference_page: usize,
+}
+
+struct PlacementGeometry {
     y: f32,
     height: f32,
     left: f32,
     width: f32,
     font_size_pt: f32,
+}
+
+fn make_placement(
+    note: &NoteText<'_>,
+    line: usize,
+    pages: PlacementPages,
+    geometry: PlacementGeometry,
     show_number: bool,
 ) -> FootnoteLinePlacement {
+    let PlacementGeometry {
+        y,
+        height,
+        left,
+        width,
+        font_size_pt,
+    } = geometry;
     let number_width = FOOTNOTE_LABEL_WIDTH_PT.min(width);
     FootnoteLinePlacement {
         note_id: note.entry.id,
         number: note.number,
         body_range: note.ranges[line].clone(),
-        page,
-        reference_page,
+        page: pages.page,
+        reference_page: pages.reference_page,
         starts_note: line == 0,
-        continued: page != reference_page && line > 0,
+        continued: pages.page != pages.reference_page && line > 0,
         show_number,
         font_size_pt,
         number_bounds: PageRect {
@@ -464,96 +492,83 @@ fn make_placement(
     }
 }
 
-fn append_continuation_pages(
-    remaining: &[NoteLine],
-    notes: &[NoteText<'_>],
-    reference_page: usize,
-    style: &PageStyle,
+struct ContinuationContext<'a> {
+    style: &'a PageStyle,
     usable_height: f32,
     usable_width: f32,
     font_size_pt: f32,
-    pages: &mut Vec<Vec<FlowLine>>,
-    placements: &mut Vec<FootnoteLinePlacement>,
+    pages: &'a mut Vec<Vec<FlowLine>>,
+    placements: &'a mut Vec<FootnoteLinePlacement>,
+}
+
+fn append_continuation_pages(
+    remaining: &[(usize, NoteLine)],
+    notes: &[NoteText<'_>],
+    reference_pages: &[usize],
+    context: &mut ContinuationContext<'_>,
 ) -> Result<(), String> {
     if remaining.is_empty() {
         return Ok(());
     }
     let mut page_lines = Vec::new();
     let mut used = 0.0;
-    for line in remaining {
+    for (reference_page, line) in remaining {
         let note = &notes[line.note];
         let height = note.heights[line.line];
-        if height > usable_height + f32::EPSILON {
+        if height > context.usable_height + f32::EPSILON {
             return Err(format!(
                 "footnote {} line exceeds page height",
                 note.entry.id
             ));
         }
-        if used + height > usable_height + f32::EPSILON && !page_lines.is_empty() {
-            place_continuation_page(
-                &page_lines,
-                notes,
-                reference_page,
-                style,
-                usable_width,
-                font_size_pt,
-                pages,
-                placements,
-            );
+        if used + height > context.usable_height + f32::EPSILON && !page_lines.is_empty() {
+            place_continuation_page(&page_lines, notes, reference_pages, context);
             page_lines.clear();
             used = 0.0;
         }
-        page_lines.push(*line);
+        page_lines.push((*reference_page, *line));
         used += height;
     }
     if !page_lines.is_empty() {
-        place_continuation_page(
-            &page_lines,
-            notes,
-            reference_page,
-            style,
-            usable_width,
-            font_size_pt,
-            pages,
-            placements,
-        );
+        place_continuation_page(&page_lines, notes, reference_pages, context);
     }
     Ok(())
 }
 
 fn place_continuation_page(
-    lines: &[NoteLine],
+    lines: &[(usize, NoteLine)],
     notes: &[NoteText<'_>],
-    reference_page: usize,
-    style: &PageStyle,
-    usable_width: f32,
-    font_size_pt: f32,
-    pages: &mut Vec<Vec<FlowLine>>,
-    placements: &mut Vec<FootnoteLinePlacement>,
+    reference_pages: &[usize],
+    context: &mut ContinuationContext<'_>,
 ) {
-    let page = pages.len();
-    let mut y = style.margin_top_pt;
+    let page = context.pages.len();
+    let mut y = context.style.margin_top_pt;
     let mut previous_note = None;
-    for line in lines {
+    for (_, line) in lines {
         let note = &notes[line.note];
+        let reference_page = reference_pages[line.note];
         let height = note.heights[line.line];
         let show_number = line.line == 0 || previous_note != Some(line.note);
-        placements.push(make_placement(
+        context.placements.push(make_placement(
             note,
             line.line,
-            page,
-            reference_page,
-            y,
-            height,
-            style.margin_left_pt,
-            usable_width,
-            font_size_pt,
+            PlacementPages {
+                page,
+                reference_page,
+            },
+            PlacementGeometry {
+                y,
+                height,
+                left: context.style.margin_left_pt,
+                width: context.usable_width,
+                font_size_pt: context.font_size_pt,
+            },
             show_number,
         ));
         y += height;
         previous_note = Some(line.note);
     }
-    pages.push(Vec::new());
+    context.pages.push(Vec::new());
 }
 
 fn anchor_locations(
@@ -771,6 +786,75 @@ mod tests {
     }
 
     #[test]
+    fn overflowing_note_continuations_follow_their_reference_before_later_body() {
+        let mut doc = paragraph_doc("Source line\nLater one\nLater two\nLater three\nLater four");
+        let note = (0..10)
+            .map(|n| format!("note {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        add_note(&mut doc, 41, 7, 0, &note);
+        let flow = flow(&doc, &tiny_style());
+
+        let reference = &flow.footnote_references()[0];
+        assert_eq!(reference.page, 0);
+        let continuation_pages = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == reference.note_id && line.continued)
+            .map(|line| line.page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            !continuation_pages.is_empty(),
+            "the fixture note must overflow its reference page"
+        );
+        let last_continuation = *continuation_pages.iter().next_back().unwrap();
+        assert_eq!(
+            continuation_pages.iter().copied().collect::<Vec<_>>(),
+            (reference.page + 1..=last_continuation).collect::<Vec<_>>(),
+            "continuation pages must be contiguous immediately after the reference page"
+        );
+        for page in reference.page + 1..=last_continuation {
+            assert!(
+                flow.lines_on(page..page + 1).is_empty(),
+                "page {page} is a note-only continuation page"
+            );
+            assert!(
+                flow.footnote_lines()
+                    .iter()
+                    .any(|line| line.page == page && line.note_id == reference.note_id),
+                "page {page} carries the overflowing note"
+            );
+        }
+        let later_body_pages = flow
+            .lines()
+            .iter()
+            .filter(|line| line.page > reference.page)
+            .map(|line| line.page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            later_body_pages
+                .iter()
+                .all(|page| *page > last_continuation),
+            "later body text starts after the note's continuation pages: {later_body_pages:?}"
+        );
+        assert_eq!(
+            later_body_pages.iter().next().copied(),
+            Some(last_continuation + 1),
+            "the first later body page is the page after the last continuation"
+        );
+        let note_pages = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == reference.note_id)
+            .map(|line| line.page)
+            .collect::<Vec<_>>();
+        assert!(
+            note_pages.windows(2).all(|pair| pair[0] <= pair[1]),
+            "note lines stay in document order across pages: {note_pages:?}"
+        );
+    }
+
+    #[test]
     fn reference_numbers_follow_document_order_not_storage_order() {
         let mut doc = WriterDocument::new("footnote-order", "Footnote order");
         doc.blocks.push(RichBlock::new(7, "paragraph", "first"));
@@ -874,8 +958,25 @@ mod tests {
             references
                 .iter()
                 .map(|reference| (reference.note_id, reference.page))
-                .collect::<Vec<_>>(),
-            vec![(10, 0), (20, 1)],
+                .collect::<Vec<_>>()
+                .first()
+                .copied(),
+            Some((10, 0)),
+        );
+        let first_note_last_page = flow
+            .footnote_lines()
+            .iter()
+            .filter(|line| line.note_id == references[0].note_id)
+            .map(|line| line.page)
+            .max()
+            .expect("the first note has placed lines");
+        assert_eq!(
+            references[1].page,
+            first_note_last_page + 1,
+            "the later anchor moves to the body page after the first note's continuous pages",
+        );
+        assert!(
+            references[1].page > references[0].page,
             "the later anchor moves when one page cannot open both notes",
         );
         for reference in references {
@@ -980,7 +1081,7 @@ mod tests {
             0,
             0,
             crate::TABLE_CELL_BASE_FONT_SIZE_PT,
-            false,
+            true,
             None,
         )
         .unwrap();
@@ -988,8 +1089,7 @@ mod tests {
             &doc,
             block.id,
             table,
-            0,
-            0,
+            (0, 0),
             &cell_block,
             crate::TABLE_CELL_BASE_FONT_SIZE_PT,
             inner_width,
@@ -1034,8 +1134,10 @@ mod tests {
                     .sum::<f32>())
                 * flow.zoom();
         assert!((marker_rect.y - expected_y).abs() < 0.05);
+        let mut caret_selection = crate::TextSelection::caret(reference.global_offset);
+        caret_selection.affinity = crate::CaretAffinity::Downstream;
         let caret = flow
-            .caret_rect(&doc, &crate::TextSelection::caret(reference.global_offset))
+            .caret_rect(&doc, &caret_selection)
             .expect("table caret shares the cell's shaped geometry");
         assert!((caret.rect.x - marker_rect.x).abs() < 0.05);
 

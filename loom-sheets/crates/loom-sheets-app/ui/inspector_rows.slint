@@ -2,6 +2,7 @@
 // edge, so right-to-left is the exact mirror image of left-to-right: label,
 // then field, then the buttons; or buttons, field, label.
 import { LoomTextField, LoomNumericField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
+
 import { Theme } from "theme.slint";
 import { CellInk } from "grid_pointer.slint";
 
@@ -13,7 +14,7 @@ component SheetRowLabel inherits Text {
     wrap: word-wrap;
     vertical-alignment: center;
     horizontal-alignment: Theme.rtl ? right : left;
-    accessible-role: text;
+    accessible-role: AccessibleRole.text;
 }
 
 /// A section heading. The shared header pads its text by space.xl, so the heading
@@ -46,7 +47,7 @@ component SheetValueBox inherits Rectangle {
     // black as the panel, so a borderless value does not read as a field.
     border-width: Theme.active-theme == "high-contrast" ? 1px : 0px;
     border-color: Theme.palette().border;
-    accessible-role: text;
+    accessible-role: AccessibleRole.text;
     accessible-label: root.field-label;
     accessible-value: root.value;
 
@@ -103,6 +104,53 @@ export component SheetFieldRow inherits Rectangle {
             field-label: root.field-label;
             value: root.value;
             placeholder: root.placeholder;
+        }
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+    }
+}
+
+/// A label and one editable numeric field with a unit and validation. The
+/// field reports acceptance so a rejected value can stay visible for repair.
+export component SheetNumericRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> field-label: "";
+    in property <string> description: "";
+    in property <string> unit: "";
+    in-out property <string> value: "";
+    in-out property <bool> invalid: false;
+    callback accepted(string) -> bool;
+    callback cancelled;
+
+    min-width: 0px;
+    min-height: Theme.scaled-control-height;
+    vertical-stretch: 0;
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        SheetRowLabel { text: root.label; accessible-label: root.label; }
+        field := LoomNumericField {
+            label: root.field-label;
+            description: root.description;
+            unit: root.unit;
+            value <=> root.value;
+            invalid <=> root.invalid;
+            edited(_) => { root.invalid = false; }
+            accepted(text) => { root.invalid = !root.accepted(text); }
+            cancelled => { root.cancelled(); }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        field-rtl := LoomNumericField {
+            label: root.field-label;
+            description: root.description;
+            unit: root.unit;
+            value <=> root.value;
+            invalid <=> root.invalid;
+            edited(_) => { root.invalid = false; }
+            accepted(text) => { root.invalid = !root.accepted(text); }
+            cancelled => { root.cancelled(); }
         }
         SheetRowLabel { text: root.label; accessible-label: root.label; }
     }
@@ -279,6 +327,11 @@ export component SheetChoiceRow inherits HorizontalLayout {
         label: root.choices[self.k];
         accessible-name: root.choice-names.length > self.k ? root.choice-names[self.k] : "";
         variant: root.current == self.k ? "primary" : "ghost";
+        selected: root.current == self.k;
+        // The chosen option is announced as well as painted, so a screen-reader
+        // user can tell which number format or alignment is active.
+        accessible-checkable: true;
+        accessible-checked: root.current == self.k;
         clicked => { root.chosen(self.k); }
     }
 }

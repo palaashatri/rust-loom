@@ -950,7 +950,7 @@ fn recovery_snapshot_restores_embedded_image_without_original_path() {
         "/path/that/no-longer-exists/source.png",
     )
     .expect("image object");
-    image.embedded = Some(PNG_BYTES.to_vec());
+    image.embedded = Some(PNG_BYTES.to_vec().into());
     sheet.objects.push(image);
 
     let snapshot = workbook_package_bytes(&[sheet], 0).expect("build recovery package");

@@ -19,6 +19,8 @@ use crate::{
     RevisionPayload, RevisionRecord, RichBlock, TrackedChanges, WriterDocument,
 };
 
+mod complex_script;
+mod run_style;
 mod table;
 use table::parse_table;
 
@@ -148,18 +150,14 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
 
     if let Some(doc_bytes) = archive.get("word/document.xml") {
         let xml = String::from_utf8_lossy(doc_bytes);
-        let unsupported_background =
-            roxmltree::Document::parse(&xml)
-                .ok()
-                .is_some_and(|document| {
-                    document
-                        .root_element()
-                        .children()
-                        .find(|node| node.has_tag_name((W_NS, "background")))
-                        .is_some_and(|background| {
-                            supported_background_appearance(background).is_none()
-                        })
-                });
+        let document = roxmltree::Document::parse(&xml).ok();
+        let unsupported_background = document.as_ref().is_some_and(|document| {
+            document
+                .root_element()
+                .children()
+                .find(|node| node.has_tag_name((W_NS, "background")))
+                .is_some_and(|background| supported_background_appearance(background).is_none())
+        });
         if unsupported_background
             && !warnings
                 .iter()
@@ -192,6 +190,21 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         }
         if xml.contains("<wp:anchor") && !warnings.iter().any(|w: &String| w.contains("Floating")) {
             warnings.push("Floating pictures are placed in the text, one to a line.".to_string());
+        }
+        let losses = document
+            .as_ref()
+            .map(complex_script::only_losses)
+            .unwrap_or_default();
+        if !losses.is_empty()
+            && !warnings
+                .iter()
+                .any(|warning: &String| warning.contains("Complex-script"))
+        {
+            warnings.push(format!(
+                "Complex-script (Arabic/Hebrew) run formatting is not supported: {} \
+                 cannot be represented and is ignored; the affected text itself is imported.",
+                losses.join(", ")
+            ));
         }
     }
 
@@ -371,19 +384,18 @@ pub fn parse_document_body_with_archive(
     parse_document_body_and_references(xml, archive).map(|(blocks, _, _, _, _)| blocks)
 }
 
+type ParsedDocumentBody = (
+    Vec<RichBlock>,
+    Vec<FootnoteReference>,
+    Vec<RevisionRecord>,
+    std::collections::BTreeMap<u64, RevisionBlockFormatChange>,
+    Vec<super::comments_import::CommentAnchor>,
+);
+
 fn parse_document_body_and_references(
     xml: &str,
     archive: Option<&PackageArchive>,
-) -> Result<
-    (
-        Vec<RichBlock>,
-        Vec<FootnoteReference>,
-        Vec<RevisionRecord>,
-        std::collections::BTreeMap<u64, RevisionBlockFormatChange>,
-        Vec<super::comments_import::CommentAnchor>,
-    ),
-    String,
-> {
+) -> Result<ParsedDocumentBody, String> {
     validate_revision_markup_scope(xml)?;
     let root_tag = document_root_tag(xml)?;
     let body_start_tag = "<w:body";
@@ -450,10 +462,12 @@ fn parse_document_body_and_references(
                     next_id,
                     archive,
                     root_tag,
-                    &mut local_references,
-                    &mut local_revisions,
-                    &mut local_paragraph_formats,
-                    &mut comment_anchors,
+                    ParagraphOutput {
+                        footnotes: &mut local_references,
+                        revisions: &mut local_revisions,
+                        paragraph_formats: &mut local_paragraph_formats,
+                        comment_anchors: &mut comment_anchors,
+                    },
                 )? {
                     if let Some(block) = block_opt {
                         references.extend(local_references.into_iter().map(|reference| {
@@ -712,7 +726,16 @@ fn validate_revision_markup_scope(xml: &str) -> Result<(), String> {
             }
             continue;
         }
-        if name.ends_with("Change") {
+        if matches!(
+            name,
+            "sectPrChange"
+                | "tblPrChange"
+                | "tblGridChange"
+                | "trPrChange"
+                | "tcPrChange"
+                | "numberingChange"
+                | "cellMerge"
+        ) {
             return Err(format!("DOCX revision element w:{name} is not supported"));
         }
     }
@@ -845,11 +868,13 @@ fn parse_run_properties(properties: Node<'_, '_>) -> Result<CharacterStyle, Stri
             continue;
         }
         match property.tag_name().name() {
-            "b" | "bCs" if xml_property_is_enabled(property) => style.weight = FontWeight::Bold,
-            "i" | "iCs" if xml_property_is_enabled(property) => style.italic = true,
+            "b" if xml_property_is_enabled(property) => style.weight = FontWeight::Bold,
+            "i" if xml_property_is_enabled(property) => style.italic = true,
             "u" if xml_property_is_enabled(property) => style.underline = true,
             "strike" if xml_property_is_enabled(property) => style.strikethrough = true,
-            "sz" | "szCs" => {
+            // The *Cs suffixes style complex scripts. Writer has one style per
+            // run, so applying them would wrongly restyle the run's Latin text.
+            "sz" => {
                 if let Some(value) = property.attribute((W_NS, "val")) {
                     if let Ok(half_points) = value.parse::<f32>() {
                         style.font_size = half_points / 2.0;
@@ -1026,10 +1051,11 @@ fn append_local_revision(
     }
     let before = before_style.map(|style| payload_piece(text, style));
     let after = after_style.map(|style| payload_piece(text, style));
-    let boundary_kind = if text.contains('\u{b}') {
-        RevisionBoundaryKind::SoftBreak
-    } else {
-        RevisionBoundaryKind::Text
+    let boundary_kind = match markup.kind {
+        // A formatting revision is not a boundary in the text stream.
+        RevisionKind::Formatting => RevisionBoundaryKind::Unknown,
+        _ if text.contains('\u{b}') => RevisionBoundaryKind::SoftBreak,
+        _ => RevisionBoundaryKind::Text,
     };
     if let Some(existing) = revisions
         .iter_mut()
@@ -1089,6 +1115,7 @@ fn append_local_revision(
 fn parse_paragraph_runs(
     paragraph_xml: &str,
     root_tag: &str,
+    kind: &str,
     text: &mut String,
     runs: &mut Vec<StyleRun>,
     footnotes: &mut Vec<LocalFootnoteReference>,
@@ -1118,12 +1145,13 @@ fn parse_paragraph_runs(
         let run_xml = paragraph_xml
             .get(start..end)
             .ok_or_else(|| "invalid DOCX run boundary".to_string())?;
-        let current_style = parse_run_style(run)?;
+        let mut current_style = parse_run_style(run)?;
+        run_style::normalize(&mut current_style, kind);
         let format_revision = parse_run_format_revision(run)?;
         if run_xml.contains("<w:delText")
             && context
                 .as_ref()
-                .is_none_or(|markup| markup.kind != RevisionKind::Deletion)
+                .map_or(true, |markup| markup.kind != RevisionKind::Deletion)
         {
             return Err("DOCX delText appears outside a deletion revision".into());
         }
@@ -1224,6 +1252,13 @@ fn local_revision_records(
         .collect()
 }
 
+struct ParagraphOutput<'a> {
+    footnotes: &'a mut Vec<LocalFootnoteReference>,
+    revisions: &'a mut Vec<RevisionRecord>,
+    paragraph_formats: &'a mut Vec<LocalParagraphFormatChange>,
+    comment_anchors: &'a mut Vec<super::comments_import::CommentAnchor>,
+}
+
 /// Parses a single `<w:p>...</w:p>` block.
 fn parse_paragraph(
     xml: &str,
@@ -1231,11 +1266,14 @@ fn parse_paragraph(
     id: u64,
     archive: Option<&PackageArchive>,
     root_tag: &str,
-    footnotes: &mut Vec<LocalFootnoteReference>,
-    revisions: &mut Vec<RevisionRecord>,
-    paragraph_formats: &mut Vec<LocalParagraphFormatChange>,
-    comment_anchors: &mut Vec<super::comments_import::CommentAnchor>,
+    output: ParagraphOutput<'_>,
 ) -> Result<Option<(Option<RichBlock>, usize)>, String> {
+    let ParagraphOutput {
+        footnotes,
+        revisions,
+        paragraph_formats,
+        comment_anchors,
+    } = output;
     let Some(tag_open_end) = xml[start..].find('>') else {
         return Ok(None);
     };
@@ -1351,6 +1389,7 @@ fn parse_paragraph(
     parse_paragraph_runs(
         p_xml,
         root_tag,
+        &kind,
         &mut text,
         &mut runs,
         footnotes,

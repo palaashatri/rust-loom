@@ -564,3 +564,215 @@ fn slide_navigator_sits_at_reading_start_and_empty_inspector_hides_geometry_rows
         );
     }
 }
+
+/// The slide's paper rectangle inside a rendered canvas: `(x, y, width, height)`.
+/// The longest paper run gives a row/column that the slide's text does not cut.
+fn paper_stage(image: &RgbaImage, canvas: (f32, f32, f32, f32)) -> (u32, u32, u32, u32) {
+    let (cx, cy, cw, ch) = canvas;
+    let x0 = (cx.max(0.0) as u32).min(image.width());
+    let x1 = ((cx + cw).max(0.0) as u32).min(image.width());
+    let y0 = (cy.max(0.0) as u32).min(image.height());
+    let y1 = ((cy + ch).max(0.0) as u32).min(image.height());
+    let mut row_best = (x0, 0u32, 0u32);
+    for y in y0..y1 {
+        let (mut run, mut start) = (0u32, x0);
+        for x in x0..x1 {
+            if image.get_pixel(x, y).0 == PAPER {
+                if run == 0 {
+                    start = x;
+                }
+                run += 1;
+                if run > row_best.2 {
+                    row_best = (start, y, run);
+                }
+            } else {
+                run = 0;
+            }
+        }
+    }
+    let mut col_best = (0u32, row_best.1, 0u32);
+    for x in row_best.0..(row_best.0 + row_best.2).min(image.width()) {
+        let (mut run, mut start) = (0u32, y0);
+        for y in y0..y1 {
+            if image.get_pixel(x, y).0 == PAPER {
+                if run == 0 {
+                    start = y;
+                }
+                run += 1;
+                if run > col_best.2 {
+                    col_best = (x, start, run);
+                }
+            } else {
+                run = 0;
+            }
+        }
+    }
+    (row_best.0, col_best.1, row_best.2, col_best.2)
+}
+
+/// Deselect so no selection handles or focus rings draw over the artwork.
+fn show_unselected_slide(session: &crate::keyboard_flow_tests::Session) {
+    session.state.session.borrow_mut().selected_elements.clear();
+    refresh(&session.app, &session.state);
+    configure_responsive_layout(&session.app, (1280, 800));
+}
+
+#[test]
+fn high_contrast_keeps_slide_artwork_colours_and_recolours_only_chrome() {
+    let session = launched();
+    let app = &session.app;
+    // Shapes draw their label in the deck's own ink, not the interface ink.
+    if let Some(slide) = session
+        .state
+        .session
+        .borrow_mut()
+        .document
+        .active_slide_mut()
+    {
+        slide.add_element(loom_present_core::SlideElement {
+            id: "contrast-shape".into(),
+            element_type: loom_present_core::ElementType::ShapeRectangle,
+            content: "Deck shape".into(),
+            x: 120.0,
+            y: 390.0,
+            width: 320.0,
+            height: 90.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+        });
+    }
+    show_unselected_slide(&session);
+
+    apply_theme(app, "light");
+    let light = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    apply_theme(app, "high-contrast");
+    let contrast = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+
+    let canvas = editor_canvas(app);
+    let (x, y, w, h) = paper_stage(&light, canvas);
+    assert!(w > 200 && h > 100, "slide stage not found: {x},{y} {w}x{h}");
+    // The 1-2 px frame belongs to chrome; compare the artwork inside it.
+    let inset = 4;
+    let mut changed = Vec::new();
+    for py in (y + inset)..(y + h - inset) {
+        for px in (x + inset)..(x + w - inset) {
+            if light.get_pixel(px, py) != contrast.get_pixel(px, py) {
+                changed.push((px, py));
+            }
+        }
+    }
+    assert!(
+        changed.is_empty(),
+        "high contrast changed {} slide-artwork pixels, first at {:?}",
+        changed.len(),
+        changed.first()
+    );
+
+    // The chrome is still allowed to change: the canvas surround differs.
+    let outside = (x - 8, y + h / 2);
+    assert_ne!(
+        light.get_pixel(outside.0, outside.1),
+        contrast.get_pixel(outside.0, outside.1),
+        "high contrast must still recolour the surrounding chrome"
+    );
+}
+
+#[test]
+fn slideshow_fit_ignores_the_editor_zoom_and_fills_the_show_viewport() {
+    let session = launched();
+    let app = &session.app;
+    show_unselected_slide(&session);
+    apply_theme(app, "light");
+    snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+
+    let mut editor_widths = Vec::new();
+    let mut show_widths = Vec::new();
+    for zoom in [2, 0] {
+        app.set_zoom_index(zoom); // 50%, then Fit
+        let editor = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+        let (_, _, editor_width, _) = paper_stage(&editor, editor_canvas(app));
+        editor_widths.push(editor_width);
+
+        app.set_is_preview_mode(true);
+        let show = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+        let (cx, cy, cw, ch) = editor_canvas(app);
+        let (x, y, show_width, show_height) = paper_stage(&show, (cx, cy, cw, ch));
+        let expected = cw.min(ch / 0.5625);
+        assert!(
+            (show_width as f32 - expected).abs() <= 4.0,
+            "slideshow paper is {show_width}px wide inside a {cw}x{ch} show viewport; expected about {expected}px at zoom index {zoom}"
+        );
+        assert!(
+            (show_height as f32 - expected * 0.5625).abs() <= 4.0,
+            "slideshow paper is {show_height}px tall; expected about {}px: {x},{y}",
+            expected * 0.5625
+        );
+        show_widths.push(show_width);
+
+        app.set_is_preview_mode(false);
+        let back = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+        let (_, _, back_width, _) = paper_stage(&back, editor_canvas(app));
+        assert_eq!(
+            app.get_zoom_index(),
+            zoom,
+            "the editor zoom choice survives the slideshow"
+        );
+        assert!(
+            (back_width as i32 - editor_width as i32).abs() <= 2,
+            "leaving the slideshow must return to the same editor zoom: {back_width} vs {editor_width}"
+        );
+    }
+
+    assert!(
+        editor_widths[1] > editor_widths[0] + 100,
+        "editor zoom itself still works: 50%={} Fit={}",
+        editor_widths[0],
+        editor_widths[1]
+    );
+    assert!(
+        (show_widths[0] as i32 - show_widths[1] as i32).abs() <= 2,
+        "the slideshow fit must not multiply the editor zoom: 50%={} Fit={}",
+        show_widths[0],
+        show_widths[1]
+    );
+}
+#[test]
+fn reopening_the_inspector_restores_the_same_rendered_panel() {
+    let session = launched();
+    let app = &session.app;
+    configure_responsive_layout(app, (1280, 800));
+    assert!(!app.get_show_inspector(), "the inspector starts closed");
+
+    app.invoke_show_inspector_tab(0);
+    let first = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    assert!(app.get_show_inspector() && app.get_inspector_visible());
+    assert!(
+        ElementHandle::find_by_accessible_label(app, "Text colour Red")
+            .next()
+            .is_some(),
+        "the reopened Format inspector draws its swatches"
+    );
+
+    app.invoke_toggle_inspector();
+    snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    assert!(!app.get_inspector_visible());
+
+    app.invoke_show_inspector_tab(0);
+    let second = snapshot_component(app, 1280.0, 800.0, 1.0).unwrap();
+    assert!(app.get_inspector_visible());
+    assert!(
+        ElementHandle::find_by_accessible_label(app, "Text colour Red")
+            .next()
+            .is_some(),
+        "the inspector is complete after reopening"
+    );
+    let panel = element(app, "PresentInspector");
+    assert!(panel.size().width > 0.0 && panel.size().height > 0.0);
+    assert_eq!(first.dimensions(), second.dimensions());
+    assert_eq!(
+        first.as_raw(),
+        second.as_raw(),
+        "reopening the inspector must restore the same rendered panel"
+    );
+}

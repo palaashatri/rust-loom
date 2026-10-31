@@ -256,8 +256,10 @@ mod tests {
             end: 6,
             style: CharacterStyle::default(),
         }];
-        let mut after_style = CharacterStyle::default();
-        after_style.italic = true;
+        let after_style = CharacterStyle {
+            italic: true,
+            ..CharacterStyle::default()
+        };
         let after_runs = vec![StyleRun {
             start: 0,
             end: 6,
