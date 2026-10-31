@@ -47,7 +47,7 @@ fn embed_present_windows_icon(manifest: &std::path::Path) {
     )
     .expect("write Present icon resource script");
 
-    let compiler = present_resource_compiler();
+    let compiler = resource_compiler();
     let status = Command::new(compiler)
         .arg("/nologo")
         .arg("/fo")
@@ -66,7 +66,7 @@ fn embed_present_windows_icon(manifest: &std::path::Path) {
     );
 }
 
-fn present_resource_compiler() -> std::ffi::OsString {
+fn resource_compiler() -> std::ffi::OsString {
     if let Some(compiler) = std::env::var_os("RC") {
         return compiler;
     }
@@ -77,9 +77,10 @@ fn present_resource_compiler() -> std::ffi::OsString {
         "x64"
     };
     let mut sdk_candidates = Vec::new();
-    if let Some(sdk_dir) = std::env::var_os("WindowsSdkDir") {
-        let sdk_dir = std::path::PathBuf::from(sdk_dir);
-        if let Some(version) = std::env::var_os("WindowsSDKVersion") {
+    let mut push_arch = |sdk_dir: &std::path::Path, version: Option<&std::ffi::OsStr>| {
+        if let Some(version) = version {
+            let version = version.to_string_lossy();
+            let version = version.trim_end_matches(['\\', '/']);
             sdk_candidates.push(
                 sdk_dir
                     .join("bin")
@@ -87,9 +88,51 @@ fn present_resource_compiler() -> std::ffi::OsString {
                     .join(resource_arch)
                     .join("rc.exe"),
             );
+            // ARM64 Windows can run the SDK's x64 resource compiler under
+            // emulation when the SDK does not ship an arm64 build.
+            if resource_arch != "x64" {
+                sdk_candidates.push(
+                    sdk_dir
+                        .join("bin")
+                        .join(version)
+                        .join("x64")
+                        .join("rc.exe"),
+                );
+            }
         }
         sdk_candidates.push(sdk_dir.join("bin").join(resource_arch).join("rc.exe"));
+        if resource_arch != "x64" {
+            sdk_candidates.push(sdk_dir.join("bin").join("x64").join("rc.exe"));
+        }
+    };
+    if let Some(sdk_dir) = std::env::var_os("WindowsSdkDir") {
+        let sdk_dir = std::path::PathBuf::from(sdk_dir);
+        push_arch(&sdk_dir, std::env::var_os("WindowsSDKVersion").as_deref());
     }
+
+    // `WindowsSdkDir` is not exported to every GitHub Actions shell. Search
+    // the standard Windows Kits roots and pick the highest installed version.
+    for root in [
+        std::env::var_os("ProgramFiles(x86)").map(std::path::PathBuf::from),
+        std::env::var_os("ProgramFiles").map(std::path::PathBuf::from),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let bin = root.join("Windows Kits").join("10").join("bin");
+        let Ok(entries) = std::fs::read_dir(&bin) else {
+            continue;
+        };
+        let mut versions: Vec<_> = entries.flatten().map(|entry| entry.path()).collect();
+        versions.sort();
+        versions.reverse();
+        for version in versions {
+            for arch in [resource_arch, "x64"] {
+                sdk_candidates.push(version.join(arch).join("rc.exe"));
+            }
+        }
+    }
+
     sdk_candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
