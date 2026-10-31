@@ -913,6 +913,16 @@ fn differing_font_families_show_a_mixed_picker_and_apply_as_one_step() {
         "the picker names the mixed state for assistive technology"
     );
 
+    let undo_before = state.session.borrow().can_undo();
+    ink.invoke_font_requested("".into());
+    assert_eq!(style_of(&state, 0).font_family.as_deref(), Some("Arial"));
+    assert_eq!(style_of(&state, 1).font_family.as_deref(), Some("Georgia"));
+    assert_eq!(
+        state.session.borrow().can_undo(),
+        undo_before,
+        "an empty submit in the mixed state must not wipe every family"
+    );
+
     ink.invoke_font_requested("Aptos".into());
     assert!(!ink.get_font_family_mixed());
     assert_eq!(ink.get_font_family().as_str(), "Aptos");
@@ -1002,5 +1012,39 @@ fn the_font_picker_is_reachable_in_right_to_left_and_large_text() {
             && position.x + size.width <= 1281.0
             && position.y + size.height <= 801.0,
         "the picker must stay inside the window: {position:?} {size:?}"
+    );
+}
+
+#[test]
+fn a_stored_family_that_is_not_usable_falls_back_to_the_theme_everywhere() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Family",
+        100.0,
+        100.0,
+        400.0,
+        80.0,
+    )]);
+    app.set_show_inspector(true);
+    {
+        let mut session = state.session.borrow_mut();
+        session.document.active_slide_mut().expect("slide").elements[0]
+            .style
+            .font_family = Some("+mj-lt".into());
+        assert!(session.select_element("t", false));
+    }
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+
+    let ink = app.global::<ElementInk>();
+    assert_eq!(
+        ink.get_font_family().as_str(),
+        "",
+        "a stored theme token is not shown as a family"
+    );
+    assert!(
+        parts_of(&app, 0).iter().all(|part| part.family.is_empty()),
+        "the canvas never hands '+mj-lt' to the renderer; it falls back to the theme face"
     );
 }

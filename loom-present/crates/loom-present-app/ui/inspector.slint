@@ -362,11 +362,11 @@ export component PresentInspector inherits LoomPanel {
                     if root.selection-count > 0 && ElementInk.available : TextStyleRow { }
                     if root.selection-count > 0 && ElementInk.available : LoomTextField {
                         label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
-                        title: "Font family";
+                        title: ElementInk.font-family-mixed ? "Font family (mixed)" : "Font family";
                         description: ElementInk.font-family-mixed
                             ? "The selected objects use different font families. Type one to apply it to all of them."
                             : "Type a font family such as Inter or Aptos. Leave empty to follow the theme.";
-                        placeholder: "Theme font";
+                        placeholder: ElementInk.font-family-mixed ? "Mixed - type to apply" : "Theme font";
                         field-min-width: 120px;
                         value <=> ElementInk.font-family;
                         accepted(text) => { ElementInk.font-requested(text); }

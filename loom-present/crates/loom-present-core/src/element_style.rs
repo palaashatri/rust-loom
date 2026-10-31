@@ -43,8 +43,14 @@ pub struct ElementStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TextAlign>,
     /// A typeface name such as `Aptos`; `None` follows the slide theme's face.
-    /// The name is stored trimmed and validated (see [`normalize_font_family`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The name is trimmed and validated when loaded (see
+    /// [`normalize_font_family`]); a stored value that is not a usable family
+    /// is ignored rather than handed to the renderer.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_font_family"
+    )]
     pub font_family: Option<String>,
 }
 
@@ -78,6 +84,17 @@ pub fn normalize_font_family(raw: &str) -> Result<String, String> {
         return Err("A font family name cannot contain control characters".to_string());
     }
     Ok(name.to_string())
+}
+
+/// Loads a stored family through [`normalize_font_family`], so a hand-edited
+/// theme token, control character or over-long name falls back to the theme
+/// instead of reaching the renderer or the exporter.
+fn deserialize_font_family<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.and_then(|name| normalize_font_family(&name).ok()))
 }
 
 /// The colours the inspector offers for text and fills.
@@ -221,6 +238,31 @@ mod tests {
         assert_eq!(back, styled);
         let older: ElementStyle = serde_json::from_str("{}").unwrap();
         assert_eq!(older.font_family, None, "a document from before this field");
+    }
+
+    #[test]
+    fn a_loaded_family_that_is_not_usable_falls_back_to_the_theme() {
+        let theme = serde_json::from_str::<ElementStyle>(r#"{"font_family":"+mj-lt"}"#).unwrap();
+        assert_eq!(theme.font_family, None, "a theme token is not a family");
+        let over = serde_json::from_str::<ElementStyle>(&format!(
+            r#"{{"font_family":"{}"}}"#,
+            "A".repeat(FONT_FAMILY_MAX_CHARS + 1)
+        ))
+        .unwrap();
+        assert_eq!(
+            over.font_family, None,
+            "an over-long stored name is ignored"
+        );
+        let control =
+            serde_json::from_str::<ElementStyle>("{\"font_family\":\"Aptos\\u0007\"}").unwrap();
+        assert_eq!(control.font_family, None, "a control character is ignored");
+        let padded =
+            serde_json::from_str::<ElementStyle>(r#"{"font_family":"  Aptos  "}"#).unwrap();
+        assert_eq!(
+            padded.font_family.as_deref(),
+            Some("Aptos"),
+            "a valid stored name is trimmed on load"
+        );
     }
 
     use crate::{
@@ -376,6 +418,22 @@ mod tests {
             style.font_family.as_deref(),
             Some("Georgia"),
             "the first explicit family is used"
+        );
+    }
+
+    #[test]
+    fn an_empty_text_object_keeps_its_family_through_pptx() {
+        let style = ElementStyle {
+            font_family: Some("Georgia".into()),
+            ..Default::default()
+        };
+        let session = deck_with(vec![element("empty", ElementType::Title, "", style)]);
+        let bytes = export_pptx(&session).expect("export");
+        let back = import_pptx(&bytes).expect("import");
+        assert_eq!(
+            back.slides[0].elements[0].style.font_family.as_deref(),
+            Some("Georgia"),
+            "the end-paragraph properties carry the family for empty text"
         );
     }
 

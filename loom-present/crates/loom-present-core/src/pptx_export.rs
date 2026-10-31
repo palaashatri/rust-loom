@@ -145,7 +145,11 @@ fn text_body(content: &str, spec: &TextSpec) -> String {
     for line in lines {
         xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\"/>"));
         if line.is_empty() {
-            xml.push_str(&format!("<a:endParaRPr lang=\"en-US\" {rpr}/>"));
+            // An empty text object still records its family on the paragraph's
+            // end properties, so a save/reopen in PowerPoint keeps the face.
+            xml.push_str(&format!(
+                "<a:endParaRPr lang=\"en-US\" {rpr}>{font}</a:endParaRPr>"
+            ));
         } else {
             xml.push_str(&format!(
                 "<a:r><a:rPr lang=\"en-US\" {rpr}><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>{font}</a:rPr><a:t>{}</a:t></a:r>",

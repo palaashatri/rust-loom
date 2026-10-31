@@ -38,12 +38,18 @@ pub(crate) fn publish(
         .document
         .active_slide()
         .map(|slide| {
-            let families: Vec<Option<&str>> = slide
+            let families: Vec<Option<String>> = slide
                 .elements
                 .iter()
                 .filter(|candidate| session.selected_elements.contains(&candidate.id))
                 .filter(|candidate| look(candidate).is_some())
-                .map(|candidate| candidate.style.font_family.as_deref())
+                .map(|candidate| {
+                    candidate
+                        .style
+                        .font_family
+                        .as_deref()
+                        .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+                })
                 .collect();
             match families.split_first() {
                 Some((first, rest)) => {
@@ -52,7 +58,7 @@ pub(crate) fn publish(
                         if mixed {
                             String::new()
                         } else {
-                            first.unwrap_or_default().to_string()
+                            first.clone().unwrap_or_default()
                         },
                         mixed,
                     )
@@ -243,7 +249,9 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
 }
 
 /// Apply a font family name, or the theme's face when the field is empty, to
-/// every selected text object and shape as one undo step.
+/// every selected text object and shape as one undo step. In a mixed selection
+/// the field is empty because the objects disagree; submitting that empty field
+/// is a no-op rather than wiping every family.
 pub(crate) fn apply_font(state: &GuiState, text: &str) -> Result<Option<String>, String> {
     let family = if text.trim().is_empty() {
         None
@@ -251,7 +259,7 @@ pub(crate) fn apply_font(state: &GuiState, text: &str) -> Result<Option<String>,
         Some(loom_present_core::normalize_font_family(text)?)
     };
     let mut session = state.session.borrow_mut();
-    let ids: Vec<String> = session
+    let selected: Vec<(String, Option<String>)> = session
         .document
         .active_slide()
         .map(|slide| {
@@ -260,10 +268,24 @@ pub(crate) fn apply_font(state: &GuiState, text: &str) -> Result<Option<String>,
                 .iter()
                 .filter(|element| session.selected_elements.contains(&element.id))
                 .filter(|element| look(element).is_some())
-                .map(|element| element.id.clone())
+                .map(|element| {
+                    let family = element
+                        .style
+                        .font_family
+                        .as_deref()
+                        .and_then(|name| loom_present_core::normalize_font_family(name).ok());
+                    (element.id.clone(), family)
+                })
                 .collect()
         })
         .unwrap_or_default();
+    let mixed = selected
+        .split_first()
+        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1));
+    if family.is_none() && mixed {
+        return Ok(None);
+    }
+    let ids: Vec<String> = selected.into_iter().map(|(id, _)| id).collect();
     if ids.is_empty() {
         return Ok(None);
     }

@@ -115,7 +115,11 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
         }
         None => text.ink = ink,
     }
-    if let Some(family) = style.font_family.as_deref() {
+    if let Some(family) = style
+        .font_family
+        .as_deref()
+        .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+    {
         text.family = SharedString::from(family);
     }
     Some(text)
