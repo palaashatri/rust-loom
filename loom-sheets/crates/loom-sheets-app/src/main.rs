@@ -2575,6 +2575,21 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     recovery_pause::sync(&app, &state);
     sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        // The native window handle is available only after the event loop has
+        // created the window; apply the titlebar appearance then.
+        let weak = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                loom_desktop::macos_window::apply(
+                    &app.window().window_handle(),
+                    app.global::<crate::Theme>().get_active_theme().as_str(),
+                );
+            }
+        })
+        .ok();
+    }
     let _worker_completion_timer = start_workbook_worker_timer(&app, &state, &menu_service);
     let _open_completion_timer = start_file_timer_after_show(&app, &state, &menu_service);
     if let Some(path) = startup_open.filter(|_| session.opens_file) {

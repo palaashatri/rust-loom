@@ -71,13 +71,24 @@ fn writer_resource_compiler() -> std::ffi::OsString {
         return compiler;
     }
 
+    let resource_arch = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") {
+        "arm64"
+    } else {
+        "x64"
+    };
     let mut sdk_candidates = Vec::new();
     if let Some(sdk_dir) = std::env::var_os("WindowsSdkDir") {
         let sdk_dir = std::path::PathBuf::from(sdk_dir);
         if let Some(version) = std::env::var_os("WindowsSDKVersion") {
-            sdk_candidates.push(sdk_dir.join("bin").join(version).join("x64").join("rc.exe"));
+            sdk_candidates.push(
+                sdk_dir
+                    .join("bin")
+                    .join(version)
+                    .join(resource_arch)
+                    .join("rc.exe"),
+            );
         }
-        sdk_candidates.push(sdk_dir.join("bin").join("x64").join("rc.exe"));
+        sdk_candidates.push(sdk_dir.join("bin").join(resource_arch).join("rc.exe"));
     }
     sdk_candidates
         .into_iter()

@@ -3656,6 +3656,21 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.window().set_position(PhysicalPosition::new(x, y));
     }
     app.show().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        // The native window handle is available only after the event loop has
+        // created the window; apply the titlebar appearance then.
+        let weak = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                loom_desktop::macos_window::apply(
+                    &app.window().window_handle(),
+                    app.global::<crate::Theme>().get_active_theme().as_str(),
+                );
+            }
+        })
+        .ok();
+    }
     #[cfg(all(target_os = "macos", not(test)))]
     let _macos_window_evidence = macos_window_evidence::install(
         &app,
