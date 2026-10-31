@@ -1,0 +1,99 @@
+// Editable geometry for the selected anchored object. The worksheet model
+// stores a cell anchor plus a pixel size, so X and Y are the anchor's column
+// letter and 1-based row rather than a second pixel coordinate system.
+import { SheetHeading, SheetNumericRow } from "inspector_rows.slint";
+import { SheetObjectView } from "objects.slint";
+import { Theme } from "theme.slint";
+
+/// The projected object list and the current object selection. The sheet
+/// projection writes both after every edit, so the inspector and canvas read
+/// one geometry snapshot.
+export global SheetObjectGeometry {
+    in-out property <[SheetObjectView]> views: [];
+    in-out property <int> selected: -1;
+}
+
+/// Inspector actions that do not belong to the window root. Keeping them in a
+/// global lets the inspector stay a focused component without growing the
+/// already-ceilinged app root.
+export global SheetInspectorActions {
+    callback set-object-field(int, string) -> bool;
+    callback set-decimals(string) -> bool;
+}
+
+export component SheetObjectGeometryFields inherits VerticalLayout {
+    in property <int> selection: -1;
+    in property <string> heading: "";
+    in property <string> column-label: "A";
+    in property <string> row-label: "1";
+    in property <string> width-label: "240";
+    in property <string> height-label: "112";
+    property <string> column-draft: "A";
+    property <bool> column-invalid: false;
+    property <string> row-draft: "1";
+    property <bool> row-invalid: false;
+    property <string> width-draft: "240";
+    property <bool> width-invalid: false;
+    property <string> height-draft: "112";
+    property <bool> height-invalid: false;
+
+    spacing: Theme.tokens.space.md;
+
+    function restore-drafts() {
+        root.column-draft = root.column-label;
+        root.column-invalid = false;
+        root.row-draft = root.row-label;
+        root.row-invalid = false;
+        root.width-draft = root.width-label;
+        root.width-invalid = false;
+        root.height-draft = root.height-label;
+        root.height-invalid = false;
+    }
+
+    init => { root.restore-drafts(); }
+    changed selection => { root.restore-drafts(); }
+    changed column-label => { root.column-draft = root.column-label; root.column-invalid = false; }
+    changed row-label => { root.row-draft = root.row-label; root.row-invalid = false; }
+    changed width-label => { root.width-draft = root.width-label; root.width-invalid = false; }
+    changed height-label => { root.height-draft = root.height-label; root.height-invalid = false; }
+
+    SheetHeading { title: root.heading; }
+    SheetNumericRow {
+        label: "X";
+        field-label: "Object X column";
+        description: "Column letter for the object anchor, for example D.";
+        value <=> root.column-draft;
+        invalid <=> root.column-invalid;
+        accepted(text) => { return SheetInspectorActions.set-object-field(0, text); }
+        cancelled => { root.column-draft = root.column-label; root.column-invalid = false; }
+    }
+    SheetNumericRow {
+        label: "Y";
+        field-label: "Object Y row";
+        description: "Whole row number for the object anchor, from 1.";
+        value <=> root.row-draft;
+        invalid <=> root.row-invalid;
+        accepted(text) => { return SheetInspectorActions.set-object-field(1, text); }
+        cancelled => { root.row-draft = root.row-label; root.row-invalid = false; }
+    }
+    SheetNumericRow {
+        label: "Width";
+        field-label: "Object width in pixels";
+        description: "80–4096 px; whole pixels only.";
+        unit: "px";
+        value <=> root.width-draft;
+        invalid <=> root.width-invalid;
+        accepted(text) => { return SheetInspectorActions.set-object-field(2, text); }
+        cancelled => { root.width-draft = root.width-label; root.width-invalid = false; }
+    }
+    SheetNumericRow {
+        label: "Height";
+        field-label: "Object height in pixels";
+        description: "48–4096 px; whole pixels only.";
+        unit: "px";
+        value <=> root.height-draft;
+        invalid <=> root.height-invalid;
+        accepted(text) => { return SheetInspectorActions.set-object-field(3, text); }
+        cancelled => { root.height-draft = root.height-label; root.height-invalid = false; }
+    }
+}

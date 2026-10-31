@@ -1370,6 +1370,19 @@ fn insert_chart_builds_the_chart_from_a_copied_range_and_never_invents_data() {
             .count()
     };
 
+    // The command names its Sheets prerequisite before the user invokes it.
+    match super::build_present_menu_bar().find_item("slide.insert_chart") {
+        Some(loom_desktop::MenuItem::Action { label, .. }) => {
+            assert_eq!(label, "Paste Chart from Sheets...")
+        }
+        other => panic!("chart menu command missing: {other:?}"),
+    }
+    assert!(master_palette(&app).iter().any(|command| matches!(
+        command.action,
+        PaletteAction::AddChart
+    ) && command.label
+        == "Paste Chart from Sheets"));
+
     // Nothing useful on the clipboard: no chart, and the status says what to do.
     loom_clipboard::write_clipboard(&loom_clipboard::ClipboardData {
         plain_text: Some("just some words".into()),
@@ -1379,7 +1392,8 @@ fn insert_chart_builds_the_chart_from_a_copied_range_and_never_invents_data() {
     app.invoke_add_chart();
     assert_eq!(charts(&state), 0, "no data, no chart");
     assert!(
-        app.get_status_left().contains("Copy a chart"),
+        app.get_status_left().contains("Copy a chart")
+            && app.get_status_left().contains("from Sheets"),
         "{}",
         app.get_status_left()
     );

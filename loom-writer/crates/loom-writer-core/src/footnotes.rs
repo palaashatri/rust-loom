@@ -611,6 +611,10 @@ mod tests {
         );
         assert!(WriterDocument::from_content_json(&missing_footnotes).is_err());
 
+        let tracked_state = format!(
+            ",\"tracked_changes\":{}",
+            crate::TrackedChanges::default().write_content_json()
+        );
         let old = current
             .replace(
                 &format!("\"format\":{}", crate::WRITER_CONTENT_FORMAT),
@@ -621,10 +625,7 @@ mod tests {
                 ",\"footnotes\":[{\"id\":41,\"block_id\":7,\"offset\":2,\"body\":\"A note body.\"}]",
                 "",
             )
-            .replace(
-                ",\"tracked_changes\":{\"recording\":false,\"author\":\"Anonymous\",\"next_id\":1,\"revisions\":[]}",
-                "",
-            );
+            .replace(&tracked_state, "");
         assert!(WriterDocument::from_content_json(&old)
             .expect("format 5 remains readable")
             .footnotes

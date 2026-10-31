@@ -28,6 +28,18 @@ export struct ObjectPart {
     round: bool,
 }
 
+/// The slide's own colours. They are document artwork, not window chrome, so
+/// selecting a different application theme (including high contrast) never
+/// recolours the deck the user authored.
+export global DocumentInk {
+    out property <color> paper: #ffffff;
+    out property <color> ink: #1d1d1f;
+    out property <color> muted: #6e6e73;
+    out property <color> shape-fill: #e6f0fc;
+    out property <color> circle-fill: #e3f6ef;
+    out property <color> stat-fill: #0071e3;
+}
+
 /// The selected object's text style, shown by the inspector, and the one callback
 /// the style controls use. A global, so the byte-limited app window needs no new
 /// property or callback for them.
@@ -86,9 +98,9 @@ export component ObjectPartView inherits Rectangle {
         font-size: root.part.fs * root.slide-height / 562.5;
         font-weight: root.part.bold ? 700 : 400;
         font-italic: root.part.italic;
-        color: root.part.ink == 1 ? Theme.palette().paper-ink
-            : root.part.ink == 2 ? Theme.palette().paper-muted
-            : root.part.ink == 3 ? Theme.palette().ink
+        color: root.part.ink == 1 ? DocumentInk.ink
+            : root.part.ink == 2 ? DocumentInk.muted
+            : root.part.ink == 3 ? DocumentInk.ink
             : root.part.fg;
         horizontal-alignment: root.part.align == 1 ? center : root.part.align == 2 ? right : left;
         vertical-alignment: center;

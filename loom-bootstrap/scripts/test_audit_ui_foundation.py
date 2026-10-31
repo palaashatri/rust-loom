@@ -17,6 +17,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         files = (
             "loom-bootstrap/scripts/audit-ui-foundation.py",
+            "loom-bootstrap/scripts/ui_foundation_rules.py",
             "loom-design-bible/contracts/ui-foundation.toml",
             "loom-design-bible/contracts/desktop-ui.toml",
             "loom-design-bible/tokens/loom.toml",

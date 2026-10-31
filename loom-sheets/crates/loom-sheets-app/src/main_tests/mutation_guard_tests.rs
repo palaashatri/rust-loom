@@ -100,9 +100,19 @@ fn table() -> Vec<(&'static str, Action)> {
         a("set_col_width", |app| {
             let _ = app.invoke_set_col_width("96".into());
         }),
+        a("set_decimals", |app| {
+            let _ = app
+                .global::<SheetInspectorActions>()
+                .invoke_set_decimals("4".into());
+        }),
         a("set_fill", |app| app.invoke_set_fill(1)),
         a("set_font_size", |app| {
             let _ = app.invoke_set_font_size("18".into());
+        }),
+        a("set_object_field", |app| {
+            let _ = app
+                .global::<SheetInspectorActions>()
+                .invoke_set_object_field(2, "320".into());
         }),
         a("set_row_height", |app| {
             let _ = app.invoke_set_row_height("32".into());
@@ -257,8 +267,19 @@ fn a_new_mutating_callback_cannot_skip_the_guard_or_the_classification() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut registered: BTreeSet<String> = BTreeSet::new();
     let mut unguarded = Vec::new();
-    for entry in std::fs::read_dir(&src).unwrap() {
-        let path = entry.unwrap().path();
+    let mut sources = Vec::new();
+    fn collect_sources(directory: &std::path::Path, sources: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_sources(&path, sources);
+            } else {
+                sources.push(path);
+            }
+        }
+    }
+    collect_sources(&src, &mut sources);
+    for path in sources {
         let file = path.file_name().unwrap().to_string_lossy().into_owned();
         if !file.ends_with(".rs") || file.contains("test") || file == "mutation_guard.rs" {
             continue;

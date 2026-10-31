@@ -606,6 +606,7 @@ fn window_presses_on_a_three_by_three_table_select_the_pressed_cell_at_every_siz
 /// the editor origin, because the page moves between presses.
 #[test]
 fn long_table_presses_on_visible_cells_select_the_pressed_cell() {
+    let _serial = loom_writer_core::test_fonts::serial();
     crate::table_actions::clear_table_cell_selection_range();
     let (rows, cols) = (100, 20);
     let (document, table_id) = page_with_table(rows, cols);
@@ -676,6 +677,7 @@ fn long_table_presses_on_visible_cells_select_the_pressed_cell() {
 /// the release selects: the release is handled after the page re-lays out.
 #[test]
 fn press_then_release_near_the_top_edge_keeps_the_pressed_cell() {
+    let _serial = loom_writer_core::test_fonts::serial();
     crate::table_actions::clear_table_cell_selection_range();
     let (rows, cols) = (100, 20);
     let (document, table_id) = page_with_table(rows, cols);

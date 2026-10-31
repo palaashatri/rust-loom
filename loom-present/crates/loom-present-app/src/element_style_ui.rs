@@ -97,24 +97,30 @@ pub(crate) fn apply_geometry(state: &GuiState, field: &str, text: &str) -> Resul
         )
     })?;
     let mut session = state.session.borrow_mut();
-    let Some((id, x, y, width, height)) = session.document.active_slide().and_then(|slide| {
-        let mut selected = slide
-            .elements
-            .iter()
-            .filter(|element| session.selected_elements.contains(&element.id));
-        let element = selected.next()?;
-        if selected.next().is_some() {
-            return None;
-        }
-        Some((
-            element.id.clone(),
-            element.x,
-            element.y,
-            element.width,
-            element.height,
-        ))
-    }) else {
-        return Ok(false);
+    let selected: Vec<(String, f32, f32, f32, f32)> = session
+        .document
+        .active_slide()
+        .map(|slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|element| session.selected_elements.contains(&element.id))
+                .map(|element| {
+                    (
+                        element.id.clone(),
+                        element.x,
+                        element.y,
+                        element.width,
+                        element.height,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let (id, x, y, width, height) = match selected.as_slice() {
+        [] => return Ok(false),
+        [element] => (*element).clone(),
+        _ => return Err("Select one object to type exact geometry".into()),
     };
     Ok(match field {
         "x" => session.transform_element(&id, value, y, width, height),

@@ -653,10 +653,10 @@ fn revision_style_at(revision: &RevisionRecord, offset: usize) -> Option<&Charac
 
 fn revision_style_xml(style: Option<&CharacterStyle>, kind_size: f32) -> String {
     let mut properties = RunProps::of(style, false, kind_size).xml();
-    if style.is_none_or(|style| style.font_family.is_empty()) {
+    if style.map_or(true, |style| style.font_family.is_empty()) {
         remove_run_property(&mut properties, "w:rFonts");
     }
-    if style.is_none_or(|style| !style.has_own_size()) {
+    if style.map_or(true, |style| !style.has_own_size()) {
         remove_run_property(&mut properties, "w:sz");
         remove_run_property(&mut properties, "w:szCs");
     }
@@ -1029,11 +1029,17 @@ fn paragraph_content(
                 open_insertion = Some(revision.id);
             }
         }
-        let style = block
-            .runs
-            .iter()
-            .find(|run| run.start <= at && at < run.end)
-            .map(|run| &run.style);
+        let style = if let Some((revision, start, _, payload_offset)) = insertion {
+            // A tracked insertion draws the style stored with its payload; an
+            // empty payload means the range has no explicit character style.
+            revision_style_at(revision, payload_offset + at - start)
+        } else {
+            block
+                .runs
+                .iter()
+                .find(|run| run.start <= at && at < run.end)
+                .map(|run| &run.style)
+        };
         let props = RunProps::of(style, false, size);
         let formatting = revisions
             .iter()
@@ -1072,16 +1078,6 @@ fn cell_paragraph(alignment: Option<&HorizontalAlign>) -> &'static str {
         Some(HorizontalAlign::Justify) => "<w:p><w:pPr><w:jc w:val=\"both\"/></w:pPr>",
         _ => "<w:p>",
     }
-}
-
-/// The alignment of a column: the first explicit alignment set on its cells.
-fn column_alignment(table: &Table, column: usize) -> Option<HorizontalAlign> {
-    (0..table.row_count()).find_map(|row| {
-        table
-            .cell(row, column)
-            .and_then(|cell| cell.style_override.as_ref())
-            .and_then(|style| style.horizontal_align)
-    })
 }
 
 /// The merged cell spans of a table as `(row, column, row_span, column_span)`.
@@ -1149,6 +1145,11 @@ fn column_widths(table: &Table, text_width: i32) -> Vec<i32> {
     widths
 }
 
+struct CellExportSources<'a> {
+    footnotes: &'a [FootnoteReference],
+    revisions: &'a [RevisionRecord],
+}
+
 fn cell_content(
     block_id: u64,
     table: &Table,
@@ -1156,13 +1157,12 @@ fn cell_content(
     row: usize,
     column: usize,
     bold: bool,
-    footnotes: &[FootnoteReference],
-    all_revisions: &[RevisionRecord],
+    sources: CellExportSources<'_>,
 ) -> String {
     let Some(range) = map.cell_range(row, column) else {
         return String::new();
     };
-    let Some(block) = crate::table_text::table_cell_rich_block(
+    let Some(mut block) = crate::table_text::table_cell_rich_block(
         block_id,
         table,
         row,
@@ -1173,7 +1173,20 @@ fn cell_content(
     ) else {
         return String::new();
     };
-    let local_revisions: Vec<RevisionRecord> = all_revisions
+    if block.runs.is_empty() && !block.text.is_empty() {
+        // A plain cell run states automatic ink explicitly, so Word does not
+        // apply an unrelated inherited colour to the cell's default text.
+        block.runs.push(loom_text::StyleRun {
+            start: 0,
+            end: block.text.len_bytes(),
+            style: CharacterStyle {
+                color: None,
+                ..CharacterStyle::default()
+            },
+        });
+    }
+    let local_revisions: Vec<RevisionRecord> = sources
+        .revisions
         .iter()
         .filter(|revision| {
             revision.anchor.block_id == block_id
@@ -1193,7 +1206,7 @@ fn cell_content(
         0,
         std::slice::from_ref(&block),
         &[],
-        footnotes,
+        sources.footnotes,
         &local_revisions,
         &[],
     )
@@ -1242,7 +1255,6 @@ fn table_xml(
         }
         out.push_str("</w:trPr>");
         for (column, width) in widths.iter().enumerate() {
-            let paragraph = cell_paragraph(column_alignment(table, column).as_ref());
             if let Some(&(mr, mc, mrs, mcs)) = merges.iter().find(|(r, c, rs, cs)| {
                 row_index >= *r && row_index < *r + *rs && column >= *c && column < *c + *cs
             }) {
@@ -1256,8 +1268,9 @@ fn table_xml(
                     table.row_count(),
                     columns,
                     &options,
-                    None,
+                    table.cell(row_index, column),
                 );
+                let paragraph = cell_paragraph(Some(&resolved.horizontal_align));
                 let shading = if let Some(bg) = resolved.background_color {
                     let hex = bg.trim_start_matches('#');
                     format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{hex}\"/>")
@@ -1284,6 +1297,12 @@ fn table_xml(
                     "<w:tc><w:tcPr><w:tcW w:w=\"{span_width}\" w:type=\"dxa\"/>{grid_span}{v_merge}{shading}</w:tcPr>{paragraph}"
                 ));
                 if row_index == mr {
+                    let cell_footnotes = cell_footnote_references(
+                        footnote_anchors,
+                        &table_text_map,
+                        row_index,
+                        column,
+                    );
                     out.push_str(&cell_content(
                         block_id,
                         table,
@@ -1291,13 +1310,10 @@ fn table_xml(
                         row_index,
                         column,
                         header || resolved.bold,
-                        &cell_footnote_references(
-                            footnote_anchors,
-                            &table_text_map,
-                            row_index,
-                            column,
-                        ),
-                        all_revisions,
+                        CellExportSources {
+                            footnotes: &cell_footnotes,
+                            revisions: all_revisions,
+                        },
                     ));
                 }
                 out.push_str("</w:p></w:tc>");
@@ -1310,8 +1326,9 @@ fn table_xml(
                 table.row_count(),
                 columns,
                 &options,
-                None,
+                table.cell(row_index, column),
             );
+            let paragraph = cell_paragraph(Some(&resolved.horizontal_align));
             let shading = if let Some(bg) = resolved.background_color {
                 let hex = bg.trim_start_matches('#');
                 format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{hex}\"/>")
@@ -1323,6 +1340,8 @@ fn table_xml(
             out.push_str(&format!(
                 "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{shading}</w:tcPr>{paragraph}"
             ));
+            let cell_footnotes =
+                cell_footnote_references(footnote_anchors, &table_text_map, row_index, column);
             out.push_str(&cell_content(
                 block_id,
                 table,
@@ -1330,8 +1349,10 @@ fn table_xml(
                 row_index,
                 column,
                 header || resolved.bold,
-                &cell_footnote_references(footnote_anchors, &table_text_map, row_index, column),
-                all_revisions,
+                CellExportSources {
+                    footnotes: &cell_footnotes,
+                    revisions: all_revisions,
+                },
             ));
             out.push_str("</w:p></w:tc>");
         }

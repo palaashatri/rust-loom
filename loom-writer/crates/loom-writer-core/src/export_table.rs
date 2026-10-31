@@ -204,8 +204,7 @@ impl TableLayout {
                             doc,
                             block_id,
                             table,
-                            row,
-                            column,
+                            (row, column),
                             &block,
                             TABLE_CELL_BASE_FONT_SIZE_PT,
                             inner,
@@ -346,17 +345,28 @@ pub(crate) fn draw_row(
     Ok(())
 }
 
+/// One table row placed on a PDF page, with the typed table it came from.
+pub(crate) struct RowDraw<'a> {
+    pub layout: &'a TableLayout,
+    pub table: &'a Table,
+    pub index: usize,
+    pub origin: (f32, f32),
+}
+
 /// Draw a table row and its inline footnote references at shaped cell carets.
 pub(crate) fn draw_row_with_footnotes(
     pdf: &mut PdfDocument,
     fonts: &mut FontRegistry,
     page: PageIndex,
-    layout: &TableLayout,
-    table: &Table,
-    index: usize,
-    origin: (f32, f32),
+    row_draw: RowDraw<'_>,
     references: &[&FootnoteReferencePlacement],
 ) -> Result<(), WriterError> {
+    let RowDraw {
+        layout,
+        table,
+        index,
+        origin,
+    } = row_draw;
     draw_row(pdf, fonts, page, layout, index, origin)?;
     let map = TableTextMap::new(table);
     let row = &layout.rows[index];
@@ -416,11 +426,13 @@ pub(crate) fn draw_row_with_footnotes(
         crate::export::footnote_export::draw_reference_marker(
             pdf,
             fonts,
-            page,
-            reference.number,
-            x,
-            line_top,
-            TABLE_CELL_BASE_FONT_SIZE_PT,
+            crate::export::footnote_export::ReferenceMarker {
+                page,
+                number: reference.number,
+                x,
+                line_top,
+                body_size_pt: TABLE_CELL_BASE_FONT_SIZE_PT,
+            },
             &format!("footnote {} table reference", reference.note_id),
         )?;
     }

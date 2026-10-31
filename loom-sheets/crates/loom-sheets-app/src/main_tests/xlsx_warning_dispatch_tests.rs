@@ -1,9 +1,13 @@
-use super::*;
-use loom_desktop::{NativeMenuBar, ScriptedFileDialogs};
 use super::workbook_interop_tests::{
     write_xlsx_with_absolute_anchor_shape, write_xlsx_with_unsupported_area_chart,
 };
+use super::*;
+use loom_desktop::{NativeMenuBar, ScriptedFileDialogs};
 use std::time::{Duration, Instant};
+
+/// One staged-loss scenario: a tag, the warning label it must name, and the
+/// fixture writer for that XLSX feature.
+type WarningScenario = (&'static str, &'static str, fn(&std::path::Path));
 
 fn wait_for_warning(
     app: &SheetsApp,
@@ -30,7 +34,7 @@ fn xlsx_loss_warnings_are_not_bypassed_by_picker_or_startup_open() {
         std::process::id()
     ));
     std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
-    let scenarios: [(&str, &str, fn(&std::path::Path)); 2] = [
+    let scenarios: [WarningScenario; 2] = [
         (
             "area-chart",
             "unsupported area charts",

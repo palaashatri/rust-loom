@@ -25,7 +25,7 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **CODE-17** Move Writer comments with the text they describe — FIXED (2026-10-04, anchors rebase from the edit position; a paste over a selection falls back to a text diff)
 - **CODE-18** Do not consume a storage sequence when append fails — FIXED (2026-10-28; storage-journal open, write, rollback, and reopen recovery tests pass)
 - **CODE-19** Undo Present transitions with the rest of the slide — FIXED
-- **UI-01** Give every desktop a visible application menu — NEEDS_REVIEW
+- **UI-01** Give every desktop a visible application menu — FIXED (2026-10-31; live macOS native menus confirmed for Writer, Sheets and Present; Linux in-window menus driven live for Sheets/Writer and covered by the Present local-menu tests)
 - **UI-28** Fit the XLSX loss warning to its message — FIXED
 - **UI-29** Align and size desktop menu popup items — FIXED
 - **UI-30** Name the current workbook in the dirty-close prompt — FIXED
@@ -33,9 +33,9 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **UI-32** Remove the redundant worksheet heading above the grid — FIXED
 - **UI-33** Meet the button-label contrast floor in every theme — FIXED
 - **UI-34** Keep anchored shape labels readable on every fill — FIXED
-- **UI-35** Give every Sheets icon action a meaningful accessible name — NEEDS_REVIEW
-- **UI-36** Expose chart data to keyboard and screen-reader users — NEEDS_REVIEW
-- **UI-37** Make anchored objects operable without a pointer — OPEN
+- **UI-35** Give every Sheets icon action a meaningful accessible name — FIXED (2026-10-31; Sheets icon-accessibility suite green; native AT-SPI matrix remains acceptance evidence)
+- **UI-36** Expose chart data to keyboard and screen-reader users — FIXED (2026-10-31; chart data is a named keyboard/screen-reader list; chart-accessibility suite green)
+- **UI-37** Make anchored objects operable without a pointer — FIXED (2026-10-31; object focus, keyboard move/resize, commit/cancel/undo and persistence tests green)
 - **UI-38** Apply text scaling throughout Sheets — FIXED
 - **UI-39** Keep Sheets inspector property labels readable — FIXED
 - **UI-42** Let the responsive policy account for text scale — FIXED
@@ -51,13 +51,13 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **UI-09** Distinguish a workbook from one sheet in its commands — FIXED
 - **UI-10** Remove the contradictory permission to truncate action captions — FIXED (2026-10-29; see archived evidence)
 - **UI-11** Keep product help out of the user's document — FIXED (2026-10-04, Writer opens blank)
-- **UI-12** Make each Writer template create what its card says — OPEN (2026-10-27 comparative audit: Blank Black creates a white page; see W-01 below)
+- **UI-12** Make each Writer template create what its card says — FIXED (2026-10-31; Blank Black creates a black page and Newsletter a single-column story flow; full Writer suite green)
 - **UI-13** Make the table command honest about its editing model — FIXED
 - **UI-14** Keep formatting and comments reachable in compact windows — FIXED
 - **UI-15** Put Present's navigator in the expected reading position — FIXED
 - **UI-16** Fit Photo's whole image inside its viewport — FIXED
 - **UI-17** Make Motion's preview represent the exported frame — FIXED
-- **UI-18** Let users type precise transform values — OPEN
+- **UI-18** Let users type precise transform values — FIXED (2026-10-31; Present converts in/cm/mm/pt, rejects px/% with readable status, and keeps one undo step)
 - **UI-19** Distinguish Video timeline zoom from scrolling — OPEN
 - **UI-20** Keep clip and region captions readable on their fills — OPEN
 - **UI-21** Give Studio one transport control for each action — OPEN
@@ -70,13 +70,13 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **CODE-20** Keep exported worksheet names distinct — FIXED
 - **CODE-21** Put spilled array results in the right cells — FIXED
 - **CODE-22** Reuse calculated values while the user navigates — FIXED
-- **CODE-23** Warn before importing XLSX features Loom cannot keep — NEEDS_REVIEW
+- **CODE-23** Warn before importing XLSX features Loom cannot keep — FIXED (2026-10-31; picker/startup warning dispatch and continue/cancel preservation tests green)
 - **CODE-24** Link XLSX cell styles so other spreadsheet apps apply them — FIXED
 - **CODE-25** Import standard DEFLATE-compressed XLSX packages — FIXED
 - **CODE-26** Preserve worker input failures across result coalescing — FIXED
-- **CODE-27** Warn before dropping a single unsupported XLSX chart — NEEDS_REVIEW
-- **CODE-28** Report unsupported absolute XLSX drawing anchors — NEEDS_REVIEW
-- **CODE-29** Warn before dropping additional series from an XLSX chart — NEEDS_REVIEW
+- **CODE-27** Warn before dropping a single unsupported XLSX chart — FIXED (2026-10-31; unsupported-area-chart fixture warns and cancel preserves the workbook)
+- **CODE-28** Report unsupported absolute XLSX drawing anchors — FIXED (2026-10-31; absolute-anchor fixture warns and cancel preserves the workbook)
+- **CODE-29** Warn before dropping additional series from an XLSX chart — FIXED (2026-10-31; multi-series fixture warns and cancel preserves the workbook)
 - **CODE-30** Accept the operating system's own recovery-path symlinks — FIXED
 - **PERF-01** Keep large workbook work from freezing the window — NEEDS_REVIEW. [Oct27 developer-build and keyboard-cache evidence](../audits/uiux-2026-10-27.md#sheets-performance-follow-up--perf-01--needs_review); native latency and broader acceptance remain open.
 - **REC-02** Keep unsaved recovery safe and bounded — FIXED for v1 on Windows and Linux (2026-10-07; real full-volume disk-full untested, injected write errors only)

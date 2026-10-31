@@ -38,7 +38,7 @@ pub fn export_document_as_docx(
 const LIST_MARKER_GAP_PT: f32 = 4.0;
 
 // shortcut: reserve 1.5 pt for PDF face-width drift; replace when layout wraps by drawn advances.
-const PDF_TEXT_WIDTH_GUARD_PT: f32 = 1.5;
+const PDF_TEXT_WIDTH_GUARD_PT: f32 = 2.5;
 
 /// How far a line of `width` moves right inside the text `column` for its
 /// alignment: centred and right-aligned lines move, the others stay at the margin.
@@ -493,11 +493,13 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                         footnote_export::draw_reference_marker(
                             &mut pdf,
                             &mut fonts,
-                            page,
-                            reference.number,
-                            marker_x,
-                            y,
-                            style.size_pt,
+                            footnote_export::ReferenceMarker {
+                                page,
+                                number: reference.number,
+                                x: marker_x,
+                                line_top: y,
+                                body_size_pt: style.size_pt,
+                            },
                             &format!("footnote {} reference", reference.note_id),
                         )?;
                     }
@@ -528,10 +530,12 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                             &mut pdf,
                             &mut fonts,
                             page,
-                            layout,
-                            table,
-                            *row,
-                            origin,
+                            export_table::RowDraw {
+                                layout,
+                                table,
+                                index: *row,
+                                origin,
+                            },
                             &references,
                         )?;
                     }
@@ -1329,8 +1333,14 @@ mod tests {
                 "{case}: the paragraph wraps onto several lines"
             );
             for piece in &drawn {
+                // A line's trailing space is a hanging wrap space: it has no
+                // ink and must not count as text outside the margin.
+                let visible = piece.text.trim_end();
+                if visible.is_empty() {
+                    continue;
+                }
                 let width = crate::text_metrics::pdf_text_width(
-                    &piece.text,
+                    visible,
                     &loom_pdf::TextStyle {
                         size_pt: piece.size,
                         bold: piece.bold.expect("Inter bold resource"),

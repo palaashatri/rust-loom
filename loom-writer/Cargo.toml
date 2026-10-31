@@ -6,6 +6,11 @@ members = [
     "crates/loom-writer-app",
 ]
 
+# Writer's keystroke/pagination gates are measured through the test profile;
+# unoptimized builds are not representative of the shipped application.
+[profile.dev]
+opt-level = 2
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

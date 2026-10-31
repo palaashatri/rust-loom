@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Iterable, NoReturn
 
 APPS = ("writer", "sheets", "present")
-PE_ICON_EMBEDDED_APPS = ("writer", "sheets")
+PE_ICON_EMBEDDED_APPS = ("writer", "sheets", "present")
 DISPLAY_NAMES = {
     "writer": "Loom Writer",
     "sheets": "Loom Sheets",

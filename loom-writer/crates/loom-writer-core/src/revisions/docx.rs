@@ -264,7 +264,8 @@ impl WriterDocument {
                 _ => {}
             }
 
-            if start_block.typed_table().is_some() {
+            let table_revision = start_block.typed_table().is_some();
+            if table_revision {
                 if cross_paragraph
                     || revision.anchor.end_block_id.is_some()
                     || revision.boundary_kind == RevisionBoundaryKind::ParagraphMark
@@ -301,7 +302,7 @@ impl WriterDocument {
                             .into(),
                     );
                 }
-            } else if !is_text_paragraph(end_block) {
+            } else if !table_revision && !is_text_paragraph(end_block) {
                 return Err("DOCX export does not support tracked changes in objects".into());
             }
 

@@ -114,13 +114,18 @@ fn move_commands_are_enabled_only_where_the_slide_can_move() {
         .filter(|item| item.menu_index == 3 && !item.separator)
         .map(|item| (item.label.to_string(), item.shortcut.to_string()))
         .collect();
+    let (up, down) = if cfg!(target_os = "macos") {
+        ("Cmd+Opt+Up", "Cmd+Opt+Down")
+    } else {
+        ("Ctrl+Alt+Up", "Ctrl+Alt+Down")
+    };
     assert!(
-        slide_menu.contains(&("Move Slide Up".into(), "Ctrl+Alt+Up".into())),
-        "{slide_menu:?}"
+        slide_menu.contains(&("Move Slide Up".into(), up.into())),
+        "the Slide menu shows the platform's move-up shortcut: {slide_menu:?}"
     );
     assert!(
-        slide_menu.contains(&("Move Slide Down".into(), "Ctrl+Alt+Down".into())),
-        "{slide_menu:?}"
+        slide_menu.contains(&("Move Slide Down".into(), down.into())),
+        "the Slide menu shows the platform's move-down shortcut: {slide_menu:?}"
     );
 
     // First slide: only Down.
@@ -132,6 +137,15 @@ fn move_commands_are_enabled_only_where_the_slide_can_move() {
     app.invoke_select_slide(1);
     assert_eq!(move_row(app, "slide.move_up"), Some(true));
     assert_eq!(move_row(app, "slide.move_down"), Some(true));
+    // The palette advertises the same shortcut the menu runs.
+    let palette_shortcut = |label: &str| {
+        master_palette(app)
+            .into_iter()
+            .find(|command| command.label == label)
+            .map(|command| command.shortcut.to_string())
+    };
+    assert_eq!(palette_shortcut("Move Slide Up").as_deref(), Some(up));
+    assert_eq!(palette_shortcut("Move Slide Down").as_deref(), Some(down));
     assert_eq!(
         palette_labels(app, "move slide"),
         ["Move Slide Up", "Move Slide Down"]

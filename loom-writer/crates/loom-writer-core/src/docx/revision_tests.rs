@@ -31,6 +31,32 @@ fn import_document_xml(xml: &str) -> Result<WriterDocument, String> {
     import_docx(&archive.to_bytes().map_err(|error| error.to_string())?)
 }
 
+fn canonical_color(color: &Option<String>) -> Option<String> {
+    color.as_ref().map(|color| {
+        let hex = color.trim_start_matches('#').to_ascii_uppercase();
+        if hex.len() == 6 {
+            format!("#{hex}FF")
+        } else {
+            format!("#{hex}")
+        }
+    })
+}
+
+fn canonical_payload(payload: &Option<RevisionPayload>) -> Option<RevisionPayload> {
+    payload.as_ref().map(|payload| {
+        let mut runs = payload.runs.clone();
+        for run in &mut runs {
+            run.style.color = canonical_color(&run.style.color);
+        }
+        // An explicit default run and no run paint the same text.
+        runs.retain(|run| run.style != CharacterStyle::default());
+        RevisionPayload {
+            text: payload.text.clone(),
+            runs,
+        }
+    })
+}
+
 fn assert_revisions_round_trip(expected: &WriterDocument, actual: &WriterDocument) {
     assert_eq!(
         actual.tracked_changes.recording(),
@@ -50,8 +76,18 @@ fn assert_revisions_round_trip(expected: &WriterDocument, actual: &WriterDocumen
         assert_eq!(reopened.author, revision.author);
         assert_eq!(reopened.kind, revision.kind);
         assert_eq!(reopened.boundary_kind, revision.boundary_kind);
-        assert_eq!(reopened.before, revision.before);
-        assert_eq!(reopened.after, revision.after);
+        assert_eq!(
+            canonical_payload(&reopened.before),
+            canonical_payload(&revision.before),
+            "revision {} before payload",
+            revision.id
+        );
+        assert_eq!(
+            canonical_payload(&reopened.after),
+            canonical_payload(&revision.after),
+            "revision {} after payload",
+            revision.id
+        );
     }
 }
 
@@ -100,7 +136,7 @@ fn cross_paragraph_text_revisions_round_trip_without_losing_deleted_payload() {
     );
     assert!(xml.contains("<w:rPr><w:ins "));
     assert!(xml.contains("w:author=\"Cross Paragraph Reviewer\""));
-    assert!(xml.contains("<w:delText>AoldB</w:delText>"));
+    assert!(xml.contains("<w:delText xml:space=\"preserve\">AoldB</w:delText>"));
 
     let reopened = import_docx(&exported.bytes).expect("reopen tracked DOCX");
     assert_eq!(reopened.editor_text(), changed.editor_text());
@@ -236,8 +272,8 @@ fn cross_paragraph_deletion_round_trips_text_around_its_paragraph_mark() {
         "the same stable revision ID marks both deleted text fragments and the paragraph mark"
     );
     assert!(xml.contains("w:author=\"Cross Paragraph Reviewer\""));
-    assert!(xml.contains("<w:delText>X</w:delText>"));
-    assert!(xml.contains("<w:delText>Y</w:delText>"));
+    assert!(xml.contains("<w:delText xml:space=\"preserve\">X</w:delText>"));
+    assert!(xml.contains("<w:delText xml:space=\"preserve\">Y</w:delText>"));
 
     let reopened = import_docx(&exported.bytes).expect("reopen paragraph-spanning deletion");
     assert_eq!(reopened.editor_text(), changed.editor_text());
@@ -586,6 +622,7 @@ fn custom_author_property_preserves_future_author_and_is_validated() {
     let archive = PackageArchive::from_bytes(&exported.bytes).expect("read exported package");
     let custom = std::str::from_utf8(archive.get("docProps/custom.xml").unwrap())
         .expect("custom properties are UTF-8");
+    roxmltree::Document::parse(custom).expect("custom properties are well-formed XML");
     assert!(custom.contains("name=\"LoomTrackedChangesAuthor\""));
     assert!(custom.contains("Future &amp; &lt;Writer&gt; — 李"));
     let rels = std::str::from_utf8(archive.get("_rels/.rels").unwrap()).unwrap();

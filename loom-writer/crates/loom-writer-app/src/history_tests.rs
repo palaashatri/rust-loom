@@ -300,7 +300,7 @@ fn an_edit_larger_than_the_budget_stays_undoable() {
 #[test]
 fn typing_a_sentence_undoes_one_word_at_a_time() {
     let s = launched("");
-    type_text(&s.app, "hello world again");
+    type_text_in_one_burst(&s, "hello world again");
     assert_eq!(text(&s), "hello world again");
 
     ctrl(&s.app, "z");
@@ -396,6 +396,16 @@ fn type_text(app: &WriterApp, text: &str) {
     }
 }
 
+/// Type through the real key path with the coalescing clock kept inside its
+/// window, so word grouping is deterministic when the full suite runs in
+/// parallel and a single keystroke can take longer than the user pause window.
+fn type_text_in_one_burst(s: &keyboard_flow_tests::Session, text: &str) {
+    for c in text.chars() {
+        s.state.history_clock.set(std::time::Instant::now());
+        tap(&s.app, c.to_string());
+    }
+}
+
 #[test]
 fn typing_in_a_table_cell_undoes_one_word_at_a_time() {
     let s = launched("");
@@ -418,7 +428,7 @@ fn typing_in_a_table_cell_undoes_one_word_at_a_time() {
             .clone()
     };
 
-    type_text(&s.app, "hello world again");
+    type_text_in_one_burst(&s, "hello world again");
     assert_eq!(cell(&s), "hello world again");
     ctrl(&s.app, "z");
     assert_eq!(cell(&s), "hello world", "the last word is one undo step");

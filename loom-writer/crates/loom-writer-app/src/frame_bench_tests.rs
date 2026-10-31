@@ -186,7 +186,7 @@ fn bench_size(pages: usize, mode: &str) {
     let path = dir.join("bench.loomdoc");
     let current = state.current.borrow().clone();
     let t = Instant::now();
-    save_file(&path, &current).expect("save");
+    crate::save_flow::save_file(&path, &current).expect("save");
     let save_ms = ms(t);
     let t = Instant::now();
     let loaded = load_file(&path).expect("open");

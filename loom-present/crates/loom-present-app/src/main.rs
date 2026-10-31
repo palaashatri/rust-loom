@@ -132,6 +132,24 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+/// Where a newly added object goes: a short cascade so repeated adds never land
+/// exactly on top of each other, kept inside the 1000 x 562.5 slide.
+fn added_object_origin(
+    session: &PresentationSession,
+    base: (f32, f32),
+    size: (f32, f32),
+) -> (f32, f32) {
+    let count = session
+        .document
+        .active_slide()
+        .map_or(0, |slide| slide.elements.len());
+    let step = (count % 6) as f32 * 24.0;
+    (
+        (base.0 + step).min(1000.0 - size.0 - 40.0),
+        (base.1 + step).min(562.5 - size.1 - 40.0),
+    )
+}
+
 fn text_element(
     id: &str,
     kind: ElementType,
@@ -1384,7 +1402,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             .ok_or("shape was not added")?
     };
     app.invoke_select_element(shape_index as i32);
-    let shape_id = {
+    let (shape_id, shape_x, shape_y) = {
         let session = state.session.borrow();
         let slide = session
             .document
@@ -1397,7 +1415,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         if !session.selected_elements.contains(&element.id) {
             return Err("journey shape was not selected".into());
         }
-        element.id.clone()
+        (element.id.clone(), element.x, element.y)
     };
     let baseline_document = state.session.borrow().document.clone();
     screenshots.push(capture_present_journey_step(
@@ -1410,7 +1428,14 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     // Move near the title/body edges. The controller applies the correction
     // and keeps the guides visible until pointer release.
     app.invoke_element_pressed(shape_index as i32, false);
-    app.invoke_element_moved(shape_index as i32, -27.0, -29.0);
+    // New objects cascade, so derive the drag from the real origin instead of
+    // assuming the pre-cascade (120, 260) position. Land three points left and
+    // one point above the body edge so the snap guides still engage.
+    app.invoke_element_moved(
+        shape_index as i32,
+        90.0 + 3.0 - shape_x,
+        230.0 + 1.0 - shape_y,
+    );
     if state.drag_state.borrow().guides.is_empty() {
         return Err("journey move did not produce snap guides".into());
     }
@@ -1647,6 +1672,18 @@ fn main() -> Result<(), String> {
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
+    // macOS: Slint's winit backend otherwise installs its app-only default
+    // menu over Loom's native File/Edit/View/Slide menu. Writer and Sheets
+    // disable it the same way before building their shared menu.
+    #[cfg(target_os = "macos")]
+    {
+        let backend = i_slint_backend_winit::Backend::builder()
+            .with_default_menu_bar(false)
+            .build()
+            .map_err(|error| error.to_string())?;
+        slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
+    }
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
@@ -1817,7 +1854,7 @@ fn build_present_menu_bar() -> MenuBar {
                     MenuShortcut::primary_shift("N"),
                 ),
                 MenuItem::action("slide.insert_table", "Insert Table..."),
-                MenuItem::action("slide.insert_chart", "Insert Chart from Clipboard..."),
+                MenuItem::action("slide.insert_chart", "Paste Chart from Sheets..."),
                 MenuItem::action("slide.insert_image", "Insert Image..."),
                 MenuItem::action("slide.duplicate", "Duplicate Slide"),
                 MenuItem::action("slide.delete", "Delete Slide"),
@@ -2282,12 +2319,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .active_slide()
                         .map(|slide| slide.elements.len() + 1)
                         .unwrap_or(1);
+                    let (x, y) = added_object_origin(&session, (120.0, 260.0), (300.0, 140.0));
                     session.add_element(text_element(
                         &format!("shape-{count}"),
                         ElementType::ShapeRectangle,
                         "Shape",
-                        120.0,
-                        260.0,
+                        x,
+                        y,
                         300.0,
                         140.0,
                     ));
@@ -2313,12 +2351,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         .active_slide()
                         .map(|slide| slide.elements.len() + 1)
                         .unwrap_or(1);
+                    let (x, y) = added_object_origin(&session, (120.0, 220.0), (520.0, 100.0));
                     session.add_element(text_element(
                         &format!("text-{count}"),
                         ElementType::BodyText,
                         "New text",
-                        120.0,
-                        220.0,
+                        x,
+                        y,
                         520.0,
                         100.0,
                     ));
@@ -3053,11 +3092,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
-                if state.inspector_available.get() || app.get_show_inspector() {
-                    app.set_show_inspector(!app.get_show_inspector());
-                    if let Some(menu_service) = &state.menu_service {
-                        sync_menu_state(menu_service, &app, &state);
-                    }
+                app.set_show_inspector(!app.get_show_inspector());
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
                 }
             }
         });

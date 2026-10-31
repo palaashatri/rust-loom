@@ -539,6 +539,14 @@ struct ProjectedSheetObjects {
     views: Vec<SheetObjectView>,
 }
 
+/// The column letters of an address, without its row number.
+fn column_label(col: u32) -> String {
+    CellRef { row: 0, col }
+        .to_a1()
+        .trim_end_matches(|c: char| c.is_ascii_digit())
+        .to_string()
+}
+
 fn project_sheet_objects(
     sheet: &Sheet,
     geometry: &GridGeometry,
@@ -604,6 +612,11 @@ fn project_sheet_objects(
                 geometry.visible_width,
                 geometry.visible_height,
             ),
+            display_name: object_actions::object_display_name_for(index, object).into(),
+            anchor_column: column_label(anchor.col).into(),
+            anchor_row: (anchor.row + 1).to_string().into(),
+            width_label: width.to_string().into(),
+            height_label: height.to_string().into(),
         });
     }
     projected
@@ -1075,6 +1088,11 @@ fn project_sheet_inner_with_preview(
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
+    // The inspector reads the same projected views the canvas uses, so typed
+    // geometry and the object on screen cannot disagree.
+    let object_geometry = app.global::<crate::SheetObjectGeometry>();
+    object_geometry.set_views(app.get_object_views());
+    object_geometry.set_selected(app.get_selected_object());
     update_selection_range(app, sheet, vals, selection);
     app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
     app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));

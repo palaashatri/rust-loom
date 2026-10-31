@@ -2,9 +2,11 @@ use super::RecoveredDraft;
 use loom_writer_core::{RichBlock, WriterDocument};
 use std::path::PathBuf;
 
-fn temp_dir() -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("loom-writer-recovery-docx-{}", std::process::id()));
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "loom-writer-recovery-docx-{}-{name}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create test directory");
     dir
 }
@@ -17,7 +19,7 @@ fn document(text: &str) -> WriterDocument {
 
 #[test]
 fn a_docx_recovery_draft_is_compared_with_the_imported_word_source() {
-    let dir = temp_dir();
+    let dir = temp_dir("clean");
     let source = dir.join("source.docx");
     let exported =
         loom_writer_core::export_docx(&document("Saved text")).expect("export source DOCX");
@@ -34,7 +36,7 @@ fn a_docx_recovery_draft_is_compared_with_the_imported_word_source() {
 
 #[test]
 fn a_docx_recovery_draft_with_edits_remains_available() {
-    let dir = temp_dir();
+    let dir = temp_dir("edited");
     let source = dir.join("source.docx");
     let exported =
         loom_writer_core::export_docx(&document("Saved text")).expect("export source DOCX");

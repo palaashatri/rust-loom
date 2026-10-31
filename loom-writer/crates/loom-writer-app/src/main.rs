@@ -64,9 +64,7 @@ mod window_chrome;
 
 use history::{EditorHistory, HistoryKind};
 use paragraph_alignment::writer_render_alignment;
-use save_flow::{
-    load_file, save_current_document, save_file, warning_is_open, writer_open_request,
-};
+use save_flow::{load_file, save_current_document, warning_is_open, writer_open_request};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -966,7 +964,7 @@ pub(crate) struct GuiState {
     /// True only after the user chose `.loomdoc` as the explicit save format.
     compatibility_save: Cell<bool>,
     history: RefCell<EditorHistory>,
-    history_clock: Instant,
+    history_clock: Cell<Instant>,
     syncing_editor: Cell<bool>,
     pending_replacement: Cell<Option<PendingReplacement>>,
     dialogs: Rc<dyn FileDialogService>,
@@ -1595,6 +1593,7 @@ fn sync_menu_state(menu_service: &NativeMenuBar, app: &WriterApp, state: &GuiSta
 fn history_now_ms(state: &GuiState) -> u64 {
     state
         .history_clock
+        .get()
         .elapsed()
         .as_millis()
         .min(u64::MAX as u128) as u64
@@ -1711,6 +1710,7 @@ fn restore_rejected_edit_projection(app: &WriterApp, state: &GuiState, document:
     state.syncing_editor.set(syncing);
 }
 
+#[cfg(test)]
 fn apply_typing(app: &WriterApp, state: &Rc<GuiState>, next: WriterDocument) -> bool {
     apply_typing_transaction(app, state, next, typing_style::snapshot())
 }
@@ -3359,6 +3359,7 @@ fn wire_writer_inspector_toggle(
 /// have shown without recovery (the requested file, the template, or the
 /// sample). The draft then reads as unsaved and closing it asks first; using
 /// the draft itself as the baseline would make restored work look clean.
+#[cfg(test)]
 fn startup_documents(
     recovered: Option<recovery_draft::RecoveredDraft>,
     open: Option<&str>,
@@ -3450,7 +3451,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         save_path: RefCell::new(save_path),
         compatibility_save: Cell::new(false),
         history: RefCell::new(EditorHistory::new()),
-        history_clock: Instant::now(),
+        history_clock: Cell::new(Instant::now()),
         syncing_editor: Cell::new(false),
         pending_replacement: Cell::new(None),
         dialogs,
@@ -3788,7 +3789,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         save_path: RefCell::new(None),
         compatibility_save: Cell::new(false),
         history: RefCell::new(initial_history),
-        history_clock: Instant::now(),
+        history_clock: Cell::new(Instant::now()),
         syncing_editor: Cell::new(false),
         pending_replacement: Cell::new(None),
         dialogs,
@@ -4108,6 +4109,13 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     )?);
 
     app.invoke_export_pdf();
+    {
+        let review = app.global::<WriterReviewState>();
+        if !review.get_pdf_export_open() {
+            return Err("journey PDF export did not open its view dialog".into());
+        }
+        review.invoke_export_pdf_view(0);
+    }
     if !export_path.is_file() {
         return Err(format!(
             "journey export did not create {}",
@@ -4130,6 +4138,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         (history.undo.len(), history.redo.len(), history.total_bytes)
     };
     app.invoke_export_pdf();
+    app.global::<WriterReviewState>().invoke_export_pdf_view(0);
     if *state.current.borrow() != before_cancel_document {
         return Err("journey export cancellation mutated the document".into());
     }
@@ -4162,6 +4171,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         (history.undo.len(), history.redo.len(), history.total_bytes)
     };
     app.invoke_export_pdf();
+    app.global::<WriterReviewState>().invoke_export_pdf_view(0);
     if *state.current.borrow() != before_failure_document {
         return Err("journey failed export mutated the document".into());
     }

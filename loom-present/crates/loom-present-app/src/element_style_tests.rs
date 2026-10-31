@@ -604,6 +604,27 @@ fn geometry_requires_a_single_selected_object() {
     )
     .next()
     .is_some());
+    assert!(
+        ElementHandle::find_by_accessible_label(
+            &app,
+            "Select one object to edit its text content."
+        )
+        .next()
+        .is_some(),
+        "a multi-selection must not offer one active element's text field"
+    );
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Selected element text")
+            .next()
+            .is_none(),
+        "the single-element content field must be hidden for a multi-selection"
+    );
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Selected Elements")
+            .next()
+            .is_some(),
+        "the header must name the multi-selection truthfully"
+    );
     for label in ["X position", "Y position", "Width", "Height", "Rotation"] {
         assert!(
             ElementHandle::find_by_accessible_label(&app, label)
@@ -620,6 +641,12 @@ fn geometry_requires_a_single_selected_object() {
     assert_eq!(geometry_of(&state, 0), first_before);
     assert_eq!(geometry_of(&state, 1), second_before);
     assert!(!state.session.borrow().can_undo());
+    assert!(
+        app.get_status_left()
+            .contains("Select one object to type exact geometry"),
+        "a typed geometry value on a multi-selection must say why it did nothing: {:?}",
+        app.get_status_left()
+    );
 }
 
 #[test]
@@ -674,4 +701,121 @@ fn geometry_uses_live_selection_when_selection_contains_stale_ids() {
         .invoke_geometry_requested("x".into(), "250".into());
     assert_eq!(geometry_of(&state, 0).0, 100.0);
     assert!(!state.session.borrow().can_undo());
+}
+
+#[test]
+fn geometry_rejects_pixel_and_percent_units_with_readable_feedback() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Typed",
+        100.0,
+        120.0,
+        400.0,
+        80.0,
+    )]);
+    select(&app, &state, "t");
+    let ink = app.global::<ElementInk>();
+
+    for (field, text) in [
+        ("x", "300 px"),
+        ("y", "40%"),
+        ("w", "12.5%"),
+        ("h", "2 px"),
+        ("rot", "15 %"),
+    ] {
+        let before = geometry_of(&state, 0);
+        ink.invoke_geometry_requested(field.into(), text.into());
+        assert_eq!(
+            geometry_of(&state, 0),
+            before,
+            "{field}={text:?} must change nothing"
+        );
+        let status = app.get_status_left();
+        let supported = if field == "rot" {
+            "° or deg"
+        } else {
+            "in, cm, mm or pt"
+        };
+        assert!(
+            status.contains("not a number") && status.contains(supported),
+            "{field}={text:?} needs readable feedback naming {supported}, got {status:?}"
+        );
+    }
+
+    // Unitless numbers remain slide units, unchanged by the rejection path.
+    ink.invoke_geometry_requested("x".into(), "250".into());
+    assert_eq!(geometry_of(&state, 0).0, 250.0);
+}
+
+#[test]
+fn imported_morph_is_named_as_unsupported_and_not_offered_as_a_fade() {
+    let (app, _state) = fixture(vec![text_element(
+        "t",
+        ElementType::Title,
+        "Imported title",
+        100.0,
+        100.0,
+        600.0,
+        120.0,
+    )]);
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    app.set_transition_index(3);
+    crate::keyboard_flow_tests::render(&app);
+
+    assert!(
+        ElementHandle::find_by_accessible_label(
+            &app,
+            "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it."
+        )
+        .next()
+        .is_some(),
+        "an imported Morph must be named, not silently played as a fade"
+    );
+    for label in ["None", "Dissolve", "Push"] {
+        assert!(
+            ElementHandle::find_by_accessible_label(&app, label)
+                .next()
+                .is_some(),
+            "the transition control still offers {label}"
+        );
+    }
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Morph")
+            .next()
+            .is_none(),
+        "Morph must not be an enabled choice"
+    );
+}
+
+#[test]
+fn geometry_units_are_visible_before_any_error() {
+    let (app, state) = fixture(vec![text_element(
+        "t",
+        ElementType::BodyText,
+        "Typed",
+        100.0,
+        120.0,
+        400.0,
+        80.0,
+    )]);
+    app.set_show_inspector(true);
+    select(&app, &state, "t");
+    crate::keyboard_flow_tests::render(&app);
+
+    assert!(
+        ElementHandle::find_by_accessible_label(
+            &app,
+            "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg."
+        )
+        .next()
+        .is_some(),
+        "supported geometry units must be visible without first failing"
+    );
+    assert!(
+        !app.get_status_left().contains("not a number"),
+        "showing the hint must not fabricate an error: {:?}",
+        app.get_status_left()
+    );
 }

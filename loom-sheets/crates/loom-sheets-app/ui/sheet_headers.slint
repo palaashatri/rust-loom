@@ -63,7 +63,7 @@ export component SheetHeaders inherits Rectangle {
             spacing: 0px;
 
             for c in root.cols : Rectangle {
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: "Column " + root.column-headers[c];
                 min-width: root.grid-column-widths[c];
                 max-width: root.grid-column-widths[c];
@@ -131,7 +131,7 @@ export component SheetHeaders inherits Rectangle {
             spacing: 0px;
 
             for r in root.rows : Rectangle {
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: "Row " + root.row-headers[r];
                 min-height: root.grid-row-heights[r];
                 max-height: root.grid-row-heights[r];

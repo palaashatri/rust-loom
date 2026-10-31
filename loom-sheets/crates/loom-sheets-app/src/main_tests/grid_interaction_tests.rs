@@ -491,6 +491,7 @@ fn inspector_search_filters_worksheet_and_cell_sections() {
         "borders",
         "fill",
         "data format",
+        "number format",
         "general",
         "number",
         "currency",

@@ -31,6 +31,7 @@ pub(crate) fn inspector_section_visibility(query: &str) -> (bool, bool) {
             "borders & fill",
             "fill",
             "data format",
+            "number format",
             "general",
             "number",
             "currency",

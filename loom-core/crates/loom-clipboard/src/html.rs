@@ -449,10 +449,8 @@ fn parse_css_length_pt(value: &str) -> Option<f32> {
         (value.trim(), 72.0)
     } else if let Some(value) = value.strip_suffix("cm") {
         (value.trim(), 72.0 / 2.54)
-    } else if let Some(value) = value.strip_suffix("mm") {
-        (value.trim(), 72.0 / 25.4)
     } else {
-        return None;
+        (value.strip_suffix("mm")?.trim(), 72.0 / 25.4)
     };
 
     let width = number.parse::<f32>().ok()? * scale;

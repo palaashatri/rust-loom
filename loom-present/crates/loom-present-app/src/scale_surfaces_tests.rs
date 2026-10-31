@@ -227,10 +227,12 @@ pub(super) fn rects_without_surface(width: f32, height: f32, scale: f32) -> Vec<
 fn toolbar_captions_scale_and_the_row_grows_to_hold_them() {
     let mut previous = 0.0f32;
     for scale in [1.0f32, 1.5, 2.0] {
-        let items = rects_without_surface(1280.0, 800.0, scale);
+        // Keep the logical width at 1280 so the labelled toolbar stays, and
+        // test only how its captions and row grow with the text scale.
+        let items = rects_without_surface(1280.0 * scale, 800.0 * scale, scale);
         let view = items
             .iter()
-            .find(|i| i.0 == "View" && i.2 > 25.0)
+            .find(|i| i.0 == "View menu" && i.2 > 25.0)
             .expect("View toolbar item");
         // icon 18 + gap 2 + padding 8 + one caption line (about 1.2 em at 10 px * scale)
         let needed = 28.0 + 12.0 * scale;

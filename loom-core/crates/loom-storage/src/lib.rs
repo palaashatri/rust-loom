@@ -143,7 +143,6 @@ fn active_fail_point() -> Option<FailPoint> {
 ///
 /// # Errors
 /// Returns an error if creating the parent or temporary file, writing or syncing the data, or replacing the destination fails.
-
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     let parent = path
         .parent()

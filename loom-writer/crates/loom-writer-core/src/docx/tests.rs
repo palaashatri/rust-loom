@@ -225,6 +225,7 @@ fn every_part_is_well_formed_and_declared() {
         "word/commentsExtended.xml",
         "docProps/core.xml",
         "docProps/app.xml",
+        "docProps/custom.xml",
     ]
     .into();
     assert_eq!(
@@ -1067,7 +1068,7 @@ fn docx_comments_round_trip_with_author_body_anchor_and_resolved_state() {
         .iter()
         .find(|block| block.id == bob.block_id)
         .expect("comment paragraph exists");
-    assert_eq!(&block.text.as_str()[bob.start..bob.end], "C");
+    assert_eq!(&block.text.as_str()[bob.start..bob.end], "Centered");
 
     let reopened = super::import_docx(
         &export_docx(&imported)
@@ -1218,11 +1219,11 @@ fn block_level_revision_wrappers_are_rejected_instead_of_flattened() {
     let cases = [
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:ins w:id="1" w:author="Reviewer"><w:p><w:r><w:t>first</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p></w:ins></w:body></w:document>"#,
-            "block-level or paragraph-mark DOCX revision wrapper w:ins",
+            "block-level DOCX revision wrapper w:ins is not supported",
         ),
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:del w:id="2" w:author="Reviewer"><w:p><w:r><w:delText>deleted</w:delText></w:r></w:p></w:del></w:body></w:document>"#,
-            "block-level or paragraph-mark DOCX revision wrapper w:del",
+            "block-level DOCX revision wrapper w:del is not supported",
         ),
         (
             r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:moveFrom w:id="3" w:author="Reviewer"><w:p><w:r><w:t>moved</w:t></w:r></w:p></w:moveFrom></w:body></w:document>"#,

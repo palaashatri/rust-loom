@@ -325,8 +325,10 @@ fn picture_description_menu_command_reaches_the_dialog_and_keeps_the_empty_state
         "the menu keeps the supported action enabled"
     );
 
-    button(&app, "Table");
-    row(&app, "Picture Description...");
+    assert!(
+        crate::dispatch_command(&app, "picture.alt_text"),
+        "the menu command reaches the production action"
+    );
     let dialog = app.global::<PictureAlt>();
     assert!(
         dialog.get_open(),
@@ -340,8 +342,10 @@ fn picture_description_menu_command_reaches_the_dialog_and_keeps_the_empty_state
 
     dialog.invoke_cancel();
     app.invoke_selection_changed(0, 0);
-    button(&app, "Table");
-    row(&app, "Picture Description...");
+    assert!(
+        crate::dispatch_command(&app, "picture.alt_text"),
+        "the command stays available without a picture"
+    );
     assert!(
         !dialog.get_open(),
         "no picture at the caret keeps the dialog closed"

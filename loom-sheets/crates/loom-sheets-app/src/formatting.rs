@@ -126,12 +126,12 @@ pub(crate) fn set_selection_number_format(
 }
 
 /// Adjust decimal places count across the selection by delta (+1 or -1).
-pub(crate) fn set_selection_decimal_places(
+fn set_selection_decimal_places_with(
     sheet: &mut Sheet,
     undo_stack: &mut Vec<SheetTransaction>,
     redo_stack: &mut Vec<SheetTransaction>,
     range: CellRange,
-    delta: i32,
+    target: impl Fn(u8) -> u8,
 ) -> bool {
     let cells = range.cells();
     if cells.is_empty() {
@@ -142,8 +142,7 @@ pub(crate) fn set_selection_decimal_places(
     let mut any_change = false;
     for &cell in &cells {
         let prev = sheet.cell_style(cell);
-        let current = prev.decimal_places.unwrap_or(2) as i32;
-        let new_decimals = (current + delta).clamp(0, 10) as u8;
+        let new_decimals = target(prev.decimal_places.unwrap_or(2)).min(10);
         if prev.decimal_places != Some(new_decimals) {
             any_change = true;
         }
@@ -157,6 +156,30 @@ pub(crate) fn set_selection_decimal_places(
     }
     let tx = SheetTransaction::Style { before, after };
     commit_transaction(sheet, undo_stack, redo_stack, tx)
+}
+
+pub(crate) fn set_selection_decimal_places(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+    delta: i32,
+) -> bool {
+    set_selection_decimal_places_with(sheet, undo_stack, redo_stack, range, |current| {
+        (i32::from(current) + delta).clamp(0, 10) as u8
+    })
+}
+
+/// Set every selected cell to the same exact decimal-place count. Used by the
+/// typed inspector field; the +/- controls keep their per-cell stepping.
+pub(crate) fn set_selection_decimal_places_exact(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+    decimals: u8,
+) -> bool {
+    set_selection_decimal_places_with(sheet, undo_stack, redo_stack, range, |_| decimals)
 }
 
 /// Toggle all-edges borders on the given range.

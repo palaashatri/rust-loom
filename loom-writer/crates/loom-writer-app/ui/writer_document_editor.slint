@@ -263,7 +263,7 @@ export component WriterDocumentEditor inherits Rectangle {
                     : parent.height;
                 text: segment.text;
                 // Keep an accessible text node while glyph tiles provide the visible pixels.
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: segment.text;
                 opacity: block.glyph-tiles.length == 0 ? 1.0 : 0.0;
                 font-family: block.font-family != "" ? block.font-family : Theme.document-font-family;
@@ -332,6 +332,11 @@ export component WriterDocumentEditor inherits Rectangle {
         color: transparent;
         selection-background-color: transparent;
         selection-foreground-color: transparent;
+        // The document draws its own caret from the shared layout geometry.
+        // Slint's macOS TextInput paints its cursor with the selection colour
+        // forced opaque, which otherwise leaves a second black I-beam at the
+        // left margin of a right-aligned or RTL line.
+        text-cursor-width: 0px;
         accessible-role: none;
         edited => {
             root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);

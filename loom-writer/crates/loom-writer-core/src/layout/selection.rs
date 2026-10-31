@@ -31,6 +31,35 @@ pub(super) fn floor_in_blocks(
 
 /// Selection highlights or caret for `selection` on `lines`, limited to the
 /// selected page window.
+/// Join adjacent selection spans that touch on the same visual line, so a
+/// shaped run boundary does not leave visible seams or duplicate rectangles.
+pub(super) fn merge_selection_rects(rects: Vec<SelectionRect>) -> Vec<SelectionRect> {
+    let mut merged: Vec<SelectionRect> = Vec::with_capacity(rects.len());
+    for rect in rects {
+        if let Some(previous) = merged.last_mut() {
+            let previous_right = previous.rect.x + previous.rect.width;
+            let rect_right = rect.rect.x + rect.rect.width;
+            let touches = (previous_right - rect.rect.x).abs() <= 0.01
+                || (rect_right - previous.rect.x).abs() <= 0.01;
+            if previous.page_index == rect.page_index
+                && previous.block_id == rect.block_id
+                && (previous.end == rect.start || rect.end == previous.start)
+                && (previous.rect.y - rect.rect.y).abs() <= 0.01
+                && (previous.rect.height - rect.rect.height).abs() <= 0.01
+                && touches
+            {
+                previous.start = previous.start.min(rect.start);
+                previous.end = previous.end.max(rect.end);
+                previous.rect.x = previous.rect.x.min(rect.rect.x);
+                previous.rect.width = previous_right.max(rect_right) - previous.rect.x;
+                continue;
+            }
+        }
+        merged.push(rect);
+    }
+    merged
+}
+
 pub(super) fn rects_for_lines(
     doc: &WriterDocument,
     style: &PageStyle,
@@ -71,8 +100,7 @@ pub(super) fn rects_for_lines(
                 block_starts[line.block_index],
                 line,
                 selection,
-                selection_start,
-                selection_end,
+                selection_start..selection_end,
             ));
             continue;
         }
@@ -281,9 +309,9 @@ fn table_cell_selection_rects(
     block_start: usize,
     line: &FlowLine,
     selection: &TextSelection,
-    selection_start: usize,
-    selection_end: usize,
+    overlap: std::ops::Range<usize>,
 ) -> Vec<SelectionRect> {
+    let (selection_start, selection_end) = (overlap.start, overlap.end);
     let block = &doc.blocks[line.block_index];
     let Some(table) = block.typed_table() else {
         return Vec::new();
@@ -344,8 +372,7 @@ fn table_cell_selection_rects(
                 doc,
                 block.id,
                 table,
-                row,
-                column,
+                (row, column),
                 &cell_block,
                 crate::TABLE_CELL_BASE_FONT_SIZE_PT,
                 (widths[column] - 2.0 * crate::TABLE_CELL_HORIZONTAL_INSET_PT).max(1.0),
@@ -414,8 +441,12 @@ fn table_cell_selection_rects(
                 });
                 continue;
             }
-            let selected_start = (selection_start - block_start).max(cell_range.start);
-            let selected_end = (selection_end - block_start).min(cell_range.end);
+            let selected_start = selection_start
+                .saturating_sub(block_start)
+                .max(cell_range.start);
+            let selected_end = selection_end
+                .saturating_sub(block_start)
+                .min(cell_range.end);
             if selected_start >= selected_end {
                 continue;
             }

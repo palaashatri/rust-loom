@@ -7,7 +7,9 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::CellRef;
 use slint::{ComponentHandle, SharedString};
 
-use crate::formatting::{adjust_selection_font_size, set_selection_font_size};
+use crate::formatting::{
+    adjust_selection_font_size, set_selection_decimal_places_exact, set_selection_font_size,
+};
 use crate::{
     apply_sheet, commit_transaction, selection_from_app, sync_menu_state, GuiState,
     SheetTransaction, SheetsApp,
@@ -23,6 +25,43 @@ const COLUMN_MAX: f32 = 400.0;
 pub(super) fn register(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
     register_font_actions(app, state, menu_service);
     register_geometry_actions(app, state, menu_service);
+    register_decimal_action(app, state, menu_service);
+}
+
+fn register_decimal_action(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    let menu_service = menu_service.clone();
+    app.global::<crate::SheetInspectorActions>()
+        .on_set_decimals(move |input| {
+            let Some(app) = app_ref.upgrade() else {
+                return false;
+            };
+            if crate::mutation_guard::refused(&app, &state) {
+                return false;
+            }
+            let Some(decimals) = parse_decimal_places(input.as_str()) else {
+                app.set_status_left("Enter a whole number of decimal places from 0 to 10.".into());
+                return false;
+            };
+            let selection = selection_from_app(&app);
+            if set_selection_decimal_places_exact(
+                &mut state.current.borrow_mut(),
+                &mut state.undo_stack.borrow_mut(),
+                &mut state.redo_stack.borrow_mut(),
+                selection.range(),
+                decimals,
+            ) {
+                apply_sheet(&app, &state);
+                sync_menu_state(&menu_service, &app, &state);
+            }
+            app.set_status_left(SharedString::from(format!("Decimals {decimals}")));
+            true
+        });
 }
 
 fn register_font_actions(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
@@ -269,6 +308,11 @@ fn selected_cell(app: &SheetsApp) -> Option<CellRef> {
 fn parse_font_size(input: &str) -> Option<u8> {
     let size = input.trim().parse::<u8>().ok()?;
     (FONT_MIN..=FONT_MAX).contains(&size).then_some(size)
+}
+
+fn parse_decimal_places(input: &str) -> Option<u8> {
+    let places = input.trim().parse::<u8>().ok()?;
+    (places <= 10).then_some(places)
 }
 
 fn parse_dimension(input: &str, minimum: f32, maximum: f32) -> Option<f32> {

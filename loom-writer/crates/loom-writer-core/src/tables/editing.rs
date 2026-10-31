@@ -19,6 +19,15 @@ use super::store::{flat_char, flat_table_text, is_table_separator};
 /// Returns an error, and changes nothing, when the separators differ from the
 /// table's own: the edit would add or remove a row or a cell.
 pub fn apply_flat_text(table: &Table, new_flat: &str) -> Result<Table, String> {
+    let mut updated = table.clone();
+    apply_flat_text_in_place(&mut updated, new_flat)?;
+    Ok(updated)
+}
+
+/// Apply `new_flat` to `table` without cloning the whole grid first. The
+/// separator and cell checks run before any cell changes, so an error leaves
+/// the table untouched.
+pub fn apply_flat_text_in_place(table: &mut Table, new_flat: &str) -> Result<(), String> {
     let old_flat = flat_table_text(table);
     let old_separators: Vec<char> = old_flat
         .chars()
@@ -37,17 +46,28 @@ pub fn apply_flat_text(table: &Table, new_flat: &str) -> Result<Table, String> {
     if columns == 0 || old_pieces.len() != new_pieces.len() {
         return Err("the table has no cells to edit".into());
     }
-    let mut updated = table.clone();
-    for (index, (old_piece, new_piece)) in old_pieces.iter().zip(&new_pieces).enumerate() {
-        if old_piece == new_piece {
-            continue;
-        }
-        let cell = updated
+    let changes: Vec<(usize, String, String)> = old_pieces
+        .iter()
+        .zip(&new_pieces)
+        .enumerate()
+        .filter(|(_, (old_piece, new_piece))| old_piece != new_piece)
+        .map(|(index, (old_piece, new_piece))| {
+            (index, (*old_piece).to_owned(), (*new_piece).to_owned())
+        })
+        .collect();
+    if changes
+        .iter()
+        .any(|(index, _, _)| table.cell(index / columns, index % columns).is_none())
+    {
+        return Err("the table has no such cell".to_string());
+    }
+    for (index, old_piece, new_piece) in changes {
+        let cell = table
             .cell_mut(index / columns, index % columns)
             .ok_or_else(|| "the table has no such cell".to_string())?;
-        cell.content.runs = edit_runs(&cell.content.runs, old_piece, new_piece);
+        cell.content.runs = edit_runs(&cell.content.runs, &old_piece, &new_piece);
     }
-    Ok(updated)
+    Ok(())
 }
 
 /// The whole table text after `inserted` replaces `range` of `old_flat`, and the

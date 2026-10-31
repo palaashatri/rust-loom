@@ -245,7 +245,11 @@ impl WriterDocument {
                 } else {
                     rebase_revision_offset(old_start, edit, true)
                 };
-                (start, rebase_revision_offset(old_end, edit, false))
+                let inserted_at_end = edit.old_start == edit.old_end && edit.old_end == old_end;
+                (
+                    start,
+                    rebase_revision_offset(old_end, edit, inserted_at_end),
+                )
             };
             if revision.kind != RevisionKind::Deletion && new_start == new_end && !is_block_format {
                 continue;
@@ -340,9 +344,14 @@ impl WriterDocument {
                         .any(|edit| edit.old_start == old_start && edit.old_end == old_start);
                 let start =
                     rebase_revision_offset_through_hunks(old_start, edits, !insertion_at_start);
+                // Text inserted exactly at the revision's end is a separate,
+                // newer change; it must not widen this revision's payload.
+                let insertion_at_end = edits
+                    .iter()
+                    .any(|edit| edit.old_start == old_end && edit.old_end == old_end);
                 (
                     start,
-                    rebase_revision_offset_through_hunks(old_end, edits, false),
+                    rebase_revision_offset_through_hunks(old_end, edits, insertion_at_end),
                 )
             };
             if revision.kind != RevisionKind::Deletion && new_start == new_end && !is_block_format {
@@ -466,18 +475,46 @@ impl WriterDocument {
         }
         if edit.new_start < edit.new_end {
             let new_range = edit.new_start..edit.new_end;
-            let payload = payload_for_range(&self.blocks, new_range.clone())?;
-            let boundary_kind =
-                Self::revision_boundary_kind_for_range(&self.blocks, new_range.clone(), &payload);
-            let anchor = anchor_from_global_range(&self.blocks, edit.new_start, edit.new_end)?;
-            self.record_revision_at_anchor(
-                RevisionKind::Insertion,
-                anchor,
-                boundary_kind,
-                None,
-                Some(payload),
-                None,
-            )?;
+            let payload = payload_for_range(&self.blocks, new_range)?;
+            // A leading hard line break creates the paragraph mark of the new
+            // paragraph. Word treats that mark as its own revision, so keep it
+            // separate from the text typed after the break.
+            let paragraph_marks = payload
+                .text
+                .bytes()
+                .take_while(|byte| *byte == b'\n')
+                .count();
+            let mut text_start = edit.new_start;
+            for _ in 0..paragraph_marks {
+                let anchor = anchor_from_global_range(&self.blocks, text_start, text_start + 1)?;
+                self.record_revision_at_anchor(
+                    RevisionKind::Insertion,
+                    anchor,
+                    RevisionBoundaryKind::ParagraphMark,
+                    None,
+                    Some(RevisionPayload::plain("\n")),
+                    None,
+                )?;
+                text_start += 1;
+            }
+            if text_start < edit.new_end {
+                let text_range = text_start..edit.new_end;
+                let text_payload = payload_for_range(&self.blocks, text_range.clone())?;
+                let text_boundary = Self::revision_boundary_kind_for_range(
+                    &self.blocks,
+                    text_range.clone(),
+                    &text_payload,
+                );
+                let anchor = anchor_from_global_range(&self.blocks, text_start, edit.new_end)?;
+                self.record_revision_at_anchor(
+                    RevisionKind::Insertion,
+                    anchor,
+                    text_boundary,
+                    None,
+                    Some(text_payload),
+                    None,
+                )?;
+            }
         }
         Ok(())
     }
@@ -519,7 +556,7 @@ impl WriterDocument {
                         end: range.end,
                         end_block_id: None,
                         prefix_sha256: crate::zip::sha256(
-                            self.blocks[index].text.as_str()[..range.start].as_bytes(),
+                            &self.blocks[index].text.as_str().as_bytes()[..range.start],
                         ),
                     },
                     RevisionBoundaryKind::Unknown,
@@ -752,7 +789,7 @@ impl WriterDocument {
             if !table_range_is_one_cell(&self.blocks[start_index], start_local..end_local) {
                 return Err(WriterError::Invalid(INVALID_REVISION.into()));
             }
-            self.set_table_text_runs(range.clone(), |run| reset_table_run_style(run))
+            self.set_table_text_runs(range.clone(), reset_table_run_style)
                 .map_err(WriterError::Invalid)?;
             for run in runs {
                 self.set_table_text_runs(
