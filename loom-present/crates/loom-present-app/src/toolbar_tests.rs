@@ -438,41 +438,121 @@ fn chart_command_labels_disclose_the_sheets_prerequisite() {
     );
 }
 
+fn rectangles_overlap(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
+    let overlap_x = (a.0 + a.2).min(b.0 + b.2) - a.0.max(b.0);
+    let overlap_y = (a.1 + a.3).min(b.1 + b.3) - a.1.max(b.1);
+    overlap_x > 0.0 && overlap_y > 0.0
+}
+
 #[test]
-fn new_text_and_shape_objects_cascade_instead_of_stacking_on_one_point() {
-    let (app, state) = launched(None);
-    let positions = |state: &GuiState| -> Vec<(f32, f32)> {
-        let session = state.session.borrow();
+fn twelve_mixed_insertions_avoid_occupied_rectangles_and_skip_preoccupied_slots() {
+    // The production text and shape boxes are too large to fit twelve disjoint
+    // rectangles on one slide (6 * 520x100 + 6 * 300x140 alone exceeds the
+    // 1000x562.5 slide area), so compact mixed boxes exercise the placement
+    // contract itself: first rectangle-free slot, every insertion disjoint.
+    let text_size = (200.0, 60.0);
+    let shape_size = (120.0, 60.0);
+    let mut session =
+        PresentationSession::new(PresentationDocument::new("placement-test", "Placement"));
+    {
+        let slide = session.document.active_slide_mut().unwrap();
+        slide.elements.clear();
+        slide.add_element(text_element(
+            "occupied-text-base",
+            ElementType::BodyText,
+            "Occupied text base",
+            120.0,
+            220.0,
+            text_size.0,
+            text_size.1,
+        ));
+        slide.add_element(text_element(
+            "occupied-shape-base",
+            ElementType::ShapeRectangle,
+            "Occupied shape base",
+            120.0,
+            260.0,
+            shape_size.0,
+            shape_size.1,
+        ));
+        slide.add_element(text_element(
+            "occupied-text-next",
+            ElementType::BodyText,
+            "Occupied text slot",
+            168.0,
+            268.0,
+            text_size.0,
+            text_size.1,
+        ));
+    }
+    let expected = [
+        (240.0, 340.0),
+        (264.0, 404.0),
+        (408.0, 462.5),
+        (624.0, 462.5),
+        (760.0, 462.5),
+        (384.0, 260.0),
+        (528.0, 220.0),
+        (744.0, 260.0),
+        (528.0, 292.0),
+        (744.0, 332.0),
+        (456.0, 364.0),
+        (120.0, 404.0),
+    ];
+
+    for (index, expected_origin) in expected.iter().enumerate() {
+        let (kind, base, size, content) = if index % 2 == 0 {
+            (ElementType::BodyText, (120.0, 220.0), text_size, "New text")
+        } else {
+            (
+                ElementType::ShapeRectangle,
+                (120.0, 260.0),
+                shape_size,
+                "Shape",
+            )
+        };
+        let origin = added_object_origin(&session, base, size);
+        assert_eq!(
+            origin, *expected_origin,
+            "insertion {index} did not take the first rectangle-free slot"
+        );
+        let slide = session.document.active_slide().unwrap();
+        let candidate = (origin.0, origin.1, size.0, size.1);
+        for existing in &slide.elements {
+            assert!(
+                !rectangles_overlap(
+                    candidate,
+                    (existing.x, existing.y, existing.width, existing.height)
+                ),
+                "insertion {index} at ({}, {}) {}x{} overlaps {} at ({}, {}) {}x{}",
+                origin.0,
+                origin.1,
+                size.0,
+                size.1,
+                existing.id,
+                existing.x,
+                existing.y,
+                existing.width,
+                existing.height
+            );
+        }
         session
             .document
-            .active_slide()
+            .active_slide_mut()
             .unwrap()
-            .elements
-            .iter()
-            .map(|element| (element.x, element.y))
-            .collect()
-    };
+            .add_element(text_element(
+                &format!("inserted-{index}"),
+                kind,
+                content,
+                origin.0,
+                origin.1,
+                size.0,
+                size.1,
+            ));
+    }
 
-    button(&app, "Text");
-    button(&app, "Text");
-    let texts = positions(&state);
-    let (first, second) = (texts[texts.len() - 2], texts[texts.len() - 1]);
-    assert_ne!(
-        first, second,
-        "two new text objects must not occupy the same point"
-    );
-
-    button(&app, "Shape");
-    button(&app, "Shape");
-    let shapes = positions(&state);
-    let (first, second) = (shapes[shapes.len() - 2], shapes[shapes.len() - 1]);
-    assert_ne!(
-        first, second,
-        "two new shapes must not occupy the same point"
-    );
-
-    let session = state.session.borrow();
-    for element in &session.document.active_slide().unwrap().elements {
+    let slide = session.document.active_slide().unwrap();
+    for element in &slide.elements {
         assert!(
             element.x >= 0.0
                 && element.y >= 0.0
@@ -484,6 +564,129 @@ fn new_text_and_shape_objects_cascade_instead_of_stacking_on_one_point() {
             element.y,
             element.width,
             element.height
+        );
+    }
+}
+
+#[test]
+fn first_text_and_shape_keep_their_base_origin_on_an_empty_slide() {
+    let (app, state) = launched(None);
+    let origins = |state: &GuiState| -> Vec<(f32, f32)> {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .unwrap()
+            .elements
+            .iter()
+            .map(|element| (element.x, element.y))
+            .collect()
+    };
+    let clear = |state: &GuiState| {
+        state
+            .session
+            .borrow_mut()
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .elements
+            .clear();
+    };
+
+    clear(&state);
+    button(&app, "Text");
+    assert_eq!(origins(&state), vec![(120.0, 220.0)]);
+
+    clear(&state);
+    button(&app, "Shape");
+    assert_eq!(origins(&state), vec![(120.0, 260.0)]);
+}
+
+#[test]
+fn toolbar_insertions_skip_preoccupied_default_rectangles() {
+    let (app, state) = launched(None);
+    let clear = |state: &GuiState| {
+        state
+            .session
+            .borrow_mut()
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .elements
+            .clear();
+    };
+
+    clear(&state);
+    {
+        let mut session = state.session.borrow_mut();
+        session
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .add_element(text_element(
+                "occupied-text-base",
+                ElementType::BodyText,
+                "Occupied text base",
+                120.0,
+                220.0,
+                520.0,
+                100.0,
+            ));
+    }
+    button(&app, "Text");
+    {
+        let session = state.session.borrow();
+        let elements = &session.document.active_slide().unwrap().elements;
+        let inserted = elements.last().unwrap();
+        assert_eq!((inserted.x, inserted.y), (240.0, 340.0));
+        assert!(
+            !rectangles_overlap(
+                (inserted.x, inserted.y, inserted.width, inserted.height),
+                (
+                    elements[0].x,
+                    elements[0].y,
+                    elements[0].width,
+                    elements[0].height
+                )
+            ),
+            "new text overlapped the pre-occupied rectangle"
+        );
+    }
+
+    clear(&state);
+    {
+        let mut session = state.session.borrow_mut();
+        session
+            .document
+            .active_slide_mut()
+            .unwrap()
+            .add_element(text_element(
+                "occupied-shape-base",
+                ElementType::ShapeRectangle,
+                "Occupied shape base",
+                120.0,
+                260.0,
+                300.0,
+                140.0,
+            ));
+    }
+    button(&app, "Shape");
+    {
+        let session = state.session.borrow();
+        let elements = &session.document.active_slide().unwrap().elements;
+        let inserted = elements.last().unwrap();
+        assert_eq!((inserted.x, inserted.y), (432.0, 382.5));
+        assert!(
+            !rectangles_overlap(
+                (inserted.x, inserted.y, inserted.width, inserted.height),
+                (
+                    elements[0].x,
+                    elements[0].y,
+                    elements[0].width,
+                    elements[0].height
+                )
+            ),
+            "new shape overlapped the pre-occupied rectangle"
         );
     }
 }

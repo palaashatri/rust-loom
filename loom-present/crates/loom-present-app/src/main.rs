@@ -132,22 +132,87 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-/// Where a newly added object goes: a short cascade so repeated adds never land
-/// exactly on top of each other, kept inside the 1000 x 562.5 slide.
+/// The distance a newly added object steps down and right after a collision.
+const ADDED_OBJECT_STEP: f32 = 24.0;
+/// The margin kept between a newly added object and the slide edge.
+const ADDED_OBJECT_MARGIN: f32 = 40.0;
+/// Rectangles closer than this are treated as overlapping.
+const ADDED_OBJECT_TOLERANCE: f32 = 1.0;
+
+/// Where a newly added object goes: start at `base` (the established position
+/// for the first object of its kind), then walk the diagonal cascade until the
+/// first slot whose full rectangle is clear of every existing element. If the
+/// diagonal is full, scan the remaining in-bounds lattice in reading order.
+/// A slide can run out of room; then the least-overlapping candidate is used so
+/// the object still lands deterministically inside the slide. Every candidate
+/// stays inside the 1000 x 562.5 slide.
 fn added_object_origin(
     session: &PresentationSession,
     base: (f32, f32),
     size: (f32, f32),
 ) -> (f32, f32) {
-    let count = session
-        .document
-        .active_slide()
-        .map_or(0, |slide| slide.elements.len());
-    let step = (count % 6) as f32 * 24.0;
-    (
-        (base.0 + step).min(1000.0 - size.0 - 40.0),
-        (base.1 + step).min(562.5 - size.1 - 40.0),
-    )
+    let max_x = (loom_present_core::SLIDE_WIDTH - size.0 - ADDED_OBJECT_MARGIN).max(0.0);
+    let max_y = (loom_present_core::SLIDE_HEIGHT - size.1 - ADDED_OBJECT_MARGIN).max(0.0);
+    let anchor = (base.0.clamp(0.0, max_x), base.1.clamp(0.0, max_y));
+    // Round up so the clamped position at the far edge stays a candidate, as
+    // the previous min(...) clamp did.
+    let columns = ((max_x - anchor.0) / ADDED_OBJECT_STEP).ceil() as usize;
+    let rows = ((max_y - anchor.1) / ADDED_OBJECT_STEP).ceil() as usize;
+    let position = |column: usize, row: usize| {
+        (
+            (anchor.0 + column as f32 * ADDED_OBJECT_STEP).min(max_x),
+            (anchor.1 + row as f32 * ADDED_OBJECT_STEP).min(max_y),
+        )
+    };
+    let overlap_area = |x: f32, y: f32| {
+        let left = x - ADDED_OBJECT_TOLERANCE;
+        let top = y - ADDED_OBJECT_TOLERANCE;
+        let right = x + size.0 + ADDED_OBJECT_TOLERANCE;
+        let bottom = y + size.1 + ADDED_OBJECT_TOLERANCE;
+        session.document.active_slide().map_or(0.0, |slide| {
+            slide
+                .elements
+                .iter()
+                .map(|element| {
+                    let overlap_x = right.min(element.x + element.width) - left.max(element.x);
+                    let overlap_y = bottom.min(element.y + element.height) - top.max(element.y);
+                    if overlap_x > 0.0 && overlap_y > 0.0 {
+                        overlap_x * overlap_y
+                    } else {
+                        0.0
+                    }
+                })
+                .sum()
+        })
+    };
+
+    let mut least_overlap = anchor;
+    let mut least_area = f32::INFINITY;
+    let mut consider = |origin: (f32, f32)| -> Option<(f32, f32)> {
+        let area = overlap_area(origin.0, origin.1);
+        if area <= 0.0 {
+            return Some(origin);
+        }
+        if area < least_area {
+            least_area = area;
+            least_overlap = origin;
+        }
+        None
+    };
+
+    for index in 0..=columns.max(rows) {
+        if let Some(origin) = consider(position(index, index)) {
+            return origin;
+        }
+    }
+    for row in 0..=rows {
+        for column in 0..=columns {
+            if let Some(origin) = consider(position(column, row)) {
+                return origin;
+            }
+        }
+    }
+    least_overlap
 }
 
 fn text_element(
