@@ -447,7 +447,7 @@ def wix_source(
         {''.join(install_components)}
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="CommonProgramMenuFolder">
+    <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="Loom Creator Suite">
         {''.join(shortcut_components)}
       </Directory>
