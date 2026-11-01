@@ -6,7 +6,9 @@
 //! bounded LRU keyed by content: embedded buffers by their shared immutable
 //! identity (pointer and length), path-backed images by path plus file
 //! identity. Moving, reordering, undoing or re-projecting the same image
-//! reuses the decoded pixels instead of decoding and copying again.
+//! reuses the decoded pixels instead of decoding and copying again. A raster
+//! larger than `MAX_DECODED_EDGE` is retained as a bounded display copy, so it
+//! is reused like any other image rather than decoded on every projection.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -18,10 +20,21 @@ use loom_sheets_core::{SheetObject, SheetObjectKind};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 /// Decoded RGBA bytes retained across projections. Roughly eight 1280x800
-/// images fit; a larger visible set still decodes, it just is not retained.
+/// images fit. Every decoded image is capped at `MAX_DECODED_EDGE`, so each one
+/// fits and is retained; an oversized original is shown from its bounded copy
+/// instead of being decoded again on every projection.
 const CACHE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
 /// Entry ceiling so many tiny images cannot crowd the LRU bookkeeping.
 const CACHE_ENTRIES: usize = 16;
+/// Longest decoded edge kept for display. A worksheet object is drawn at
+/// spreadsheet scale, so an oversized raster is shown from a copy scaled to
+/// this edge: at most 16 MiB of RGBA. Stored document bytes and XLSX export
+/// keep the original image untouched.
+const MAX_DECODED_EDGE: u32 = 2048;
+
+// A bounded image must always fit the budget, or it would silently go uncached.
+const _: () =
+    assert!(MAX_DECODED_EDGE as usize * MAX_DECODED_EDGE as usize * 4 <= CACHE_BUDGET_BYTES);
 
 /// What an image resource is, independent of which object currently uses it.
 ///
@@ -116,8 +129,9 @@ impl ImageCache {
 
     fn insert(&mut self, key: ImageKey, image: Image) {
         let bytes = decoded_bytes(&image);
-        // One image larger than the whole budget is still returned, but it is
-        // not worth evicting every reusable image to retain it.
+        // Defensive: decoded rasters are bounded by MAX_DECODED_EDGE, so only a
+        // budget smaller than one bounded image reaches this guard. Such an
+        // image is returned uncached rather than evicting the whole cache.
         if bytes > self.budget {
             return;
         }
@@ -207,16 +221,40 @@ fn decode_embedded(bytes: &[u8], svg: bool) -> Image {
         return Image::load_from_svg_data(bytes).unwrap_or_default();
     }
     match image::load_from_memory(bytes) {
-        Ok(decoded) => {
-            let rgba = decoded.to_rgba8();
-            Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                rgba.as_raw(),
-                rgba.width(),
-                rgba.height(),
-            ))
-        }
+        Ok(decoded) => bounded_image(decoded.into_rgba8()),
         Err(_) => Image::default(),
     }
+}
+
+/// Copies a decoded raster into a Slint handle no larger than `MAX_DECODED_EDGE`.
+///
+/// The full decode is still allocated once per image identity; what is kept,
+/// retained and re-projected is this bounded copy. An image already within the
+/// limit is copied exactly, without resampling.
+fn bounded_image(rgba: image::RgbaImage) -> Image {
+    let (width, height) = rgba.dimensions();
+    let longest = width.max(height);
+    let rgba = if longest > MAX_DECODED_EDGE {
+        image::imageops::thumbnail(
+            &rgba,
+            scaled_edge(width, longest),
+            scaled_edge(height, longest),
+        )
+    } else {
+        rgba
+    };
+    Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+        rgba.as_raw(),
+        rgba.width(),
+        rgba.height(),
+    ))
+}
+
+/// `edge` scaled so that `longest` maps onto `MAX_DECODED_EDGE`, keeping the
+/// aspect ratio. Integer arithmetic keeps the longest edge exact.
+fn scaled_edge(edge: u32, longest: u32) -> u32 {
+    let scaled = u64::from(edge) * u64::from(MAX_DECODED_EDGE) / u64::from(longest);
+    u32::try_from(scaled).unwrap_or(MAX_DECODED_EDGE).max(1)
 }
 
 fn decoded_bytes(image: &Image) -> usize {
@@ -375,5 +413,50 @@ mod tests {
         assert_eq!(decode_calls_for_tests(), 2);
         assert_eq!(cached_bytes_for_tests(), 0);
         assert_eq!(cached_entries_for_tests(), 0);
+    }
+
+    fn solid_png(width: u32, height: u32) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(width, height, image::Rgba([12, 34, 56, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .expect("encode solid image");
+        bytes
+    }
+
+    #[test]
+    fn oversized_image_is_decoded_once_and_retained_at_bounded_size() {
+        // 3000x3000 RGBA is 36 MB decoded, above the whole 32 MiB budget. It was
+        // decoded again on every projection and never retained.
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        let huge = object(solid_png(3000, 3000), "huge.png");
+        let first = image_for(&huge);
+        let second = image_for(&huge);
+        assert_eq!(
+            decode_calls_for_tests(),
+            1,
+            "a repeated projection must reuse the bounded decoded copy"
+        );
+        assert_eq!(first.size(), second.size());
+        assert_eq!(first.size().width, MAX_DECODED_EDGE);
+        assert_eq!(first.size().height, MAX_DECODED_EDGE);
+        assert_eq!(cached_entries_for_tests(), 1);
+        assert!(cached_bytes_for_tests() <= CACHE_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn oversized_image_keeps_its_aspect_ratio() {
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        let wide = image_for(&object(solid_png(4000, 1000), "wide.png"));
+        assert_eq!(wide.size().width, MAX_DECODED_EDGE);
+        assert_eq!(wide.size().height, MAX_DECODED_EDGE / 4);
+    }
+
+    #[test]
+    fn image_at_the_edge_limit_is_not_resampled() {
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        let edge = image_for(&object(solid_png(MAX_DECODED_EDGE, 16), "edge.png"));
+        assert_eq!(edge.size().width, MAX_DECODED_EDGE);
+        assert_eq!(edge.size().height, 16);
     }
 }
