@@ -616,9 +616,9 @@ export component Toggle inherits Rectangle {
         spacing: 8px; cross-axis-alignment: center;
         Rectangle {
             width: 32px; height: 18px; border-radius: 9px;
-            background: !root.enabled ? Theme.palette().surface-sunken : root.checked ? Theme.palette().accent : Theme.palette().surface-sunken;
+            background: !root.enabled ? Theme.palette().surface-sunken : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().surface : Theme.palette().surface-sunken;
             border-width: focus.has-focus ? 2px : 1px;
-            border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : Theme.palette().border-strong;
+            border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().ink-secondary : Theme.palette().border-strong;
             Rectangle {
                 x: root.checked ? 16px : 2px; y: 2px; width: 12px; height: 12px; border-radius: 6px;
                 background: root.checked ? Theme.palette().accent-ink : Theme.palette().ink-secondary;
@@ -917,7 +917,7 @@ export component ColorSwatch inherits Rectangle {
     callback clicked;
     width: 24px; height: 24px; border-radius: 12px;
     border-width: root.checked ? 2px : 1px;
-    border-color: root.checked ? Theme.palette().accent : Theme.palette().border-strong;
+    border-color: root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().ink-secondary : Theme.palette().border-strong;
     background: transparent;
     Rectangle {
         x: root.checked ? 2px : 1px; y: root.checked ? 2px : 1px;
@@ -926,7 +926,7 @@ export component ColorSwatch inherits Rectangle {
         border-radius: (parent.width - (root.checked ? 4px : 2px)) / 2;
         background: root.color-value;
     }
-    TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 export component Badge inherits Rectangle {

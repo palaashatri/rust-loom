@@ -388,6 +388,45 @@ pub(crate) fn paste_action(app: &WriterApp, state: &GuiState) {
         .or_else(|| clip.html.as_deref().map(paste_policy::visible_text))
         .filter(|text| !text.is_empty());
     if let Some(text) = text {
+        // A table cell holds one line: pasted line breaks become spaces, as typed
+        // ones do, and Markdown structure is not pasted into a cell.
+        let caret_offset = {
+            let selection = next.selection();
+            selection.anchor.min(selection.focus)
+        };
+        if next.table_cell_at_offset(caret_offset).is_some() {
+            let flat = text.replace("\r\n", " ").replace(['\r', '\n', '\t'], " ");
+            if replace_selection(&mut next, &flat) {
+                if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
+                app.set_status_left("Pasted text".into());
+            } else {
+                app.set_status_left("Paste failed: the text cannot be placed here".into());
+            }
+            return;
+        }
+        // Markdown becomes headings, lists, emphasis and tables, never raw markup.
+        if crate::markdown_paste::looks_like_markdown(&text) {
+            let blocks = crate::markdown_paste::parse(&text);
+            let insert_at = {
+                let selection = next.selection();
+                selection.anchor.min(selection.focus)
+            };
+            if replace_selection(&mut next, &crate::markdown_paste::plain_lines(&blocks)) {
+                let summary = crate::markdown_paste::format_inserted(&mut next, &blocks, insert_at);
+                if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
+                    return;
+                }
+                app.set_status_left(slint::SharedString::from(format!(
+                    "Pasted Markdown: {} headings, {} list items, {} tables",
+                    summary.headings, summary.list_items, summary.tables
+                )));
+            } else {
+                app.set_status_left("Paste failed: the text cannot be placed here".into());
+            }
+            return;
+        }
         if replace_selection(&mut next, &text) {
             if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
                 return;

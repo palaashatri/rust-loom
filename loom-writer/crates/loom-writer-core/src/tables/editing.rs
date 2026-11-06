@@ -28,6 +28,14 @@ pub fn apply_flat_text(table: &Table, new_flat: &str) -> Result<Table, String> {
 /// separator and cell checks run before any cell changes, so an error leaves
 /// the table untouched.
 pub fn apply_flat_text_in_place(table: &mut Table, new_flat: &str) -> Result<(), String> {
+    // A cell holds one line: line breaks in edited text (a paste, say) become
+    // spaces, as typed ones do. Separators are kept, since they define the cells.
+    let single_line: String = new_flat
+        .replace("\r\n", "\n")
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    let new_flat = single_line.as_str();
     let old_flat = flat_table_text(table);
     let old_separators: Vec<char> = old_flat
         .chars()
@@ -295,4 +303,21 @@ fn same_style(a: &TextRun, b: &TextRun) -> bool {
         && a.font_size_pt == b.font_size_pt
         && a.font_family == b.font_family
         && a.color == b.color
+}
+
+#[cfg(test)]
+mod line_break_tests {
+    use super::*;
+
+    #[test]
+    fn a_line_break_in_an_edited_cell_becomes_a_space() {
+        let mut table = Table::new(1, 2);
+        table.set_cell_text(0, 0, "Name");
+        table.set_cell_text(0, 1, "Score");
+        let edited = flat_table_text(&table).replace("Score", "first\nsecond\r\nthird");
+        apply_flat_text_in_place(&mut table, &edited).expect("apply edit");
+        let flat = flat_table_text(&table);
+        assert!(flat.contains("first second third"), "{flat:?}");
+        assert!(!flat.contains('\n') && !flat.contains('\r'), "{flat:?}");
+    }
 }

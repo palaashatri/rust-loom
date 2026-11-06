@@ -213,7 +213,14 @@ pub(super) fn set_shaped_glyphs(
     clip: RasterClip,
     default_ink_rgba: [u8; 4],
 ) -> Result<(), GlyphPaintError> {
-    let tiles = rasterize_shaped_tiles(shaped, frame, pixels_per_point, clip, default_ink_rgba)?;
+    let tiles = rasterize_shaped_tiles(
+        shaped,
+        frame,
+        frame,
+        pixels_per_point,
+        clip,
+        default_ink_rgba,
+    )?;
     row.glyph_tiles = ModelRc::new(VecModel::from(tiles));
     Ok(())
 }
@@ -253,6 +260,7 @@ pub(super) fn set_shaped_block_glyphs(
             tiles.extend(rasterize_shaped_tiles(
                 shaped,
                 line_frame,
+                frame,
                 pixels_per_point,
                 clip,
                 default_ink_rgba,
@@ -326,6 +334,7 @@ pub(super) fn set_shaped_block_glyphs_with_footnotes(
             tiles.extend(rasterize_shaped_tiles(
                 shaped,
                 line_frame,
+                frame,
                 pixels_per_point,
                 clip,
                 default_ink_rgba,
@@ -340,6 +349,7 @@ pub(super) fn set_shaped_block_glyphs_with_footnotes(
 fn rasterize_shaped_tiles(
     shaped: &WriterShapedVisualLine,
     frame: Frame,
+    origin: Frame,
     pixels_per_point: f32,
     clip: RasterClip,
     default_ink_rgba: [u8; 4],
@@ -448,7 +458,7 @@ fn rasterize_shaped_tiles(
                 pixels_per_point,
                 default_ink_rgba,
             );
-            push_glyph_tile(&mut tiles, bounds, frame, scale, pixels_per_point, pixels);
+            push_glyph_tile(&mut tiles, bounds, origin, scale, pixels_per_point, pixels);
         }
     }
     Ok(tiles)
@@ -457,7 +467,7 @@ fn rasterize_shaped_tiles(
 fn push_glyph_tile(
     tiles: &mut Vec<WriterGlyphTile>,
     bounds: RasterTileBounds,
-    frame: Frame,
+    origin: Frame,
     scale: f64,
     pixels_per_point: f32,
     pixels: Vec<u8>,
@@ -469,8 +479,8 @@ fn push_glyph_tile(
         slint::SharedPixelBuffer::clone_from_slice(&pixels, bounds.width_px, bounds.height_px);
     let source = slint::Image::from_rgba8_premultiplied(buffer);
     tiles.push(WriterGlyphTile {
-        x: (bounds.origin_x_px as f64 / scale - f64::from(frame.x)) as f32,
-        y: (bounds.origin_y_px as f64 / scale - f64::from(frame.y)) as f32,
+        x: (bounds.origin_x_px as f64 / scale - f64::from(origin.x)) as f32,
+        y: (bounds.origin_y_px as f64 / scale - f64::from(origin.y)) as f32,
         width: bounds.width_px as f32 / pixels_per_point,
         height: bounds.height_px as f32 / pixels_per_point,
         source,

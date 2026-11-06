@@ -33,6 +33,7 @@ mod list_keys;
 mod list_level_actions;
 mod local_menu;
 mod markdown_export;
+mod markdown_paste;
 mod multi_click;
 mod outline;
 mod page_setup_actions;

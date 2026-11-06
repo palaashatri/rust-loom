@@ -268,11 +268,11 @@ component FillSwatch inherits Rectangle {
     height: 24px;
     border-radius: 4px;
     background: root.swatch-color;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? root.ring : Theme.palette().border;
+    border-width: root.selected || hit.has-hover ? 2px : 1px;
+    border-color: root.selected ? root.ring : hit.has-hover ? Theme.palette().ink-secondary : Theme.palette().border;
     accessible-role: button;
     accessible-label: root.swatch-label;
-    TouchArea { clicked => { root.pick(root.swatch-index); } }
+    hit := TouchArea { clicked => { root.pick(root.swatch-index); } }
 }
 
 /// The eight fill choices, red first; right-to-left starts from the right edge.
