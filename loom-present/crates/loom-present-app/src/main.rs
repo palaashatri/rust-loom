@@ -1750,7 +1750,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     let app = PresentApp::new().map_err(|error| error.to_string())?;
-    window_chrome::install(&app);
+    window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
     appearance::start(
@@ -1824,6 +1824,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.invoke_view_state_changed();
         presenter::mirror_theme(app);
     });
+    window_chrome::on_change(|app| app.invoke_view_state_changed());
     let _ = local_menu::sync(&app, &menu_service);
 
     let app_ref = app.as_weak();
@@ -1924,6 +1925,7 @@ fn build_present_menu_bar() -> MenuBar {
         ]
         .into_iter()
         .chain(loom_desktop::appearance::menu_items())
+        .chain(loom_desktop::window_frame::menu_items())
         .collect(),
         vec![Menu::new(
             "Slide",
@@ -1994,6 +1996,7 @@ fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
         id if appearance::dispatch(app, id) => {}
+        id if window_chrome::dispatch(app, id) => {}
         id if slide_order::dispatch(app, id) => {}
         "app.palette" => app.invoke_open_palette(),
         _ => return false,
@@ -2032,6 +2035,12 @@ fn is_present_menu_command(id: &str) -> bool {
                 | "view.inspector"
                 | "view.navigator"
                 | "view.notes"
+                | "view.appearance.system"
+                | "view.appearance.light"
+                | "view.appearance.dark"
+                | "view.appearance.high_contrast"
+                | "view.window-frame.system"
+                | "view.window-frame.loom"
                 | "app.palette"
         )
 }

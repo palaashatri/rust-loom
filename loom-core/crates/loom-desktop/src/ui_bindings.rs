@@ -339,42 +339,139 @@ macro_rules! local_menu_bindings {
     };
 }
 
-/// Expand the custom-title-bar bindings for one application window.
+/// Expand the window-frame bindings for one application window.
+///
+/// Invoke inside a module of the application crate, naming the application's
+/// status-line setter: `loom_desktop::window_chrome_bindings!(MyApp, set_status_left);`.
 ///
 /// The window must declare `custom-chrome`, `no-frame: root.custom-chrome`, and
 /// the `window-drag`, `window-close`, and `window-resize(int)` callbacks that
 /// `loom-ui`'s `LoomTitleBar` and `LoomWindowResizeEdges` are wired to, and the
-/// application crate must depend on `i-slint-backend-winit`. Generates `install`
-/// and the `USES_CUSTOM_CHROME` constant. macOS keeps its native frame and menu.
+/// application crate must depend on `i-slint-backend-winit`. Generates:
+///
+/// * `start`: at startup, use the saved [`WindowFrame`](crate::window_frame::WindowFrame)
+///   (or the `LOOM_CUSTOM_CHROME=1` override, which is never written back);
+/// * `install`: the environment-only startup, for headless renders and journeys;
+/// * `apply`: switch the window live without remembering the choice;
+/// * `choose`: switch, remember, and announce the choice in the status line;
+/// * `dispatch`: run a `view.window-frame.*` command id from a menu or palette;
+/// * `current`: the frame the window is showing.
+///
+/// The platform frame is the default. macOS always keeps its native frame and
+/// menu bar, so there the Loom title bar is not offered.
 #[macro_export]
 macro_rules! window_chrome_bindings {
-    ($app:ty) => {
-        /// Whether this platform draws Loom's own title bar.
-        /// Native window frames are default; custom chrome is an opt-in via LOOM_CUSTOM_CHROME=1.
-        pub(crate) const USES_CUSTOM_CHROME: bool = false;
-
-        /// Whether this target supports the window operations needed by custom chrome.
-        const CUSTOM_CHROME_CALLBACKS_SUPPORTED: bool =
-            cfg!(any(target_os = "windows", target_os = "linux"));
-
-        fn custom_chrome_requested(callbacks_supported: bool, request: Option<&str>) -> bool {
-            callbacks_supported && request == Some("1")
+    ($app:ty, $status_setter:ident) => {
+        ::std::thread_local! {
+            static FRAME_STORE: ::std::cell::RefCell<
+                ::std::option::Option<$crate::window_frame::WindowFrameStore>,
+            > = const { ::std::cell::RefCell::new(::std::option::Option::None) };
+            static FRAME: ::std::cell::Cell<$crate::window_frame::WindowFrame> =
+                const { ::std::cell::Cell::new($crate::window_frame::WindowFrame::System) };
+            static FRAME_LISTENER: ::std::cell::RefCell<
+                ::std::option::Option<::std::rc::Rc<dyn Fn(&$app)>>,
+            > = const { ::std::cell::RefCell::new(::std::option::Option::None) };
         }
 
-        /// Whether custom chrome was requested via environment variable.
-        pub(crate) fn uses_custom_chrome() -> bool {
-            let request = ::std::env::var("LOOM_CUSTOM_CHROME").ok();
-            custom_chrome_requested(CUSTOM_CHROME_CALLBACKS_SUPPORTED, request.as_deref())
+        /// Run `listener` after every change of frame, so menu check marks
+        /// follow the choice from any surface.
+        #[allow(dead_code)]
+        pub(crate) fn on_change(listener: impl Fn(&$app) + 'static) {
+            FRAME_LISTENER.with(|slot| {
+                *slot.borrow_mut() = ::std::option::Option::Some(::std::rc::Rc::new(listener))
+            });
         }
 
-        /// Turn on custom chrome when requested and connect its callbacks. Safe in headless
-        /// renders: window operations then find no winit window and do nothing.
-        pub(crate) fn install(app: &$app) {
-            let custom = uses_custom_chrome();
-            app.set_custom_chrome(custom);
+        /// The frame the window is showing.
+        #[allow(dead_code)]
+        pub(crate) fn current(_app: &$app) -> $crate::window_frame::WindowFrame {
+            FRAME.with(::std::cell::Cell::get)
+        }
+
+        /// Switch the window to a frame, without remembering it. A request for
+        /// Loom's title bar on a platform that cannot draw it keeps the
+        /// platform frame.
+        #[allow(dead_code)]
+        pub(crate) fn apply(app: &$app, frame: $crate::window_frame::WindowFrame) {
+            use ::slint::ComponentHandle as _;
+            let own_title_bar =
+                frame.draws_own_title_bar() && $crate::window_frame::SUPPORTED;
+            let shown = if own_title_bar {
+                $crate::window_frame::WindowFrame::Loom
+            } else {
+                $crate::window_frame::WindowFrame::System
+            };
+            app.set_custom_chrome(own_title_bar);
+            FRAME.with(|slot| slot.set(shown));
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            if custom {
-                wire_window_chrome(app);
+            wire_window_chrome(app);
+            let listener = FRAME_LISTENER.with(|slot| slot.borrow().clone());
+            if let ::std::option::Option::Some(listener) = listener {
+                listener(app);
+            }
+        }
+
+        /// Startup with the per-user store of one application id: use the
+        /// environment override or the saved frame, and remember the store for
+        /// later changes.
+        #[allow(dead_code)]
+        pub(crate) fn start(app: &$app, application_id: &str) {
+            let store = $crate::window_frame::WindowFrameStore::for_application(application_id);
+            let environment = ::std::env::var($crate::window_frame::ENVIRONMENT_OVERRIDE).ok();
+            let frame = $crate::window_frame::startup_frame(
+                &store,
+                $crate::window_frame::SUPPORTED,
+                environment.as_deref(),
+            );
+            FRAME_STORE.with(|slot| *slot.borrow_mut() = ::std::option::Option::Some(store));
+            apply(app, frame);
+        }
+
+        /// Environment-only startup, with no store: headless renders and
+        /// journeys never read or write a user's saved choice.
+        #[allow(dead_code)]
+        pub(crate) fn install(app: &$app) {
+            let environment = ::std::env::var($crate::window_frame::ENVIRONMENT_OVERRIDE).ok();
+            let forced = $crate::window_frame::SUPPORTED && environment.as_deref() == ::std::option::Option::Some("1");
+            apply(
+                app,
+                if forced {
+                    $crate::window_frame::WindowFrame::Loom
+                } else {
+                    $crate::window_frame::WindowFrame::System
+                },
+            );
+        }
+
+        /// A user's choice: switch, remember, and announce it in the status
+        /// line. A failed write is reported but the switch stays.
+        #[allow(dead_code)]
+        pub(crate) fn choose(app: &$app, frame: $crate::window_frame::WindowFrame) {
+            if frame.draws_own_title_bar() && !$crate::window_frame::SUPPORTED {
+                app.$status_setter(::slint::SharedString::from(
+                    "The Loom title bar is not available on this platform; macOS keeps its native frame.",
+                ));
+                return;
+            }
+            apply(app, frame);
+            let saved = FRAME_STORE
+                .with(|slot| slot.borrow().as_ref().map(|store| store.save(frame)));
+            let mut message = ::std::format!("Window frame: {}.", frame.label());
+            if let ::std::option::Option::Some(::std::result::Result::Err(error)) = saved {
+                message.push_str(&::std::format!(" (could not be remembered: {error})"));
+            }
+            app.$status_setter(::slint::SharedString::from(message));
+        }
+
+        /// Run a `view.window-frame.*` command; false for any other id.
+        #[allow(dead_code)]
+        pub(crate) fn dispatch(app: &$app, id: &str) -> bool {
+            match $crate::window_frame::WindowFrame::from_command_id(id) {
+                ::std::option::Option::Some(frame) => {
+                    choose(app, frame);
+                    true
+                }
+                ::std::option::Option::None => false,
             }
         }
 

@@ -21,8 +21,10 @@ pub mod macos_window;
 #[cfg(not(target_os = "macos"))]
 pub mod macos_window;
 pub mod menu;
+mod settings_file;
 pub mod ui_bindings;
 pub mod ui_font;
+pub mod window_frame;
 pub use appearance::{Appearance, AppearanceStore};
 pub use menu::{
     build_standard_menu_bar, standard_command_state_projection, CommandAction, CommandSource,

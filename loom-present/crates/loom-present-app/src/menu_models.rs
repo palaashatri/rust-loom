@@ -87,6 +87,7 @@ pub(crate) fn menu_projection(
     projection.insert(inspector);
     view_state::project(&mut projection, app);
     loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
+    loom_desktop::window_frame::project_checks(&mut projection, crate::window_chrome::current(app));
     slide_order::project(&mut projection, &session);
 
     let mut slide_delete = projection.get("slide.delete").cloned().ok_or_else(|| {

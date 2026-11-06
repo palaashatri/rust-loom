@@ -401,6 +401,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "view.inspector" => app.invoke_toggle_inspector(),
         id if view_state::dispatch(app, id) => {}
         id if appearance::dispatch(app, id) => {}
+        id if window_chrome::dispatch(app, id) => {}
         "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
         "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
         "format.underline" | "writer.style.underline-all" => app.invoke_toggle_underline(),
@@ -722,6 +723,7 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
     catalog.extend(paragraph_alignment::command_specs());
     catalog.extend(formatting_actions::command_specs());
     catalog.extend(appearance::command_specs());
+    catalog.extend(window_chrome::command_specs());
     catalog.extend(table_actions::table_command_specs());
     catalog
 }
@@ -3380,7 +3382,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     let app = WriterApp::new().map_err(|e| e.to_string())?;
-    window_chrome::install(&app);
+    window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
     appearance::start(
@@ -3510,6 +3512,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     // A choice from any surface refreshes the menu check marks.
     appearance::on_change(|app| app.invoke_view_state_changed());
+    window_chrome::on_change(|app| app.invoke_view_state_changed());
     let app_ref = app.as_weak();
     let registry_for_menu = state.registry.clone();
     menu_service

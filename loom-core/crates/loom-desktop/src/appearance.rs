@@ -8,14 +8,12 @@
 //! and the glue that applies a choice to a window live in
 //! [`appearance_bindings!`](crate::appearance_bindings).
 
-use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::settings_file;
 use crate::{CommandStateProjection, MenuItem};
 
-/// Largest settings file that is read. A bigger file is treated as corrupt.
-const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
 /// Settings file key that holds the appearance.
 const KEY: &str = "appearance";
 /// Name of the radio group the four menu rows share.
@@ -150,12 +148,9 @@ impl AppearanceStore {
     }
 
     /// The per-user store for one application id such as `org.loom.sheets`.
-    ///
-    /// The directory is `LOOM_CONFIG_DIR` when set; otherwise `%APPDATA%` on
-    /// Windows, `~/Library/Application Support` on macOS, and
-    /// `$XDG_CONFIG_HOME` or `~/.config` elsewhere, with `loom/<id>` below it.
+    /// The location is given by [`settings_file::path_for_application`].
     pub fn for_application(application_id: &str) -> Self {
-        Self::at(settings_directory(application_id).join("settings.toml"))
+        Self::at(settings_file::path_for_application(application_id))
     }
 
     /// The settings file path.
@@ -166,54 +161,15 @@ impl AppearanceStore {
     /// The saved choice. A missing, unreadable, oversized or corrupt file, or
     /// an unknown value, is `System`.
     pub fn load(&self) -> Appearance {
-        self.read_text()
+        settings_file::read(&self.path, KEY)
             .as_deref()
-            .and_then(parse_appearance)
+            .and_then(Appearance::from_id)
             .unwrap_or_default()
     }
 
-    /// Remembers a choice. The file is replaced in one step, so a crash never
-    /// leaves half a file. Other `key = value` lines already in the file are
-    /// kept.
+    /// Remembers a choice. Other settings already in the file are kept.
     pub fn save(&self, appearance: Appearance) -> io::Result<()> {
-        let mut text = String::from("# Loom settings\n");
-        text.push_str(&format!("{KEY} = \"{}\"\n", appearance.id()));
-        if let Some(existing) = self.read_text() {
-            for line in existing.lines() {
-                let trimmed = line.trim();
-                let is_other_setting = trimmed
-                    .split_once('=')
-                    .is_some_and(|(key, _)| !trimmed.starts_with('#') && key.trim() != KEY);
-                if is_other_setting {
-                    text.push_str(trimmed);
-                    text.push('\n');
-                }
-            }
-        }
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let mut temporary = self.path.clone().into_os_string();
-        temporary.push(format!(".tmp{}", std::process::id()));
-        let temporary = PathBuf::from(temporary);
-        let result = (|| {
-            let mut file = fs::File::create(&temporary)?;
-            file.write_all(text.as_bytes())?;
-            file.sync_all()?;
-            fs::rename(&temporary, &self.path)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
-    }
-
-    fn read_text(&self) -> Option<String> {
-        let metadata = fs::metadata(&self.path).ok()?;
-        if !metadata.is_file() || metadata.len() > MAX_SETTINGS_BYTES {
-            return None;
-        }
-        fs::read_to_string(&self.path).ok()
+        settings_file::write(&self.path, KEY, appearance.id())
     }
 }
 
@@ -226,42 +182,11 @@ pub fn startup_appearance(store: &AppearanceStore, flag: Option<&str>) -> Appear
     }
 }
 
-fn parse_appearance(text: &str) -> Option<Appearance> {
-    text.lines().find_map(|line| {
-        let (key, value) = line.trim().split_once('=')?;
-        if key.trim() != KEY {
-            return None;
-        }
-        Appearance::from_id(value.trim().trim_matches('"'))
-    })
-}
-
-fn settings_directory(application_id: &str) -> PathBuf {
-    if let Some(directory) = std::env::var_os("LOOM_CONFIG_DIR") {
-        return PathBuf::from(directory).join(application_id);
-    }
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|home| {
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-        })
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-    }
-    .unwrap_or_else(|| PathBuf::from(".loom-config"));
-    base.join("loom").join(application_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{CommandState, Menu, MenuBar};
+    use std::fs;
 
     fn temporary_store(name: &str) -> (PathBuf, AppearanceStore) {
         let directory = std::env::temp_dir().join(format!(

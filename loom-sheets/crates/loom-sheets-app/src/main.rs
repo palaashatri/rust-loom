@@ -1136,6 +1136,7 @@ fn menu_projection(
     inspector.checked = Some(app.get_show_inspector());
     projection.insert(inspector);
     loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
+    loom_desktop::window_frame::project_checks(&mut projection, window_chrome::current(app));
 
     Ok(projection)
 }
@@ -2264,7 +2265,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
-    window_chrome::install(&app);
+    window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
     appearance::start(
@@ -2627,11 +2628,18 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 }
 
 fn wire_appearance_menu_sync(menu_service: &Arc<NativeMenuBar>, state: &Rc<GuiState>) {
+    let frame_menu_service = menu_service.clone();
+    let frame_state = Rc::downgrade(state);
     let menu_service = menu_service.clone();
     let state = Rc::downgrade(state);
     appearance::on_change(move |app| {
         if let Some(state) = state.upgrade() {
             sync_menu_state(&menu_service, app, &state);
+        }
+    });
+    window_chrome::on_change(move |app| {
+        if let Some(state) = frame_state.upgrade() {
+            sync_menu_state(&frame_menu_service, app, &state);
         }
     });
 }

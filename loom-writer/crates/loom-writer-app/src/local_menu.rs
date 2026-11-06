@@ -35,6 +35,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "view.appearance.light",
     "view.appearance.dark",
     "view.appearance.high_contrast",
+    "view.window-frame.system",
+    "view.window-frame.loom",
     "format.bold",
     "format.italic",
     "format.underline",
@@ -121,6 +123,7 @@ pub(crate) fn menu_projection(
 
     view_state::project(&mut projection, app);
     loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
+    loom_desktop::window_frame::project_checks(&mut projection, crate::window_chrome::current(app));
 
     Ok(projection)
 }
@@ -156,6 +159,7 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                 MenuItem::check("view.navigator", "Outline Navigator", false),
             ],
             loom_desktop::appearance::menu_items(),
+            loom_desktop::window_frame::menu_items(),
         ]
         .concat(),
         vec![

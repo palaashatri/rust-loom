@@ -37,6 +37,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "view.appearance.light",
     "view.appearance.dark",
     "view.appearance.high_contrast",
+    "view.window-frame.system",
+    "view.window-frame.loom",
     "app.palette",
 ];
 
