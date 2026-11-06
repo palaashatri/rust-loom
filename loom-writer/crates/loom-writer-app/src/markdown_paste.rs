@@ -138,9 +138,15 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
 }
 
 /// The text the pasted blocks occupy in the document, one line per block. A
-/// table keeps an empty line where it will be placed.
+/// table keeps an empty line where it will be placed. A paste that ends in a
+/// table gets one more empty line after it, so the caret and any text typed
+/// next land in a paragraph below the table, not in its last cell.
 pub(crate) fn plain_lines(blocks: &[Block]) -> String {
-    blocks.iter().map(block_text).collect::<Vec<_>>().join("\n")
+    let mut text = blocks.iter().map(block_text).collect::<Vec<_>>().join("\n");
+    if matches!(blocks.last(), Some(Block::Table(_))) {
+        text.push('\n');
+    }
+    text
 }
 
 /// Formats the plain lines that `plain_lines` produced, once they are in the
@@ -155,11 +161,8 @@ pub(crate) fn format_inserted(
     let mut summary = Summary::default();
     let mut tables: Vec<(usize, Vec<Vec<String>>)> = Vec::new();
     let mut cursor = insert_at;
-    let total: usize = blocks
-        .iter()
-        .map(|block| block_text(block).len())
-        .sum::<usize>()
-        + blocks.len().saturating_sub(1);
+    // The length of exactly the text that `plain_lines` inserted at `insert_at`.
+    let total = plain_lines(blocks).len();
     for block in blocks {
         let text = block_text(block);
         let start = cursor;
@@ -527,6 +530,19 @@ mod tests {
                 vec!["Name".to_string(), "Score".to_string()],
                 vec!["Ada".to_string(), "9".to_string()],
             ])]
+        );
+    }
+
+    #[test]
+    fn a_paste_ending_in_a_table_leaves_the_caret_below_it() {
+        let blocks = parse("Intro line\n\n| a | b |\n| --- | --- |\n| 1 | 2 |");
+        let mut document = document_with("");
+        document.replace_paragraphs(&plain_lines(&blocks));
+        format_inserted(&mut document, &blocks, 0);
+        let caret = document.selection().focus;
+        assert!(
+            document.table_cell_at_offset(caret).is_none(),
+            "the caret after a pasted table must not sit in its cell (caret {caret})"
         );
     }
 

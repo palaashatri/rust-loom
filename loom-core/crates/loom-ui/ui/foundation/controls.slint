@@ -140,7 +140,7 @@ export component LoomIconButton inherits Rectangle {
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
+        : touch.has-hover ? Theme.palette().surface-sunken
         : transparent;
     accessible-role: button;
     accessible-enabled: root.enabled;
