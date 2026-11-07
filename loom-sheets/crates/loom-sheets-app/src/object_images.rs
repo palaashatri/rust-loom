@@ -31,6 +31,13 @@ const CACHE_ENTRIES: usize = 16;
 /// this edge: at most 16 MiB of RGBA. Stored document bytes and XLSX export
 /// keep the original image untouched.
 const MAX_DECODED_EDGE: u32 = 2048;
+/// Largest decoded RGBA raster the decoder may allocate: 4096 x 4096, 64 MiB.
+/// The declared size is read from the file header before any pixel buffer is
+/// allocated, so a larger raster is refused outright. The decoder's own
+/// allocation limit is twice this. The RGBA conversion that follows adds at most
+/// this figure again. Peak memory for one decode is therefore a few multiples
+/// of this value; the cache budget is not a hard memory limit.
+const MAX_SOURCE_DECODE_BYTES: u64 = 64 * 1024 * 1024;
 
 // A bounded image must always fit the budget, or it would silently go uncached.
 const _: () =
@@ -220,10 +227,36 @@ fn decode_embedded(bytes: &[u8], svg: bool) -> Image {
     if svg {
         return Image::load_from_svg_data(bytes).unwrap_or_default();
     }
-    match image::load_from_memory(bytes) {
-        Ok(decoded) => bounded_image(decoded.into_rgba8()),
-        Err(_) => Image::default(),
+    match decode_raster(bytes) {
+        Some(decoded) => bounded_image(decoded.into_rgba8()),
+        None => Image::default(),
     }
+}
+
+/// Decodes an embedded raster. Returns `None` when it is undecodable or when its
+/// header declares a size above `MAX_SOURCE_DECODE_BYTES`. A refused image shows
+/// as an empty object, the same as an undecodable one.
+fn decode_raster(bytes: &[u8]) -> Option<image::DynamicImage> {
+    let reader = || {
+        image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()
+    };
+    let (width, height) = reader()?.into_dimensions().ok()?;
+    if !within_decode_budget(width, height) {
+        return None;
+    }
+    let mut reader = reader()?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_SOURCE_DECODE_BYTES * 2);
+    reader.limits(limits);
+    reader.decode().ok()
+}
+
+/// Whether a raster of this declared size may be decoded. Both sides fit in
+/// `u64`, so the comparison cannot overflow at the `u32` extremes.
+fn within_decode_budget(width: u32, height: u32) -> bool {
+    u64::from(width) * u64::from(height) <= MAX_SOURCE_DECODE_BYTES / 4
 }
 
 /// Copies a decoded raster into a Slint handle no larger than `MAX_DECODED_EDGE`.
@@ -458,5 +491,78 @@ mod tests {
         let edge = image_for(&object(solid_png(MAX_DECODED_EDGE, 16), "edge.png"));
         assert_eq!(edge.size().width, MAX_DECODED_EDGE);
         assert_eq!(edge.size().height, 16);
+    }
+
+    #[test]
+    fn the_decode_budget_is_inclusive_and_refuses_larger_declared_sizes() {
+        // 4096 x 4096 RGBA is exactly the 64 MiB budget and is allowed.
+        assert!(within_decode_budget(4096, 4096));
+        assert!(!within_decode_budget(4097, 4096));
+        assert!(!within_decode_budget(10_000, 10_000));
+        // The extremes must not overflow the comparison. A one-pixel-wide strip of
+        // u32::MAX rows is still about 4 billion pixels and must be refused.
+        assert!(!within_decode_budget(u32::MAX, u32::MAX));
+        assert!(!within_decode_budget(1, u32::MAX));
+        assert!(within_decode_budget(1, 16_777_216));
+    }
+
+    /// A PNG whose header declares `width` x `height` RGBA, with a valid but empty
+    /// image stream. It is never fully decoded, so the test stays cheap.
+    fn png_declaring(width: u32, height: u32) -> Vec<u8> {
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        // 8-bit RGBA, deflate, adaptive filtering, no interlace.
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        // A zlib stream holding one final stored block of zero bytes.
+        let empty_stream = [
+            0x78, 0x01, 0x01, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01,
+        ];
+        let chunks: [(&[u8; 4], &[u8]); 3] =
+            [(b"IHDR", &ihdr), (b"IDAT", &empty_stream), (b"IEND", &[])];
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (kind, data) in chunks {
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut body = kind.to_vec();
+            body.extend_from_slice(data);
+            bytes.extend_from_slice(&body);
+            bytes.extend_from_slice(&crc32(&body).to_be_bytes());
+        }
+        bytes
+    }
+
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = u32::MAX;
+        for &byte in data {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    #[test]
+    fn an_oversized_decode_is_refused_before_pixels_are_allocated() {
+        // A real 3000 x 3000 image is 36 MB decoded: inside the budget, so it decodes.
+        assert!(decode_raster(&solid_png(3000, 3000)).is_some());
+        // The header declares 5000 x 5000 (100 MB decoded) with no pixel data.
+        let header = png_declaring(5000, 5000);
+        let declared = image::ImageReader::new(Cursor::new(&header))
+            .with_guessed_format()
+            .expect("format")
+            .into_dimensions()
+            .expect("the header is readable");
+        assert_eq!(
+            declared,
+            (5000, 5000),
+            "the refusal must come from the declared size"
+        );
+        assert!(decode_raster(&header).is_none());
+        assert_eq!(image_for(&object(header, "refused.png")).size().width, 0);
     }
 }
