@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 
-import { ObjectPart, ObjectPartView, ElementInk } from "object_part.slint";
+import { ObjectPart, ObjectPartView, ElementInk, DocumentInk } from "object_part.slint";
 export { ObjectPart, ElementInk }
 
 /// The editor canvas's table and chart parts, one list per element.
@@ -109,12 +109,14 @@ export component PresentSlideCanvas inherits Rectangle {
             property <float> text-scale: self.width / 840px;
             x: max(self.margin, (parent.width - self.width) / 2);
             y: max(self.margin, (parent.height - self.height) / 2);
-            width: min(root.fit-screen ? 100000px : 2520px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * root.zoom;
+            // A slideshow fits the show viewport at scale 1; the editor's page zoom
+            // only magnifies the editing canvas and is never carried into playback.
+            width: min(root.fit-screen ? 100000px : 2520px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio))) * (root.fit-screen ? 1.0 : root.zoom);
             height: min(parent.height - self.margin * 2, self.width * self.slide-ratio);
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
-            background: Theme.palette().paper;
+            background: DocumentInk.paper;
             drop-shadow-blur: root.miniature ? 0px : 16px;
             drop-shadow-offset-y: root.miniature ? 0px : 6px;
             drop-shadow-color: root.miniature ? transparent : Theme.palette().shadow;
@@ -184,11 +186,11 @@ export component PresentSlideCanvas inherits Rectangle {
                 border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
                 border-width: root.editing-enabled && (element-focus.has-focus || (root.element-selected.length > idx && root.element-selected[idx])) ? 2px : 0px;
                 border-color: element-focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
-                background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
-                    : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
-                    : root.element-types[idx] == 5 ? Theme.palette().content-accent
-                    : root.element-types[idx] == 7 ? Theme.palette().paper
-                    : root.element-types[idx] == 8 ? Theme.palette().paper
+                background: root.element-types[idx] == 3 ? DocumentInk.shape-fill
+                    : root.element-types[idx] == 4 ? DocumentInk.circle-fill
+                    : root.element-types[idx] == 5 ? DocumentInk.stat-fill
+                    : root.element-types[idx] == 7 ? DocumentInk.paper
+                    : root.element-types[idx] == 8 ? DocumentInk.paper
                     : transparent;
                 transform-origin: { x: self.width / 2, y: self.height / 2 };
                 transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;
@@ -233,7 +235,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     width: parent.width * 0.88 * (slot + 1.0 < parent.bar-count ? 1.0 : parent.bar-last);
                     height: max(1px, text-px * 0.45);
                     border-radius: self.height / 2;
-                    background: Theme.palette().paper-muted;
+                    background: DocumentInk.muted;
                     opacity: 0.45;
                 }
 
@@ -250,9 +252,8 @@ export component PresentSlideCanvas inherits Rectangle {
                     font-family: Theme.document-font-family;
                     font-size: text-px;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
-                    color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
-                        : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
-                        : Theme.palette().paper-ink;
+                    color: root.element-types[idx] == 1 || root.element-types[idx] == 2 ? DocumentInk.muted
+                        : DocumentInk.ink;
                     horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
                     vertical-alignment: center;
                     wrap: word-wrap;
@@ -267,7 +268,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     text: root.element-placeholders[idx];
                     font-family: Theme.document-font-family;
                     font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display : Theme.tokens.typography.body-large) * slide.text-scale;
-                    color: Theme.palette().paper-muted;
+                    color: DocumentInk.muted;
                     opacity: 0.6;
                     horizontal-alignment: root.element-types[idx] == 0 ? center : left;
                     vertical-alignment: center;
@@ -344,12 +345,13 @@ export component PresentSlideCanvas inherits Rectangle {
                     y: ObjectParts.active-cells[idx].fy * parent.height;
                     width: ObjectParts.active-cells[idx].fw * parent.width;
                     height: ObjectParts.active-cells[idx].fh * parent.height;
-                    background: Theme.palette().paper;
+                    background: DocumentInk.paper;
                     accessible-role: none;
                 }
 
                 if root.editing-enabled && root.editing-idx == idx : TextInput {
-                    font-family: Theme.document-font-family;
+                    font-family: (self.in-cell || self.styled) && ObjectParts.active-cells[idx].family != ""
+                        ? ObjectParts.active-cells[idx].family : Theme.document-font-family;
                     // A table edits one cell, in place, with that cell's own text.
                     property <bool> in-cell: root.element-types[idx] == 7 && ObjectParts.active-cells.length > idx;
                     // A text object with its own style edits in that style.
@@ -377,7 +379,7 @@ export component PresentSlideCanvas inherits Rectangle {
                         : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
                     font-weight: self.styled ? (ObjectParts.active-cells[idx].bold ? 700 : 400) : root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     font-italic: self.styled && ObjectParts.active-cells[idx].italic;
-                    color: self.styled ? (ObjectParts.active-cells[idx].ink == 1 ? Theme.palette().paper-ink : ObjectParts.active-cells[idx].ink == 2 ? Theme.palette().paper-muted : ObjectParts.active-cells[idx].ink == 3 ? Theme.palette().ink : ObjectParts.active-cells[idx].fg) : Theme.palette().paper-ink;
+                    color: self.styled ? (ObjectParts.active-cells[idx].ink == 1 ? DocumentInk.ink : ObjectParts.active-cells[idx].ink == 2 ? DocumentInk.muted : ObjectParts.active-cells[idx].ink == 3 ? DocumentInk.ink : ObjectParts.active-cells[idx].fg) : DocumentInk.ink;
                     horizontal-alignment: self.styled ? (ObjectParts.active-cells[idx].align == 1 ? center : ObjectParts.active-cells[idx].align == 2 ? right : left) : root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
                     vertical-alignment: center;
                     wrap: word-wrap;

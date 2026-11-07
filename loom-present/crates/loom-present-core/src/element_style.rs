@@ -42,10 +42,60 @@ pub struct ElementStyle {
     /// `None` follows the element type (titles are centred).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TextAlign>,
+    /// A typeface name such as `Aptos`; `None` follows the slide theme's face.
+    /// The name is trimmed and validated when loaded (see
+    /// [`normalize_font_family`]); a stored value that is not a usable family
+    /// is ignored rather than handed to the renderer.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_font_family"
+    )]
+    pub font_family: Option<String>,
 }
 
 /// Smallest and largest text size the editor offers, in points.
 pub const FONT_SIZE_RANGE: (f32, f32) = (6.0, 200.0);
+
+/// Longest font family name the editor accepts, in characters.
+pub const FONT_FAMILY_MAX_CHARS: usize = 128;
+
+/// Trims a font family name and checks it can be written to a deck and a
+/// `.pptx` run. Empty names are rejected: following the theme is `None`, not
+/// an empty string, and PowerPoint's `+mj-lt` / `+mn-lt` theme references are
+/// not family names either.
+pub fn normalize_font_family(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("A font family name cannot be empty".to_string());
+    }
+    if name.starts_with('+') {
+        return Err("A theme font reference is not a font family name".to_string());
+    }
+    if name.chars().count() > FONT_FAMILY_MAX_CHARS {
+        return Err(format!(
+            "Font family names are limited to {FONT_FAMILY_MAX_CHARS} characters"
+        ));
+    }
+    if name
+        .chars()
+        .any(|ch| ch.is_control() || matches!(ch, '\u{FFFE}' | '\u{FFFF}'))
+    {
+        return Err("A font family name cannot contain control characters".to_string());
+    }
+    Ok(name.to_string())
+}
+
+/// Loads a stored family through [`normalize_font_family`], so a hand-edited
+/// theme token, control character or over-long name falls back to the theme
+/// instead of reaching the renderer or the exporter.
+fn deserialize_font_family<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.and_then(|name| normalize_font_family(&name).ok()))
+}
 
 /// The colours the inspector offers for text and fills.
 pub const PALETTE: [&str; 7] = [
@@ -137,11 +187,82 @@ mod tests {
             italic: true,
             color: Some("#1565C0".into()),
             align: Some(TextAlign::Right),
+            font_family: Some("Aptos".into()),
             ..Default::default()
         };
         let back: ElementStyle =
             serde_json::from_str(&serde_json::to_string(&style).unwrap()).unwrap();
         assert_eq!(back, style);
+    }
+
+    #[test]
+    fn a_font_family_is_trimmed_capped_and_refuses_empty_and_control_characters() {
+        assert_eq!(
+            normalize_font_family("  Aptos Display  ").unwrap(),
+            "Aptos Display"
+        );
+        assert_eq!(
+            normalize_font_family("Noto Sans עברית").unwrap(),
+            "Noto Sans עברית",
+            "a right-to-left family name is kept"
+        );
+        assert!(normalize_font_family("").is_err());
+        assert!(normalize_font_family(" \t\n ").is_err(), "trimmed empty");
+        assert!(
+            normalize_font_family("+mj-lt").is_err(),
+            "a theme reference is not a family"
+        );
+        assert!(
+            normalize_font_family("Aptos\u{0007}").is_err(),
+            "control characters are rejected"
+        );
+        let longest = "A".repeat(FONT_FAMILY_MAX_CHARS);
+        assert_eq!(normalize_font_family(&longest).unwrap(), longest);
+        assert!(
+            normalize_font_family(&"A".repeat(FONT_FAMILY_MAX_CHARS + 1)).is_err(),
+            "one character over the cap is rejected"
+        );
+    }
+
+    #[test]
+    fn an_unset_font_family_adds_nothing_to_a_document_but_a_set_one_round_trips() {
+        let plain = serde_json::to_string(&ElementStyle::default()).unwrap();
+        assert_eq!(plain, "{}", "existing documents keep their bytes");
+        let styled = ElementStyle {
+            font_family: Some("Aptos".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&styled).unwrap();
+        assert!(json.contains("\"font_family\":\"Aptos\""), "{json}");
+        let back: ElementStyle = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, styled);
+        let older: ElementStyle = serde_json::from_str("{}").unwrap();
+        assert_eq!(older.font_family, None, "a document from before this field");
+    }
+
+    #[test]
+    fn a_loaded_family_that_is_not_usable_falls_back_to_the_theme() {
+        let theme = serde_json::from_str::<ElementStyle>(r#"{"font_family":"+mj-lt"}"#).unwrap();
+        assert_eq!(theme.font_family, None, "a theme token is not a family");
+        let over = serde_json::from_str::<ElementStyle>(&format!(
+            r#"{{"font_family":"{}"}}"#,
+            "A".repeat(FONT_FAMILY_MAX_CHARS + 1)
+        ))
+        .unwrap();
+        assert_eq!(
+            over.font_family, None,
+            "an over-long stored name is ignored"
+        );
+        let control =
+            serde_json::from_str::<ElementStyle>("{\"font_family\":\"Aptos\\u0007\"}").unwrap();
+        assert_eq!(control.font_family, None, "a control character is ignored");
+        let padded =
+            serde_json::from_str::<ElementStyle>(r#"{"font_family":"  Aptos  "}"#).unwrap();
+        assert_eq!(
+            padded.font_family.as_deref(),
+            Some("Aptos"),
+            "a valid stored name is trimmed on load"
+        );
     }
 
     use crate::{
@@ -180,6 +301,7 @@ mod tests {
             color: Some("#1565C0".into()),
             fill: Some("#E65100".into()),
             align: Some(TextAlign::Right),
+            font_family: Some("Aptos".into()),
         };
         let session = deck_with(vec![
             element("styled", ElementType::Title, "Styled title", style.clone()),
@@ -207,6 +329,16 @@ mod tests {
         assert!(xml.contains(" i=\"1\""), "italic is written");
         assert!(xml.contains("algn=\"r\""), "alignment is written");
         assert!(
+            xml.contains("<a:latin typeface=\"Aptos\"/>")
+                && xml.contains("<a:ea typeface=\"Aptos\"/>")
+                && xml.contains("<a:cs typeface=\"Aptos\"/>"),
+            "the element's own family is written in its run properties: {xml}"
+        );
+        assert!(
+            !xml.contains("+mj-lt"),
+            "an explicit family replaces the theme's heading face: {xml}"
+        );
+        assert!(
             xml.contains("1565C0") && xml.contains("E65100"),
             "text colour and fill"
         );
@@ -228,6 +360,141 @@ mod tests {
             find("rect").style.is_default(),
             "so does a default-filled shape"
         );
+    }
+
+    #[test]
+    fn an_unset_family_keeps_the_theme_face_in_pptx() {
+        let session = deck_with(vec![
+            element(
+                "title",
+                ElementType::Title,
+                "Themed",
+                ElementStyle::default(),
+            ),
+            element(
+                "body",
+                ElementType::BodyText,
+                "Body words",
+                ElementStyle::default(),
+            ),
+        ]);
+        let bytes = export_pptx(&session).expect("export");
+        let archive = loom_package::zip::PackageArchive::from_bytes(&bytes).unwrap();
+        let xml =
+            String::from_utf8(archive.get("ppt/slides/slide1.xml").unwrap().to_vec()).unwrap();
+        assert!(
+            xml.contains("<a:latin typeface=\"+mj-lt\"/>"),
+            "a title without its own family still follows the theme's heading face: {xml}"
+        );
+        assert!(
+            xml.contains("Body words") && !xml.contains("typeface=\"Inter\""),
+            "an unset body family writes no explicit face: {xml}"
+        );
+    }
+
+    #[test]
+    fn a_powerpoint_latin_typeface_imports_but_theme_references_do_not() {
+        let explicit = "<p:sp><p:spPr><a:xfrm><a:off x=\"1219200\" y=\"1219200\"/><a:ext cx=\"6096000\" cy=\"1219200\"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr lang=\"en-US\" sz=\"2400\"><a:latin typeface=\"  Georgia  \"/><a:ea typeface=\"Georgia\"/></a:rPr><a:t>Serif</a:t></a:r></a:p></p:txBody></p:sp>";
+        let style =
+            crate::pptx_import::parse_shape_style_for_tests(explicit, &ElementType::BodyText);
+        assert_eq!(
+            style.font_family.as_deref(),
+            Some("Georgia"),
+            "an explicit family is trimmed and kept"
+        );
+
+        let themed = explicit.replace("  Georgia  ", "+mj-lt");
+        let style = crate::pptx_import::parse_shape_style_for_tests(&themed, &ElementType::Title);
+        assert_eq!(
+            style.font_family, None,
+            "a +mj-lt theme reference is not an element family"
+        );
+
+        // PowerPoint can put the theme face on an earlier run and a real family
+        // on a later one in the same shape; the explicit family still wins.
+        let later = "<p:sp><p:spPr/><p:txBody><a:p><a:r><a:rPr lang=\"en-US\"><a:latin typeface=\"+mn-lt\"/></a:rPr><a:t>One</a:t></a:r><a:r><a:rPr lang=\"en-US\"><a:latin typeface=\"Georgia\"/></a:rPr><a:t>Two</a:t></a:r></a:p></p:txBody></p:sp>";
+        let style = crate::pptx_import::parse_shape_style_for_tests(later, &ElementType::BodyText);
+        assert_eq!(
+            style.font_family.as_deref(),
+            Some("Georgia"),
+            "the first explicit family is used"
+        );
+    }
+
+    #[test]
+    fn an_empty_text_object_keeps_its_family_through_pptx() {
+        let style = ElementStyle {
+            font_family: Some("Georgia".into()),
+            ..Default::default()
+        };
+        let session = deck_with(vec![element("empty", ElementType::Title, "", style)]);
+        let bytes = export_pptx(&session).expect("export");
+        let back = import_pptx(&bytes).expect("import");
+        assert_eq!(
+            back.slides[0].elements[0].style.font_family.as_deref(),
+            Some("Georgia"),
+            "the end-paragraph properties carry the family for empty text"
+        );
+    }
+
+    #[test]
+    fn a_family_with_xml_specials_round_trips_through_a_pptx_run() {
+        let style = ElementStyle {
+            font_family: Some("A&B \"Display\"".into()),
+            ..Default::default()
+        };
+        let session = deck_with(vec![element(
+            "body",
+            ElementType::BodyText,
+            "Words",
+            style.clone(),
+        )]);
+        let bytes = export_pptx(&session).expect("export");
+        let archive = loom_package::zip::PackageArchive::from_bytes(&bytes).unwrap();
+        let xml =
+            String::from_utf8(archive.get("ppt/slides/slide1.xml").unwrap().to_vec()).unwrap();
+        assert!(
+            xml.contains("typeface=\"A&amp;B &quot;Display&quot;\""),
+            "the family is escaped in the attribute: {xml}"
+        );
+        let back = import_pptx(&bytes).expect("import");
+        let body = back.slides[0]
+            .elements
+            .iter()
+            .find(|element| element.id == "body")
+            .expect("body element");
+        assert_eq!(body.style.font_family, style.font_family);
+    }
+
+    #[test]
+    fn an_invalid_stored_family_is_never_written_as_a_theme_reference() {
+        let session = deck_with(vec![
+            element(
+                "title",
+                ElementType::Title,
+                "Themed",
+                ElementStyle::default(),
+            ),
+            element(
+                "body",
+                ElementType::BodyText,
+                "Words",
+                ElementStyle {
+                    font_family: Some("+mj-lt".into()),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let bytes = export_pptx(&session).expect("export");
+        let archive = loom_package::zip::PackageArchive::from_bytes(&bytes).unwrap();
+        let xml =
+            String::from_utf8(archive.get("ppt/slides/slide1.xml").unwrap().to_vec()).unwrap();
+        assert_eq!(
+            xml.matches("<a:latin").count(),
+            1,
+            "only the title's own theme reference is written, not the body's hand-edited one: {xml}"
+        );
+        assert!(xml.contains("<a:latin typeface=\"+mj-lt\"/>"));
     }
 
     #[test]

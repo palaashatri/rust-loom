@@ -364,7 +364,7 @@ fn the_view_menu_works_from_the_keyboard() {
 fn the_toolbar_view_menu_offers_the_same_choices() {
     let h = launched("toolbar", Some("light"));
     settle(h.app());
-    toolbar_button(h.app(), "View").invoke_accessible_default_action();
+    toolbar_button(h.app(), "View menu").invoke_accessible_default_action();
     settle(h.app());
     let row = ElementHandle::find_by_accessible_label(h.app(), "Appearance: High Contrast")
         .find(|e| e.accessible_role() == Some(AccessibleRole::ListItem))

@@ -772,9 +772,19 @@ fn html_only_styled_table_paste_keeps_formatting_through_edit_undo_redo_and_expo
             .to_vec(),
     )
     .expect("valid DOCX XML");
+    let grid_widths: Vec<i32> = xml
+        .split("<w:gridCol w:w=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .filter_map(|value| value.parse().ok())
+        .collect();
+    assert_eq!(grid_widths.len(), 2, "both table columns are exported");
+    let ratio = grid_widths[0] as f32 / grid_widths[1] as f32;
+    assert!(
+        (ratio - 210.0 / 91.0).abs() < 0.01,
+        "DOCX keeps the pasted column width ratio: {grid_widths:?}"
+    );
     for expected in [
-        "<w:gridCol w:w=\"4200\"/>",
-        "<w:gridCol w:w=\"1820\"/>",
         "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E6F4EA\"/>",
         "<w:jc w:val=\"right\"/>",
         "<w:b/>",

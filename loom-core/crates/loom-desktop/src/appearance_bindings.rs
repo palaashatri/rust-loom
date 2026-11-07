@@ -83,6 +83,10 @@ macro_rules! appearance_bindings {
             let theme = app.global::<crate::Theme>();
             theme.set_appearance(choice.id().into());
             theme.set_active_theme(choice.resolve(system_is_dark(app)).into());
+            $crate::macos_window::apply(
+                &app.window().window_handle(),
+                theme.get_active_theme().as_str(),
+            );
             let listener = LISTENER.with(|slot| slot.borrow().clone());
             if let ::std::option::Option::Some(listener) = listener {
                 listener(app);

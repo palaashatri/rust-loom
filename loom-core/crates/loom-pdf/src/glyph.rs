@@ -601,7 +601,7 @@ fn validate_paint(
     paint: PositionedRunPaint,
 ) -> Result<(), String> {
     let width = f64::from(run.shaped.width);
-    if !width.is_finite() || width < 0.0 || width > MAX_TEXT_COORDINATE_PT {
+    if !width.is_finite() || !(0.0..=MAX_TEXT_COORDINATE_PT).contains(&width) {
         return Err(format!("run {run_index} has an invalid shaped width"));
     }
     if !paint.ascent_pt.is_finite()

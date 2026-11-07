@@ -310,7 +310,11 @@ def test_appimage_stages_original_pngs(
 ) -> None:
     monkeypatch.setattr(release, "collect_binaries", lambda *_: binaries(tmp_path))
     monkeypatch.setattr(release, "require_program", lambda name: name)
-    monkeypatch.setattr(release.shutil, "which", lambda _: "appimagetool")
+    monkeypatch.setattr(
+        release.shutil,
+        "which",
+        lambda name: "appimagetool" if name == "appimagetool" else None,
+    )
     monkeypatch.setattr(
         release, "run", lambda args: Path(args[-1]).write_bytes(b"test deb")
     )

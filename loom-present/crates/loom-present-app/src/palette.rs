@@ -104,13 +104,21 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::MoveSlideUp,
             id: "present.move-slide-up",
             label: "Move Slide Up",
-            shortcut: "Ctrl+Alt+Up",
+            shortcut: if cfg!(target_os = "macos") {
+                "Cmd+Opt+Up"
+            } else {
+                "Ctrl+Alt+Up"
+            },
         },
         PaletteCommand {
             action: PaletteAction::MoveSlideDown,
             id: "present.move-slide-down",
             label: "Move Slide Down",
-            shortcut: "Ctrl+Alt+Down",
+            shortcut: if cfg!(target_os = "macos") {
+                "Cmd+Opt+Down"
+            } else {
+                "Ctrl+Alt+Down"
+            },
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -181,7 +189,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
         PaletteCommand {
             action: PaletteAction::AddChart,
             id: "present.insert-chart",
-            label: "Insert Chart from Clipboard",
+            label: "Paste Chart from Sheets",
             shortcut: "",
         },
         PaletteCommand {

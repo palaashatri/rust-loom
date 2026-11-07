@@ -58,7 +58,7 @@ fn workbook() -> (Vec<Sheet>, usize) {
     data.set_str("B1", "=A1*2");
     let mut image =
         loom_sheets_core::SheetObject::image(cell_ref("D1"), "chart.png").expect("image object");
-    image.embedded = Some(PNG.to_vec());
+    image.embedded = Some(PNG.to_vec().into());
     data.objects.push(image);
     let mut report = Sheet::new("Report");
     report.set_str("A1", "=Data!B1+1");

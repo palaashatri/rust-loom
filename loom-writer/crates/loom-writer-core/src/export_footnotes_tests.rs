@@ -36,6 +36,73 @@ fn pdf_draws_inline_marker_and_note_body_from_shared_plan() {
 }
 
 #[test]
+fn pdf_note_continuation_pages_stay_adjacent_to_their_reference_page() {
+    let mut doc = WriterDocument::new("pdf-note-order", "PDF note order");
+    doc.page
+        .set_custom_geometry_points(72.0, 72.0, 0.0, 0.0, 0.0, 0.0)
+        .expect("tiny page geometry");
+    doc.blocks.push(RichBlock::new(
+        7,
+        "paragraph",
+        "Source line.\nLater one.\nLater two.\nLater three.",
+    ));
+    doc.footnotes.push(FootnoteEntry {
+        id: 41,
+        block_id: 7,
+        offset: 0,
+        body: (0..20)
+            .map(|n| format!("note {n:02}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    });
+
+    let pages = page_text(&crate::export_pdf(&doc).expect("export overflowing note PDF"));
+    let later_page = pages
+        .iter()
+        .position(|text| text.contains("Later one."))
+        .unwrap_or_else(|| panic!("later body text is drawn: {pages:?}"));
+    assert_eq!(
+        pages.iter().position(|text| text.contains("Source line.")),
+        Some(0),
+        "the reference stays on the first page"
+    );
+    assert!(
+        later_page > 1,
+        "later body text follows the note's continuation pages: {pages:?}"
+    );
+
+    let note_page_for = |n: usize| {
+        let token = format!("note {n:02}");
+        pages
+            .iter()
+            .position(|text| text.contains(&token))
+            .unwrap_or_else(|| panic!("note line {token:?} is drawn: {pages:?}"))
+    };
+    let note_pages = (0..20).map(note_page_for).collect::<Vec<_>>();
+    assert!(
+        note_pages.windows(2).all(|pair| pair[0] <= pair[1]),
+        "note lines keep document order in the PDF: {note_pages:?}"
+    );
+    let last_note_page = *note_pages.last().unwrap();
+    let first_note_page = note_pages[0];
+    assert_eq!(
+        (first_note_page..=last_note_page).collect::<Vec<_>>(),
+        note_pages
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        "every page from the reference to the last note line carries the note"
+    );
+    assert_eq!(
+        later_page,
+        last_note_page + 1,
+        "later body text starts on the page after the last continuation page: {pages:?}"
+    );
+}
+
+#[test]
 fn pdf_draws_reference_inside_a_typed_table_cell() {
     let mut table = crate::loom_objects::table::Table::new(1, 1);
     table.set_cell_text(0, 0, "Cell text");

@@ -559,7 +559,7 @@ fn focus_toolbar_item(app: &PresentApp, name: &str) {
 #[test]
 fn toolbar_items_are_reachable_in_order_and_view_zoom_menus_work_by_keyboard() {
     let s = launched();
-    focus_toolbar_item(&s.app, "View");
+    focus_toolbar_item(&s.app, "View menu");
     let mut seen = vec![focus_name(&s.app)];
     for _ in 0..9 {
         tab(&s.app);
@@ -568,7 +568,7 @@ fn toolbar_items_are_reachable_in_order_and_view_zoom_menus_work_by_keyboard() {
     assert_eq!(
         seen,
         [
-            "View",
+            "View menu",
             "Zoom",
             "Add Slide",
             "Insert",
@@ -585,7 +585,7 @@ fn toolbar_items_are_reachable_in_order_and_view_zoom_menus_work_by_keyboard() {
     s.app.invoke_focus_editor();
     render(&s.app);
     let page = focus_weak(&s.app);
-    focus_toolbar_item(&s.app, "View");
+    focus_toolbar_item(&s.app, "View menu");
     press(&s.app, Key::Return);
     assert!(s.app.get_view_menu_open(), "Enter opens the View menu");
     press(&s.app, Key::DownArrow);
@@ -610,11 +610,15 @@ fn toolbar_items_are_reachable_in_order_and_view_zoom_menus_work_by_keyboard() {
     assert_eq!(s.app.get_zoom_index(), 2, "50% chosen");
 
     // Escape closes either menu and returns focus to the item that opened it.
-    focus_toolbar_item(&s.app, "View");
+    focus_toolbar_item(&s.app, "View menu");
     press(&s.app, Key::Return);
     press(&s.app, Key::Escape);
     assert!(!s.app.get_view_menu_open());
-    assert_eq!(focus_name(&s.app), "View", "focus returns to the trigger");
+    assert_eq!(
+        focus_name(&s.app),
+        "View menu",
+        "focus returns to the trigger"
+    );
     press(&s.app, Key::Tab);
     press(&s.app, Key::Return);
     assert!(s.app.get_zoom_menu_open());
@@ -721,7 +725,7 @@ fn f6_cycles_toolbar_inspector_strip_and_slide_and_shift_f6_goes_back() {
     press(&s.app, Key::F6);
     assert_eq!(
         focus_name(&s.app),
-        "View",
+        "View menu",
         "F6 reaches the first toolbar item"
     );
     press(&s.app, Key::F6);
@@ -1519,6 +1523,9 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
     for (notes, inspector_tab) in [(false, 0), (true, 1), (false, 2)] {
         let s = launched();
         s.app.set_show_notes_drawer(notes);
+        // The inspector starts closed; this test walks the full tab order, so
+        // open it explicitly and keep its selected mode.
+        s.app.set_show_inspector(true);
         s.app.set_inspector_tab(inspector_tab);
         render(&s.app);
 
@@ -1599,7 +1606,7 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
         assert_eq!(
             names(Part::Toolbar),
             [
-                "View",
+                "View menu",
                 "Zoom",
                 "Add Slide",
                 "Insert",
@@ -1710,7 +1717,7 @@ fn slide_reorder_table_and_chart_insertion_and_pptx_warning_work_from_the_keyboa
     assert_eq!(s.state.session.borrow().document.active_index, 0);
     assert_eq!(s.state.session.borrow().document.slides[0].id, first_id);
 
-    // Insert a table and a chart via the Ctrl+K command palette.
+    // Insert a table and paste a chart via the Ctrl+K command palette.
     let before_count = s.state.session.borrow().document.slides[0].elements.len();
     ctrl(&s.app, "k");
     type_text(&s.app, "insert table");
@@ -1735,7 +1742,7 @@ fn slide_reorder_table_and_chart_insertion_and_pptx_warning_work_from_the_keyboa
     ))
     .expect("write the chart to the mock clipboard");
     ctrl(&s.app, "k");
-    type_text(&s.app, "insert chart");
+    type_text(&s.app, "chart from sheets");
     press(&s.app, Key::Return);
     loom_clipboard::set_mock_clipboard_enabled(false);
     assert_eq!(

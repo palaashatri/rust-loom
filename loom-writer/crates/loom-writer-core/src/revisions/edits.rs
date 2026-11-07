@@ -387,11 +387,15 @@ pub(super) fn replace_runs_in_range(
         }
     }
     runs.extend(replacement.iter().filter_map(|run| {
-        (run.start < run.end).then(|| StyleRun {
-            start: run.start + range.start,
-            end: run.end + range.start,
-            style: run.style.clone(),
-        })
+        if run.start < run.end {
+            Some(StyleRun {
+                start: run.start + range.start,
+                end: run.end + range.start,
+                style: run.style.clone(),
+            })
+        } else {
+            None
+        }
     }));
     runs.sort_by_key(|run| run.start);
     coalesce_runs(runs)

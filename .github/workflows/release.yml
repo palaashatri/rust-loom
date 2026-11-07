@@ -42,7 +42,7 @@ jobs:
           build=true
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             # Skip only when the public (non-draft) nightly release already
-            # carries all four archives for this commit. Checking the tag alone
+            # carries all six portable archives for this commit. Checking the tag alone
             # would never retry a run that moved the tag but failed to publish.
             published="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
@@ -50,7 +50,7 @@ jobs:
               | jq -r --arg sha "${GITHUB_SHA}" \
                 'if .draft then 0 else [.assets[].name | select(startswith("loom-nightly-" + $sha + "-"))] | length end' \
               || echo 0)"
-            if [ "${published:-0}" -ge 4 ]; then
+            if [ "${published:-0}" -ge 6 ]; then
               echo "nightly for ${GITHUB_SHA} is already published; nothing to build."
               build=false
             fi
@@ -67,24 +67,44 @@ jobs:
         include:
           - runner: ubuntu-24.04
             label: linux-x86_64
+            platform: linux
+            arch: x86_64
+            archive: tar.gz
+            exe: ""
+          - runner: ubuntu-24.04-arm
+            label: linux-aarch64
+            platform: linux
+            arch: aarch64
             archive: tar.gz
             exe: ""
           - runner: windows-2022
             label: windows-x86_64
+            platform: windows
+            arch: x86_64
+            archive: zip
+            exe: ".exe"
+          - runner: windows-11-arm
+            label: windows-aarch64
+            platform: windows
+            arch: aarch64
             archive: zip
             exe: ".exe"
           - runner: macos-15
             label: macos-arm64
+            platform: macos
+            arch: aarch64
             archive: tar.gz
             exe: ""
           - runner: macos-15-intel
             label: macos-x86_64
+            platform: macos
+            arch: x86_64
             archive: tar.gz
             exe: ""
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
-      # One target directory for all eight workspaces: Slint and the shared
+      # One target directory for the active workspaces: Slint and the shared
       # crates are compiled once per platform instead of once per app.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target-release
       CARGO_INCREMENTAL: "0"
@@ -95,19 +115,43 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve installer version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            candidate="${GITHUB_REF_NAME#v}"
+          else
+            candidate="0.1.0"
+          fi
+          if [[ "$candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "INSTALLER_VERSION=$candidate" >> "$GITHUB_ENV"
+          else
+            echo "INSTALLER_VERSION=0.1.0" >> "$GITHUB_ENV"
+          fi
+
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libasound2-dev libfontconfig1-dev \
-            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev \
+            dpkg-dev rpm
 
       - name: Select Rust stable
         shell: bash
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+
+      - name: Install Windows installer tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version "4.*"
+          "$HOME\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          choco install nsis -y --no-progress
 
       - name: Configure static Windows CRT
         if: runner.os == 'Windows'
@@ -135,7 +179,7 @@ jobs:
           done
 
       - name: Verify Windows executables do not import the CRT DLLs
-        if: runner.os == 'Windows'
+        if: matrix.platform == 'windows' && matrix.arch == 'x86_64'
         shell: pwsh
         run: |
           $vswhere = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)) 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -162,7 +206,7 @@ jobs:
               throw "loom-$app.exe still imports a Microsoft CRT DLL:`n$dependencyText"
             }
           }
-          Write-Host 'All eight executables have no VCRUNTIME, MSVCP, or UCRT DLL imports.'
+          Write-Host 'All three executables have no VCRUNTIME, MSVCP, or UCRT DLL imports.'
 
       - name: Stage the portable archive
         shell: bash
@@ -264,11 +308,27 @@ jobs:
             test -s "$out"
           done
 
+      - name: Build native installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          python loom-bootstrap/packaging/release.py \
+            --root "$GITHUB_WORKSPACE" \
+            --output dist/packages \
+            --platform "${{ matrix.platform }}" \
+            --architecture "${{ matrix.arch }}" \
+            --version "$INSTALLER_VERSION" \
+            --bin-dir target-release/release \
+            --allow-unsigned
+
       # actions/upload-artifact v7.0.2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: loom-${{ matrix.label }}
-          path: ${{ env.ARCHIVE }}
+          path: |
+            ${{ env.ARCHIVE }}
+            dist/packages/*
           if-no-files-found: error
           retention-days: 7
 

@@ -1,0 +1,39 @@
+import { LoomTitleBar, LocalMenuBar, LocalMenuLabels } from "foundation.slint";
+
+/// The menu rows at the top of the Sheets window: the custom title bar with
+/// its embedded File/Edit/View menu on Windows/Linux, or the plain local menu
+/// bar when the native frame is in use. Keeping the choice here stops the app
+/// root from duplicating the menu wiring in both branches.
+export component SheetMenuChrome inherits VerticalLayout {
+    in property <bool> custom-chrome: false;
+    in property <string> title: "";
+    in property <bool> maximized: false;
+    in property <bool> local-menu-visible: true;
+    in property <[string]> labels: [];
+    in-out property <int> open-index: -1;
+    callback drag-requested;
+    callback toggle-maximize;
+    callback minimize;
+    callback close;
+
+    spacing: 0px;
+    padding: 0px;
+
+    if root.custom-chrome : LoomTitleBar {
+        title: root.title;
+        maximized: root.maximized;
+        drag-requested => { root.drag-requested(); }
+        toggle-maximize => { root.toggle-maximize(); }
+        minimize => { root.minimize(); }
+        close => { root.close(); }
+        LocalMenuLabels {
+            labels: root.labels;
+            open-index <=> root.open-index;
+        }
+    }
+    if root.local-menu-visible && !root.custom-chrome : LocalMenuBar {
+        labels: root.labels;
+        open-index <=> root.open-index;
+    }
+}
+

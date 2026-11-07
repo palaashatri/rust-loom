@@ -231,7 +231,7 @@ fn sales() -> Sheet {
     shape.fill = FillColor::Yellow;
     s.objects.push(shape);
     let mut image = SheetObject::image(cell("M22"), "hero.png").expect("image object");
-    image.embedded = Some(tiny_png());
+    image.embedded = Some(tiny_png().into());
     image.width = 96;
     image.height = 96;
     s.objects.push(image);

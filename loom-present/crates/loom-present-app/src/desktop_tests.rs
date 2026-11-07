@@ -588,7 +588,7 @@ fn present_menu_projection_derives_live_session_and_window_state() {
 }
 
 #[test]
-fn present_menu_disables_inspector_when_window_cannot_show_it() {
+fn present_menu_opens_the_docked_inspector_at_compact_widths() {
     set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     let inspector_available = configure_responsive_width(&app, 900);
@@ -610,6 +610,21 @@ fn present_menu_disables_inspector_when_window_cannot_show_it() {
     let menu = NativeMenuBar::new();
     menu.install_menu_bar(&build_present_menu_bar())
         .expect("install menu");
+    let app_ref = app.as_weak();
+    menu.register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
+        let app = app_ref
+            .upgrade()
+            .ok_or_else(|| DesktopError::InvalidRequest("Present app was dropped".into()))?;
+        if dispatch_command(&app, &action.id) {
+            Ok(())
+        } else {
+            Err(DesktopError::InvalidRequest(format!(
+                "unsupported Present menu command {}",
+                action.id
+            )))
+        }
+    }))
+    .expect("register sink");
 
     sync_menu_state(&menu, &app, &state);
 
@@ -618,19 +633,18 @@ fn present_menu_disables_inspector_when_window_cannot_show_it() {
             .and_then(|bar| bar.find_item("view.inspector").cloned()),
         Some(MenuItem::Check {
             checked: false,
-            enabled: false,
+            enabled: true,
             ..
         })
     ));
 
-    let before = app.get_show_inspector();
-    let error = menu
-        .dispatch_action_from("view.inspector", CommandSource::Menu)
-        .expect_err("compact inspector action must be disabled");
-    assert!(error
-        .to_string()
-        .contains("menu item view.inspector is disabled"));
-    assert_eq!(app.get_show_inspector(), before);
+    menu.dispatch_action_from("view.inspector", CommandSource::Menu)
+        .expect("compact inspector action stays available");
+    assert!(
+        app.get_show_inspector(),
+        "the compact menu opens the docked inspector"
+    );
+    assert!(app.get_inspector_visible());
 }
 
 #[test]

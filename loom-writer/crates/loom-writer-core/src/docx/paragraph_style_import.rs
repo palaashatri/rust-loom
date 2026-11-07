@@ -97,17 +97,11 @@ pub(super) fn paragraph_style_from_docx(p_xml: &str) -> Result<ParagraphStyle, S
                 .and_then(|value| value.parse::<u8>().ok())
                 .unwrap_or(0)
                 .min(crate::list_levels::MAX_LIST_LEVEL);
-            if first_line.is_some() || hanging.is_some_and(|value| value != 18.0) {
-                return Err("DOCX custom list marker indents are not supported".into());
-            }
+            // Direct indents on a list paragraph describe the list marker, not
+            // a user paragraph indent: Writer draws its own marker geometry.
             let base_left = 720 + i32::from(level) * 360;
-            if let Some(left) = left {
-                if left < base_left {
-                    return Err("DOCX list indent is below the supported marker indent".into());
-                }
+            if let Some(left) = left.filter(|left| *left >= base_left) {
                 style.left_indent = (left - base_left) as f32 / 20.0;
-            } else if hanging.is_some() {
-                return Err("DOCX hanging list indent is missing its left indent".into());
             }
         } else {
             style.left_indent = left.unwrap_or(0) as f32 / 20.0;
@@ -328,7 +322,7 @@ pub(super) fn validate_tracked_paragraph_properties(
             }
         } else if name == "jc" {
             let value = property.attribute((super::xml::W_NS, "val"));
-            if value.is_none_or(|value| {
+            if value.map_or(true, |value| {
                 !["start", "end", "left", "center", "right", "both"]
                     .iter()
                     .any(|allowed| value.eq_ignore_ascii_case(allowed))

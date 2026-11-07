@@ -50,7 +50,7 @@ export component LoomButton inherits Rectangle {
             : touch.has-hover ? Theme.palette().selection-soft : transparent)
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
+        : touch.has-hover ? Theme.palette().selection-soft
         : Theme.palette().surface;
 
     accessible-role: button;
@@ -140,7 +140,7 @@ export component LoomIconButton inherits Rectangle {
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
+        : touch.has-hover ? Theme.palette().surface-sunken
         : transparent;
     accessible-role: button;
     accessible-enabled: root.enabled;
@@ -416,12 +416,14 @@ export component LoomToggle inherits Rectangle {
             border-width: focus.has-focus ? 2px : 1px;
             border-color: focus.has-focus ? Theme.palette().focus
                 : root.checked ? Theme.palette().accent
+                : touch.has-hover ? Theme.palette().ink
                 : Theme.palette().ink-secondary;
             // High contrast's off track is the black surface: the white knob would
             // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
-                : root.checked ? Theme.palette().accent
+                : root.checked ? (touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
                 : Theme.active-theme == "high-contrast" ? Theme.palette().surface
+                : touch.has-hover ? Theme.palette().ink
                 : Theme.palette().ink-secondary;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;
@@ -455,7 +457,7 @@ export component LoomToggle inherits Rectangle {
             return reject;
         }
     }
-    TouchArea {
+    touch := TouchArea {
         enabled: root.enabled;
         clicked => {
             focus.focus();

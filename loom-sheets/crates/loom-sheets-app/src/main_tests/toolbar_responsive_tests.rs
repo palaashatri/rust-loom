@@ -74,6 +74,56 @@ fn toolbar_items_and_more_actions_stay_inside_the_window_at_every_size_and_text_
     }
 }
 
+/// S-09: the shared item paints its focus/selected outline inset from all four
+/// edges, so the ring never touches the toolbar separators. The compact More
+/// trigger stays vertically centred on the labelled row rather than riding its
+/// top edge.
+#[test]
+fn toolbar_state_outlines_keep_a_vertical_inset_and_more_stays_centred() {
+    for text_scale in [1.0_f32, 2.0] {
+        let app = sheets_window(text_scale);
+        app.set_inspector_tab(1);
+        let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render");
+
+        let outline_of = |item: &ElementHandle| {
+            let outline = item
+                .query_descendants()
+                .match_id("IconOverLabelToolbarItem::state-outline")
+                .find_first()
+                .expect("the toolbar item declares an inset state outline");
+            (outline.absolute_position(), outline.size())
+        };
+
+        for label in ["Image", "Format", "Organize"] {
+            let item =
+                toolbar_button(&app, label).unwrap_or_else(|| panic!("{label} toolbar item"));
+            let (item_pos, item_size) = (item.absolute_position(), item.size());
+            let (outline_pos, outline_size) = outline_of(&item);
+            let top = outline_pos.y - item_pos.y;
+            let bottom = (item_pos.y + item_size.height) - (outline_pos.y + outline_size.height);
+            assert!(
+                top >= 1.5 && bottom >= 1.5,
+                "{label} outline touches the row edge at {text_scale}x: top inset {top}, bottom inset {bottom}"
+            );
+            assert!(
+                outline_size.height <= item_size.height - 3.0,
+                "{label} outline must leave vertical breathing room at {text_scale}x: {} of {}",
+                outline_size.height,
+                item_size.height
+            );
+        }
+
+        let labelled = toolbar_button(&app, "Image").expect("Image toolbar item");
+        let more = toolbar_button(&app, "More actions").expect("More actions trigger");
+        let labelled_centre = labelled.absolute_position().y + labelled.size().height / 2.0;
+        let more_centre = more.absolute_position().y + more.size().height / 2.0;
+        assert!(
+            (labelled_centre - more_centre).abs() <= 1.0,
+            "More actions must stay centred beside the labelled row at {text_scale}x: {more_centre} vs {labelled_centre}"
+        );
+    }
+}
+
 #[test]
 fn inspector_icon_buttons_grow_with_text_scale_and_the_title_stays_on_one_line() {
     let app = sheets_window(1.0);

@@ -14,16 +14,6 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::{bidi::visible_end, LineMeasure, Style, Uncovered};
 use crate::{layout::block_positions, RichBlock};
 
-#[cfg(test)]
-thread_local! {
-    static MEASURE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(crate) fn measure_build_count() -> usize {
-    MEASURE_BUILDS.with(std::cell::Cell::get)
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LineGeometry {
     pub(crate) range: Range<usize>,
@@ -338,8 +328,6 @@ pub(crate) fn block_line_geometry(
 }
 
 pub(crate) fn measure_block(block: &RichBlock, font_size: f32) -> LineMeasure {
-    #[cfg(test)]
-    MEASURE_BUILDS.with(|count| count.set(count.get() + 1));
     LineMeasure::new(
         block.text.as_str(),
         0,

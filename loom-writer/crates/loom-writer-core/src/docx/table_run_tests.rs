@@ -143,6 +143,25 @@ fn typed_table_runs_export_strike_scripts_font_color_and_size() {
 }
 
 #[test]
+fn cell_horizontal_alignment_override_exports_as_paragraph_justification() {
+    let mut table = Table::new(1, 1);
+    table.header_row = false;
+    table.set_cell_text(0, 0, "right");
+    table.cell_mut(0, 0).expect("cell").style_override = Some(loom_objects::CellStyleOverride {
+        horizontal_align: Some(loom_objects::HorizontalAlign::Right),
+        ..Default::default()
+    });
+    let mut source = WriterDocument::new("cell-align", "Cell alignment");
+    source.blocks.push(RichBlock::table_block(1, table));
+    let export = export_docx(&source).expect("export right-aligned cell");
+    let xml = document_xml(&export.bytes);
+    assert!(
+        xml.contains("<w:jc w:val=\"right\"/>"),
+        "a cell alignment override exports as its paragraph justification: {xml}"
+    );
+}
+
+#[test]
 fn typed_table_runs_export_default_foreground_as_automatic_color() {
     let mut table = Table::new(1, 1);
     table.header_row = false;

@@ -93,10 +93,10 @@ fn wire_direction(app: &WriterApp, state: &Rc<GuiState>) {
                 direction,
             );
             next.set_selection(selection);
-            if next != *state.current.borrow() {
-                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
-                    return;
-                }
+            if next != *state.current.borrow()
+                && !apply_with_history(&app, &state, next, HistoryKind::DocumentAction)
+            {
+                return;
             }
             announce(
                 &app,
@@ -132,10 +132,10 @@ fn wire_logical_alignment(app: &WriterApp, state: &Rc<GuiState>) {
                 return;
             };
             next.set_selection(selection);
-            if next != *state.current.borrow() {
-                if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
-                    return;
-                }
+            if next != *state.current.borrow()
+                && !apply_with_history(&app, &state, next, HistoryKind::DocumentAction)
+            {
+                return;
             }
             announce(
                 &app,
@@ -233,10 +233,10 @@ fn toggle_script(app: &WriterApp, state: &GuiState, superscript: bool) {
         );
     }
     next.set_selection(selection.clone());
-    if next != *state.current.borrow() {
-        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
-            return;
-        }
+    if next != *state.current.borrow()
+        && !apply_with_history(app, state, next, HistoryKind::DocumentAction)
+    {
+        return;
     }
     let label = if superscript {
         "Superscript"
@@ -348,10 +348,10 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
         &color,
     );
     next.set_selection(selection.clone());
-    if next != *state.current.borrow() {
-        if !apply_with_history(app, state, next, HistoryKind::DocumentAction) {
-            return;
-        }
+    if next != *state.current.borrow()
+        && !apply_with_history(app, state, next, HistoryKind::DocumentAction)
+    {
+        return;
     }
     global.set_color_dialog_open(false);
     global.set_color_error(SharedString::new());

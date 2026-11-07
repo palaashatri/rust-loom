@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use loom_package::PackageArchive;
 use loom_sheets_core::{Sheet, SheetObjectKind, WorkbookFile};
@@ -30,6 +31,7 @@ pub(crate) fn prepare_workbook(
                 (!object.path.trim().is_empty())
                     .then(|| std::fs::read(&object.path).ok())
                     .flatten()
+                    .map(Arc::from)
             });
             let Some(bytes) = bytes else {
                 return Err(format!("image source is unavailable: {}", object.path));
@@ -49,7 +51,7 @@ pub(crate) fn prepare_workbook(
             assets.push(EmbeddedAsset {
                 path: asset_path,
                 mime: image_mime(extension),
-                bytes,
+                bytes: bytes.to_vec(),
             });
         }
     }
@@ -60,6 +62,9 @@ pub(crate) fn attach_workbook_assets(
     workbook: &mut WorkbookFile,
     archive: &PackageArchive,
 ) -> Result<(), String> {
+    // Identical images share one package entry on save; share one immutable
+    // buffer on load too, so the decoded-image cache sees one identity.
+    let mut loaded = BTreeMap::<String, Arc<[u8]>>::new();
     for sheet in &mut workbook.sheets {
         for object in &mut sheet.objects {
             let Some(asset_path) = object.asset.as_deref() else {
@@ -68,10 +73,16 @@ pub(crate) fn attach_workbook_assets(
             if !asset_path.starts_with("content/assets/") {
                 return Err(format!("invalid image asset path: {asset_path}"));
             }
+            if let Some(bytes) = loaded.get(asset_path) {
+                object.embedded = Some(Arc::clone(bytes));
+                continue;
+            }
             let bytes = archive
                 .get(asset_path)
                 .ok_or_else(|| format!("missing image asset {asset_path}"))?;
-            object.embedded = Some(bytes.to_vec());
+            let bytes = Arc::<[u8]>::from(bytes);
+            object.embedded = Some(Arc::clone(&bytes));
+            loaded.insert(asset_path.to_string(), bytes);
         }
     }
     Ok(())
@@ -112,7 +123,7 @@ mod tests {
         let mut sheet = Sheet::new("Assets");
         let mut image =
             SheetObject::image(CellRef { row: 0, col: 0 }, "/tmp/hero.jpg").expect("image object");
-        image.embedded = Some(vec![1, 2, 3]);
+        image.embedded = Some(vec![1, 2, 3].into());
         sheet.objects.push(image);
 
         let (sheets, assets) = prepare_workbook(&[sheet]).expect("prepare assets");
@@ -131,7 +142,7 @@ mod tests {
         for (row, path) in [(0, "/tmp/hero.png"), (1, "/tmp/hero-copy.png")] {
             let mut image =
                 SheetObject::image(CellRef { row, col: 0 }, path).expect("image object");
-            image.embedded = Some(vec![137, 80, 78, 71]);
+            image.embedded = Some(vec![137, 80, 78, 71].into());
             sheet.objects.push(image);
         }
 

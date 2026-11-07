@@ -5,11 +5,11 @@
 
 use std::collections::BTreeMap;
 
-use loom_pdf::{PageIndex, PathStyle, PdfDocument, TextStyle, text_width_pt};
+use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
 
 use crate::{
-    ElementType, PresentationDocument, SLIDE_HEIGHT, SLIDE_WIDTH, SlideElement,
-    normalize_angle_degrees, pictures,
+    normalize_angle_degrees, pictures, ElementType, PresentationDocument, SlideElement,
+    SLIDE_HEIGHT, SLIDE_WIDTH,
 };
 
 /// The page in points: the 16:9 slide at PowerPoint's standard 13.33 by 7.5 inches.

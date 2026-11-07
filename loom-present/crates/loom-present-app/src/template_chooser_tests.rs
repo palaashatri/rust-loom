@@ -190,6 +190,18 @@ fn nothing_in_the_chooser_or_its_entry_points_is_called_a_theme() {
             "a card named {label}"
         );
     }
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "Choose a Layout")
+            .next()
+            .is_some(),
+        "the chooser labels its text-only cards as layouts, not document themes"
+    );
+    assert!(
+        ElementHandle::find_by_accessible_label(&app, "LAYOUTS")
+            .next()
+            .is_some(),
+        "the category heading names layouts"
+    );
     // The aspect-ratio control only changed the editor's view and was never
     // stored or exported, so it is no longer offered here.
     for gone in [

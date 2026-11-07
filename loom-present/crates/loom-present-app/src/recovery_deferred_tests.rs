@@ -1633,3 +1633,5 @@ fn a_dropped_apps_completion_cannot_write_into_the_next_apps_recovery_store() {
         recovery_draft::payload(&newest_b, None).expect("latest new-app draft")
     );
 }
+
+mod recovery_import_retry;

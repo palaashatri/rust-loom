@@ -17,16 +17,6 @@ use super::measure::LineMeasure;
 use crate::layout::{block_bidi_runs, block_positions};
 use crate::{CaretAffinity, RichBlock};
 
-#[cfg(test)]
-thread_local! {
-    static PARAGRAPH_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(crate) fn paragraph_scan_count() -> usize {
-    PARAGRAPH_SCANS.with(std::cell::Cell::get)
-}
-
 /// The bidi runs of a paragraph's text, or `None` from [`BidiRuns::of`] when no
 /// character can be right to left.
 pub(crate) struct BidiRuns {
@@ -39,8 +29,6 @@ impl BidiRuns {
     }
 
     pub(crate) fn with_direction(text: &str, direction: ParagraphDirection) -> Option<Self> {
-        #[cfg(test)]
-        PARAGRAPH_SCANS.with(|count| count.set(count.get() + 1));
         text.chars().any(may_be_right_to_left).then(|| Self {
             runs: segment(
                 text,

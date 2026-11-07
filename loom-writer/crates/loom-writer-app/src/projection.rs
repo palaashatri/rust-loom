@@ -29,8 +29,8 @@ use slint::{Model, SharedString};
 pub(crate) mod render_text;
 use render_text::{
     fragment_justification_spaces, render_row, set_shaped_block_glyphs,
-    set_shaped_block_glyphs_with_footnotes, set_shaped_glyphs, Align, Frame, RasterClip,
-    RowGeometry,
+    set_shaped_block_glyphs_with_footnotes, set_shaped_glyphs, Align, FootnoteCellGlyphs, Frame,
+    RasterClip, RowGeometry,
 };
 
 /// Screens of height kept when the view height is not yet known.
@@ -788,17 +788,18 @@ fn project_inner(
                             let glyph_result = if has_footnote_reference {
                                 Some(set_shaped_block_glyphs_with_footnotes(
                                     &mut row,
-                                    doc,
-                                    block.id,
-                                    table,
-                                    r,
-                                    c,
-                                    &cell_block,
-                                    frame,
-                                    loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
-                                    pixels_per_point,
-                                    raster_clip,
-                                    doc.page.appearance.auto_ink_rgba(),
+                                    FootnoteCellGlyphs {
+                                        doc,
+                                        table_block_id: block.id,
+                                        table,
+                                        cell: (r, c),
+                                        block: &cell_block,
+                                        frame,
+                                        font_size: loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
+                                        pixels_per_point,
+                                        clip: raster_clip,
+                                        default_ink_rgba: doc.page.appearance.auto_ink_rgba(),
+                                    },
                                 ))
                             } else if raster_device_scale.is_some() {
                                 Some(set_shaped_block_glyphs(
@@ -1123,8 +1124,7 @@ fn project_inner(
                                     doc,
                                     loc.block_id,
                                     table,
-                                    loc.row,
-                                    loc.col,
+                                    (loc.row, loc.col),
                                     block,
                                     font_size,
                                     inner,

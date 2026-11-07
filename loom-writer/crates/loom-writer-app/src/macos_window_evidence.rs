@@ -1,3 +1,9 @@
+//! macOS window-evidence adapter.
+//!
+//! The adapter attaches only in the real application. Test builds exercise its
+//! pure geometry helpers without constructing the full evidence writer.
+#![cfg_attr(test, allow(dead_code))]
+
 use std::{
     fs::{File, OpenOptions},
     io::Write,

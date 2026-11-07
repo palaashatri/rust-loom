@@ -139,6 +139,10 @@ fn legacy_content_versions_accept_supported_colors_and_missing_fields() {
     WriterDocument::from_content_json(old).expect("a legacy unstyled document loads");
 
     let document = document_with_colors(Some("#a1B2c3"), Some("#12345680"), Some("#AABBccFF"));
+    let tracked_state = format!(
+        ",\"tracked_changes\":{}",
+        crate::TrackedChanges::default().write_content_json()
+    );
     let content = document
         .to_content_json()
         .replace(
@@ -147,10 +151,7 @@ fn legacy_content_versions_accept_supported_colors_and_missing_fields() {
         )
         .replace(",\"appearance\":\"white\"", "")
         .replace(",\"footnotes\":[]", "")
-        .replace(
-            ",\"tracked_changes\":{\"recording\":false,\"author\":\"Anonymous\",\"next_id\":1,\"revisions\":[]}",
-            "",
-        );
+        .replace(&tracked_state, "");
     let loaded = WriterDocument::from_content_json(&content).expect("format 2 colors load");
     assert_eq!(
         loaded.blocks[0].runs[0].style.color.as_deref(),

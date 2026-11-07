@@ -125,7 +125,13 @@ pub(super) fn block_revision_runs(block: &RichBlock) -> Vec<StyleRun> {
                 continue;
             };
             let Some(cell_block) = crate::table_text::table_cell_rich_block(
-                block.id, table, row, column, 11.0, false, None,
+                block.id,
+                table,
+                row,
+                column,
+                crate::TABLE_CELL_BASE_FONT_SIZE_PT,
+                false,
+                None,
             ) else {
                 continue;
             };
@@ -204,17 +210,28 @@ pub(super) fn ensure_revision_resolution_order(
     revision: &RevisionRecord,
     order: RevisionResolutionOrder,
 ) -> Result<(), WriterError> {
-    let range = |revision: &RevisionRecord| {
-        if blocks.is_empty()
+    let range = |revision: &RevisionRecord| -> Result<(usize, usize), WriterError> {
+        let (start, end) = if blocks.is_empty()
             && revision.kind == RevisionKind::Deletion
             && revision.anchor.end_block_id.is_none()
             && revision.anchor.start == 0
             && revision.anchor.end == 0
         {
-            Ok((0, 0))
+            (0, 0)
         } else {
-            anchor_global_range(blocks, &revision.anchor)
+            anchor_global_range(blocks, &revision.anchor)?
+        };
+        // A tracked deletion keeps its removed text in the payload and anchors
+        // at the replacement point. Its effective span is the length of that
+        // payload, so a replacement insertion at the same point is dependent.
+        if revision.kind == RevisionKind::Deletion && start == end {
+            let removed = revision
+                .before
+                .as_ref()
+                .map_or(0, |payload| payload.text.len());
+            return Ok((start, start.saturating_add(removed)));
         }
+        Ok((start, end))
     };
     let (start, end) = range(revision)?;
     for other in revisions {
@@ -254,15 +271,14 @@ pub(super) fn validate_record(
     {
         return Err(WriterError::Invalid(INVALID_REVISION.into()));
     }
-    if blocks.is_empty() {
-        if revision.kind != RevisionKind::Deletion
+    if blocks.is_empty()
+        && (revision.kind != RevisionKind::Deletion
             || revision.anchor.end_block_id.is_some()
             || revision.anchor.start != 0
             || revision.anchor.end != 0
-            || revision.anchor.prefix_sha256 != crate::zip::sha256(&[])
-        {
-            return Err(WriterError::Invalid(INVALID_REVISION.into()));
-        }
+            || revision.anchor.prefix_sha256 != crate::zip::sha256(&[]))
+    {
+        return Err(WriterError::Invalid(INVALID_REVISION.into()));
     }
     let (global_start, global_end) = if blocks.is_empty() {
         (0, 0)
@@ -270,7 +286,7 @@ pub(super) fn validate_record(
         let (start, end) = anchor_global_range(blocks, &revision.anchor)?;
         let start_index = unique_block_index(blocks, revision.anchor.block_id)?;
         let start_text = blocks[start_index].text.as_str();
-        if crate::zip::sha256(start_text[..revision.anchor.start].as_bytes())
+        if crate::zip::sha256(&start_text.as_bytes()[..revision.anchor.start])
             != revision.anchor.prefix_sha256
         {
             return Err(WriterError::Invalid(INVALID_REVISION.into()));

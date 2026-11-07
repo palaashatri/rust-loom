@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use loom_present_core::{ElementStyle, TextAlign, PALETTE};
+use loom_present_core::{ElementStyle, PresentationSession, TextAlign, PALETTE};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::object_parts::{color, look};
@@ -15,24 +15,67 @@ fn slot_of(hex: Option<&str>) -> i32 {
 }
 
 /// Show the active object's style in the inspector; hide the controls when it
-/// is a picture, table or chart.
-pub(crate) fn publish(app: &PresentApp, element: &loom_present_core::SlideElement) {
+/// is a picture, table or chart. The family also reports when the selected
+/// objects disagree, instead of showing the active object's family for all.
+pub(crate) fn publish(
+    app: &PresentApp,
+    session: &PresentationSession,
+    element: &loom_present_core::SlideElement,
+) {
     let ink = app.global::<ElementInk>();
-    let Some(look) = look(element) else {
+    let Some(active_look) = look(element) else {
         ink.set_available(false);
         return;
     };
     ink.set_available(true);
-    ink.set_size_label(format!("{:.0} pt", look.size_pt).into());
-    ink.set_bold(look.bold);
-    ink.set_italic(look.italic);
-    ink.set_align(look.align);
+    ink.set_size_label(format!("{:.0} pt", active_look.size_pt).into());
+    ink.set_bold(active_look.bold);
+    ink.set_italic(active_look.italic);
+    ink.set_align(active_look.align);
     ink.set_color_slot(slot_of(element.style.color.as_deref()));
     ink.set_fill_slot(slot_of(element.style.fill.as_deref()));
+    let (family, mixed) = session
+        .document
+        .active_slide()
+        .map(|slide| {
+            let families: Vec<Option<String>> = slide
+                .elements
+                .iter()
+                .filter(|candidate| session.selected_elements.contains(&candidate.id))
+                .filter(|candidate| look(candidate).is_some())
+                .map(|candidate| {
+                    candidate
+                        .style
+                        .font_family
+                        .as_deref()
+                        .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+                })
+                .collect();
+            match families.split_first() {
+                Some((first, rest)) => {
+                    let mixed = rest.iter().any(|family| family != first);
+                    (
+                        if mixed {
+                            String::new()
+                        } else {
+                            first.clone().unwrap_or_default()
+                        },
+                        mixed,
+                    )
+                }
+                None => (String::new(), false),
+            }
+        })
+        .unwrap_or_default();
+    ink.set_font_family(family.into());
+    ink.set_font_family_mixed(mixed);
 }
 
 pub(crate) fn clear(app: &PresentApp) {
-    app.global::<ElementInk>().set_available(false);
+    let ink = app.global::<ElementInk>();
+    ink.set_available(false);
+    ink.set_font_family("".into());
+    ink.set_font_family_mixed(false);
 }
 
 /// A number as the geometry fields show it: whole when it is whole, else one decimal.
@@ -97,24 +140,30 @@ pub(crate) fn apply_geometry(state: &GuiState, field: &str, text: &str) -> Resul
         )
     })?;
     let mut session = state.session.borrow_mut();
-    let Some((id, x, y, width, height)) = session.document.active_slide().and_then(|slide| {
-        let mut selected = slide
-            .elements
-            .iter()
-            .filter(|element| session.selected_elements.contains(&element.id));
-        let element = selected.next()?;
-        if selected.next().is_some() {
-            return None;
-        }
-        Some((
-            element.id.clone(),
-            element.x,
-            element.y,
-            element.width,
-            element.height,
-        ))
-    }) else {
-        return Ok(false);
+    let selected: Vec<(String, f32, f32, f32, f32)> = session
+        .document
+        .active_slide()
+        .map(|slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|element| session.selected_elements.contains(&element.id))
+                .map(|element| {
+                    (
+                        element.id.clone(),
+                        element.x,
+                        element.y,
+                        element.width,
+                        element.height,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let (id, x, y, width, height) = match selected.as_slice() {
+        [] => return Ok(false),
+        [element] => (*element).clone(),
+        _ => return Err("Select one object to type exact geometry".into()),
     };
     Ok(match field {
         "x" => session.transform_element(&id, value, y, width, height),
@@ -199,6 +248,54 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
     changed.then_some(words)
 }
 
+/// Apply a font family name, or the theme's face when the field is empty, to
+/// every selected text object and shape as one undo step. In a mixed selection
+/// the field is empty because the objects disagree; submitting that empty field
+/// is a no-op rather than wiping every family.
+pub(crate) fn apply_font(state: &GuiState, text: &str) -> Result<Option<String>, String> {
+    let family = if text.trim().is_empty() {
+        None
+    } else {
+        Some(loom_present_core::normalize_font_family(text)?)
+    };
+    let mut session = state.session.borrow_mut();
+    let selected: Vec<(String, Option<String>)> = session
+        .document
+        .active_slide()
+        .map(|slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|element| session.selected_elements.contains(&element.id))
+                .filter(|element| look(element).is_some())
+                .map(|element| {
+                    let family = element
+                        .style
+                        .font_family
+                        .as_deref()
+                        .and_then(|name| loom_present_core::normalize_font_family(name).ok());
+                    (element.id.clone(), family)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mixed = selected
+        .split_first()
+        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1));
+    if family.is_none() && mixed {
+        return Ok(None);
+    }
+    let ids: Vec<String> = selected.into_iter().map(|(id, _)| id).collect();
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let changed = session.restyle_elements(&ids, |style| style.font_family = family.clone());
+    Ok(changed.then(|| match family {
+        Some(family) => format!("Font family {family}"),
+        None => "Font family follows the theme".to_string(),
+    }))
+}
+
 /// Ask for a style change as the inspector's controls do; the shortcuts and the
 /// palette go through the same callback.
 pub(crate) fn request(app: &PresentApp, kind: &str, value: i32) {
@@ -220,6 +317,34 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
             refresh(&app, &state);
             if let Some(message) = message {
                 set_status(&app, &message);
+            }
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_font_requested(move |text| {
+            let Some(app) = app_ref.upgrade() else { return };
+            match apply_font(&state, text.as_str()) {
+                Ok(words) => {
+                    // The field shows the document's canonical family again.
+                    refresh(&app, &state);
+                    if let Some(words) = words {
+                        set_status(&app, &words);
+                    }
+                }
+                Err(message) => {
+                    // A rejected name changes nothing and the field shows the truth again.
+                    refresh(&app, &state);
+                    set_status(&app, &message);
+                }
+            }
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_font_cancelled(move || {
+            if let Some(app) = app_ref.upgrade() {
+                refresh(&app, &state);
             }
         });
     }

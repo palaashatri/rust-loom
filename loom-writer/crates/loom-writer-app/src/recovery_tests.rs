@@ -70,7 +70,7 @@ pub(super) fn make_test_state(
         save_path: RefCell::new(save_path),
         compatibility_save: Cell::new(false),
         history: RefCell::new(history),
-        history_clock: Instant::now(),
+        history_clock: Cell::new(Instant::now()),
         syncing_editor: Cell::new(false),
         pending_replacement: Cell::new(None),
         dialogs: Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),

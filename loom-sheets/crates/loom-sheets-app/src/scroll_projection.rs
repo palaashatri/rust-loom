@@ -235,8 +235,11 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
         app.get_grid_scroll_y(),
         object_actions::preview_geometry(state),
         &|index, object| match existing.row_data(index) {
-            Some(view) if reusable => view.image,
-            _ => load_sheet_object_image(object),
+            // A scroll never changes image content, so an object that was
+            // already visible keeps its decoded handle. Everything else
+            // (newly visible, or once culled) goes through the content cache.
+            Some(view) if reusable && view.visible => view.image,
+            _ => object_images::image_for(object),
         },
     );
     if !window_moved {

@@ -155,6 +155,18 @@ impl PresentationSession {
             f64::from(SLIDE_HEIGHT * INSERT_FIT_FRACTION),
         )
         .map(|(x, y, w, h)| (w as f32, h as f32, x as f32, y as f32))?;
+        // A short cascade keeps repeated inserts from landing exactly on top of
+        // each other; the first picture stays centered.
+        let count = self.document.active_slide().map_or(0, |slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|element| element.element_type == ElementType::Picture)
+                .count()
+        });
+        let step = (count % 6) as f32 * 24.0;
+        let x = (x + step).min(SLIDE_WIDTH - width);
+        let y = (y + step).min(SLIDE_HEIGHT - height);
         self.checkpoint();
         let asset_id = asset.id.clone();
         self.document.assets.insert(asset_id.clone(), asset);

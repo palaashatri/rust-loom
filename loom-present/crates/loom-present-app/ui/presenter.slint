@@ -60,7 +60,7 @@ export component PresenterWindow inherits Window {
                         font-size: Theme.type.caption;
                         font-weight: 600;
                         color: Theme.palette().ink-secondary;
-                        accessible-role: text;
+                        accessible-role: AccessibleRole.text;
                     }
                     Text {
                         text: root.slide-title;
@@ -69,7 +69,7 @@ export component PresenterWindow inherits Window {
                         font-weight: 700;
                         color: Theme.palette().ink;
                         overflow: elide;
-                        accessible-role: text;
+                        accessible-role: AccessibleRole.text;
                         accessible-label: "Current slide: " + root.slide-title;
                     }
                 }
@@ -79,7 +79,7 @@ export component PresenterWindow inherits Window {
                     font-weight: 600;
                     color: root.timer-running ? Theme.palette().ink : Theme.palette().ink-secondary;
                     vertical-alignment: center;
-                    accessible-role: text;
+                    accessible-role: AccessibleRole.text;
                     accessible-label: "Elapsed time " + root.elapsed + (root.timer-running ? "" : ", paused");
                 }
                 LoomButton {
@@ -119,7 +119,7 @@ export component PresenterWindow inherits Window {
                             font-size: Theme.type.body-large * 1.25;
                             color: root.notes == "" ? Theme.palette().ink-secondary : Theme.palette().ink;
                             vertical-stretch: 1;
-                            accessible-role: text;
+                            accessible-role: AccessibleRole.text;
                             accessible-label: "Speaker notes: " + (root.notes == "" ? "none" : root.notes);
                         }
                     }
@@ -170,7 +170,7 @@ export component PresenterWindow inherits Window {
                                 color: Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
-                                accessible-role: text;
+                                accessible-role: AccessibleRole.text;
                                 accessible-label: "No next slide";
                             }
                         }
@@ -182,7 +182,7 @@ export component PresenterWindow inherits Window {
                             font-size: Theme.type.body-large;
                             font-weight: 600;
                             color: Theme.palette().ink;
-                            accessible-role: text;
+                            accessible-role: AccessibleRole.text;
                             accessible-label: root.has-next ? "Next slide: " + root.next-title : "No next slide";
                         }
                         Rectangle { vertical-stretch: 1; }

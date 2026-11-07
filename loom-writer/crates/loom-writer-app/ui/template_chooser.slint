@@ -368,41 +368,73 @@ export component TemplateChooserModal inherits Rectangle {
 
                         if root.template-columns == 2 : VerticalLayout {
                             spacing: Theme.tokens.space.xl;
-                            HorizontalLayout {
+                            if !Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.xl;
                                 alignment: center;
-                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
                             }
-                            HorizontalLayout {
+                            if Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.xl;
                                 alignment: center;
-                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
                             }
-                            HorizontalLayout {
+                            if !Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.xl;
                                 alignment: center;
-                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { layout-order: Theme.rtl ? 1 : 0; descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 1; descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                            }
+                            if Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                            }
+                            if !Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                            }
+                            if Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
                             }
                         }
 
                         if root.template-columns == 3 : VerticalLayout {
                             spacing: Theme.tokens.space.xl;
-                            HorizontalLayout {
+                            if !Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.xl;
                                 alignment: center;
-                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { layout-order: Theme.rtl ? 2 : 0; descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { layout-order: 1; descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 2; descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
                             }
-                            HorizontalLayout {
+                            if Theme.rtl : HorizontalLayout {
                                 spacing: Theme.tokens.space.xl;
                                 alignment: center;
-                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { layout-order: Theme.rtl ? 2 : 0; descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { layout-order: 1; descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
-                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { layout-order: Theme.rtl ? 0 : 2; descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[2].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[2]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[2].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[1].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[1]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[1].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[0].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[0]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[0].stable-id; } }
+                            }
+                            if !Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                            }
+                            if Theme.rtl : HorizontalLayout {
+                                spacing: Theme.tokens.space.xl;
+                                alignment: center;
+                                if root.template-visible(WriterTemplateCatalog.templates[5].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[5]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[5].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[4].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[4]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[4].stable-id; } }
+                                if root.template-visible(WriterTemplateCatalog.templates[3].category) : WriterTemplateOption { descriptor: WriterTemplateCatalog.templates[3]; current-template-id: root.template-selected; clicked => { root.template-selected = WriterTemplateCatalog.templates[3].stable-id; } }
                             }
                         }
                     }

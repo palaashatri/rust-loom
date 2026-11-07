@@ -304,9 +304,14 @@ fn rejected_revision_finalization_keeps_document_history_recovery_and_projection
     let history_before = history_shape(&state);
     let writes_before = recovery::WRITES.with(Cell::get);
     let mut unsupported = before.clone();
-    unsupported
-        .set_block_alignment(unsupported.blocks[0].id, loom_text::Alignment::Right)
-        .expect("change paragraph alignment");
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("encode the fixture picture");
+    unsupported.blocks[0].image = Some(
+        loom_writer_core::InlineImage::from_bytes("photo.png", png)
+            .expect("decode the fixture picture"),
+    );
 
     assert!(!apply_with_history(
         &app,

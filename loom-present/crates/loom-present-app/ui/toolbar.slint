@@ -7,6 +7,9 @@ import { Theme } from "theme.slint";
 /// inspector tabs on the reading-end side.
 export component PresentActionToolbar inherits LabeledToolbar {
     in property <bool> overflow: false;
+    /// Compact icon-only chrome: distinguish a toolbar mode button from the
+    /// local menu's top-level item with the same visible caption.
+    in property <bool> compact: false;
     in property <bool> inspector-visible: false;
     in property <int> inspector-tab: 0;
     in property <bool> view-menu-open: false;
@@ -41,6 +44,7 @@ export component PresentActionToolbar inherits LabeledToolbar {
         LoomToolbarItem {
             icon: "view";
             label: "View";
+            accessible-name: "View menu";
             checked: root.view-menu-open;
             focus-request: root.focus-view-tick;
             clicked => { root.toggle-view-menu(self.absolute-position.x); }
@@ -74,7 +78,7 @@ export component PresentActionToolbar inherits LabeledToolbar {
         // Wide windows only: narrow ones reach it from the Slide menu and palette.
         if !root.overflow : LoomToolbarItem {
             icon: "chart";
-            label: "Chart from Clipboard";
+            label: "Paste Chart from Sheets";
             clicked => { root.add-chart(); }
         }
         LoomToolbarItem {
@@ -166,7 +170,7 @@ export component PresentActionToolbar inherits LabeledToolbar {
         // Wide windows only: narrow ones reach it from the Slide menu and palette.
         if !root.overflow : LoomToolbarItem {
             icon: "chart";
-            label: "Chart from Clipboard";
+            label: "Paste Chart from Sheets";
             clicked => { root.add-chart(); }
         }
         // Wide windows only: narrow ones reach it from the Slide menu and palette.
@@ -198,6 +202,7 @@ export component PresentActionToolbar inherits LabeledToolbar {
         LoomToolbarItem {
             icon: "view";
             label: "View";
+            accessible-name: "View menu";
             checked: root.view-menu-open;
             focus-request: root.focus-view-tick;
             clicked => { root.toggle-view-menu(self.absolute-position.x + self.width); }

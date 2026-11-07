@@ -168,6 +168,153 @@ fn keyboard_step_object(
     true
 }
 
+/// One parsed, validated object-geometry edit. X/Y are the anchor's column and
+/// row; width and height are document pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObjectGeometryField {
+    Column(u32),
+    Row(u32),
+    Width(u32),
+    Height(u32),
+}
+
+fn parse_object_column(raw: &str) -> Result<u32, String> {
+    let text = raw.trim();
+    if text.is_empty() || !text.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Err("Object X must be a column letter such as D.".to_string());
+    }
+    CellRef::parse(&format!("{text}1"))
+        .map(|cell| cell.col)
+        .ok_or_else(|| "Object X must be a column between A and XFD.".to_string())
+}
+
+fn parse_object_row(raw: &str) -> Result<u32, String> {
+    let text = raw.trim();
+    if text.is_empty() || !text.chars().all(|c| c.is_ascii_digit()) {
+        return Err("Object Y must be a whole row number from 1 to 1048576.".to_string());
+    }
+    CellRef::parse(&format!("A{text}"))
+        .map(|cell| cell.row)
+        .ok_or_else(|| "Object Y must be a row between 1 and 1048576.".to_string())
+}
+
+fn parse_object_pixels(raw: &str, field: &str, minimum: u32) -> Result<u32, String> {
+    let text = raw.trim();
+    let unit = text.len().saturating_sub(2);
+    let number = if text.is_char_boundary(unit) && text[unit..].eq_ignore_ascii_case("px") {
+        text[..unit].trim()
+    } else {
+        text
+    };
+    let value: f32 = number
+        .parse()
+        .map_err(|_| format!("{field} must be a whole number of pixels, for example 240 px."))?;
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(format!("{field} must be a whole number of pixels."));
+    }
+    let value = value as u32;
+    if !(minimum..=MAX_OBJECT_SIZE).contains(&value) {
+        return Err(format!(
+            "{field} must be between {minimum} and {MAX_OBJECT_SIZE} px."
+        ));
+    }
+    Ok(value)
+}
+
+fn parse_object_geometry_field(field: i32, raw: &str) -> Result<ObjectGeometryField, String> {
+    match field {
+        0 => parse_object_column(raw).map(ObjectGeometryField::Column),
+        1 => parse_object_row(raw).map(ObjectGeometryField::Row),
+        2 => parse_object_pixels(raw, "Object width", MIN_OBJECT_WIDTH)
+            .map(ObjectGeometryField::Width),
+        3 => parse_object_pixels(raw, "Object height", MIN_OBJECT_HEIGHT)
+            .map(ObjectGeometryField::Height),
+        _ => Err("Unknown object geometry field.".to_string()),
+    }
+}
+
+fn set_object_field(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    field: i32,
+    raw: &str,
+) -> bool {
+    let index = app.get_selected_object();
+    let Ok(index) = usize::try_from(index) else {
+        app.set_status_left("Select an anchored object first.".into());
+        return false;
+    };
+    let edit = match parse_object_geometry_field(field, raw) {
+        Ok(edit) => edit,
+        Err(message) => {
+            app.set_status_left(SharedString::from(message));
+            return false;
+        }
+    };
+    cancel_active_gesture(app, state);
+    let before = state.current.borrow().clone();
+    let mut after = before.clone();
+    let Some(object) = after.objects.get_mut(index) else {
+        app.set_status_left("Select an anchored object first.".into());
+        return false;
+    };
+    let changed = match edit {
+        ObjectGeometryField::Column(column) => {
+            let changed = object.anchor.col != column;
+            object.anchor.col = column;
+            changed
+        }
+        ObjectGeometryField::Row(row) => {
+            let changed = object.anchor.row != row;
+            object.anchor.row = row;
+            changed
+        }
+        ObjectGeometryField::Width(width) => {
+            let changed = object.width != width;
+            object.width = width;
+            changed
+        }
+        ObjectGeometryField::Height(height) => {
+            let changed = object.height != height;
+            object.height = height;
+            changed
+        }
+    };
+    let name = object_display_name_for(index, object);
+    if !changed {
+        app.set_status_left(SharedString::from(format!("{name} unchanged.")));
+        return true;
+    }
+    *state.current.borrow_mut() = after.clone();
+    push_history(
+        &mut state.undo_stack.borrow_mut(),
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after.clone()),
+        },
+    );
+    state.redo_stack.borrow_mut().clear();
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    let message = match edit {
+        ObjectGeometryField::Column(_) | ObjectGeometryField::Row(_) => {
+            format!(
+                "{name} anchor set to {}.",
+                after.objects[index].anchor.to_a1()
+            )
+        }
+        ObjectGeometryField::Width(_) => {
+            format!("{name} width set to {} px.", after.objects[index].width)
+        }
+        ObjectGeometryField::Height(_) => {
+            format!("{name} height set to {} px.", after.objects[index].height)
+        }
+    };
+    app.set_status_left(SharedString::from(message));
+    true
+}
+
 fn reveal_object(app: &SheetsApp, state: &Rc<GuiState>, index: usize) {
     let sheet = state.current.borrow();
     let Some(object) = sheet.objects.get(index) else {
@@ -464,26 +611,28 @@ fn handle_keyboard_action(
     }
 }
 
-/// Name the selected object the way the accessibility tree does, so the status
-/// line and the announcement agree.
+/// Name an object the way the accessibility tree does, so the status line,
+/// announcement and inspector heading agree.
+pub(crate) fn object_display_name_for(index: usize, object: &SheetObject) -> String {
+    let kind = match object.kind {
+        loom_sheets_core::SheetObjectKind::Image => "Image",
+        loom_sheets_core::SheetObjectKind::Shape => "Shape",
+    };
+    let label = object.label.trim();
+    if label.is_empty() {
+        format!("{kind} {}", index + 1)
+    } else {
+        format!("{kind} {} \u{2014} {label}", index + 1)
+    }
+}
+
 fn object_display_name(state: &GuiState, index: usize) -> String {
     state
         .current
         .borrow()
         .objects
         .get(index)
-        .map(|object| {
-            let kind = match object.kind {
-                loom_sheets_core::SheetObjectKind::Image => "Image",
-                loom_sheets_core::SheetObjectKind::Shape => "Shape",
-            };
-            let label = object.label.trim();
-            if label.is_empty() {
-                format!("{kind} {}", index + 1)
-            } else {
-                format!("{kind} {} \u{2014} {label}", index + 1)
-            }
-        })
+        .map(|object| object_display_name_for(index, object))
         .unwrap_or_else(|| format!("Object {}", index + 1))
 }
 
@@ -650,6 +799,22 @@ pub(crate) fn register_object_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<crate::SheetInspectorActions>()
+            .on_set_object_field(move |field, value| {
+                if let Some(app) = app_ref.upgrade() {
+                    if crate::mutation_guard::refused(&app, &state) {
+                        return false;
+                    }
+                    set_object_field(&app, &state, &menu_service, field, value.as_str())
+                } else {
+                    false
+                }
+            });
+    }
     {
         // Leaving object navigation: show the selected cell the address box names.
         let state = state.clone();
@@ -820,7 +985,9 @@ pub(crate) fn register_object_actions(
 mod tests {
     use super::super::*;
     use super::{
-        anchor_after_drag, keyboard_step_object, resized_dimensions_from_size, ObjectGestureMode,
+        anchor_after_drag, keyboard_step_object, parse_object_column, parse_object_geometry_field,
+        parse_object_pixels, parse_object_row, resized_dimensions_from_size, ObjectGeometryField,
+        ObjectGestureMode,
     };
     use loom_sheets_core::SheetObject;
 
@@ -843,6 +1010,49 @@ mod tests {
             resized_dimensions_from_size(240, 100, 100.0, -200.0, 2.0),
             (290, 48)
         );
+    }
+
+    #[test]
+    fn object_geometry_fields_accept_only_their_documented_units() {
+        assert_eq!(parse_object_column("a"), Ok(0));
+        assert_eq!(parse_object_column(" D "), Ok(3));
+        assert_eq!(parse_object_column("AA"), Ok(26));
+        for invalid in ["", "1", "A1", "D3", "XFE"] {
+            assert!(
+                parse_object_column(invalid).is_err(),
+                "{invalid:?} is not a bare column"
+            );
+        }
+
+        assert_eq!(parse_object_row("1"), Ok(0));
+        assert_eq!(parse_object_row(" 1048576 "), Ok(1_048_575));
+        for invalid in ["", "0", "abc", "A3", "1048577"] {
+            assert!(
+                parse_object_row(invalid).is_err(),
+                "{invalid:?} is not a bare row"
+            );
+        }
+
+        assert_eq!(parse_object_pixels("80", "Width", 80), Ok(80));
+        assert_eq!(parse_object_pixels("240 px", "Width", 80), Ok(240));
+        assert_eq!(parse_object_pixels("240PX", "Width", 80), Ok(240));
+        assert_eq!(parse_object_pixels("4096", "Height", 48), Ok(4096));
+        for invalid in ["79", "4097", "240.5", "12cm", "", "-1"] {
+            assert!(
+                parse_object_pixels(invalid, "Width", 80).is_err(),
+                "{invalid:?} is not a supported pixel size"
+            );
+        }
+
+        assert_eq!(
+            parse_object_geometry_field(0, "E"),
+            Ok(ObjectGeometryField::Column(4))
+        );
+        assert_eq!(
+            parse_object_geometry_field(3, "121 px"),
+            Ok(ObjectGeometryField::Height(121))
+        );
+        assert!(parse_object_geometry_field(9, "1").is_err());
     }
 
     #[test]

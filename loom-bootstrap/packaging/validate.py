@@ -276,7 +276,7 @@ def validate_windows(artifact: Path, architecture: str, assertions: list[str]) -
             "MSI decompilation verified all application/file-association/open-command metadata",
             "MSI administrative extraction succeeded",
             "MSI shortcut icon declarations, indices and original ICO payloads verified",
-            "Writer PE group icon references canonical ICO frame payloads",
+            "application PE group icons reference canonical ICO frame payloads",
             "all packaged PE executables match the requested architecture",
         ]
     )

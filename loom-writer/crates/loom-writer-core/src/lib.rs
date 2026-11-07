@@ -544,7 +544,6 @@ impl WriterDocument {
     /// text matches retain the complete old block, including id, kind, paragraph
     /// style, and runs, even when an insertion or deletion moves them. The
     /// empty string represents an empty document rather than one empty block.
-
     pub fn replace_paragraphs(&mut self, plain_text: &str) {
         let old_blocks = self.rebuild_blocks(plain_text, None);
         Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
@@ -1405,7 +1404,7 @@ fn apply_global_character_style(
     end: usize,
     style: loom_text::CharacterStyle,
 ) {
-    if start >= end {
+    if start >= end || style == loom_text::CharacterStyle::default() {
         return;
     }
     for (block_index, local_start, local_end) in

@@ -301,7 +301,7 @@ export component SheetTable inherits Rectangle {
                             if is-active || (in-selection && root.selection-end-row - root.selection-start-row < 64 && root.selection-end-col - root.selection-start-col < 64 && (root.selection-end-row - root.selection-start-row + 1) * (root.selection-end-col - root.selection-start-col + 1) <= 64) || ((global-row == root.selected-row || global-col == root.selected-col) && (root.cells[cell-idx] != "" || spill-kind != 0)) : Rectangle {
                                 width: parent.width;
                                 height: parent.height;
-                                accessible-role: text;
+                                accessible-role: AccessibleRole.text;
                                 accessible-label: root.cell-labels[cell-idx];
                             }
 

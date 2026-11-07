@@ -62,10 +62,11 @@ fn tracked_changes_round_trip_persist_settings_ids_and_rich_payloads() {
 fn older_content_defaults_tracked_changes_without_changing_existing_documents() {
     let original = document("legacy");
     let current_json = original.to_content_json();
-    let missing_state = current_json.replace(
-        ",\"tracked_changes\":{\"recording\":false,\"author\":\"Anonymous\",\"next_id\":1,\"revisions\":[]}",
-        "",
+    let tracked_state = format!(
+        ",\"tracked_changes\":{}",
+        TrackedChanges::default().write_content_json()
     );
+    let missing_state = current_json.replace(&tracked_state, "");
     assert!(WriterDocument::from_content_json(&missing_state).is_err());
 
     let json = current_json
@@ -74,10 +75,7 @@ fn older_content_defaults_tracked_changes_without_changing_existing_documents() 
             "\"format\":6",
         )
         .replace(",\"appearance\":\"white\"", "")
-        .replace(
-            ",\"tracked_changes\":{\"recording\":false,\"author\":\"Anonymous\",\"next_id\":1,\"revisions\":[]}",
-            "",
-        );
+        .replace(&tracked_state, "");
     let loaded = WriterDocument::from_content_json(&json).unwrap();
     assert_eq!(loaded.tracked_changes, TrackedChanges::default());
     assert!(loaded.same_content_as(&original));
@@ -126,8 +124,10 @@ fn recording_allocates_monotonic_ids_and_disabled_recording_does_not_advance() {
 #[test]
 fn recording_an_insertion_requires_payload_to_match_current_inline_style() {
     let mut document = document("a");
-    let mut italic = loom_text::CharacterStyle::default();
-    italic.italic = true;
+    let italic = loom_text::CharacterStyle {
+        italic: true,
+        ..Default::default()
+    };
     document.blocks[0].runs = vec![StyleRun {
         start: 0,
         end: 1,
@@ -975,8 +975,10 @@ fn paragraph_format_reject_preserves_an_invalidated_revision_atomically() {
 fn committed_inline_formatting_is_recorded_and_rejected() {
     let before = document("abc");
     let mut candidate = before.clone();
-    let mut bold = loom_text::CharacterStyle::default();
-    bold.weight = loom_text::FontWeight::Bold;
+    let bold = loom_text::CharacterStyle {
+        weight: loom_text::FontWeight::Bold,
+        ..Default::default()
+    };
     candidate.blocks[0].runs.push(StyleRun {
         start: 0,
         end: 2,

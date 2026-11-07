@@ -58,6 +58,7 @@ mod export_operation_journeys;
 mod grid_gesture_tests;
 #[path = "main_tests/grid_interaction_tests.rs"]
 mod grid_interaction_tests;
+
 #[path = "main_tests/grid_pointer_tests.rs"]
 mod grid_pointer_tests;
 #[path = "main_tests/grid_scroll_coverage_tests.rs"]
@@ -70,6 +71,8 @@ mod import_title_tests;
 mod layout_tests;
 #[path = "main_tests/mutation_guard_tests.rs"]
 mod mutation_guard_tests;
+#[path = "main_tests/object_image_cache_tests.rs"]
+mod object_image_cache_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
 #[path = "main_tests/perf_regression_tests.rs"]

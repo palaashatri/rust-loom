@@ -49,7 +49,9 @@ export component PresentApp inherits Window {
     // User-requested state survives widths where the inspector is unavailable.
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
-    out property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    // The user's request is the effective state at every width: a compact
+    // window docks the inspector instead of silently discarding the request.
+    out property <bool> inspector-visible: root.show-inspector;
     in-out property <bool> show-navigator: true;
     in-out property <bool> view-menu-open: false;
     in-out property <bool> zoom-menu-open: false;
@@ -429,6 +431,7 @@ export component PresentApp inherits Window {
                 focus-view-tick: root.focus-view-tick;
                 focus-zoom-tick: root.focus-zoom-tick;
                 overflow: root.overflow-toolbar;
+                compact: root.icon-only-toolbar;
                 inspector-visible: root.inspector-visible;
                 inspector-tab: root.inspector-tab;
                 view-menu-open: root.view-menu-open;
@@ -469,6 +472,7 @@ export component PresentApp inherits Window {
 
                 if root.rtl && root.inspector-visible && !root.is-preview-mode : inspector-rtl := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
+                    compact: !root.inspector-available;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
                     slide-count-text: root.slide-count-text;
@@ -637,6 +641,7 @@ export component PresentApp inherits Window {
 
                 if !root.rtl && root.inspector-visible && !root.is-preview-mode : inspector-ltr := PresentInspector {
                     inspector-tab <=> root.inspector-tab;
+                    compact: !root.inspector-available;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
                     slide-count-text: root.slide-count-text;

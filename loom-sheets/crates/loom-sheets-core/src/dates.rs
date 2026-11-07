@@ -36,7 +36,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 /// `yyyy-mm-dd` for a 1900-system date serial; `None` when the number is not
 /// a representable date (negative, zero, or beyond year 9999).
 pub fn serial_to_iso(serial: f64) -> Option<String> {
-    if !serial.is_finite() || serial < 1.0 || serial >= 2_958_466.0 {
+    if !serial.is_finite() || !(1.0..2_958_466.0).contains(&serial) {
         return None;
     }
     let day = serial.floor() as i64;

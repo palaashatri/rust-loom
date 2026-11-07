@@ -363,6 +363,11 @@ fn the_number_format_choices_are_named_by_what_they_do() {
             1,
             "one data-format button named {name:?}"
         );
+        assert_eq!(
+            buttons(name)[0].accessible_checkable(),
+            Some(true),
+            "{name:?} exposes that it is a choice"
+        );
     }
     for glyph in ["123", "$", "%", "1.23"] {
         assert!(
@@ -370,6 +375,17 @@ fn the_number_format_choices_are_named_by_what_they_do() {
             "a data-format button is still named only by its glyph {glyph:?}"
         );
     }
+    let checked = |name: &str| buttons(name)[0].accessible_checked();
+    assert_eq!(checked("General"), Some(true), "General starts selected");
+    assert_eq!(checked("Number"), Some(false));
+    app.set_cell_format(3);
+    let _ = snapshot_component(&app, 1280.0, 1100.0, 1.0).expect("render the new format");
+    assert_eq!(checked("General"), Some(false), "the old choice clears");
+    assert_eq!(
+        checked("Number"),
+        Some(true),
+        "the chosen format is announced"
+    );
 }
 
 #[test]

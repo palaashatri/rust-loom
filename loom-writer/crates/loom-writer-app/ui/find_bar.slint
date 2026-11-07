@@ -106,7 +106,7 @@ export component FindBarOverlay inherits Rectangle {
                 color: Theme.palette().ink-secondary;
                 vertical-alignment: center;
                 horizontal-alignment: center;
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: FindBar.status == "" ? "Find results" : "Find results: " + FindBar.status;
                 accessible-live-region: AccessibleLiveness.polite;
             }
@@ -126,7 +126,7 @@ export component FindBarOverlay inherits Rectangle {
                 color: Theme.palette().ink-secondary;
                 vertical-alignment: center;
                 horizontal-alignment: center;
-                accessible-role: text;
+                accessible-role: AccessibleRole.text;
                 accessible-label: FindBar.status == "" ? "Find results" : "Find results: " + FindBar.status;
                 accessible-live-region: AccessibleLiveness.polite;
             }

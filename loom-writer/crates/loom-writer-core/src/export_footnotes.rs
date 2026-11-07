@@ -16,17 +16,29 @@ use crate::{
 #[path = "export_footnotes_tests.rs"]
 mod tests;
 
+/// Where one footnote ordinal is drawn on the page.
+pub(crate) struct ReferenceMarker {
+    pub page: PageIndex,
+    pub number: usize,
+    pub x: f32,
+    pub line_top: f32,
+    pub body_size_pt: f32,
+}
+
 /// Draw a small raised ordinal at an already-resolved source-text caret.
 pub(crate) fn draw_reference_marker(
     pdf: &mut PdfDocument,
     fonts: &mut FontRegistry,
-    page: PageIndex,
-    number: usize,
-    x: f32,
-    line_top: f32,
-    body_size_pt: f32,
+    marker: ReferenceMarker,
     context: &str,
 ) -> Result<(), WriterError> {
+    let ReferenceMarker {
+        page,
+        number,
+        x,
+        line_top,
+        body_size_pt,
+    } = marker;
     let text = format!("{number}");
     let size_pt = (body_size_pt * 0.65).max(5.0);
     let block = RichBlock::new(0, "paragraph", text.as_str());
@@ -52,6 +64,8 @@ pub(crate) fn draw_reference_marker(
     )
 }
 
+type ShapedNoteLines = HashMap<u64, Vec<(Range<usize>, Option<WriterShapedVisualLine>)>>;
+
 /// Draw the note-body lines at the same page coordinates used by `DocumentFlow`.
 pub(crate) fn draw_body_lines(
     pdf: &mut PdfDocument,
@@ -61,8 +75,7 @@ pub(crate) fn draw_body_lines(
     doc: &WriterDocument,
     page_style: &PageStyle,
 ) -> Result<(), WriterError> {
-    let mut shaped_by_note: HashMap<u64, Vec<(Range<usize>, Option<WriterShapedVisualLine>)>> =
-        HashMap::with_capacity(doc.footnotes.len());
+    let mut shaped_by_note: ShapedNoteLines = HashMap::with_capacity(doc.footnotes.len());
     for note in &doc.footnotes {
         let first = flow
             .footnote_lines()
@@ -119,11 +132,13 @@ pub(crate) fn draw_body_lines(
             draw_reference_marker(
                 pdf,
                 fonts,
-                page,
-                placement.number,
-                placement.number_bounds.x - page_bounds.x,
-                line_top,
-                placement.font_size_pt,
+                ReferenceMarker {
+                    page,
+                    number: placement.number,
+                    x: placement.number_bounds.x - page_bounds.x,
+                    line_top,
+                    body_size_pt: placement.font_size_pt,
+                },
                 &format!("footnote {} label", placement.note_id),
             )?;
         }

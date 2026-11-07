@@ -93,6 +93,8 @@ A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formattin
 2. Sign the Windows and macOS artifacts (notarizing the macOS ones) and the Linux packages, keeping the credentials in CI secrets.
 3. Record the support period here. Vulnerability reports use GitHub private vulnerability reporting, which is enabled. Define how an actively exploited vulnerability is reported within 24 hours.
 
+**Status 2026-11-07:** the six-target release workflow ran to `success` on GitHub run `41185632779`, on commit `1b883d4b`, and `release.yml` is unchanged to the PR #21 head. The artifacts were built with `--allow-unsigned`. Signing, SBOM, dependency audit and the support statement are still open.
+
 **Done when:** a release candidate carries signatures, an SBOM and a stated support period, and the reporting path is written down. Until then, releases stay labelled as development previews.
 
 ### GOV-09 — Define shared rich-text semantics across Writer, Sheets, and Present
@@ -107,6 +109,8 @@ A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formattin
 2. Reconcile duplicate representations against `loom_text` for common text semantics. Keep cell number formats/table structure and slide-object geometry/type in their owning domain models.
 3. Use structured data for rich-text clipboard and persistence paths. Keep Markdown as an explicitly named import/export format, and warn or refuse when a conversion cannot preserve supported formatting; never silently flatten runs.
 4. Add focused persistence/reopen and cross-app copy/paste checks for the shared formatting subset, plus import/export loss checks for unsupported or app-specific features.
+
+**Status 2026-11-07:** unchanged. Present still stores one style per element and renders one `Text` per element, Writer stores one style per run, and Sheets' cell styles are separate. No shared contract or support/loss map has been written yet.
 
 **Done when:** the shared semantic contract and support/loss map are documented; Writer, Sheets and Present preserve the common supported formatting through native save/reopen and the tested cross-app clipboard paths; unsupported mappings are visible; and app-specific layout/data remain intact. Each app still needs to pass its own acceptance gate.
 

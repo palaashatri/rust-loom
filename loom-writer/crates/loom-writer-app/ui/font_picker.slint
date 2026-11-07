@@ -54,8 +54,10 @@ export component WriterFontField inherits Rectangle {
     height: Theme.scaled-control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: field-focus.has-focus ? 2px : 1px;
-    border-color: field-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
-    background: Theme.palette().surface;
+    border-color: field-focus.has-focus
+        ? Theme.palette().focus
+        : (touch.has-hover ? Theme.palette().ink-secondary : Theme.palette().border);
+    background: touch.has-hover ? Theme.palette().selection-soft : Theme.palette().surface;
     accessible-role: none;
 
     in property <int> focus-tick: FontPicker.field-focus-tick;
@@ -89,7 +91,7 @@ export component WriterFontField inherits Rectangle {
         }
     }
 
-    TouchArea {
+    touch := TouchArea {
         clicked => {
             field-focus.focus();
             if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); }

@@ -132,7 +132,6 @@ pub(crate) fn snapshot() -> Snapshot {
 }
 
 /// Restore pending typing style after a rejected document transaction.
-
 pub(crate) fn restore(snapshot: Snapshot) {
     PENDING.with(|pending| *pending.borrow_mut() = snapshot);
 }

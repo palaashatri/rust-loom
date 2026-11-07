@@ -60,7 +60,11 @@ fn render(
         // Open it the way a user does, so the menu anchors to the clicked item.
         let _ = snapshot_component(&app, width, height, 1.0).expect("render");
         let label = if surface == "view-menu" {
-            "View"
+            if width < 1180.0 {
+                "View menu"
+            } else {
+                "View"
+            }
         } else {
             "Zoom"
         };

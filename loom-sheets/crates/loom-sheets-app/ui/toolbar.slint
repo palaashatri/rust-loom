@@ -111,17 +111,31 @@ export component SheetActionToolbar inherits LabeledToolbar {
             checked: root.inspector-visible && root.inspector-tab == 0;
             clicked => { root.show-inspector-tab(0); }
         }
-        LoomOverflowTrigger {
-            focus-request: root.request(9);
-            clicked => { root.overflow-requested(); }
+        // The overflow control keeps its compact 28 px hit target but is
+        // centred on the labelled row instead of riding its top edge.
+        Rectangle {
+            width: 28px;
+            height: ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
+            background: transparent;
+            LoomOverflowTrigger {
+                y: (parent.height - self.height) / 2;
+                focus-request: root.request(9);
+                clicked => { root.overflow-requested(); }
+            }
         }
     }
     if Theme.rtl : HorizontalLayout {
         horizontal-stretch: 1;
         spacing: 4px;
-        LoomOverflowTrigger {
-            focus-request: root.request(9);
-            clicked => { root.overflow-requested(); }
+        Rectangle {
+            width: 28px;
+            height: ResponsivePolicy.labeled-toolbar-min-height + ResponsivePolicy.toolbar-label-extra;
+            background: transparent;
+            LoomOverflowTrigger {
+                y: (parent.height - self.height) / 2;
+                focus-request: root.request(9);
+                clicked => { root.overflow-requested(); }
+            }
         }
         LoomToolbarItem {
             icon: "organize"; label: "Organize";

@@ -28,6 +28,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "view.appearance.light",
     "view.appearance.dark",
     "view.appearance.high_contrast",
+    "view.window-frame.system",
+    "view.window-frame.loom",
     "table.add_row",
     "table.delete_row",
     "table.add_col",
@@ -63,6 +65,7 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
         [
             vec![MenuItem::check("view.inspector", "Format Inspector", false)],
             loom_desktop::appearance::menu_items(),
+            loom_desktop::window_frame::menu_items(),
         ]
         .concat(),
         vec![Menu::new(

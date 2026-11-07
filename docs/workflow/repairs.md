@@ -25,7 +25,7 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **CODE-17** Move Writer comments with the text they describe — FIXED (2026-10-04, anchors rebase from the edit position; a paste over a selection falls back to a text diff)
 - **CODE-18** Do not consume a storage sequence when append fails — FIXED (2026-10-28; storage-journal open, write, rollback, and reopen recovery tests pass)
 - **CODE-19** Undo Present transitions with the rest of the slide — FIXED
-- **UI-01** Give every desktop a visible application menu — NEEDS_REVIEW
+- **UI-01** Give every desktop a visible application menu — FIXED (2026-10-31; live macOS native menus confirmed for Writer, Sheets and Present; Linux in-window menus driven live for Sheets/Writer and covered by the Present local-menu tests)
 - **UI-28** Fit the XLSX loss warning to its message — FIXED
 - **UI-29** Align and size desktop menu popup items — FIXED
 - **UI-30** Name the current workbook in the dirty-close prompt — FIXED
@@ -33,9 +33,9 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **UI-32** Remove the redundant worksheet heading above the grid — FIXED
 - **UI-33** Meet the button-label contrast floor in every theme — FIXED
 - **UI-34** Keep anchored shape labels readable on every fill — FIXED
-- **UI-35** Give every Sheets icon action a meaningful accessible name — NEEDS_REVIEW
-- **UI-36** Expose chart data to keyboard and screen-reader users — NEEDS_REVIEW
-- **UI-37** Make anchored objects operable without a pointer — OPEN
+- **UI-35** Give every Sheets icon action a meaningful accessible name — FIXED (2026-10-31; Sheets icon-accessibility suite green; native AT-SPI matrix remains acceptance evidence)
+- **UI-36** Expose chart data to keyboard and screen-reader users — FIXED (2026-10-31; chart data is a named keyboard/screen-reader list; chart-accessibility suite green)
+- **UI-37** Make anchored objects operable without a pointer — FIXED (2026-10-31; object focus, keyboard move/resize, commit/cancel/undo and persistence tests green)
 - **UI-38** Apply text scaling throughout Sheets — FIXED
 - **UI-39** Keep Sheets inspector property labels readable — FIXED
 - **UI-42** Let the responsive policy account for text scale — FIXED
@@ -51,13 +51,13 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **UI-09** Distinguish a workbook from one sheet in its commands — FIXED
 - **UI-10** Remove the contradictory permission to truncate action captions — FIXED (2026-10-29; see archived evidence)
 - **UI-11** Keep product help out of the user's document — FIXED (2026-10-04, Writer opens blank)
-- **UI-12** Make each Writer template create what its card says — OPEN (2026-10-27 comparative audit: Blank Black creates a white page; see W-01 below)
+- **UI-12** Make each Writer template create what its card says — FIXED (2026-10-31; Blank Black creates a black page and Newsletter a single-column story flow; full Writer suite green)
 - **UI-13** Make the table command honest about its editing model — FIXED
 - **UI-14** Keep formatting and comments reachable in compact windows — FIXED
 - **UI-15** Put Present's navigator in the expected reading position — FIXED
 - **UI-16** Fit Photo's whole image inside its viewport — FIXED
 - **UI-17** Make Motion's preview represent the exported frame — FIXED
-- **UI-18** Let users type precise transform values — OPEN
+- **UI-18** Let users type precise transform values — FIXED (2026-10-31; Present converts in/cm/mm/pt, rejects px/% with readable status, and keeps one undo step)
 - **UI-19** Distinguish Video timeline zoom from scrolling — OPEN
 - **UI-20** Keep clip and region captions readable on their fills — OPEN
 - **UI-21** Give Studio one transport control for each action — OPEN
@@ -70,15 +70,15 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **CODE-20** Keep exported worksheet names distinct — FIXED
 - **CODE-21** Put spilled array results in the right cells — FIXED
 - **CODE-22** Reuse calculated values while the user navigates — FIXED
-- **CODE-23** Warn before importing XLSX features Loom cannot keep — NEEDS_REVIEW
+- **CODE-23** Warn before importing XLSX features Loom cannot keep — FIXED (2026-10-31; picker/startup warning dispatch and continue/cancel preservation tests green)
 - **CODE-24** Link XLSX cell styles so other spreadsheet apps apply them — FIXED
 - **CODE-25** Import standard DEFLATE-compressed XLSX packages — FIXED
 - **CODE-26** Preserve worker input failures across result coalescing — FIXED
-- **CODE-27** Warn before dropping a single unsupported XLSX chart — NEEDS_REVIEW
-- **CODE-28** Report unsupported absolute XLSX drawing anchors — NEEDS_REVIEW
-- **CODE-29** Warn before dropping additional series from an XLSX chart — NEEDS_REVIEW
+- **CODE-27** Warn before dropping a single unsupported XLSX chart — FIXED (2026-10-31; unsupported-area-chart fixture warns and cancel preserves the workbook)
+- **CODE-28** Report unsupported absolute XLSX drawing anchors — FIXED (2026-10-31; absolute-anchor fixture warns and cancel preserves the workbook)
+- **CODE-29** Warn before dropping additional series from an XLSX chart — FIXED (2026-10-31; multi-series fixture warns and cancel preserves the workbook)
 - **CODE-30** Accept the operating system's own recovery-path symlinks — FIXED
-- **PERF-01** Keep large workbook work from freezing the window — NEEDS_REVIEW. [Oct27 developer-build and keyboard-cache evidence](../audits/uiux-2026-10-27.md#sheets-performance-follow-up--perf-01--needs_review); native latency and broader acceptance remain open.
+- **PERF-01** Keep large workbook work from freezing the window — NEEDS_REVIEW. [Oct27 developer-build and keyboard-cache evidence](../audits/uiux-2026-10-27.md#sheets-performance-follow-up--perf-01--needs_review); native latency and broader acceptance remain open. 2026-11-07: embedded oversized images are refused from their header before decoding (`cce0fbb9`); path-only images are not yet covered.
 - **REC-02** Keep unsaved recovery safe and bounded — FIXED for v1 on Windows and Linux (2026-10-07; real full-volume disk-full untested, injected write errors only)
 - **GOV-02** Reconcile design-bible prose with canonical contracts — OPEN
 - **GOV-03** Restore trustworthy geometry-manifest generation — OPEN
@@ -98,6 +98,8 @@ All three office applications remain `ACCEPTANCE_BLOCKED`. The earlier 2026-10-1
 2. **Sheets:** focus handling when the grid narrows (Argon D1, scoped repair verified on Windows below; Linux and broader checks remain), circular-reference message, window ballooning or hang on rapid resize after open, doubled gridline under a wrapped row (the latest macOS pixel comparison at 24 px unwrapped and 215.9 px wrapped produced the same row-boundary pixels, so the original finding remains unreproduced and OPEN), dense-sheet scroll below the 60 fps budget. The private Slint `paint` warning is resolved in source by making `CellInk.paint` public; the rebuilt Sheets test package no longer emits that private-function diagnostic. A new OPEN native check reproduces ignored grid characters after Alt+Space system-menu sizing until Alt is tapped; retained modifier state is a hypothesis pending event/physical-input verification. Recheck the review's empty-reference display and chart-redo findings too; they are not covered by the prior sort repair.
 3. **Writer:** Markdown-backed tables lose pasted formatting/alignment/widths; per-character table undo; Table actions enabled outside tables (scoped repair verified below); inspector Del Row overflow (not reproduced at the two tested Windows sizes); missing painted cell-range selection, visible C3 clicks selecting C2, compact-inspector overlap; caret/placeholder overlap; PDF heading/table styling; imported underline; duplicate accessibility names; toolbar arrow navigation; Ctrl+Home margin; app-local font picker; chart summary instead of a drawn chart; picture resize, clipboard paste and alt text; table typing and page-render performance.
    - **Plan only — 2026-10-29:** The `picture.alt_text` action is present in Writer's Table menu but omitted from `local_menu.rs`'s supported-command set, which disables the route. Add it to that set and cover both action paths in `toolbar_tests.rs`: the command opens the production description dialog when the caret is on a picture, and remains available but keeps the dialog closed with status feedback when no picture is at the caret. Keep the repair OPEN until its scoped checks run; no repair result or backlog-state change is recorded here.
+   - **Status — 2026-11-07:** Table-cell wrapping, Markdown paste structure and the caret after a table-ending paste are fixed (`9f40cf08`, `1bfb0b84`, with a 2026-11-06 on-screen check). The other Writer items in this list were not re-verified in this pass.
 4. **Present:** horizontal bar export, rotated chart text smear, per-character table undo, stacked new objects, pie/multi-series chart fidelity, text-scale chrome glyph, theme colours, startup PPTX warning bypass (scoped repair verified below), per-run text formatting; actionable import failure text and deferred recovery error/order/replacement races.
    - **Plan only — 2026-10-29:** When a deferred recovery append fails, opening a lossy PPTX warning stops retry timers, but the warning's status update can re-arm a retry that cannot write while the import is pending. Guard automatic and explicit retries while `PENDING_PPTX_IMPORT` is set. Add one regression that injects the deferred append failure, opens a pending import warning, projects status, proves automatic/explicit retry remain deferred, then cancels and verifies the latest visible deck is recovered. Existing candidate checkpoint ordering and import-error UI coverage remain unchanged. Sources: `recovery_deferred.rs` and `recovery_deferred_tests.rs`; no implementation or verification result is recorded yet.
+   - **Status — 2026-11-07:** Stacked new objects are repaired (the placement search and the twelve-insertion regression `twelve_mixed_insertions_avoid_occupied_rectangles_and_skip_preoccupied_slots`). The other Present items in this list were not re-verified in this pass.
 5. **Cross-platform evidence:** live Linux interactions including picture chooser, typing and graceful close; complete inspected viewport/theme/text-scale/device-scale matrix; speech evidence remains owner-deferred, not a passing claim; Linux performance; recorded independent per-gate sign-off. macOS remains deferred pending a host.

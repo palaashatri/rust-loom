@@ -139,8 +139,10 @@ mod tests {
     }
 
     fn formatting(text: &str, italic: bool) -> RevisionPayload {
-        let mut style = loom_text::CharacterStyle::default();
-        style.italic = italic;
+        let style = loom_text::CharacterStyle {
+            italic,
+            ..Default::default()
+        };
         RevisionPayload {
             text: text.to_owned(),
             runs: vec![loom_text::StyleRun {

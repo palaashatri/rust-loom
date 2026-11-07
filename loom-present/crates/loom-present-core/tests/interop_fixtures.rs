@@ -97,6 +97,7 @@ fn fixture_session() -> PresentationSession {
         color: Some("#1565C0".to_string()),
         fill: Some("#E65100".to_string()),
         align: Some(loom_present_core::TextAlign::Right),
+        font_family: None,
     };
     two.add_element(rect2);
     two.add_element(element(

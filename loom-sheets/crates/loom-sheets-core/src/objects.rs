@@ -5,6 +5,7 @@
 //! undoable/persisted identity.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::style::FillColor;
 use crate::CellRef;
@@ -54,7 +55,12 @@ pub struct SheetObject {
     /// Local source path for images; empty for shapes.
     pub path: String,
     /// Embedded source bytes loaded from a `.loomtable` asset entry.
-    pub embedded: Option<Vec<u8>>,
+    ///
+    /// The payload is immutable and shared: clones of a sheet (undo snapshots,
+    /// worker hand-off, projection copies) keep one buffer instead of copying
+    /// megabytes of image data, and the UI can identify decoded pixels by this
+    /// buffer's identity.
+    pub embedded: Option<Arc<[u8]>>,
     /// Package-relative asset entry containing `embedded`, when persisted.
     pub asset: Option<String>,
     /// Shape fill. Images ignore this value.
@@ -149,7 +155,7 @@ mod tests {
     fn image_objects_can_carry_an_embedded_payload() {
         let mut image = SheetObject::image(CellRef { row: 0, col: 0 }, "hero.png")
             .expect("image path is valid");
-        image.embedded = Some(vec![0x89, b'P', b'N', b'G']);
+        image.embedded = Some(vec![0x89, b'P', b'N', b'G'].into());
         assert_eq!(
             image.embedded.as_deref(),
             Some(&[0x89, b'P', b'N', b'G'][..])
