@@ -25,7 +25,8 @@ export component SheetsTemplateCard inherits Rectangle {
         alignment: start;
         cross-axis-alignment: center;
 
-        // Preview frame
+        // Preview frame: inset previews inside the 2.5 px selected border so
+        // full-bleed thumbnails never paint over top/side border strokes.
         Rectangle {
             width: root.preview-width;
             height: root.preview-height;
@@ -38,7 +39,16 @@ export component SheetsTemplateCard inherits Rectangle {
             drop-shadow-offset-y: 1.5px;
             drop-shadow-color: Theme.palette().shadow;
 
-            @children
+            Rectangle {
+                x: 3px;
+                y: 3px;
+                width: parent.width - 6px;
+                height: parent.height - 6px;
+                border-radius: max(0px, Theme.tokens.metrics.radius-small - 3px);
+                clip: true;
+
+                @children
+            }
         }
 
         Text {

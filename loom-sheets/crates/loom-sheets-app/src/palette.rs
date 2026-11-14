@@ -63,6 +63,7 @@ pub enum PaletteAction {
     Undo,
     Redo,
     Appearance(loom_desktop::Appearance),
+    WindowFrame(loom_desktop::window_frame::WindowFrame),
 }
 
 /// Route a palette action through the canonical command dispatcher.
@@ -119,6 +120,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::PivotMin => dispatch_command(app, "table.pivot_min"),
         PaletteAction::PivotMax => dispatch_command(app, "table.pivot_max"),
         PaletteAction::Appearance(choice) => dispatch_command(app, choice.command_id()),
+        PaletteAction::WindowFrame(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::Undo if app.get_can_undo() => dispatch_command(app, "sheets.undo"),
         PaletteAction::Redo if app.get_can_redo() => dispatch_command(app, "sheets.redo"),
         PaletteAction::Undo | PaletteAction::Redo => false,
@@ -180,7 +182,12 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "table.pivot_max" => Some(PaletteAction::PivotMax),
         "sheets.undo" => Some(PaletteAction::Undo),
         "sheets.redo" => Some(PaletteAction::Redo),
-        other => loom_desktop::Appearance::from_command_id(other).map(PaletteAction::Appearance),
+        other => loom_desktop::Appearance::from_command_id(other)
+            .map(PaletteAction::Appearance)
+            .or_else(|| {
+                loom_desktop::window_frame::WindowFrame::from_command_id(other)
+                    .map(PaletteAction::WindowFrame)
+            }),
     }
 }
 
@@ -200,6 +207,9 @@ fn keywords_for(id: &str) -> &'static str {
         "sheets.export-csv" => "csv comma separated values spreadsheet",
         "sheets.export-xlsx" => "xlsx excel spreadsheet office",
         "sheets.open" => "xlsx csv excel file",
+        id if loom_desktop::window_frame::WindowFrame::from_command_id(id).is_some() => {
+            "window frame title bar chrome border"
+        }
         _ => "",
     }
 }
@@ -494,6 +504,18 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "",
         )
     }))
+    .chain(
+        loom_desktop::window_frame::WindowFrame::ALL
+            .into_iter()
+            .map(|choice| {
+                (
+                    PaletteAction::WindowFrame(choice),
+                    choice.command_id(),
+                    choice.label(),
+                    "",
+                )
+            }),
+    )
     .chain([
         (PaletteAction::Undo, "sheets.undo", "Undo", "Ctrl+Z"),
         (PaletteAction::Redo, "sheets.redo", "Redo", "Ctrl+Shift+Z"),
@@ -510,6 +532,9 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
         PaletteAction::Redo => app.get_can_redo(),
         PaletteAction::WorksheetObjects => app.get_object_views().row_count() > 0,
         PaletteAction::RetryRecovery => app.get_recovery_paused(),
+        PaletteAction::WindowFrame(loom_desktop::window_frame::WindowFrame::Loom) => {
+            loom_desktop::window_frame::SUPPORTED
+        }
         _ => true,
     })
     .collect()
@@ -660,5 +685,72 @@ mod search_tests {
         let csv = command("sheets.export-csv", "Export CSV");
         assert!(!command_matches(&csv, "zzz"));
         assert!(!command_matches(&csv, "export zzz"));
+    }
+
+    #[test]
+    fn window_frame_choices_match_title_bar_and_window_frame_queries() {
+        for choice in loom_desktop::window_frame::WindowFrame::ALL {
+            let entry = PaletteCommand {
+                action: PaletteAction::WindowFrame(choice),
+                id: choice.command_id(),
+                label: choice.label(),
+                shortcut: "",
+                keywords: keywords_for(choice.command_id()),
+            };
+            assert!(
+                command_matches(&entry, "title bar"),
+                "{} must match 'title bar'",
+                choice.command_id()
+            );
+            assert!(
+                command_matches(&entry, "window frame"),
+                "{} must match 'window frame'",
+                choice.command_id()
+            );
+            assert!(
+                command_matches(&entry, "chrome"),
+                "{} must match 'chrome'",
+                choice.command_id()
+            );
+            assert!(
+                command_matches(&entry, "border"),
+                "{} must match 'border'",
+                choice.command_id()
+            );
+            assert_eq!(
+                palette_action_for_id(choice.command_id()),
+                Some(PaletteAction::WindowFrame(choice)),
+                "palette_action_for_id must round-trip {}",
+                choice.command_id()
+            );
+        }
+    }
+
+    #[test]
+    fn master_palette_includes_supported_window_frame_choices_and_dispatches_them() {
+        crate::set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let commands = master_palette(&app);
+        let has_system = commands.iter().any(|c| {
+            c.action == PaletteAction::WindowFrame(loom_desktop::window_frame::WindowFrame::System)
+        });
+        let has_loom = commands.iter().any(|c| {
+            c.action == PaletteAction::WindowFrame(loom_desktop::window_frame::WindowFrame::Loom)
+        });
+        assert!(has_system, "master_palette must include System title bar");
+        assert_eq!(
+            has_loom,
+            loom_desktop::window_frame::SUPPORTED,
+            "Loom title bar presence in master_palette must match SUPPORTED"
+        );
+
+        rebuild_palette(&app, "window frame");
+        let expected_rows = 1 + usize::from(loom_desktop::window_frame::SUPPORTED);
+        assert_eq!(app.get_palette_commands().row_count(), expected_rows);
+
+        assert!(dispatch_palette_action(
+            &app,
+            PaletteAction::WindowFrame(loom_desktop::window_frame::WindowFrame::System),
+        ));
     }
 }

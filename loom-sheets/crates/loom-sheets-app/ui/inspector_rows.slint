@@ -38,7 +38,7 @@ component SheetValueBox inherits Rectangle {
     in property <string> value: "";
     in property <bool> placeholder: false;
 
-    min-width: 140px;
+    min-width: 112px;
     horizontal-stretch: 1;
     height: Theme.scaled-control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
@@ -200,10 +200,10 @@ export component SheetStepperRow inherits Rectangle {
     callback accepted(string) -> bool;
     callback cancelled;
 
-    // Stack when the label, the field's 140 px minimum and both full-size
+    // Stack when the label, the field's 112 px minimum and both full-size
     // buttons cannot share a line. Scaling also gives the label its own line.
     private property <bool> stacked: root.width < 100px + Theme.tokens.space.sm
-        + 140px + 2 * Theme.tokens.metrics.control-height + 2 * Theme.tokens.space.xs
+        + 112px + 2 * Theme.tokens.metrics.control-height + 2 * Theme.tokens.space.xs
         || Theme.text-scale > 1;
     min-width: 0px;
     height: row-layout.preferred-height;
@@ -231,7 +231,7 @@ export component SheetStepperRow inherits Rectangle {
                 increase => { root.increase(); }
             }
             if root.editable : LoomNumericField {
-                field-min-width: 140px;
+                field-min-width: 112px;
                 label: root.field-label;
                 description: root.edit-description;
                 unit: root.edit-unit;
