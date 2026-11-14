@@ -23,6 +23,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.export_csv",
     "file.export_xlsx",
     "file.export_pdf",
+    "file.print",
     "edit.undo",
     "edit.redo",
     "edit.cut",
@@ -130,9 +131,10 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
             ),
             MenuItem::action_with_shortcut(
                 "file.export_pdf",
-                "Export to PDF / Print...",
-                MenuShortcut::primary("P"),
+                "Export to PDF...",
+                MenuShortcut::primary_alt("P"),
             ),
+            MenuItem::action_with_shortcut("file.print", "Print...", MenuShortcut::primary("P")),
         ],
         vec![
             MenuItem::action_with_shortcut("edit.find", "Find...", MenuShortcut::primary("F")),

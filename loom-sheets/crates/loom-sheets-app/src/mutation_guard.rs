@@ -153,6 +153,13 @@ pub(crate) const ALLOWED: &[&str] = &[
     "export_csv",
     "export_pdf",
     "export_xlsx",
+    // Print Preview & Page Setup modal navigation, options, and print dispatch.
+    "close_preview",
+    "next_page",
+    "open_preview",
+    "prev_page",
+    "print_document",
+    "settings_changed",
     "retry_recovery",
     "save_as_sheet",
     "save_changes_cancel",

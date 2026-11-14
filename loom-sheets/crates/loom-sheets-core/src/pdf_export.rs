@@ -19,6 +19,47 @@ const PAGE_HEADER_HEIGHT_PT: f32 = 24.0;
 const COL_HEADER_HEIGHT_PT: f32 = 18.0;
 const CELL_PAD_X_PT: f32 = 4.0;
 
+/// Standard paper sizes in PDF points (72 pt = 1 inch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaperSize {
+    /// US Letter (8.5 x 11 in = 612 x 792 pt).
+    #[default]
+    Letter,
+    /// ISO A4 (210 x 297 mm = 595.28 x 841.89 pt).
+    A4,
+    /// US Legal (8.5 x 14 in = 612 x 1008 pt).
+    Legal,
+}
+
+impl PaperSize {
+    /// Portrait width and height in PDF points.
+    pub fn dimensions_pt(self) -> (f32, f32) {
+        match self {
+            Self::Letter => (612.0, 792.0),
+            Self::A4 => (595.28, 841.89),
+            Self::Legal => (612.0, 1008.0),
+        }
+    }
+}
+
+/// Page orientation for PDF export and print preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageOrientation {
+    #[default]
+    Portrait,
+    Landscape,
+}
+
+/// Scaling mode applied to worksheet columns and rows when paginating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrintScale {
+    #[default]
+    Actual100,
+    Scale75,
+    Scale50,
+    FitOnePageWide,
+}
+
 /// Options controlling PDF page geometry and table rendering.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PdfExportOptions {
@@ -32,6 +73,14 @@ pub struct PdfExportOptions {
     pub include_gridlines: bool,
     /// Whether to repeat `sheet.freeze_rows` at the top of continuation pages.
     pub repeat_frozen_rows: bool,
+    /// Standard paper size (default: Letter).
+    pub paper_size: PaperSize,
+    /// Page orientation (default: Portrait).
+    pub orientation: PageOrientation,
+    /// Scaling mode (default: Actual100).
+    pub scale: PrintScale,
+    /// Whether to include column (A, B, C...) and row (1, 2, 3...) headers.
+    pub include_headers: bool,
 }
 
 impl Default for PdfExportOptions {
@@ -42,7 +91,202 @@ impl Default for PdfExportOptions {
             margin_pt: 36.0,
             include_gridlines: true,
             repeat_frozen_rows: true,
+            paper_size: PaperSize::Letter,
+            orientation: PageOrientation::Portrait,
+            scale: PrintScale::Actual100,
+            include_headers: true,
         }
+    }
+}
+
+impl PdfExportOptions {
+    /// Resolve effective `(width_pt, height_pt)` accounting for `paper_size`,
+    /// custom dimensions, and `orientation`.
+    pub fn resolved_page_size_pt(&self) -> (f32, f32) {
+        let (base_w, base_h) = if self.paper_size == PaperSize::Letter
+            && ((self.page_width_pt - 612.0).abs() > 0.01
+                || (self.page_height_pt - 792.0).abs() > 0.01)
+        {
+            (self.page_width_pt, self.page_height_pt)
+        } else {
+            self.paper_size.dimensions_pt()
+        };
+        let (w, h) = match self.orientation {
+            PageOrientation::Portrait => (base_w.min(base_h), base_w.max(base_h)),
+            PageOrientation::Landscape => (base_w.max(base_h), base_w.min(base_h)),
+        };
+        (w.max(144.0), h.max(144.0))
+    }
+}
+
+/// A single rendered cell inside a [`SheetPagePreview`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PagePreviewCell {
+    pub row: u32,
+    pub col: u32,
+    pub x_pt: f32,
+    pub y_pt: f32,
+    pub width_pt: f32,
+    pub height_pt: f32,
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub align: CellAlignment,
+    pub fill_rgb: Option<(f32, f32, f32)>,
+    pub text_rgb: (f32, f32, f32),
+    pub has_border: bool,
+    pub font_size_pt: f32,
+}
+
+/// Paginated preview of one worksheet page, sharing exact layout with PDF export.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetPagePreview {
+    pub page_number: usize,
+    pub total_pages: usize,
+    pub width_pt: f32,
+    pub height_pt: f32,
+    pub margin_pt: f32,
+    pub sheet_title: String,
+    pub col_headers: Vec<String>,
+    pub col_widths_pt: Vec<f32>,
+    pub row_headers: Vec<String>,
+    pub row_heights_pt: Vec<f32>,
+    pub row_gutter_pt: f32,
+    pub col_header_height_pt: f32,
+    pub page_header_height_pt: f32,
+    pub include_headers: bool,
+    pub include_gridlines: bool,
+    pub is_empty: bool,
+    pub cells: Vec<PagePreviewCell>,
+}
+
+struct PageLayoutPlan {
+    page_w: f32,
+    page_h: f32,
+    margin: f32,
+    scale_factor: f32,
+    row_gutter_w: f32,
+    col_header_h: f32,
+    include_headers: bool,
+    include_gridlines: bool,
+    sheet_title: String,
+    evaluated: HashMap<CellRef, Value>,
+    col_widths: Vec<f32>,
+    row_heights: Vec<f32>,
+    col_bands: Vec<(u32, u32)>,
+    row_bands: Vec<Vec<u32>>,
+    is_empty: bool,
+}
+
+fn build_page_plan(sheet: &Sheet, options: PdfExportOptions) -> PageLayoutPlan {
+    let (page_w, page_h) = options.resolved_page_size_pt();
+    let margin = options
+        .margin_pt
+        .clamp(12.0, (page_w.min(page_h) / 4.0).max(12.0));
+    let usable_w = (page_w - 2.0 * margin).max(72.0);
+    let usable_h = (page_h - 2.0 * margin).max(72.0);
+    let evaluated = evaluate(sheet);
+    let sheet_title = if sheet.name.trim().is_empty() {
+        "Sheet".to_string()
+    } else {
+        sheet.name.clone()
+    };
+
+    let Some((max_row, max_col)) = used_bounds(sheet) else {
+        return PageLayoutPlan {
+            page_w,
+            page_h,
+            margin,
+            scale_factor: 1.0,
+            row_gutter_w: 0.0,
+            col_header_h: 0.0,
+            include_headers: options.include_headers,
+            include_gridlines: options.include_gridlines,
+            sheet_title,
+            evaluated,
+            col_widths: Vec::new(),
+            row_heights: Vec::new(),
+            col_bands: Vec::new(),
+            row_bands: Vec::new(),
+            is_empty: true,
+        };
+    };
+
+    let base_gutter = if options.include_headers {
+        ROW_GUTTER_WIDTH_PT
+    } else {
+        0.0
+    };
+    let base_col_hdr = if options.include_headers {
+        COL_HEADER_HEIGHT_PT
+    } else {
+        0.0
+    };
+    let raw_col_table_w = (usable_w - base_gutter).max(MIN_COL_WIDTH_PT);
+    let raw_col_widths: Vec<f32> = (0..=max_col)
+        .map(|col| column_width_pt(sheet, col, raw_col_table_w))
+        .collect();
+    let raw_body_h = (usable_h - PAGE_HEADER_HEIGHT_PT - base_col_hdr).max(MIN_ROW_HEIGHT_PT);
+    let raw_row_heights: Vec<f32> = (0..=max_row)
+        .map(|row| row_height_pt(sheet, row, raw_body_h))
+        .collect();
+
+    let scale_factor = match options.scale {
+        PrintScale::Actual100 => 1.0,
+        PrintScale::Scale75 => 0.75,
+        PrintScale::Scale50 => 0.50,
+        PrintScale::FitOnePageWide => {
+            let total_w: f32 = raw_col_widths.iter().sum();
+            if total_w > raw_col_table_w && total_w > 0.0 {
+                (raw_col_table_w / total_w).clamp(0.20, 1.0)
+            } else {
+                1.0
+            }
+        }
+    };
+
+    let row_gutter_w = base_gutter * scale_factor;
+    let col_header_h = base_col_hdr * scale_factor;
+    let col_table_w = (usable_w - row_gutter_w).max(24.0);
+    let body_h = (usable_h - PAGE_HEADER_HEIGHT_PT - col_header_h).max(16.0);
+
+    let col_widths: Vec<f32> = raw_col_widths
+        .into_iter()
+        .map(|w| (w * scale_factor).max(10.0))
+        .collect();
+    let row_heights: Vec<f32> = raw_row_heights
+        .into_iter()
+        .map(|h| (h * scale_factor).max(10.0))
+        .collect();
+
+    let col_bands = if options.scale == PrintScale::FitOnePageWide {
+        vec![(0, max_col + 1)]
+    } else {
+        partition_columns(&col_widths, col_table_w)
+    };
+    let frozen_rows = if options.repeat_frozen_rows {
+        sheet.freeze_rows.min(max_row + 1)
+    } else {
+        0
+    };
+    let row_bands = partition_rows(&row_heights, body_h, frozen_rows);
+
+    PageLayoutPlan {
+        page_w,
+        page_h,
+        margin,
+        scale_factor,
+        row_gutter_w,
+        col_header_h,
+        include_headers: options.include_headers,
+        include_gridlines: options.include_gridlines,
+        sheet_title,
+        evaluated,
+        col_widths,
+        row_heights,
+        col_bands,
+        row_bands,
+        is_empty: false,
     }
 }
 
@@ -53,67 +297,42 @@ pub fn export_sheet_pdf(sheet: &Sheet) -> Vec<u8> {
 
 /// Export `sheet` as a paginated PDF document with explicit page options.
 pub fn export_sheet_pdf_with_options(sheet: &Sheet, options: PdfExportOptions) -> Vec<u8> {
-    let page_w = options.page_width_pt.max(144.0);
-    let page_h = options.page_height_pt.max(144.0);
-    let margin = options
-        .margin_pt
-        .clamp(12.0, (page_w.min(page_h) / 4.0).max(12.0));
-    let usable_w = (page_w - 2.0 * margin).max(72.0);
-    let usable_h = (page_h - 2.0 * margin).max(72.0);
-
+    let plan = build_page_plan(sheet, options);
     let mut doc = PdfDocument::new();
-    let evaluated = evaluate(sheet);
 
-    let bounds = used_bounds(sheet);
-    let Some((max_row, max_col)) = bounds else {
-        let page = doc.add_page(page_w, page_h);
-        draw_page_header(&mut doc, page, sheet, (page_w, page_h, margin), 1, 1);
+    if plan.is_empty {
+        let page = doc.add_page(plan.page_w, plan.page_h);
+        draw_page_header(
+            &mut doc,
+            page,
+            &plan.sheet_title,
+            (plan.page_w, plan.page_h, plan.margin),
+            1,
+            1,
+        );
         let empty_style = TextStyle {
             size_pt: 10.0,
             fill_rgb: (0.35, 0.37, 0.40),
             bold: false,
             italic: true,
         };
-        let y = page_h - margin - PAGE_HEADER_HEIGHT_PT - 18.0;
-        doc.draw_text(page, margin, y, "Empty worksheet", &empty_style);
+        let y = plan.page_h - plan.margin - PAGE_HEADER_HEIGHT_PT - 18.0;
+        doc.draw_text(page, plan.margin, y, "Empty worksheet", &empty_style);
         return doc.serialize();
-    };
+    }
 
-    let col_table_w = (usable_w - ROW_GUTTER_WIDTH_PT).max(MIN_COL_WIDTH_PT);
-    let col_widths: Vec<f32> = (0..=max_col)
-        .map(|col| column_width_pt(sheet, col, col_table_w))
-        .collect();
-    let row_heights: Vec<f32> = (0..=max_row)
-        .map(|row| {
-            row_height_pt(
-                sheet,
-                row,
-                usable_h - PAGE_HEADER_HEIGHT_PT - COL_HEADER_HEIGHT_PT,
-            )
-        })
-        .collect();
-
-    let col_bands = partition_columns(&col_widths, col_table_w);
-    let body_h = (usable_h - PAGE_HEADER_HEIGHT_PT - COL_HEADER_HEIGHT_PT).max(MIN_ROW_HEIGHT_PT);
-    let frozen_rows = if options.repeat_frozen_rows {
-        sheet.freeze_rows.min(max_row + 1)
-    } else {
-        0
-    };
-    let row_bands = partition_rows(&row_heights, body_h, frozen_rows);
-
-    let total_pages = row_bands.len() * col_bands.len();
+    let total_pages = plan.row_bands.len() * plan.col_bands.len();
     let mut page_num = 0usize;
 
-    for row_band in &row_bands {
-        for &(col_start, col_end) in &col_bands {
+    for row_band in &plan.row_bands {
+        for &(col_start, col_end) in &plan.col_bands {
             page_num += 1;
-            let page = doc.add_page(page_w, page_h);
+            let page = doc.add_page(plan.page_w, plan.page_h);
             draw_page_header(
                 &mut doc,
                 page,
-                sheet,
-                (page_w, page_h, margin),
+                &plan.sheet_title,
+                (plan.page_w, plan.page_h, plan.margin),
                 page_num,
                 total_pages,
             );
@@ -121,19 +340,146 @@ pub fn export_sheet_pdf_with_options(sheet: &Sheet, options: PdfExportOptions) -
                 &mut doc,
                 page,
                 sheet,
-                &evaluated,
-                page_h - margin - PAGE_HEADER_HEIGHT_PT,
-                margin,
+                &plan,
+                plan.page_h - plan.margin - PAGE_HEADER_HEIGHT_PT,
                 col_start..col_end,
                 row_band,
-                &col_widths,
-                &row_heights,
-                options.include_gridlines,
             );
         }
     }
 
     doc.serialize()
+}
+
+/// Compute paginated page previews for `sheet` using the exact same pagination
+/// and cell formatting logic as [`export_sheet_pdf_with_options`].
+pub fn preview_sheet_pages(sheet: &Sheet, options: PdfExportOptions) -> Vec<SheetPagePreview> {
+    let plan = build_page_plan(sheet, options);
+    if plan.is_empty {
+        return vec![SheetPagePreview {
+            page_number: 1,
+            total_pages: 1,
+            width_pt: plan.page_w,
+            height_pt: plan.page_h,
+            margin_pt: plan.margin,
+            sheet_title: plan.sheet_title,
+            col_headers: Vec::new(),
+            col_widths_pt: Vec::new(),
+            row_headers: Vec::new(),
+            row_heights_pt: Vec::new(),
+            row_gutter_pt: 0.0,
+            col_header_height_pt: 0.0,
+            page_header_height_pt: PAGE_HEADER_HEIGHT_PT,
+            include_headers: plan.include_headers,
+            include_gridlines: plan.include_gridlines,
+            is_empty: true,
+            cells: Vec::new(),
+        }];
+    }
+
+    let total_pages = plan.row_bands.len() * plan.col_bands.len();
+    let mut pages = Vec::with_capacity(total_pages);
+    let mut page_num = 0usize;
+
+    for row_band in &plan.row_bands {
+        for &(col_start, col_end) in &plan.col_bands {
+            page_num += 1;
+            let col_headers = if plan.include_headers {
+                (col_start..col_end).map(column_letters).collect()
+            } else {
+                Vec::new()
+            };
+            let col_widths_pt: Vec<f32> = (col_start..col_end)
+                .map(|c| plan.col_widths[c as usize])
+                .collect();
+            let row_headers = if plan.include_headers {
+                row_band.iter().map(|r| (r + 1).to_string()).collect()
+            } else {
+                Vec::new()
+            };
+            let row_heights_pt: Vec<f32> = row_band
+                .iter()
+                .map(|&r| plan.row_heights[r as usize])
+                .collect();
+
+            let mut cells = Vec::with_capacity(row_band.len() * (col_end - col_start) as usize);
+            let mut y_top = plan.margin + PAGE_HEADER_HEIGHT_PT + plan.col_header_h;
+            for &row in row_band {
+                let h = plan.row_heights[row as usize];
+                let mut x_left = plan.margin + plan.row_gutter_w;
+                for col in col_start..col_end {
+                    let w = plan.col_widths[col as usize];
+                    let cell_ref = CellRef { row, col };
+                    let style = sheet.cell_style(cell_ref);
+                    let raw_value = plan
+                        .evaluated
+                        .get(&cell_ref)
+                        .map(Value::display)
+                        .or_else(|| sheet.cells.get(&cell_ref).map(|c| c.raw.clone()))
+                        .unwrap_or_default();
+                    let display = style.format_value(&raw_value);
+                    let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
+                        * plan.scale_factor)
+                        .clamp(5.5, 16.0);
+                    let text_style = TextStyle {
+                        size_pt,
+                        fill_rgb: style
+                            .text_color
+                            .map(rgb_from_u32)
+                            .unwrap_or((0.10, 0.11, 0.12)),
+                        bold: style.bold,
+                        italic: style.italic,
+                    };
+                    let max_text_w = (w - 2.0 * CELL_PAD_X_PT * plan.scale_factor).max(4.0);
+                    let clipped = if display.is_empty() {
+                        String::new()
+                    } else {
+                        fit_text(&display, &text_style, max_text_w)
+                    };
+                    cells.push(PagePreviewCell {
+                        row,
+                        col,
+                        x_pt: x_left,
+                        y_pt: y_top,
+                        width_pt: w,
+                        height_pt: h,
+                        text: clipped,
+                        bold: style.bold,
+                        italic: style.italic,
+                        align: sheet.cell_alignment(cell_ref),
+                        fill_rgb: fill_color_rgb(style.fill),
+                        text_rgb: text_style.fill_rgb,
+                        has_border: style.borders != crate::style::CellBorders::NONE,
+                        font_size_pt: size_pt,
+                    });
+                    x_left += w;
+                }
+                y_top += h;
+            }
+
+            pages.push(SheetPagePreview {
+                page_number: page_num,
+                total_pages,
+                width_pt: plan.page_w,
+                height_pt: plan.page_h,
+                margin_pt: plan.margin,
+                sheet_title: plan.sheet_title.clone(),
+                col_headers,
+                col_widths_pt,
+                row_headers,
+                row_heights_pt,
+                row_gutter_pt: plan.row_gutter_w,
+                col_header_height_pt: plan.col_header_h,
+                page_header_height_pt: PAGE_HEADER_HEIGHT_PT,
+                include_headers: plan.include_headers,
+                include_gridlines: plan.include_gridlines,
+                is_empty: false,
+                cells,
+            });
+        }
+    }
+
+    pages
 }
 
 fn used_bounds(sheet: &Sheet) -> Option<(u32, u32)> {
@@ -226,7 +572,7 @@ fn partition_rows(row_heights: &[f32], body_h: f32, frozen_rows: u32) -> Vec<Vec
 fn draw_page_header(
     doc: &mut PdfDocument,
     page: PageIndex,
-    sheet: &Sheet,
+    title: &str,
     (page_w, page_h, margin): (f32, f32, f32),
     page_num: usize,
     total_pages: usize,
@@ -243,11 +589,6 @@ fn draw_page_header(
         fill_rgb: (0.38, 0.40, 0.44),
         bold: false,
         italic: false,
-    };
-    let title = if sheet.name.trim().is_empty() {
-        "Sheet"
-    } else {
-        sheet.name.as_str()
     };
     let page_label = format!("Page {page_num} of {total_pages}");
     let page_label_w = text_width_pt(&page_label, &page_style);
@@ -272,86 +613,88 @@ fn draw_page_header(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_table_band(
     doc: &mut PdfDocument,
     page: PageIndex,
     sheet: &Sheet,
-    evaluated: &HashMap<CellRef, Value>,
+    plan: &PageLayoutPlan,
     table_top: f32,
-    left_x: f32,
     cols: std::ops::Range<u32>,
     rows: &[u32],
-    col_widths: &[f32],
-    row_heights: &[f32],
-    include_gridlines: bool,
 ) {
+    let left_x = plan.margin;
+    let include_gridlines = plan.include_gridlines;
     let header_bg = PathStyle::filled((0.94, 0.95, 0.97));
     let grid_stroke = PathStyle::stroked((0.82, 0.84, 0.87), 0.5);
     let border_stroke = PathStyle::stroked((0.25, 0.27, 0.30), 0.9);
     let header_text = TextStyle {
-        size_pt: 8.5,
+        size_pt: (8.5 * plan.scale_factor).clamp(5.5, 10.0),
         fill_rgb: (0.28, 0.30, 0.34),
         bold: true,
         italic: false,
     };
 
-    // Corner cell
-    let col_hdr_y = table_top - COL_HEADER_HEIGHT_PT;
-    doc.draw_rect(
-        page,
-        left_x,
-        col_hdr_y,
-        ROW_GUTTER_WIDTH_PT,
-        COL_HEADER_HEIGHT_PT,
-        header_bg,
-    );
-    if include_gridlines {
+    let col_hdr_y = table_top - plan.col_header_h;
+    if plan.include_headers {
+        // Corner cell
         doc.draw_rect(
             page,
             left_x,
             col_hdr_y,
-            ROW_GUTTER_WIDTH_PT,
-            COL_HEADER_HEIGHT_PT,
-            grid_stroke,
+            plan.row_gutter_w,
+            plan.col_header_h,
+            header_bg,
         );
-    }
-
-    // Column headers (A, B, C...)
-    let mut x = left_x + ROW_GUTTER_WIDTH_PT;
-    for col in cols.clone() {
-        let w = col_widths[col as usize];
-        doc.draw_rect(page, x, col_hdr_y, w, COL_HEADER_HEIGHT_PT, header_bg);
         if include_gridlines {
-            doc.draw_rect(page, x, col_hdr_y, w, COL_HEADER_HEIGHT_PT, grid_stroke);
+            doc.draw_rect(
+                page,
+                left_x,
+                col_hdr_y,
+                plan.row_gutter_w,
+                plan.col_header_h,
+                grid_stroke,
+            );
         }
-        let label = column_letters(col);
-        let label_w = text_width_pt(&label, &header_text);
-        let text_x = x + ((w - label_w) * 0.5).max(2.0);
-        doc.draw_text(page, text_x, col_hdr_y + 5.5, &label, &header_text);
-        x += w;
+
+        // Column headers (A, B, C...)
+        let mut x = left_x + plan.row_gutter_w;
+        for col in cols.clone() {
+            let w = plan.col_widths[col as usize];
+            doc.draw_rect(page, x, col_hdr_y, w, plan.col_header_h, header_bg);
+            if include_gridlines {
+                doc.draw_rect(page, x, col_hdr_y, w, plan.col_header_h, grid_stroke);
+            }
+            let label = column_letters(col);
+            let label_w = text_width_pt(&label, &header_text);
+            let text_x = x + ((w - label_w) * 0.5).max(2.0);
+            let text_y = col_hdr_y + ((plan.col_header_h - header_text.size_pt) * 0.5).max(2.0);
+            doc.draw_text(page, text_x, text_y, &label, &header_text);
+            x += w;
+        }
     }
 
     // Data rows
     let mut y_top = col_hdr_y;
     for &row in rows {
-        let h = row_heights[row as usize];
+        let h = plan.row_heights[row as usize];
         let y_bot = y_top - h;
 
-        // Row gutter
-        doc.draw_rect(page, left_x, y_bot, ROW_GUTTER_WIDTH_PT, h, header_bg);
-        if include_gridlines {
-            doc.draw_rect(page, left_x, y_bot, ROW_GUTTER_WIDTH_PT, h, grid_stroke);
+        if plan.include_headers {
+            // Row gutter
+            doc.draw_rect(page, left_x, y_bot, plan.row_gutter_w, h, header_bg);
+            if include_gridlines {
+                doc.draw_rect(page, left_x, y_bot, plan.row_gutter_w, h, grid_stroke);
+            }
+            let row_label = (row + 1).to_string();
+            let row_label_w = text_width_pt(&row_label, &header_text);
+            let row_text_x = left_x + ((plan.row_gutter_w - row_label_w) * 0.5).max(2.0);
+            let row_text_y = y_bot + ((h - header_text.size_pt) * 0.5).max(2.0) + 1.0;
+            doc.draw_text(page, row_text_x, row_text_y, &row_label, &header_text);
         }
-        let row_label = (row + 1).to_string();
-        let row_label_w = text_width_pt(&row_label, &header_text);
-        let row_text_x = left_x + ((ROW_GUTTER_WIDTH_PT - row_label_w) * 0.5).max(2.0);
-        let row_text_y = y_bot + ((h - header_text.size_pt) * 0.5).max(3.0) + 1.5;
-        doc.draw_text(page, row_text_x, row_text_y, &row_label, &header_text);
 
-        let mut cell_x = left_x + ROW_GUTTER_WIDTH_PT;
+        let mut cell_x = left_x + plan.row_gutter_w;
         for col in cols.clone() {
-            let w = col_widths[col as usize];
+            let w = plan.col_widths[col as usize];
             let cell_ref = CellRef { row, col };
             let style = sheet.cell_style(cell_ref);
 
@@ -364,14 +707,16 @@ fn draw_table_band(
                 doc.draw_rect(page, cell_x, y_bot, w, h, grid_stroke);
             }
 
-            let raw_value = evaluated
+            let raw_value = plan
+                .evaluated
                 .get(&cell_ref)
                 .map(Value::display)
                 .or_else(|| sheet.cells.get(&cell_ref).map(|c| c.raw.clone()))
                 .unwrap_or_default();
             let display = style.format_value(&raw_value);
             if !display.is_empty() {
-                let size_pt = (style.font_size.unwrap_or(13) as f32 * 0.72).clamp(7.0, 16.0);
+                let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72) * plan.scale_factor)
+                    .clamp(5.5, 16.0);
                 let text_style = TextStyle {
                     size_pt,
                     fill_rgb: style
@@ -381,23 +726,25 @@ fn draw_table_band(
                     bold: style.bold,
                     italic: style.italic,
                 };
-                let max_text_w = (w - 2.0 * CELL_PAD_X_PT).max(4.0);
+                let pad_x = CELL_PAD_X_PT * plan.scale_factor;
+                let max_text_w = (w - 2.0 * pad_x).max(4.0);
                 let clipped = fit_text(&display, &text_style, max_text_w);
                 let text_w = text_width_pt(&clipped, &text_style);
                 let alignment = sheet.cell_alignment(cell_ref);
-                let is_numeric = evaluated
+                let is_numeric = plan
+                    .evaluated
                     .get(&cell_ref)
                     .is_some_and(|v| matches!(v, Value::Number(_)));
                 let align_right = alignment == CellAlignment::Right
                     || (alignment == CellAlignment::General && is_numeric);
                 let text_x = if alignment == CellAlignment::Center {
-                    cell_x + ((w - text_w) * 0.5).max(CELL_PAD_X_PT)
+                    cell_x + ((w - text_w) * 0.5).max(pad_x)
                 } else if align_right {
-                    cell_x + (w - CELL_PAD_X_PT - text_w).max(CELL_PAD_X_PT)
+                    cell_x + (w - pad_x - text_w).max(pad_x)
                 } else {
-                    cell_x + CELL_PAD_X_PT
+                    cell_x + pad_x
                 };
-                let text_y = y_bot + ((h - size_pt) * 0.5).max(2.5) + 1.5;
+                let text_y = y_bot + ((h - size_pt) * 0.5).max(2.0) + 1.0;
                 doc.draw_text(page, text_x, text_y, &clipped, &text_style);
             }
 
@@ -515,5 +862,80 @@ mod tests {
         let all_text = loom_pdf::inspect::readable_content(&bytes).expect("readable content");
         assert!(all_text.contains("H0"));
         assert!(all_text.contains("R59C13"));
+    }
+
+    #[test]
+    fn paper_size_and_orientation_resolve_dimensions() {
+        let mut opts = PdfExportOptions::default();
+        assert_eq!(opts.resolved_page_size_pt(), (612.0, 792.0));
+
+        opts.orientation = PageOrientation::Landscape;
+        assert_eq!(opts.resolved_page_size_pt(), (792.0, 612.0));
+
+        opts.paper_size = PaperSize::A4;
+        opts.orientation = PageOrientation::Portrait;
+        assert_eq!(opts.resolved_page_size_pt(), (595.28, 841.89));
+
+        opts.paper_size = PaperSize::Legal;
+        opts.orientation = PageOrientation::Landscape;
+        assert_eq!(opts.resolved_page_size_pt(), (1008.0, 612.0));
+    }
+
+    #[test]
+    fn preview_shares_exact_pagination_and_scale_with_pdf_export() {
+        let mut sheet = Sheet::new("Forecast");
+        sheet.freeze_rows = 1;
+        for col in 0..14u32 {
+            sheet.set_str(&CellRef { row: 0, col }.to_a1(), &format!("Col{col}"));
+            sheet.set_str(&CellRef { row: 1, col }.to_a1(), &format!("Val{col}"));
+        }
+
+        let fit_opts = PdfExportOptions {
+            scale: PrintScale::FitOnePageWide,
+            orientation: PageOrientation::Landscape,
+            ..Default::default()
+        };
+        let previews = preview_sheet_pages(&sheet, fit_opts);
+        let pdf_bytes = export_sheet_pdf_with_options(&sheet, fit_opts);
+        let pdf_pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("page text");
+        assert_eq!(previews.len(), pdf_pages.len());
+        assert_eq!(previews.len(), 1);
+        assert_eq!(previews[0].width_pt, 792.0);
+        assert_eq!(previews[0].height_pt, 612.0);
+        assert_eq!(previews[0].col_headers.len(), 14);
+        assert!(previews[0].cells.iter().any(|c| c.text == "Col13"));
+    }
+
+    #[test]
+    fn include_headers_false_omits_headers_in_preview_and_pdf() {
+        let mut sheet = Sheet::new("Clean");
+        sheet.set_str("A1", "Alpha");
+        let opts = PdfExportOptions {
+            include_headers: false,
+            include_gridlines: false,
+            ..Default::default()
+        };
+        let previews = preview_sheet_pages(&sheet, opts);
+        assert_eq!(previews.len(), 1);
+        assert!(previews[0].col_headers.is_empty());
+        assert!(previews[0].row_headers.is_empty());
+        assert_eq!(previews[0].row_gutter_pt, 0.0);
+        assert_eq!(previews[0].col_header_height_pt, 0.0);
+
+        let pdf_bytes = export_sheet_pdf_with_options(&sheet, opts);
+        loom_pdf::inspect::verify(&pdf_bytes).expect("valid PDF");
+        let pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("page text");
+        assert!(pages[0].contains("Alpha"));
+    }
+
+    #[test]
+    fn empty_sheet_preview_returns_single_empty_page() {
+        let sheet = Sheet::new("Blank");
+        let previews = preview_sheet_pages(&sheet, PdfExportOptions::default());
+        assert_eq!(previews.len(), 1);
+        assert!(previews[0].is_empty);
+        assert_eq!(previews[0].page_number, 1);
+        assert_eq!(previews[0].total_pages, 1);
+        assert!(previews[0].cells.is_empty());
     }
 }

@@ -46,6 +46,10 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
             app.global::<crate::SheetInspectorActions>()
                 .invoke_export_pdf();
         }
+        "file.print" | "sheets.print-preview" => {
+            app.global::<crate::PrintPreviewState>()
+                .invoke_open_preview();
+        }
         "arrange.bring_forward" => {
             app.global::<crate::SheetInspectorActions>()
                 .invoke_arrange_object(0);
@@ -246,7 +250,8 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "sheets.retry-recovery" => sc("Cmd+Alt+Z", "Ctrl+Alt+Z"),
         "file.export_csv" | "sheets.export-csv" => sc("Cmd+E", "Ctrl+E"),
         "file.export_xlsx" | "sheets.export-xlsx" => sc("Cmd+Shift+E", "Ctrl+Shift+E"),
-        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+P", "Ctrl+P"),
+        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+Alt+P", "Ctrl+Alt+P"),
+        "file.print" | "sheets.print-preview" => sc("Cmd+P", "Ctrl+P"),
         "arrange.bring_forward" => sc("Cmd+Alt+]", "Ctrl+Alt+]"),
         "arrange.send_backward" => sc("Cmd+Alt+[", "Ctrl+Alt+["),
         "arrange.bring_to_front" => sc("Cmd+Shift+Alt+]", "Ctrl+Shift+Alt+]"),
@@ -382,6 +387,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("s", true, false) => "file.save_as",
         ("e", false, false) => "file.export_csv",
         ("e", true, false) => "file.export_xlsx",
+        ("p", false, false) => "file.print",
         ("z", false, false) => "edit.undo",
         ("z", true, false) | ("y", false, false) => "edit.redo",
         ("x", false, false) => "edit.cut",
