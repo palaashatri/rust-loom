@@ -95,15 +95,18 @@ impl CellConditionalRule {
 }
 
 fn parse_numeric(raw: &str) -> Option<f64> {
-    if raw.is_empty() {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
         return None;
     }
-    let cleaned = raw
-        .trim()
-        .trim_start_matches('$')
-        .trim_end_matches('%')
-        .replace(',', "");
-    cleaned.parse::<f64>().ok().filter(|n| n.is_finite())
+    let (body, is_percent) = match trimmed.strip_suffix('%') {
+        Some(rest) => (rest.trim_end(), true),
+        None => (trimmed, false),
+    };
+    let cleaned = body.trim_start_matches('$').replace(',', "");
+    let value = cleaned.parse::<f64>().ok().filter(|n| n.is_finite())?;
+    let scaled = if is_percent { value / 100.0 } else { value };
+    scaled.is_finite().then_some(scaled)
 }
 
 #[cfg(test)]
@@ -169,5 +172,19 @@ mod tests {
             assert_eq!(ConditionalOperator::parse(op.as_str()), Some(op));
         }
         assert_eq!(ConditionalOperator::parse("unknown"), None);
+    }
+
+    #[test]
+    fn percentage_values_compare_as_numeric_fractions() {
+        let gt_point_two = sample_rule(ConditionalOperator::GreaterThan, "0.2");
+        assert!(!gt_point_two.matches("12.5%"));
+        assert!(gt_point_two.matches("25%"));
+
+        let gt_twenty_pct = sample_rule(ConditionalOperator::GreaterThan, "20%");
+        assert!(!gt_twenty_pct.matches("12.5%"));
+        assert!(gt_twenty_pct.matches("0.25"));
+
+        let eq_fraction = sample_rule(ConditionalOperator::EqualTo, "0.125");
+        assert!(eq_fraction.matches("12.5%"));
     }
 }

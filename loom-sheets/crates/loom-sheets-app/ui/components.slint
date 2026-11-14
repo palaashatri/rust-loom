@@ -395,6 +395,8 @@ export component SheetTable inherits Rectangle {
                 }
 
                 MergedCellLayer {
+                    editing: root.editing;
+                    edit-text: root.edit-text;
                     x: root.grid-col-offset;
                     y: root.grid-row-offset;
                     width: root.grid-visible-width;
