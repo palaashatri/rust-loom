@@ -145,3 +145,100 @@ fn the_inspector_offers_named_swatches_for_every_text_colour() {
         );
     }
 }
+
+#[test]
+fn wrapped_rows_keep_a_single_gridline_across_row_boundaries() {
+    fn sample_strip(
+        image: &image::RgbaImage,
+        sample_x: u32,
+        boundary_y: f32,
+    ) -> (Vec<[u8; 4]>, usize) {
+        let base_y = (boundary_y.floor() as i32 - 4).max(0) as u32;
+        let strip: Vec<[u8; 4]> = (0..=8)
+            .map(|dy| image.get_pixel(sample_x, base_y + dy).0)
+            .collect();
+        let bg = strip[0];
+        let gridline_rows = strip.iter().filter(|&&px| px != bg).count();
+        (strip, gridline_rows)
+    }
+
+    fn render_and_sample_row_boundary(
+        text: &str,
+        wrap: bool,
+    ) -> (f32, Vec<[u8; 4]>, usize, Vec<[u8; 4]>, usize) {
+        let s = wired(&[("A1", text), ("D5", "anchor")]);
+        if wrap {
+            s.app.global::<CellInk>().invoke_wrap_toggled();
+        }
+        // Move active cell away from row 0..2 boundaries so the selection ring
+        // does not sit on the sampled boundary.
+        s.app.invoke_navigate_selection(4, 3);
+        let row_height = s.state.current.borrow().row_height(0);
+        let image = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
+        let row1 = ElementHandle::find_by_accessible_label(&s.app, "Row 1")
+            .next()
+            .expect("Row 1 header");
+        let row2 = ElementHandle::find_by_accessible_label(&s.app, "Row 2")
+            .next()
+            .expect("Row 2 header");
+        let row3 = ElementHandle::find_by_accessible_label(&s.app, "Row 3")
+            .next()
+            .expect("Row 3 header");
+        let col_b = ElementHandle::find_by_accessible_label(&s.app, "Column B")
+            .next()
+            .expect("Column B header");
+        let sample_x = (col_b.absolute_position().x + col_b.size().width * 0.5).round() as u32;
+        let boundary_y1 = row2.absolute_position().y;
+        let boundary_y2 = row3.absolute_position().y;
+        assert!(
+            (boundary_y1 - (row1.absolute_position().y + row_height)).abs() < 1.5,
+            "Row 2 top ({boundary_y1}) should align with Row 1 height ({row_height})"
+        );
+        let (strip1, lines1) = sample_strip(&image, sample_x, boundary_y1);
+        let (strip2, lines2) = sample_strip(&image, sample_x, boundary_y2);
+        (row_height, strip1, lines1, strip2, lines2)
+    }
+
+    let (unwrapped_h, unwrapped_strip1, unwrapped_lines1, unwrapped_strip2, unwrapped_lines2) =
+        render_and_sample_row_boundary("short", false);
+    assert_eq!(unwrapped_h, 24.0);
+    assert_eq!(
+        unwrapped_lines1, 1,
+        "unwrapped Row 1->2 boundary must draw a single 1px hairline: {unwrapped_strip1:?}"
+    );
+    assert_eq!(
+        unwrapped_lines2, 1,
+        "unwrapped Row 2->3 boundary must draw a single 1px hairline: {unwrapped_strip2:?}"
+    );
+
+    // Exercise fractional wrapped heights produced by `wrapped_row_heights`
+    // (2 lines ~ 45.8px, 5 lines ~ 102.5px, 11 lines ~ 215.9px).
+    for sample_text in [
+        "two lines of text in one wrapped cell",
+        "five wrapped lines of sample text inside a default width worksheet cell so the boundary falls on half a pixel",
+        "eleven wrapped lines of sample text inside one cell to mirror the long wrapped case and confirm that growing the row never draws a doubled horizontal gridline beneath it at any line count",
+    ] {
+        let (wrapped_h, wrapped_strip1, wrapped_lines1, wrapped_strip2, wrapped_lines2) =
+            render_and_sample_row_boundary(sample_text, true);
+        assert!(
+            wrapped_h > unwrapped_h,
+            "wrapped row height {wrapped_h} should grow"
+        );
+        assert_eq!(
+            wrapped_lines1, 1,
+            "wrapped row height {wrapped_h} drew {wrapped_lines1} non-paper rows on Row 1->2 instead of 1 hairline: {wrapped_strip1:?}"
+        );
+        assert_eq!(
+            wrapped_strip1, unwrapped_strip1,
+            "wrapped row height {wrapped_h} changed Row 1->2 boundary pixels compared to unwrapped {unwrapped_h}: wrapped={wrapped_strip1:?}, unwrapped={unwrapped_strip1:?}"
+        );
+        assert_eq!(
+            wrapped_lines2, 1,
+            "wrapped row height {wrapped_h} drew {wrapped_lines2} non-paper rows on Row 2->3 instead of 1 hairline: {wrapped_strip2:?}"
+        );
+        assert_eq!(
+            wrapped_strip2, unwrapped_strip2,
+            "wrapped row height {wrapped_h} changed Row 2->3 boundary pixels compared to unwrapped {unwrapped_h}: wrapped={wrapped_strip2:?}, unwrapped={unwrapped_strip2:?}"
+        );
+    }
+}

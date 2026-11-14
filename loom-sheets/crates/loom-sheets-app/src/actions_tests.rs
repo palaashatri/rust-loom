@@ -1501,3 +1501,148 @@ fn a_single_row_has_nothing_to_sort_even_without_a_header() {
         None
     );
 }
+
+#[test]
+fn insert_chart_undo_redo_restores_visible_chart() {
+    use slint::Model as _;
+
+    loom_test_support::capture::set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = make_test_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_sheet_actions(&app, &state, &menu_service);
+    crate::chart_actions::register_chart_actions(&app, &state);
+    crate::register_history_actions(&app, &state, &menu_service);
+    apply_sheet(&app, &state);
+
+    {
+        let sheet = state.current.borrow();
+        let values = evaluate(&sheet);
+        crate::selection_projection::update_selection_range(
+            &app,
+            &sheet,
+            &values,
+            GridSelection::new(
+                CellRef::parse("A1").expect("A1"),
+                CellRef::parse("B4").expect("B4"),
+            ),
+        );
+    }
+
+    app.invoke_insert_chart();
+    assert!(app.get_chart_exists());
+    assert!(app.get_chart_visible());
+    let expected_source = app.get_chart_source_range().to_string();
+    let expected_title = app.get_chart_title().to_string();
+    let expected_points = app.get_chart_normalized().row_count();
+    let expected_categories: Vec<String> = app
+        .get_chart_categories()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let expected_values: Vec<String> = app
+        .get_chart_values_display()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert!(!expected_source.is_empty());
+    assert!(expected_points > 0);
+    assert!(!expected_categories.is_empty());
+    assert!(!expected_values.is_empty());
+
+    app.invoke_undo();
+    assert!(!app.get_chart_exists());
+    assert!(!app.get_chart_visible());
+    assert!(state.current.borrow().chart.is_none());
+    assert_eq!(app.get_chart_normalized().row_count(), 0);
+    assert_eq!(app.get_chart_categories().row_count(), 0);
+    assert_eq!(app.get_chart_values_display().row_count(), 0);
+    assert!(app.get_chart_source_range().is_empty());
+
+    app.invoke_redo();
+    assert!(
+        app.get_chart_exists(),
+        "redone chart must exist in sheet UI state"
+    );
+    assert!(
+        app.get_chart_visible(),
+        "redone chart must reopen visibly instead of staying hidden"
+    );
+    assert!(state.current.borrow().chart.is_some());
+    assert_eq!(app.get_chart_source_range().as_str(), expected_source);
+    assert_eq!(app.get_chart_title().as_str(), expected_title);
+    assert_eq!(app.get_chart_normalized().row_count(), expected_points);
+    let redone_categories: Vec<String> = app
+        .get_chart_categories()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let redone_values: Vec<String> = app
+        .get_chart_values_display()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(redone_categories, expected_categories);
+    assert_eq!(redone_values, expected_values);
+}
+
+#[test]
+fn blank_reference_formula_projects_zero_in_grid_and_selection() {
+    use slint::Model as _;
+
+    loom_test_support::capture::set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = make_test_state();
+    state.install_workbook(vec![crate::blank_sheet()], 0);
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    crate::register_cell_edit_action(&app, &state, &menu_service);
+    apply_sheet(&app, &state);
+
+    app.set_selected_cell("A1".into());
+    app.set_selected_row(0);
+    app.set_selected_col(0);
+    app.invoke_commit_selected_cell("=B1".into());
+
+    assert_eq!(
+        app.get_cells().row_data(0).map(|s| s.to_string()),
+        Some("0".to_string()),
+        "grid cell A1 pointing to blank B1 must display 0"
+    );
+    assert_eq!(
+        app.get_cells().row_data(1).map(|s| s.to_string()),
+        Some(String::new()),
+        "referenced blank cell B1 must remain blank"
+    );
+    assert_eq!(app.get_selection_value().as_str(), "0");
+    assert_eq!(app.get_selection_formula().as_str(), "=B1");
+    assert_eq!(
+        app.get_cell_labels().row_data(0).map(|s| s.to_string()),
+        Some("A1, value 0, formula =B1".to_string())
+    );
+
+    // Also verify workbook evaluation path feeds the same "0" into grid & selection projection.
+    let (siblings, active) = crate::workbook_sheets(&state);
+    let mut wb_values = loom_sheets_core::workbook::evaluate_workbook(&siblings);
+    let active_values = wb_values.swap_remove(active);
+    let a1 = CellRef::parse("A1").expect("A1");
+    assert_eq!(active_values.get(&a1), Some(&Value::Number(0.0)));
+    {
+        let sheet = state.current.borrow();
+        crate::project_sheet_inner(&app, &sheet, &active_values, true);
+    }
+    assert_eq!(
+        app.get_cells().row_data(0).map(|s| s.to_string()),
+        Some("0".to_string())
+    );
+    assert_eq!(app.get_selection_value().as_str(), "0");
+
+    // Once B1 gets a value, the cached/workbook projection updates A1 away from 0.
+    app.set_selected_cell("B1".into());
+    app.set_selected_row(0);
+    app.set_selected_col(1);
+    app.invoke_commit_selected_cell("42".into());
+    assert_eq!(
+        app.get_cells().row_data(0).map(|s| s.to_string()),
+        Some("42".to_string())
+    );
+}

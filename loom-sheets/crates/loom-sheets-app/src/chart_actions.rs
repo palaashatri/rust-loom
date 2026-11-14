@@ -60,6 +60,16 @@ fn numeric_axis_value(raw: &str) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
+/// Restore chart visibility and properties when undo or redo brings a chart
+/// onto a sheet that previously had none, while keeping initial file-open
+/// behavior hidden when `sync_chart_to_app` runs directly.
+pub(crate) fn sync_restored_chart_visibility(app: &SheetsApp, had_chart: bool, sheet: &Sheet) {
+    if !had_chart && sheet.chart.is_some() {
+        app.set_chart_visible(true);
+        sync_chart_to_app(app, sheet);
+    }
+}
+
 /// Synchronize active chart data from the worksheet model to the Slint UI.
 pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
     let Some(chart) = sheet.chart.clone() else {

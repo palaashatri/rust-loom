@@ -2191,6 +2191,7 @@ pub(crate) fn register_history_actions(
                 object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.undo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
+                    let had_chart = state.current.borrow().chart.is_some();
                     if let SheetTransaction::Workbook { before, .. } = &edit {
                         restore_workbook_state(&app, &state, before, &menu_service);
                     } else {
@@ -2200,6 +2201,11 @@ pub(crate) fn register_history_actions(
                         }
                         apply_sheet(&app, &state);
                     }
+                    chart_actions::sync_restored_chart_visibility(
+                        &app,
+                        had_chart,
+                        &state.current.borrow(),
+                    );
                     state.recompute_dirty_from_saved();
                     sync_window_title(&app, &state);
                     // The entry joins the redo stack before the menu and the
@@ -2222,6 +2228,7 @@ pub(crate) fn register_history_actions(
                 object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.redo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
+                    let had_chart = state.current.borrow().chart.is_some();
                     if let SheetTransaction::Workbook { after, .. } = &edit {
                         restore_workbook_state(&app, &state, after, &menu_service);
                     } else {
@@ -2231,6 +2238,11 @@ pub(crate) fn register_history_actions(
                         }
                         apply_sheet(&app, &state);
                     }
+                    chart_actions::sync_restored_chart_visibility(
+                        &app,
+                        had_chart,
+                        &state.current.borrow(),
+                    );
                     state.recompute_dirty_from_saved();
                     sync_window_title(&app, &state);
                     push_history(&mut state.undo_stack.borrow_mut(), edit);
