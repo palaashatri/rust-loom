@@ -4,7 +4,8 @@
 //! CI to exercise the formula engine without a display.
 
 use loom_sheets_core::{
-    evaluate, from_csv, to_csv, CalculationCache, CellRange, CellRef, Sheet, SheetModel,
+    evaluate, export_sheet_pdf, from_csv, sheet_from_json, to_csv, workbook_from_json,
+    CalculationCache, CellRange, CellRef, Sheet, SheetModel,
 };
 use std::collections::BTreeMap;
 
@@ -20,6 +21,7 @@ fn print_usage() {
     eprintln!("  demo (prints an evaluated example)");
     eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
     eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
+    eprintln!("  to-pdf <csv-or-loomsheet> <output.pdf> (exports active sheet as paginated PDF)");
     eprintln!("  create <file.loomsheet> <name>");
     eprintln!("  recalc <csv-file> <cell> <raw-value>");
     eprintln!("  sort <csv-file> <range> <column-offset> <asc|desc>");
@@ -41,6 +43,10 @@ fn run() -> Result<(), String> {
         "to-csv" => cmd_tocsv(
             args.get(2).ok_or("to-csv requires <csv-file>")?,
             args.get(3).ok_or("to-csv requires <output.csv>")?,
+        ),
+        "to-pdf" => cmd_topdf(
+            args.get(2).ok_or("to-pdf requires <input-file>")?,
+            args.get(3).ok_or("to-pdf requires <output.pdf>")?,
         ),
         "create" => cmd_create(
             args.get(2).ok_or("create requires <file.loomsheet>")?,
@@ -200,4 +206,65 @@ fn cmd_sort(path: &str, range: &str, column_offset: &str, order: &str) -> Result
     model.sort_rows(range, column_offset, ascending)?;
     print!("{}", to_csv(&model.sheet));
     Ok(())
+}
+
+fn load_sheet_for_pdf(path: &str) -> Result<Sheet, String> {
+    if path.ends_with(".loomsheet") {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let arch =
+            loom_package::zip::PackageArchive::from_bytes(&bytes).map_err(|e| e.to_string())?;
+        let content = arch
+            .get("content/sheet.json")
+            .ok_or_else(|| "missing content/sheet.json in .loomsheet".to_string())?;
+        let json = std::str::from_utf8(content).map_err(|e| e.to_string())?;
+        if let Ok(wb) = workbook_from_json(json) {
+            return wb
+                .sheets
+                .into_iter()
+                .nth(wb.active)
+                .ok_or_else(|| "workbook has no active sheet".to_string());
+        }
+        return sheet_from_json(json);
+    }
+    let csv = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Sheet");
+    Ok(from_csv(name, &csv))
+}
+
+fn cmd_topdf(path: &str, out: &str) -> Result<(), String> {
+    let sheet = load_sheet_for_pdf(path)?;
+    let pdf = export_sheet_pdf(&sheet);
+    std::fs::write(out, pdf).map_err(|e| e.to_string())?;
+    println!("wrote {out}");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_exports_csv_and_loomsheet_to_valid_pdf() {
+        let dir = std::env::temp_dir().join(format!("loom_sheets_cli_pdf_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv_path = dir.join("sample.csv");
+        let pdf_from_csv = dir.join("from_csv.pdf");
+        std::fs::write(&csv_path, "Item,Amount\nRent,1200\nFood,450\n").unwrap();
+        cmd_topdf(csv_path.to_str().unwrap(), pdf_from_csv.to_str().unwrap()).unwrap();
+        let bytes = std::fs::read(&pdf_from_csv).unwrap();
+        assert!(bytes.starts_with(b"%PDF-1.4"));
+
+        let pkg_path = dir.join("sample.loomsheet");
+        let pdf_from_pkg = dir.join("from_pkg.pdf");
+        cmd_create(pkg_path.to_str().unwrap(), "Budget").unwrap();
+        cmd_topdf(pkg_path.to_str().unwrap(), pdf_from_pkg.to_str().unwrap()).unwrap();
+        let pkg_bytes = std::fs::read(&pdf_from_pkg).unwrap();
+        assert!(pkg_bytes.starts_with(b"%PDF-1.4"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

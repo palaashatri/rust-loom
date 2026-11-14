@@ -1,15 +1,20 @@
 //! Chart projection helpers for Loom Sheets.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
+use loom_desktop::NativeMenuBar;
 use loom_objects::chart::{Chart, ChartSeries as ObjSeries, ChartType};
-use loom_sheets_core::{CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, Sheet};
+use loom_sheets_core::{CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, Sheet, SheetChart};
 use slint::{ComponentHandle, SharedString, VecModel};
 
 use crate::analysis::{
     bar_plot_geometry, chart_points, line_path_commands, normalize_plot_values, pie_wedge_commands,
 };
-use crate::{GuiState, SheetsApp};
+use crate::{
+    apply_sheet, push_history, sync_menu_state, GuiState, SheetChartActions, SheetChartConfig,
+    SheetTransaction, SheetsApp,
+};
 
 fn clear_chart_points(app: &SheetsApp) {
     app.set_chart_categories(Rc::new(VecModel::<SharedString>::from(Vec::new())).into());
@@ -74,6 +79,15 @@ pub(crate) fn sync_restored_chart_visibility(app: &SheetsApp, had_chart: bool, s
 pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
     let Some(chart) = sheet.chart.clone() else {
         app.set_chart_exists(false);
+        let cfg = app.global::<SheetChartConfig>();
+        cfg.set_chart_exists(false);
+        cfg.set_show_legend(true);
+        cfg.set_title("Chart".into());
+        cfg.set_kind("bar".into());
+        cfg.set_x_axis_label(SharedString::default());
+        cfg.set_y_axis_label(SharedString::default());
+        cfg.set_series_name(SharedString::default());
+        cfg.set_source_range(SharedString::default());
         let was_focused = app.get_chart_focused();
         clear_chart_points(app);
         app.set_chart_source_range(SharedString::default());
@@ -91,9 +105,6 @@ pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
         return;
     };
     app.set_chart_exists(true);
-    if !app.get_chart_visible() {
-        return;
-    }
     let end_row = chart
         .end_row
         .unwrap_or(sheet.dimensions().rows.saturating_sub(1));
@@ -116,11 +127,28 @@ pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
         .map(|cell| cell.raw.as_str())
         .filter(|label| !label.is_empty())
         .unwrap_or("Values");
-    let series = column_header
+    let derived_series = column_header
         .split_once('(')
         .map(|(label, _)| label.trim())
         .filter(|label| !label.is_empty())
         .unwrap_or(column_header);
+    let series = if chart.series_name.trim().is_empty() {
+        derived_series
+    } else {
+        chart.series_name.trim()
+    };
+    let cfg = app.global::<SheetChartConfig>();
+    cfg.set_chart_exists(true);
+    cfg.set_show_legend(chart.show_legend);
+    cfg.set_title(SharedString::from(chart.title.as_str()));
+    cfg.set_kind(SharedString::from(chart.kind.as_str()));
+    cfg.set_x_axis_label(SharedString::from(chart.x_axis_label.as_str()));
+    cfg.set_y_axis_label(SharedString::from(chart.y_axis_label.as_str()));
+    cfg.set_series_name(SharedString::from(series));
+    cfg.set_source_range(SharedString::from(source.as_str()));
+    if !app.get_chart_visible() {
+        return;
+    }
     let unit = column_header
         .split_once('(')
         .and_then(|(_, suffix)| suffix.strip_suffix(')'))
@@ -212,6 +240,37 @@ pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
     app.set_chart_pie_opacities(Rc::new(VecModel::from(opacities)).into());
 }
 
+fn update_chart_property(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    status: &str,
+    mutate: impl FnOnce(&mut SheetChart) -> bool,
+) -> bool {
+    let before = state.current.borrow().clone();
+    let mut after = before.clone();
+    let Some(chart) = after.chart.as_mut() else {
+        app.set_status_left("No chart in active worksheet.".into());
+        return false;
+    };
+    if !mutate(chart) {
+        return true;
+    }
+    *state.current.borrow_mut() = after.clone();
+    push_history(
+        &mut state.undo_stack.borrow_mut(),
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    state.redo_stack.borrow_mut().clear();
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    app.set_status_left(SharedString::from(status));
+    true
+}
+
 /// Register chart callbacks on the Slint window.
 pub(crate) fn register_chart_actions(app: &SheetsApp, state: &Rc<GuiState>) {
     let state = state.clone();
@@ -221,6 +280,157 @@ pub(crate) fn register_chart_actions(app: &SheetsApp, state: &Rc<GuiState>) {
             copy_active_chart_to_clipboard(&app, &state);
         }
     });
+}
+
+/// Register chart inspector customization callbacks on the Slint window.
+pub(crate) fn register_chart_inspector_actions(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_set_chart_title(move |title| {
+                let Some(app) = app_ref.upgrade() else {
+                    return false;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return false;
+                }
+                let trimmed = title.trim().to_string();
+                if trimmed.is_empty() {
+                    app.set_status_left("Chart title cannot be empty.".into());
+                    return false;
+                }
+                update_chart_property(&app, &state, &menu_service, "Updated chart title", |c| {
+                    if c.title == trimmed {
+                        return false;
+                    }
+                    c.title = trimmed;
+                    true
+                })
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_set_chart_kind(move |idx| {
+                let Some(app) = app_ref.upgrade() else {
+                    return;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
+                let kind = match idx {
+                    1 => ChartKind::Line,
+                    2 => ChartKind::Pie,
+                    3 => ChartKind::Scatter,
+                    _ => ChartKind::Bar,
+                };
+                update_chart_property(
+                    &app,
+                    &state,
+                    &menu_service,
+                    &format!("Chart kind set to {}", kind.as_str()),
+                    |c| {
+                        if c.kind == kind {
+                            return false;
+                        }
+                        c.kind = kind;
+                        true
+                    },
+                );
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_toggle_chart_legend(move || {
+                let Some(app) = app_ref.upgrade() else {
+                    return;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
+                update_chart_property(&app, &state, &menu_service, "Toggled chart legend", |c| {
+                    c.show_legend = !c.show_legend;
+                    true
+                });
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_set_x_axis_label(move |label| {
+                let Some(app) = app_ref.upgrade() else {
+                    return false;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return false;
+                }
+                let next = label.trim().to_string();
+                update_chart_property(&app, &state, &menu_service, "Updated X-axis label", |c| {
+                    if c.x_axis_label == next {
+                        return false;
+                    }
+                    c.x_axis_label = next;
+                    true
+                })
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_set_y_axis_label(move |label| {
+                let Some(app) = app_ref.upgrade() else {
+                    return false;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return false;
+                }
+                let next = label.trim().to_string();
+                update_chart_property(&app, &state, &menu_service, "Updated Y-axis label", |c| {
+                    if c.y_axis_label == next {
+                        return false;
+                    }
+                    c.y_axis_label = next;
+                    true
+                })
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<SheetChartActions>()
+            .on_set_series_name(move |name| {
+                let Some(app) = app_ref.upgrade() else {
+                    return false;
+                };
+                if crate::mutation_guard::refused(&app, &state) {
+                    return false;
+                }
+                let next = name.trim().to_string();
+                update_chart_property(&app, &state, &menu_service, "Updated series name", |c| {
+                    if c.series_name == next {
+                        return false;
+                    }
+                    c.series_name = next;
+                    true
+                })
+            });
+    }
 }
 
 /// Copies the active chart from the worksheet to the system clipboard in multi-format form.

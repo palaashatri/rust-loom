@@ -12,6 +12,7 @@ use crate::{GuiState, SheetsApp};
 pub(crate) enum ExportFormat {
     Csv,
     Xlsx,
+    Pdf,
 }
 
 impl ExportFormat {
@@ -19,6 +20,7 @@ impl ExportFormat {
         match self {
             Self::Csv => "CSV",
             Self::Xlsx => "Excel",
+            Self::Pdf => "PDF",
         }
     }
 }
@@ -37,6 +39,7 @@ pub(crate) struct ExportOperation {
 pub(crate) enum ExportOutputSummary {
     Csv { sheet_name: String },
     Xlsx { sheet_count: usize },
+    Pdf { sheet_name: String },
 }
 
 pub(crate) struct ExportCompletion {
@@ -152,6 +155,7 @@ pub(crate) fn export_with_picker(app: &SheetsApp, state: &GuiState, format: Expo
     let request = match format {
         ExportFormat::Csv => super::export_request(state),
         ExportFormat::Xlsx => super::export_xlsx_request(state),
+        ExportFormat::Pdf => super::export_pdf_request(state),
     };
     match state.dialogs.save_file(&request) {
         Ok(Some(path)) => queue_export(app, state, format, path),
@@ -267,6 +271,14 @@ pub(super) fn handle_completion(
                 ),
             )
         }
+        Ok(ExportOutputSummary::Pdf { sheet_name }) if operation.format == ExportFormat::Pdf => (
+            true,
+            format!(
+                "Exported PDF from {source_context} · {} to {}",
+                sheet_name,
+                operation.path.display()
+            ),
+        ),
         Ok(_) => (
             false,
             format!(

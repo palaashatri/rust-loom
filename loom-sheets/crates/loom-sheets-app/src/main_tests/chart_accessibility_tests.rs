@@ -790,6 +790,7 @@ fn production_scatter_projection_uses_numeric_x_values_and_discards_invalid_pair
         val_col: 1,
         start_row: 1,
         end_row: Some(8),
+        ..Default::default()
     });
     app.set_chart_visible(true);
     sync_chart_to_app(&app, &sheet);
@@ -886,6 +887,7 @@ fn chart_summary_explains_nonpositive_pie_values() {
         val_col: 1,
         start_row: 1,
         end_row: Some(2),
+        ..Default::default()
     });
     app.set_chart_visible(true);
     sync_chart_to_app(&app, &sheet);

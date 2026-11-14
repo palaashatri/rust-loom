@@ -268,6 +268,7 @@ pub(crate) fn plan_chart_in_range(
         val_col,
         start_row,
         end_row: Some(end_row),
+        ..Default::default()
     })
 }
 

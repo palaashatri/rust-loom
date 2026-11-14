@@ -250,6 +250,7 @@ fn a_chart_is_placed_beside_the_data_not_over_it() {
         val_col: 1,
         start_row: 1,
         end_row: Some(1),
+        ..Default::default()
     });
     let drawing = part(&export(&[sheet]), "xl/drawings/drawing1.xml");
     // Data reaches column E (index 4); the chart starts at column G (6).

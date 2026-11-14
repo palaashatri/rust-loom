@@ -87,6 +87,9 @@ use object_layout::editor_dimensions_with_width;
 use object_layout::{editor_dimensions_with_preview, project_sheet_objects};
 
 mod chart_actions;
+#[cfg(test)]
+#[path = "charts_arrange_pdf_tests.rs"]
+mod charts_arrange_pdf_tests;
 
 mod appearance;
 mod local_menu;
@@ -1780,6 +1783,18 @@ fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
+fn export_pdf_request(state: &GuiState) -> SaveFileRequest {
+    let filters = FileFilter::new("PDF Document", ["pdf"])
+        .map(|filter| vec![filter])
+        .unwrap_or_default();
+    SaveFileRequest {
+        title: "Export Sheet to PDF".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(format!("{}.pdf", state.current.borrow().name)),
+        filters,
+    }
+}
+
 pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
     {
         let state = Rc::clone(state);
@@ -1806,6 +1821,20 @@ pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
                 );
             }
         });
+    }
+    {
+        let state = Rc::clone(state);
+        let app_ref = app.as_weak();
+        app.global::<crate::SheetInspectorActions>()
+            .on_export_pdf(move || {
+                if let Some(app) = app_ref.upgrade() {
+                    export_operations::export_with_picker(
+                        &app,
+                        &state,
+                        export_operations::ExportFormat::Pdf,
+                    );
+                }
+            });
     }
 }
 
@@ -2463,6 +2492,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     register_sheet_actions(&app, &state, &menu_service);
     welcome_guide::wire(&app, &state, &menu_service);
     chart_actions::register_chart_actions(&app, &state);
+    chart_actions::register_chart_inspector_actions(&app, &state, &menu_service);
     object_actions::register_object_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);

@@ -72,10 +72,22 @@ struct PersistedChart {
     start_row: u32,
     #[serde(default)]
     end_row: Option<u32>,
+    #[serde(default = "default_chart_show_legend")]
+    show_legend: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    x_axis_label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    y_axis_label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    series_name: String,
 }
 
 fn default_chart_start_row() -> u32 {
     1
+}
+
+fn default_chart_show_legend() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -246,6 +258,10 @@ impl From<&Sheet> for PersistedSheet {
                 val_col: chart.val_col,
                 start_row: chart.start_row,
                 end_row: chart.end_row,
+                show_legend: chart.show_legend,
+                x_axis_label: chart.x_axis_label.clone(),
+                y_axis_label: chart.y_axis_label.clone(),
+                series_name: chart.series_name.clone(),
             }),
             objects: sheet
                 .objects
@@ -490,6 +506,10 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
                 val_col: chart.val_col,
                 start_row: chart.start_row,
                 end_row: chart.end_row,
+                show_legend: chart.show_legend,
+                x_axis_label: chart.x_axis_label,
+                y_axis_label: chart.y_axis_label,
+                series_name: chart.series_name,
             })
         })
         .transpose()?;
@@ -925,8 +945,35 @@ mod tests {
         let chart = json["chart"].as_object_mut().unwrap();
         chart.remove("start_row");
         chart.remove("end_row");
+        chart.remove("show_legend");
         let restored = sheet_from_json(&json.to_string()).unwrap().chart.unwrap();
         assert_eq!(restored.start_row, 1);
         assert_eq!(restored.end_row, None);
+        assert!(restored.show_legend);
+    }
+
+    #[test]
+    fn chart_customization_fields_roundtrip() {
+        let mut sheet = Sheet::new("CustomChart");
+        sheet.chart = Some(crate::SheetChart {
+            kind: crate::ChartKind::Line,
+            title: "Quarterly Revenue".to_string(),
+            cat_col: 0,
+            val_col: 1,
+            start_row: 1,
+            end_row: Some(4),
+            show_legend: false,
+            x_axis_label: "Quarter".to_string(),
+            y_axis_label: "USD".to_string(),
+            series_name: "Revenue".to_string(),
+        });
+        let restored = sheet_from_json(&sheet_to_json(&sheet))
+            .unwrap()
+            .chart
+            .unwrap();
+        assert!(!restored.show_legend);
+        assert_eq!(restored.x_axis_label, "Quarter");
+        assert_eq!(restored.y_axis_label, "USD");
+        assert_eq!(restored.series_name, "Revenue");
     }
 }

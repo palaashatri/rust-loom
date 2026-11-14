@@ -5,7 +5,9 @@ import {
 import { Theme } from "theme.slint";
 import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetTextColorRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
 import { SheetInspectorActions, SheetObjectGeometry, SheetObjectGeometryFields } from "object_inspector.slint";
+import { SheetChartConfig, SheetChartActions, SheetChartInspectorFields } from "chart_inspector.slint";
 export { SheetInspectorActions, SheetObjectGeometry } from "object_inspector.slint";
+export { SheetChartConfig, SheetChartActions } from "chart_inspector.slint";
 import { CellInk } from "grid_pointer.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
 import { DataValidationSection } from "validation_inspector.slint";
@@ -236,6 +238,8 @@ export component SheetInspector inherits LoomPanel {
                     width-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].width-label;
                     height-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].height-label;
                 }
+
+                if root.inspector-tab == 1 && SheetChartConfig.chart-exists && root.inspector-search == "" : SheetChartInspectorFields {}
 
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;

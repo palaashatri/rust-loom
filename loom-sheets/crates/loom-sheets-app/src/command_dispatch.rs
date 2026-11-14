@@ -42,6 +42,26 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "sheets.retry-recovery" => app.invoke_retry_recovery(),
         "file.export_csv" | "sheets.export-csv" => app.invoke_export_csv(),
         "file.export_xlsx" | "sheets.export-xlsx" => app.invoke_export_xlsx(),
+        "file.export_pdf" | "sheets.export-pdf" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_export_pdf();
+        }
+        "arrange.bring_forward" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(0);
+        }
+        "arrange.send_backward" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(1);
+        }
+        "arrange.bring_to_front" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(2);
+        }
+        "arrange.send_to_back" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(3);
+        }
         "edit.undo" | "sheets.undo" => app.invoke_undo(),
         "edit.redo" | "sheets.redo" => app.invoke_redo(),
         "edit.cut" | "sheets.cut" => app.invoke_cut_selection(),
@@ -179,6 +199,11 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "sheets.retry-recovery" => sc("Cmd+Alt+Z", "Ctrl+Alt+Z"),
         "file.export_csv" | "sheets.export-csv" => sc("Cmd+E", "Ctrl+E"),
         "file.export_xlsx" | "sheets.export-xlsx" => sc("Cmd+Shift+E", "Ctrl+Shift+E"),
+        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+P", "Ctrl+P"),
+        "arrange.bring_forward" => sc("Cmd+Alt+]", "Ctrl+Alt+]"),
+        "arrange.send_backward" => sc("Cmd+Alt+[", "Ctrl+Alt+["),
+        "arrange.bring_to_front" => sc("Cmd+Shift+Alt+]", "Ctrl+Shift+Alt+]"),
+        "arrange.send_to_back" => sc("Cmd+Shift+Alt+[", "Ctrl+Shift+Alt+["),
         "edit.undo" | "sheets.undo" => sc("Cmd+Z", "Ctrl+Z"),
         "edit.redo" | "sheets.redo" => sc("Cmd+Shift+Z", "Ctrl+Shift+Z"),
         "edit.cut" | "sheets.cut" => sc("Cmd+X", "Ctrl+X"),

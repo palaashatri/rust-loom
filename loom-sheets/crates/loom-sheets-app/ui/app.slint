@@ -7,7 +7,7 @@ export { DataToolsState }
 import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetMenuChrome } from "menu_chrome.slint";
 export { SheetToolbarLayout } from "toolbar_layout.slint";
-export { SheetInspectorActions, SheetObjectGeometry } from "object_inspector.slint";
+export { SheetInspectorActions, SheetObjectGeometry, SheetChartConfig, SheetChartActions } from "object_inspector.slint";
 import { LoomWindowResizeEdges, LocalMenu, LocalMenuEntry, LocalMenuPopup } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
 import { SheetToolbarOverflow } from "toolbar_overflow.slint";
@@ -347,7 +347,7 @@ export component SheetsApp inherits Window {
         root.toolbar-menu = 0;
         if (kind != 0) { action-toolbar.focus-menu-trigger(kind); } else { grid-surface.focus-grid(); }
     }
-    /// Toolbar Format/Organize: show that inspector tab, or close it.
+    /// Toggle inspector tab.
     public function show-inspector-tab(tab: int) {
         if (root.inspector-visible && root.inspector-tab == tab) {
             root.toggle-inspector();
