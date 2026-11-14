@@ -584,9 +584,10 @@ fn attribution_of_ui_thread_steps_on_one_million_cells() {
 }
 
 /// One million cells including 10,000 chained formulas (500 rows x 20 columns
-/// of `=prev+1` in rows 2049..=2548 below 2,048 sortable data rows holding
-/// 989,500 numeric cells), measuring evaluation, cell commit on a formula chain
-/// head, and whole-workbook sort/undo-sort.
+/// of row-local `={prev_col}{row}+1` in rows 2049..=2548 below 2,048 numeric
+/// rows holding 989,500 cells; all 2,548 rows are sortable via
+/// `RowOrder::follow_moved_formulas`), measuring evaluation, cell commit on a
+/// formula chain head, and whole-workbook sort/undo-sort.
 #[test]
 fn million_cells_with_ten_thousand_chained_formulas() {
     if std::env::var_os("LOOM_PERF_FORMULAS_1M").is_none() {
@@ -619,7 +620,7 @@ fn million_cells_with_ten_thousand_chained_formulas() {
     }
     assert_eq!(sheet.cells.len(), UNIQUE_CELLS as usize);
     assert_eq!(sheet.cells.formula_count(), 10_000);
-    assert_eq!(crate::actions::sortable_last_row(&sheet), SIDE - 1);
+    assert_eq!(crate::actions::sortable_last_row(&sheet), SIDE + 500 - 1);
 
     let session = Session::open(sheet, "formulas1m", Vec::new());
     let head_a1 = format!("A{}", SIDE + 1);
@@ -652,6 +653,10 @@ fn million_cells_with_ten_thousand_chained_formulas() {
         sort_series.record(callback, &settle(&session));
         let callback = timed(|| session.app.invoke_undo());
         undo_sort_series.record(callback, &settle(&session));
+        assert_eq!(
+            values_for_projection(&session.state).get(&tail_u1),
+            Some(&loom_sheets_core::Value::Number((100 + rep + 20) as f64))
+        );
     }
     let cells = session.state.current.borrow().cells.len();
     commit_series.print("formula_head_commit_1m_10k_formulas", cells);
