@@ -122,11 +122,57 @@ fn table() -> Vec<(&'static str, Action)> {
         a("toggle_bold", |app| app.invoke_toggle_bold()),
         a("toggle_borders", |app| app.invoke_toggle_borders()),
         a("toggle_italic", |app| app.invoke_toggle_italic()),
+        a("toggle_strikethrough", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_toggle_strikethrough()
+        }),
         a("toggle_underline", |app| app.invoke_toggle_underline()),
+        a("toggle_wrap_text", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_toggle_wrap_text()
+        }),
         a("undo", |app| app.invoke_undo()),
         a("unfreeze_panes", |app| app.invoke_unfreeze_panes()),
+        a("unmerge_cells", |app| {
+            app.global::<crate::CellRichFormat>().invoke_unmerge_cells()
+        }),
         a("wrap_toggled", |app| {
             app.global::<CellInk>().invoke_wrap_toggled()
+        }),
+        a("apply_border_preset", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_apply_border_preset("all".into())
+        }),
+        a("auto_text_color", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_auto_text_color()
+        }),
+        a("cf_add_rule", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_add_rule(0, "10".into(), 0, 0)
+        }),
+        a("cf_clear_selection", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_clear_selection()
+        }),
+        a("cf_remove_rule", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_remove_rule(0)
+        }),
+        a("cycle_text_color", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cycle_text_color()
+        }),
+        a("merge_cells", |app| {
+            app.global::<crate::CellRichFormat>().invoke_merge_cells()
+        }),
+        a("paste_formats_only", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_paste_formats_only()
+        }),
+        a("paste_values_only", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_paste_values_only()
         }),
     ]
 }

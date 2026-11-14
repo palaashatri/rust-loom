@@ -457,7 +457,7 @@ pub(crate) fn register_sheet_actions(
                     &mut state.redo_stack.borrow_mut(),
                     sel.range(),
                 ) {
-                    let on = state.current.borrow().cell_style(sel.anchor).border;
+                    let on = state.current.borrow().cell_style(sel.anchor).borders.any();
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     announce_toggle(&app, "Borders", on);
@@ -985,6 +985,7 @@ pub(crate) fn register_sheet_actions(
     crate::clipboard_actions::wire(app, state, menu_service);
     crate::grid_pointer::wire(app, state, menu_service);
     crate::ink_actions::wire(app, state, menu_service);
+    crate::rich_format_actions::wire(app, state, menu_service);
 
     {
         let state = state.clone();

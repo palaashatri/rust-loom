@@ -1285,11 +1285,11 @@ fn test_borders_fill_and_font_size_toggle_undo() {
     assert!(toggle_selection_borders(
         &mut sheet, &mut undo, &mut redo, range
     ));
-    assert!(sheet.cell_style(cell).border);
+    assert!(sheet.cell_style(cell).borders.all());
     assert!(toggle_selection_borders(
         &mut sheet, &mut undo, &mut redo, range
     ));
-    assert!(!sheet.cell_style(cell).border);
+    assert!(!sheet.cell_style(cell).borders.any());
     assert_eq!(undo.len(), 2);
 
     assert!(cycle_selection_fill(

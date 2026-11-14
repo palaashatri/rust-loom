@@ -49,6 +49,7 @@ use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
 mod inspector_search;
+mod rich_format_actions;
 #[cfg(test)]
 use inspector_search::inspector_section_visibility;
 mod paste_formats;
@@ -277,21 +278,22 @@ fn project_sheet_grid_with_values(
                 sheet.col_width(col),
                 formatting::effective_font_size(style) as f32,
             );
+            let effective = sheet.effective_style(cell, &display_val);
             cell_labels.push(accessible_cell_label(cell, sheet.raw(cell), &raw_val));
             cells.push(display_val);
             cell_alignments.push(align_code);
-            cell_bolds.push(style.bold);
-            cell_italics.push(style.italic);
-            cell_underlines.push(style.underline);
-            cell_borders.push(style.border);
-            cell_fills.push(style.fill.swatch_index());
-            cell_font_sizes.push(formatting::effective_font_size(style) as i32);
+            cell_bolds.push(effective.bold);
+            cell_italics.push(effective.italic);
+            cell_underlines.push(effective.underline);
+            cell_borders.push(effective.borders.any());
+            cell_fills.push(effective.fill.swatch_index());
+            cell_font_sizes.push(formatting::effective_font_size(effective) as i32);
             cell_text_colors.push(
-                style
+                effective
                     .text_color
                     .map_or(-1, |rgb| (rgb & 0x00FF_FFFF) as i32),
             );
-            cell_wraps.push(style.wrap);
+            cell_wraps.push(effective.wrap);
         }
     }
 
@@ -972,6 +974,7 @@ fn project_sheet_inner_with_preview(
     );
 
     scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);
+    rich_format_actions::publish_viewport(app, sheet, vals, viewport, selection, zoom);
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
@@ -1470,7 +1473,16 @@ pub(crate) fn select_cell(app: &SheetsApp, state: &GuiState, r: i32, c: i32) {
     let refr = CellRef { row: r, col: c };
     let vals = values_for_projection(state);
     let sheet = state.current.borrow();
-    update_selection(app, &sheet, &vals, refr);
+    if let Some(merged) = sheet.merge_at(refr) {
+        update_selection_range(
+            app,
+            &sheet,
+            &vals,
+            GridSelection::new(merged.end, merged.start),
+        );
+    } else {
+        update_selection(app, &sheet, &vals, refr);
+    }
 }
 
 fn inspector_tab_index(index: i32) -> i32 {

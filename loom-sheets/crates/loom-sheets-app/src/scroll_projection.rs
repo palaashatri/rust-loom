@@ -252,6 +252,14 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     app.set_view_col_origin(viewport.first_col as i32);
     let grid = project_sheet_grid_with_values(&sheet, &values, viewport);
     apply_grid(app, grid, None, &geometry, zoom);
+    crate::rich_format_actions::publish_viewport(
+        app,
+        &sheet,
+        &values,
+        viewport,
+        crate::selection_from_app(app),
+        zoom,
+    );
     sync_model!(app, get_object_views, set_object_views, objects.views);
     // The window changed underneath a live scroll; keep the pointer's offsets.
     app.set_grid_scroll_x(viewport_geometry.0);

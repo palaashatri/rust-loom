@@ -1,0 +1,29 @@
+import { WelcomeGuideModal } from "welcome_guide.slint";
+import { ConditionalFormatModal } from "conditional_format_modal.slint";
+import { CellRichFormat } from "rich_format.slint";
+
+export component SheetModals inherits Rectangle {
+    in property <bool> welcome-open: false;
+    in-out property <int> step: 0;
+    in property <string> mod-key: "Ctrl";
+    in property <bool> focus-request: false;
+    callback close-guide();
+    callback try-action(string);
+
+    if root.welcome-open : WelcomeGuideModal {
+        width: 100%;
+        height: 100%;
+        open: true;
+        step <=> root.step;
+        mod-key: root.mod-key;
+        focus-request: root.focus-request;
+        close-guide => { root.close-guide(); }
+        try-action(id) => { root.try-action(id); }
+    }
+
+    if CellRichFormat.cf-modal-open : ConditionalFormatModal {
+        width: 100%;
+        height: 100%;
+        open: true;
+    }
+}

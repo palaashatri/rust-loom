@@ -24,7 +24,7 @@ fn inspector_reflects_borders_fill_and_font() {
     sheet.set_str("A1", "hi");
     let a1 = CellRef::parse("A1").unwrap();
     let mut style = sheet.cell_style(a1);
-    style.border = true;
+    style.borders = loom_sheets_core::CellBorders::ALL;
     style.fill = loom_sheets_core::style::FillColor::Blue;
     style.font_size = Some(18);
     sheet.set_cell_style(a1, style);

@@ -1,0 +1,70 @@
+// Rich formatting globals and data structures for Loom Sheets:
+// per-edge borders, strikethrough, merged cell spans, and conditional formatting.
+
+export struct MergedCellView {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    text: string,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikethrough: bool,
+    font-px: int,
+    ink: int,
+    fill-idx: int,
+    align: int,
+    wraps: bool,
+    border-top: bool,
+    border-right: bool,
+    border-bottom: bool,
+    border-left: bool,
+    in-selection: bool,
+    is-active: bool,
+}
+
+export struct ConditionalRuleView {
+    range: string,
+    operator: string,
+    value: string,
+    fill-name: string,
+    text-color-name: string,
+}
+
+export global CellRichFormat {
+    in-out property <[bool]> strikethroughs: [];
+    in-out property <[bool]> border-tops: [];
+    in-out property <[bool]> border-rights: [];
+    in-out property <[bool]> border-bottoms: [];
+    in-out property <[bool]> border-lefts: [];
+    in-out property <[bool]> merged-covered: [];
+    in-out property <[MergedCellView]> merged-views: [];
+
+    in-out property <bool> selected-strikethrough: false;
+    in-out property <bool> selected-merged: false;
+
+    callback toggle-strikethrough();
+    callback toggle-wrap-text();
+    callback cycle-text-color();
+    callback auto-text-color();
+    callback apply-border-preset(string);
+    callback merge-cells();
+    callback unmerge-cells();
+    callback open-conditional-formatting();
+    callback paste-values-only();
+    callback paste-formats-only();
+
+    in-out property <bool> cf-modal-open: false;
+    in-out property <string> cf-range: "A1";
+    in-out property <int> cf-operator: 0;
+    in-out property <string> cf-value: "";
+    in-out property <int> cf-fill: 0;
+    in-out property <int> cf-text-color: -1;
+    in-out property <[ConditionalRuleView]> cf-rules: [];
+
+    callback cf-add-rule(int, string, int, int);
+    callback cf-remove-rule(int);
+    callback cf-clear-selection();
+    callback cf-close();
+}

@@ -1,5 +1,5 @@
 import { TemplateChooserModal } from "template_chooser.slint";
-import { WelcomeGuideModal } from "welcome_guide.slint";
+import { SheetModals } from "sheet_modals.slint";
 import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
 import { SaveChangesDialog } from "save_changes_dialog.slint";
 import { CloseDrainShield } from "close_drain_shield.slint";
@@ -18,7 +18,7 @@ import {
 import { Theme, ResponsivePolicy } from "theme.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
-export { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
+export { GridPointer, CellSpill, CellInk, CellRichFormat } from "grid_pointer.slint";
 export component SheetsApp inherits Window {
     init => { Theme.application = "sheets"; }
     icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");
@@ -768,10 +768,10 @@ export component SheetsApp inherits Window {
         import-continue => { root.xlsx-import-continue(); }
     }
 
-    if root.welcome-open : WelcomeGuideModal {
+    SheetModals {
         width: 100%;
         height: 100%;
-        open: true;
+        welcome-open: root.welcome-open;
         step <=> root.welcome-step;
         mod-key: root.mod-key;
         focus-request: root.welcome-focus-request;

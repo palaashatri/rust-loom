@@ -149,7 +149,7 @@ fn sales() -> Sheet {
         style(&mut s, a1, |v| {
             v.bold = true;
             v.fill = FillColor::Gray;
-            v.border = true;
+            v.borders = crate::style::CellBorders::ALL;
         });
         s.set_cell_alignment(cell(a1), CellAlignment::Center);
     }
@@ -190,7 +190,7 @@ fn sales() -> Sheet {
         v.underline = true;
         v.font_size = Some(16);
         v.fill = FillColor::Yellow;
-        v.border = true;
+        v.borders = crate::style::CellBorders::ALL;
     });
     s.set_cell_alignment(cell("A2"), CellAlignment::Left);
     s.set_cell_alignment(cell("A3"), CellAlignment::Center);

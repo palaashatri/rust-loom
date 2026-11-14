@@ -29,6 +29,8 @@ struct LastCopy {
     origin: CellRef,
     /// Each copied cell's style and alignment, pasted along with its value.
     formats: Vec<Vec<CellFormat>>,
+    /// Evaluated display values for Paste Values Only.
+    evaluated_values: Vec<Vec<String>>,
     /// The text Copy wrote to the system clipboard; `None` when that write failed.
     external_text: Option<String>,
 }
@@ -40,6 +42,7 @@ struct Pasteable {
     cells: Vec<Vec<String>>,
     origin: Option<CellRef>,
     formats: Option<Vec<Vec<CellFormat>>>,
+    evaluated_values: Option<Vec<Vec<String>>>,
 }
 
 /// "1 cell" or "N cells".
@@ -180,7 +183,8 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     let values = evaluate_current(state);
     let data = copy_selection_with_values(&state.current.borrow(), Some(&values), sel);
     let count = data.iter().map(Vec::len).sum();
-    let text = encode_tsv(&external_rows(&state.current.borrow(), &values, sel));
+    let evaluated = external_rows(&state.current.borrow(), &values, sel);
+    let text = encode_tsv(&evaluated);
     let cell_data = external_cells_data(&state.current.borrow(), &values, sel);
     let table = loom_clipboard::sheets_range_to_table(&cell_data);
     let mut clip_data = loom_clipboard::ClipboardData::from_table(&table);
@@ -194,6 +198,7 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
         *last.borrow_mut() = Some(LastCopy {
             origin,
             formats,
+            evaluated_values: evaluated,
             external_text: written.then_some(text),
         });
     });
@@ -223,13 +228,20 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
                 // Another program has not replaced what Copy wrote.
                 (Some(written), Some(text)) => text == written,
             })
-            .map(|last| (last.origin, last.formats.clone()))
+            .map(|last| {
+                (
+                    last.origin,
+                    last.formats.clone(),
+                    last.evaluated_values.clone(),
+                )
+            })
     });
-    if let (Some((origin, formats)), Some(raw)) = (from_us, internal) {
+    if let (Some((origin, formats, evaluated_values)), Some(raw)) = (from_us, internal) {
         return Some(Pasteable {
             cells: raw,
             origin: Some(origin),
             formats: Some(formats),
+            evaluated_values: Some(evaluated_values),
         });
     }
 
@@ -249,6 +261,7 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
                     cells: rows,
                     origin: None,
                     formats: Some(formats),
+                    evaluated_values: None,
                 });
             }
         }
@@ -269,6 +282,7 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
                         cells: rows,
                         origin: None,
                         formats: Some(formats),
+                        evaluated_values: None,
                     });
                 }
             }
@@ -285,6 +299,7 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
         cells: rows,
         origin: None,
         formats: None,
+        evaluated_values: None,
     })
 }
 
@@ -372,6 +387,83 @@ fn paste_cells(
     pasted
 }
 
+/// Paste Special: Values Only (writes evaluated cell values without formulas or styles).
+pub(crate) fn paste_values_only(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &NativeMenuBar,
+) -> bool {
+    let Some(pasteable) = clipboard_cells(state) else {
+        app.set_status_left(SharedString::from("Nothing on clipboard to paste"));
+        return false;
+    };
+    let sel = selection_from_app(app);
+    let cells = pasteable.evaluated_values.unwrap_or(pasteable.cells);
+    let range = sel.range();
+    let fill = cells.len() == 1 && cells[0].len() == 1 && range.start != range.end;
+    let (target, data) = if fill {
+        let source = cells[0][0].clone();
+        let rows = (range.end.row - range.start.row + 1) as usize;
+        let cols = (range.end.col - range.start.col + 1) as usize;
+        (sel.collapse(range.start), vec![vec![source; cols]; rows])
+    } else {
+        (sel, cells)
+    };
+    let pasted = paste_selection(
+        &mut state.current.borrow_mut(),
+        &mut state.undo_stack.borrow_mut(),
+        &mut state.redo_stack.borrow_mut(),
+        target,
+        &data,
+    );
+    if pasted > 0 {
+        apply_sheet(app, state);
+        sync_menu_state(menu_service, app, state);
+        app.set_status_left(SharedString::from(format!(
+            "Pasted {} (values only)",
+            cells_label(pasted)
+        )));
+        true
+    } else {
+        false
+    }
+}
+
+/// Paste Special: Formats Only (writes styles and alignments without changing cell values).
+pub(crate) fn paste_formats_only(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &NativeMenuBar,
+) -> bool {
+    let Some(pasteable) = clipboard_cells(state) else {
+        app.set_status_left(SharedString::from("Nothing on clipboard to paste"));
+        return false;
+    };
+    let Some(formats) = pasteable.formats else {
+        app.set_status_left(SharedString::from("No formatting on clipboard to paste"));
+        return false;
+    };
+    let sel = selection_from_app(app);
+    let range = sel.range();
+    let fill = formats.len() == 1 && formats[0].len() == 1 && range.start != range.end;
+    let fill_over = fill.then_some((range.start, range.end));
+    let before = Box::new(state.current.borrow().clone());
+    {
+        let mut sheet = state.current.borrow_mut();
+        paste_formats::apply(&mut sheet, range.start, &formats, fill_over);
+    }
+    let after = Box::new(state.current.borrow().clone());
+    crate::push_history(
+        &mut state.undo_stack.borrow_mut(),
+        crate::SheetTransaction::Snapshot { before, after },
+    );
+    state.redo_stack.borrow_mut().clear();
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    app.set_status_left(SharedString::from("Pasted formats"));
+    true
+}
+
 pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
     {
         let state = state.clone();
@@ -431,6 +523,7 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     cells,
                     origin,
                     formats,
+                    ..
                 }) = clipboard_cells(&state)
                 else {
                     app.set_status_left("Nothing to paste".into());
