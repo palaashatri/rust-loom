@@ -764,15 +764,9 @@ export component SheetsApp inherits Window {
         warning-message: root.xlsx-import-warning-message;
         save-changes-open: root.save-changes-open;
         template-chooser-open: root.template-chooser-open;
-        clear-sibling-overlays => {
-            root.palette-open = false;
-            root.toolbar-overflow-open = false;
-            root.local-menu-open-index = -1;
-        }
+        clear-sibling-overlays => { root.palette-open = false; root.toolbar-overflow-open = false; root.local-menu-open-index = -1; }
         focus-save-changes => { save-changes-dialog.focus-dialog(); }
-        focus-template-chooser => {
-            root.template-chooser-focus-request = !root.template-chooser-focus-request;
-        }
+        focus-template-chooser => { root.template-chooser-focus-request = !root.template-chooser-focus-request; }
         focus-app => { grid-surface.focus-grid(); }
         focus-grid => { grid-surface.focus-grid(); }
         import-cancel => { root.xlsx-import-cancel(); }

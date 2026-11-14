@@ -622,12 +622,13 @@ fn partition_rows(row_heights: &[f32], body_h: f32, frozen_rows: u32) -> Vec<Vec
     while cursor < row_heights.len() {
         let mut rows = Vec::new();
         let mut used = 0.0f32;
-        if use_frozen && cursor >= frozen_count {
-            if used + frozen_h + row_heights[cursor] <= body_h + 0.01 {
-                for (r, &h) in row_heights.iter().enumerate().take(frozen_count) {
-                    rows.push(r as u32);
-                    used += h;
-                }
+        if use_frozen
+            && cursor >= frozen_count
+            && used + frozen_h + row_heights[cursor] <= body_h + 0.01
+        {
+            for (r, &h) in row_heights.iter().enumerate().take(frozen_count) {
+                rows.push(r as u32);
+                used += h;
             }
         }
         let band_start = cursor;
@@ -1238,8 +1239,10 @@ mod tests {
     #[test]
     fn styled_blank_cells_and_spilled_results_expand_used_bounds() {
         let mut styled_only = Sheet::new("StyledBlank");
-        let mut style = crate::style::CellStyle::default();
-        style.fill = FillColor::Yellow;
+        let style = crate::style::CellStyle {
+            fill: FillColor::Yellow,
+            ..Default::default()
+        };
         styled_only.set_cell_style(CellRef::parse("C4").unwrap(), style);
         let previews = preview_sheet_pages(&styled_only, PdfExportOptions::default());
         assert!(!previews[0].is_empty);
@@ -1288,10 +1291,12 @@ mod tests {
     fn single_edge_border_draws_only_enabled_edge() {
         let mut sheet = Sheet::new("Borders");
         sheet.set_str("A1", "Underlined");
-        let mut style = crate::style::CellStyle::default();
-        style.borders = CellBorders {
-            bottom: true,
-            ..CellBorders::NONE
+        let style = crate::style::CellStyle {
+            borders: CellBorders {
+                bottom: true,
+                ..CellBorders::NONE
+            },
+            ..Default::default()
         };
         sheet.set_cell_style(CellRef::parse("A1").unwrap(), style);
         let opts = PdfExportOptions {
@@ -1313,8 +1318,10 @@ mod tests {
         sheet.set_str("A1", "Alpha Bravo Charlie Delta");
         sheet.set_col_width(0, 65.0);
         sheet.set_row_height(0, 72.0);
-        let mut style = crate::style::CellStyle::default();
-        style.wrap = true;
+        let style = crate::style::CellStyle {
+            wrap: true,
+            ..Default::default()
+        };
         sheet.set_cell_style(CellRef::parse("A1").unwrap(), style);
 
         let previews = preview_sheet_pages(&sheet, PdfExportOptions::default());

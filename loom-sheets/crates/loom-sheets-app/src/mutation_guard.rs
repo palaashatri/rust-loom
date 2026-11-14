@@ -112,6 +112,7 @@ pub(crate) const MUTATING: &[&str] = &[
 pub(crate) const ALLOWED: &[&str] = &[
     // Formula bar editing-assist draft updates (do not mutate the committed workbook).
     "accept_suggestion",
+    "caret_moved",
     "cycle_f4",
     "dismiss_popup",
     "editing_state_changed",
@@ -204,6 +205,7 @@ pub(crate) const ALLOWED: &[&str] = &[
     "close_column_filter",
     "close_find",
     "close_named_ranges",
+    "filter_matches",
     "find_next",
     "find_prev",
     "goto_named_range",
