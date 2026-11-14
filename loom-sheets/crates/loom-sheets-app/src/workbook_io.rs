@@ -89,9 +89,12 @@ pub(crate) fn starter_workbook() -> Sheet {
 }
 
 /// Build the workbook for a template-chooser card index. Every advertised
-/// card (0-10) produces its named sheet with live formulas; unknown indices
+/// card (0-26) produces its named sheet with live formulas; unknown indices
 /// fall back to a blank sheet.
 pub(crate) fn template_sheet(idx: i32) -> Sheet {
+    if let Some(sheet) = crate::template_catalog::catalog_template_sheet(idx) {
+        return sheet;
+    }
     match idx {
         1 => seeded_sheet(
             "Monthly Budget",

@@ -16,13 +16,16 @@ pub(crate) fn wire_template_navigation(app: &SheetsApp) {
 
 fn template_ids_for_category(category: i32, recents: &[i32]) -> Vec<i32> {
     match category {
-        0 => vec![0, 3, 4, 5, 6, 7, 1, 8, 9, 10, 2],
+        0 => vec![
+            0, 3, 4, 5, 6, 7, 1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 2, 19, 20, 21, 22, 23,
+            24, 25, 26,
+        ],
         1 => recents.to_vec(),
         2 => vec![0, 3, 4, 5, 6],
-        3 => vec![7, 1, 8, 9, 10],
-        4 => vec![1, 8, 10],
-        5 => vec![2, 4, 5],
-        6 => vec![6, 8, 4],
+        3 => vec![7, 1, 8, 9, 10, 11, 12, 13, 14],
+        4 => vec![15, 16, 17, 18],
+        5 => vec![2, 19, 20, 21, 22],
+        6 => vec![23, 24, 25, 26],
         _ => Vec::new(),
     }
 }
@@ -53,8 +56,14 @@ fn template_scroll_row(
             0 | 3 | 4 => 0,
             5 | 6 => 1,
             7 | 1 | 8 => 3 - i32::from(text_scale >= 1.5),
-            9 | 10 => 4 - i32::from(text_scale >= 1.5),
-            2 => 7 - large_text_adjustment,
+            9..=11 => 4 - i32::from(text_scale >= 1.5),
+            12..=14 => 5 - i32::from(text_scale >= 1.5),
+            15..=17 => 7 - large_text_adjustment,
+            18 => 8 - large_text_adjustment,
+            2 | 19 | 20 => 10 - large_text_adjustment,
+            21 | 22 => 11 - large_text_adjustment,
+            23..=25 => 13 - large_text_adjustment,
+            26 => 14 - large_text_adjustment,
             _ => 0,
         };
     }

@@ -1,6 +1,6 @@
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { SheetsTemplateOption, TemplateChooserFooter } from "template_cards.slint";
+import { SheetsTemplateOption, TemplateCardRow, TemplateChooserFooter } from "template_cards.slint";
 
 export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
@@ -22,23 +22,31 @@ export component TemplateChooserModal inherits Rectangle {
         let section-gap = 24px;
         let recent-height = heading-height + inner-gap
             + (root.template-recents.length == 0 ? body-height : card-height);
+        let three-row-section = heading-height + 3 * inner-gap + 3 * card-height;
         let two-row-section = heading-height + 2 * inner-gap + 2 * card-height;
-        let one-row-section = heading-height + inner-gap + card-height;
 
         if (root.template-category == 0) {
-            return recent-height + 2 * two-row-section + 3 * one-row-section
+            return recent-height + three-row-section + 4 * two-row-section
                 + 5 * section-gap + 16px;
         }
         if (root.template-category == 1) {
             return recent-height + 16px;
         }
-        if (root.template-category == 2 || root.template-category == 3) {
-            return two-row-section + 16px;
+        if (root.template-category == 3) {
+            return three-row-section + 16px;
         }
-        return one-row-section + 16px;
+        return two-row-section + 16px;
     }
     pure function template-title(index: int) -> string {
-        return ["Blank", "Monthly Budget", "Invoice & Expenses", "Checklist", "Table and Chart", "Expense Summary", "Sales Chart", "Budget", "Monthly Goal", "Portfolio", "Net Worth"][index];
+        return [
+            "Blank", "Monthly Budget", "Invoice & Expenses", "Checklist",
+            "Table and Chart", "Expense Summary", "Sales Chart", "Budget",
+            "Monthly Goal", "Portfolio", "Net Worth",
+            "Loan Amortization", "Retirement Planner", "Debt Payoff", "Tax Summary",
+            "Travel Itinerary", "Habit & Workout Log", "Event Budget", "Meal Planner",
+            "Profit & Loss", "Employee Timesheet", "Inventory Tracker", "Project Schedule",
+            "Gradebook", "Attendance Tracker", "GPA Calculator", "Lab Data & Chart",
+        ][index];
     }
     callback cancel-template;
     callback create-template(int);
@@ -71,11 +79,11 @@ export component TemplateChooserModal inherits Rectangle {
         } else if (category-index == 3) {
             root.template-selected = 7;
         } else if (category-index == 4) {
-            root.template-selected = 1;
+            root.template-selected = 15;
         } else if (category-index == 5) {
             root.template-selected = 2;
         } else if (category-index == 6) {
-            root.template-selected = 6;
+            root.template-selected = 23;
         }
     }
 
@@ -318,36 +326,8 @@ export component TemplateChooserModal inherits Rectangle {
                                     color: Theme.palette().ink;
                                     horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 0; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 0; } }
-                                    SheetsTemplateOption { index: 3; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 3; } }
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                    SheetsTemplateOption { index: 3; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 3; } }
-                                    SheetsTemplateOption { index: 0; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 0; } }
-                                }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
-                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
-                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
-                                }
+                                TemplateCardRow { ids: [0, 3, 4]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [5, 6]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
                             }
 
                             // Personal Finance Section
@@ -362,36 +342,9 @@ export component TemplateChooserModal inherits Rectangle {
                                     color: Theme.palette().ink;
                                     horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 7; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 7; } }
-                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
-                                    SheetsTemplateOption { index: 7; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 7; } }
-                                }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 9; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 9; } }
-                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
-                                    SheetsTemplateOption { index: 9; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 9; } }
-                                }
+                                TemplateCardRow { ids: [7, 1, 8]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [9, 10, 11]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [12, 13, 14]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
                             }
 
                             // Personal Section (category 4)
@@ -406,22 +359,8 @@ export component TemplateChooserModal inherits Rectangle {
                                     color: Theme.palette().ink;
                                     horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 10; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 10; } }
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                    SheetsTemplateOption { index: 1; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 1; } }
-                                }
+                                TemplateCardRow { ids: [15, 16, 17]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [18]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
                             }
 
                             // Business Section (category 5)
@@ -436,22 +375,8 @@ export component TemplateChooserModal inherits Rectangle {
                                     color: Theme.palette().ink;
                                     horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 2; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 2; } }
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 5; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 5; } }
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                    SheetsTemplateOption { index: 2; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 2; } }
-                                }
+                                TemplateCardRow { ids: [2, 19, 20]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [21, 22]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
                             }
 
                             // Education Section (category 6)
@@ -466,22 +391,8 @@ export component TemplateChooserModal inherits Rectangle {
                                     color: Theme.palette().ink;
                                     horizontal-alignment: Theme.rtl ? right : left;
                                 }
-                                if !Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: start;
-                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                }
-                                if Theme.rtl : HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    spacing: Theme.tokens.space.lg;
-                                    alignment: end;
-                                    SheetsTemplateOption { index: 4; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 4; } }
-                                    SheetsTemplateOption { index: 8; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 8; } }
-                                    SheetsTemplateOption { index: 6; current: root.template-selected; text-scale: root.text-scale; clicked => { root.template-selected = 6; } }
-                                }
+                                TemplateCardRow { ids: [23, 24, 25]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
+                                TemplateCardRow { ids: [26]; current: root.template-selected; text-scale: root.text-scale; select(id) => { root.template-selected = id; } }
                             }
                             }
                         }

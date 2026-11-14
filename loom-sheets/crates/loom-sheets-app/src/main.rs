@@ -134,6 +134,7 @@ mod responsive_layout;
 mod scroll_projection;
 mod selection_projection;
 pub(crate) use selection_projection::update_selection_range;
+mod template_catalog;
 mod template_navigation;
 mod welcome_guide;
 mod window_chrome;
