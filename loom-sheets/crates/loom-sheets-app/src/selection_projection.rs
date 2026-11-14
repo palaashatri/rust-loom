@@ -1,6 +1,8 @@
 //! Selection metadata and cell formatting controls projected into the inspector.
 
-use loom_sheets_core::{CellAlignment, CellRef, GridSelection, NumberFormat, Sheet, Value};
+use loom_sheets_core::{
+    CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, Sheet, Value,
+};
 use slint::SharedString;
 
 use crate::{cell_value, formatting, SheetsApp};
@@ -34,7 +36,10 @@ pub(crate) fn update_selection_range(
     app.set_selection_end_row(range.end.row as i32);
     app.set_selection_end_col(range.end.col as i32);
     app.set_selection_range(range.to_a1().into());
-    app.set_selection_count((range.cells().len() as i32).max(1));
+    let span_rows = (range.end.row - range.start.row + 1) as u64;
+    let span_cols = (range.end.col - range.start.col + 1) as u64;
+    let cell_count = span_rows.saturating_mul(span_cols);
+    app.set_selection_count((cell_count.min(i32::MAX as u64) as i32).max(1));
     let align_code = match sheet.cell_alignment(selected) {
         CellAlignment::General | CellAlignment::Left => 0,
         CellAlignment::Center => 1,
@@ -85,23 +90,170 @@ pub(crate) fn update_selection_range(
         formula_suffix
     )));
     app.set_selection_value(SharedString::from(display));
-    let cell_count = range.cells().len();
-    if cell_count > 1 {
-        let mut sum = 0.0;
-        let mut count = 0;
-        for cell in range.cells() {
-            let value = cell_value(sheet, vals, cell.row, cell.col);
-            let clean = value.trim().trim_start_matches('$').trim_end_matches('%');
-            if let Ok(number) = clean.parse::<f64>() {
-                sum += number;
-                count += 1;
+    match format_selection_summary(sheet, vals, range) {
+        Some(summary) => app.set_status_right(SharedString::from(summary)),
+        None => app.set_status_right(SharedString::new()),
+    }
+}
+
+fn format_stat_number(value: f64) -> String {
+    let normalized = if value.abs() < 1e-12 { 0.0 } else { value };
+    if (normalized - normalized.round()).abs() < 1e-9 && normalized.abs() < 1e12 {
+        return format!("{}", normalized.round() as i64);
+    }
+    let formatted = format!("{normalized:.2}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    if trimmed == "-0" {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn numeric_cell_value(
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    cell: CellRef,
+) -> Option<f64> {
+    match vals.get(&cell) {
+        Some(Value::Number(n)) if n.is_finite() => return Some(*n),
+        Some(Value::Empty) | None => {}
+        Some(_) => return None,
+    }
+    let raw = sheet.raw(cell)?.trim();
+    if raw.is_empty() || raw.starts_with('=') {
+        return None;
+    }
+    let clean = raw.trim_start_matches('$').trim_end_matches('%');
+    clean.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+pub(crate) fn format_selection_summary(
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    range: CellRange,
+) -> Option<String> {
+    if range.start == range.end {
+        return None;
+    }
+    let span_rows = (range.end.row - range.start.row + 1) as u64;
+    let span_cols = (range.end.col - range.start.col + 1) as u64;
+    let total_cells = span_rows.saturating_mul(span_cols);
+
+    let mut sum = 0.0_f64;
+    let mut count = 0usize;
+
+    if total_cells <= 4096 {
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                if let Some(n) = numeric_cell_value(sheet, vals, CellRef { row, col }) {
+                    sum += n;
+                    count += 1;
+                }
             }
         }
-        if count > 0 {
-            let average = sum / count as f64;
-            app.set_status_right(SharedString::from(format!(
-                "SUM: {sum:.2}  AVG: {average:.2}  COUNT: {count}"
-            )));
+    } else {
+        for (cell, _) in sheet.cells.iter() {
+            if cell.row >= range.start.row
+                && cell.row <= range.end.row
+                && cell.col >= range.start.col
+                && cell.col <= range.end.col
+            {
+                if let Some(n) = numeric_cell_value(sheet, vals, *cell) {
+                    sum += n;
+                    count += 1;
+                }
+            }
         }
+        for (cell, value) in vals.iter() {
+            if cell.row >= range.start.row
+                && cell.row <= range.end.row
+                && cell.col >= range.start.col
+                && cell.col <= range.end.col
+                && !sheet.cells.contains_key(cell)
+            {
+                if let Value::Number(n) = value {
+                    if n.is_finite() {
+                        sum += *n;
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        return None;
+    }
+    let average = sum / count as f64;
+    Some(format!(
+        "Sum: {}  Avg: {}  Count: {count}",
+        format_stat_number(sum),
+        format_stat_number(average)
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_selection_summary;
+    use loom_sheets_core::{evaluate, CellRange, CellRef, Sheet};
+
+    #[test]
+    fn single_cell_selection_has_no_summary() {
+        let mut sheet = Sheet::new("S");
+        sheet.set_str("A1", "42");
+        let vals = evaluate(&sheet);
+        let single = CellRange {
+            start: CellRef::parse("A1").unwrap(),
+            end: CellRef::parse("A1").unwrap(),
+        };
+        assert_eq!(format_selection_summary(&sheet, &vals, single), None);
+    }
+
+    #[test]
+    fn multi_cell_numeric_selection_computes_sum_avg_count() {
+        let mut sheet = Sheet::new("S");
+        sheet.set_str("A1", "10");
+        sheet.set_str("A2", "20");
+        sheet.set_str("A3", "label");
+        sheet.set_str("A4", "=A1+A2");
+        let vals = evaluate(&sheet);
+        let range = CellRange {
+            start: CellRef::parse("A1").unwrap(),
+            end: CellRef::parse("A4").unwrap(),
+        };
+        assert_eq!(
+            format_selection_summary(&sheet, &vals, range).as_deref(),
+            Some("Sum: 60  Avg: 20  Count: 3")
+        );
+    }
+
+    #[test]
+    fn multi_cell_non_numeric_selection_returns_none() {
+        let mut sheet = Sheet::new("S");
+        sheet.set_str("A1", "hello");
+        sheet.set_str("A2", "world");
+        let vals = evaluate(&sheet);
+        let range = CellRange {
+            start: CellRef::parse("A1").unwrap(),
+            end: CellRef::parse("A2").unwrap(),
+        };
+        assert_eq!(format_selection_summary(&sheet, &vals, range), None);
+    }
+
+    #[test]
+    fn large_sparse_selection_uses_sparse_scan() {
+        let mut sheet = Sheet::new("S");
+        sheet.set_str("A1", "12.5");
+        sheet.set_str("Z500", "7.5");
+        let vals = evaluate(&sheet);
+        let range = CellRange {
+            start: CellRef::parse("A1").unwrap(),
+            end: CellRef::parse("Z500").unwrap(),
+        };
+        assert_eq!(
+            format_selection_summary(&sheet, &vals, range).as_deref(),
+            Some("Sum: 20  Avg: 10  Count: 2")
+        );
     }
 }

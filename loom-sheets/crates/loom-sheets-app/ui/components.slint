@@ -9,8 +9,10 @@ import { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
 import { CellOverflowLayer } from "cell_overflow.slint";
 import { SheetHeaders } from "sheet_headers.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
+import { FormulaRefCellOverlay, FormulaAssist, FormulaAssistPopup } from "formula_assist.slint";
 
 export { SheetTabs, FormulaNameBar, SheetStatusRow } from "sheet_bars.slint";
+export { FormulaAssist, FormulaAssistPopup } from "formula_assist.slint";
 
 export { SheetActionToolbar } from "toolbar.slint";
 
@@ -335,6 +337,13 @@ export component SheetTable inherits Rectangle {
                                     vertical-alignment: center;
                                     overflow: elide;
                                 }
+                            }
+
+                            FormulaRefCellOverlay {
+                                width: parent.width;
+                                height: parent.height;
+                                global-row: global-row;
+                                global-col: global-col;
                             }
 
                             SheetSelectionOverlay {

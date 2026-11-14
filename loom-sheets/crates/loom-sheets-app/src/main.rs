@@ -130,6 +130,8 @@ mod journey;
 use journey::*;
 
 mod cell_spill;
+mod formula_assist;
+mod formula_catalog;
 mod responsive_layout;
 mod scroll_projection;
 mod selection_projection;
@@ -2298,10 +2300,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+    formula_assist::register_callbacks(&app, &state);
     {
         let app_ref = app.as_weak();
+        let state = state.clone();
         app.on_begin_edit(move |initial_text| {
             if let Some(app) = app_ref.upgrade() {
+                formula_assist::sync_assist(&app, &state, initial_text.as_str());
                 app.set_formula_edit_buffer(initial_text);
                 app.invoke_focus_formula_bar();
             }

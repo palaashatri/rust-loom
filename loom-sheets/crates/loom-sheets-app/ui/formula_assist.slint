@@ -1,0 +1,232 @@
+import { Theme } from "theme.slint";
+
+export struct FormulaSuggestion {
+    name: string,
+    signature: string,
+    summary: string,
+}
+
+export struct FormulaRefHighlight {
+    start-row: int,
+    start-col: int,
+    end-row: int,
+    end-col: int,
+    color-index: int,
+}
+
+export global FormulaAssist {
+    in-out property <bool> active: false;
+    in-out property <bool> popup-open: false;
+    in-out property <[FormulaSuggestion]> suggestions: [];
+    in-out property <int> selected-suggestion: 0;
+    in-out property <string> signature-prefix: "";
+    in-out property <string> signature-active: "";
+    in-out property <string> signature-suffix: "";
+    in-out property <string> signature-summary: "";
+    in-out property <[FormulaRefHighlight]> ref-highlights: [];
+
+    callback formula-edited(string);
+    callback editing-state-changed(bool);
+    callback accept-suggestion(int);
+    callback dismiss-popup();
+    callback cycle-f4();
+
+    public pure function ref-color(idx: int) -> color {
+        idx == 0 ? #2563EB
+            : idx == 1 ? #DC2626
+            : idx == 2 ? #059669
+            : idx == 3 ? #D97706
+            : idx == 4 ? #7C3AED
+            : #0891B2
+    }
+}
+
+/// Color-coded cell/range reference highlight overlay rendered inside each
+/// visible cell of SheetTable when editing a formula.
+export component FormulaRefCellOverlay inherits Rectangle {
+    in property <int> global-row: 0;
+    in property <int> global-col: 0;
+    background: transparent;
+
+    for hl in FormulaAssist.ref-highlights : Rectangle {
+        property <bool> hit: root.global-row >= hl.start-row
+            && root.global-row <= hl.end-row
+            && root.global-col >= hl.start-col
+            && root.global-col <= hl.end-col;
+        property <color> c: FormulaAssist.ref-color(hl.color-index);
+        visible: FormulaAssist.active && hit;
+        width: parent.width;
+        height: parent.height;
+        background: hit ? c.transparentize(0.88) : transparent;
+
+        if hit && root.global-row == hl.start-row : Rectangle {
+            y: 0px;
+            width: parent.width;
+            height: 2px;
+            background: c;
+        }
+        if hit && root.global-row == hl.end-row : Rectangle {
+            y: parent.height - 2px;
+            width: parent.width;
+            height: 2px;
+            background: c;
+        }
+        if hit && root.global-col == hl.start-col : Rectangle {
+            x: 0px;
+            width: 2px;
+            height: parent.height;
+            background: c;
+        }
+        if hit && root.global-col == hl.end-col : Rectangle {
+            x: parent.width - 2px;
+            width: 2px;
+            height: parent.height;
+            background: c;
+        }
+    }
+}
+
+/// Floating formula autocomplete popup and argument signature hint anchored
+/// below the formula bar while editing a `=` formula.
+export component FormulaAssistPopup inherits Rectangle {
+    in property <bool> rtl: false;
+    in property <length> host-width: 800px;
+    property <bool> has-signature: FormulaAssist.active
+        && (FormulaAssist.signature-prefix != "" || FormulaAssist.signature-active != "");
+    property <bool> show-list: FormulaAssist.active
+        && FormulaAssist.popup-open
+        && FormulaAssist.suggestions.length > 0;
+
+    visible: has-signature || show-list;
+    x: root.rtl ? max(12px, root.host-width - self.width - 120px) : min(120px, max(12px, root.host-width - self.width - 12px));
+    y: 4px;
+    width: min(440px * max(1.0, Theme.text-scale), max(240px, root.host-width - Theme.tokens.space.lg * 2));
+    height: content.preferred-height;
+    background: Theme.palette().surface;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    drop-shadow-blur: 10px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: #00000028;
+
+    content := VerticalLayout {
+        spacing: 0px;
+
+        if root.has-signature : Rectangle {
+            background: Theme.palette().surface-sunken;
+            border-top-left-radius: Theme.tokens.metrics.radius-medium;
+            border-top-right-radius: Theme.tokens.metrics.radius-medium;
+            height: sig-col.preferred-height;
+
+            sig-col := VerticalLayout {
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                padding-top: Theme.tokens.space.xs;
+                padding-bottom: Theme.tokens.space.xs;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 0px;
+                    Text {
+                        text: FormulaAssist.signature-prefix;
+                        font-family: Theme.document-font-family;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: FormulaAssist.signature-active;
+                        font-family: Theme.document-font-family;
+                        font-size: Theme.type.caption;
+                        font-weight: 700;
+                        color: Theme.control-accent;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: FormulaAssist.signature-suffix;
+                        font-family: Theme.document-font-family;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                }
+
+                if FormulaAssist.signature-summary != "" : Text {
+                    text: FormulaAssist.signature-summary;
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().ink-secondary;
+                    overflow: elide;
+                }
+            }
+        }
+
+        if root.has-signature && root.show-list : Rectangle {
+            height: 1px;
+            background: Theme.palette().border;
+        }
+
+        if root.show-list : VerticalLayout {
+            padding: Theme.tokens.space.xs;
+            spacing: 2px;
+            accessible-role: list;
+            accessible-label: "Formula function suggestions";
+
+            for item[idx] in FormulaAssist.suggestions : Rectangle {
+                property <bool> selected: idx == FormulaAssist.selected-suggestion;
+                height: item-col.preferred-height;
+                border-radius: Theme.tokens.metrics.radius-small;
+                background: selected ? Theme.palette().selection-soft : transparent;
+                border-width: selected && Theme.active-theme == "high-contrast" ? 1px : 0px;
+                border-color: Theme.palette().paper-ink;
+                accessible-role: list-item;
+                accessible-label: item.signature + " — " + item.summary;
+
+                item-col := VerticalLayout {
+                    padding-left: Theme.tokens.space.sm;
+                    padding-right: Theme.tokens.space.sm;
+                    padding-top: Theme.tokens.space.xs;
+                    padding-bottom: Theme.tokens.space.xs;
+                    spacing: 1px;
+
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: item.name;
+                            font-family: Theme.document-font-family;
+                            font-size: Theme.type.body;
+                            font-weight: 700;
+                            color: selected ? Theme.control-accent : Theme.palette().ink;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: item.signature;
+                            font-family: Theme.document-font-family;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: item.summary;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        overflow: elide;
+                    }
+                }
+
+                TouchArea {
+                    clicked => {
+                        FormulaAssist.selected-suggestion = idx;
+                        FormulaAssist.accept-suggestion(idx);
+                    }
+                }
+            }
+        }
+    }
+}
