@@ -31,6 +31,7 @@ pub(crate) mod functions_util;
 pub mod interop;
 mod number_text;
 pub mod objects;
+pub mod pdf_export;
 pub mod persistence;
 pub mod refs;
 pub mod row_order;
@@ -45,7 +46,8 @@ pub use interop::{
     from_csv, from_csv_sniffed, from_csv_with_dialect, parse_csv_records, sniff_csv_dialect,
     to_csv, to_csv_with_formulas, to_csv_with_values, CsvDialect,
 };
-pub use objects::{SheetObject, SheetObjectKind};
+pub use objects::{reorder_objects, SheetObject, SheetObjectKind, ZOrderAction};
+pub use pdf_export::{export_sheet_pdf, export_sheet_pdf_with_options, PdfExportOptions};
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };

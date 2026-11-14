@@ -13,6 +13,7 @@ fn wire_everything(session: &Session) {
     let (app, state) = (&session.app, &session.state);
     register_sheet_actions(app, state, &menu_service);
     crate::chart_actions::register_chart_actions(app, state);
+    crate::chart_actions::register_chart_inspector_actions(app, state, &menu_service);
     register_history_actions(app, state, &menu_service);
     object_actions::register_object_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);
@@ -44,6 +45,10 @@ fn table() -> Vec<(&'static str, Action)> {
         a("adjust_decimals", |app| app.invoke_adjust_decimals(1)),
         a("adjust_font", |app| app.invoke_adjust_font(1)),
         a("adjust_row_height", |app| app.invoke_adjust_row_height(5)),
+        a("arrange_object", |app| {
+            app.global::<SheetInspectorActions>()
+                .invoke_arrange_object(0)
+        }),
         a("clear_selected_cells", |app| {
             app.invoke_clear_selected_cells()
         }),
@@ -97,6 +102,14 @@ fn table() -> Vec<(&'static str, Action)> {
         }),
         a("set_cell_alignment", |app| app.invoke_set_cell_alignment(1)),
         a("set_cell_format", |app| app.invoke_set_cell_format(1)),
+        a("set_chart_kind", |app| {
+            app.global::<SheetChartActions>().invoke_set_chart_kind(1)
+        }),
+        a("set_chart_title", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_chart_title("Title".into());
+        }),
         a("set_col_width", |app| {
             let _ = app.invoke_set_col_width("96".into());
         }),
@@ -117,10 +130,29 @@ fn table() -> Vec<(&'static str, Action)> {
         a("set_row_height", |app| {
             let _ = app.invoke_set_row_height("32".into());
         }),
+        a("set_series_name", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_series_name("Series".into());
+        }),
+        a("set_x_axis_label", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_x_axis_label("X".into());
+        }),
+        a("set_y_axis_label", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_y_axis_label("Y".into());
+        }),
         a("sort_ascending", |app| app.invoke_sort_ascending()),
         a("sort_descending", |app| app.invoke_sort_descending()),
         a("toggle_bold", |app| app.invoke_toggle_bold()),
         a("toggle_borders", |app| app.invoke_toggle_borders()),
+        a("toggle_chart_legend", |app| {
+            app.global::<SheetChartActions>()
+                .invoke_toggle_chart_legend()
+        }),
         a("toggle_italic", |app| app.invoke_toggle_italic()),
         a("toggle_underline", |app| app.invoke_toggle_underline()),
         a("undo", |app| app.invoke_undo()),

@@ -582,6 +582,7 @@ fn parse_chart(path: &str, xml: &str) -> Result<Option<SheetChart>, String> {
         title,
         cat_col,
         val_col,
+        ..Default::default()
     }))
 }
 

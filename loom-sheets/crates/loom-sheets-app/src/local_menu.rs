@@ -22,6 +22,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.save_as",
     "file.export_csv",
     "file.export_xlsx",
+    "file.export_pdf",
     "edit.undo",
     "edit.redo",
     "edit.cut",
@@ -73,6 +74,10 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "sheets.insert_shape",
     "sheets.insert_image",
     "sheets.delete_sheet",
+    "arrange.bring_forward",
+    "arrange.send_backward",
+    "arrange.bring_to_front",
+    "arrange.send_to_back",
 ];
 
 loom_desktop::local_menu_bindings!(SheetsApp, SUPPORTED_COMMANDS, set_status_left);
@@ -98,6 +103,11 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
                 "file.export_xlsx",
                 "Export to Excel (.xlsx)...",
                 MenuShortcut::primary_shift("E"),
+            ),
+            MenuItem::action_with_shortcut(
+                "file.export_pdf",
+                "Export to PDF / Print...",
+                MenuShortcut::primary("P"),
             ),
         ],
         vec![],
@@ -239,6 +249,24 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
                     MenuItem::Separator,
                     MenuItem::action("format.borders", "Toggle Borders"),
                     MenuItem::action("format.fill_cycle", "Cycle Cell Fill"),
+                ],
+            ),
+            Menu::new(
+                "Arrange",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "arrange.bring_forward",
+                        "Bring Forward",
+                        MenuShortcut::primary_alt("]"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "arrange.send_backward",
+                        "Send Backward",
+                        MenuShortcut::primary_alt("["),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action("arrange.bring_to_front", "Bring to Front"),
+                    MenuItem::action("arrange.send_to_back", "Send to Back"),
                 ],
             ),
         ],

@@ -1,0 +1,72 @@
+import { Theme } from "theme.slint";
+import { Doc } from "doc_palette.slint";
+import { SheetChartConfig } from "chart_inspector.slint";
+
+export component SheetChartPieLegend inherits Flickable {
+    in property <[string]> categories: [];
+    in property <[string]> values-display: [];
+    in property <[float]> pie-opacities: [];
+    in property <float> text-scale: 1.0;
+
+    viewport-height: pie-legend.preferred-height;
+
+    pie-legend := VerticalLayout {
+        spacing: 2px;
+
+        for idx in root.categories.length : HorizontalLayout {
+            spacing: 6px;
+            Rectangle {
+                y: 4px;
+                width: 8px;
+                height: 8px;
+                border-radius: 2px;
+                background: Doc.accent;
+                opacity: idx < root.pie-opacities.length ? root.pie-opacities[idx] : 1.0;
+            }
+            Text {
+                text: (idx < root.categories.length ? root.categories[idx] : "") + " — " + (idx < root.values-display.length ? root.values-display[idx] : "");
+                font-size: Theme.tokens.typography.micro * root.text-scale;
+                color: Theme.palette().paper-ink;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
+
+export component SheetChartLegendBar inherits HorizontalLayout {
+    in property <string> series-label: "Values";
+    in property <string> kind: "bar";
+    in property <float> text-scale: 1.0;
+
+    spacing: Theme.tokens.space.sm;
+    visible: SheetChartConfig.show-legend && root.kind != "pie";
+    height: self.visible ? self.preferred-height : 0px;
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        Rectangle {
+            y: 3px;
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            background: Doc.accent;
+        }
+        Text {
+            text: root.series-label;
+            font-size: Theme.tokens.typography.micro * root.text-scale;
+            color: Theme.palette().paper-ink;
+            overflow: elide;
+        }
+    }
+    if SheetChartConfig.x-axis-label != "" || SheetChartConfig.y-axis-label != "" : Text {
+        text: (SheetChartConfig.x-axis-label != "" ? "X: " + SheetChartConfig.x-axis-label : "")
+            + (SheetChartConfig.x-axis-label != "" && SheetChartConfig.y-axis-label != "" ? " · " : "")
+            + (SheetChartConfig.y-axis-label != "" ? "Y: " + SheetChartConfig.y-axis-label : "");
+        font-size: Theme.tokens.typography.micro * root.text-scale;
+        color: Doc.muted;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+}

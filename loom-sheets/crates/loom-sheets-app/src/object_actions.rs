@@ -315,6 +315,77 @@ fn set_object_field(
     true
 }
 
+pub(crate) fn arrange_selected_object(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    action_idx: i32,
+) -> bool {
+    let action = match action_idx {
+        0 => loom_sheets_core::ZOrderAction::BringForward,
+        1 => loom_sheets_core::ZOrderAction::SendBackward,
+        2 => loom_sheets_core::ZOrderAction::BringToFront,
+        3 => loom_sheets_core::ZOrderAction::SendToBack,
+        _ => return false,
+    };
+    let index = app.get_selected_object();
+    let Ok(index) = usize::try_from(index) else {
+        let msg = if state.current.borrow().objects.is_empty() {
+            "No worksheet objects to arrange."
+        } else {
+            "Select a worksheet object to arrange."
+        };
+        app.set_status_left(msg.into());
+        return false;
+    };
+    cancel_active_gesture(app, state);
+    let before = state.current.borrow().clone();
+    let mut after = before.clone();
+    let Some(new_index) = loom_sheets_core::reorder_objects(&mut after.objects, index, action)
+    else {
+        let name = object_display_name(state, index);
+        let msg = match action {
+            loom_sheets_core::ZOrderAction::BringForward
+            | loom_sheets_core::ZOrderAction::BringToFront => {
+                format!("{name} is already at the front.")
+            }
+            loom_sheets_core::ZOrderAction::SendBackward
+            | loom_sheets_core::ZOrderAction::SendToBack => {
+                format!("{name} is already at the back.")
+            }
+        };
+        app.set_status_left(SharedString::from(msg));
+        return false;
+    };
+    let name = object_display_name_for(new_index, &after.objects[new_index]);
+    *state.current.borrow_mut() = after.clone();
+    push_history(
+        &mut state.undo_stack.borrow_mut(),
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    state.redo_stack.borrow_mut().clear();
+    app.set_selected_object(new_index as i32);
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    let verb = match action {
+        loom_sheets_core::ZOrderAction::BringForward
+        | loom_sheets_core::ZOrderAction::BringToFront => "Brought",
+        loom_sheets_core::ZOrderAction::SendBackward
+        | loom_sheets_core::ZOrderAction::SendToBack => "Sent",
+    };
+    let target = match action {
+        loom_sheets_core::ZOrderAction::BringForward => "forward",
+        loom_sheets_core::ZOrderAction::SendBackward => "backward",
+        loom_sheets_core::ZOrderAction::BringToFront => "to front",
+        loom_sheets_core::ZOrderAction::SendToBack => "to back",
+    };
+    app.set_status_left(SharedString::from(format!("{verb} {name} {target}.")));
+    true
+}
+
 fn reveal_object(app: &SheetsApp, state: &Rc<GuiState>, index: usize) {
     let sheet = state.current.borrow();
     let Some(object) = sheet.objects.get(index) else {
@@ -812,6 +883,20 @@ pub(crate) fn register_object_actions(
                     set_object_field(&app, &state, &menu_service, field, value.as_str())
                 } else {
                     false
+                }
+            });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.global::<crate::SheetInspectorActions>()
+            .on_arrange_object(move |action_idx| {
+                if let Some(app) = app_ref.upgrade() {
+                    if crate::mutation_guard::refused(&app, &state) {
+                        return;
+                    }
+                    arrange_selected_object(&app, &state, &menu_service, action_idx);
                 }
             });
     }

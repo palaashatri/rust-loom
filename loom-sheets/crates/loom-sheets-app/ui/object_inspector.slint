@@ -1,7 +1,9 @@
 // Editable geometry for the selected anchored object. The worksheet model
 // stores a cell anchor plus a pixel size, so X and Y are the anchor's column
 // letter and 1-based row rather than a second pixel coordinate system.
+import { LoomButton } from "foundation.slint";
 import { SheetHeading, SheetNumericRow } from "inspector_rows.slint";
+export { SheetChartConfig, SheetChartActions } from "chart_inspector.slint";
 import { SheetObjectView } from "objects.slint";
 import { Theme } from "theme.slint";
 
@@ -19,6 +21,8 @@ export global SheetObjectGeometry {
 export global SheetInspectorActions {
     callback set-object-field(int, string) -> bool;
     callback set-decimals(string) -> bool;
+    callback arrange-object(int);
+    callback export-pdf();
 }
 
 export component SheetObjectGeometryFields inherits VerticalLayout {
@@ -95,5 +99,32 @@ export component SheetObjectGeometryFields inherits VerticalLayout {
         invalid <=> root.height-invalid;
         accepted(text) => { return SheetInspectorActions.set-object-field(3, text); }
         cancelled => { root.height-draft = root.height-label; root.height-invalid = false; }
+    }
+    SheetHeading { title: "Arrange"; }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LoomButton {
+            label: "Forward";
+            horizontal-stretch: 1;
+            clicked => { SheetInspectorActions.arrange-object(0); }
+        }
+        LoomButton {
+            label: "Backward";
+            horizontal-stretch: 1;
+            clicked => { SheetInspectorActions.arrange-object(1); }
+        }
+    }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LoomButton {
+            label: "To Front";
+            horizontal-stretch: 1;
+            clicked => { SheetInspectorActions.arrange-object(2); }
+        }
+        LoomButton {
+            label: "To Back";
+            horizontal-stretch: 1;
+            clicked => { SheetInspectorActions.arrange-object(3); }
+        }
     }
 }

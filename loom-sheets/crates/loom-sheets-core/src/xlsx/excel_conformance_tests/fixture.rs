@@ -226,6 +226,7 @@ fn sales() -> Sheet {
         val_col: 3,
         start_row: 1,
         end_row: Some(3),
+        ..Default::default()
     });
     let mut shape = SheetObject::shape(cell("I22"), "Quarterly target");
     shape.fill = FillColor::Yellow;

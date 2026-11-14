@@ -134,6 +134,7 @@ fn fixture_workbook() -> Vec<Sheet> {
         val_col: 3,
         start_row: 1,
         end_row: Some(4),
+        ..Default::default()
     });
     sales
         .objects
