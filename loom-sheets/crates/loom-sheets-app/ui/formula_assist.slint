@@ -24,8 +24,11 @@ export global FormulaAssist {
     in-out property <string> signature-suffix: "";
     in-out property <string> signature-summary: "";
     in-out property <[FormulaRefHighlight]> ref-highlights: [];
+    in-out property <int> caret-byte-offset: -1;
+    in-out property <int> restore-caret-seq: 0;
 
     callback formula-edited(string);
+    callback caret-moved(int);
     callback editing-state-changed(bool);
     callback accept-suggestion(int);
     callback dismiss-popup();

@@ -529,6 +529,11 @@ pub(crate) fn clear_assist(app: &SheetsApp) {
     assist.set_ref_highlights(ModelRc::default());
 }
 
+fn current_caret_byte(app: &SheetsApp) -> Option<usize> {
+    let offset = app.global::<FormulaAssist>().get_caret_byte_offset();
+    (offset >= 0).then_some(offset as usize)
+}
+
 pub(crate) fn sync_assist(app: &SheetsApp, state: &GuiState, formula: &str) {
     if !formula.starts_with('=') {
         clear_assist(app);
@@ -536,7 +541,7 @@ pub(crate) fn sync_assist(app: &SheetsApp, state: &GuiState, formula: &str) {
     }
 
     let active_sheet_name = state.current.borrow().name.clone();
-    let analysis = analyze_formula_cursor(formula, None);
+    let analysis = analyze_formula_cursor(formula, current_caret_byte(app));
     let highlights = extract_ref_highlights(formula, &active_sheet_name);
 
     let assist = app.global::<FormulaAssist>();
@@ -603,6 +608,21 @@ pub(crate) fn register_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
     {
         let app_ref = app.as_weak();
         let state = state.clone();
+        assist.on_caret_moved(move |offset| {
+            if let Some(app) = app_ref.upgrade() {
+                let assist = app.global::<FormulaAssist>();
+                assist.set_caret_byte_offset(offset);
+                let buf = app.get_formula_edit_buffer();
+                if buf.starts_with('=') {
+                    sync_assist(&app, &state, buf.as_str());
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
         assist.on_editing_state_changed(move |editing| {
             if let Some(app) = app_ref.upgrade() {
                 if editing {
@@ -628,10 +648,14 @@ pub(crate) fn register_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
                 return;
             };
             let current = app.get_formula_edit_buffer();
-            if let Some((updated, _)) = apply_suggestion(current.as_str(), None, item.name.as_str())
-            {
+            if let Some((updated, new_cursor)) = apply_suggestion(
+                current.as_str(),
+                current_caret_byte(&app),
+                item.name.as_str(),
+            ) {
                 app.set_formula_edit_buffer(SharedString::from(updated.as_str()));
-                app.invoke_focus_formula_bar();
+                assist.set_caret_byte_offset(new_cursor as i32);
+                assist.set_restore_caret_seq(assist.get_restore_caret_seq().wrapping_add(1));
                 sync_assist(&app, &state, &updated);
             }
         });
@@ -655,9 +679,13 @@ pub(crate) fn register_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
                 return;
             };
             let current = app.get_formula_edit_buffer();
-            if let Some((updated, _)) = cycle_reference_in_formula(current.as_str(), None) {
+            if let Some((updated, new_cursor)) =
+                cycle_reference_in_formula(current.as_str(), current_caret_byte(&app))
+            {
+                let assist = app.global::<FormulaAssist>();
                 app.set_formula_edit_buffer(SharedString::from(updated.as_str()));
-                app.invoke_focus_formula_bar();
+                assist.set_caret_byte_offset(new_cursor as i32);
+                assist.set_restore_caret_seq(assist.get_restore_caret_seq().wrapping_add(1));
                 sync_assist(&app, &state, &updated);
             }
         });

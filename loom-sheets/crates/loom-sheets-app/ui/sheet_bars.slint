@@ -15,9 +15,14 @@ component FormulaFieldScope inherits FocusScope {
 
     horizontal-stretch: 1;
     focus-on-tab-navigation: false;
+    property <int> restore-caret-seq: FormulaAssist.restore-caret-seq;
+    changed restore-caret-seq => {
+        field.focus-at(FormulaAssist.caret-byte-offset);
+    }
 
     capture-key-pressed(event) => {
         if (event.text == Key.F4 && !event.modifiers.control && !event.modifiers.meta && !event.modifiers.alt) {
+            FormulaAssist.caret-byte-offset = field.cursor-position-byte-offset;
             FormulaAssist.cycle-f4();
             return accept;
         }
@@ -31,6 +36,7 @@ component FormulaFieldScope inherits FocusScope {
                 return accept;
             }
             if (event.text == Key.Return || (event.text == Key.Tab && !event.modifiers.shift)) {
+                FormulaAssist.caret-byte-offset = field.cursor-position-byte-offset;
                 FormulaAssist.accept-suggestion(FormulaAssist.selected-suggestion);
                 return accept;
             }
@@ -53,12 +59,22 @@ component FormulaFieldScope inherits FocusScope {
         focus-request: root.focus-request;
         changed focused => {
             if (self.focused) {
+                FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
                 FormulaAssist.editing-state-changed(true);
             } else if (!root.is-editing) {
                 FormulaAssist.editing-state-changed(false);
             }
         }
-        edited(text) => { FormulaAssist.formula-edited(text); }
+        changed cursor-position-byte-offset => {
+            FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
+            if (self.focused) {
+                FormulaAssist.caret-moved(self.cursor-position-byte-offset);
+            }
+        }
+        edited(text) => {
+            FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
+            FormulaAssist.formula-edited(text);
+        }
         accepted(text) => { root.commit-advance(text, 1, 0); }
         tabbed(back) => { root.commit-advance(root.value, 0, back ? -1 : 1); }
         cancelled => {

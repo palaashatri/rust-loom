@@ -14,17 +14,47 @@ use loom_sheets_core::data_tools::{
     replace_cell_raw, unique_column_values,
 };
 use loom_sheets_core::{
-    evaluate, CellRange, CellRef, DataValidationRule, FindOptions, GridSelection, RangeEdit, Sheet,
-    ValidationCriteria, Value,
+    evaluate, CellRef, FindOptions, GridSelection, RangeEdit, Sheet, ValidationCriteria, Value,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{
     apply_sheet, commit_formula_edit, commit_transaction, commit_workbook_transaction,
     evaluate_current, project_current, selection_from_app, sync_current_to_tabs, sync_menu_state,
-    update_selection_range, DataToolsState, FilterValueItem, GuiState, NamedRangeItem,
-    SheetTransaction, SheetsApp,
+    update_selection_range, DataToolsState, FilterValueItem, GuiState, SheetTransaction, SheetsApp,
 };
+
+mod named_ranges;
+mod validation;
+
+pub(crate) use named_ranges::open_named_ranges;
+use named_ranges::sync_named_ranges_model;
+
+pub(super) fn commit_sheet_metadata_edit(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    mutate: impl FnOnce(&mut Sheet) -> bool,
+) -> bool {
+    let before = state.current.borrow().clone();
+    let mut after = before.clone();
+    if !mutate(&mut after) {
+        return false;
+    }
+    commit_transaction(
+        &mut state.current.borrow_mut(),
+        &mut state.undo_stack.borrow_mut(),
+        &mut state.redo_stack.borrow_mut(),
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    state.mark_content_dirty();
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    true
+}
 
 pub(crate) fn open_find_replace(app: &SheetsApp, replace_mode: bool) {
     let dt = app.global::<DataToolsState>();
@@ -43,22 +73,20 @@ pub(crate) fn toggle_auto_filter(
     }
     let selection = selection_from_app(app);
     let header_row = selection.range().start.row;
-    let enabled = {
-        let mut current = state.current.borrow_mut();
+    let mut enabled = false;
+    commit_sheet_metadata_edit(app, state, menu_service, |current| {
         if current.auto_filter.enabled {
             current.auto_filter.enabled = false;
             current.auto_filter.column_filters.clear();
             current.hidden_rows.clear();
-            false
+            enabled = false;
         } else {
             current.auto_filter.enabled = true;
             current.auto_filter.header_row = header_row;
-            true
+            enabled = true;
         }
-    };
-    state.mark_content_dirty();
-    apply_sheet(app, state);
-    sync_menu_state(menu_service, app, state);
+        true
+    });
     let msg = if enabled {
         format!("AutoFilter enabled on row {}", header_row + 1)
     } else {
@@ -75,26 +103,23 @@ pub(crate) fn clear_all_filters(
     if crate::mutation_guard::refused(app, state) {
         return;
     }
-    {
-        let mut current = state.current.borrow_mut();
+    commit_sheet_metadata_edit(app, state, menu_service, |current| {
         current.auto_filter.column_filters.clear();
         current.hidden_rows.clear();
-    }
-    state.mark_content_dirty();
-    apply_sheet(app, state);
-    sync_menu_state(menu_service, app, state);
+        true
+    });
     app.set_status_left("Cleared all column filters".into());
 }
 
 pub(crate) fn open_column_filter(app: &SheetsApp, state: &Rc<GuiState>, col: u32) {
     let values = evaluate_current(state);
     let (header_row, unique, existing) = {
-        let mut current = state.current.borrow_mut();
-        if !current.auto_filter.enabled {
-            current.auto_filter.enabled = true;
-            current.auto_filter.header_row = 0;
-        }
-        let header_row = current.auto_filter.header_row;
+        let current = state.current.borrow();
+        let header_row = if current.auto_filter.enabled {
+            current.auto_filter.header_row
+        } else {
+            0
+        };
         let unique = unique_column_values(&current, &values, header_row, col);
         let existing = current.auto_filter.column_filters.get(&col).cloned();
         (header_row, unique, existing)
@@ -118,35 +143,11 @@ pub(crate) fn open_column_filter(app: &SheetsApp, state: &Rc<GuiState>, col: u32
         .trim_end_matches('1')
         .to_string();
     let dt = app.global::<DataToolsState>();
-    dt.set_autofilter_enabled(true);
     dt.set_filter_col_index(col as i32);
     dt.set_filter_col_name(SharedString::from(col_name));
     dt.set_filter_search(SharedString::default());
     dt.set_filter_values(ModelRc::new(VecModel::from(items)));
     dt.set_filter_popup_open(true);
-}
-
-pub(crate) fn open_named_ranges(app: &SheetsApp, state: &Rc<GuiState>) {
-    let selection = selection_from_app(app);
-    let dt = app.global::<DataToolsState>();
-    dt.set_new_range_name(SharedString::default());
-    dt.set_new_range_ref(SharedString::from(selection.range().to_a1()));
-    dt.set_named_range_error(SharedString::default());
-    sync_named_ranges_model(app, &state.current.borrow());
-    dt.set_named_ranges_open(true);
-}
-
-fn sync_named_ranges_model(app: &SheetsApp, sheet: &Sheet) {
-    let items: Vec<NamedRangeItem> = sheet
-        .named_ranges
-        .iter()
-        .map(|(name, range)| NamedRangeItem {
-            name: SharedString::from(name.as_str()),
-            range: SharedString::from(range.to_a1()),
-        })
-        .collect();
-    app.global::<DataToolsState>()
-        .set_named_ranges(ModelRc::new(VecModel::from(items)));
 }
 
 /// Syncs AutoFilter indicators, Named Ranges list, and active cell Data Validation into `DataToolsState`.
@@ -522,20 +523,20 @@ pub(crate) fn register_data_tools_actions(
                     }
                 }
                 let values = evaluate_current(&state);
-                {
-                    let mut current = state.current.borrow_mut();
-                    current.auto_filter.enabled = true;
+                commit_sheet_metadata_edit(&app, &state, &menu_service, |current| {
+                    if !current.auto_filter.enabled {
+                        current.auto_filter.header_row = 0;
+                        current.auto_filter.enabled = true;
+                    }
                     if all_checked {
                         current.auto_filter.column_filters.remove(&col);
                     } else {
                         current.auto_filter.column_filters.insert(col, allowed);
                     }
-                    recompute_hidden_rows(&mut current, &values);
-                }
+                    recompute_hidden_rows(current, &values);
+                    true
+                });
                 dt.set_filter_popup_open(false);
-                state.mark_content_dirty();
-                apply_sheet(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
             }
         });
     }
@@ -551,15 +552,12 @@ pub(crate) fn register_data_tools_actions(
                 let dt = app.global::<DataToolsState>();
                 let col = dt.get_filter_col_index().max(0) as u32;
                 let values = evaluate_current(&state);
-                {
-                    let mut current = state.current.borrow_mut();
+                commit_sheet_metadata_edit(&app, &state, &menu_service, |current| {
                     current.auto_filter.column_filters.remove(&col);
-                    recompute_hidden_rows(&mut current, &values);
-                }
+                    recompute_hidden_rows(current, &values);
+                    true
+                });
                 dt.set_filter_popup_open(false);
-                state.mark_content_dirty();
-                apply_sheet(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
             }
         });
     }
@@ -572,215 +570,11 @@ pub(crate) fn register_data_tools_actions(
         });
     }
 
-    // Named Ranges
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        let menu_service = menu_service.clone();
-        dt.on_save_named_range(move |name, range_str| {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let dt = app.global::<DataToolsState>();
-                let Some(range) = CellRange::parse(range_str.as_str().trim()) else {
-                    dt.set_named_range_error("Invalid A1 range (e.g. A1:B10)".into());
-                    return;
-                };
-                let res = state
-                    .current
-                    .borrow_mut()
-                    .set_named_range(name.as_str(), range);
-                match res {
-                    Ok(()) => {
-                        dt.set_named_range_error(SharedString::default());
-                        dt.set_new_range_name(SharedString::default());
-                        state.mark_content_dirty();
-                        apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
-                    }
-                    Err(err) => {
-                        dt.set_named_range_error(SharedString::from(err));
-                    }
-                }
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        let menu_service = menu_service.clone();
-        dt.on_delete_named_range(move |name| {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                if state.current.borrow_mut().remove_named_range(name.as_str()) {
-                    state.mark_content_dirty();
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                }
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        dt.on_goto_named_range(move |name| {
-            if let Some(app) = app_ref.upgrade() {
-                let target = state.current.borrow().resolve_named_range(name.as_str());
-                if let Some(range) = target {
-                    let vals = evaluate_current(&state);
-                    let sheet = state.current.borrow();
-                    update_selection_range(
-                        &app,
-                        &sheet,
-                        &vals,
-                        GridSelection {
-                            anchor: range.start,
-                            focus: range.end,
-                        },
-                    );
-                    drop(sheet);
-                    project_current(&app, &state);
-                    app.global::<DataToolsState>().set_named_ranges_open(false);
-                }
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        dt.on_close_named_ranges(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.global::<DataToolsState>().set_named_ranges_open(false);
-            }
-        });
-    }
-
-    // Cell Data Validation
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        let menu_service = menu_service.clone();
-        dt.on_apply_validation(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let dt = app.global::<DataToolsState>();
-                let selection = selection_from_app(&app).range();
-                let kind = dt.get_val_kind();
-                if kind == 0 {
-                    state.current.borrow_mut().clear_validation(selection);
-                    dt.set_val_feedback("Validation rule cleared".into());
-                    dt.set_val_feedback_error(false);
-                    state.mark_content_dirty();
-                    apply_sheet(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    return;
-                }
-                let criteria = match kind {
-                    1 => {
-                        let items: Vec<String> = dt
-                            .get_val_list_or_range()
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        if items.is_empty() {
-                            dt.set_val_feedback("Enter comma-separated list items".into());
-                            dt.set_val_feedback_error(true);
-                            return;
-                        }
-                        ValidationCriteria::List(items)
-                    }
-                    2 => {
-                        let Some(src) =
-                            CellRange::parse(dt.get_val_list_or_range().as_str().trim())
-                        else {
-                            dt.set_val_feedback("Invalid source range (e.g. E1:E5)".into());
-                            dt.set_val_feedback_error(true);
-                            return;
-                        };
-                        ValidationCriteria::RangeList(src)
-                    }
-                    3 => {
-                        let (Ok(min), Ok(max)) = (
-                            dt.get_val_min().trim().parse::<i64>(),
-                            dt.get_val_max().trim().parse::<i64>(),
-                        ) else {
-                            dt.set_val_feedback("Enter integer Min and Max".into());
-                            dt.set_val_feedback_error(true);
-                            return;
-                        };
-                        ValidationCriteria::WholeNumberBetween(min.min(max), min.max(max))
-                    }
-                    4 => {
-                        let (Ok(min), Ok(max)) = (
-                            dt.get_val_min().trim().parse::<f64>(),
-                            dt.get_val_max().trim().parse::<f64>(),
-                        ) else {
-                            dt.set_val_feedback("Enter numeric Min and Max".into());
-                            dt.set_val_feedback_error(true);
-                            return;
-                        };
-                        ValidationCriteria::DecimalBetween(min.min(max), min.max(max))
-                    }
-                    5 => {
-                        let (Ok(min), Ok(max)) = (
-                            dt.get_val_min().trim().parse::<usize>(),
-                            dt.get_val_max().trim().parse::<usize>(),
-                        ) else {
-                            dt.set_val_feedback("Enter non-negative Min and Max length".into());
-                            dt.set_val_feedback_error(true);
-                            return;
-                        };
-                        ValidationCriteria::TextLengthBetween(min.min(max), min.max(max))
-                    }
-                    _ => return,
-                };
-                let err_msg = {
-                    let msg = dt.get_val_error_message().to_string();
-                    if msg.trim().is_empty() {
-                        "Invalid value".to_string()
-                    } else {
-                        msg
-                    }
-                };
-                let mut rule = DataValidationRule::new(criteria, err_msg);
-                rule.allow_blank = dt.get_val_allow_blank();
-                state.current.borrow_mut().set_validation(selection, rule);
-                dt.set_val_feedback(SharedString::from(format!(
-                    "Validation applied to {}",
-                    selection.to_a1()
-                )));
-                dt.set_val_feedback_error(false);
-                state.mark_content_dirty();
-                apply_sheet(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        let state = state.clone();
-        let menu_service = menu_service.clone();
-        dt.on_clear_validation(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if crate::mutation_guard::refused(&app, &state) {
-                    return;
-                }
-                let selection = selection_from_app(&app).range();
-                state.current.borrow_mut().clear_validation(selection);
-                let dt = app.global::<DataToolsState>();
-                dt.set_val_feedback("Validation rule cleared".into());
-                dt.set_val_feedback_error(false);
-                state.mark_content_dirty();
-                apply_sheet(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
-            }
-        });
-    }
+    dt.on_filter_matches(|value, query| {
+        query.is_empty() || value.to_lowercase().contains(&query.to_lowercase())
+    });
+    named_ranges::register_callbacks(app, state, menu_service);
+    validation::register_callbacks(app, state, menu_service);
     {
         let app_ref = app.as_weak();
         let state = state.clone();
