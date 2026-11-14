@@ -114,11 +114,7 @@ fn applies_pivot_to_current_sheet_with_undo_and_palette_wiring() {
     assert!(!pb.get_open());
     assert_eq!(s.state.sheets.borrow().len(), 1);
     assert_eq!(
-        s.state
-            .current
-            .borrow()
-            .raw(CellRef::parse("F1").unwrap())
-            .as_deref(),
+        s.state.current.borrow().raw(CellRef::parse("F1").unwrap()),
         Some("Region")
     );
     assert!(s

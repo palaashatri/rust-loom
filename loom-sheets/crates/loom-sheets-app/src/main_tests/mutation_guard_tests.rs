@@ -269,6 +269,10 @@ fn table() -> Vec<(&'static str, Action)> {
             app.global::<crate::SheetTableState>()
                 .invoke_delete_active_table()
         }),
+        a("apply_pivot_builder", |app| {
+            app.global::<crate::PivotBuilderState>()
+                .invoke_apply_pivot_builder()
+        }),
     ]
 }
 

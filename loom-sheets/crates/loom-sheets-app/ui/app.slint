@@ -1,29 +1,27 @@
-import { TemplateChooserModal } from "template_chooser.slint";
-import { SheetModals, PivotBuilderState } from "sheet_modals.slint";
-export { PivotBuilderState }
-import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
-import { SaveChangesDialog } from "save_changes_dialog.slint";
-import { DataToolsOverlay, DataToolsState } from "data_tools.slint";
-export { DataToolsState }
-import { CloseDrainShield } from "close_drain_shield.slint";
-import { SheetMenuChrome } from "menu_chrome.slint";
-export { SheetToolbarLayout } from "toolbar_layout.slint";
-export { SheetInspectorActions, SheetObjectGeometry, SheetChartConfig, SheetChartActions } from "object_inspector.slint";
-import { LoomWindowResizeEdges, LocalMenu, LocalMenuEntry, LocalMenuPopup } from "foundation.slint";
-import { SheetChartOverlay } from "chart.slint";
-import { SheetToolbarOverflow } from "toolbar_overflow.slint";
-import { SheetToolbarMenu } from "toolbar_menu.slint";
-import { SheetObjectLayer, SheetObjectView } from "objects.slint";
-import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import {TemplateChooserModal} from "template_chooser.slint";
+import {SheetModals} from "sheet_modals.slint";
+export {PivotBuilderState,PrintPreviewState,StartHubState} from "sheet_modals.slint";
+import {XlsxImportWarningDialog} from "xlsx_import_warning.slint";
+import {SaveChangesDialog} from "save_changes_dialog.slint";
+import {DataToolsOverlay,DataToolsState} from "data_tools.slint";
+export {DataToolsState}
+import {CloseDrainShield} from "close_drain_shield.slint";
+import {SheetMenuChrome} from "menu_chrome.slint";
+export {SheetToolbarLayout} from "toolbar_layout.slint";
+export {SheetInspectorActions,SheetObjectGeometry,SheetChartConfig,SheetChartActions} from "object_inspector.slint";
+import {LoomWindowResizeEdges,LocalMenu,LocalMenuEntry,LocalMenuPopup} from "foundation.slint";
+import {SheetChartOverlay} from "chart.slint";
+import {SheetToolbarOverflow} from "toolbar_overflow.slint";
+import {SheetToolbarMenu} from "toolbar_menu.slint";
+import {SheetObjectLayer,SheetObjectView} from "objects.slint";
+import {CommandPalette,CommandPaletteItem} from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {FormulaNameBar,SheetActionToolbar,SheetGridSurface,SheetInspector,SheetTabs,SheetStatusRow,FormulaAssistPopup} from "components.slint";
 import {Theme,ResponsivePolicy} from "theme.slint";
 export {Theme,ResponsivePolicy} from "theme.slint";
 export {LocalMenu,LocalMenuEntry} from "foundation.slint";
 export {GridPointer,CellSpill,CellInk,CellRichFormat} from "grid_pointer.slint";
 export {FormulaAssist} from "formula_assist.slint";
-export { PrintPreviewState } from "print_preview_modal.slint";
-export { StartHubState } from "start_hub.slint";
-export { SheetTableState } from "table_canvas_layer.slint";
+export {SheetTableState} from "table_canvas_layer.slint";
 export component SheetsApp inherits Window {
     init => { Theme.application = "sheets"; }
     icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");
@@ -788,17 +786,11 @@ export component SheetsApp inherits Window {
         query: root.palette-query;
         selected: root.palette-selected;
         command-invoked(idx) => { root.palette-invoked(idx); }
-        query-changed(q) => {
-            root.palette-query = q;
-            root.palette-query-changed(q);
-        }
+        query-changed(q) => { root.palette-query = q; root.palette-query-changed(q); }
         move-selection(delta) => { root.palette-move(delta); }
         key-text(text) => { root.palette-key-text(text); }
         backspace => { root.palette-backspace(); }
-        close-requested => {
-            root.palette-open = false;
-            root.palette-close();
-        }
+        close-requested => { root.palette-open = false; root.palette-close(); }
     }
     DataToolsOverlay { }
     close-drain-shield := CloseDrainShield {

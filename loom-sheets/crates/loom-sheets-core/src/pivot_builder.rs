@@ -818,7 +818,7 @@ mod tests {
             .unwrap()
             .starts_with("=SUMIFS("));
         assert_eq!(
-            pivot.raw(CellRef::parse("D4").unwrap()).as_deref(),
+            pivot.raw(CellRef::parse("D4").unwrap()),
             Some("=SUM(D2:D3)")
         );
         assert!(pivot.cell_style(CellRef::parse("A1").unwrap()).bold);

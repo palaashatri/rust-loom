@@ -24,6 +24,7 @@ pub(crate) const MUTATING: &[&str] = &[
     "adjust_row_height",
     "apply_border_preset",
     "apply_column_filter",
+    "apply_pivot_builder",
     "apply_validation",
     "arrange_object",
     "auto_text_color",
@@ -219,6 +220,19 @@ pub(crate) const ALLOWED: &[&str] = &[
     "search_edited",
     "select_table",
     "tab_changed",
+    // Pivot Builder draft modal controls (only `apply_pivot_builder` mutates the workbook).
+    "close_builder",
+    "cycle_val_agg",
+    "open_builder",
+    "select_filter_field",
+    "select_filter_value",
+    "set_dest_cell",
+    "set_dest_new_sheet",
+    "set_source_range",
+    "set_title",
+    "toggle_col_field",
+    "toggle_row_field",
+    "toggle_val_field",
 ];
 
 /// True, with the visible paused status set, when a workbook change must be
