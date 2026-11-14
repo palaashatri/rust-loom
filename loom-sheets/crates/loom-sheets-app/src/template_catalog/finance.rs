@@ -55,7 +55,7 @@ pub(super) fn loan_amortization() -> Sheet {
             ("D14", "=C14-E14"),
             ("E14", "=B14*$B$3/$B$5"),
             ("F14", "=B14-D14"),
-            ("A15", "6-Mo Subtotal"),
+            ("A15", "4-Mo Subtotal"),
             ("C15", "=SUM(C11:C14)"),
             ("D15", "=SUM(D11:D14)"),
             ("E15", "=SUM(E11:E14)"),

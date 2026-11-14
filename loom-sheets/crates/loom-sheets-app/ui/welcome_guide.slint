@@ -103,13 +103,17 @@ export component WelcomeGuideModal inherits Rectangle {
             }
             if (event.text == Key.Tab || event.text == Key.Backtab) {
                 if (event.text == Key.Backtab || event.modifiers.shift) {
-                    if (next-button.has-focus) { prev-button.grab-focus(); }
+                    if (next-button.has-focus) {
+                        if (root.step > 0) { prev-button.grab-focus(); } else { try-button.grab-focus(); }
+                    }
                     else if (prev-button.has-focus) { try-button.grab-focus(); }
                     else if (try-button.has-focus) { close-button.grab-focus(); }
                     else { next-button.grab-focus(); }
                 } else {
                     if (close-button.has-focus) { try-button.grab-focus(); }
-                    else if (try-button.has-focus) { prev-button.grab-focus(); }
+                    else if (try-button.has-focus) {
+                        if (root.step > 0) { prev-button.grab-focus(); } else { next-button.grab-focus(); }
+                    }
                     else if (prev-button.has-focus) { next-button.grab-focus(); }
                     else { close-button.grab-focus(); }
                 }

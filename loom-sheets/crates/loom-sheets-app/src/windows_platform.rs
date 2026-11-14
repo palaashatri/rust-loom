@@ -8,7 +8,6 @@ use std::ffi::{c_int, c_void};
 use std::ptr::null_mut;
 
 use i_slint_backend_winit::winit::event::WindowEvent as WinitWindowEvent;
-use i_slint_backend_winit::winit::keyboard::{Key, NamedKey};
 use i_slint_backend_winit::{EventResult, WinitWindowAccessor};
 use slint::ComponentHandle;
 
@@ -23,6 +22,25 @@ const PFD_SUPPORT_OPENGL: u32 = 0x0000_0020;
 const PFD_TYPE_RGBA: u8 = 0;
 const PFD_MAIN_PLANE: u8 = 0;
 const VK_MENU: c_int = 0x12;
+const WM_KEYFIRST: u32 = 0x0100;
+const WM_KEYLAST: u32 = 0x0109;
+const PM_NOREMOVE: u32 = 0x0000;
+
+#[repr(C)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+#[repr(C)]
+struct Msg {
+    hwnd: Hwnd,
+    message: u32,
+    w_param: usize,
+    l_param: isize,
+    time: u32,
+    pt: Point,
+}
 
 #[repr(C)]
 struct PixelFormatDescriptor {
@@ -74,6 +92,13 @@ unsafe extern "system" {
     fn GetDC(hwnd: Hwnd) -> Hdc;
     fn ReleaseDC(hwnd: Hwnd, hdc: Hdc) -> c_int;
     fn GetAsyncKeyState(vkey: c_int) -> i16;
+    fn PeekMessageW(
+        msg: *mut Msg,
+        hwnd: Hwnd,
+        msg_filter_min: u32,
+        msg_filter_max: u32,
+        remove_msg: u32,
+    ) -> c_int;
 }
 
 #[link(name = "gdi32")]
@@ -188,6 +213,19 @@ pub(crate) fn init_backend_if_needed() -> Result<(), String> {
     slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())
 }
 
+fn has_pending_keyboard_input() -> bool {
+    let mut msg = std::mem::MaybeUninit::<Msg>::uninit();
+    unsafe {
+        PeekMessageW(
+            msg.as_mut_ptr(),
+            null_mut(),
+            WM_KEYFIRST,
+            WM_KEYLAST,
+            PM_NOREMOVE,
+        ) != 0
+    }
+}
+
 /// Clear any stale Alt modifier state left behind when Windows modal system
 /// menus or move/size loops consume `VK_MENU` release events.
 pub(crate) fn install_alt_modifier_guard(app: &crate::SheetsApp) {
@@ -197,13 +235,7 @@ pub(crate) fn install_alt_modifier_guard(app: &crate::SheetsApp) {
             WinitWindowEvent::Resized(_)
             | WinitWindowEvent::Moved(_)
             | WinitWindowEvent::Focused(true)
-            | WinitWindowEvent::MouseInput { .. } => true,
-            WinitWindowEvent::KeyboardInput {
-                event: key_event, ..
-            } => !matches!(
-                key_event.logical_key,
-                Key::Named(NamedKey::Alt | NamedKey::AltGraph)
-            ),
+            | WinitWindowEvent::MouseInput { .. } => !has_pending_keyboard_input(),
             _ => false,
         };
         if should_sync && unsafe { (GetAsyncKeyState(VK_MENU) as u16 & 0x8000) == 0 } {

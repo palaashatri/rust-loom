@@ -2593,6 +2593,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.invoke_focus_template_chooser();
     } else if app.get_welcome_open() {
         app.invoke_focus_welcome();
+        let app_ref = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if app.get_welcome_open()
+                    && !app.get_save_changes_open()
+                    && !app.get_xlsx_import_warning_open()
+                    && !app.get_template_chooser_open()
+                {
+                    app.invoke_focus_welcome();
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
     } else {
         app.invoke_focus_grid();
         // Activation of the shown window can restore a different focus item
