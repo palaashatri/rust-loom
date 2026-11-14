@@ -53,6 +53,7 @@ mod rich_format_actions;
 #[cfg(test)]
 use inspector_search::inspector_section_visibility;
 mod paste_formats;
+mod print_preview;
 mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
 
@@ -1848,6 +1849,7 @@ pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
                 }
             });
     }
+    print_preview::wire_callbacks(app, state);
 }
 
 /// The one document identity used by the window title, the close prompt, and

@@ -1,6 +1,7 @@
 import { WelcomeGuideModal } from "welcome_guide.slint";
 import { ConditionalFormatModal } from "conditional_format_modal.slint";
 import { CellRichFormat } from "rich_format.slint";
+import { PrintPreviewModal, PrintPreviewState } from "print_preview_modal.slint";
 
 export component SheetModals inherits Rectangle {
     in property <bool> welcome-open: false;
@@ -22,6 +23,12 @@ export component SheetModals inherits Rectangle {
     }
 
     if CellRichFormat.cf-modal-open : ConditionalFormatModal {
+        width: 100%;
+        height: 100%;
+        open: true;
+    }
+
+    if PrintPreviewState.open : PrintPreviewModal {
         width: 100%;
         height: 100%;
         open: true;

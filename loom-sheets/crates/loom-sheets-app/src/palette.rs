@@ -19,6 +19,7 @@ pub enum PaletteAction {
     ExportCsv,
     ExportXlsx,
     ExportPdf,
+    PrintPreview,
     BringForward,
     SendBackward,
     BringToFront,
@@ -107,6 +108,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::ExportCsv => dispatch_command(app, "sheets.export-csv"),
         PaletteAction::ExportXlsx => dispatch_command(app, "sheets.export-xlsx"),
         PaletteAction::ExportPdf => dispatch_command(app, "file.export_pdf"),
+        PaletteAction::PrintPreview => dispatch_command(app, "file.print"),
         PaletteAction::BringForward => dispatch_command(app, "arrange.bring_forward"),
         PaletteAction::SendBackward => dispatch_command(app, "arrange.send_backward"),
         PaletteAction::BringToFront => dispatch_command(app, "arrange.bring_to_front"),
@@ -199,6 +201,7 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "sheets.export-csv" => Some(PaletteAction::ExportCsv),
         "sheets.export-xlsx" => Some(PaletteAction::ExportXlsx),
         "file.export_pdf" | "sheets.export-pdf" => Some(PaletteAction::ExportPdf),
+        "file.print" | "sheets.print-preview" => Some(PaletteAction::PrintPreview),
         "arrange.bring_forward" => Some(PaletteAction::BringForward),
         "arrange.send_backward" => Some(PaletteAction::SendBackward),
         "arrange.bring_to_front" => Some(PaletteAction::BringToFront),
@@ -295,7 +298,10 @@ fn keywords_for(id: &str) -> &'static str {
     match id {
         "sheets.export-csv" => "csv comma separated values spreadsheet",
         "sheets.export-xlsx" => "xlsx excel spreadsheet office",
-        "file.export_pdf" | "sheets.export-pdf" => "pdf print export portable document",
+        "file.export_pdf" | "sheets.export-pdf" => "pdf export portable document",
+        "file.print" | "sheets.print-preview" => {
+            "print preview page setup paper margins orientation"
+        }
         "arrange.bring_forward"
         | "arrange.send_backward"
         | "arrange.bring_to_front"
@@ -355,10 +361,11 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "sheets.export-xlsx",
             "Export Excel (.xlsx)",
         ),
+        (PaletteAction::ExportPdf, "file.export_pdf", "Export to PDF"),
         (
-            PaletteAction::ExportPdf,
-            "file.export_pdf",
-            "Export to PDF / Print",
+            PaletteAction::PrintPreview,
+            "file.print",
+            "Print Preview / Page Setup…",
         ),
         (
             PaletteAction::BringForward,
