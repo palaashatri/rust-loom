@@ -4,7 +4,7 @@
 //! CI to exercise the formula engine without a display.
 
 use loom_sheets_core::{
-    evaluate, export_sheet_pdf, from_csv, sheet_from_json, to_csv, workbook_from_json,
+    evaluate, export_workbook_sheet_pdf, from_csv, sheet_from_json, to_csv, workbook_from_json,
     CalculationCache, CellRange, CellRef, Sheet, SheetModel,
 };
 use std::collections::BTreeMap;
@@ -208,7 +208,7 @@ fn cmd_sort(path: &str, range: &str, column_offset: &str, order: &str) -> Result
     Ok(())
 }
 
-fn load_sheet_for_pdf(path: &str) -> Result<Sheet, String> {
+fn load_workbook_for_pdf(path: &str) -> Result<(Vec<Sheet>, usize), String> {
     if path.ends_with(".loomsheet") {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         let arch =
@@ -218,13 +218,12 @@ fn load_sheet_for_pdf(path: &str) -> Result<Sheet, String> {
             .ok_or_else(|| "missing content/sheet.json in .loomsheet".to_string())?;
         let json = std::str::from_utf8(content).map_err(|e| e.to_string())?;
         if let Ok(wb) = workbook_from_json(json) {
-            return wb
-                .sheets
-                .into_iter()
-                .nth(wb.active)
-                .ok_or_else(|| "workbook has no active sheet".to_string());
+            if wb.sheets.is_empty() || wb.active >= wb.sheets.len() {
+                return Err("workbook has no active sheet".to_string());
+            }
+            return Ok((wb.sheets, wb.active));
         }
-        return sheet_from_json(json);
+        return Ok((vec![sheet_from_json(json)?], 0));
     }
     let csv = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let name = std::path::Path::new(path)
@@ -232,12 +231,12 @@ fn load_sheet_for_pdf(path: &str) -> Result<Sheet, String> {
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
         .unwrap_or("Sheet");
-    Ok(from_csv(name, &csv))
+    Ok((vec![from_csv(name, &csv)], 0))
 }
 
 fn cmd_topdf(path: &str, out: &str) -> Result<(), String> {
-    let sheet = load_sheet_for_pdf(path)?;
-    let pdf = export_sheet_pdf(&sheet);
+    let (sheets, active) = load_workbook_for_pdf(path)?;
+    let pdf = export_workbook_sheet_pdf(&sheets, active);
     std::fs::write(out, pdf).map_err(|e| e.to_string())?;
     println!("wrote {out}");
     Ok(())

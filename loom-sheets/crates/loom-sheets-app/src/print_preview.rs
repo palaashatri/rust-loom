@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use loom_sheets_core::{
-    export_sheet_pdf_with_options, preview_sheet_pages, CellAlignment, PageOrientation, PaperSize,
-    PdfExportOptions, PrintScale, SheetPagePreview,
+    export_workbook_sheet_pdf_with_options, preview_workbook_sheet_pages, CellAlignment,
+    PageOrientation, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
 };
 use slint::{Color, ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -97,8 +97,8 @@ pub(crate) fn open(app: &SheetsApp, state: &GuiState) {
 pub(crate) fn refresh_preview(app: &SheetsApp, state: &GuiState) {
     let options = options_from_ui(app);
     let pages = {
-        let sheet = state.current.borrow();
-        preview_sheet_pages(&sheet, options)
+        let (sheets, active) = crate::workbook_sheets(state);
+        preview_workbook_sheet_pages(&sheets, active, options)
     };
     let total = pages.len().max(1);
     let ui = app.global::<PrintPreviewState>();
@@ -200,7 +200,8 @@ pub(crate) fn export_pdf_with_setup(app: &SheetsApp, state: &GuiState) {
     match state.dialogs.save_file(&request) {
         Ok(Some(path)) => {
             let options = options_from_ui(app);
-            let bytes = export_sheet_pdf_with_options(&state.current.borrow(), options);
+            let (sheets, active) = crate::workbook_sheets(state);
+            let bytes = export_workbook_sheet_pdf_with_options(&sheets, active, options);
             let ui = app.global::<PrintPreviewState>();
             match loom_storage::atomic_write(&path, &bytes) {
                 Ok(()) => {
@@ -230,9 +231,9 @@ pub(crate) fn export_pdf_with_setup(app: &SheetsApp, state: &GuiState) {
 /// Write a temporary PDF for printing and return its path.
 pub(crate) fn write_print_temp_pdf(app: &SheetsApp, state: &GuiState) -> Result<PathBuf, String> {
     let options = options_from_ui(app);
-    let sheet = state.current.borrow();
-    let bytes = export_sheet_pdf_with_options(&sheet, options);
-    let sanitized: String = sheet
+    let (sheets, active) = crate::workbook_sheets(state);
+    let bytes = export_workbook_sheet_pdf_with_options(&sheets, active, options);
+    let sanitized: String = sheets[active]
         .name
         .chars()
         .map(|c| {

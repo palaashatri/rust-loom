@@ -7,8 +7,9 @@ use std::collections::HashMap;
 
 use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
 
-use crate::style::{CellAlignment, FillColor};
-use crate::{evaluate, CellRef, Sheet, Value};
+use crate::style::{CellAlignment, CellBorders, FillColor};
+use crate::workbook::evaluate_workbook;
+use crate::{CellRef, Sheet, Value};
 
 const DEFAULT_COL_WIDTH_PT: f32 = 60.0;
 const DEFAULT_ROW_HEIGHT_PT: f32 = 18.0;
@@ -178,38 +179,56 @@ struct PageLayoutPlan {
     is_empty: bool,
 }
 
-fn build_page_plan(sheet: &Sheet, options: PdfExportOptions) -> PageLayoutPlan {
+fn build_page_plan(
+    sheets: &[Sheet],
+    sheet_index: usize,
+    options: PdfExportOptions,
+) -> (Sheet, PageLayoutPlan) {
+    let sheet = sheets
+        .get(sheet_index)
+        .cloned()
+        .unwrap_or_else(|| Sheet::new("Sheet"));
     let (page_w, page_h) = options.resolved_page_size_pt();
     let margin = options
         .margin_pt
         .clamp(12.0, (page_w.min(page_h) / 4.0).max(12.0));
     let usable_w = (page_w - 2.0 * margin).max(72.0);
     let usable_h = (page_h - 2.0 * margin).max(72.0);
-    let evaluated = evaluate(sheet);
+    let evaluated = if sheets.is_empty() || sheet_index >= sheets.len() {
+        HashMap::new()
+    } else {
+        evaluate_workbook(sheets)
+            .into_iter()
+            .nth(sheet_index)
+            .unwrap_or_default()
+    };
     let sheet_title = if sheet.name.trim().is_empty() {
         "Sheet".to_string()
     } else {
         sheet.name.clone()
     };
 
-    let Some((max_row, max_col)) = used_bounds(sheet) else {
-        return PageLayoutPlan {
-            page_w,
-            page_h,
-            margin,
-            scale_factor: 1.0,
-            row_gutter_w: 0.0,
-            col_header_h: 0.0,
-            include_headers: options.include_headers,
-            include_gridlines: options.include_gridlines,
-            sheet_title,
-            evaluated,
-            col_widths: Vec::new(),
-            row_heights: Vec::new(),
-            col_bands: Vec::new(),
-            row_bands: Vec::new(),
-            is_empty: true,
-        };
+    let Some((max_row, max_col)) = used_bounds(&sheet, &evaluated) else {
+        return (
+            sheet,
+            PageLayoutPlan {
+                page_w,
+                page_h,
+                margin,
+                scale_factor: 1.0,
+                row_gutter_w: 0.0,
+                col_header_h: 0.0,
+                include_headers: options.include_headers,
+                include_gridlines: options.include_gridlines,
+                sheet_title,
+                evaluated,
+                col_widths: Vec::new(),
+                row_heights: Vec::new(),
+                col_bands: Vec::new(),
+                row_bands: Vec::new(),
+                is_empty: true,
+            },
+        );
     };
 
     let base_gutter = if options.include_headers {
@@ -224,11 +243,11 @@ fn build_page_plan(sheet: &Sheet, options: PdfExportOptions) -> PageLayoutPlan {
     };
     let raw_col_table_w = (usable_w - base_gutter).max(MIN_COL_WIDTH_PT);
     let raw_col_widths: Vec<f32> = (0..=max_col)
-        .map(|col| column_width_pt(sheet, col, raw_col_table_w))
+        .map(|col| column_width_pt(&sheet, col, raw_col_table_w))
         .collect();
     let raw_body_h = (usable_h - PAGE_HEADER_HEIGHT_PT - base_col_hdr).max(MIN_ROW_HEIGHT_PT);
     let raw_row_heights: Vec<f32> = (0..=max_row)
-        .map(|row| row_height_pt(sheet, row, raw_body_h))
+        .map(|row| row_height_pt(&sheet, row, raw_body_h))
         .collect();
 
     let scale_factor = match options.scale {
@@ -271,23 +290,26 @@ fn build_page_plan(sheet: &Sheet, options: PdfExportOptions) -> PageLayoutPlan {
     };
     let row_bands = partition_rows(&row_heights, body_h, frozen_rows);
 
-    PageLayoutPlan {
-        page_w,
-        page_h,
-        margin,
-        scale_factor,
-        row_gutter_w,
-        col_header_h,
-        include_headers: options.include_headers,
-        include_gridlines: options.include_gridlines,
-        sheet_title,
-        evaluated,
-        col_widths,
-        row_heights,
-        col_bands,
-        row_bands,
-        is_empty: false,
-    }
+    (
+        sheet,
+        PageLayoutPlan {
+            page_w,
+            page_h,
+            margin,
+            scale_factor,
+            row_gutter_w,
+            col_header_h,
+            include_headers: options.include_headers,
+            include_gridlines: options.include_gridlines,
+            sheet_title,
+            evaluated,
+            col_widths,
+            row_heights,
+            col_bands,
+            row_bands,
+            is_empty: false,
+        },
+    )
 }
 
 /// Export `sheet` as a paginated PDF document using default US Letter options.
@@ -297,7 +319,21 @@ pub fn export_sheet_pdf(sheet: &Sheet) -> Vec<u8> {
 
 /// Export `sheet` as a paginated PDF document with explicit page options.
 pub fn export_sheet_pdf_with_options(sheet: &Sheet, options: PdfExportOptions) -> Vec<u8> {
-    let plan = build_page_plan(sheet, options);
+    export_workbook_sheet_pdf_with_options(std::slice::from_ref(sheet), 0, options)
+}
+
+/// Export `sheets[sheet_index]` with full workbook evaluation context using default options.
+pub fn export_workbook_sheet_pdf(sheets: &[Sheet], sheet_index: usize) -> Vec<u8> {
+    export_workbook_sheet_pdf_with_options(sheets, sheet_index, PdfExportOptions::default())
+}
+
+/// Export `sheets[sheet_index]` with full workbook evaluation context and explicit options.
+pub fn export_workbook_sheet_pdf_with_options(
+    sheets: &[Sheet],
+    sheet_index: usize,
+    options: PdfExportOptions,
+) -> Vec<u8> {
+    let (sheet, plan) = build_page_plan(sheets, sheet_index, options);
     let mut doc = PdfDocument::new();
 
     if plan.is_empty {
@@ -339,7 +375,7 @@ pub fn export_sheet_pdf_with_options(sheet: &Sheet, options: PdfExportOptions) -
             draw_table_band(
                 &mut doc,
                 page,
-                sheet,
+                &sheet,
                 &plan,
                 plan.page_h - plan.margin - PAGE_HEADER_HEIGHT_PT,
                 col_start..col_end,
@@ -354,7 +390,17 @@ pub fn export_sheet_pdf_with_options(sheet: &Sheet, options: PdfExportOptions) -
 /// Compute paginated page previews for `sheet` using the exact same pagination
 /// and cell formatting logic as [`export_sheet_pdf_with_options`].
 pub fn preview_sheet_pages(sheet: &Sheet, options: PdfExportOptions) -> Vec<SheetPagePreview> {
-    let plan = build_page_plan(sheet, options);
+    preview_workbook_sheet_pages(std::slice::from_ref(sheet), 0, options)
+}
+
+/// Compute paginated page previews for `sheets[sheet_index]` with full workbook
+/// evaluation context, sharing exact layout with [`export_workbook_sheet_pdf_with_options`].
+pub fn preview_workbook_sheet_pages(
+    sheets: &[Sheet],
+    sheet_index: usize,
+    options: PdfExportOptions,
+) -> Vec<SheetPagePreview> {
+    let (sheet, plan) = build_page_plan(sheets, sheet_index, options);
     if plan.is_empty {
         return vec![SheetPagePreview {
             page_number: 1,
@@ -404,54 +450,67 @@ pub fn preview_sheet_pages(sheet: &Sheet, options: PdfExportOptions) -> Vec<Shee
 
             let mut cells = Vec::with_capacity(row_band.len() * (col_end - col_start) as usize);
             let mut y_top = plan.margin + PAGE_HEADER_HEIGHT_PT + plan.col_header_h;
-            for &row in row_band {
+            for (row_idx, &row) in row_band.iter().enumerate() {
                 let h = plan.row_heights[row as usize];
                 let mut x_left = plan.margin + plan.row_gutter_w;
                 for col in col_start..col_end {
                     let w = plan.col_widths[col as usize];
-                    let cell_ref = CellRef { row, col };
-                    let style = sheet.cell_style(cell_ref);
-                    let raw_value = plan
-                        .evaluated
-                        .get(&cell_ref)
-                        .map(Value::display)
-                        .or_else(|| sheet.cells.get(&cell_ref).map(|c| c.raw.clone()))
-                        .unwrap_or_default();
-                    let display = style.format_value(&raw_value);
-                    let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
-                        * plan.scale_factor)
-                        .clamp(5.5, 16.0);
-                    let text_style = TextStyle {
-                        size_pt,
-                        fill_rgb: style
-                            .text_color
-                            .map(rgb_from_u32)
-                            .unwrap_or((0.10, 0.11, 0.12)),
-                        bold: style.bold,
-                        italic: style.italic,
-                    };
-                    let max_text_w = (w - 2.0 * CELL_PAD_X_PT * plan.scale_factor).max(4.0);
-                    let clipped = if display.is_empty() {
-                        String::new()
-                    } else {
-                        fit_text(&display, &text_style, max_text_w)
-                    };
-                    cells.push(PagePreviewCell {
-                        row,
-                        col,
-                        x_pt: x_left,
-                        y_pt: y_top,
-                        width_pt: w,
-                        height_pt: h,
-                        text: clipped,
-                        bold: style.bold,
-                        italic: style.italic,
-                        align: sheet.cell_alignment(cell_ref),
-                        fill_rgb: fill_color_rgb(style.fill),
-                        text_rgb: text_style.fill_rgb,
-                        has_border: style.borders != crate::style::CellBorders::NONE,
-                        font_size_pt: size_pt,
-                    });
+                    if let Some(span) =
+                        band_cell_span(&sheet, &plan, row_band, row_idx, col_start..col_end, col)
+                    {
+                        let style = sheet.cell_style(span.anchor);
+                        let raw_value = if span.render_text {
+                            plan.evaluated
+                                .get(&span.anchor)
+                                .map(Value::display)
+                                .or_else(|| sheet.cells.get(&span.anchor).map(|c| c.raw.clone()))
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        let display = style.format_value(&raw_value);
+                        let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
+                            * plan.scale_factor)
+                            .clamp(5.5, 16.0);
+                        let text_style = TextStyle {
+                            size_pt,
+                            fill_rgb: style
+                                .text_color
+                                .map(rgb_from_u32)
+                                .unwrap_or((0.10, 0.11, 0.12)),
+                            bold: style.bold,
+                            italic: style.italic,
+                        };
+                        let max_text_w =
+                            (span.width_pt - 2.0 * CELL_PAD_X_PT * plan.scale_factor).max(4.0);
+                        let clipped = if display.is_empty() {
+                            String::new()
+                        } else if style.wrap {
+                            let pad_y = 2.0 * plan.scale_factor;
+                            let line_h = size_pt * 1.25;
+                            let max_lines =
+                                ((span.height_pt - 2.0 * pad_y) / line_h).floor().max(1.0) as usize;
+                            wrap_text_lines(&display, &text_style, max_text_w, max_lines).join("\n")
+                        } else {
+                            fit_text(&display, &text_style, max_text_w)
+                        };
+                        cells.push(PagePreviewCell {
+                            row,
+                            col,
+                            x_pt: x_left,
+                            y_pt: y_top,
+                            width_pt: span.width_pt,
+                            height_pt: span.height_pt,
+                            text: clipped,
+                            bold: style.bold,
+                            italic: style.italic,
+                            align: sheet.cell_alignment(span.anchor),
+                            fill_rgb: fill_color_rgb(style.fill),
+                            text_rgb: text_style.fill_rgb,
+                            has_border: style.borders != CellBorders::NONE,
+                            font_size_pt: size_pt,
+                        });
+                    }
                     x_left += w;
                 }
                 y_top += h;
@@ -482,14 +541,29 @@ pub fn preview_sheet_pages(sheet: &Sheet, options: PdfExportOptions) -> Vec<Shee
     pages
 }
 
-fn used_bounds(sheet: &Sheet) -> Option<(u32, u32)> {
+fn used_bounds(sheet: &Sheet, evaluated: &HashMap<CellRef, Value>) -> Option<(u32, u32)> {
     let mut max_row = 0u32;
     let mut max_col = 0u32;
     let mut any = false;
-    for cell_ref in sheet.cells.keys() {
+    let styled_refs = sheet
+        .styles
+        .iter()
+        .filter(|(_, style)| !style.is_default())
+        .map(|(cell_ref, _)| cell_ref);
+    for cell_ref in sheet
+        .cells
+        .keys()
+        .chain(evaluated.keys())
+        .chain(styled_refs)
+    {
         any = true;
         max_row = max_row.max(cell_ref.row);
         max_col = max_col.max(cell_ref.col);
+    }
+    for merge in &sheet.merged_ranges {
+        any = true;
+        max_row = max_row.max(merge.start.row).max(merge.end.row);
+        max_col = max_col.max(merge.start.col).max(merge.end.col);
     }
     if any {
         Some((max_row, max_col))
@@ -549,9 +623,11 @@ fn partition_rows(row_heights: &[f32], body_h: f32, frozen_rows: u32) -> Vec<Vec
         let mut rows = Vec::new();
         let mut used = 0.0f32;
         if use_frozen && cursor >= frozen_count {
-            for (r, &h) in row_heights.iter().enumerate().take(frozen_count) {
-                rows.push(r as u32);
-                used += h;
+            if used + frozen_h + row_heights[cursor] <= body_h + 0.01 {
+                for (r, &h) in row_heights.iter().enumerate().take(frozen_count) {
+                    rows.push(r as u32);
+                    used += h;
+                }
             }
         }
         let band_start = cursor;
@@ -675,7 +751,7 @@ fn draw_table_band(
 
     // Data rows
     let mut y_top = col_hdr_y;
-    for &row in rows {
+    for (row_idx, &row) in rows.iter().enumerate() {
         let h = plan.row_heights[row as usize];
         let y_bot = y_top - h;
 
@@ -695,62 +771,193 @@ fn draw_table_band(
         let mut cell_x = left_x + plan.row_gutter_w;
         for col in cols.clone() {
             let w = plan.col_widths[col as usize];
-            let cell_ref = CellRef { row, col };
-            let style = sheet.cell_style(cell_ref);
+            if let Some(span) = band_cell_span(sheet, plan, rows, row_idx, cols.clone(), col) {
+                let span_w = span.width_pt;
+                let span_h = span.height_pt;
+                let span_y_bot = y_top - span_h;
+                let style = sheet.cell_style(span.anchor);
 
-            if let Some(fill_rgb) = fill_color_rgb(style.fill) {
-                doc.draw_rect(page, cell_x, y_bot, w, h, PathStyle::filled(fill_rgb));
-            }
-            if style.borders != crate::style::CellBorders::NONE {
-                doc.draw_rect(page, cell_x, y_bot, w, h, border_stroke);
-            } else if include_gridlines {
-                doc.draw_rect(page, cell_x, y_bot, w, h, grid_stroke);
-            }
+                if let Some(fill_rgb) = fill_color_rgb(style.fill) {
+                    doc.draw_rect(
+                        page,
+                        cell_x,
+                        span_y_bot,
+                        span_w,
+                        span_h,
+                        PathStyle::filled(fill_rgb),
+                    );
+                }
+                if include_gridlines {
+                    doc.draw_rect(page, cell_x, span_y_bot, span_w, span_h, grid_stroke);
+                }
+                if style.borders != CellBorders::NONE {
+                    draw_borders(
+                        doc,
+                        page,
+                        cell_x,
+                        span_y_bot,
+                        span_w,
+                        span_h,
+                        style.borders,
+                        border_stroke,
+                    );
+                }
 
-            let raw_value = plan
-                .evaluated
-                .get(&cell_ref)
-                .map(Value::display)
-                .or_else(|| sheet.cells.get(&cell_ref).map(|c| c.raw.clone()))
-                .unwrap_or_default();
-            let display = style.format_value(&raw_value);
-            if !display.is_empty() {
-                let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72) * plan.scale_factor)
-                    .clamp(5.5, 16.0);
-                let text_style = TextStyle {
-                    size_pt,
-                    fill_rgb: style
-                        .text_color
-                        .map(rgb_from_u32)
-                        .unwrap_or((0.10, 0.11, 0.12)),
-                    bold: style.bold,
-                    italic: style.italic,
-                };
-                let pad_x = CELL_PAD_X_PT * plan.scale_factor;
-                let max_text_w = (w - 2.0 * pad_x).max(4.0);
-                let clipped = fit_text(&display, &text_style, max_text_w);
-                let text_w = text_width_pt(&clipped, &text_style);
-                let alignment = sheet.cell_alignment(cell_ref);
-                let is_numeric = plan
-                    .evaluated
-                    .get(&cell_ref)
-                    .is_some_and(|v| matches!(v, Value::Number(_)));
-                let align_right = alignment == CellAlignment::Right
-                    || (alignment == CellAlignment::General && is_numeric);
-                let text_x = if alignment == CellAlignment::Center {
-                    cell_x + ((w - text_w) * 0.5).max(pad_x)
-                } else if align_right {
-                    cell_x + (w - pad_x - text_w).max(pad_x)
+                let raw_value = if span.render_text {
+                    plan.evaluated
+                        .get(&span.anchor)
+                        .map(Value::display)
+                        .or_else(|| sheet.cells.get(&span.anchor).map(|c| c.raw.clone()))
+                        .unwrap_or_default()
                 } else {
-                    cell_x + pad_x
+                    String::new()
                 };
-                let text_y = y_bot + ((h - size_pt) * 0.5).max(2.0) + 1.0;
-                doc.draw_text(page, text_x, text_y, &clipped, &text_style);
+                let display = style.format_value(&raw_value);
+                if !display.is_empty() {
+                    let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
+                        * plan.scale_factor)
+                        .clamp(5.5, 16.0);
+                    let text_style = TextStyle {
+                        size_pt,
+                        fill_rgb: style
+                            .text_color
+                            .map(rgb_from_u32)
+                            .unwrap_or((0.10, 0.11, 0.12)),
+                        bold: style.bold,
+                        italic: style.italic,
+                    };
+                    let pad_x = CELL_PAD_X_PT * plan.scale_factor;
+                    let max_text_w = (span_w - 2.0 * pad_x).max(4.0);
+                    let alignment = sheet.cell_alignment(span.anchor);
+                    let is_numeric = plan
+                        .evaluated
+                        .get(&span.anchor)
+                        .is_some_and(|v| matches!(v, Value::Number(_)));
+                    let align_right = alignment == CellAlignment::Right
+                        || (alignment == CellAlignment::General && is_numeric);
+                    let aligned_x = |line: &str| {
+                        let line_w = text_width_pt(line, &text_style);
+                        if alignment == CellAlignment::Center {
+                            cell_x + ((span_w - line_w) * 0.5).max(pad_x)
+                        } else if align_right {
+                            cell_x + (span_w - pad_x - line_w).max(pad_x)
+                        } else {
+                            cell_x + pad_x
+                        }
+                    };
+
+                    if style.wrap {
+                        let pad_y = 2.0 * plan.scale_factor;
+                        let line_h = size_pt * 1.25;
+                        let max_lines = ((span_h - 2.0 * pad_y) / line_h).floor().max(1.0) as usize;
+                        let lines = wrap_text_lines(&display, &text_style, max_text_w, max_lines);
+                        let total_h = lines.len() as f32 * line_h;
+                        let block_top = span_y_bot + span_h - ((span_h - total_h) * 0.5).max(pad_y);
+                        for (idx, line) in lines.iter().enumerate() {
+                            if line.is_empty() {
+                                continue;
+                            }
+                            let line_y = block_top - (idx as f32 + 1.0) * line_h
+                                + (line_h - size_pt) * 0.5
+                                + 1.0;
+                            doc.draw_text(page, aligned_x(line), line_y, line, &text_style);
+                        }
+                    } else {
+                        let clipped = fit_text(&display, &text_style, max_text_w);
+                        let text_y = span_y_bot + ((span_h - size_pt) * 0.5).max(2.0) + 1.0;
+                        doc.draw_text(page, aligned_x(&clipped), text_y, &clipped, &text_style);
+                    }
+                }
             }
 
             cell_x += w;
         }
         y_top = y_bot;
+    }
+}
+
+struct BandCellSpan {
+    anchor: CellRef,
+    width_pt: f32,
+    height_pt: f32,
+    render_text: bool,
+}
+
+fn band_cell_span(
+    sheet: &Sheet,
+    plan: &PageLayoutPlan,
+    rows: &[u32],
+    row_idx: usize,
+    cols: std::ops::Range<u32>,
+    col: u32,
+) -> Option<BandCellSpan> {
+    let row = rows[row_idx];
+    for merge in &sheet.merged_ranges {
+        let r0 = merge.start.row.min(merge.end.row);
+        let r1 = merge.start.row.max(merge.end.row);
+        let c0 = merge.start.col.min(merge.end.col);
+        let c1 = merge.start.col.max(merge.end.col);
+        if row < r0 || row > r1 || col < c0 || col > c1 {
+            continue;
+        }
+        let first_col = c0.max(cols.start);
+        if col != first_col {
+            return None;
+        }
+        if row_idx > 0
+            && rows[row_idx - 1] >= r0
+            && rows[row_idx - 1] <= r1
+            && rows[row_idx - 1] + 1 == row
+        {
+            return None;
+        }
+        let last_col = c1.min(cols.end.saturating_sub(1));
+        let width_pt: f32 = (col..=last_col).map(|c| plan.col_widths[c as usize]).sum();
+        let mut height_pt = 0.0f32;
+        for k in row_idx..rows.len() {
+            let r = rows[k];
+            if r > r1 || (k > row_idx && r != rows[k - 1] + 1) {
+                break;
+            }
+            height_pt += plan.row_heights[r as usize];
+        }
+        return Some(BandCellSpan {
+            anchor: CellRef { row: r0, col: c0 },
+            width_pt,
+            height_pt,
+            render_text: row == r0 && col == c0,
+        });
+    }
+    Some(BandCellSpan {
+        anchor: CellRef { row, col },
+        width_pt: plan.col_widths[col as usize],
+        height_pt: plan.row_heights[row as usize],
+        render_text: true,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_borders(
+    doc: &mut PdfDocument,
+    page: PageIndex,
+    x: f32,
+    y_bot: f32,
+    w: f32,
+    h: f32,
+    borders: CellBorders,
+    stroke: PathStyle,
+) {
+    if borders.top {
+        doc.draw_line(page, x, y_bot + h, x + w, y_bot + h, stroke);
+    }
+    if borders.right {
+        doc.draw_line(page, x + w, y_bot, x + w, y_bot + h, stroke);
+    }
+    if borders.bottom {
+        doc.draw_line(page, x, y_bot, x + w, y_bot, stroke);
+    }
+    if borders.left {
+        doc.draw_line(page, x, y_bot, x, y_bot + h, stroke);
     }
 }
 
@@ -800,6 +1007,81 @@ fn fit_text(text: &str, style: &TextStyle, max_width_pt: f32) -> String {
     }
     out.push_str(ellipsis);
     out
+}
+
+fn wrap_text_lines(
+    text: &str,
+    style: &TextStyle,
+    max_width_pt: f32,
+    max_lines: usize,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for para in text.split('\n') {
+        let para = para.strip_suffix('\r').unwrap_or(para);
+        if para.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut current = String::new();
+        for word in para.split(' ') {
+            if word.is_empty() {
+                continue;
+            }
+            if current.is_empty() {
+                if text_width_pt(word, style) <= max_width_pt {
+                    current.push_str(word);
+                } else {
+                    for ch in word.chars() {
+                        current.push(ch);
+                        if text_width_pt(&current, style) > max_width_pt {
+                            current.pop();
+                            if !current.is_empty() {
+                                lines.push(std::mem::take(&mut current));
+                            }
+                            current.push(ch);
+                        }
+                    }
+                }
+            } else {
+                let candidate = format!("{current} {word}");
+                if text_width_pt(&candidate, style) <= max_width_pt {
+                    current = candidate;
+                } else {
+                    lines.push(std::mem::take(&mut current));
+                    if text_width_pt(word, style) <= max_width_pt {
+                        current.push_str(word);
+                    } else {
+                        for ch in word.chars() {
+                            current.push(ch);
+                            if text_width_pt(&current, style) > max_width_pt {
+                                current.pop();
+                                if !current.is_empty() {
+                                    lines.push(std::mem::take(&mut current));
+                                }
+                                current.push(ch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        lines.push(current);
+    }
+
+    if lines.len() > max_lines && max_lines > 0 {
+        lines.truncate(max_lines);
+        if let Some(last) = lines.last_mut() {
+            let ellipsis = "...";
+            let ellipsis_w = text_width_pt(ellipsis, style);
+            while !last.is_empty() && text_width_pt(last, style) + ellipsis_w > max_width_pt {
+                last.pop();
+            }
+            if ellipsis_w <= max_width_pt {
+                last.push_str(ellipsis);
+            }
+        }
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -937,5 +1219,114 @@ mod tests {
         assert_eq!(previews[0].page_number, 1);
         assert_eq!(previews[0].total_pages, 1);
         assert!(previews[0].cells.is_empty());
+    }
+
+    #[test]
+    fn workbook_export_resolves_cross_sheet_formulas() {
+        let mut s1 = Sheet::new("Summary");
+        s1.set_str("A1", "=Data!A1*2");
+        let mut s2 = Sheet::new("Data");
+        s2.set_str("A1", "21");
+
+        let pdf_bytes = export_workbook_sheet_pdf(&[s1, s2], 0);
+        loom_pdf::inspect::verify(&pdf_bytes).expect("valid PDF");
+        let pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("page text");
+        assert!(pages[0].contains("42"));
+        assert!(!pages[0].contains("#REF!"));
+    }
+
+    #[test]
+    fn styled_blank_cells_and_spilled_results_expand_used_bounds() {
+        let mut styled_only = Sheet::new("StyledBlank");
+        let mut style = crate::style::CellStyle::default();
+        style.fill = FillColor::Yellow;
+        styled_only.set_cell_style(CellRef::parse("C4").unwrap(), style);
+        let previews = preview_sheet_pages(&styled_only, PdfExportOptions::default());
+        assert!(!previews[0].is_empty);
+        assert_eq!(previews[0].col_headers, vec!["A", "B", "C"]);
+        assert_eq!(previews[0].row_headers, vec!["1", "2", "3", "4"]);
+
+        let mut spilled = Sheet::new("Spill");
+        spilled.set_str("A1", "=SEQUENCE(2,2)");
+        let spill_previews = preview_sheet_pages(&spilled, PdfExportOptions::default());
+        assert_eq!(spill_previews[0].col_headers, vec!["A", "B"]);
+        assert_eq!(spill_previews[0].row_headers, vec!["1", "2"]);
+        let pdf_bytes = export_sheet_pdf(&spilled);
+        let pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("page text");
+        assert!(pages[0].contains("4"));
+    }
+
+    #[test]
+    fn partition_rows_omits_frozen_header_when_first_body_row_does_not_fit() {
+        let bands = partition_rows(&[300.0, 678.0], 678.0, 1);
+        assert_eq!(bands, vec![vec![0], vec![1]]);
+        for band in &bands {
+            let total_h: f32 = band.iter().map(|&r| [300.0, 678.0][r as usize]).sum();
+            assert!(total_h <= 678.01, "band height {total_h} exceeded body_h");
+        }
+    }
+
+    #[test]
+    fn merged_cells_span_columns_and_skip_covered_cells() {
+        let mut sheet = Sheet::new("Merges");
+        sheet.set_str("A1", "Wide Title");
+        sheet.merged_ranges.push(crate::CellRange::new(
+            CellRef::parse("A1").unwrap(),
+            CellRef::parse("B1").unwrap(),
+        ));
+        let previews = preview_sheet_pages(&sheet, PdfExportOptions::default());
+        assert_eq!(previews[0].cells.len(), 1);
+        assert_eq!(previews[0].cells[0].row, 0);
+        assert_eq!(previews[0].cells[0].col, 0);
+        assert_eq!(
+            previews[0].cells[0].width_pt,
+            previews[0].col_widths_pt[0] + previews[0].col_widths_pt[1]
+        );
+    }
+
+    #[test]
+    fn single_edge_border_draws_only_enabled_edge() {
+        let mut sheet = Sheet::new("Borders");
+        sheet.set_str("A1", "Underlined");
+        let mut style = crate::style::CellStyle::default();
+        style.borders = CellBorders {
+            bottom: true,
+            ..CellBorders::NONE
+        };
+        sheet.set_cell_style(CellRef::parse("A1").unwrap(), style);
+        let opts = PdfExportOptions {
+            include_gridlines: false,
+            include_headers: false,
+            ..Default::default()
+        };
+        let pdf_bytes = export_sheet_pdf_with_options(&sheet, opts);
+        loom_pdf::inspect::verify(&pdf_bytes).expect("valid PDF");
+        let raw = loom_pdf::inspect::readable_content(&pdf_bytes).expect("readable content");
+        // Border stroke width is 0.90; only 1 horizontal bottom border line (plus 1 header separator line at 0.75).
+        let border_strokes = raw.matches("0.90 w").count();
+        assert_eq!(border_strokes, 1, "expected 1 border stroke, got:\n{raw}");
+    }
+
+    #[test]
+    fn wrapped_text_renders_multiple_lines_in_tall_row() {
+        let mut sheet = Sheet::new("Wrapped");
+        sheet.set_str("A1", "Alpha Bravo Charlie Delta");
+        sheet.set_col_width(0, 65.0);
+        sheet.set_row_height(0, 72.0);
+        let mut style = crate::style::CellStyle::default();
+        style.wrap = true;
+        sheet.set_cell_style(CellRef::parse("A1").unwrap(), style);
+
+        let previews = preview_sheet_pages(&sheet, PdfExportOptions::default());
+        assert!(
+            previews[0].cells[0].text.contains('\n'),
+            "expected multi-line wrapped preview text, got {:?}",
+            previews[0].cells[0].text
+        );
+        let pdf_bytes = export_sheet_pdf(&sheet);
+        loom_pdf::inspect::verify(&pdf_bytes).expect("valid PDF");
+        let pages = loom_pdf::inspect::page_text(&pdf_bytes).expect("page text");
+        assert!(pages[0].contains("Alpha"));
+        assert!(pages[0].contains("Delta"));
     }
 }

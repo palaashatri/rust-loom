@@ -1198,7 +1198,7 @@ fn export_at_revision(
             let sheet = sheets
                 .get(active_sheet)
                 .ok_or_else(|| format!("active sheet {} is unavailable", active_sheet + 1))?;
-            let bytes = loom_sheets_core::export_sheet_pdf(sheet);
+            let bytes = loom_sheets_core::export_workbook_sheet_pdf(sheets, active_sheet);
             loom_storage::atomic_write(&operation.path, &bytes)
                 .map_err(|error| format!("PDF write failed: {error}"))?;
             Ok(ExportOutputSummary::Pdf {

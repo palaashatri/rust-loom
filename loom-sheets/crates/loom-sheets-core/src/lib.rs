@@ -54,8 +54,9 @@ pub use interop::{
 };
 pub use objects::{reorder_objects, SheetObject, SheetObjectKind, ZOrderAction};
 pub use pdf_export::{
-    export_sheet_pdf, export_sheet_pdf_with_options, preview_sheet_pages, PageOrientation,
-    PagePreviewCell, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
+    export_sheet_pdf, export_sheet_pdf_with_options, export_workbook_sheet_pdf,
+    export_workbook_sheet_pdf_with_options, preview_sheet_pages, preview_workbook_sheet_pages,
+    PageOrientation, PagePreviewCell, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
 };
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
