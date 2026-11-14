@@ -135,6 +135,7 @@ mod scroll_projection;
 mod selection_projection;
 pub(crate) use selection_projection::update_selection_range;
 mod template_navigation;
+mod welcome_guide;
 mod window_chrome;
 #[cfg(test)]
 pub(crate) use responsive_layout::wire_responsive_layout;
@@ -2443,6 +2444,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     wire_appearance_menu_sync(&menu_service, &state);
 
     register_sheet_actions(&app, &state, &menu_service);
+    welcome_guide::wire(&app, &state, &menu_service);
     chart_actions::register_chart_actions(&app, &state);
     object_actions::register_object_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
@@ -2460,6 +2462,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     if args.template_chooser && startup_open.is_none() {
         app.set_template_chooser_open(true);
+    } else if startup_open.is_none()
+        && !session.recovered_unsaved
+        && welcome_guide::should_show_on_first_run()
+    {
+        welcome_guide::open(&app);
     }
     project_current(&app, &state);
     app.set_status_left("Calculating…".into());
@@ -2513,6 +2520,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.invoke_focus_xlsx_import_warning();
     } else if app.get_template_chooser_open() {
         app.invoke_focus_template_chooser();
+    } else if app.get_welcome_open() {
+        app.invoke_focus_welcome();
     } else {
         app.invoke_focus_grid();
         // Activation of the shown window can restore a different focus item
@@ -2525,6 +2534,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 if !app.get_save_changes_open()
                     && !app.get_xlsx_import_warning_open()
                     && !app.get_template_chooser_open()
+                    && !app.get_welcome_open()
                 {
                     app.invoke_focus_grid();
                 }

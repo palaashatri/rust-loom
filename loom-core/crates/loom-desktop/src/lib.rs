@@ -21,7 +21,7 @@ pub mod macos_window;
 #[cfg(not(target_os = "macos"))]
 pub mod macos_window;
 pub mod menu;
-mod settings_file;
+pub mod settings_file;
 pub mod ui_bindings;
 pub mod ui_font;
 pub mod window_frame;

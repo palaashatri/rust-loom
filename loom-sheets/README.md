@@ -8,7 +8,7 @@ Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workb
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1107 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
+- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1109 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 
@@ -67,6 +67,7 @@ On macOS, `Cmd` replaces `Ctrl` (`Alt` corresponds to `Option`). Menus and the c
 | Keys | Action |
 |---|---|
 | Alt+F / Alt+E / Alt+V / Alt+T / Alt+H, or F10 | Open the File / Edit / View / Table / Help menu (F10 opens the first); arrows walk, Enter runs, Escape closes |
+| Ctrl+Shift+/ / Cmd+Shift+/ | Open or close the interactive Welcome Guide (`Help > Welcome Guide` and `View` toolbar menu) |
 | Ctrl+K / Ctrl+Shift+P / F1 | Toggle Command Palette |
 | Ctrl+N / Ctrl+Shift+N / Ctrl+O | New / New from template / Open |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |

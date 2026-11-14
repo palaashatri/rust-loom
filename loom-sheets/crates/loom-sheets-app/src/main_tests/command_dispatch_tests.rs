@@ -131,7 +131,7 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     rebuild_palette(&app, "");
     assert_eq!(
         app.get_palette_commands().row_count(),
-        54 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
+        55 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
     );
     let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(
@@ -554,6 +554,17 @@ fn every_palette_command_and_menu_item_exposes_a_shortcut() {
     let shortcuts_item = menu
         .find_item("help.shortcuts")
         .expect("Help -> Keyboard Shortcuts");
+    let welcome_item = menu
+        .find_item("help.welcome")
+        .expect("Help -> Welcome Guide");
+    assert!(welcome_item.is_enabled());
+    assert!(welcome_item.has_keyboard_shortcut());
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.id == "sheets.welcome" && !c.shortcut.is_empty()),
+        "Welcome Guide must be registered in master_palette with a shortcut"
+    );
     assert!(
         shortcuts_item.has_keyboard_shortcut(),
         "Help -> Keyboard Shortcuts should expose a shortcut"

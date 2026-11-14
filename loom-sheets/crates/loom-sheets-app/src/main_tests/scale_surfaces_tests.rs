@@ -140,6 +140,7 @@ pub(super) fn open_surface(app: &SheetsApp, surface: &str) {
         "text-menu" => app.set_toolbar_menu(4),
         "export-menu" => app.set_toolbar_menu(5),
         "overflow" => app.set_toolbar_overflow_open(true),
+        "welcome" => app.set_welcome_open(true),
         _ => {}
     }
 }
@@ -160,6 +161,7 @@ fn dialogs_menus_and_palette_fit_at_every_text_scale() {
         "text-menu",
         "export-menu",
         "overflow",
+        "welcome",
     ] {
         for (width, height) in [(1024.0f32, 720.0f32), (1280.0, 800.0)] {
             for scale in [1.0f32, 1.5, 2.0] {

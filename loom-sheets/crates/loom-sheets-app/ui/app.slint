@@ -1,4 +1,5 @@
 import { TemplateChooserModal } from "template_chooser.slint";
+import { WelcomeGuideModal } from "welcome_guide.slint";
 import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
 import { SaveChangesDialog } from "save_changes_dialog.slint";
 import { CloseDrainShield } from "close_drain_shield.slint";
@@ -276,6 +277,11 @@ export component SheetsApp inherits Window {
     in-out property <[float]> chart-pie-opacities: [];
     in-out property <int> cell-format: 0;
     in-out property <int> cell-alignment: 0;
+    in-out property <bool> welcome-open: false;
+    in-out property <int> welcome-step: 0;
+    in-out property <bool> welcome-focus-request: false;
+    callback welcome-close;
+    callback welcome-try-action(string);
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
     in-out property <string> palette-query: "";
@@ -302,6 +308,9 @@ export component SheetsApp inherits Window {
     }
     public function focus-template-chooser() {
         root.template-chooser-focus-request = !root.template-chooser-focus-request;
+    }
+    public function focus-welcome() {
+        root.welcome-focus-request = !root.welcome-focus-request;
     }
     public function focus-formula-bar() {
         root.is-editing = true;
@@ -375,7 +384,7 @@ export component SheetsApp inherits Window {
                 if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
                 return reject;
             }
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.welcome-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
                 root.cycle-region(event.modifiers.shift);
                 return accept;
@@ -486,7 +495,7 @@ export component SheetsApp inherits Window {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     grid-surface := SheetGridSurface {
-                        keyboard-active: !root.save-changes-open && !root.xlsx-import-warning-open;
+                        keyboard-active: !root.save-changes-open && !root.xlsx-import-warning-open && !root.welcome-open;
                         width: parent.width;
                         height: parent.height;
                         editing: root.is-editing;
@@ -756,6 +765,17 @@ export component SheetsApp inherits Window {
         focus-grid => { grid-surface.focus-grid(); }
         import-cancel => { root.xlsx-import-cancel(); }
         import-continue => { root.xlsx-import-continue(); }
+    }
+
+    if root.welcome-open : WelcomeGuideModal {
+        width: root.width;
+        height: root.height;
+        open: root.welcome-open;
+        step <=> root.welcome-step;
+        mod-key: root.mod-key;
+        focus-request: root.welcome-focus-request;
+        close-guide => { root.welcome-close(); }
+        try-action(id) => { root.welcome-try-action(id); }
     }
 
     palette := CommandPalette {

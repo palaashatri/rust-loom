@@ -140,6 +140,8 @@ pub(crate) const ALLOWED: &[&str] = &[
     "palette_query_changed",
     "shortcut_pressed",
     "toolbar_command",
+    "welcome_close",
+    "welcome_try_action",
     // Window chrome and native window-event synchronization.
     "window_close",
     "window_drag",

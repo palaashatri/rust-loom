@@ -109,6 +109,12 @@ fn every_interactive_element_has_an_accessible_name() {
     assert!(bad.is_empty(), "unnamed (palette open): {bad:#?}");
     app.set_palette_open(false);
 
+    app.set_welcome_open(true);
+    render(&app);
+    let bad = unnamed(&app);
+    assert!(bad.is_empty(), "unnamed (welcome open): {bad:#?}");
+    app.set_welcome_open(false);
+
     for kind in 1..=5 {
         app.set_toolbar_menu(kind);
         render(&app);

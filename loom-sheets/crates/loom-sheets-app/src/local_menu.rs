@@ -30,6 +30,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "edit.select_all",
     "app.palette",
     "help.shortcuts",
+    "help.welcome",
     "view.inspector",
     "view.zoom_in",
     "view.zoom_out",
@@ -172,6 +173,16 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
         &CommandState::action("help.shortcuts", "Keyboard Shortcuts")
             .with_shortcut(MenuShortcut::primary_shift("P")),
     );
+    if let Some(help) = menu_bar.menus.iter_mut().find(|menu| menu.title == "Help") {
+        help.items.insert(
+            0,
+            MenuItem::action_with_shortcut(
+                "help.welcome",
+                "Welcome Guide",
+                MenuShortcut::primary_shift("/"),
+            ),
+        );
+    }
     menu_bar.disable_items_except(SUPPORTED_COMMANDS);
     menu_bar
 }

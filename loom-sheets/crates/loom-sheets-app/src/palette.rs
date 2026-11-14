@@ -62,6 +62,7 @@ pub enum PaletteAction {
     PivotMax,
     Undo,
     Redo,
+    WelcomeGuide,
     Appearance(loom_desktop::Appearance),
     WindowFrame(loom_desktop::window_frame::WindowFrame),
 }
@@ -121,6 +122,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::PivotMax => dispatch_command(app, "table.pivot_max"),
         PaletteAction::Appearance(choice) => dispatch_command(app, choice.command_id()),
         PaletteAction::WindowFrame(choice) => dispatch_command(app, choice.command_id()),
+        PaletteAction::WelcomeGuide => dispatch_command(app, "sheets.welcome"),
         PaletteAction::Undo if app.get_can_undo() => dispatch_command(app, "sheets.undo"),
         PaletteAction::Redo if app.get_can_redo() => dispatch_command(app, "sheets.redo"),
         PaletteAction::Undo | PaletteAction::Redo => false,
@@ -182,6 +184,7 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "table.pivot_max" => Some(PaletteAction::PivotMax),
         "sheets.undo" => Some(PaletteAction::Undo),
         "sheets.redo" => Some(PaletteAction::Redo),
+        "sheets.welcome" => Some(PaletteAction::WelcomeGuide),
         other => loom_desktop::Appearance::from_command_id(other)
             .map(PaletteAction::Appearance)
             .or_else(|| {
@@ -207,6 +210,7 @@ fn keywords_for(id: &str) -> &'static str {
         "sheets.export-csv" => "csv comma separated values spreadsheet",
         "sheets.export-xlsx" => "xlsx excel spreadsheet office",
         "sheets.open" => "xlsx csv excel file",
+        "sheets.welcome" => "welcome guide tour tutorial help onboarding getting started",
         id if loom_desktop::window_frame::WindowFrame::from_command_id(id).is_some() => {
             "window frame title bar chrome border"
         }
@@ -435,6 +439,11 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             }),
     )
     .chain([
+        (
+            PaletteAction::WelcomeGuide,
+            "sheets.welcome",
+            "Welcome Guide",
+        ),
         (PaletteAction::Undo, "sheets.undo", "Undo"),
         (PaletteAction::Redo, "sheets.redo", "Redo"),
     ])

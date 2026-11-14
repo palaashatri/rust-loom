@@ -49,6 +49,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
         "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
+        "help.welcome" | "sheets.welcome" => crate::welcome_guide::open(app),
         "view.inspector" => app.invoke_toggle_inspector(),
         "view.zoom_in" => app.invoke_zoom_in(),
         "view.zoom_out" => app.invoke_zoom_out(),
@@ -165,6 +166,7 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.fill_down" => sc("Cmd+D", "Ctrl+D"),
         "app.palette" => sc("Cmd+K", "Ctrl+K"),
         "help.shortcuts" => sc("Cmd+Shift+P", "Ctrl+Shift+P"),
+        "help.welcome" | "sheets.welcome" => sc("Cmd+Shift+/", "Ctrl+Shift+/"),
         "view.inspector" => sc("Cmd+Alt+I", "Ctrl+Alt+I"),
         "view.zoom_in" => sc("Cmd+=", "Ctrl+="),
         "view.zoom_out" => sc("Cmd+-", "Ctrl+-"),
@@ -254,6 +256,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
     }
     let command_id = match (lower.as_str(), shift, alt) {
         ("k", _, false) | ("p", true, false) => "app.palette",
+        ("/", true, false) | ("?", _, false) => "help.welcome",
         ("n", false, false) => "file.new",
         ("n", true, false) => "file.new_template",
         ("o", false, false) => "file.open",
