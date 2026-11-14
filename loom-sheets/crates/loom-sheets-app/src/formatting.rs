@@ -1,6 +1,6 @@
 //! Cell and range formatting operations with full undo/redo transaction recording.
 
-use loom_sheets_core::style::FillColor;
+use loom_sheets_core::style::{BorderPreset, CellBorders, FillColor};
 use loom_sheets_core::{CellRange, NumberFormat, Sheet};
 
 use crate::{commit_transaction, SheetTransaction};
@@ -182,6 +182,33 @@ pub(crate) fn set_selection_decimal_places_exact(
     set_selection_decimal_places_with(sheet, undo_stack, redo_stack, range, |_| decimals)
 }
 
+/// Toggle strikethrough on the given range.
+pub(crate) fn toggle_selection_strikethrough(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+) -> bool {
+    let cells = range.cells();
+    if cells.is_empty() {
+        return false;
+    }
+    let all_strike = cells.iter().all(|&c| sheet.cell_style(c).strikethrough);
+    let target = !all_strike;
+
+    let mut before = Vec::with_capacity(cells.len());
+    let mut after = Vec::with_capacity(cells.len());
+    for &cell in &cells {
+        let prev = sheet.cell_style(cell);
+        before.push((cell, prev));
+        let mut next = prev;
+        next.strikethrough = target;
+        after.push((cell, next));
+    }
+    let tx = SheetTransaction::Style { before, after };
+    commit_transaction(sheet, undo_stack, redo_stack, tx)
+}
+
 /// Toggle all-edges borders on the given range.
 pub(crate) fn toggle_selection_borders(
     sheet: &mut Sheet,
@@ -193,8 +220,12 @@ pub(crate) fn toggle_selection_borders(
     if cells.is_empty() {
         return false;
     }
-    let all_bordered = cells.iter().all(|&c| sheet.cell_style(c).border);
-    let target = !all_bordered;
+    let all_bordered = cells.iter().all(|&c| sheet.cell_style(c).borders.all());
+    let target = if all_bordered {
+        CellBorders::NONE
+    } else {
+        CellBorders::ALL
+    };
 
     let mut before = Vec::with_capacity(cells.len());
     let mut after = Vec::with_capacity(cells.len());
@@ -202,11 +233,34 @@ pub(crate) fn toggle_selection_borders(
         let prev = sheet.cell_style(cell);
         before.push((cell, prev));
         let mut next = prev;
-        next.border = target;
+        next.borders = target;
         after.push((cell, next));
     }
     let tx = SheetTransaction::Style { before, after };
     commit_transaction(sheet, undo_stack, redo_stack, tx)
+}
+
+/// Apply a border preset (`all`, `outer`, `top`, `bottom`, `left`, `right`, `none`) with undo/redo.
+pub(crate) fn apply_selection_border_preset(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+    preset: BorderPreset,
+) -> bool {
+    let cells = range.cells();
+    if cells.is_empty() {
+        return false;
+    }
+    let before: Vec<_> = cells.iter().map(|&c| (c, sheet.cell_style(c))).collect();
+    if !sheet.apply_border_preset(range, preset) {
+        return false;
+    }
+    let after: Vec<_> = cells.iter().map(|&c| (c, sheet.cell_style(c))).collect();
+    let tx = SheetTransaction::Style { before, after };
+    crate::push_history(undo_stack, tx);
+    redo_stack.clear();
+    true
 }
 
 /// Cycle the fill swatch on the given range through the palette to none.

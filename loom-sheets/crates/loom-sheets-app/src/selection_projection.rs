@@ -63,9 +63,10 @@ pub(crate) fn update_selection_range(
     let decimals = style.decimal_places.unwrap_or(2);
     app.set_cell_decimals(decimals as i32);
     app.set_cell_decimals_label(SharedString::from(decimals.to_string()));
-    app.set_cell_border(style.border);
+    app.set_cell_border(style.borders.any());
     app.set_cell_fill(style.fill.swatch_index());
     crate::ink_actions::publish_selected(app, style);
+    crate::rich_format_actions::publish_selected(app, sheet, range);
     let font_size = formatting::effective_font_size(style);
     app.set_cell_font_size(font_size as i32);
     app.set_cell_font_label(SharedString::from(font_size.to_string()));

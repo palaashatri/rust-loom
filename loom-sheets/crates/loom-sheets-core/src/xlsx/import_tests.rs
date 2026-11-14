@@ -129,7 +129,7 @@ fn excel_cell_formatting_widths_heights_and_freeze_panes_import() {
     assert_eq!(header.font_size, Some(21), "16 pt is 21 px");
     assert_eq!(sheet.cell_alignment(at("A1")), CellAlignment::Center);
     assert_eq!(sheet.cell_alignment(at("A2")), CellAlignment::Right);
-    assert!(sheet.cell_style(at("A3")).border);
+    assert!(sheet.cell_style(at("A3")).borders.any());
     // Number formats keep their decimals: `0.000`, `#,##0` and `0%`.
     assert_eq!(sheet.cell_style(at("B1")).format_value("5"), "5.000");
     assert_eq!(sheet.cell_style(at("B2")).format_value("5"), "5");

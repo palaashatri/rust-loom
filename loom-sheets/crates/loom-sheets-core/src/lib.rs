@@ -15,6 +15,7 @@ pub use charts::{
 };
 
 pub mod banded;
+pub mod conditional_format;
 pub mod data_tools;
 pub mod dates;
 mod formula;
@@ -41,6 +42,7 @@ mod style_fit;
 pub mod workbook;
 pub mod xlsx;
 pub use banded::{BandedMap, StoredValue};
+pub use conditional_format::{CellConditionalRule, ConditionalOperator};
 pub use data_tools::{AutoFilterState, FindMatch, FindOptions, SheetValidation};
 pub use formula::{parse_formula, Formula};
 pub(crate) use formula::{BinOp, Expr};
@@ -54,7 +56,7 @@ pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };
 pub use row_order::RowOrder;
-pub use style::{CellAlignment, CellStyle};
+pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
 pub use xlsx::{
     export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
     XlsxImportWarning,
@@ -487,6 +489,10 @@ pub struct Sheet {
     pub named_ranges: BTreeMap<String, CellRange>,
     /// Cell data validation rules.
     pub validations: Vec<SheetValidation>,
+    /// Merged cell spans (normalized, non-overlapping, each covering >= 2 cells).
+    pub merged_ranges: Vec<CellRange>,
+    /// Conditional formatting rules evaluated against cell display values.
+    pub conditional_rules: Vec<CellConditionalRule>,
 }
 
 impl Sheet {
@@ -507,6 +513,8 @@ impl Sheet {
             hidden_rows: BTreeSet::new(),
             named_ranges: BTreeMap::new(),
             validations: Vec::new(),
+            merged_ranges: Vec::new(),
+            conditional_rules: Vec::new(),
         }
     }
 
@@ -608,6 +616,162 @@ impl Sheet {
     pub fn unfreeze_panes(&mut self) {
         self.freeze_rows = 0;
         self.freeze_cols = 0;
+    }
+
+    /// Apply a border preset (`all`, `outer`, `top`, `bottom`, `left`, `right`, `none`) to `range`.
+    /// Returns `true` if any cell style changed.
+    pub fn apply_border_preset(&mut self, range: CellRange, preset: BorderPreset) -> bool {
+        let mut changed = false;
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                let cell = CellRef { row, col };
+                let prev = self.cell_style(cell);
+                let mut next = prev;
+                match preset {
+                    BorderPreset::All => next.borders = CellBorders::ALL,
+                    BorderPreset::None => next.borders = CellBorders::NONE,
+                    BorderPreset::Outer => {
+                        if row == range.start.row {
+                            next.borders.top = true;
+                        }
+                        if row == range.end.row {
+                            next.borders.bottom = true;
+                        }
+                        if col == range.start.col {
+                            next.borders.left = true;
+                        }
+                        if col == range.end.col {
+                            next.borders.right = true;
+                        }
+                    }
+                    BorderPreset::Top => {
+                        if row == range.start.row {
+                            next.borders.top = true;
+                        }
+                    }
+                    BorderPreset::Bottom => {
+                        if row == range.end.row {
+                            next.borders.bottom = true;
+                        }
+                    }
+                    BorderPreset::Left => {
+                        if col == range.start.col {
+                            next.borders.left = true;
+                        }
+                    }
+                    BorderPreset::Right => {
+                        if col == range.end.col {
+                            next.borders.right = true;
+                        }
+                    }
+                }
+                if next != prev {
+                    self.set_cell_style(cell, next);
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Merge `range` into a single spanned cell. Keeps the anchor cell's value
+    /// (or the first non-empty cell's value if the anchor is empty) and clears
+    /// covered cells. Returns `false` if `range` is a single cell or already merged.
+    pub fn merge_cells(&mut self, range: CellRange) -> bool {
+        if range.start == range.end {
+            return false;
+        }
+        if self.merged_ranges.contains(&range) {
+            return false;
+        }
+        self.merged_ranges
+            .retain(|existing| !existing.intersects(range));
+        let anchor = range.start;
+        let mut kept_raw = self.raw(anchor).unwrap_or_default().to_string();
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                let cell = CellRef { row, col };
+                if cell == anchor {
+                    continue;
+                }
+                if kept_raw.is_empty() {
+                    if let Some(raw) = self.raw(cell) {
+                        if !raw.is_empty() {
+                            kept_raw = raw.to_string();
+                        }
+                    }
+                }
+                self.cells.remove(&cell);
+            }
+        }
+        if !kept_raw.is_empty() && self.raw(anchor) != Some(kept_raw.as_str()) {
+            self.set_raw(anchor, &kept_raw);
+        }
+        self.merged_ranges.push(range);
+        self.merged_ranges
+            .sort_by_key(|r| (r.start.row, r.start.col, r.end.row, r.end.col));
+        true
+    }
+
+    /// Unmerge any merged spans intersecting `range`. Returns `true` if any were removed.
+    pub fn unmerge_cells(&mut self, range: CellRange) -> bool {
+        let before = self.merged_ranges.len();
+        self.merged_ranges
+            .retain(|existing| !existing.intersects(range));
+        self.merged_ranges.len() != before
+    }
+
+    /// Returns the merged range containing `cell`, if any.
+    pub fn merge_at(&self, cell: CellRef) -> Option<CellRange> {
+        self.merged_ranges
+            .iter()
+            .copied()
+            .find(|r| r.contains(cell))
+    }
+
+    /// Returns `true` if `cell` is covered by a merged span and is not its top-left anchor.
+    pub fn is_merged_covered(&self, cell: CellRef) -> bool {
+        self.merge_at(cell).is_some_and(|range| range.start != cell)
+    }
+
+    /// Add a conditional formatting rule to the sheet.
+    pub fn add_conditional_rule(&mut self, rule: CellConditionalRule) {
+        self.conditional_rules.push(rule);
+    }
+
+    /// Remove a conditional formatting rule by index.
+    pub fn remove_conditional_rule(&mut self, index: usize) -> bool {
+        if index < self.conditional_rules.len() {
+            self.conditional_rules.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear all conditional formatting rules that intersect `range`.
+    pub fn clear_conditional_rules(&mut self, range: CellRange) -> usize {
+        let before = self.conditional_rules.len();
+        self.conditional_rules
+            .retain(|rule| !rule.range.intersects(range));
+        before - self.conditional_rules.len()
+    }
+
+    /// Compute the effective style of `cell`, applying any matching conditional
+    /// formatting rules on top of the cell's base style.
+    pub fn effective_style(&self, cell: CellRef, display_value: &str) -> CellStyle {
+        let mut style = self.cell_style(cell);
+        for rule in &self.conditional_rules {
+            if rule.range.contains(cell) && rule.matches(display_value) {
+                if rule.fill != style::FillColor::None {
+                    style.fill = rule.fill;
+                }
+                if let Some(color) = rule.text_color {
+                    style.text_color = Some(color);
+                }
+            }
+        }
+        style
     }
 }
 
@@ -2015,6 +2179,14 @@ impl CellRange {
             && cell.row <= self.end.row
             && cell.col >= self.start.col
             && cell.col <= self.end.col
+    }
+
+    /// Whether this range overlaps another range.
+    pub fn intersects(self, other: CellRange) -> bool {
+        self.start.row <= other.end.row
+            && self.end.row >= other.start.row
+            && self.start.col <= other.end.col
+            && self.end.col >= other.start.col
     }
 
     /// Cells in row-major order.

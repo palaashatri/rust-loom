@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::style::{CellAlignment, CellStyle, FillColor};
+use crate::style::{CellAlignment, CellBorders, CellStyle, FillColor};
 use crate::{CellRef, Sheet};
 
 use super::xml::xml_escape_attr;
@@ -28,9 +28,9 @@ impl XfKey {
 }
 
 pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
-    let mut fonts = Vec::<(bool, bool, bool, Option<u8>, Option<u32>)>::new();
+    let mut fonts = Vec::<(bool, bool, bool, bool, Option<u8>, Option<u32>)>::new();
     let mut fills = Vec::<FillColor>::new();
-    let mut borders = Vec::<bool>::new();
+    let mut borders = Vec::<CellBorders>::new();
     let mut formats = BTreeMap::<String, u32>::new();
     for key in keys {
         let style = key.style;
@@ -38,6 +38,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
             style.bold,
             style.italic,
             style.underline,
+            style.strikethrough,
             style.font_size,
             style.text_color,
         );
@@ -47,8 +48,8 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
         if style.fill != FillColor::None && !fills.contains(&style.fill) {
             fills.push(style.fill);
         }
-        if !borders.contains(&style.border) {
-            borders.push(style.border);
+        if !borders.contains(&style.borders) {
+            borders.push(style.borders);
         }
         let code = number_format_code(style);
         if code != "General" && code != "@" {
@@ -60,7 +61,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
     }
     let font_xml = fonts
         .iter()
-        .map(|(bold, italic, underline, size, color)| {
+        .map(|(bold, italic, underline, strikethrough, size, color)| {
             let mut flags = String::new();
             if *bold {
                 flags.push_str("<b/>");
@@ -70,6 +71,9 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
             }
             if *underline {
                 flags.push_str("<u/>");
+            }
+            if *strikethrough {
+                flags.push_str("<strike/>");
             }
             let points = size.map(|px| (px as f32 * 0.75).max(1.0)).unwrap_or(11.0);
             let color = match color {
@@ -99,11 +103,20 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
     let border_xml = borders
         .iter()
         .map(|border| {
-            if *border {
-                "<border><left style=\"thin\"><color auto=\"1\"/></left><right style=\"thin\"><color auto=\"1\"/></right><top style=\"thin\"><color auto=\"1\"/></top><bottom style=\"thin\"><color auto=\"1\"/></bottom><diagonal/></border>".to_string()
-            } else {
-                "<border><left/><right/><top/><bottom/><diagonal/></border>".to_string()
-            }
+            let side = |name: &str, on: bool| {
+                if on {
+                    format!("<{name} style=\"thin\"><color auto=\"1\"/></{name}>")
+                } else {
+                    format!("<{name}/>")
+                }
+            };
+            format!(
+                "<border>{}{}{}{}<diagonal/></border>",
+                side("left", border.left),
+                side("right", border.right),
+                side("top", border.top),
+                side("bottom", border.bottom),
+            )
         })
         .collect::<String>();
     let num_fmt_xml = formats
@@ -126,6 +139,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                             key.style.bold,
                             key.style.italic,
                             key.style.underline,
+                            key.style.strikethrough,
                             key.style.font_size,
                             key.style.text_color,
                         )
@@ -137,7 +151,7 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
                 .map_or(0, |position| position + 2);
             let border_id = borders
                 .iter()
-                .position(|border| *border == key.style.border)
+                .position(|border| *border == key.style.borders)
                 .unwrap_or(0);
             let code = number_format_code(key.style);
             let num_fmt_id = if code == "General" {

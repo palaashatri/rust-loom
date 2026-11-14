@@ -67,6 +67,12 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "edit.cut" | "sheets.cut" => app.invoke_cut_selection(),
         "edit.copy" | "sheets.copy" => app.invoke_copy_selection(),
         "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
+        "edit.paste_values" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_paste_values_only(),
+        "edit.paste_formats" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_paste_formats_only(),
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
         "edit.find" | "sheets.find" => crate::data_tools::open_find_replace(app, false),
         "edit.replace" | "sheets.replace" => crate::data_tools::open_find_replace(app, true),
@@ -122,6 +128,44 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.adjust_decimals_increase" => app.invoke_adjust_decimals(1),
         "table.adjust_decimals_decrease" => app.invoke_adjust_decimals(-1),
         "format.borders" | "sheets.borders" => app.invoke_toggle_borders(),
+        "format.borders_all" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("all".into()),
+        "format.borders_outer" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("outer".into()),
+        "format.borders_top" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("top".into()),
+        "format.borders_bottom" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("bottom".into()),
+        "format.borders_left" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("left".into()),
+        "format.borders_right" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("right".into()),
+        "format.borders_none" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("none".into()),
+        "format.strikethrough" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_toggle_strikethrough(),
+        "format.wrap_text" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_toggle_wrap_text(),
+        "format.text_color_cycle" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_cycle_text_color(),
+        "format.text_color_auto" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_auto_text_color(),
+        "format.merge" => app.global::<crate::CellRichFormat>().invoke_merge_cells(),
+        "format.unmerge" => app.global::<crate::CellRichFormat>().invoke_unmerge_cells(),
+        "format.conditional_formatting" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_open_conditional_formatting(),
         "format.fill_cycle" | "sheets.fill-cycle" => app.invoke_cycle_fill(),
         "format.font_increase" => app.invoke_adjust_font(1),
         "format.font_decrease" => app.invoke_adjust_font(-1),
@@ -209,6 +253,8 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "edit.cut" | "sheets.cut" => sc("Cmd+X", "Ctrl+X"),
         "edit.copy" | "sheets.copy" => sc("Cmd+C", "Ctrl+C"),
         "edit.paste" | "sheets.paste" => sc("Cmd+V", "Ctrl+V"),
+        "edit.paste_values" => sc("Cmd+Shift+V", "Ctrl+Shift+V"),
+        "edit.paste_formats" => sc("Cmd+Alt+V", "Ctrl+Alt+V"),
         "edit.select_all" | "sheets.select-all" => sc("Cmd+A", "Ctrl+A"),
         "edit.find" | "sheets.find" => sc("Cmd+F", "Ctrl+F"),
         "edit.replace" | "sheets.replace" => sc("Cmd+H", "Ctrl+H"),
@@ -248,6 +294,20 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.adjust_decimals_increase" => sc("Cmd+Alt+.", "Ctrl+Alt+."),
         "table.adjust_decimals_decrease" => sc("Cmd+Alt+,", "Ctrl+Alt+,"),
         "format.borders" | "sheets.borders" => sc("Cmd+Alt+B", "Ctrl+Alt+B"),
+        "format.borders_all" => sc("Cmd+Shift+7", "Ctrl+Shift+7"),
+        "format.borders_outer" => sc("Cmd+Shift+8", "Ctrl+Shift+8"),
+        "format.borders_top" => sc("Cmd+Shift+Up", "Ctrl+Shift+Up"),
+        "format.borders_bottom" => sc("Cmd+Shift+Down", "Ctrl+Shift+Down"),
+        "format.borders_left" => sc("Cmd+Shift+Left", "Ctrl+Shift+Left"),
+        "format.borders_right" => sc("Cmd+Shift+Right", "Ctrl+Shift+Right"),
+        "format.borders_none" => sc("Cmd+Shift+0", "Ctrl+Shift+0"),
+        "format.strikethrough" => sc("Cmd+Shift+X", "Ctrl+Shift+X"),
+        "format.wrap_text" => sc("Cmd+Alt+W", "Ctrl+Alt+W"),
+        "format.text_color_cycle" => sc("Cmd+Alt+E", "Ctrl+Alt+E"),
+        "format.text_color_auto" => sc("Cmd+Alt+Q", "Ctrl+Alt+Q"),
+        "format.merge" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
+        "format.unmerge" => sc("Cmd+Shift+G", "Ctrl+Shift+G"),
+        "format.conditional_formatting" => sc("Cmd+Alt+O", "Ctrl+Alt+O"),
         "format.fill_cycle" | "sheets.fill-cycle" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
         "format.font_increase" => sc("Cmd+Shift+.", "Ctrl+Shift+."),
         "format.font_decrease" => sc("Cmd+Shift+,", "Ctrl+Shift+,"),

@@ -212,7 +212,7 @@ fn compare_sheet(
             .all(|side| excel[*side].as_i64().is_some_and(|line| line > 0));
         // A neighbour's border shows on the shared edge, so only a styled
         // border must be present on all four sides.
-        if style.border && !outlined {
+        if style.borders.any() && !outlined {
             out.push(format!("{at}: border missing on a side in Excel"));
         }
         let want_align = match key.alignment {

@@ -6,10 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::style::CellStyle;
+use crate::style::{CellBorders, CellStyle, FillColor};
 use crate::{
-    AutoFilterState, CellAlignment, CellRange, CellRef, DataValidationRule, NumberFormat, Sheet,
-    SheetValidation, ValidationCriteria,
+    AutoFilterState, CellAlignment, CellConditionalRule, CellRange, CellRef, ConditionalOperator,
+    DataValidationRule, NumberFormat, Sheet, SheetValidation, ValidationCriteria,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,18 @@ struct PersistedAlignment {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct PersistedBorders {
+    #[serde(default, skip_serializing_if = "is_false")]
+    top: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    right: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    bottom: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    left: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct PersistedStyle {
     #[serde(rename = "ref")]
     reference: String,
@@ -45,12 +57,16 @@ struct PersistedStyle {
     italic: bool,
     #[serde(default)]
     underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    strikethrough: bool,
     #[serde(default)]
     format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     decimals: Option<u8>,
     #[serde(default, skip_serializing_if = "is_false")]
     border: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    borders: Option<PersistedBorders>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +76,17 @@ struct PersistedStyle {
     color: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     wrap: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedConditionalRule {
+    range: String,
+    operator: String,
+    value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -165,6 +192,10 @@ struct PersistedSheet {
     named_ranges: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     validations: Vec<PersistedValidation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    merges: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    conditional_rules: Vec<PersistedConditionalRule>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -227,9 +258,18 @@ impl From<&Sheet> for PersistedSheet {
                     bold: style.bold,
                     italic: style.italic,
                     underline: style.underline,
+                    strikethrough: style.strikethrough,
                     format: Some(number_format_as_str(style.number_format).to_string()),
                     decimals: style.decimal_places,
-                    border: style.border,
+                    border: style.borders.all(),
+                    borders: (style.borders.any() && !style.borders.all()).then_some(
+                        PersistedBorders {
+                            top: style.borders.top,
+                            right: style.borders.right,
+                            bottom: style.borders.bottom,
+                            left: style.borders.left,
+                        },
+                    ),
                     fill: (style.fill != crate::style::FillColor::None)
                         .then(|| style.fill.as_str().to_string()),
                     font: style.font_size,
@@ -362,6 +402,24 @@ impl From<&Sheet> for PersistedSheet {
                     },
                 })
                 .collect(),
+            merges: sheet
+                .merged_ranges
+                .iter()
+                .map(|range| range.to_a1())
+                .collect(),
+            conditional_rules: sheet
+                .conditional_rules
+                .iter()
+                .map(|rule| PersistedConditionalRule {
+                    range: rule.range.to_a1(),
+                    operator: rule.operator.as_str().to_string(),
+                    value: rule.value.clone(),
+                    fill: (rule.fill != FillColor::None).then(|| rule.fill.as_str().to_string()),
+                    color: rule
+                        .text_color
+                        .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
+                })
+                .collect(),
         }
     }
 }
@@ -476,13 +534,24 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
     for style in raw.styles {
         let reference = CellRef::parse(&style.reference)
             .ok_or_else(|| format!("invalid style reference {:?}", style.reference))?;
+        let borders = match style.borders {
+            Some(b) => CellBorders {
+                top: b.top,
+                right: b.right,
+                bottom: b.bottom,
+                left: b.left,
+            },
+            None if style.border => CellBorders::ALL,
+            None => CellBorders::NONE,
+        };
         let value = CellStyle {
             bold: style.bold,
             italic: style.italic,
             underline: style.underline,
+            strikethrough: style.strikethrough,
             number_format: parse_number_format(style.format.as_deref())?,
             decimal_places: style.decimals,
-            border: style.border,
+            borders,
             fill: parse_fill(style.fill.as_deref())?,
             font_size: style.font,
             text_color: parse_text_color(style.color.as_deref())?,
@@ -589,6 +658,26 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
         let mut rule = DataValidationRule::new(criteria, v.error_message);
         rule.allow_blank = v.allow_blank;
         sheet.validations.push(SheetValidation { range, rule });
+    }
+    for merge in raw.merges {
+        let range =
+            CellRange::parse(&merge).ok_or_else(|| format!("invalid merge range {merge:?}"))?;
+        sheet.merge_cells(range);
+    }
+    for rule in raw.conditional_rules {
+        let range = CellRange::parse(&rule.range)
+            .ok_or_else(|| format!("invalid conditional range {:?}", rule.range))?;
+        let operator = ConditionalOperator::parse(&rule.operator)
+            .ok_or_else(|| format!("unknown conditional operator {:?}", rule.operator))?;
+        let fill = parse_fill(rule.fill.as_deref())?;
+        let text_color = parse_text_color(rule.color.as_deref())?;
+        sheet.add_conditional_rule(CellConditionalRule {
+            range,
+            operator,
+            value: rule.value,
+            fill,
+            text_color,
+        });
     }
     Ok(sheet)
 }
@@ -712,9 +801,10 @@ mod tests {
                 bold: true,
                 italic: false,
                 underline: true,
+                strikethrough: false,
                 number_format: NumberFormat::Currency,
                 decimal_places: Some(0),
-                border: false,
+                borders: CellBorders::NONE,
                 fill: crate::style::FillColor::None,
                 font_size: None,
                 text_color: None,
@@ -727,9 +817,10 @@ mod tests {
                 bold: false,
                 italic: true,
                 underline: false,
+                strikethrough: true,
                 number_format: NumberFormat::Percentage,
                 decimal_places: Some(2),
-                border: true,
+                borders: CellBorders::ALL,
                 fill: crate::style::FillColor::Blue,
                 font_size: Some(18),
                 text_color: Some(0x00C0_3A2B),
@@ -743,13 +834,15 @@ mod tests {
         assert!(back_a1.bold);
         assert!(back_a1.underline);
         assert!(!back_a1.italic);
+        assert!(!back_a1.strikethrough);
         assert_eq!(back_a1.number_format, NumberFormat::Currency);
         assert_eq!(back_a1.decimal_places, Some(0));
         let back_b1 = back.cell_style(b1);
         assert!(back_b1.italic);
+        assert!(back_b1.strikethrough);
         assert_eq!(back_b1.number_format, NumberFormat::Percentage);
         assert_eq!(back_b1.decimal_places, Some(2));
-        assert!(back_b1.border);
+        assert!(back_b1.borders.all());
         assert_eq!(back_b1.fill, crate::style::FillColor::Blue);
         assert_eq!(back_b1.font_size, Some(18));
         assert_eq!(back_b1.text_color, Some(0x00C0_3A2B));
