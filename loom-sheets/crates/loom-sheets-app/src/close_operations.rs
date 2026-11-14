@@ -20,6 +20,13 @@ pub(crate) enum CloseState {
 }
 
 pub(crate) fn wire_window_close_handler(app: &SheetsApp, state: &Rc<GuiState>) {
+    let weak = app.as_weak();
+    app.on_window_close(move || {
+        if let Some(app) = weak.upgrade() {
+            app.window()
+                .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+        }
+    });
     let app_ref = app.as_weak();
     let state = Rc::clone(state);
     app.window().on_close_requested(move || {

@@ -123,12 +123,17 @@ else:
         if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
             fail("office-v1 existing foundation consumer list changed")
         for app in APPS:
-            expected = "IN_PROGRESS" if app in ("sheets", "writer", "present") else "LOCKED"
-            if workflow.get("application_status", {}).get(app) != expected:
-                if expected == "IN_PROGRESS":
+            if app == "sheets":
+                if workflow.get("application_status", {}).get(app) not in (
+                    "IN_PROGRESS",
+                    "ACCEPTED",
+                ):
+                    fail("sheets status must be IN_PROGRESS or ACCEPTED in office-v1 phase")
+            elif app in ("writer", "present"):
+                if workflow.get("application_status", {}).get(app) != "IN_PROGRESS":
                     fail(f"{app} status must be IN_PROGRESS in office-v1 phase")
-                else:
-                    fail(f"application {app} must remain LOCKED in office-v1 phase")
+            elif workflow.get("application_status", {}).get(app) != "LOCKED":
+                fail(f"application {app} must remain LOCKED in office-v1 phase")
         office_prefixes = {
             ".agents/", ".github/", "AGENTS.md", "README.md",
             "docs/",
@@ -338,9 +343,17 @@ if phase in ("audit-repair", "office-v1"):
     if len(tables) != 1 or [name.lower() for name, _, _ in rows] != list(APPS):
         fail("docs/workflow/current.md current truth must contain exactly one ordered live application status table")
     for name, quality, schedule in rows:
-        if quality != "ACCEPTANCE_BLOCKED":
-            fail(f"{name} product status must remain ACCEPTANCE_BLOCKED {table_status_context}")
-        if schedule != workflow.get("application_status", {}).get(name.lower()):
+        expected_schedule = workflow.get("application_status", {}).get(name.lower())
+        expected_quality = (
+            "ACCEPTED"
+            if phase == "office-v1"
+            and name.lower() == "sheets"
+            and expected_schedule == "ACCEPTED"
+            else "ACCEPTANCE_BLOCKED"
+        )
+        if quality != expected_quality:
+            fail(f"{name} product status must remain {expected_quality} {table_status_context}")
+        if schedule != expected_schedule:
             fail(f"{name} work status disagrees with workflow")
         section = re.search(
             rf"^### {re.escape(name)}\s*\n(.*?)(?=^## |^### |\Z)",

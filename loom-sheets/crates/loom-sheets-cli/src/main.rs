@@ -15,19 +15,27 @@ fn main() {
     }
 }
 
+fn print_usage() {
+    eprintln!("usage: loom-sheets <command> [args]");
+    eprintln!("  demo (prints an evaluated example)");
+    eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
+    eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
+    eprintln!("  create <file.loomsheet> <name>");
+    eprintln!("  recalc <csv-file> <cell> <raw-value>");
+    eprintln!("  sort <csv-file> <range> <column-offset> <asc|desc>");
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: loom-sheets <command> [args]");
-        eprintln!("  demo (prints an evaluated example)");
-        eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
-        eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
-        eprintln!("  create <file.loomsheet> <name>");
-        eprintln!("  recalc <csv-file> <cell> <raw-value>");
-        eprintln!("  sort <csv-file> <range> <column-offset> <asc|desc>");
+        print_usage();
         std::process::exit(2);
     }
     match args[1].as_str() {
+        "-h" | "--help" | "help" => {
+            print_usage();
+            Ok(())
+        }
         "demo" => cmd_demo(),
         "eval" => cmd_eval(args.get(2).ok_or("eval requires <csv-file>")?),
         "to-csv" => cmd_tocsv(

@@ -1,7 +1,7 @@
 //! Shared command dispatch for menu, toolbar, and palette actions.
 
 use loom_desktop::{CommandAction, DesktopError};
-use slint::{Model, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 
 use crate::SheetsApp;
 
@@ -18,6 +18,9 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
     }
 
     match id {
+        "app.quit" | "loom sheets.quit" => app
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::CloseRequested),
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
         "file.new_template" | "sheets.new-template" => {
             app.set_template_chooser_open(true);

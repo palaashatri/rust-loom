@@ -64,6 +64,18 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn(old, text)
         path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
+    def set_sheets_capability_status(self, status):
+        """Align ### Sheets status in capabilities.md with a test fixture state."""
+        cap_path = self.root / "docs/workflow/capabilities.md"
+        cap_text = cap_path.read_text(encoding="utf-8")
+        cap_text = re.sub(
+            r"(### Sheets\s*\n\nStatus:\s*`)[A-Z_]+(`)",
+            rf"\g<1>{status}\g<2>",
+            cap_text,
+            count=1,
+        )
+        cap_path.write_text(cap_text, encoding="utf-8")
+
     def use_shared_repair_fixture(self):
         """Use the historical shared-recovery fixture for lock-regression tests."""
         workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
@@ -115,6 +127,7 @@ class GovernanceTests(unittest.TestCase):
         truth = truth.replace('| 3 | Present | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
                               '| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED |', 1)
         self.write_truth(truth)
+        self.set_sheets_capability_status("ACCEPTANCE_BLOCKED")
 
     def use_office_v1_fixture(self):
         """Use the owner-authorized three-app production work scope."""
@@ -164,7 +177,15 @@ class GovernanceTests(unittest.TestCase):
             count=1,
         )
         self.assertEqual(count, 1, "fixture must contain the active workflow gate")
+        updated = re.sub(
+            r"^\| 1 \| Sheets \| [A-Z_]+ \| [A-Z_]+ \|",
+            "| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
+            updated,
+            count=1,
+            flags=re.MULTILINE,
+        )
         self.write_truth(updated)
+        self.set_sheets_capability_status("ACCEPTANCE_BLOCKED")
 
     def run_audit(self):
         return subprocess.run(
@@ -200,6 +221,22 @@ class GovernanceTests(unittest.TestCase):
         self.replace("current_truth", "| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
                      "| 1 | Sheets | ACCEPTED | IN_PROGRESS |")
         self.rejects("Sheets product status must remain ACCEPTANCE_BLOCKED during office-v1")
+
+    def test_office_v1_allows_accepted_sheets_when_workflow_and_table_agree(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     'sheets = "IN_PROGRESS"', 'sheets = "ACCEPTED"')
+        self.replace("current_truth", "| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
+                     "| 1 | Sheets | ACCEPTED | ACCEPTED |")
+        self.set_sheets_capability_status("ACCEPTED")
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_office_v1_rejects_mismatched_accepted_sheets_promotion(self):
+        self.use_office_v1_fixture()
+        self.replace("loom-bootstrap/contracts/workflow.toml",
+                     'sheets = "IN_PROGRESS"', 'sheets = "ACCEPTED"')
+        self.rejects("Sheets product status must remain ACCEPTED during office-v1")
 
     def test_office_v1_keeps_photo_as_the_next_application(self):
         self.use_office_v1_fixture()

@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { SheetImageFallback } from "object_image_fallback.slint";
 
 export struct SheetObjectView {
     kind: string,
@@ -18,30 +19,6 @@ export struct SheetObjectView {
     anchor-row: string,
     width-label: string,
     height-label: string,
-}
-
-/// Centered fallback notice drawn inside an image frame when the image could
-/// not be decoded or exceeded the 64 MiB limit.
-component SheetImageFallback inherits Rectangle {
-    in property <string> image-label: "";
-    background: transparent;
-
-    Text {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        text: root.image-label != ""
-            ? root.image-label + "\nImage unavailable\n(unreadable or > 64 MiB)"
-            : "Image unavailable\n(unreadable or > 64 MiB)";
-        font-family: Theme.document-font-family;
-        color: Theme.palette().ink-secondary;
-        font-size: Theme.tokens.typography.caption;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        wrap: word-wrap;
-        overflow: elide;
-    }
 }
 
 /// Non-cell content placed on a worksheet at a cell anchor.

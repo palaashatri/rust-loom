@@ -90,6 +90,8 @@ mod chart_actions;
 
 mod appearance;
 mod local_menu;
+#[cfg(target_os = "windows")]
+mod windows_platform;
 
 mod cli;
 #[cfg(test)]
@@ -2177,6 +2179,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             .map_err(|error| error.to_string())?;
         slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
     }
+    #[cfg(target_os = "windows")]
+    windows_platform::init_backend_if_needed()?;
 
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
@@ -2250,7 +2254,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     // One menu adapter owns the application sink for its entire lifetime so
     // accepted native actions and toolbar/palette callbacks share a route.
-    let menu_service = Arc::new(NativeMenuBar::new());
+    let menu_service = Arc::new(NativeMenuBar::new().with_command_routed_quit());
 
     {
         let state = state.clone();
@@ -2471,6 +2475,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     state.recompute_dirty_from_saved();
     recovery_pause::sync(&app, &state);
     sync_window_title(&app, &state);
+    #[cfg(target_os = "windows")]
+    windows_platform::install_alt_modifier_guard(&app);
     app.show().map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     {

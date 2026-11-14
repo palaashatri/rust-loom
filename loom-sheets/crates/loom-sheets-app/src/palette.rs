@@ -228,13 +228,22 @@ pub fn command_matches(command: &PaletteCommand, query: &str) -> bool {
             .all(|word| fields.iter().any(|field| field.contains(word)))
 }
 
+/// Platform shortcut hint for palette rows (Cmd on macOS, Ctrl elsewhere).
+const fn sc(mac: &'static str, other: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        mac
+    } else {
+        other
+    }
+}
+
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     [
         (
             PaletteAction::NewSheet,
             "sheets.new",
             "New Workbook",
-            "Ctrl+N",
+            sc("Cmd+N", "Ctrl+N"),
         ),
         (
             PaletteAction::NewFromTemplate,
@@ -246,19 +255,19 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             PaletteAction::OpenSheet,
             "sheets.open",
             "Open Workbook",
-            "Ctrl+O",
+            sc("Cmd+O", "Ctrl+O"),
         ),
         (
             PaletteAction::SaveSheet,
             "sheets.save",
             "Save Workbook",
-            "Ctrl+S",
+            sc("Cmd+S", "Ctrl+S"),
         ),
         (
             PaletteAction::SaveAsSheet,
             "sheets.save-as",
             "Save Workbook As",
-            "Ctrl+Shift+S",
+            sc("Cmd+Shift+S", "Ctrl+Shift+S"),
         ),
         (
             PaletteAction::RetryRecovery,
@@ -270,7 +279,7 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             PaletteAction::ExportCsv,
             "sheets.export-csv",
             "Export CSV",
-            "Ctrl+E",
+            sc("Cmd+E", "Ctrl+E"),
         ),
         (
             PaletteAction::ExportXlsx,
@@ -278,14 +287,29 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "Export Excel (.xlsx)",
             "",
         ),
-        (PaletteAction::Cut, "sheets.cut", "Cut", "Ctrl+X"),
-        (PaletteAction::Copy, "sheets.copy", "Copy", "Ctrl+C"),
-        (PaletteAction::Paste, "sheets.paste", "Paste", "Ctrl+V"),
+        (
+            PaletteAction::Cut,
+            "sheets.cut",
+            "Cut",
+            sc("Cmd+X", "Ctrl+X"),
+        ),
+        (
+            PaletteAction::Copy,
+            "sheets.copy",
+            "Copy",
+            sc("Cmd+C", "Ctrl+C"),
+        ),
+        (
+            PaletteAction::Paste,
+            "sheets.paste",
+            "Paste",
+            sc("Cmd+V", "Ctrl+V"),
+        ),
         (
             PaletteAction::SelectAll,
             "sheets.select-all",
             "Select All",
-            "Ctrl+A",
+            sc("Cmd+A", "Ctrl+A"),
         ),
         (PaletteAction::AddRow, "table.add_row", "Add Row", ""),
         (
@@ -331,13 +355,23 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "Delete Sheet",
             "",
         ),
-        (PaletteAction::Bold, "sheets.bold", "Bold", "Ctrl+B"),
-        (PaletteAction::Italic, "sheets.italic", "Italic", "Ctrl+I"),
+        (
+            PaletteAction::Bold,
+            "sheets.bold",
+            "Bold",
+            sc("Cmd+B", "Ctrl+B"),
+        ),
+        (
+            PaletteAction::Italic,
+            "sheets.italic",
+            "Italic",
+            sc("Cmd+I", "Ctrl+I"),
+        ),
         (
             PaletteAction::Underline,
             "sheets.underline",
             "Underline",
-            "Ctrl+U",
+            sc("Cmd+U", "Ctrl+U"),
         ),
         (
             PaletteAction::AlignLeft,
@@ -517,8 +551,18 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             }),
     )
     .chain([
-        (PaletteAction::Undo, "sheets.undo", "Undo", "Ctrl+Z"),
-        (PaletteAction::Redo, "sheets.redo", "Redo", "Ctrl+Shift+Z"),
+        (
+            PaletteAction::Undo,
+            "sheets.undo",
+            "Undo",
+            sc("Cmd+Z", "Ctrl+Z"),
+        ),
+        (
+            PaletteAction::Redo,
+            "sheets.redo",
+            "Redo",
+            sc("Cmd+Shift+Z", "Ctrl+Shift+Z"),
+        ),
     ])
     .map(|(action, id, label, shortcut)| PaletteCommand {
         action,

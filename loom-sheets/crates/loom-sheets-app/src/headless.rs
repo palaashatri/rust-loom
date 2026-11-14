@@ -21,7 +21,22 @@ pub(super) fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     }
     apply_headless_viewport_size(&app, w, h);
     let mut sheet = match &args.open {
-        Some(p) => load_sheet(Path::new(p))?,
+        Some(p) => {
+            let workbook = load_workbook(Path::new(p))?;
+            let names: Vec<SharedString> = workbook
+                .sheets
+                .iter()
+                .map(|s| SharedString::from(s.name.as_str()))
+                .collect();
+            let active = workbook.active.min(workbook.sheets.len().saturating_sub(1));
+            app.set_sheet_names(Rc::new(VecModel::from(names)).into());
+            app.set_active_sheet_index(active as i32);
+            workbook
+                .sheets
+                .into_iter()
+                .nth(active)
+                .unwrap_or_else(blank_sheet)
+        }
         None if args.example || args.smoke || args.chart || args.objects => starter_workbook(),
         None => blank_sheet(),
     };

@@ -254,6 +254,13 @@ fn labels(app: &SheetsApp) -> Vec<String> {
         .collect()
 }
 
+fn menu_index(app: &SheetsApp, name: &str) -> i32 {
+    labels(app)
+        .iter()
+        .position(|label| label == name)
+        .unwrap_or_else(|| panic!("missing menu {name:?}")) as i32
+}
+
 fn popup_labels(app: &SheetsApp) -> Vec<String> {
     app.get_local_menu_popup_items()
         .iter()
@@ -293,20 +300,35 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     let s = launched(&[("A1", "1")]);
     let grid = focus_weak(&s.app);
     let menus = labels(&s.app);
-    assert_eq!(menus, ["File", "Edit", "View", "Table", "Help"]);
+    let document_menus = ["File", "Edit", "View", "Table", "Help"];
+    let listed_document_menus: Vec<&str> = menus
+        .iter()
+        .filter(|label| document_menus.contains(&label.as_str()))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(listed_document_menus, document_menus);
+    let file_index = menu_index(&s.app, "File");
+    assert!(
+        menus[..file_index as usize]
+            .iter()
+            .all(|label| label == "Loom Sheets"),
+        "only the macOS app menu may precede File: {menus:?}"
+    );
 
-    for (index, letter) in ["f", "e", "v", "t", "h"].iter().enumerate() {
+    for (letter, label) in [
+        ("f", "File"),
+        ("e", "Edit"),
+        ("v", "View"),
+        ("t", "Table"),
+        ("h", "Help"),
+    ] {
         alt(&s.app, letter);
         assert_eq!(
             s.app.get_local_menu_open_index(),
-            index as i32,
-            "Alt+{letter}"
+            menu_index(&s.app, label),
+            "Alt+{letter} opens {label}"
         );
-        assert!(
-            !popup_labels(&s.app).is_empty(),
-            "{} has rows",
-            menus[index]
-        );
+        assert!(!popup_labels(&s.app).is_empty(), "{label} has rows");
         press(&s.app, Key::Escape);
         assert_eq!(s.app.get_local_menu_open_index(), -1);
         assert!(
@@ -325,13 +347,22 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     press(&s.app, Key::UpArrow);
     assert_eq!(selected_row(&s.app), first);
     press(&s.app, Key::RightArrow);
-    assert_eq!(s.app.get_local_menu_open_index(), 1);
-    press(&s.app, Key::LeftArrow);
-    press(&s.app, Key::LeftArrow);
     assert_eq!(
         s.app.get_local_menu_open_index(),
-        4,
-        "Left wraps to the last menu"
+        menu_index(&s.app, "Edit")
+    );
+    press(&s.app, Key::LeftArrow);
+    assert_eq!(s.app.get_local_menu_open_index(), file_index);
+    press(&s.app, Key::LeftArrow);
+    let previous = if file_index == 0 {
+        menus.len() as i32 - 1
+    } else {
+        file_index - 1
+    };
+    assert_eq!(
+        s.app.get_local_menu_open_index(),
+        previous,
+        "Left moves to the preceding top-level menu"
     );
     press(&s.app, Key::Escape);
 }
@@ -885,10 +916,7 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
                 .map(|(_, g)| g.iter().map(|s| s.name.clone()).collect())
                 .unwrap_or_default()
         };
-        assert_eq!(
-            names(Region::Menu),
-            ["File", "Edit", "View", "Table", "Help"]
-        );
+        assert_eq!(names(Region::Menu), labels(&s.app));
         assert_eq!(
             names(Region::Toolbar),
             [
@@ -918,7 +946,7 @@ fn alt_letters_and_f10_open_menus_while_editing_without_typing_into_the_cell() {
     alt(&s.app, "f");
     assert_eq!(
         s.app.get_local_menu_open_index(),
-        0,
+        menu_index(&s.app, "File"),
         "Alt+F opens File from the formula bar"
     );
     assert_eq!(
@@ -935,7 +963,7 @@ fn alt_letters_and_f10_open_menus_while_editing_without_typing_into_the_cell() {
     alt(&s.app, "e");
     assert_eq!(
         s.app.get_local_menu_open_index(),
-        1,
+        menu_index(&s.app, "Edit"),
         "Alt+E opens Edit from the inspector search"
     );
     assert_eq!(

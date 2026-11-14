@@ -376,7 +376,13 @@ fn local_menu_highlight_is_visible_on_hover_and_remains_when_open() {
     );
 
     chord_alt(h.app(), "f");
-    assert_eq!(h.app().get_local_menu_open_index(), 0);
+    let file_index = h
+        .app()
+        .get_local_menu_labels()
+        .iter()
+        .position(|label| label == "File")
+        .expect("File menu") as i32;
+    assert_eq!(h.app().get_local_menu_open_index(), file_index);
     h.app().window().dispatch_event(WindowEvent::PointerMoved {
         position: slint::LogicalPosition::new(1200.0, 700.0),
     });

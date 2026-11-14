@@ -16,8 +16,8 @@ loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
 loom-production = { path = "../../../loom-core/crates/loom-production" }
 loom-package = { workspace = true }
 loom-storage = { path = "../../../loom-core/crates/loom-storage" }
-loom-ui = { path = "../../../loom-core/crates/loom-ui" }
-loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
+loom-ui = { workspace = true }
+loom-test-support = { workspace = true }
 fs2 = "0.4"
 i-slint-core = { version = "=1.17.1", default-features = false }
 serde = { version = "1", features = ["derive"] }

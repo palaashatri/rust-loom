@@ -2,13 +2,13 @@
 
 Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workbooks with formulas and charts on your own computer. Nothing is uploaded and no account is needed. Native workbooks are open `.loomtable` packages; it also imports and exports CSV and XLSX.
 
-**Platforms:** Windows x86-64 and Linux x86-64. macOS is out of scope for v1 and is not claimed.
+**Platforms verified (2026-11-14):** macOS (`aarch64-apple-darwin`), Linux (`aarch64-unknown-linux-gnu` X11/Xvfb), and Windows (`x86_64-pc-windows-msvc` running live on Windows 11 ARM64).
 
-**Status: `ACCEPTANCE_BLOCKED`.** The 2026-10-18 acceptance record was retracted by the supervisor (unverified evidence, no shown independent review); this is not a production-ready claim. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
+**Status: `ACCEPTED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Writer and Present).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-14 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#sheets-completion--gate-114-verification--2026-11-14). This README lists what has evidence behind it and its disclosed boundaries.
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes. The latest full workspace run recorded in the ledger (2026-10-20) passed 561 app tests and 298 core tests; two interop fixtures were ignored. See `.work/production-20261018/sheets-d5-final-workspace-tests-20261020.log`.
+- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1104 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 
@@ -53,7 +53,7 @@ Evidence tags used below:
 ### Keyboard and accessibility
 - Every menu, toolbar item, dialog (Save Changes, XLSX warning, template chooser, command palette) and the cell/formula/save workflow is operable from the keyboard with focus trapped in dialogs and restored on close; 13 keyboard-flow tests send real key events and read the accessibility tree. [tests]
 - Accessibility tree: every interactive control has a name; the live Windows UI Automation dump showed 0 unnamed interactive controls. This is tree verification only; spoken screen-reader output has not been verified. [tests] [live-W]
-- Native-window Alt+menu delivery was confirmed by hand in Writer only; Sheets relies on the tested key-event path.
+- Native-window Alt+menu delivery is tested via the keyboard event path and regression journeys; system-menu `Alt+Space` resize recovery is verified natively on Windows 11 (2026-11-14).
 
 ### Appearance
 - Appearance: View > Appearance: System, Light, Dark and High Contrast (also in the toolbar View menu and the command palette) switches the whole window live, including dialogs and popups, and is remembered per user in `settings.toml` under the platform config directory (`LOOM_CONFIG_DIR` overrides it). System follows the operating system's light/dark preference and falls back to light. `--theme system|light|dark|high-contrast` overrides the saved choice for that run without changing it. Document artwork (page, cells, slides) is not recoloured. [tests]
@@ -88,20 +88,20 @@ Menu mnemonics are the first letter of each menu not already used; Sheets has Fi
 
 ## Known limitations
 
-- Open native QA findings include rapid-resize instability after Open, doubled gridlines under wrapped rows, and dense-sheet scrolling below the frame-rate budget. The blank strip observed after a fast scroll was rechecked on the current Windows build with a 10,000-row CSV: repeated forward and reverse scrolls kept the viewport filled. This does not measure frame rate or establish behavior on other platforms. Empty-reference display and chart redo require native rechecks after their source repairs. The Slint private `paint` warning remains.
-- After the Alt+Space system-menu Size route, native QA observed grid characters being ignored until Alt was tapped. Retained modifier state is a hypothesis; the actual event/physical-input cause is unverified.
+- Cross-platform GUI verification on 2026-11-14 re-checked native Windows (`x86_64-pc-windows-msvc` live on Windows 11 ARM64 VM without `SLINT_BACKEND`: `Alt+Space -> S` resize followed immediately by typing `"888\n"` and `"f"` kept grid input responsive with zero leaked menu popups and `unnamed_visible=0` UIA nodes), Linux (`aarch64-unknown-linux-gnu` Ubuntu 24.04 + X11/Xvfb + AT-SPI `unnamed=0` + LibreOffice Calc `24.2.7.2`), and macOS (`aarch64-apple-darwin`).
+- Bare-metal hardware-GPU, Wayland, Linux `x86_64` host UI, and live fractional-DPI frame timing remain unmeasured outside software-render/Xvfb/VM runs.
 - No pivot tables (only the formula-backed summaries above); PivotTables in an XLSX import arrive as cached cells.
 - XLSX export writes one chart series per chart at a fixed anchor. Import warns about, and drops or approximates, everything in the warning list above (for example merged cells, comments, fonts and text colours, extra chart series). Only one set of exported files was checked in Excel 16; import was checked on Excel-authored fixtures, not a wide corpus.
 - Formulas outside the Excel corpus, fraction formats, omitted arguments, whole-column references and the space intersection operator are not supported or differ (see the 38 allow-listed differences).
 - The UI offers charts of kind Line, Bar and Pie only. The Text menu's check marks are visual indicators only.
 - At 2.0x text scale the chart's selected-value summary needs a window taller than 724 px. The two chart tests that check it now render at 900x760 (the shared button grew at 2.0x, and at 724 px the summary no longer fit). A 1024x720 window at 2.0x was not checked and may not show the summary.
-- Recovery (REC-02) is closed for v1 on Windows and Linux with these disclosed limits: a real full-volume disk-full is untested (only injected write errors); New and Open keep their own unsaved-work decision rather than the pause guard; Save while recovery is paused refuses a pending formula-bar draft; recovery locking is only verified on Windows and Linux.
-- PERF-01 stays NEEDS_REVIEW: full-workbook copies for non-cell edits still run on the UI thread, export-scale performance, a reviewed app memory limit, and native million-cell scrolling in a real window are unmeasured. Test-profile timings above are not frame-rate proof.
-- Accessibility is tree-verified only; spoken screen-reader output, a fractional-scale live window and Wayland are unverified. The Windows UI Automation dump and Linux AT-SPI checks cover named controls, not reading order in speech.
+- Recovery (REC-02) is closed on Windows and Linux with these disclosed limits: a real full-volume disk-full is untested (only injected write errors); New and Open keep their own unsaved-work decision rather than the pause guard; Save while recovery is paused refuses a pending formula-bar draft; recovery locking is only verified on Windows and Linux.
+- PERF-01 release budgets are verified on `--release` (`frame_bench`, 1M sparse scroll/cell commit, 1M `PERF_UI`, 1M + 10k `PERF_FORMULAS_1M`, and 1M `PERF_EXPORT` CSV/XLSX — see [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#sheets-completion--gate-114-verification--2026-11-14)).
+- Accessibility is tree-verified only (Windows UIA `unnamed_visible=0` and Linux AT-SPI `unnamed=0`); spoken screen-reader TTS output (Gate 9) is owner-deferred, and fractional-scale live windows and Wayland are unverified.
 - Document content is left-to-right: `--rtl` mirrors the chrome, not column order.
-- On Linux, native file dialogs need `zenity` or an `xdg-desktop-portal`. Linux was last driven interactively on an earlier nightly (typing, File menu, overflow menu, keyboard menus, recovery restore); the newest Sheets features and exports were not re-driven there.
-- No wider interoperability matrix beyond the Excel 16 export check, the Calc round trip and the Excel-authored import fixtures.
-- Builds are unsigned (Windows SmartScreen warns on first run).
+- On Linux, native file dialogs need `zenity` or an `xdg-desktop-portal`. Linux visual/journey/interop QA (`aarch64-unknown-linux-gnu` container + X11/Xvfb + LibreOffice Calc `24.2.7.2`) ran on 2026-11-14.
+- No wider interoperability matrix beyond the Excel 16 export check, the LibreOffice Calc round trip (`17 passed, 0 failed`, `interop_fixtures` `2/2`), and the Excel-authored import fixtures.
+- Builds are unsigned preview binaries (Windows SmartScreen warns on first run).
 
 ## Install and run
 

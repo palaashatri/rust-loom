@@ -4,7 +4,17 @@
 
 use crate::SheetsApp;
 
+/// Canonical Quit / Exit command id installed in the platform menu bar.
+#[cfg(test)]
+pub(crate) const QUIT_COMMAND_ID: &str = if cfg!(target_os = "macos") {
+    "loom sheets.quit"
+} else {
+    "app.quit"
+};
+
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
+    "app.quit",
+    "loom sheets.quit",
     "file.new",
     "file.new_template",
     "file.open",
@@ -39,6 +49,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.freeze_header",
     "table.unfreeze_panes",
     "table.pivot_sum",
+    "sheets.insert_chart",
     "sheets.insert_shape",
     "sheets.insert_image",
     "sheets.delete_sheet",
@@ -80,6 +91,7 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
                 MenuItem::action("table.freeze_header", "Freeze Header Row"),
                 MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
                 MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
+                MenuItem::action("sheets.insert_chart", "Insert Chart"),
                 MenuItem::action("sheets.insert_shape", "Insert Shape"),
                 MenuItem::action("sheets.insert_image", "Insert Image"),
                 MenuItem::action("sheets.delete_sheet", "Delete Sheet"),

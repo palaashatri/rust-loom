@@ -139,10 +139,11 @@ pub(crate) const ALLOWED: &[&str] = &[
     "palette_move",
     "palette_query_changed",
     "toolbar_command",
-    // Window chrome.
+    // Window chrome and native window-event synchronization.
     "window_close",
     "window_drag",
     "window_resize",
+    "winit_window_event",
 ];
 
 /// True, with the visible paused status set, when a workbook change must be

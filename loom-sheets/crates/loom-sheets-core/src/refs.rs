@@ -42,93 +42,99 @@ pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32)
         return formula.to_string();
     }
 
-    let mut result = String::with_capacity(formula.len());
-    let chars: Vec<char> = formula.chars().collect();
-    let mut i = 0;
+    let bytes = formula.as_bytes();
+    let mut result = String::with_capacity(formula.len() + 4);
+    let mut flushed = 0usize;
+    let mut i = 0usize;
 
-    while i < chars.len() {
+    while i < bytes.len() {
         // String literals are opaque text, never references.
-        if chars[i] == '"' {
-            let start = i;
+        if bytes[i] == b'"' {
             i += 1;
-            let mut closed = false;
-            while i < chars.len() {
-                if chars[i] == '"' {
-                    if i + 1 < chars.len() && chars[i + 1] == '"' {
+            while i < bytes.len() {
+                if bytes[i] == b'"' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
                         i += 2;
                     } else {
                         i += 1;
-                        closed = true;
                         break;
                     }
                 } else {
                     i += 1;
                 }
             }
-            let _ = closed;
-            for ch in &chars[start..i.min(chars.len())] {
-                result.push(*ch);
-            }
             continue;
         }
 
         // Quoted sheet qualifier: 'Name'! (with '' escapes).
-        if chars[i] == '\'' {
-            if let Some((_, after)) = scan_quoted_name(&chars, i) {
-                if chars.get(after) == Some(&'!') {
-                    for ch in &chars[i..=after] {
-                        result.push(*ch);
-                    }
+        if bytes[i] == b'\'' {
+            if let Some(after) = scan_quoted_name_end(bytes, i) {
+                if bytes.get(after) == Some(&b'!') {
+                    result.push_str(&formula[flushed..=after]);
                     i = after + 1;
-                    i = shift_ref_or_range(&chars, i, delta_cols, delta_rows, &mut result);
+                    flushed = i;
+                    i = shift_ref_or_range_bytes(
+                        formula,
+                        bytes,
+                        i,
+                        delta_cols,
+                        delta_rows,
+                        &mut result,
+                        &mut flushed,
+                    );
                     continue;
                 }
             }
-            result.push(chars[i]);
             i += 1;
             continue;
         }
 
         // Unquoted sheet qualifier: Name! (letters/digits/underscore/dot).
-        if chars[i].is_ascii_alphabetic() {
+        if bytes[i].is_ascii_alphabetic() {
             let mut j = i;
-            while j < chars.len()
-                && (chars[j].is_ascii_alphanumeric() || chars[j] == '_' || chars[j] == '.')
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'.')
             {
                 j += 1;
             }
-            if j > i && chars.get(j) == Some(&'!') {
-                for ch in &chars[i..=j] {
-                    result.push(*ch);
-                }
+            if j > i && bytes.get(j) == Some(&b'!') {
+                result.push_str(&formula[flushed..=j]);
                 i = j + 1;
-                i = shift_ref_or_range(&chars, i, delta_cols, delta_rows, &mut result);
+                flushed = i;
+                i = shift_ref_or_range_bytes(
+                    formula,
+                    bytes,
+                    i,
+                    delta_cols,
+                    delta_rows,
+                    &mut result,
+                    &mut flushed,
+                );
                 continue;
             }
         }
 
         // A word directly followed by `(` is a function name (`LOG10(`,
         // `STDEV.S(`), never a cell reference, whatever its letters and digits.
-        if chars[i].is_ascii_alphabetic() && !(i > 0 && chars[i - 1].is_ascii_alphanumeric()) {
+        if bytes[i].is_ascii_alphabetic() && !(i > 0 && bytes[i - 1].is_ascii_alphanumeric()) {
             let mut j = i;
-            while j < chars.len()
-                && (chars[j].is_ascii_alphanumeric() || chars[j] == '_' || chars[j] == '.')
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'.')
             {
                 j += 1;
             }
-            if chars.get(j) == Some(&'(') {
-                result.extend(&chars[i..j]);
+            if bytes.get(j) == Some(&b'(') {
                 i = j;
                 continue;
             }
         }
 
         // Check for start of cell reference (optional '$' followed by letters then optional '$' then digits)
-        let is_ref_start = if chars[i] == '$' {
-            i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic()
-        } else if chars[i].is_ascii_alphabetic() {
+        let is_ref_start = if bytes[i] == b'$' {
+            i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphabetic()
+        } else if bytes[i].is_ascii_alphabetic() {
             // Must not be preceded by alphanumeric or underscore (which would make it a function name like SUM)
-            !(i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'))
+            !(i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_'))
         } else {
             false
         };
@@ -136,51 +142,72 @@ pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32)
         if is_ref_start {
             let start = i;
             let mut col_abs = false;
-            if chars[i] == '$' {
+            if bytes[i] == b'$' {
                 col_abs = true;
                 i += 1;
             }
 
             let col_start = i;
-            while i < chars.len() && chars[i].is_ascii_alphabetic() {
+            while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
                 i += 1;
             }
-            let col_str: String = chars[col_start..i].iter().collect();
+            let col_bytes = &bytes[col_start..i];
 
             let mut row_abs = false;
-            if i < chars.len() && chars[i] == '$' {
+            if i < bytes.len() && bytes[i] == b'$' {
                 row_abs = true;
                 i += 1;
             }
 
             let row_start = i;
-            while i < chars.len() && chars[i].is_ascii_digit() {
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
                 i += 1;
             }
-            let row_str: String = chars[row_start..i].iter().collect();
+            let row_bytes = &bytes[row_start..i];
 
             // Check if this formed a valid cell reference (e.g., has digits for row)
-            if !col_str.is_empty() && !row_str.is_empty() {
-                result.push_str(&shift_cell_text(
-                    &col_str, &row_str, col_abs, row_abs, delta_cols, delta_rows,
-                ));
-            } else {
-                // Not a valid cell reference, push original matched substring
-                for ch in &chars[start..i] {
-                    result.push(*ch);
-                }
+            if !col_bytes.is_empty() && !row_bytes.is_empty() {
+                result.push_str(&formula[flushed..start]);
+                write_shifted_cell_text(
+                    col_bytes,
+                    row_bytes,
+                    col_abs,
+                    row_abs,
+                    delta_cols,
+                    delta_rows,
+                    &mut result,
+                );
+                flushed = i;
             }
         } else {
-            result.push(chars[i]);
             i += 1;
         }
     }
 
+    result.push_str(&formula[flushed..]);
     result
 }
 
+/// Scan a `'...'` quoted name starting at byte `i` (which must be `b'\''`),
+/// returning the byte index right past its closing quote.
+fn scan_quoted_name_end(bytes: &[u8], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    while j < bytes.len() {
+        if bytes[j] == b'\'' {
+            if j + 1 < bytes.len() && bytes[j + 1] == b'\'' {
+                j += 2;
+            } else {
+                return Some(j + 1);
+            }
+        } else {
+            j += 1;
+        }
+    }
+    None
+}
+
 /// Scan a `'...'` quoted name starting at `i` (which must be `'`),
-/// returning the qualifier text span and the index past its closing quote.
+/// returning the qualifier text and the index past its closing quote.
 fn scan_quoted_name(chars: &[char], i: usize) -> Option<(String, usize)> {
     let mut j = i + 1;
     let mut name = String::new();
@@ -201,102 +228,111 @@ fn scan_quoted_name(chars: &[char], i: usize) -> Option<(String, usize)> {
 }
 
 /// Shift one `A1`-style reference (with `$` markers) at `i`, or a `A1:B2`
-/// range when a colon follows. Returns the new index. Non-references pass
-/// through untouched.
-fn shift_ref_or_range(
-    chars: &[char],
+/// range when a colon follows. Returns the new byte index and advances `flushed`.
+fn shift_ref_or_range_bytes(
+    formula: &str,
+    bytes: &[u8],
     i: usize,
     delta_cols: i32,
     delta_rows: i32,
     out: &mut String,
+    flushed: &mut usize,
 ) -> usize {
-    let mut i = i;
-    // Optional leading '$' (defensive; qualifiers never carry one).
+    let start = i;
+    let mut pos = i;
     let mut col_abs = false;
-    if chars.get(i) == Some(&'$') {
+    if bytes.get(pos) == Some(&b'$') {
         col_abs = true;
-        i += 1;
+        pos += 1;
     }
-    let col_start = i;
-    while i < chars.len() && chars[i].is_ascii_alphabetic() {
-        i += 1;
+    let col_start = pos;
+    while pos < bytes.len() && bytes[pos].is_ascii_alphabetic() {
+        pos += 1;
     }
-    let col_str: String = chars[col_start..i].iter().collect();
+    let col_bytes = &bytes[col_start..pos];
     let mut row_abs = false;
-    if chars.get(i) == Some(&'$') {
+    if bytes.get(pos) == Some(&b'$') {
         row_abs = true;
-        i += 1;
+        pos += 1;
     }
-    let row_start = i;
-    while i < chars.len() && chars[i].is_ascii_digit() {
-        i += 1;
+    let row_start = pos;
+    while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+        pos += 1;
     }
-    let row_str: String = chars[row_start..i].iter().collect();
-    if col_str.is_empty() || row_str.is_empty() {
-        return col_start.saturating_sub(if col_abs { 1 } else { 0 });
+    let row_bytes = &bytes[row_start..pos];
+    if col_bytes.is_empty() || row_bytes.is_empty() {
+        return start;
     }
-    out.push_str(&shift_cell_text(
-        &col_str, &row_str, col_abs, row_abs, delta_cols, delta_rows,
-    ));
+    out.push_str(&formula[*flushed..start]);
+    write_shifted_cell_text(
+        col_bytes, row_bytes, col_abs, row_abs, delta_cols, delta_rows, out,
+    );
+    *flushed = pos;
     // Range end after a colon.
-    if chars.get(i) == Some(&':') {
-        // Only consume the colon when a valid ref follows; otherwise the
-        // colon belongs to surrounding syntax and stays for the main loop.
-        let mut j = i + 1;
+    if bytes.get(pos) == Some(&b':') {
+        let mut j = pos + 1;
         let mut end_col_abs = false;
-        if chars.get(j) == Some(&'$') {
+        if bytes.get(j) == Some(&b'$') {
             end_col_abs = true;
             j += 1;
         }
         let end_col_start = j;
-        while j < chars.len() && chars[j].is_ascii_alphabetic() {
+        while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
             j += 1;
         }
-        let end_col: String = chars[end_col_start..j].iter().collect();
+        let end_col = &bytes[end_col_start..j];
         let mut end_row_abs = false;
-        if chars.get(j) == Some(&'$') {
+        if bytes.get(j) == Some(&b'$') {
             end_row_abs = true;
             j += 1;
         }
         let end_row_start = j;
-        while j < chars.len() && chars[j].is_ascii_digit() {
+        while j < bytes.len() && bytes[j].is_ascii_digit() {
             j += 1;
         }
-        let end_row: String = chars[end_row_start..j].iter().collect();
+        let end_row = &bytes[end_row_start..j];
         if !end_col.is_empty() && !end_row.is_empty() {
             out.push(':');
-            out.push_str(&shift_cell_text(
-                &end_col,
-                &end_row,
+            write_shifted_cell_text(
+                end_col,
+                end_row,
                 end_col_abs,
                 end_row_abs,
                 delta_cols,
                 delta_rows,
-            ));
+                out,
+            );
+            *flushed = j;
             return j;
         }
     }
-    i
+    pos
 }
 
-/// Shift one parsed column/row pair and re-encode it with `$` markers kept.
-fn shift_cell_text(
-    col_str: &str,
-    row_str: &str,
+/// Shift one parsed ASCII column/row byte slice pair and write directly to `out`.
+fn write_shifted_cell_text(
+    col_bytes: &[u8],
+    row_bytes: &[u8],
     col_abs: bool,
     row_abs: bool,
     delta_cols: i32,
     delta_rows: i32,
-) -> String {
-    // Parse column index (0-based)
+    out: &mut String,
+) {
+    use std::fmt::Write as _;
+
     let mut col_idx: u32 = 0;
-    for c in col_str.to_ascii_uppercase().chars() {
-        col_idx = col_idx * 26 + (c as u32 - 'A' as u32 + 1);
+    for &b in col_bytes {
+        col_idx = col_idx
+            .saturating_mul(26)
+            .saturating_add(u32::from(b.to_ascii_uppercase() - b'A' + 1));
     }
     let mut col_num = (col_idx.saturating_sub(1)) as i32;
-
-    // Parse row index (0-based)
-    let mut row_num = row_str.parse::<i32>().unwrap_or(1) - 1;
+    let mut row_num = std::str::from_utf8(row_bytes)
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1)
+        - 1;
 
     if !col_abs {
         col_num = (col_num + delta_cols).max(0);
@@ -305,25 +341,24 @@ fn shift_cell_text(
         row_num = (row_num + delta_rows).max(0);
     }
 
-    // Re-encode column string
-    let mut new_col = String::new();
-    let mut cn = col_num + 1;
-    while cn > 0 {
-        let rem = ((cn - 1) % 26) as u8;
-        new_col.insert(0, (b'A' + rem) as char);
-        cn = (cn - 1) / 26;
-    }
-
-    let mut out = String::new();
     if col_abs {
         out.push('$');
     }
-    out.push_str(&new_col);
+    let mut buf = [0u8; 8];
+    let mut pos = buf.len();
+    let mut cn = col_num + 1;
+    while cn > 0 && pos > 0 {
+        pos -= 1;
+        buf[pos] = b'A' + ((cn - 1) % 26) as u8;
+        cn = (cn - 1) / 26;
+    }
+    if let Ok(col_str) = std::str::from_utf8(&buf[pos..]) {
+        out.push_str(col_str);
+    }
     if row_abs {
         out.push('$');
     }
-    out.push_str(&(row_num + 1).to_string());
-    out
+    let _ = write!(out, "{}", row_num + 1);
 }
 
 /// Validate a candidate sheet name against its future siblings (which must

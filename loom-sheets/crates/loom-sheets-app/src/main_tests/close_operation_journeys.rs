@@ -1199,3 +1199,53 @@ fn hostile_dirty_close_untitled_prompt_agrees_with_window_title() {
     assert!(state.is_dirty());
     assert!(app.window().is_visible());
 }
+
+#[test]
+fn quit_command_and_window_close_route_through_unsaved_work_guard() {
+    assert!(local_menu::SUPPORTED_COMMANDS.contains(&"app.quit"));
+    assert!(local_menu::SUPPORTED_COMMANDS.contains(&"loom sheets.quit"));
+    assert!(local_menu::SUPPORTED_COMMANDS.contains(&"sheets.insert_chart"));
+    let menu = local_menu::sheets_menu_bar();
+    assert!(
+        menu.find_item("sheets.insert_chart")
+            .is_some_and(|item| item.is_enabled()),
+        "Table -> Insert Chart must be enabled in the menu bar"
+    );
+    let quit_id = if cfg!(target_os = "macos") {
+        "loom sheets.quit"
+    } else {
+        "app.quit"
+    };
+    assert!(
+        menu.find_item(quit_id)
+            .is_some_and(|item| item.is_enabled()),
+        "menu bar Quit command {quit_id} must be enabled"
+    );
+
+    let (app, state) = close_test_app([]);
+    let recovery = ScratchDirectory::new();
+    attach_worker(&app, &state, &recovery.0, true);
+    wire_close_actions(&app, &state);
+    state.mark_content_dirty();
+    app.window().show().expect("show dirty workbook");
+
+    assert!(dispatch_command(&app, local_menu::QUIT_COMMAND_ID));
+    pump_worker_until(&app, &state, || {
+        state.close_state.get() == close_operations::CloseState::DirtyDecision
+    });
+    assert!(app.get_save_changes_open());
+    assert!(app.get_save_changes_close_mode());
+
+    app.invoke_save_changes_cancel();
+    assert_eq!(state.close_state.get(), close_operations::CloseState::Idle);
+    assert!(!app.get_save_changes_open());
+
+    app.invoke_window_close();
+    pump_worker_until(&app, &state, || {
+        state.close_state.get() == close_operations::CloseState::DirtyDecision
+    });
+    assert!(app.get_save_changes_open());
+    assert!(app.get_save_changes_close_mode());
+    app.invoke_save_changes_cancel();
+    assert!(app.window().is_visible());
+}

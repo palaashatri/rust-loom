@@ -297,6 +297,52 @@ impl<V: StoredValue> Row<V> {
         }
     }
 
+    fn update_formulas_in_range(
+        &mut self,
+        first_col: u32,
+        last_col: u32,
+        mut change: impl FnMut(&mut V) -> bool,
+    ) -> bool {
+        if self.formulas == 0 || first_col > last_col {
+            return false;
+        }
+        let start = self.coords.partition_point(|c| c.col < first_col);
+        let end = self.coords.partition_point(|c| c.col <= last_col);
+        if !self.values[start..end].iter().any(StoredValue::is_formula) {
+            return false;
+        }
+        let mut changed = false;
+        let coords = &self.coords[start..end];
+        let values = Arc::make_mut(&mut self.values);
+        for (coord, value) in coords.iter().zip(&mut values[start..end]) {
+            if !value.is_formula() {
+                continue;
+            }
+            let old_bytes = entry_bytes(value);
+            let old_persisted = value.is_persisted();
+            let old_fp = old_persisted.then(|| cell_fingerprint(coord.col, value));
+            if change(value) {
+                changed = true;
+                self.bytes = self.bytes - old_bytes + entry_bytes(value);
+                if !value.is_formula() {
+                    self.formulas -= 1;
+                }
+                if let Some((oh1, oh2)) = old_fp {
+                    self.persisted_count -= 1;
+                    self.sum_h1 = self.sum_h1.wrapping_sub(oh1);
+                    self.sum_h2 = self.sum_h2.wrapping_sub(oh2);
+                }
+                if value.is_persisted() {
+                    let (nh1, nh2) = cell_fingerprint(coord.col, value);
+                    self.persisted_count += 1;
+                    self.sum_h1 = self.sum_h1.wrapping_add(nh1);
+                    self.sum_h2 = self.sum_h2.wrapping_add(nh2);
+                }
+            }
+        }
+        changed
+    }
+
     fn digest(&self, row: u32) -> Digest {
         if self.persisted_count == 0 {
             return Digest::default();
@@ -529,6 +575,47 @@ impl<V: StoredValue> BandedMap<V> {
         removed
     }
 
+    /// Entries in `row`, sorted by column.
+    pub fn row_entries(&self, row: u32) -> impl Iterator<Item = (&CellRef, &V)> {
+        let (coords, values) = self
+            .bands
+            .get(&(row / BAND_ROWS))
+            .and_then(|band| band.rows[(row - band.base_row) as usize].as_ref())
+            .map_or((&[][..], &[][..]), |row_data| {
+                (row_data.coords.as_slice(), row_data.values.as_slice())
+            });
+        coords.iter().zip(values.iter())
+    }
+
+    /// Mutate formula entries in `row` within `first_col..=last_col`.
+    /// Rows with no formulas return immediately without touching the band.
+    pub(crate) fn update_row_formulas_in_range(
+        &mut self,
+        row: u32,
+        first_col: u32,
+        last_col: u32,
+        mut change: impl FnMut(&mut V) -> bool,
+    ) {
+        let key = row / BAND_ROWS;
+        let has_formulas = self.bands.get(&key).is_some_and(|band| {
+            let slot = (row - band.base_row) as usize;
+            band.rows[slot].as_ref().is_some_and(|r| r.formulas > 0)
+        });
+        if !has_formulas {
+            return;
+        }
+        let Some(band_arc) = self.bands.get_mut(&key) else {
+            return;
+        };
+        let slot = (row - band_arc.base_row) as usize;
+        let band = writable(band_arc);
+        if band.rows[slot].as_mut().is_some_and(|row_data| {
+            row_data.update_formulas_in_range(first_col, last_col, &mut change)
+        }) {
+            band.refresh_totals();
+        }
+    }
+
     /// Remove every entry.
     pub fn clear(&mut self) {
         self.bands.clear();
@@ -600,7 +687,7 @@ impl<V: StoredValue> BandedMap<V> {
             }
             let mut band = Band::new(base_row);
             let mut band_entries = 0usize;
-            for slot in 0..BAND_ROWS as usize {
+            for (slot, row_slot) in band.rows.iter_mut().enumerate() {
                 let dest_row = base_row + slot as u32;
                 let next_row = if dest_row < start_row || dest_row > end_row {
                     row_at(dest_row).cloned()
@@ -626,7 +713,7 @@ impl<V: StoredValue> BandedMap<V> {
                 if let Some(row) = &next_row {
                     band_entries += row.len();
                 }
-                band.rows[slot] = next_row;
+                *row_slot = next_row;
             }
             new_len += band_entries;
             if band.is_empty() {

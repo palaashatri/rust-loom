@@ -379,28 +379,30 @@ export component SheetsApp inherits Window {
                 return accept;
             }
             if (event.modifiers.control || event.modifiers.meta) {
-                if (event.text == Key.K || event.text == "k") { root.open-palette(); return accept; }
-                if (event.text == "n" || event.text == "N") { root.new-sheet(); return accept; }
-                if (event.text == "o" || event.text == "O") { root.open-sheet(); return accept; }
-                if (event.text == "s" || event.text == "S") {
+                let k = event.text;
+                if (k == Key.K || k == "k") { root.open-palette(); return accept; }
+                if (k == "n" || k == "N") { root.new-sheet(); return accept; }
+                if (k == "o" || k == "O") { root.open-sheet(); return accept; }
+                if (k == "s" || k == "S") {
                     if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); }
                     return accept;
                 }
-                if (event.text == "e" || event.text == "E") { root.export-csv(); return accept; }
-                if (event.text == "z" || event.text == "Z" || event.text == "y") {
-                    if (event.modifiers.shift || event.text == "y") { root.redo(); } else { root.undo(); }
+                if (k == "e" || k == "E") { root.export-csv(); return accept; }
+                if (k == "q" || k == "Q") { root.window-close(); return accept; }
+                if (k == "z" || k == "Z" || k == "y") {
+                    if (event.modifiers.shift || k == "y") { root.redo(); } else { root.undo(); }
                     return accept;
                 }
-                if (event.text == "c" || event.text == "C") { root.copy-selection(); return accept; }
-                if (event.text == "x" || event.text == "X") { root.cut-selection(); return accept; }
-                if (event.text == "v" || event.text == "V") { root.paste-selection(); return accept; }
-                if (event.text == "a" || event.text == "A") { root.select-all(); return accept; }
-                if (event.text == "b" || event.text == "B") { root.toggle-bold(); return accept; }
-                if (event.text == "i" || event.text == "I") { root.toggle-italic(); return accept; }
-                if (event.text == "u" || event.text == "U") { root.toggle-underline(); return accept; }
-                if (event.text == "=" || event.text == "+") { root.zoom-in(); return accept; }
-                if (event.text == "-") { root.zoom-out(); return accept; }
-                if (event.text == "0") { root.zoom-actual(); return accept; }
+                if (k == "c" || k == "C") { root.copy-selection(); return accept; }
+                if (k == "x" || k == "X") { root.cut-selection(); return accept; }
+                if (k == "v" || k == "V") { root.paste-selection(); return accept; }
+                if (k == "a" || k == "A") { root.select-all(); return accept; }
+                if (k == "b" || k == "B") { root.toggle-bold(); return accept; }
+                if (k == "i" || k == "I") { root.toggle-italic(); return accept; }
+                if (k == "u" || k == "U") { root.toggle-underline(); return accept; }
+                if (k == "=" || k == "+") { root.zoom-in(); return accept; }
+                if (k == "-") { root.zoom-out(); return accept; }
+                if (k == "0") { root.zoom-actual(); return accept; }
             }
             if (event.text == Key.Backspace || event.text == Key.Delete) { root.clear-selected-cells(); return accept; }
             if (event.text == Key.Escape) {

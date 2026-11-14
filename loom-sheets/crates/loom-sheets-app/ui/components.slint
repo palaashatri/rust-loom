@@ -497,11 +497,11 @@ export component SheetGridSurface inherits Rectangle {
                     return accept;
             }
             if (event.text == Key.Home) {
-                    if (event.modifiers.shift) { root.extend-selection(event.modifiers.control ? -2100000000 : 0, -2100000000); }
-                    else { root.navigate-selection(event.modifiers.control ? -2100000000 : 0, -2100000000); }
+                    if (event.modifiers.shift) { root.extend-selection((event.modifiers.control || event.modifiers.meta) ? -2100000000 : 0, -2100000000); }
+                    else { root.navigate-selection((event.modifiers.control || event.modifiers.meta) ? -2100000000 : 0, -2100000000); }
                     return accept;
             }
-            if (event.text == Key.End && event.modifiers.control) {
+            if (event.text == Key.End && (event.modifiers.control || event.modifiers.meta)) {
                     if (event.modifiers.shift) { root.extend-selection(2100000000, 2100000000); }
                     else { root.navigate-selection(2100000000, 2100000000); }
                     return accept;
