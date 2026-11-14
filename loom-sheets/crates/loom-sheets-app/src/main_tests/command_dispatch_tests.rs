@@ -131,7 +131,7 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     rebuild_palette(&app, "");
     assert_eq!(
         app.get_palette_commands().row_count(),
-        55 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
+        62 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
     );
     let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(

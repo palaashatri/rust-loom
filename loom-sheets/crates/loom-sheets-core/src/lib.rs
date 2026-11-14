@@ -5,7 +5,7 @@
 //! ordering and cycle detection. CSV import/export is included for
 //! interoperability. The GUI (a documented follow-on) consumes this engine.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use loom_package::zip::PackageArchive;
 
@@ -15,6 +15,7 @@ pub use charts::{
 };
 
 pub mod banded;
+pub mod data_tools;
 pub mod dates;
 mod formula;
 pub mod functions;
@@ -39,6 +40,7 @@ mod style_fit;
 pub mod workbook;
 pub mod xlsx;
 pub use banded::{BandedMap, StoredValue};
+pub use data_tools::{AutoFilterState, FindMatch, FindOptions, SheetValidation};
 pub use formula::{parse_formula, Formula};
 pub(crate) use formula::{BinOp, Expr};
 pub use interop::{
@@ -475,6 +477,14 @@ pub struct Sheet {
     pub chart: Option<SheetChart>,
     /// Drawings and local image attachments anchored to worksheet cells.
     pub objects: Vec<SheetObject>,
+    /// Non-destructive column AutoFilter state.
+    pub auto_filter: AutoFilterState,
+    /// Row indexes hidden by AutoFilter.
+    pub hidden_rows: BTreeSet<u32>,
+    /// Named ranges keyed by uppercase identifier.
+    pub named_ranges: BTreeMap<String, CellRange>,
+    /// Cell data validation rules.
+    pub validations: Vec<SheetValidation>,
 }
 
 impl Sheet {
@@ -491,6 +501,10 @@ impl Sheet {
             row_heights: BTreeMap::new(),
             chart: None,
             objects: Vec::new(),
+            auto_filter: AutoFilterState::default(),
+            hidden_rows: BTreeSet::new(),
+            named_ranges: BTreeMap::new(),
+            validations: Vec::new(),
         }
     }
 
@@ -804,6 +818,7 @@ impl DependencyGraph {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationCriteria {
     List(Vec<String>),
+    RangeList(CellRange),
     WholeNumberBetween(i64, i64),
     DecimalBetween(f64, f64),
     TextLengthBetween(usize, usize),
@@ -845,6 +860,7 @@ impl DataValidationRule {
                     Err(self.error_message.clone())
                 }
             }
+            ValidationCriteria::RangeList(_) => Err(self.error_message.clone()),
             ValidationCriteria::WholeNumberBetween(min, max) => {
                 if let Ok(n) = trimmed.parse::<i64>() {
                     if n >= *min && n <= *max {
@@ -1382,6 +1398,66 @@ impl Sheet {
             cols = cols.max(object.anchor.col.saturating_add(1));
         }
         SheetDimensions::new(rows, cols)
+    }
+
+    /// Creates or updates a named range on this worksheet.
+    pub fn set_named_range(&mut self, name: &str, range: CellRange) -> Result<(), String> {
+        let trimmed = name.trim();
+        if !data_tools::valid_named_range_name(trimmed) {
+            return Err(format!("invalid named range {name:?}"));
+        }
+        self.named_ranges
+            .insert(trimmed.to_ascii_uppercase(), range);
+        Ok(())
+    }
+
+    /// Removes a named range by name (case-insensitive).
+    pub fn remove_named_range(&mut self, name: &str) -> bool {
+        self.named_ranges
+            .remove(&name.trim().to_ascii_uppercase())
+            .is_some()
+    }
+
+    /// Resolves a named range by name (case-insensitive).
+    pub fn resolve_named_range(&self, name: &str) -> Option<CellRange> {
+        self.named_ranges
+            .get(&name.trim().to_ascii_uppercase())
+            .copied()
+    }
+
+    /// Attaches or replaces a data validation rule for `range`.
+    pub fn set_validation(&mut self, range: CellRange, rule: DataValidationRule) {
+        self.validations.retain(|existing| existing.range != range);
+        self.validations.push(SheetValidation { range, rule });
+    }
+
+    /// Clears any data validation rule whose target range equals `range` or contains `range.start`.
+    pub fn clear_validation(&mut self, range: CellRange) -> bool {
+        let before = self.validations.len();
+        self.validations
+            .retain(|existing| existing.range != range && !existing.range.contains(range.start));
+        self.validations.len() != before
+    }
+
+    /// Returns the most recently added validation rule covering `cell`, if any.
+    pub fn validation_for_cell(&self, cell: CellRef) -> Option<&SheetValidation> {
+        self.validations
+            .iter()
+            .rev()
+            .find(|v| v.range.contains(cell))
+    }
+
+    /// Validates candidate raw input for `cell` against any matching validation rule.
+    pub fn validate_cell_input(
+        &self,
+        cell: CellRef,
+        input: &str,
+        values: &HashMap<CellRef, Value>,
+    ) -> Result<(), String> {
+        let Some(validation) = self.validation_for_cell(cell) else {
+            return Ok(());
+        };
+        data_tools::validate_input_against_rule(&validation.rule, self, values, input)
     }
 }
 

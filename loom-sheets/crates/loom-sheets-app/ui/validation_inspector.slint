@@ -1,0 +1,90 @@
+import { LoomButton, LoomTextField, LoomToggle } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { SheetHeading, SheetChoiceRow } from "inspector_rows.slint";
+import { DataToolsState } from "data_tools.slint";
+
+export component DataValidationSection inherits VerticalLayout {
+    spacing: Theme.tokens.space.md;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        SheetHeading { title: "DATA VALIDATION"; horizontal-stretch: 1; }
+        LoomButton {
+            label: DataToolsState.val-expanded ? "Hide" : "Configure";
+            clicked => { DataToolsState.val-expanded = !DataToolsState.val-expanded; }
+        }
+    }
+
+    if DataToolsState.val-expanded || DataToolsState.val-kind != 0 || DataToolsState.val-feedback != "" : VerticalLayout {
+        spacing: Theme.tokens.space.md;
+
+        SheetChoiceRow {
+            choices: ["None", "List", "Range"];
+            current: DataToolsState.val-kind < 3 ? DataToolsState.val-kind : -1;
+            chosen(idx) => { DataToolsState.val-kind = idx; }
+        }
+        SheetChoiceRow {
+            choices: ["Whole", "Decimal", "Len"];
+            current: DataToolsState.val-kind >= 3 ? DataToolsState.val-kind - 3 : -1;
+            chosen(idx) => { DataToolsState.val-kind = idx + 3; }
+        }
+
+        if DataToolsState.val-kind == 1 || DataToolsState.val-kind == 2 : LoomTextField {
+            label: DataToolsState.val-kind == 1 ? "List Items" : "Source Range";
+            placeholder: DataToolsState.val-kind == 1 ? "Red, Green, Blue" : "E1:E5";
+            value <=> DataToolsState.val-list-or-range;
+            edited(v) => { DataToolsState.val-list-or-range = v; }
+        }
+
+        if DataToolsState.val-kind >= 3 : HorizontalLayout {
+            spacing: 8px;
+            LoomTextField {
+                label: "Min";
+                field-min-width: 80px;
+                value <=> DataToolsState.val-min;
+                edited(v) => { DataToolsState.val-min = v; }
+            }
+            LoomTextField {
+                label: "Max";
+                field-min-width: 80px;
+                value <=> DataToolsState.val-max;
+                edited(v) => { DataToolsState.val-max = v; }
+            }
+        }
+
+        if DataToolsState.val-kind > 0 : VerticalLayout {
+            spacing: 6px;
+            LoomToggle {
+                label: "Allow blank";
+                checked <=> DataToolsState.val-allow-blank;
+                toggled(c) => { DataToolsState.val-allow-blank = c; }
+            }
+            LoomTextField {
+                label: "Error Message";
+                placeholder: "Invalid value";
+                value <=> DataToolsState.val-error-message;
+                edited(v) => { DataToolsState.val-error-message = v; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            LoomButton {
+                label: "Apply Rule";
+                variant: "primary";
+                clicked => { DataToolsState.apply-validation(); }
+            }
+            LoomButton {
+                label: "Clear Rule";
+                clicked => { DataToolsState.clear-validation(); }
+            }
+        }
+
+        if DataToolsState.val-feedback != "" : Text {
+            text: DataToolsState.val-feedback;
+            font-size: Theme.type.caption;
+            color: DataToolsState.val-feedback-error ? Theme.palette().danger : Theme.palette().ink-secondary;
+            wrap: word-wrap;
+        }
+    }
+}

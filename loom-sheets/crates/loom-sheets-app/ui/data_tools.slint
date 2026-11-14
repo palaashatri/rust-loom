@@ -1,0 +1,375 @@
+import { LoomButton, LoomTextField, LoomToggle, LoomPanel, LoomIconButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export struct FilterValueItem {
+    value: string,
+    checked: bool,
+}
+
+export struct NamedRangeItem {
+    name: string,
+    range: string,
+}
+
+export global DataToolsState {
+    // Find & Replace
+    in-out property <bool> find-open: false;
+    in-out property <bool> find-replace-mode: false;
+    in-out property <string> find-query: "";
+    in-out property <string> replace-text: "";
+    in-out property <bool> find-match-case: false;
+    in-out property <bool> find-whole-cell: false;
+    in-out property <bool> find-workbook-scope: false;
+    in-out property <string> find-status: "";
+    callback find-next();
+    callback find-prev();
+    callback replace-current();
+    callback replace-all();
+    callback close-find();
+
+    // AutoFilter
+    in-out property <bool> autofilter-enabled: false;
+    in-out property <[bool]> col-filtered: [];
+    in-out property <bool> filter-popup-open: false;
+    in-out property <int> filter-col-index: 0;
+    in-out property <string> filter-col-name: "";
+    in-out property <string> filter-search: "";
+    in-out property <[FilterValueItem]> filter-values: [];
+    callback open-column-filter(int);
+    callback toggle-filter-value(int);
+    callback select-all-filter-values(bool);
+    callback apply-column-filter();
+    callback clear-column-filter();
+    callback close-column-filter();
+
+    // Named Ranges
+    in-out property <bool> named-ranges-open: false;
+    in-out property <[NamedRangeItem]> named-ranges: [];
+    in-out property <string> new-range-name: "";
+    in-out property <string> new-range-ref: "";
+    in-out property <string> named-range-error: "";
+    callback save-named-range(string, string);
+    callback delete-named-range(string);
+    callback goto-named-range(string);
+    callback close-named-ranges();
+
+    // Cell Data Validation
+    in-out property <bool> val-expanded: false;
+    in-out property <int> val-kind: 0;
+    in-out property <string> val-list-or-range: "";
+    in-out property <string> val-min: "";
+    in-out property <string> val-max: "";
+    in-out property <bool> val-allow-blank: true;
+    in-out property <string> val-error-message: "Invalid value";
+    in-out property <string> val-feedback: "";
+    in-out property <bool> val-feedback-error: false;
+    callback apply-validation();
+    callback clear-validation();
+    callback toggle-auto-filter();
+    callback open-filter-column();
+    callback clear-all-filters();
+    callback open-named-ranges();
+}
+
+export component DataToolsOverlay inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    // 1. Find & Replace floating bar
+    if DataToolsState.find-open : Rectangle {
+        x: parent.width - self.width - 24px;
+        y: 96px;
+        width: 420px;
+        height: find-col.preferred-height + 24px;
+        background: Theme.palette().surface;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        border-radius: Theme.tokens.metrics.radius-large;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: #00000028;
+
+        TouchArea { }
+
+        FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    DataToolsState.close-find();
+                    return accept;
+                }
+                return reject;
+            }
+            find-col := VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: DataToolsState.find-replace-mode ? "Find & Replace" : "Find";
+                        font-size: Theme.type.body;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    LoomButton {
+                        label: DataToolsState.find-replace-mode ? "Find Only" : "Replace...";
+                        clicked => { DataToolsState.find-replace-mode = !DataToolsState.find-replace-mode; }
+                    }
+                    LoomButton {
+                        label: "Close";
+                        clicked => { DataToolsState.close-find(); }
+                    }
+                }
+
+                LoomTextField {
+                    label: "Find";
+                    placeholder: "Search text or value...";
+                    value <=> DataToolsState.find-query;
+                    edited(v) => { DataToolsState.find-query = v; }
+                    accepted(_) => { DataToolsState.find-next(); }
+                    cancelled => { DataToolsState.close-find(); }
+                }
+
+                if DataToolsState.find-replace-mode : LoomTextField {
+                    label: "Replace";
+                    placeholder: "Replacement text...";
+                    value <=> DataToolsState.replace-text;
+                    edited(v) => { DataToolsState.replace-text = v; }
+                    accepted(_) => { DataToolsState.replace-current(); }
+                    cancelled => { DataToolsState.close-find(); }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LoomToggle {
+                        label: "Match case";
+                        checked <=> DataToolsState.find-match-case;
+                        toggled(c) => { DataToolsState.find-match-case = c; }
+                    }
+                    LoomToggle {
+                        label: "Whole cell";
+                        checked <=> DataToolsState.find-whole-cell;
+                        toggled(c) => { DataToolsState.find-whole-cell = c; }
+                    }
+                    LoomToggle {
+                        label: "Workbook";
+                        checked <=> DataToolsState.find-workbook-scope;
+                        toggled(c) => { DataToolsState.find-workbook-scope = c; }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: DataToolsState.find-status;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    LoomButton { label: "Prev"; clicked => { DataToolsState.find-prev(); } }
+                    LoomButton { label: "Next"; variant: "primary"; clicked => { DataToolsState.find-next(); } }
+                }
+
+                if DataToolsState.find-replace-mode : HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle { horizontal-stretch: 1; }
+                    LoomButton { label: "Replace"; clicked => { DataToolsState.replace-current(); } }
+                    LoomButton { label: "Replace All"; variant: "primary"; clicked => { DataToolsState.replace-all(); } }
+                }
+            }
+        }
+    }
+
+    // 2. Column AutoFilter-by-value modal
+    if DataToolsState.filter-popup-open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000044;
+        TouchArea { clicked => { DataToolsState.close-column-filter(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 340px;
+            height: 400px;
+            background: Theme.palette().surface;
+            border-width: 1px;
+            border-color: Theme.palette().border-strong;
+            border-radius: Theme.tokens.metrics.radius-large;
+            TouchArea { }
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    Text {
+                        text: "Filter Column " + DataToolsState.filter-col-name;
+                        font-size: Theme.type.body;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    LoomButton { label: "Close"; clicked => { DataToolsState.close-column-filter(); } }
+                }
+
+                LoomTextField {
+                    label: "Search";
+                    placeholder: "Filter values...";
+                    value <=> DataToolsState.filter-search;
+                    edited(v) => { DataToolsState.filter-search = v; }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    LoomButton { label: "Select All"; clicked => { DataToolsState.select-all-filter-values(true); } }
+                    LoomButton { label: "Clear All"; clicked => { DataToolsState.select-all-filter-values(false); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    LoomButton { label: "Reset Col"; clicked => { DataToolsState.clear-column-filter(); } }
+                }
+
+                Flickable {
+                    vertical-stretch: 1;
+                    viewport-height: filter-list.preferred-height;
+                    filter-list := VerticalLayout {
+                        spacing: 4px;
+                        for item[idx] in DataToolsState.filter-values : Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: item.checked ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                            TouchArea {
+                                clicked => { DataToolsState.toggle-filter-value(idx); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Text {
+                                    text: item.checked ? "[x]" : "[ ]";
+                                    font-size: Theme.type.caption;
+                                    color: item.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: item.value == "" ? "(Blank)" : item.value;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; }
+                    LoomButton { label: "Cancel"; clicked => { DataToolsState.close-column-filter(); } }
+                    LoomButton { label: "Apply"; variant: "primary"; clicked => { DataToolsState.apply-column-filter(); } }
+                }
+            }
+        }
+    }
+
+    // 3. Named Ranges Manager modal
+    if DataToolsState.named-ranges-open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000044;
+        TouchArea { clicked => { DataToolsState.close-named-ranges(); } }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 440px;
+            height: 440px;
+            background: Theme.palette().surface;
+            border-width: 1px;
+            border-color: Theme.palette().border-strong;
+            border-radius: Theme.tokens.metrics.radius-large;
+            TouchArea { }
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    Text {
+                        text: "Named Ranges";
+                        font-size: Theme.type.title;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    LoomButton { label: "Close"; clicked => { DataToolsState.close-named-ranges(); } }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LoomTextField {
+                        label: "Name";
+                        placeholder: "e.g. Sales_Total";
+                        value <=> DataToolsState.new-range-name;
+                        edited(v) => { DataToolsState.new-range-name = v; }
+                    }
+                    LoomTextField {
+                        label: "Range";
+                        placeholder: "e.g. A1:B10";
+                        value <=> DataToolsState.new-range-ref;
+                        edited(v) => { DataToolsState.new-range-ref = v; }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: DataToolsState.named-range-error;
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().danger;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    LoomButton {
+                        label: "Save Range";
+                        variant: "primary";
+                        clicked => { DataToolsState.save-named-range(DataToolsState.new-range-name, DataToolsState.new-range-ref); }
+                    }
+                }
+
+                Flickable {
+                    vertical-stretch: 1;
+                    viewport-height: nr-list.preferred-height;
+                    nr-list := VerticalLayout {
+                        spacing: 6px;
+                        for nr in DataToolsState.named-ranges : Rectangle {
+                            height: 36px;
+                            border-radius: 6px;
+                            background: Theme.palette().surface-sunken;
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Text {
+                                    text: nr.name + "  ->  " + nr.range;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                LoomButton { label: "Go To"; clicked => { DataToolsState.goto-named-range(nr.name); } }
+                                LoomButton { label: "Delete"; variant: "danger"; clicked => { DataToolsState.delete-named-range(nr.name); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -2,6 +2,8 @@ import { TemplateChooserModal } from "template_chooser.slint";
 import { WelcomeGuideModal } from "welcome_guide.slint";
 import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
 import { SaveChangesDialog } from "save_changes_dialog.slint";
+import { DataToolsOverlay, DataToolsState } from "data_tools.slint";
+export { DataToolsState }
 import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetMenuChrome } from "menu_chrome.slint";
 export { SheetToolbarLayout } from "toolbar_layout.slint";
@@ -736,8 +738,6 @@ export component SheetsApp inherits Window {
     }
 
     save-changes-dialog := SaveChangesDialog {
-        width: root.width;
-        height: root.height;
         open: root.save-changes-open;
         document-name: root.save-changes-document;
         close-mode: root.save-changes-close-mode;
@@ -747,8 +747,6 @@ export component SheetsApp inherits Window {
         save => { root.save-changes-save(); }
     }
     xlsx-import-warning := XlsxImportWarningDialog {
-        width: root.width;
-        height: root.height;
         open: root.xlsx-import-warning-open;
         warning-message: root.xlsx-import-warning-message;
         save-changes-open: root.save-changes-open;
@@ -769,8 +767,6 @@ export component SheetsApp inherits Window {
     }
 
     if root.welcome-open : WelcomeGuideModal {
-        width: 100%;
-        height: 100%;
         open: true;
         step <=> root.welcome-step;
         mod-key: root.mod-key;
@@ -799,6 +795,7 @@ export component SheetsApp inherits Window {
             root.palette-close();
         }
     }
+    DataToolsOverlay { }
     close-drain-shield := CloseDrainShield {
         active: root.close-draining && !root.save-changes-open;
         window-width: root.width;

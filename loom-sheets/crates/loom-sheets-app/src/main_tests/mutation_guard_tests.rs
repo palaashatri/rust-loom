@@ -128,6 +128,45 @@ fn table() -> Vec<(&'static str, Action)> {
         a("wrap_toggled", |app| {
             app.global::<CellInk>().invoke_wrap_toggled()
         }),
+        a("apply_column_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_apply_column_filter()
+        }),
+        a("apply_validation", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_apply_validation()
+        }),
+        a("clear_all_filters", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_all_filters()
+        }),
+        a("clear_column_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_column_filter()
+        }),
+        a("clear_validation", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_validation()
+        }),
+        a("delete_named_range", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_delete_named_range("Amounts".into())
+        }),
+        a("replace_all", |app| {
+            app.global::<crate::DataToolsState>().invoke_replace_all()
+        }),
+        a("replace_current", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_replace_current()
+        }),
+        a("save_named_range", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_save_named_range("Amounts".into(), "A1:A2".into())
+        }),
+        a("toggle_auto_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_toggle_auto_filter()
+        }),
     ]
 }
 

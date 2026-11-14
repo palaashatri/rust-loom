@@ -28,6 +28,13 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "edit.copy",
     "edit.paste",
     "edit.select_all",
+    "edit.find",
+    "edit.replace",
+    "data.toggle_filter",
+    "data.filter_column",
+    "data.clear_filter",
+    "data.named_ranges",
+    "data.validation",
     "app.palette",
     "help.shortcuts",
     "help.welcome",
@@ -100,7 +107,14 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
                 MenuShortcut::primary_shift("E"),
             ),
         ],
-        vec![],
+        vec![
+            MenuItem::action_with_shortcut("edit.find", "Find...", MenuShortcut::primary("F")),
+            MenuItem::action_with_shortcut(
+                "edit.replace",
+                "Find & Replace...",
+                MenuShortcut::primary("H"),
+            ),
+        ],
         [
             vec![
                 CommandState::check("view.inspector", "Format Inspector", false)
@@ -112,6 +126,17 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
         ]
         .concat(),
         vec![
+            Menu::new(
+                "Data",
+                vec![
+                    MenuItem::action("data.toggle_filter", "Toggle AutoFilter"),
+                    MenuItem::action("data.filter_column", "Filter Column..."),
+                    MenuItem::action("data.clear_filter", "Clear All Filters"),
+                    MenuItem::Separator,
+                    MenuItem::action("data.named_ranges", "Named Ranges..."),
+                    MenuItem::action("data.validation", "Data Validation..."),
+                ],
+            ),
             Menu::new(
                 "Insert",
                 vec![

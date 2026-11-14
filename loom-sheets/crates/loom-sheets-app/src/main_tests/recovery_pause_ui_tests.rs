@@ -83,6 +83,7 @@ impl Session {
             .expect("versioned recovery directory");
         let menu_service = std::sync::Arc::new(NativeMenuBar::new());
         register_cell_edit_action(&app, &state, &menu_service);
+        crate::data_tools::register_data_tools_actions(&app, &state, &menu_service);
         crate::recovery_pause::wire(&app, &state);
         Self {
             app,

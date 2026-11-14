@@ -8,6 +8,7 @@ import { SheetInspectorActions, SheetObjectGeometry, SheetObjectGeometryFields }
 export { SheetInspectorActions, SheetObjectGeometry } from "object_inspector.slint";
 import { CellInk } from "grid_pointer.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
+import { DataValidationSection } from "validation_inspector.slint";
 
 export component SheetInspector inherits LoomPanel {
     in property <string> selection-range: "A1";
@@ -382,6 +383,7 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetHeading { title: "Alignment"; }
                     SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
+                    DataValidationSection { }
                     SheetStepperRow {
                         label: "Row height";
                         field-label: "Selected row height";
