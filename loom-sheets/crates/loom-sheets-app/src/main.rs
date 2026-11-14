@@ -51,6 +51,8 @@ mod ink_actions;
 mod inspector_search;
 mod pivot_builder;
 mod rich_format_actions;
+mod sheet_tables;
+mod start_hub;
 #[cfg(test)]
 use inspector_search::inspector_section_visibility;
 mod paste_formats;
@@ -991,6 +993,7 @@ fn project_sheet_inner_with_preview(
     scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);
     data_tools::sync_data_tools_state(app, sheet);
     rich_format_actions::publish_viewport(app, sheet, vals, viewport, selection, zoom);
+    sheet_tables::project_tables(app, sheet, viewport, selection, zoom);
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
@@ -2505,6 +2508,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     wire_appearance_menu_sync(&menu_service, &state);
 
     register_sheet_actions(&app, &state, &menu_service);
+    start_hub::wire(&app, &state, &menu_service);
+    sheet_tables::wire(&app, &state, &menu_service);
     welcome_guide::wire(&app, &state, &menu_service);
     chart_actions::register_chart_actions(&app, &state);
     chart_actions::register_chart_inspector_actions(&app, &state, &menu_service);
@@ -2523,7 +2528,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         sync_chart_to_app(&app, &state.current.borrow());
     }
     if startup_open.is_none() && !session.recovered_unsaved && !args.objects && !args.chart {
-        app.set_template_chooser_open(true);
+        if args.template_chooser {
+            app.set_template_chooser_open(true);
+        } else {
+            start_hub::open_hub(&app);
+        }
         state
             .pending_first_run_welcome
             .set(welcome_guide::should_show_on_first_run());

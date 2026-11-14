@@ -3,8 +3,10 @@ import { ConditionalFormatModal } from "conditional_format_modal.slint";
 import { CellRichFormat } from "rich_format.slint";
 import { PivotBuilderModal, PivotBuilderState, PivotFieldItem, PivotPreviewRow } from "pivot_builder_modal.slint";
 import { PrintPreviewModal, PrintPreviewState } from "print_preview_modal.slint";
+import { StartHubModal, StartHubState, StartHubRecentItem } from "start_hub.slint";
 
 export { PivotBuilderState, PivotFieldItem, PivotPreviewRow }
+export { StartHubState, StartHubRecentItem } from "start_hub.slint";
 
 export component SheetModals inherits Rectangle {
     in property <bool> welcome-open: false;
@@ -41,5 +43,10 @@ export component SheetModals inherits Rectangle {
         width: 100%;
         height: 100%;
         open: true;
+    }
+
+    if StartHubState.open : StartHubModal {
+        width: 100%;
+        height: 100%;
     }
 }

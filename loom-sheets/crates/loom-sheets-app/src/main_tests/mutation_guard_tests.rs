@@ -18,6 +18,7 @@ fn wire_everything(session: &Session) {
     object_actions::register_object_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);
     crate::ink_actions::wire(app, state, &menu_service);
+    crate::sheet_tables::wire(app, state, &menu_service);
 }
 
 fn fingerprint(state: &GuiState) -> String {
@@ -244,6 +245,29 @@ fn table() -> Vec<(&'static str, Action)> {
         a("paste_values_only", |app| {
             app.global::<crate::CellRichFormat>()
                 .invoke_paste_values_only()
+        }),
+        a("insert_table", |app| {
+            app.global::<crate::SheetTableState>().invoke_insert_table()
+        }),
+        a("rename_active_table", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_rename_active_table("Sales".into())
+        }),
+        a("set_active_table_style", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_set_active_table_style(1)
+        }),
+        a("toggle_active_table_title", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_toggle_active_table_title()
+        }),
+        a("toggle_active_table_alternating", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_toggle_active_table_alternating()
+        }),
+        a("delete_active_table", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_delete_active_table()
         }),
     ]
 }

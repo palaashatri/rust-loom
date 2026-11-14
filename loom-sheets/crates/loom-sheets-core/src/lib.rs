@@ -38,6 +38,7 @@ pub mod persistence;
 pub mod pivot_builder;
 pub mod refs;
 pub mod row_order;
+pub mod sheet_tables;
 pub mod style;
 mod style_fit;
 pub mod workbook;
@@ -64,6 +65,7 @@ pub use pivot_builder::{
     plan_pivot_updates, PivotCell, PivotFieldConfig, PivotTableResult,
 };
 pub use row_order::RowOrder;
+pub use sheet_tables::{SheetTable, TableStylePreset};
 pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
 pub use xlsx::{
     export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
@@ -501,6 +503,8 @@ pub struct Sheet {
     pub merged_ranges: Vec<CellRange>,
     /// Conditional formatting rules evaluated against cell display values.
     pub conditional_rules: Vec<CellConditionalRule>,
+    /// Independent named canvas tables on this worksheet.
+    pub tables: Vec<SheetTable>,
 }
 
 impl Sheet {
@@ -523,6 +527,7 @@ impl Sheet {
             validations: Vec::new(),
             merged_ranges: Vec::new(),
             conditional_rules: Vec::new(),
+            tables: Vec::new(),
         }
     }
 

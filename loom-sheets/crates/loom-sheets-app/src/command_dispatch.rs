@@ -22,6 +22,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
             .window()
             .dispatch_event(slint::platform::WindowEvent::CloseRequested),
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
+        "file.start_hub" | "sheets.start-hub" => crate::start_hub::open_hub(app),
         "file.new_template" | "sheets.new-template" => {
             app.set_template_chooser_open(true);
             app.invoke_focus_template_chooser();
@@ -112,6 +113,21 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.delete_row" => app.invoke_delete_row(),
         "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),
         "table.delete_col" => app.invoke_delete_col(),
+        "table.insert_table" => app.global::<crate::SheetTableState>().invoke_insert_table(),
+        "table.toggle_title" => app
+            .global::<crate::SheetTableState>()
+            .invoke_toggle_active_table_title(),
+        "table.toggle_alternating_rows" => app
+            .global::<crate::SheetTableState>()
+            .invoke_toggle_active_table_alternating(),
+        "table.cycle_style" => {
+            let ts = app.global::<crate::SheetTableState>();
+            let next = (ts.get_active_style() + 1) % 5;
+            ts.invoke_set_active_table_style(next);
+        }
+        "table.delete_table" => app
+            .global::<crate::SheetTableState>()
+            .invoke_delete_active_table(),
         "table.sort_asc" | "sheets.sort-asc" => app.invoke_sort_ascending(),
         "table.sort_desc" | "sheets.sort-desc" => app.invoke_sort_descending(),
         "table.freeze_header" | "sheets.freeze-header" => app.invoke_freeze_panes(),
@@ -243,6 +259,7 @@ const fn sc(mac: &'static str, other: &'static str) -> &'static str {
 pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
     match id {
         "file.new" | "sheets.new" => sc("Cmd+N", "Ctrl+N"),
+        "file.start_hub" | "sheets.start-hub" => sc("Cmd+Shift+O", "Ctrl+Shift+O"),
         "file.new_template" | "sheets.new-template" => sc("Cmd+Shift+N", "Ctrl+Shift+N"),
         "file.open" | "sheets.open" => sc("Cmd+O", "Ctrl+O"),
         "file.save" | "sheets.save" => sc("Cmd+S", "Ctrl+S"),
@@ -285,6 +302,11 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.delete_row" => sc("Cmd+Alt+W", "Ctrl+Alt+W"),
         "table.add_col" | "sheets.add-col" => sc("Cmd+Alt+K", "Ctrl+Alt+K"),
         "table.delete_col" => sc("Cmd+Alt+L", "Ctrl+Alt+L"),
+        "table.insert_table" => sc("Cmd+Alt+T", "Ctrl+Alt+T"),
+        "table.cycle_style" => sc("Cmd+Alt+Y", "Ctrl+Alt+Y"),
+        "table.toggle_title" => sc("Cmd+Alt+U", "Ctrl+Alt+U"),
+        "table.toggle_alternating_rows" => sc("Cmd+Alt+B", "Ctrl+Alt+B"),
+        "table.delete_table" => sc("Cmd+Alt+Backspace", "Ctrl+Alt+Backspace"),
         "table.sort_asc" | "sheets.sort-asc" | "sheets.organize" => sc("Cmd+Alt+S", "Ctrl+Alt+S"),
         "table.sort_desc" | "sheets.sort-desc" => sc("Cmd+Alt+D", "Ctrl+Alt+D"),
         "table.freeze_header" | "sheets.freeze-header" => sc("Cmd+Alt+F", "Ctrl+Alt+F"),
