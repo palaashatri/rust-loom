@@ -54,7 +54,7 @@ fn set_header_row(sheet: &mut Sheet, refs: &[&str], fill: FillColor) {
     style_cells(sheet, refs, |s| {
         s.bold = true;
         s.fill = fill;
-        s.border = true;
+        s.borders = loom_sheets_core::style::CellBorders::ALL;
     });
 }
 
@@ -62,7 +62,7 @@ fn set_total_row(sheet: &mut Sheet, refs: &[&str]) {
     style_cells(sheet, refs, |s| {
         s.bold = true;
         s.fill = FillColor::Gray;
-        s.border = true;
+        s.borders = loom_sheets_core::style::CellBorders::ALL;
     });
 }
 
@@ -1390,6 +1390,10 @@ fn lab_data_and_chart() -> Sheet {
         val_col: 3,
         start_row: 1,
         end_row: Some(6),
+        series_name: "Mean Velocity".to_string(),
+        show_legend: true,
+        x_axis_label: "Time (s)".to_string(),
+        y_axis_label: "Velocity (m/s)".to_string(),
     });
     sheet
 }

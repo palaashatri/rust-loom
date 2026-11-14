@@ -148,10 +148,19 @@ fn icon_button(app: &SheetsApp, label: &str) -> ElementHandle {
     matches.into_iter().next().expect("button count checked")
 }
 
-fn scroll_cell_inspector_to_bottom(app: &SheetsApp) {
-    // The normal-size window clips the lower controls until the inspector is
+fn scroll_cell_inspector_by(app: &SheetsApp, delta_y: f32) {
+    // The normal-size window clips lower controls until the inspector is
     // scrolled. Send a wheel event over a visible button, as a user would.
-    icon_button(app, "Toggle bold formatting (Cell inspector)").scroll(0.0, -1_000.0);
+    let anchor =
+        if ElementHandle::find_by_accessible_label(app, "Toggle bold formatting (Cell inspector)")
+            .next()
+            .is_some()
+        {
+            "Toggle bold formatting (Cell inspector)"
+        } else {
+            "Decrease displayed decimal places"
+        };
+    icon_button(app, anchor).scroll(0.0, delta_y);
     let _ = snapshot_component(app, 1280.0, 720.0, 1.0)
         .expect("render the scrolled Cell inspector accessibility tree");
 }
@@ -201,8 +210,10 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
     cell_top_expected.extend_from_slice(&CELL_ACTIONS[..5]);
     check_icon_button_tree(&app, &cell_top_expected, &mut seen_labels);
 
-    scroll_cell_inspector_to_bottom(&app);
-    check_icon_button_tree(&app, &CELL_ACTIONS[5..], &mut seen_labels);
+    scroll_cell_inspector_by(&app, -240.0);
+    check_icon_button_tree(&app, &CELL_ACTIONS[5..7], &mut seen_labels);
+    scroll_cell_inspector_by(&app, -1_000.0);
+    check_icon_button_tree(&app, &CELL_ACTIONS[7..], &mut seen_labels);
 
     app.set_inspector_tab(0);
     let _ = snapshot_component(&app, 1280.0, 720.0, 1.0)
@@ -302,7 +313,7 @@ fn inspector_steppers_and_chart_close_support_their_accessible_default_action() 
         assert_eq!(events.borrow().last(), Some(&expected));
     }
 
-    scroll_cell_inspector_to_bottom(&app);
+    scroll_cell_inspector_by(&app, -240.0);
     for (label, expected) in [
         (
             "Decrease displayed decimal places",
@@ -312,6 +323,13 @@ fn inspector_steppers_and_chart_close_support_their_accessible_default_action() 
             "Increase displayed decimal places",
             IconActionEvent::Decimals(1),
         ),
+    ] {
+        icon_button(&app, label).invoke_accessible_default_action();
+        assert_eq!(events.borrow().last(), Some(&expected));
+    }
+
+    scroll_cell_inspector_by(&app, -1_000.0);
+    for (label, expected) in [
         (
             "Decrease selected row height",
             IconActionEvent::RowHeight(-4),

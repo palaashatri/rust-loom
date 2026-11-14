@@ -358,7 +358,7 @@ fn draw_table_band(
             if let Some(fill_rgb) = fill_color_rgb(style.fill) {
                 doc.draw_rect(page, cell_x, y_bot, w, h, PathStyle::filled(fill_rgb));
             }
-            if style.border {
+            if style.borders != crate::style::CellBorders::NONE {
                 doc.draw_rect(page, cell_x, y_bot, w, h, border_stroke);
             } else if include_gridlines {
                 doc.draw_rect(page, cell_x, y_bot, w, h, grid_stroke);
