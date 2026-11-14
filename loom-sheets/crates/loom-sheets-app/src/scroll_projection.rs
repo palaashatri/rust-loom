@@ -153,11 +153,7 @@ fn scrolled_viewport(
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
+    let scaled_rows = crate::scaled_row_heights(sheet, zoom);
     let window_at = |dimensions| {
         viewport_from_dimensions(
             (

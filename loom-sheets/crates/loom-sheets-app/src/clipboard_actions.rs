@@ -114,6 +114,30 @@ fn external_rows(
         .collect()
 }
 
+/// Evaluated values for Paste Values Only, preserving evaluated empty strings.
+fn evaluated_rows(
+    sheet: &Sheet,
+    values: &std::collections::HashMap<CellRef, loom_sheets_core::Value>,
+    sel: GridSelection,
+) -> Vec<Vec<String>> {
+    let range = sel.range();
+    (range.start.row..=range.end.row)
+        .map(|row| {
+            (range.start.col..=range.end.col)
+                .map(|col| {
+                    let cell = CellRef { row, col };
+                    let raw = sheet.raw(cell).unwrap_or_default().to_string();
+                    if raw.starts_with('=') || raw.is_empty() {
+                        values.get(&cell).map(|v| v.display()).unwrap_or(raw)
+                    } else {
+                        raw
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn external_cells_data(
     sheet: &Sheet,
     values: &std::collections::HashMap<CellRef, loom_sheets_core::Value>,
@@ -183,8 +207,9 @@ fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     let values = evaluate_current(state);
     let data = copy_selection_with_values(&state.current.borrow(), Some(&values), sel);
     let count = data.iter().map(Vec::len).sum();
-    let evaluated = external_rows(&state.current.borrow(), &values, sel);
-    let text = encode_tsv(&evaluated);
+    let external = external_rows(&state.current.borrow(), &values, sel);
+    let evaluated = evaluated_rows(&state.current.borrow(), &values, sel);
+    let text = encode_tsv(&external);
     let cell_data = external_cells_data(&state.current.borrow(), &values, sel);
     let table = loom_clipboard::sheets_range_to_table(&cell_data);
     let mut clip_data = loom_clipboard::ClipboardData::from_table(&table);
@@ -450,7 +475,7 @@ pub(crate) fn paste_formats_only(
     let before = Box::new(state.current.borrow().clone());
     {
         let mut sheet = state.current.borrow_mut();
-        paste_formats::apply(&mut sheet, range.start, &formats, fill_over);
+        paste_formats::apply(&mut sheet, sel.focus, &formats, fill_over);
     }
     let after = Box::new(state.current.borrow().clone());
     crate::push_history(
@@ -587,5 +612,24 @@ mod tests {
         assert_eq!(cells[0][0], "=C4+$B$1");
         assert_eq!(cells[0][1], "text");
         assert_eq!(cells[0][2], "7");
+    }
+
+    #[test]
+    fn evaluated_rows_preserve_evaluated_empty_strings() {
+        let mut sheet = Sheet::new("Eval");
+        let a1 = CellRef::parse("A1").unwrap();
+        let b1 = CellRef::parse("B1").unwrap();
+        sheet.set_str("A1", "0");
+        sheet.set_str("B1", "=IF(A1=0,\"\",A1)");
+        let mut values = std::collections::HashMap::new();
+        values.insert(a1, loom_sheets_core::Value::Number(0.0));
+        values.insert(b1, loom_sheets_core::Value::Text(String::new()));
+        let sel = GridSelection::new(b1, b1);
+
+        assert_eq!(
+            external_rows(&sheet, &values, sel),
+            rows(&[&["=IF(A1=0,\"\",A1)"]])
+        );
+        assert_eq!(evaluated_rows(&sheet, &values, sel), rows(&[&[""]]));
     }
 }

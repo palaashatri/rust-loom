@@ -284,12 +284,13 @@ fn project_sheet_grid_with_values(
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
             };
+            let formatted_val = style.format_value(&raw_val);
             let display_val = style.format_value_fit(
                 &raw_val,
                 sheet.col_width(col),
                 formatting::effective_font_size(style) as f32,
             );
-            let effective = sheet.effective_style(cell, &display_val);
+            let effective = sheet.effective_style(cell, &formatted_val);
             cell_labels.push(accessible_cell_label(cell, sheet.raw(cell), &raw_val));
             cells.push(display_val);
             cell_alignments.push(align_code);
@@ -359,10 +360,23 @@ fn dimension_size(
     default_size: f32,
     custom: &std::collections::BTreeMap<u32, f32>,
 ) -> f32 {
-    valid_dimension(
-        custom.get(&index).copied().unwrap_or(default_size),
-        default_size,
-    )
+    match custom.get(&index).copied() {
+        Some(size) if size.is_finite() && size >= 0.0 => size,
+        _ => default_size,
+    }
+}
+
+pub(crate) fn scaled_row_heights(sheet: &Sheet, zoom: f32) -> std::collections::BTreeMap<u32, f32> {
+    let mut heights: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .filter(|(_, &height)| height.is_finite() && height > 0.0)
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
+    for &row in &sheet.hidden_rows {
+        heights.insert(row, 0.0);
+    }
+    heights
 }
 
 pub(crate) fn dimension_extent(
@@ -372,7 +386,7 @@ pub(crate) fn dimension_extent(
 ) -> f32 {
     let mut extent = count as f32 * default_size;
     for (&index, &size) in custom {
-        if index < count && size.is_finite() && size > 0.0 {
+        if index < count && size.is_finite() && size >= 0.0 {
             extent += size - default_size;
         }
     }
@@ -386,7 +400,7 @@ pub(crate) fn dimension_offset(
 ) -> f32 {
     let mut offset = first as f32 * default_size;
     for &size in custom.range(..first).map(|(_, size)| size) {
-        if size.is_finite() && size > 0.0 {
+        if size.is_finite() && size >= 0.0 {
             offset += size - default_size;
         }
     }
@@ -416,7 +430,7 @@ fn dimension_index_at_offset(
         if custom_index >= count
             || custom_index < index
             || !custom_size.is_finite()
-            || custom_size <= 0.0
+            || custom_size < 0.0
         {
             continue;
         }
@@ -574,24 +588,14 @@ fn grid_geometry_fit(
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
+    let scaled_rows = scaled_row_heights(sheet, zoom);
     let column_widths: Vec<f32> = (0..viewport.visible_cols)
         .filter_map(|index| viewport.column_at(index))
         .map(|col| dimension_size(col, default_col_width, &scaled_cols))
         .collect();
     let row_heights: Vec<f32> = (0..viewport.visible_rows)
         .filter_map(|index| viewport.row_at(index))
-        .map(|row| {
-            if sheet.hidden_rows.contains(&row) {
-                0.0
-            } else {
-                dimension_size(row, default_row_height, &scaled_rows)
-            }
-        })
+        .map(|row| dimension_size(row, default_row_height, &scaled_rows))
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
@@ -667,11 +671,7 @@ fn viewport_from_app(
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
+    let scaled_rows = scaled_row_heights(sheet, zoom);
     let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
     viewport_from_dimensions(

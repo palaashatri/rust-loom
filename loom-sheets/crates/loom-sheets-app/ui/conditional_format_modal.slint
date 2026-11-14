@@ -17,7 +17,10 @@ export component ConditionalFormatModal inherits Rectangle {
         }
 
     FocusScope {
+        width: 100%;
+        height: 100%;
         enabled: root.open;
+        init => { self.focus(); }
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 CellRichFormat.cf-close();
@@ -25,9 +28,8 @@ export component ConditionalFormatModal inherits Rectangle {
             }
             return reject;
         }
-    }
 
-    LoomPanel {
+        LoomPanel {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         width: min(460px, parent.width - 32px);
@@ -192,6 +194,7 @@ export component ConditionalFormatModal inherits Rectangle {
                     }
                 }
             }
+        }
         }
     }
     }

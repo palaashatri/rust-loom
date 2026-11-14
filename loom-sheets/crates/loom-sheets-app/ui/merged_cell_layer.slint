@@ -3,6 +3,12 @@ import { CellInk, CellRichFormat } from "grid_pointer.slint";
 
 export component MergedCellLayer inherits Rectangle {
     in property <float> zoom-factor: 1.0;
+    in property <bool> editing: false;
+    in property <string> edit-text: "";
+
+    property <color> readable-line: Theme.active-theme == "high-contrast"
+        ? Theme.palette().paper
+        : Theme.palette().paper-line;
 
     for m in CellRichFormat.merged-views : Rectangle {
         x: m.x;
@@ -17,7 +23,7 @@ export component MergedCellLayer inherits Rectangle {
             : m.fill-idx == 4 ? #BFDBFE
             : m.fill-idx == 5 ? #DDD6FE
             : m.fill-idx == 6 ? #E5E7EB
-            : m.in-selection && !m.is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : Theme.palette().paper-line)
+            : m.in-selection && !m.is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : root.readable-line)
             : Theme.palette().paper;
         border-width: m.is-active ? 2px : 1px;
         border-color: m.is-active ? Theme.palette().accent : Theme.palette().paper-line;
@@ -31,7 +37,7 @@ export component MergedCellLayer inherits Rectangle {
             x: 8px;
             width: parent.width - 16px;
             height: parent.height;
-            text: m.text;
+            text: (m.is-active && root.editing) ? root.edit-text : m.text;
             font-family: Theme.document-font-family;
             accessible-role: AccessibleRole.none;
             font-size: m.font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);

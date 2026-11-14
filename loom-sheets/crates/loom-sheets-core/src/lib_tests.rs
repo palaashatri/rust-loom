@@ -1619,3 +1619,18 @@ fn conditional_formatting_effective_style_applies_fill_and_text_color() {
     assert_eq!(miss_style.fill, style::FillColor::None);
     assert_eq!(miss_style.text_color, None);
 }
+
+#[test]
+fn merge_cells_handles_full_sheet_span_sparsely() {
+    let mut sheet = Sheet::new("SparseMerge");
+    let b2 = CellRef::parse("B2").unwrap();
+    let c3 = CellRef::parse("C3").unwrap();
+    sheet.set_str("B2", "kept");
+    sheet.set_str("C3", "discarded");
+
+    let full = CellRange::parse("A1:XFD1048576").unwrap();
+    assert!(sheet.merge_cells(full));
+    assert_eq!(sheet.raw(CellRef::parse("A1").unwrap()), Some("kept"));
+    assert_eq!(sheet.raw(b2), None);
+    assert_eq!(sheet.raw(c3), None);
+}

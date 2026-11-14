@@ -80,6 +80,14 @@ pub(crate) fn publish_viewport(
     rf.set_merged_views(ModelRc::new(VecModel::from(merged_views)));
 }
 
+fn projected_row_height(sheet: &Sheet, row: u32, zoom: f32) -> f32 {
+    if sheet.hidden_rows.contains(&row) {
+        0.0
+    } else {
+        sheet.row_height(row) * zoom
+    }
+}
+
 fn build_merged_views(
     sheet: &Sheet,
     values: &HashMap<CellRef, Value>,
@@ -112,24 +120,28 @@ fn build_merged_views(
             .map(|c| sheet.col_width(c) * zoom)
             .sum();
         let y: f32 = (viewport.first_row..vis_start_row)
-            .map(|r| sheet.row_height(r) * zoom)
+            .map(|r| projected_row_height(sheet, r, zoom))
             .sum();
         let width: f32 = (vis_start_col..=vis_end_col)
             .map(|c| sheet.col_width(c) * zoom)
             .sum();
         let height: f32 = (vis_start_row..=vis_end_row)
-            .map(|r| sheet.row_height(r) * zoom)
+            .map(|r| projected_row_height(sheet, r, zoom))
             .sum();
+        if width <= 0.0 || height <= 0.0 {
+            continue;
+        }
 
         let anchor = range.start;
         let raw_val = cell_value(sheet, values, anchor.row, anchor.col);
         let base_style = sheet.cell_style(anchor);
+        let formatted_val = base_style.format_value(&raw_val);
         let display_val = base_style.format_value_fit(
             &raw_val,
             width / zoom.max(0.1),
             formatting::effective_font_size(base_style) as f32,
         );
-        let effective = sheet.effective_style(anchor, &display_val);
+        let effective = sheet.effective_style(anchor, &formatted_val);
         let numeric = matches!(values.get(&anchor), Some(Value::Number(_)))
             || raw_val.trim().parse::<f64>().is_ok();
         let align_code = match sheet.cell_alignment(anchor) {
@@ -249,6 +261,16 @@ pub(crate) fn merge_selection(
         SheetTransaction::Snapshot { before, after },
     );
     state.redo_stack.borrow_mut().clear();
+    {
+        let sheet = state.current.borrow();
+        let vals = crate::values_for_projection(state);
+        crate::selection_projection::update_selection_range(
+            app,
+            &sheet,
+            &vals,
+            loom_sheets_core::GridSelection::new(range.end, range.start),
+        );
+    }
     apply_sheet(app, state);
     sync_menu_state(menu_service, app, state);
     app.set_status_left(SharedString::from(format!("Merged {}", range.to_a1())));

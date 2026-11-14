@@ -701,21 +701,20 @@ impl Sheet {
             .retain(|existing| !existing.intersects(range));
         let anchor = range.start;
         let mut kept_raw = self.raw(anchor).unwrap_or_default().to_string();
-        for row in range.start.row..=range.end.row {
-            for col in range.start.col..=range.end.col {
-                let cell = CellRef { row, col };
-                if cell == anchor {
-                    continue;
-                }
-                if kept_raw.is_empty() {
-                    if let Some(raw) = self.raw(cell) {
-                        if !raw.is_empty() {
-                            kept_raw = raw.to_string();
-                        }
+        let covered: Vec<CellRef> = self
+            .cells
+            .iter()
+            .filter_map(|(&cell, _)| (cell != anchor && range.contains(cell)).then_some(cell))
+            .collect();
+        for cell in covered {
+            if kept_raw.is_empty() {
+                if let Some(raw) = self.raw(cell) {
+                    if !raw.is_empty() {
+                        kept_raw = raw.to_string();
                     }
                 }
-                self.cells.remove(&cell);
             }
+            self.cells.remove(&cell);
         }
         if !kept_raw.is_empty() && self.raw(anchor) != Some(kept_raw.as_str()) {
             self.set_raw(anchor, &kept_raw);

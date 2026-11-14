@@ -665,8 +665,29 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
     for merge in raw.merges {
         let range =
             CellRange::parse(&merge).ok_or_else(|| format!("invalid merge range {merge:?}"))?;
-        sheet.merge_cells(range);
+        if range.start == range.end {
+            return Err(format!("invalid single-cell merge range {merge:?}"));
+        }
+        if sheet
+            .merged_ranges
+            .iter()
+            .any(|existing| existing.intersects(range))
+        {
+            return Err(format!("overlapping merge range {merge:?}"));
+        }
+        if let Some((&cell, _)) = sheet.cells.iter().find(|(&cell, cell_data)| {
+            cell != range.start && range.contains(cell) && !cell_data.raw.is_empty()
+        }) {
+            return Err(format!(
+                "merge range {merge:?} covers non-empty cell {}",
+                cell.to_a1()
+            ));
+        }
+        sheet.merged_ranges.push(range);
     }
+    sheet
+        .merged_ranges
+        .sort_by_key(|r| (r.start.row, r.start.col, r.end.row, r.end.col));
     for rule in raw.conditional_rules {
         let range = CellRange::parse(&rule.range)
             .ok_or_else(|| format!("invalid conditional range {:?}", rule.range))?;
@@ -1072,5 +1093,17 @@ mod tests {
         assert_eq!(restored.x_axis_label, "Quarter");
         assert_eq!(restored.y_axis_label, "USD");
         assert_eq!(restored.series_name, "Revenue");
+    }
+
+    #[test]
+    fn merge_decode_rejects_non_empty_covered_cells_instead_of_discarding() {
+        let mut sheet = Sheet::new("Merged");
+        sheet.set_str("A1", "head");
+        assert!(sheet.merge_cells(CellRange::parse("A1:B1").unwrap()));
+        // Unrestricted setter writes into covered cell B1 after merge.
+        sheet.set_str("B1", "later");
+        let json = sheet_to_json(&sheet);
+        let err = sheet_from_json(&json).unwrap_err();
+        assert!(err.contains("B1"), "unexpected error: {err}");
     }
 }
