@@ -11,7 +11,7 @@ use loom_sheets_core::{
     CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
     SheetChart, SheetObject,
 };
-use slint::{ComponentHandle, Image, Model, SharedString, VecModel};
+use slint::{ComponentHandle, Model, SharedString, VecModel};
 
 pub(crate) use crate::chart_actions::sync_chart_to_app;
 
@@ -652,9 +652,10 @@ pub(crate) fn register_sheet_actions(
                 };
                 match state.dialogs.open_file(&request) {
                     Ok(Some(path)) => {
-                        if let Err(error) = Image::load_from_path(&path) {
+                        if let Err(reason) = crate::object_images::validate_image_for_insert(&path)
+                        {
                             app.set_status_left(SharedString::from(format!(
-                                "Insert image failed: {error}"
+                                "Insert image failed: {reason}"
                             )));
                             return;
                         }

@@ -1,7 +1,116 @@
-use loom_sheets_core::{CellRef, Sheet, SheetDimensions};
+use loom_sheets_core::{CellRef, Sheet, SheetDimensions, SheetObjectKind};
+use slint::Image;
+
+use crate::{dimension_offset, GridGeometry, SheetObjectView, GRID_ROW_HEIGHT};
 
 pub(crate) const MIN_RENDERED_OBJECT_WIDTH: i32 = 80;
 pub(crate) const MIN_RENDERED_OBJECT_HEIGHT: i32 = 48;
+
+/// Materialized positions for the bounded worksheet object layer. Objects
+/// retain worksheet coordinates in the core model while the UI receives only
+/// the small list of objects and their current viewport-relative geometry.
+pub(crate) struct ProjectedSheetObjects {
+    pub(crate) views: Vec<SheetObjectView>,
+}
+
+/// The column letters of an address, without its row number.
+fn column_label(col: u32) -> String {
+    CellRef { row: 0, col }
+        .to_a1()
+        .trim_end_matches(|c: char| c.is_ascii_digit())
+        .to_string()
+}
+
+pub(crate) fn object_details(
+    kind: SheetObjectKind,
+    anchor: CellRef,
+    width: u32,
+    height: u32,
+    visible: bool,
+    image: &Image,
+) -> String {
+    let base = format!(
+        "Anchor {}; size {} by {} document pixels. Tab and Shift+Tab browse objects; M moves one cell; R resizes by 10 pixels; arrow keys preview; Enter commits one undo step; Escape cancels.",
+        anchor.to_a1(),
+        width,
+        height,
+    );
+    if visible && kind == SheetObjectKind::Image && image.size().width == 0 {
+        format!("Image unavailable: file is unreadable or exceeds the 64 MiB decode limit. {base}")
+    } else {
+        base
+    }
+}
+
+pub(crate) fn project_sheet_objects(
+    sheet: &Sheet,
+    geometry: &GridGeometry,
+    zoom: f32,
+    scroll_x: f32,
+    scroll_y: f32,
+    preview: Option<(usize, CellRef, u32, u32)>,
+    image_for: &dyn Fn(usize, &loom_sheets_core::SheetObject) -> Image,
+) -> ProjectedSheetObjects {
+    let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
+        .col_widths
+        .iter()
+        .map(|(&col, &width)| (col, width * zoom))
+        .collect();
+    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
+    let mut projected = ProjectedSheetObjects {
+        views: Vec::with_capacity(sheet.objects.len()),
+    };
+    for (index, object) in sheet.objects.iter().enumerate() {
+        let (anchor, width, height) = preview
+            .filter(|(preview_index, _, _, _)| *preview_index == index)
+            .map(|(_, anchor, width, height)| (anchor, width, height))
+            .unwrap_or((object.anchor, object.width, object.height));
+        let absolute_x = dimension_offset(anchor.col, geometry.default_col_width, &scaled_cols);
+        let absolute_y = dimension_offset(anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
+        let x = absolute_x + scroll_x;
+        let y = absolute_y + scroll_y;
+        let rendered_width = rendered_object_extent(width, zoom, MIN_RENDERED_OBJECT_WIDTH);
+        let rendered_height = rendered_object_extent(height, zoom, MIN_RENDERED_OBJECT_HEIGHT);
+        let visible = intersects_object_viewport(
+            x,
+            y,
+            rendered_width as f32,
+            rendered_height as f32,
+            geometry.visible_width,
+            geometry.visible_height,
+        );
+        // Culling happens before any image work: an object outside the
+        // viewport must not decode or copy its pixels.
+        let image = if visible {
+            image_for(index, object)
+        } else {
+            Image::default()
+        };
+        let details = object_details(object.kind, anchor, width, height, visible, &image);
+        projected.views.push(SheetObjectView {
+            kind: object.kind.as_str().into(),
+            label: object.label.as_str().into(),
+            details: details.into(),
+            image,
+            x,
+            y,
+            width: rendered_width,
+            height: rendered_height,
+            fill: object.fill.swatch_index(),
+            visible,
+            display_name: crate::object_actions::object_display_name_for(index, object).into(),
+            anchor_column: column_label(anchor.col).into(),
+            anchor_row: (anchor.row + 1).to_string().into(),
+            width_label: width.to_string().into(),
+            height_label: height.to_string().into(),
+        });
+    }
+    projected
+}
 
 /// Keep an anchored object projected while any part of its body or selected
 /// resize target intersects the scrollable canvas.

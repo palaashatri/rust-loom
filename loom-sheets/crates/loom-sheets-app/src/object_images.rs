@@ -32,12 +32,17 @@ const CACHE_ENTRIES: usize = 16;
 /// keep the original image untouched.
 const MAX_DECODED_EDGE: u32 = 2048;
 /// Largest decoded RGBA raster the decoder may allocate: 4096 x 4096, 64 MiB.
-/// The declared size is read from the file header before any pixel buffer is
+/// The declared size is read from the header before any pixel buffer is
 /// allocated, so a larger raster is refused outright. The decoder's own
-/// allocation limit is twice this. The RGBA conversion that follows adds at most
-/// this figure again. Peak memory for one decode is therefore a few multiples
-/// of this value; the cache budget is not a hard memory limit.
-const MAX_SOURCE_DECODE_BYTES: u64 = 64 * 1024 * 1024;
+/// allocation limit (`MAX_RASTER_ALLOC_BYTES`) is twice this. The RGBA
+/// conversion that follows adds at most this figure again. Peak memory for one
+/// decode is therefore a few multiples of this value; the cache budget is not a
+/// hard memory limit.
+const MAX_DECODED_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Decoder allocation ceiling for a single raster decode (128 MiB).
+const MAX_RASTER_ALLOC_BYTES: u64 = MAX_DECODED_IMAGE_BYTES * 2;
+/// Maximum raw SVG byte length read from disk or rendered from an embedded asset.
+const MAX_SVG_BYTES: usize = 16 * 1024 * 1024;
 
 // A bounded image must always fit the budget, or it would silently go uncached.
 const _: () =
@@ -208,10 +213,18 @@ fn identity(object: &SheetObject) -> (ImageKey, Source<'_>) {
     )
 }
 
+/// Validate and decode a user-chosen image file before inserting it into a
+/// worksheet. Returns an empty/refused failure reason mentioning `"64 MiB"`
+/// when the declared image exceeds the decoded pixel budget.
+pub(crate) fn validate_image_for_insert(path: &Path) -> Result<Image, String> {
+    decode_file(path)
+}
+
 /// SVGs are selected by file extension, matching the persistence/import path.
 fn has_svg_extension(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("svg"))
+    Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
 }
 
 fn decode(source: Source<'_>) -> Image {
@@ -219,44 +232,150 @@ fn decode(source: Source<'_>) -> Image {
     DECODE_CALLS.with(|calls| calls.set(calls.get() + 1));
     match source {
         Source::Embedded { bytes, svg } => decode_embedded(bytes, svg),
-        Source::File(path) => Image::load_from_path(Path::new(path)).unwrap_or_default(),
+        Source::File(path) => decode_file(Path::new(path)).unwrap_or_default(),
     }
 }
 
 fn decode_embedded(bytes: &[u8], svg: bool) -> Image {
     if svg {
-        return Image::load_from_svg_data(bytes).unwrap_or_default();
+        return render_svg(bytes).unwrap_or_default();
     }
-    match decode_raster(bytes) {
-        Some(decoded) => bounded_image(decoded.into_rgba8()),
-        None => Image::default(),
+    decode_raster_bytes(bytes).unwrap_or_default()
+}
+
+fn decode_file(path: &Path) -> Result<Image, String> {
+    if path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+    {
+        let bytes = read_capped_svg_bytes(path)?;
+        return render_svg(&bytes);
     }
+    decode_raster_file(path)
+}
+
+fn read_capped_svg_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read as _;
+
+    let file = std::fs::File::open(path).map_err(|error| format!("could not open SVG: {error}"))?;
+    if let Ok(metadata) = file.metadata() {
+        if metadata.len() > MAX_SVG_BYTES as u64 {
+            return Err(format!(
+                "SVG file exceeds {} MiB limit",
+                MAX_SVG_BYTES / (1024 * 1024)
+            ));
+        }
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_SVG_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read SVG: {error}"))?;
+    if bytes.len() > MAX_SVG_BYTES {
+        return Err(format!(
+            "SVG file exceeds {} MiB limit",
+            MAX_SVG_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes)
+}
+
+fn render_svg(bytes: &[u8]) -> Result<Image, String> {
+    if bytes.len() > MAX_SVG_BYTES {
+        return Err(format!(
+            "SVG file exceeds {} MiB limit",
+            MAX_SVG_BYTES / (1024 * 1024)
+        ));
+    }
+    let image =
+        Image::load_from_svg_data(bytes).map_err(|_| "could not parse SVG image".to_string())?;
+    let size = image.size();
+    if size.width == 0 || size.height == 0 {
+        return Err("SVG image has zero width or height".to_string());
+    }
+    if !within_decode_budget(size.width, size.height) {
+        let decoded_mib =
+            (u64::from(size.width) * u64::from(size.height) * 4) as f64 / (1024.0 * 1024.0);
+        return Err(format!(
+            "SVG dimensions {}x{} ({decoded_mib:.1} MiB decoded) exceed the 64 MiB limit",
+            size.width, size.height
+        ));
+    }
+    if size.width.max(size.height) > MAX_DECODED_EDGE {
+        let rgba = image
+            .to_rgba8()
+            .ok_or_else(|| "could not rasterize oversized SVG".to_string())?;
+        let rgba =
+            image::RgbaImage::from_raw(rgba.width(), rgba.height(), rgba.as_bytes().to_vec())
+                .ok_or_else(|| "SVG pixel buffer size mismatch".to_string())?;
+        return Ok(bounded_image(rgba));
+    }
+    Ok(image)
+}
+
+fn raster_decode_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_RASTER_ALLOC_BYTES);
+    limits
+}
+
+/// Decodes a raster from any seekable reader. Reads header dimensions first and
+/// refuses images exceeding `MAX_DECODED_IMAGE_BYTES` (64 MiB decoded RGBA)
+/// before allocating pixel buffers, then decodes under `MAX_RASTER_ALLOC_BYTES`.
+fn decode_raster_checked<R: std::io::BufRead + std::io::Seek>(
+    open_reader: impl Fn() -> Result<image::ImageReader<R>, String>,
+) -> Result<image::DynamicImage, String> {
+    let (width, height) = open_reader()?
+        .into_dimensions()
+        .map_err(|error| format!("could not read image dimensions: {error}"))?;
+    if width == 0 || height == 0 {
+        return Err("image has zero width or height".to_string());
+    }
+    if !within_decode_budget(width, height) {
+        let decoded_mib = (u64::from(width) * u64::from(height) * 4) as f64 / (1024.0 * 1024.0);
+        return Err(format!(
+            "image dimensions {width}x{height} ({decoded_mib:.1} MiB decoded) exceed the 64 MiB limit"
+        ));
+    }
+    let mut reader = open_reader()?;
+    reader.limits(raster_decode_limits());
+    reader
+        .decode()
+        .map_err(|error| format!("could not decode image: {error}"))
+}
+
+fn cursor_reader(bytes: &[u8]) -> Result<image::ImageReader<std::io::Cursor<&[u8]>>, String> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| format!("could not read image format: {error}"))
+}
+
+fn decode_raster_bytes(bytes: &[u8]) -> Result<Image, String> {
+    decode_raster_checked(|| cursor_reader(bytes))
+        .map(|decoded| bounded_image(decoded.into_rgba8()))
+}
+
+fn decode_raster_file(path: &Path) -> Result<Image, String> {
+    decode_raster_checked(|| {
+        image::ImageReader::open(path)
+            .map_err(|error| format!("could not open image: {error}"))?
+            .with_guessed_format()
+            .map_err(|error| format!("could not read image format: {error}"))
+    })
+    .map(|decoded| bounded_image(decoded.into_rgba8()))
 }
 
 /// Decodes an embedded raster. Returns `None` when it is undecodable or when its
-/// header declares a size above `MAX_SOURCE_DECODE_BYTES`. A refused image shows
+/// header declares a size above `MAX_DECODED_IMAGE_BYTES`. A refused image shows
 /// as an empty object, the same as an undecodable one.
+#[cfg(test)]
 fn decode_raster(bytes: &[u8]) -> Option<image::DynamicImage> {
-    let reader = || {
-        image::ImageReader::new(std::io::Cursor::new(bytes))
-            .with_guessed_format()
-            .ok()
-    };
-    let (width, height) = reader()?.into_dimensions().ok()?;
-    if !within_decode_budget(width, height) {
-        return None;
-    }
-    let mut reader = reader()?;
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(MAX_SOURCE_DECODE_BYTES * 2);
-    reader.limits(limits);
-    reader.decode().ok()
+    decode_raster_checked(|| cursor_reader(bytes)).ok()
 }
 
 /// Whether a raster of this declared size may be decoded. Both sides fit in
 /// `u64`, so the comparison cannot overflow at the `u32` extremes.
 fn within_decode_budget(width: u32, height: u32) -> bool {
-    u64::from(width) * u64::from(height) <= MAX_SOURCE_DECODE_BYTES / 4
+    width > 0 && height > 0 && u64::from(width) * u64::from(height) <= MAX_DECODED_IMAGE_BYTES / 4
 }
 
 /// Copies a decoded raster into a Slint handle no larger than `MAX_DECODED_EDGE`.
@@ -564,5 +683,97 @@ mod tests {
         );
         assert!(decode_raster(&header).is_none());
         assert_eq!(image_for(&object(header, "refused.png")).size().width, 0);
+    }
+
+    struct TempTestFile {
+        path: PathBuf,
+    }
+
+    impl TempTestFile {
+        fn write(name: &str, bytes: &[u8]) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "loom-sheets-object-images-{}-{name}",
+                std::process::id()
+            ));
+            std::fs::write(&path, bytes).expect("write temporary test image");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempTestFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    fn file_object(path: &Path) -> SheetObject {
+        SheetObject::image(
+            CellRef { row: 0, col: 0 },
+            path.to_string_lossy().into_owned(),
+        )
+        .expect("image object needs a path")
+    }
+
+    #[test]
+    fn oversized_file_raster_is_refused_from_header_before_decoding() {
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        // 4097 x 4097 RGBA is > 64 MiB decoded; empty IDAT stream proves no
+        // pixel allocation or decompression occurred.
+        let file = TempTestFile::write("oversized-4097.png", &png_declaring(4097, 4097));
+
+        let image = image_for(&file_object(&file.path));
+        assert_eq!(image.size().width, 0);
+
+        let err = validate_image_for_insert(&file.path)
+            .expect_err("4097x4097 file must be rejected for insert");
+        assert!(err.contains("64 MiB"), "error must mention 64 MiB: {err}");
+        assert!(
+            err.contains("4097x4097"),
+            "error must include declared dimensions: {err}"
+        );
+    }
+
+    #[test]
+    fn valid_file_raster_is_decoded_bounded_and_cached() {
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        let file = TempTestFile::write("large-file.png", &solid_png(2500, 1000));
+        let obj = file_object(&file.path);
+
+        let first = image_for(&obj);
+        let second = image_for(&obj);
+        assert_eq!(decode_calls_for_tests(), 1);
+        assert_eq!(first.size(), second.size());
+        assert_eq!(first.size().width, MAX_DECODED_EDGE);
+        assert_eq!(first.size().height, 819);
+
+        let validated = validate_image_for_insert(&file.path).expect("valid raster passes insert");
+        assert_eq!(validated.size().width, MAX_DECODED_EDGE);
+    }
+
+    #[test]
+    fn file_svg_enforces_byte_and_dimension_limits() {
+        reset_cache_for_tests(CACHE_BUDGET_BYTES);
+        let valid_svg = TempTestFile::write(
+            "valid.svg",
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect width="64" height="32" fill="#0071e3"/></svg>"##,
+        );
+        let valid_image = image_for(&file_object(&valid_svg.path));
+        assert_eq!(
+            (valid_image.size().width, valid_image.size().height),
+            (64, 32)
+        );
+        assert!(validate_image_for_insert(&valid_svg.path).is_ok());
+
+        let huge_svg = TempTestFile::write(
+            "huge.svg",
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="5000" height="5000"><rect width="5000" height="5000"/></svg>"#,
+        );
+        assert_eq!(image_for(&file_object(&huge_svg.path)).size().width, 0);
+        let err = validate_image_for_insert(&huge_svg.path)
+            .expect_err("5000x5000 SVG must exceed 64 MiB limit");
+        assert!(err.contains("64 MiB"), "error must mention 64 MiB: {err}");
+
+        let oversized_bytes = vec![b' '; MAX_SVG_BYTES + 1];
+        assert!(render_svg(&oversized_bytes).is_err());
     }
 }

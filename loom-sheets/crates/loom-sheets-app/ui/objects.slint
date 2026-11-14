@@ -20,6 +20,30 @@ export struct SheetObjectView {
     height-label: string,
 }
 
+/// Centered fallback notice drawn inside an image frame when the image could
+/// not be decoded or exceeded the 64 MiB limit.
+component SheetImageFallback inherits Rectangle {
+    in property <string> image-label: "";
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.image-label != ""
+            ? root.image-label + "\nImage unavailable\n(unreadable or > 64 MiB)"
+            : "Image unavailable\n(unreadable or > 64 MiB)";
+        font-family: Theme.document-font-family;
+        color: Theme.palette().ink-secondary;
+        font-size: Theme.tokens.typography.caption;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        overflow: elide;
+    }
+}
+
 /// Non-cell content placed on a worksheet at a cell anchor.
 ///
 /// The native controller supplies document geometry and decoded images.
@@ -241,6 +265,14 @@ export component SheetObjectLayer inherits Rectangle {
             height: parent.height - 4px;
             source: root.objects[idx].image;
             image-fit: contain;
+        }
+
+        if root.objects[idx].kind == "image" && root.objects[idx].image.width == 0 : SheetImageFallback {
+            x: Theme.tokens.space.sm;
+            y: Theme.tokens.space.sm;
+            width: parent.width - 2 * Theme.tokens.space.sm;
+            height: parent.height - 2 * Theme.tokens.space.sm;
+            image-label: root.objects[idx].label;
         }
 
         object-focus := FocusScope {

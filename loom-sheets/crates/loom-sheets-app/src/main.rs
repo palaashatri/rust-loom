@@ -36,7 +36,7 @@ use loom_sheets_core::{
     SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, Image, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -82,9 +82,9 @@ mod object_actions;
 mod object_images;
 
 mod object_layout;
-use object_layout::editor_dimensions_with_preview;
 #[cfg(test)]
 use object_layout::editor_dimensions_with_width;
+use object_layout::{editor_dimensions_with_preview, project_sheet_objects};
 
 mod chart_actions;
 
@@ -529,103 +529,6 @@ struct GridGeometry {
     visible_height: f32,
     content_width: f32,
     content_height: f32,
-}
-
-/// Materialized positions for the bounded worksheet object layer. Objects
-/// retain worksheet coordinates in the core model while the UI receives only
-/// the small list of objects and their current viewport-relative geometry.
-struct ProjectedSheetObjects {
-    views: Vec<SheetObjectView>,
-}
-
-/// The column letters of an address, without its row number.
-fn column_label(col: u32) -> String {
-    CellRef { row: 0, col }
-        .to_a1()
-        .trim_end_matches(|c: char| c.is_ascii_digit())
-        .to_string()
-}
-
-fn project_sheet_objects(
-    sheet: &Sheet,
-    geometry: &GridGeometry,
-    zoom: f32,
-    scroll_x: f32,
-    scroll_y: f32,
-    preview: Option<(usize, CellRef, u32, u32)>,
-    image_for: &dyn Fn(usize, &loom_sheets_core::SheetObject) -> Image,
-) -> ProjectedSheetObjects {
-    let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
-        .col_widths
-        .iter()
-        .map(|(&col, &width)| (col, width * zoom))
-        .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
-    let mut projected = ProjectedSheetObjects {
-        views: Vec::with_capacity(sheet.objects.len()),
-    };
-    for (index, object) in sheet.objects.iter().enumerate() {
-        let (anchor, width, height) = preview
-            .filter(|(preview_index, _, _, _)| *preview_index == index)
-            .map(|(_, anchor, width, height)| (anchor, width, height))
-            .unwrap_or((object.anchor, object.width, object.height));
-        let absolute_x = dimension_offset(anchor.col, geometry.default_col_width, &scaled_cols);
-        let absolute_y = dimension_offset(anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
-        let x = absolute_x + scroll_x;
-        let y = absolute_y + scroll_y;
-        let rendered_width = object_layout::rendered_object_extent(
-            width,
-            zoom,
-            object_layout::MIN_RENDERED_OBJECT_WIDTH,
-        );
-        let rendered_height = object_layout::rendered_object_extent(
-            height,
-            zoom,
-            object_layout::MIN_RENDERED_OBJECT_HEIGHT,
-        );
-        let visible = object_layout::intersects_object_viewport(
-            x,
-            y,
-            rendered_width as f32,
-            rendered_height as f32,
-            geometry.visible_width,
-            geometry.visible_height,
-        );
-        let details = format!(
-                "Anchor {}; size {} by {} document pixels. Tab and Shift+Tab browse objects; M moves one cell; R resizes by 10 pixels; arrow keys preview; Enter commits one undo step; Escape cancels.",
-                anchor.to_a1(),
-                width,
-                height,
-            );
-        projected.views.push(SheetObjectView {
-            kind: object.kind.as_str().into(),
-            label: object.label.as_str().into(),
-            details: details.into(),
-            // Culling happens before any image work: an object outside the
-            // viewport must not decode or copy its pixels.
-            image: if visible {
-                image_for(index, object)
-            } else {
-                Image::default()
-            },
-            x,
-            y,
-            width: rendered_width,
-            height: rendered_height,
-            fill: object.fill.swatch_index(),
-            visible,
-            display_name: object_actions::object_display_name_for(index, object).into(),
-            anchor_column: column_label(anchor.col).into(),
-            anchor_row: (anchor.row + 1).to_string().into(),
-            width_label: width.to_string().into(),
-            height_label: height.to_string().into(),
-        });
-    }
-    projected
 }
 
 fn grid_geometry(
