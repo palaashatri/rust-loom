@@ -332,6 +332,18 @@ pub(crate) fn register_chart_inspector_actions(
                     3 => ChartKind::Scatter,
                     _ => ChartKind::Bar,
                 };
+                if kind == ChartKind::Scatter {
+                    let sheet = state.current.borrow();
+                    if let Some(chart) = sheet.chart.as_ref() {
+                        let has_numeric_pairs = chart_points(&sheet, chart)
+                            .into_iter()
+                            .any(|(cat, _, _)| numeric_axis_value(&cat).is_some());
+                        if !has_numeric_pairs {
+                            app.set_status_left("Scatter chart requires numeric X/Y pairs.".into());
+                            return;
+                        }
+                    }
+                }
                 update_chart_property(
                     &app,
                     &state,

@@ -40,10 +40,10 @@ export component SheetChartLegendBar inherits HorizontalLayout {
     in property <float> text-scale: 1.0;
 
     spacing: Theme.tokens.space.sm;
-    visible: SheetChartConfig.show-legend && root.kind != "pie";
+    visible: root.kind != "pie" && (SheetChartConfig.show-legend || SheetChartConfig.x-axis-label != "" || SheetChartConfig.y-axis-label != "");
     height: self.visible ? self.preferred-height : 0px;
 
-    HorizontalLayout {
+    if SheetChartConfig.show-legend : HorizontalLayout {
         spacing: 6px;
         alignment: start;
         Rectangle {

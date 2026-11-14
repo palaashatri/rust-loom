@@ -183,27 +183,39 @@ pub fn replace_cell_raw(
         return None;
     }
     // Case-insensitive replacement preserving unmatched slices of `raw`.
-    // Only replace when byte offsets align cleanly on char boundaries.
+    // Map lowercased byte offsets back to original-string byte offsets, and
+    // replace only when both ends of a match fall on original char boundaries.
+    let mut lower = String::with_capacity(raw.len());
+    let mut starts: Vec<(usize, usize)> = Vec::new();
+    for (raw_off, ch) in raw.char_indices() {
+        starts.push((lower.len(), raw_off));
+        lower.extend(ch.to_lowercase());
+    }
+    starts.push((lower.len(), raw.len()));
+    let to_raw = |lo: usize| {
+        starts
+            .binary_search_by_key(&lo, |&(l, _)| l)
+            .ok()
+            .map(|i| starts[i].1)
+    };
     let mut out = String::with_capacity(raw.len());
-    let mut pos = 0;
-    while pos < raw.len() {
-        if let Some(rel) = raw[pos..].to_lowercase().find(&query_lower) {
-            // Find matching byte length in `raw` corresponding to `query_lower`.
-            let match_start = pos + rel;
-            let query_chars = query.chars().count();
-            let match_end = raw[match_start..]
-                .char_indices()
-                .nth(query_chars)
-                .map(|(idx, _)| match_start + idx)
-                .unwrap_or(raw.len());
-            out.push_str(&raw[pos..match_start]);
-            out.push_str(replacement);
-            pos = match_end;
-        } else {
-            out.push_str(&raw[pos..]);
-            break;
+    let (mut lo_pos, mut raw_pos) = (0usize, 0usize);
+    while let Some(rel) = lower[lo_pos..].find(&query_lower) {
+        let ls = lo_pos + rel;
+        let le = ls + query_lower.len();
+        match (to_raw(ls), to_raw(le)) {
+            (Some(rs), Some(re)) => {
+                out.push_str(&raw[raw_pos..rs]);
+                out.push_str(replacement);
+                raw_pos = re;
+                lo_pos = le;
+            }
+            _ => {
+                lo_pos = ls + lower[ls..].chars().next().map_or(1, char::len_utf8);
+            }
         }
     }
+    out.push_str(&raw[raw_pos..]);
     if out == raw {
         None
     } else {
@@ -338,8 +350,12 @@ pub fn expand_named_ranges_in_formula(
             output.push_str(ident);
             continue;
         }
-        output.push(character);
-        index += 1;
+        let ch = formula[index..]
+            .chars()
+            .next()
+            .expect("index stays on a char boundary");
+        output.push(ch);
+        index += ch.len_utf8();
     }
     output
 }
@@ -561,5 +577,30 @@ mod tests {
         let json = sheet_to_json(&sheet);
         let loaded = sheet_from_json(&json).unwrap();
         assert_eq!(loaded.validations.len(), 2);
+    }
+
+    #[test]
+    fn case_insensitive_replace_handles_multibyte_case_changes() {
+        assert_eq!(
+            replace_cell_raw("İstanbul", "stan", "X", false, false).as_deref(),
+            Some("İXbul")
+        );
+        assert_eq!(
+            replace_cell_raw("\u{212A}xab", "ab", "cd", false, false).as_deref(),
+            Some("\u{212A}xcd")
+        );
+    }
+
+    #[test]
+    fn named_range_expansion_preserves_non_ascii_text() {
+        let mut ranges = std::collections::BTreeMap::new();
+        ranges.insert(
+            "RATE".to_string(),
+            CellRange::parse("A1:A1").expect("valid range"),
+        );
+        assert_eq!(
+            expand_named_ranges_in_formula("=\"café\"&RATE+'Données'!B1", &ranges),
+            "=\"café\"&A1+'Données'!B1"
+        );
     }
 }

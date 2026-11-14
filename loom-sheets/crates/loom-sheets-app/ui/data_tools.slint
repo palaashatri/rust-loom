@@ -41,9 +41,11 @@ export global DataToolsState {
     callback apply-column-filter();
     callback clear-column-filter();
     callback close-column-filter();
+    pure callback filter-matches(string, string) -> bool;
 
     // Named Ranges
     in-out property <bool> named-ranges-open: false;
+    out property <bool> modal-open: filter-popup-open || named-ranges-open;
     in-out property <[NamedRangeItem]> named-ranges: [];
     in-out property <string> new-range-name: "";
     in-out property <string> new-range-ref: "";
@@ -185,11 +187,22 @@ export component DataToolsOverlay inherits Rectangle {
     }
 
     // 2. Column AutoFilter-by-value modal
-    if DataToolsState.filter-popup-open : Rectangle {
+    if DataToolsState.filter-popup-open : FocusScope {
         width: 100%;
         height: 100%;
-        background: #00000044;
-        TouchArea { clicked => { DataToolsState.close-column-filter(); } }
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                DataToolsState.close-column-filter();
+                return accept;
+            }
+            return reject;
+        }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: #00000044;
+            TouchArea { clicked => { DataToolsState.close-column-filter(); } }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -239,7 +252,10 @@ export component DataToolsOverlay inherits Rectangle {
                     filter-list := VerticalLayout {
                         spacing: 4px;
                         for item[idx] in DataToolsState.filter-values : Rectangle {
-                            height: 28px;
+                            property <bool> matches: DataToolsState.filter-search == "" || DataToolsState.filter-matches(item.value, DataToolsState.filter-search);
+                            visible: self.matches;
+                            height: self.matches ? 28px : 0px;
+                            clip: true;
                             border-radius: 4px;
                             background: item.checked ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
                             TouchArea {
@@ -275,14 +291,26 @@ export component DataToolsOverlay inherits Rectangle {
                 }
             }
         }
+        }
     }
 
     // 3. Named Ranges Manager modal
-    if DataToolsState.named-ranges-open : Rectangle {
+    if DataToolsState.named-ranges-open : FocusScope {
         width: 100%;
         height: 100%;
-        background: #00000044;
-        TouchArea { clicked => { DataToolsState.close-named-ranges(); } }
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                DataToolsState.close-named-ranges();
+                return accept;
+            }
+            return reject;
+        }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: #00000044;
+            TouchArea { clicked => { DataToolsState.close-named-ranges(); } }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -370,6 +398,7 @@ export component DataToolsOverlay inherits Rectangle {
                     }
                 }
             }
+        }
         }
     }
 }

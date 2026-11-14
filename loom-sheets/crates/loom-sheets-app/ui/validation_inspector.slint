@@ -15,7 +15,7 @@ export component DataValidationSection inherits VerticalLayout {
         }
     }
 
-    if DataToolsState.val-expanded || DataToolsState.val-kind != 0 || DataToolsState.val-feedback != "" : VerticalLayout {
+    if DataToolsState.val-expanded : VerticalLayout {
         spacing: Theme.tokens.space.md;
 
         SheetChoiceRow {

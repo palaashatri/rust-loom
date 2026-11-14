@@ -202,6 +202,8 @@ export component LoomTextField inherits VerticalLayout {
     in property <length> field-min-width: 140px;
     /// Whether the text field has keyboard focus, so a host can scroll it into view.
     out property <bool> focused: input.has-focus;
+    /// Current caret position as a UTF-8 byte offset inside `value`.
+    out property <int> cursor-position-byte-offset: input.cursor-position-byte-offset;
     callback edited(string);
     callback accepted(string);
     callback cancelled;
@@ -223,6 +225,11 @@ export component LoomTextField inherits VerticalLayout {
     public function focus-input() {
         input.focus();
         input.set-selection-offsets(input.text.character-count, input.text.character-count);
+    }
+    /// Focus the field and place the caret at the given UTF-8 byte offset.
+    public function focus-at(byte-offset: int) {
+        input.focus();
+        input.set-selection-offsets(byte-offset, byte-offset);
     }
 
     spacing: Theme.tokens.space.xs;

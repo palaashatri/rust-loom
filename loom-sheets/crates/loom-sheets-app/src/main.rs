@@ -1726,7 +1726,9 @@ impl GuiState {
 
     /// Recheck full content after undo/redo, where the edit marker alone would
     /// stay set even after returning exactly to the last saved workbook. The
-    /// check compares cell digests, so it costs the same for any workbook size.
+    /// check compares active sheet index, cell/style/alignment digests, and
+    /// layout metadata (including `auto_filter`, `hidden_rows`, `named_ranges`,
+    /// and `validations`).
     pub(crate) fn recompute_dirty_from_saved(&self) {
         let Some(saved) = self.last_saved.borrow().clone() else {
             self.dirty_content.set(true);
