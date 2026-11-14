@@ -139,7 +139,12 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
             MenuItem::action_with_shortcut(
                 "file.export_pdf",
                 "Export to PDF...",
-                MenuShortcut::primary_alt("P"),
+                MenuShortcut {
+                    key: "F".into(),
+                    primary_modifier: true,
+                    shift: true,
+                    alt: true,
+                },
             ),
             MenuItem::action_with_shortcut("file.print", "Print...", MenuShortcut::primary("P")),
         ],
@@ -158,7 +163,12 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
             MenuItem::action_with_shortcut(
                 "edit.paste_formats",
                 "Paste Formats Only",
-                MenuShortcut::primary_alt("V"),
+                MenuShortcut {
+                    key: "V".into(),
+                    primary_modifier: true,
+                    shift: true,
+                    alt: true,
+                },
             ),
         ],
         [

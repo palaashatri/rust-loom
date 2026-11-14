@@ -267,7 +267,7 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "sheets.retry-recovery" => sc("Cmd+Alt+Z", "Ctrl+Alt+Z"),
         "file.export_csv" | "sheets.export-csv" => sc("Cmd+E", "Ctrl+E"),
         "file.export_xlsx" | "sheets.export-xlsx" => sc("Cmd+Shift+E", "Ctrl+Shift+E"),
-        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+Alt+P", "Ctrl+Alt+P"),
+        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+Shift+Alt+F", "Ctrl+Shift+Alt+F"),
         "file.print" | "sheets.print-preview" => sc("Cmd+P", "Ctrl+P"),
         "arrange.bring_forward" => sc("Cmd+Alt+]", "Ctrl+Alt+]"),
         "arrange.send_backward" => sc("Cmd+Alt+[", "Ctrl+Alt+["),
@@ -279,7 +279,7 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "edit.copy" | "sheets.copy" => sc("Cmd+C", "Ctrl+C"),
         "edit.paste" | "sheets.paste" => sc("Cmd+V", "Ctrl+V"),
         "edit.paste_values" => sc("Cmd+Shift+V", "Ctrl+Shift+V"),
-        "edit.paste_formats" => sc("Cmd+Alt+V", "Ctrl+Alt+V"),
+        "edit.paste_formats" => sc("Cmd+Shift+Alt+V", "Ctrl+Shift+Alt+V"),
         "edit.select_all" | "sheets.select-all" => sc("Cmd+A", "Ctrl+A"),
         "edit.find" | "sheets.find" => sc("Cmd+F", "Ctrl+F"),
         "edit.replace" | "sheets.replace" => sc("Cmd+H", "Ctrl+H"),
@@ -332,10 +332,10 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "format.borders_right" => sc("Cmd+Shift+Right", "Ctrl+Shift+Right"),
         "format.borders_none" => sc("Cmd+Shift+0", "Ctrl+Shift+0"),
         "format.strikethrough" => sc("Cmd+Shift+X", "Ctrl+Shift+X"),
-        "format.wrap_text" => sc("Cmd+Alt+W", "Ctrl+Alt+W"),
-        "format.text_color_cycle" => sc("Cmd+Alt+E", "Ctrl+Alt+E"),
-        "format.text_color_auto" => sc("Cmd+Alt+Q", "Ctrl+Alt+Q"),
-        "format.merge" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
+        "format.wrap_text" => sc("Cmd+Shift+Alt+W", "Ctrl+Shift+Alt+W"),
+        "format.text_color_cycle" => sc("Cmd+Shift+Alt+E", "Ctrl+Shift+Alt+E"),
+        "format.text_color_auto" => sc("Cmd+Shift+Alt+Q", "Ctrl+Shift+Alt+Q"),
+        "format.merge" => sc("Cmd+Shift+Alt+G", "Ctrl+Shift+Alt+G"),
         "format.unmerge" => sc("Cmd+Shift+G", "Ctrl+Shift+G"),
         "format.conditional_formatting" => sc("Cmd+Alt+O", "Ctrl+Alt+O"),
         "format.fill_cycle" | "sheets.fill-cycle" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
@@ -409,12 +409,15 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("s", true, false) => "file.save_as",
         ("e", false, false) => "file.export_csv",
         ("e", true, false) => "file.export_xlsx",
+        ("f", true, true) => "file.export_pdf",
         ("p", false, false) => "file.print",
         ("z", false, false) => "edit.undo",
         ("z", true, false) | ("y", false, false) => "edit.redo",
         ("x", false, false) => "edit.cut",
         ("c", false, false) => "edit.copy",
         ("v", false, false) => "edit.paste",
+        ("v", true, false) => "edit.paste_values",
+        ("v", true, true) => "edit.paste_formats",
         ("a", false, false) => "edit.select_all",
         ("f", false, false) => "edit.find",
         ("h", false, false) => "edit.replace",
@@ -455,6 +458,12 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("u", false, true) => "table.unfreeze_panes",
         ("b", false, true) => "format.borders",
         ("g", false, true) => "format.fill_cycle",
+        ("g", true, true) => "format.merge",
+        ("g", true, false) => "format.unmerge",
+        ("w", true, true) => "format.wrap_text",
+        ("e", true, true) => "format.text_color_cycle",
+        ("q", true, true) => "format.text_color_auto",
+        ("x", true, false) => "format.strikethrough",
         ("0", false, true) => "format.general",
         ("1", false, true) => "format.number",
         ("4", false, true) => "format.currency",
@@ -477,6 +486,8 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("7", false, true) => "view.appearance.light",
         ("[", false, true) => "view.window-frame.system",
         ("]", false, true) => "view.window-frame.loom",
+        ("[", true, true) => "arrange.send_to_back",
+        ("]", true, true) => "arrange.bring_to_front",
         ("z", false, true) if app.get_recovery_paused() => "sheets.retry-recovery",
         _ => return false,
     };
@@ -492,4 +503,120 @@ pub(crate) fn wire_shortcuts(app: &SheetsApp) {
             .upgrade()
             .is_some_and(|app| dispatch_shortcut(&app, key.as_str(), shift, alt))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    #[test]
+    fn advertised_shortcuts_dispatch_without_collisions() {
+        crate::set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let last_action = Rc::new(Cell::new(""));
+        {
+            let r = last_action.clone();
+            app.global::<crate::PrintPreviewState>()
+                .on_open_preview(move || r.set("file.print"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::SheetInspectorActions>()
+                .on_export_pdf(move || r.set("file.export_pdf"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::SheetInspectorActions>()
+                .on_arrange_object(move |mode| match mode {
+                    2 => r.set("arrange.bring_to_front"),
+                    3 => r.set("arrange.send_to_back"),
+                    _ => {}
+                });
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_paste_values_only(move || r.set("edit.paste_values"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_paste_formats_only(move || r.set("edit.paste_formats"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_toggle_wrap_text(move || r.set("format.wrap_text"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_merge_cells(move || r.set("format.merge"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_cycle_text_color(move || r.set("format.text_color_cycle"));
+        }
+        {
+            let r = last_action.clone();
+            app.global::<crate::CellRichFormat>()
+                .on_auto_text_color(move || r.set("format.text_color_auto"));
+        }
+
+        for (key, shift, alt, expected) in [
+            ("p", false, false, "file.print"),
+            ("f", true, true, "file.export_pdf"),
+            ("v", true, false, "edit.paste_values"),
+            ("v", true, true, "edit.paste_formats"),
+            ("]", true, true, "arrange.bring_to_front"),
+            ("[", true, true, "arrange.send_to_back"),
+            ("w", true, true, "format.wrap_text"),
+            ("g", true, true, "format.merge"),
+            ("e", true, true, "format.text_color_cycle"),
+            ("q", true, true, "format.text_color_auto"),
+        ] {
+            last_action.set("");
+            assert!(
+                dispatch_shortcut(&app, key, shift, alt),
+                "expected ({key}, {shift}, {alt}) to dispatch"
+            );
+            assert_eq!(last_action.get(), expected);
+        }
+
+        // Verify table.delete_row does not fire on format.wrap_text's shortcut,
+        // and Cmd/Ctrl+Alt+W still routes to table.delete_row without wrapping text.
+        last_action.set("");
+        assert!(dispatch_shortcut(&app, "w", false, true));
+        assert_eq!(last_action.get(), "");
+
+        // Distinct non-empty shortcut labels across the newly disambiguated commands.
+        let ids = [
+            "file.print",
+            "file.export_pdf",
+            "table.pivot_sum",
+            "edit.paste_values",
+            "edit.paste_formats",
+            "data.validation",
+            "format.wrap_text",
+            "table.delete_row",
+            "format.merge",
+            "format.fill_cycle",
+            "format.text_color_cycle",
+            "data.clear_filter",
+            "format.text_color_auto",
+            "data.filter_column",
+            "arrange.bring_to_front",
+            "arrange.send_to_back",
+        ];
+        let mut seen = HashSet::new();
+        for id in ids {
+            let label = shortcut_for_id(id);
+            assert!(!label.is_empty(), "missing shortcut for {id}");
+            assert!(seen.insert(label), "duplicate shortcut {label} for {id}");
+        }
+    }
 }

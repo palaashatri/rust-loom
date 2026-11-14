@@ -340,10 +340,12 @@ export component SheetsApp inherits Window {
         else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
         else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }
         else { root.region = 3; action-toolbar.focus-first(); }
-    }    public function close-toolbar-menu() {
-        root.toolbar-menu = 0;
-        grid-surface.focus-grid();
     }
+    public function open-toolbar-menu(k: int) {
+        root.toolbar-menu = k;
+        if (k != 0) { toolbar-menu-popup.focus-menu(); } else { grid-surface.focus-grid(); }
+    }
+    public function close-toolbar-menu() { root.open-toolbar-menu(0); }
     public function dismiss-toolbar-menu() {
         let kind = root.toolbar-menu;
         root.toolbar-menu = 0;
@@ -437,8 +439,7 @@ export component SheetsApp inherits Window {
                 command(id) => { root.toolbar-command(id); }
                 toggle-menu(kind, x) => {
                     root.toolbar-menu-x = x;
-                    root.toolbar-menu = root.toolbar-menu == kind ? 0 : kind;
-                    if (root.toolbar-menu != 0) { toolbar-menu-popup.focus-menu(); } else { grid-surface.focus-grid(); }
+                    root.open-toolbar-menu(root.toolbar-menu == kind ? 0 : kind);
                 }
                 show-inspector-tab(tab) => { root.show-inspector-tab(tab); }
                 overflow-requested => {
@@ -738,6 +739,17 @@ export component SheetsApp inherits Window {
         navigate-template-selection(delta) => { root.navigate-template-selection(delta); }
     }
 
+    SheetModals {
+        width: 100%;
+        height: 100%;
+        welcome-open: root.welcome-open;
+        step <=> root.welcome-step;
+        mod-key: root.mod-key;
+        focus-request: root.welcome-focus-request;
+        close-guide => { root.welcome-close(); }
+        try-action(id) => { root.welcome-try-action(id); }
+    }
+
     save-changes-dialog := SaveChangesDialog {
         open: root.save-changes-open;
         document-name: root.save-changes-document;
@@ -765,17 +777,6 @@ export component SheetsApp inherits Window {
         focus-grid => { grid-surface.focus-grid(); }
         import-cancel => { root.xlsx-import-cancel(); }
         import-continue => { root.xlsx-import-continue(); }
-    }
-
-    SheetModals {
-        width: 100%;
-        height: 100%;
-        welcome-open: root.welcome-open;
-        step <=> root.welcome-step;
-        mod-key: root.mod-key;
-        focus-request: root.welcome-focus-request;
-        close-guide => { root.welcome-close(); }
-        try-action(id) => { root.welcome-try-action(id); }
     }
 
     palette := CommandPalette {

@@ -30,6 +30,40 @@ fn template_ids_for_category(category: i32, recents: &[i32]) -> Vec<i32> {
     }
 }
 
+fn business_scroll_row(row: usize, recents: &[i32], text_scale: f32) -> i32 {
+    let scale = text_scale.max(1.0);
+    let card_height = (110.0 + 44.0 * scale).max(160.0);
+    let heading_height = 24.0 * scale;
+    let body_height = 40.0 * scale;
+    let inner_gap = 16.0;
+    let section_gap = 24.0;
+    let recent_height = heading_height
+        + inner_gap
+        + if recents.is_empty() {
+            body_height
+        } else {
+            card_height
+        };
+    let two_row_section = heading_height + 2.0 * inner_gap + 2.0 * card_height;
+    let three_row_section = heading_height + 3.0 * inner_gap + 3.0 * card_height;
+    let business_section_y = recent_height
+        + section_gap
+        + two_row_section
+        + section_gap
+        + three_row_section
+        + section_gap
+        + two_row_section
+        + section_gap;
+    let row_y = business_section_y
+        + heading_height
+        + (row as f32 + 1.0) * inner_gap
+        + (row as f32) * card_height;
+    let row_step = 174.0 * scale;
+    let min_pos = ((row_y + card_height) / row_step - 1.0).ceil();
+    let max_pos = ((row_y + 400.0) / row_step - 1.0).floor();
+    min_pos.min(max_pos).max(0.0) as i32
+}
+
 fn template_scroll_row(
     category: i32,
     selected: i32,
@@ -60,8 +94,8 @@ fn template_scroll_row(
             12..=14 => 5 - i32::from(text_scale >= 1.5),
             15..=17 => 7 - large_text_adjustment,
             18 => 8 - large_text_adjustment,
-            2 | 19 | 20 => 10 - large_text_adjustment,
-            21 | 22 => 11 - large_text_adjustment,
+            2 | 19 | 20 => business_scroll_row(0, recents, text_scale),
+            21 | 22 => business_scroll_row(1, recents, text_scale),
             23..=25 => 13 - large_text_adjustment,
             26 => 14 - large_text_adjustment,
             _ => 0,
@@ -101,4 +135,60 @@ fn move_template_selection(app: &SheetsApp, direction: i32) {
         &recents,
         app.get_template_text_scale(),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn business_templates_stay_within_viewport_at_large_text_scale() {
+        let scale = 1.5_f32;
+        let card_height = (110.0 + 44.0 * scale).max(160.0);
+        let heading_height = 24.0 * scale;
+        let body_height = 40.0 * scale;
+        let inner_gap = 16.0;
+        let section_gap = 24.0;
+        let two_row = heading_height + 2.0 * inner_gap + 2.0 * card_height;
+        let three_row = heading_height + 3.0 * inner_gap + 3.0 * card_height;
+        let row_step = 174.0 * scale;
+
+        for recents in [&[][..], &[9][..]] {
+            let recent_height = heading_height
+                + inner_gap
+                + if recents.is_empty() {
+                    body_height
+                } else {
+                    card_height
+                };
+            let biz_y = recent_height
+                + section_gap
+                + two_row
+                + section_gap
+                + three_row
+                + section_gap
+                + two_row
+                + section_gap;
+            for (row, id) in [(0, 19), (1, 21)] {
+                let card_y = biz_y
+                    + heading_height
+                    + (row as f32 + 1.0) * inner_gap
+                    + row as f32 * card_height;
+                let pos = template_scroll_row(0, id, 0, recents, scale) as f32;
+                for viewport_h in [400.0_f32, 520.0_f32] {
+                    let scroll_top = (pos * row_step - (viewport_h - row_step)).max(0.0);
+                    assert!(
+                        card_y >= scroll_top,
+                        "id={id} recents={recents:?} vh={viewport_h}: card_y={card_y} < scroll_top={scroll_top}"
+                    );
+                    assert!(
+                        card_y + card_height <= scroll_top + viewport_h,
+                        "id={id} recents={recents:?} vh={viewport_h}: bottom={} > {}",
+                        card_y + card_height,
+                        scroll_top + viewport_h
+                    );
+                }
+            }
+        }
+    }
 }
