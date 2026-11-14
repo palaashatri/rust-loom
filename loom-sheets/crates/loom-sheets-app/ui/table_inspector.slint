@@ -1,0 +1,75 @@
+import { LoomButton, LoomToggle } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { SheetChoiceRow, SheetFieldRow, SheetHeading } from "inspector_rows.slint";
+import { SheetTableState } from "table_canvas_layer.slint";
+
+export component SheetTableInspectorSection inherits VerticalLayout {
+    spacing: Theme.tokens.space.md;
+
+    SheetHeading { title: "Canvas Tables"; }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        alignment: start;
+
+        LoomButton {
+            label: "Insert Table";
+            variant: "secondary";
+            clicked => { SheetTableState.insert-table(); }
+        }
+        if SheetTableState.has-active-table : LoomButton {
+            label: "Delete Table";
+            variant: "ghost";
+            clicked => { SheetTableState.delete-active-table(); }
+        }
+    }
+
+    if SheetTableState.has-active-table : VerticalLayout {
+        spacing: Theme.tokens.space.md;
+
+        SheetFieldRow {
+            label: "Table Name";
+            field-label: "Active table name";
+            value: SheetTableState.active-name;
+            editable: true;
+            edited(name) => { SheetTableState.rename-active-table(name); }
+        }
+        SheetFieldRow {
+            label: "Table Range";
+            field-label: "Active table range";
+            value: SheetTableState.active-range;
+            editable: false;
+        }
+        SheetChoiceRow {
+            choices: ["Classic", "Jade", "Ocean", "Coral", "Charcoal"];
+            current: SheetTableState.active-style;
+            chosen(idx) => { SheetTableState.set-active-table-style(idx); }
+        }
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Table Title";
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+            LoomToggle {
+                checked: SheetTableState.active-show-title;
+                toggled => { SheetTableState.toggle-active-table-title(); }
+            }
+        }
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Alternating Rows";
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+            LoomToggle {
+                checked: SheetTableState.active-alternating-rows;
+                toggled => { SheetTableState.toggle-active-table-alternating(); }
+            }
+        }
+    }
+}

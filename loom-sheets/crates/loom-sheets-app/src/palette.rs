@@ -11,6 +11,7 @@ use crate::{dispatch_command, CommandPaletteItem, SheetsApp};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
     NewSheet,
+    StartHub,
     NewFromTemplate,
     OpenSheet,
     SaveSheet,
@@ -40,6 +41,11 @@ pub enum PaletteAction {
     DeleteRow,
     AddCol,
     DeleteCol,
+    InsertTable,
+    ToggleTableTitle,
+    ToggleTableAlternatingRows,
+    CycleTableStyle,
+    DeleteTable,
     SortAsc,
     SortDesc,
     FreezeHeader,
@@ -99,6 +105,7 @@ pub enum PaletteAction {
 pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
     match action {
         PaletteAction::NewSheet => dispatch_command(app, "sheets.new"),
+        PaletteAction::StartHub => dispatch_command(app, "file.start_hub"),
         PaletteAction::NewFromTemplate => dispatch_command(app, "sheets.new-template"),
         PaletteAction::OpenSheet => dispatch_command(app, "sheets.open"),
         PaletteAction::SaveSheet => dispatch_command(app, "sheets.save"),
@@ -128,6 +135,13 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::DeleteRow => dispatch_command(app, "table.delete_row"),
         PaletteAction::AddCol => dispatch_command(app, "table.add_col"),
         PaletteAction::DeleteCol => dispatch_command(app, "table.delete_col"),
+        PaletteAction::InsertTable => dispatch_command(app, "table.insert_table"),
+        PaletteAction::ToggleTableTitle => dispatch_command(app, "table.toggle_title"),
+        PaletteAction::ToggleTableAlternatingRows => {
+            dispatch_command(app, "table.toggle_alternating_rows")
+        }
+        PaletteAction::CycleTableStyle => dispatch_command(app, "table.cycle_style"),
+        PaletteAction::DeleteTable => dispatch_command(app, "table.delete_table"),
         PaletteAction::SortAsc => dispatch_command(app, "table.sort_asc"),
         PaletteAction::SortDesc => dispatch_command(app, "table.sort_desc"),
         PaletteAction::FreezeHeader => dispatch_command(app, "table.freeze_header"),
@@ -191,6 +205,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
 pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
     match id {
         "sheets.new" => Some(PaletteAction::NewSheet),
+        "file.start_hub" | "sheets.start-hub" => Some(PaletteAction::StartHub),
         "sheets.new-template" => Some(PaletteAction::NewFromTemplate),
         "sheets.open" => Some(PaletteAction::OpenSheet),
         "sheets.save" => Some(PaletteAction::SaveSheet),
@@ -220,6 +235,11 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "table.delete_row" => Some(PaletteAction::DeleteRow),
         "table.add_col" => Some(PaletteAction::AddCol),
         "table.delete_col" => Some(PaletteAction::DeleteCol),
+        "table.insert_table" => Some(PaletteAction::InsertTable),
+        "table.toggle_title" => Some(PaletteAction::ToggleTableTitle),
+        "table.toggle_alternating_rows" => Some(PaletteAction::ToggleTableAlternatingRows),
+        "table.cycle_style" => Some(PaletteAction::CycleTableStyle),
+        "table.delete_table" => Some(PaletteAction::DeleteTable),
         "table.sort_asc" => Some(PaletteAction::SortAsc),
         "table.sort_desc" => Some(PaletteAction::SortDesc),
         "table.freeze_header" => Some(PaletteAction::FreezeHeader),
@@ -332,6 +352,7 @@ pub fn command_matches(command: &PaletteCommand, query: &str) -> bool {
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     [
         (PaletteAction::NewSheet, "sheets.new", "New Workbook"),
+        (PaletteAction::StartHub, "file.start_hub", "Start Hub..."),
         (
             PaletteAction::NewFromTemplate,
             "sheets.new-template",
@@ -412,6 +433,31 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "Cell Data Validation...",
         ),
         (PaletteAction::AddRow, "table.add_row", "Add Row"),
+        (
+            PaletteAction::InsertTable,
+            "table.insert_table",
+            "Insert Table",
+        ),
+        (
+            PaletteAction::CycleTableStyle,
+            "table.cycle_style",
+            "Cycle Table Style",
+        ),
+        (
+            PaletteAction::ToggleTableTitle,
+            "table.toggle_title",
+            "Toggle Table Title",
+        ),
+        (
+            PaletteAction::ToggleTableAlternatingRows,
+            "table.toggle_alternating_rows",
+            "Toggle Alternating Rows",
+        ),
+        (
+            PaletteAction::DeleteTable,
+            "table.delete_table",
+            "Delete Table",
+        ),
         (PaletteAction::DeleteRow, "table.delete_row", "Delete Row"),
         (PaletteAction::AddCol, "table.add_col", "Add Column"),
         (

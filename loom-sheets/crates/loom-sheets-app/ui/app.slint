@@ -1,12 +1,12 @@
-import { TemplateChooserModal } from "template_chooser.slint";
-import { SheetModals } from "sheet_modals.slint";
-import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
-import { SaveChangesDialog } from "save_changes_dialog.slint";
-import { DataToolsOverlay, DataToolsState } from "data_tools.slint";
-export { DataToolsState }
-import { CloseDrainShield } from "close_drain_shield.slint";
-import { SheetMenuChrome } from "menu_chrome.slint";
-export { SheetToolbarLayout } from "toolbar_layout.slint";
+import {TemplateChooserModal} from "template_chooser.slint";
+import {SheetModals} from "sheet_modals.slint";
+import {XlsxImportWarningDialog} from "xlsx_import_warning.slint";
+import {SaveChangesDialog} from "save_changes_dialog.slint";
+import {DataToolsOverlay,DataToolsState} from "data_tools.slint";
+export {DataToolsState}
+import {CloseDrainShield} from "close_drain_shield.slint";
+import {SheetMenuChrome} from "menu_chrome.slint";
+export {SheetToolbarLayout} from "toolbar_layout.slint";
 export { SheetInspectorActions, SheetObjectGeometry, SheetChartConfig, SheetChartActions } from "object_inspector.slint";
 import { LoomWindowResizeEdges, LocalMenu, LocalMenuEntry, LocalMenuPopup } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
@@ -20,6 +20,8 @@ export {Theme,ResponsivePolicy} from "theme.slint";
 export {LocalMenu,LocalMenuEntry} from "foundation.slint";
 export {GridPointer,CellSpill,CellInk,CellRichFormat} from "grid_pointer.slint";
 export {FormulaAssist} from "formula_assist.slint";
+export {StartHubState} from "start_hub.slint";
+export {SheetTableState} from "table_canvas_layer.slint";
 export component SheetsApp inherits Window {
     init => { Theme.application = "sheets"; }
     icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");

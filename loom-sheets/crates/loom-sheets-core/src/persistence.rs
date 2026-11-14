@@ -196,6 +196,8 @@ struct PersistedSheet {
     merges: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     conditional_rules: Vec<PersistedConditionalRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tables: Vec<crate::SheetTable>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -420,6 +422,7 @@ impl From<&Sheet> for PersistedSheet {
                         .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
                 })
                 .collect(),
+            tables: sheet.tables.clone(),
         }
     }
 }
@@ -679,6 +682,7 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             text_color,
         });
     }
+    sheet.tables = raw.tables;
     Ok(sheet)
 }
 

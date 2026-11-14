@@ -96,6 +96,13 @@ pub(crate) const MUTATING: &[&str] = &[
     "unfreeze_panes",
     "unmerge_cells",
     "wrap_toggled",
+    // Canvas table mutations (guarded by `mutation_guard::refused`).
+    "delete_active_table",
+    "insert_table",
+    "rename_active_table",
+    "set_active_table_style",
+    "toggle_active_table_alternating",
+    "toggle_active_table_title",
 ];
 
 /// Callbacks that never change the workbook, or that are separately protected.
@@ -197,6 +204,14 @@ pub(crate) const ALLOWED: &[&str] = &[
     "open_named_ranges",
     "select_all_filter_values",
     "toggle_filter_value",
+    // Step 1 Start Hub & canvas table selection (no direct workbook mutation).
+    "close_hub",
+    "new_document",
+    "open_file",
+    "open_recent",
+    "search_edited",
+    "select_table",
+    "tab_changed",
 ];
 
 /// True, with the visible paused status set, when a workbook change must be

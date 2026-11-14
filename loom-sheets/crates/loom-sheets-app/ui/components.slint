@@ -8,6 +8,8 @@ import { Theme } from "theme.slint";
 import { GridPointer, CellSpill, CellInk, CellRichFormat } from "grid_pointer.slint";
 import { CellOverflowLayer } from "cell_overflow.slint";
 import { MergedCellLayer } from "merged_cell_layer.slint";
+import { TableCanvasLayer, SheetTableState, SheetTableView, TableBandView } from "table_canvas_layer.slint";
+export { SheetTableState, SheetTableView, TableBandView } from "table_canvas_layer.slint";
 import { SheetHeaders } from "sheet_headers.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
 import { FormulaRefCellOverlay, FormulaAssist, FormulaAssistPopup } from "formula_assist.slint";
@@ -393,6 +395,14 @@ export component SheetTable inherits Rectangle {
                 }
 
                 MergedCellLayer {
+                    x: root.grid-col-offset;
+                    y: root.grid-row-offset;
+                    width: root.grid-visible-width;
+                    height: root.grid-visible-height;
+                    zoom-factor: root.zoom-factor;
+                }
+
+                TableCanvasLayer {
                     x: root.grid-col-offset;
                     y: root.grid-row-offset;
                     width: root.grid-visible-width;
