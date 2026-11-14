@@ -1,7 +1,6 @@
-import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { SheetsTemplateOption } from "template_cards.slint";
+import { SheetsTemplateOption, TemplateChooserFooter } from "template_cards.slint";
 
 export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
@@ -43,6 +42,7 @@ export component TemplateChooserModal inherits Rectangle {
     }
     callback cancel-template;
     callback create-template(int);
+    callback open-file;
     callback navigate-template-selection(int);
 
     public function focus-template-chooser() {
@@ -110,8 +110,8 @@ export component TemplateChooserModal inherits Rectangle {
             }
             if (event.text == Key.UpArrow) { root.choose-template-category(max(0, root.template-category - 1)); return accept; }
             if (event.text == Key.DownArrow) { root.choose-template-category(min(6, root.template-category + 1)); return accept; }
-            if (event.text == Key.Tab && !event.modifiers.shift && create-button.has-focus) { chooser-focus.focus(); return accept; }
-            if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { create-button.grab-focus(); return accept; }
+            if (event.text == Key.Tab && !event.modifiers.shift && footer.create-focused) { chooser-focus.focus(); return accept; }
+            if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { footer.focus-create(); return accept; }
             return reject;
         }
 
@@ -489,55 +489,10 @@ export component TemplateChooserModal inherits Rectangle {
                 }
             }
 
-            // Bottom Footer Action Bar. The primary button sits at the reading end:
-            // right in LTR, left in RTL; the hint fills the rest.
-            Rectangle {
-                height: 52px;
-                background: Theme.palette().chrome;
-
-                Rectangle {
-                    x: 0px;
-                    y: 0px;
-                    width: parent.width;
-                    height: 1px;
-                    background: Theme.palette().border;
-                }
-
-                cancel-button := LoomButton {
-                    label: "Cancel";
-                    variant: "secondary";
-                    width: self.preferred-width;
-                    height: Theme.tokens.metrics.control-height;
-                    x: Theme.rtl
-                        ? create-button.x + create-button.width + Theme.tokens.space.lg
-                        : create-button.x - Theme.tokens.space.lg - self.width;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.cancel-template(); }
-                }
-
-                create-button := LoomButton {
-                    label: "Create";
-                    variant: "primary";
-                    width: self.preferred-width;
-                    height: Theme.tokens.metrics.control-height;
-                    x: Theme.rtl ? Theme.tokens.space.xl : parent.width - Theme.tokens.space.xl - self.width;
-                    y: (parent.height - self.height) / 2;
-                    clicked => { root.create-template(root.template-selected); }
-                }
-
-                Text {
-                    text: "Escape to cancel • Return to create";
-                    font-size: Theme.type.caption;
-                    color: Theme.palette().ink-secondary;
-                    x: Theme.rtl ? cancel-button.x + cancel-button.width + Theme.tokens.space.lg : Theme.tokens.space.xl;
-                    width: Theme.rtl
-                        ? max(0px, parent.width - Theme.tokens.space.xl - self.x)
-                        : max(0px, cancel-button.x - Theme.tokens.space.lg - Theme.tokens.space.xl);
-                    height: parent.height;
-                    horizontal-alignment: Theme.rtl ? right : left;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
+            footer := TemplateChooserFooter {
+                open-file => { root.open-file(); }
+                cancel-template => { root.cancel-template(); }
+                create-template => { root.create-template(root.template-selected); }
             }
         }
     }

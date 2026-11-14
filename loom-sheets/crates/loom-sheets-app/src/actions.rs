@@ -92,6 +92,9 @@ pub(crate) fn create_template_workbook(
     sync_menu_state(menu_service, app, state);
     app.set_template_chooser_open(false);
     app.set_status_left("Created template workbook".into());
+    if state.pending_first_run_welcome.replace(false) {
+        crate::welcome_guide::open(app);
+    }
 }
 
 /// Status-line confirmation for a style toggle, read back from the focused
@@ -126,10 +129,14 @@ pub(crate) fn register_sheet_actions(
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_cancel_template(move || {
             if let Some(app) = app_ref.upgrade() {
                 app.set_template_chooser_open(false);
+                if state.pending_first_run_welcome.replace(false) {
+                    crate::welcome_guide::open(&app);
+                }
             }
         });
     }

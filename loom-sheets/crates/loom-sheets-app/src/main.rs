@@ -1552,6 +1552,7 @@ pub(crate) struct GuiState {
     pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
     pub(crate) object_gesture: RefCell<Option<object_actions::ObjectGesture>>,
     pub(crate) object_context_generation: Cell<u64>,
+    pub(crate) pending_first_run_welcome: Cell<bool>,
 }
 
 impl GuiState {
@@ -1607,6 +1608,7 @@ impl GuiState {
             clipboard: RefCell::new(None),
             object_gesture: RefCell::new(None),
             object_context_generation: Cell::new(0),
+            pending_first_run_welcome: Cell::new(false),
         }
     }
 
@@ -2460,13 +2462,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.set_chart_visible(true);
         sync_chart_to_app(&app, &state.current.borrow());
     }
-    if args.template_chooser && startup_open.is_none() {
+    if startup_open.is_none() && !session.recovered_unsaved && !args.objects && !args.chart {
         app.set_template_chooser_open(true);
-    } else if startup_open.is_none()
-        && !session.recovered_unsaved
-        && welcome_guide::should_show_on_first_run()
-    {
-        welcome_guide::open(&app);
+        state
+            .pending_first_run_welcome
+            .set(welcome_guide::should_show_on_first_run());
     }
     project_current(&app, &state);
     app.set_status_left("Calculating…".into());

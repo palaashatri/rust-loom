@@ -706,6 +706,8 @@ fn template_chooser_is_keyboard_complete_and_traps_tab() {
     assert_eq!(s.app.get_template_category(), 0);
 
     tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Open File…");
+    tab(&s.app);
     assert_eq!(focus_name(&s.app), "Cancel");
     tab(&s.app);
     assert_eq!(focus_name(&s.app), "Create");
@@ -718,6 +720,8 @@ fn template_chooser_is_keyboard_complete_and_traps_tab() {
     assert_eq!(focus_name(&s.app), "Create", "Shift+Tab wraps backwards");
     shift_tab(&s.app);
     assert_eq!(focus_name(&s.app), "Cancel");
+    shift_tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Open File…");
     press(&s.app, Key::Escape);
     assert_eq!(*log.borrow(), ["cancel"], "Escape cancels from a button");
     assert!(

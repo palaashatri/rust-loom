@@ -594,6 +594,8 @@ pub(super) fn open_workbook_from_picker(
                             .borrow_mut()
                             .authorize_dirty_replacement(operation, revision);
                     }
+                    app.set_template_chooser_open(false);
+                    state.pending_first_run_welcome.set(false);
                     app.set_status_left(SharedString::from(open_text));
                 }
                 Err(error) => {

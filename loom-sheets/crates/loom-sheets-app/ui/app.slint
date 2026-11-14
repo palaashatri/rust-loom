@@ -731,6 +731,7 @@ export component SheetsApp inherits Window {
         text-scale: root.template-text-scale;
         cancel-template => { root.cancel-template(); }
         create-template(selected) => { root.create-template(selected); }
+        open-file => { root.open-sheet(); }
         navigate-template-selection(delta) => { root.navigate-template-selection(delta); }
     }
 
@@ -768,9 +769,9 @@ export component SheetsApp inherits Window {
     }
 
     if root.welcome-open : WelcomeGuideModal {
-        width: root.width;
-        height: root.height;
-        open: root.welcome-open;
+        width: 100%;
+        height: 100%;
+        open: true;
         step <=> root.welcome-step;
         mod-key: root.mod-key;
         focus-request: root.welcome-focus-request;

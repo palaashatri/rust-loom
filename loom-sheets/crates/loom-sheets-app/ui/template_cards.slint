@@ -1,3 +1,4 @@
+import { LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 import {
     BlankPreview, ChecklistPreview, TableChartPreview, PivotPreview,
@@ -88,4 +89,69 @@ export component SheetsTemplateOption inherits SheetsTemplateCard {
     if root.index == 8 : MonthlyGoalPreview {}
     if root.index == 9 : PortfolioPreview {}
     if root.index == 10 : NetWorthPreview {}
+}
+
+export component TemplateChooserFooter inherits Rectangle {
+    callback open-file;
+    callback cancel-template;
+    callback create-template;
+    out property <bool> create-focused: create-button.has-focus;
+    public function focus-create() { create-button.grab-focus(); }
+
+    height: 52px;
+    background: Theme.palette().chrome;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+
+    open-button := LoomButton {
+        label: "Open File…";
+        variant: "secondary";
+        width: self.preferred-width;
+        height: Theme.tokens.metrics.control-height;
+        x: Theme.rtl ? parent.width - Theme.tokens.space.xl - self.width : Theme.tokens.space.xl;
+        y: (parent.height - self.height) / 2;
+        clicked => { root.open-file(); }
+    }
+
+    cancel-button := LoomButton {
+        label: "Cancel";
+        variant: "secondary";
+        width: self.preferred-width;
+        height: Theme.tokens.metrics.control-height;
+        x: Theme.rtl
+            ? create-button.x + create-button.width + Theme.tokens.space.lg
+            : create-button.x - Theme.tokens.space.lg - self.width;
+        y: (parent.height - self.height) / 2;
+        clicked => { root.cancel-template(); }
+    }
+
+    create-button := LoomButton {
+        label: "Create";
+        variant: "primary";
+        width: self.preferred-width;
+        height: Theme.tokens.metrics.control-height;
+        x: Theme.rtl ? Theme.tokens.space.xl : parent.width - Theme.tokens.space.xl - self.width;
+        y: (parent.height - self.height) / 2;
+        clicked => { root.create-template(); }
+    }
+
+    Text {
+        text: "Esc: cancel • Return: create";
+        font-size: Theme.type.caption;
+        color: Theme.palette().ink-secondary;
+        x: Theme.rtl ? cancel-button.x + cancel-button.width + Theme.tokens.space.lg : open-button.x + open-button.width + Theme.tokens.space.lg;
+        width: Theme.rtl
+            ? max(0px, open-button.x - Theme.tokens.space.lg - self.x)
+            : max(0px, cancel-button.x - Theme.tokens.space.lg - self.x);
+        height: parent.height;
+        horizontal-alignment: Theme.rtl ? right : left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
 }
