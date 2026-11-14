@@ -73,6 +73,12 @@ pub(crate) const MUTATING: &[&str] = &[
 /// Each group says why.
 #[cfg(test)]
 pub(crate) const ALLOWED: &[&str] = &[
+    // Formula bar editing-assist draft updates (do not mutate the committed workbook).
+    "accept_suggestion",
+    "cycle_f4",
+    "dismiss_popup",
+    "editing_state_changed",
+    "formula_edited",
     // Navigation, selection, scrolling, zoom, and view layout.
     "begin_edit",
     "cancel_selected_cell",
