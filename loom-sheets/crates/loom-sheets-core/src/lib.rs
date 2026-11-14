@@ -35,6 +35,7 @@ mod number_text;
 pub mod objects;
 pub mod pdf_export;
 pub mod persistence;
+pub mod pivot_builder;
 pub mod refs;
 pub mod row_order;
 pub mod style;
@@ -54,6 +55,10 @@ pub use objects::{reorder_objects, SheetObject, SheetObjectKind, ZOrderAction};
 pub use pdf_export::{export_sheet_pdf, export_sheet_pdf_with_options, PdfExportOptions};
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
+};
+pub use pivot_builder::{
+    build_pivot_sheet, compute_pivot_table, detect_headers, extract_unique_values,
+    plan_pivot_updates, PivotCell, PivotFieldConfig, PivotTableResult,
 };
 pub use row_order::RowOrder;
 pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
@@ -2357,6 +2362,22 @@ impl RangeEdit {
             );
         }
 
+        Self { before, after }
+    }
+
+    /// Builds an edit from explicit `(cell, new_raw)` updates.
+    pub fn from_cells(
+        sheet: &Sheet,
+        updates: impl IntoIterator<Item = (CellRef, Option<String>)>,
+    ) -> Self {
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+        for (cell, value) in updates {
+            before
+                .entry(cell)
+                .or_insert_with(|| sheet.raw(cell).map(str::to_owned));
+            after.insert(cell, value);
+        }
         Self { before, after }
     }
 

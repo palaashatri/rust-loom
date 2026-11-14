@@ -186,6 +186,9 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.pivot_average" => app.invoke_pivot_summary(2),
         "table.pivot_min" => app.invoke_pivot_summary(3),
         "table.pivot_max" => app.invoke_pivot_summary(4),
+        "table.pivot_builder" => app
+            .global::<crate::PivotBuilderState>()
+            .invoke_open_builder(),
         _ => return false,
     }
     true
@@ -322,6 +325,7 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.pivot_average" => sc("Cmd+Alt+3", "Ctrl+Alt+3"),
         "table.pivot_min" => sc("Cmd+Alt+8", "Ctrl+Alt+8"),
         "table.pivot_max" => sc("Cmd+Alt+9", "Ctrl+Alt+9"),
+        "table.pivot_builder" => sc("Cmd+Alt+Shift+P", "Ctrl+Alt+Shift+P"),
         "view.appearance.system" => sc("Cmd+Alt+6", "Ctrl+Alt+6"),
         "view.appearance.light" => sc("Cmd+Alt+7", "Ctrl+Alt+7"),
         "view.appearance.dark" => sc("Cmd+Shift+D", "Ctrl+Shift+D"),
@@ -436,6 +440,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("t", false, true) => "sheets.cycle_chart_kind",
         ("y", false, true) => "sheets.copy_chart",
         ("p", false, true) => "table.pivot_sum",
+        ("p", true, true) => "table.pivot_builder",
         ("2", false, true) => "table.pivot_count",
         ("3", false, true) => "table.pivot_average",
         ("8", false, true) => "table.pivot_min",

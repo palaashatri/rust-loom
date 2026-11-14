@@ -62,6 +62,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.pivot_sum",
     "table.pivot_count",
     "table.pivot_average",
+    "table.pivot_builder",
     "table.adjust_decimals_increase",
     "table.adjust_decimals_decrease",
     "format.bold",
@@ -256,6 +257,16 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
                         MenuShortcut::primary_alt("D"),
                     ),
                     MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "table.pivot_builder",
+                        "Create Pivot Table…",
+                        MenuShortcut {
+                            key: "P".into(),
+                            primary_modifier: true,
+                            shift: true,
+                            alt: true,
+                        },
+                    ),
                     MenuItem::action_with_shortcut(
                         "table.pivot_sum",
                         "Pivot Summary (Sum)",

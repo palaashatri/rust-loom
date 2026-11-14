@@ -986,6 +986,7 @@ pub(crate) fn register_sheet_actions(
     crate::grid_pointer::wire(app, state, menu_service);
     crate::ink_actions::wire(app, state, menu_service);
     crate::rich_format_actions::wire(app, state, menu_service);
+    crate::pivot_builder::wire(app, state, menu_service);
 
     {
         let state = state.clone();

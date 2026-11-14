@@ -49,6 +49,7 @@ use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
 mod inspector_search;
+mod pivot_builder;
 mod rich_format_actions;
 #[cfg(test)]
 use inspector_search::inspector_section_visibility;
