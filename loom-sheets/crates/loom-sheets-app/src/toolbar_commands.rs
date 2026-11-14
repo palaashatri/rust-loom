@@ -12,6 +12,7 @@ pub(crate) const FORMAT_TAB: i32 = 1;
 
 /// Routes toolbar and menu commands to the shared dispatcher.
 pub(crate) fn wire(app: &SheetsApp) {
+    crate::command_dispatch::wire_shortcuts(app);
     let app_ref = app.as_weak();
     app.on_toolbar_command(move |id| {
         if let Some(app) = app_ref.upgrade() {

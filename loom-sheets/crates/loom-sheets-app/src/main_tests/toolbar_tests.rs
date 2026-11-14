@@ -375,3 +375,66 @@ fn toolbar_toggle_rows_remain_checkable_when_off() {
         3
     );
 }
+
+#[test]
+fn sheet_tabs_delete_button_and_expanded_table_menu_and_shortcuts_work() {
+    let app = launched();
+    let delete_calls = Rc::new(Cell::new(0));
+    let seen_delete = delete_calls.clone();
+    app.on_delete_sheet(move || seen_delete.set(seen_delete.get() + 1));
+
+    let delete_btn = || {
+        ElementHandle::find_by_accessible_label(&app, "Delete sheet")
+            .find(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .expect("Delete sheet button")
+    };
+    assert_eq!(
+        delete_btn().accessible_enabled(),
+        Some(false),
+        "Delete sheet is disabled when only one sheet exists"
+    );
+
+    app.set_sheet_names(slint::ModelRc::new(slint::VecModel::from(vec![
+        SharedString::from("Sheet 1"),
+        SharedString::from("Sheet 2"),
+    ])));
+    render(&app);
+    assert_eq!(delete_btn().accessible_enabled(), Some(true));
+    delete_btn().invoke_accessible_default_action();
+    assert_eq!(delete_calls.get(), 1);
+
+    // View -> Command Palette exposes its keyboard shortcut.
+    button(&app, "View");
+    render(&app);
+    let palette_row = ElementHandle::find_by_accessible_label(&app, "Command Palette")
+        .find(|e| e.accessible_role() == Some(AccessibleRole::ListItem))
+        .expect("Command Palette menu row");
+    assert_eq!(
+        palette_row.accessible_description().as_deref(),
+        Some(crate::command_dispatch::shortcut_for_id("app.palette"))
+    );
+
+    // Expanded Table menu exposes delete/sort-desc/freeze/delete-sheet rows with shortcuts.
+    let table_calls = Rc::new(RefCell::new(Vec::new()));
+    let push = |name: &'static str| {
+        let table_calls = table_calls.clone();
+        move || table_calls.borrow_mut().push(name)
+    };
+    app.on_sort_descending(push("sort_desc"));
+    app.on_delete_row(push("delete_row"));
+    app.on_delete_col(push("delete_col"));
+    app.on_freeze_panes(push("freeze"));
+    for (row, expected) in [
+        ("Sort Descending", "sort_desc"),
+        ("Delete Row", "delete_row"),
+        ("Delete Column", "delete_col"),
+        ("Freeze Header Row", "freeze"),
+    ] {
+        button(&app, "Table");
+        item(&app, row);
+        assert_eq!(table_calls.borrow().last(), Some(&expected), "{row}");
+    }
+    button(&app, "Table");
+    item(&app, "Delete Sheet");
+    assert_eq!(delete_calls.get(), 2);
+}

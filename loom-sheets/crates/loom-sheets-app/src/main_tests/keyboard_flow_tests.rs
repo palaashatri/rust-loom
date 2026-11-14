@@ -434,6 +434,55 @@ fn ctrl_k_palette_runs_a_command_and_escape_closes_it_returning_focus() {
     assert!(same_focus(&focus_weak(&s.app), &grid));
 }
 
+#[test]
+fn palette_opens_with_ctrl_shift_p_and_f1_and_new_shortcuts_dispatch() {
+    let s = launched(&[("A1", "1")]);
+    let grid = focus_weak(&s.app);
+    chord(&s.app, &[Key::Control, Key::Shift], "p");
+    assert!(s.app.get_palette_open(), "Ctrl+Shift+P opens the palette");
+    press(&s.app, Key::Escape);
+    assert!(!s.app.get_palette_open());
+    assert!(same_focus(&focus_weak(&s.app), &grid));
+
+    press(&s.app, Key::F1);
+    assert!(s.app.get_palette_open(), "F1 opens the palette");
+    press(&s.app, Key::Escape);
+    assert!(!s.app.get_palette_open());
+
+    let log = Rc::new(RefCell::new(Vec::<&'static str>::new()));
+    let push = |name: &'static str| {
+        let log = log.clone();
+        move || log.borrow_mut().push(name)
+    };
+    s.app.on_fill_selection(push("fill"));
+    s.app.on_export_xlsx(push("xlsx"));
+    s.app.on_add_sheet(push("add_sheet"));
+    s.app.on_delete_sheet(push("delete_sheet"));
+    s.app.on_add_row(push("add_row"));
+    s.app.on_sort_ascending(push("sort_asc"));
+    s.app.on_sort_descending(push("sort_desc"));
+
+    ctrl(&s.app, "d");
+    chord(&s.app, &[Key::Control, Key::Shift], "e");
+    chord(&s.app, &[Key::Control, Key::Alt], "n");
+    chord(&s.app, &[Key::Control, Key::Alt], "x");
+    chord(&s.app, &[Key::Control, Key::Alt], "r");
+    chord(&s.app, &[Key::Control, Key::Alt], "s");
+    chord(&s.app, &[Key::Control, Key::Alt], "d");
+    assert_eq!(
+        *log.borrow(),
+        [
+            "fill",
+            "xlsx",
+            "add_sheet",
+            "delete_sheet",
+            "add_row",
+            "sort_asc",
+            "sort_desc"
+        ]
+    );
+}
+
 /// Put focus on a toolbar item: F6 from the grid lands on the first one and
 /// Tab walks the rest.
 fn focus_toolbar_item(s: &Session, name: &str) {

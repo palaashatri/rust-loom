@@ -129,3 +129,210 @@ pub(crate) fn schedule_menu_action(
             ))
         })
 }
+
+/// Platform modifier label shown in menus and the command palette.
+pub(crate) const PRIMARY_MOD: &str = if cfg!(target_os = "macos") {
+    "Cmd+"
+} else {
+    "Ctrl+"
+};
+
+const fn sc(mac: &'static str, other: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        mac
+    } else {
+        other
+    }
+}
+
+/// Canonical keyboard shortcut label for a Sheets command identifier.
+pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
+    match id {
+        "file.new" | "sheets.new" => sc("Cmd+N", "Ctrl+N"),
+        "file.new_template" | "sheets.new-template" => sc("Cmd+Shift+N", "Ctrl+Shift+N"),
+        "file.open" | "sheets.open" => sc("Cmd+O", "Ctrl+O"),
+        "file.save" | "sheets.save" => sc("Cmd+S", "Ctrl+S"),
+        "file.save_as" | "sheets.save-as" => sc("Cmd+Shift+S", "Ctrl+Shift+S"),
+        "sheets.retry-recovery" => sc("Cmd+Alt+Z", "Ctrl+Alt+Z"),
+        "file.export_csv" | "sheets.export-csv" => sc("Cmd+E", "Ctrl+E"),
+        "file.export_xlsx" | "sheets.export-xlsx" => sc("Cmd+Shift+E", "Ctrl+Shift+E"),
+        "edit.undo" | "sheets.undo" => sc("Cmd+Z", "Ctrl+Z"),
+        "edit.redo" | "sheets.redo" => sc("Cmd+Shift+Z", "Ctrl+Shift+Z"),
+        "edit.cut" | "sheets.cut" => sc("Cmd+X", "Ctrl+X"),
+        "edit.copy" | "sheets.copy" => sc("Cmd+C", "Ctrl+C"),
+        "edit.paste" | "sheets.paste" => sc("Cmd+V", "Ctrl+V"),
+        "edit.select_all" | "sheets.select-all" => sc("Cmd+A", "Ctrl+A"),
+        "table.fill_down" => sc("Cmd+D", "Ctrl+D"),
+        "app.palette" => sc("Cmd+K", "Ctrl+K"),
+        "help.shortcuts" => sc("Cmd+Shift+P", "Ctrl+Shift+P"),
+        "view.inspector" => sc("Cmd+Alt+I", "Ctrl+Alt+I"),
+        "view.zoom_in" => sc("Cmd+=", "Ctrl+="),
+        "view.zoom_out" => sc("Cmd+-", "Ctrl+-"),
+        "view.zoom_actual" => sc("Cmd+0", "Ctrl+0"),
+        "sheets.add_sheet" => sc("Cmd+Alt+N", "Ctrl+Alt+N"),
+        "sheets.delete_sheet" => sc("Cmd+Alt+X", "Ctrl+Alt+X"),
+        "table.add_row" => sc("Cmd+Alt+R", "Ctrl+Alt+R"),
+        "table.delete_row" => sc("Cmd+Alt+W", "Ctrl+Alt+W"),
+        "table.add_col" | "sheets.add-col" => sc("Cmd+Alt+K", "Ctrl+Alt+K"),
+        "table.delete_col" => sc("Cmd+Alt+L", "Ctrl+Alt+L"),
+        "table.sort_asc" | "sheets.sort-asc" | "sheets.organize" => sc("Cmd+Alt+S", "Ctrl+Alt+S"),
+        "table.sort_desc" | "sheets.sort-desc" => sc("Cmd+Alt+D", "Ctrl+Alt+D"),
+        "table.freeze_header" | "sheets.freeze-header" => sc("Cmd+Alt+F", "Ctrl+Alt+F"),
+        "table.unfreeze_panes" | "sheets.unfreeze-panes" => sc("Cmd+Alt+U", "Ctrl+Alt+U"),
+        "format.bold" | "sheets.bold" => sc("Cmd+B", "Ctrl+B"),
+        "format.italic" | "sheets.italic" => sc("Cmd+I", "Ctrl+I"),
+        "format.underline" | "sheets.underline" => sc("Cmd+U", "Ctrl+U"),
+        "format.align_left" | "sheets.align-left" => sc("Cmd+Shift+L", "Ctrl+Shift+L"),
+        "format.align_center" | "sheets.align-center" => sc("Cmd+Shift+M", "Ctrl+Shift+M"),
+        "format.align_right" | "sheets.align-right" => sc("Cmd+Shift+R", "Ctrl+Shift+R"),
+        "format.general" => sc("Cmd+Alt+0", "Ctrl+Alt+0"),
+        "format.number" => sc("Cmd+Alt+1", "Ctrl+Alt+1"),
+        "format.currency" => sc("Cmd+Alt+4", "Ctrl+Alt+4"),
+        "format.percentage" => sc("Cmd+Alt+5", "Ctrl+Alt+5"),
+        "table.adjust_decimals_increase" => sc("Cmd+Alt+.", "Ctrl+Alt+."),
+        "table.adjust_decimals_decrease" => sc("Cmd+Alt+,", "Ctrl+Alt+,"),
+        "format.borders" | "sheets.borders" => sc("Cmd+Alt+B", "Ctrl+Alt+B"),
+        "format.fill_cycle" | "sheets.fill-cycle" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
+        "format.font_increase" => sc("Cmd+Shift+.", "Ctrl+Shift+."),
+        "format.font_decrease" => sc("Cmd+Shift+,", "Ctrl+Shift+,"),
+        "sheets.insert_chart" => sc("Cmd+Alt+C", "Ctrl+Alt+C"),
+        "sheets.insert_shape" => sc("Cmd+Alt+J", "Ctrl+Alt+J"),
+        "sheets.insert_image" => sc("Cmd+Alt+M", "Ctrl+Alt+M"),
+        "sheets.cycle_chart_kind" => sc("Cmd+Alt+T", "Ctrl+Alt+T"),
+        "sheets.copy_chart" => sc("Cmd+Alt+Y", "Ctrl+Alt+Y"),
+        "sheets.worksheet-objects" => "F6",
+        "table.pivot_sum" => sc("Cmd+Alt+P", "Ctrl+Alt+P"),
+        "table.pivot_count" => sc("Cmd+Alt+2", "Ctrl+Alt+2"),
+        "table.pivot_average" => sc("Cmd+Alt+3", "Ctrl+Alt+3"),
+        "table.pivot_min" => sc("Cmd+Alt+8", "Ctrl+Alt+8"),
+        "table.pivot_max" => sc("Cmd+Alt+9", "Ctrl+Alt+9"),
+        "view.appearance.system" => sc("Cmd+Alt+6", "Ctrl+Alt+6"),
+        "view.appearance.light" => sc("Cmd+Alt+7", "Ctrl+Alt+7"),
+        "view.appearance.dark" => sc("Cmd+Shift+D", "Ctrl+Shift+D"),
+        "view.appearance.high_contrast" => sc("Cmd+Shift+H", "Ctrl+Shift+H"),
+        "view.window-frame.system" => sc("Cmd+Alt+[", "Ctrl+Alt+["),
+        "view.window-frame.loom" => sc("Cmd+Alt+]", "Ctrl+Alt+]"),
+        _ => "",
+    }
+}
+
+/// Dispatch a Ctrl/Cmd chord from the Slint root focus handler.
+pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bool) -> bool {
+    if app.get_close_draining() {
+        return true;
+    }
+    if app.get_xlsx_import_warning_open() {
+        return false;
+    }
+    let ch = key.chars().next();
+    if shift && !alt && ch == Some(char::from(slint::platform::Key::Backspace)) {
+        return dispatch_command(app, "sheets.delete_sheet");
+    }
+    if !shift && alt {
+        if let Some(c) = ch {
+            if c == char::from(slint::platform::Key::DownArrow) {
+                return dispatch_command(app, "table.add_row");
+            }
+            if c == char::from(slint::platform::Key::UpArrow) {
+                return dispatch_command(app, "table.delete_row");
+            }
+            if c == char::from(slint::platform::Key::RightArrow) {
+                return dispatch_command(app, "table.add_col");
+            }
+            if c == char::from(slint::platform::Key::LeftArrow) {
+                return dispatch_command(app, "table.delete_col");
+            }
+        }
+    }
+    let lower = key.to_ascii_lowercase();
+    if !alt && lower == "q" && !shift {
+        app.invoke_window_close();
+        return true;
+    }
+    if !alt && (lower == "=" || lower == "+") {
+        return dispatch_command(app, "view.zoom_in");
+    }
+    let command_id = match (lower.as_str(), shift, alt) {
+        ("k", _, false) | ("p", true, false) => "app.palette",
+        ("n", false, false) => "file.new",
+        ("n", true, false) => "file.new_template",
+        ("o", false, false) => "file.open",
+        ("s", false, false) => "file.save",
+        ("s", true, false) => "file.save_as",
+        ("e", false, false) => "file.export_csv",
+        ("e", true, false) => "file.export_xlsx",
+        ("z", false, false) => "edit.undo",
+        ("z", true, false) | ("y", false, false) => "edit.redo",
+        ("x", false, false) => "edit.cut",
+        ("c", false, false) => "edit.copy",
+        ("v", false, false) => "edit.paste",
+        ("a", false, false) => "edit.select_all",
+        ("d", false, false) => "table.fill_down",
+        ("b", false, false) => "format.bold",
+        ("i", false, false) => "format.italic",
+        ("u", false, false) => "format.underline",
+        ("-", false, false) | ("_", true, false) => "view.zoom_out",
+        ("0", false, false) => "view.zoom_actual",
+        ("l", true, false) => "format.align_left",
+        ("m", true, false) => "format.align_center",
+        ("r", true, false) => {
+            if app.get_recovery_paused() {
+                "sheets.retry-recovery"
+            } else {
+                "format.align_right"
+            }
+        }
+        ("." | ">", true, false) => "format.font_increase",
+        ("," | "<", true, false) => "format.font_decrease",
+        ("d", true, false) => "view.appearance.dark",
+        ("h", true, false) => "view.appearance.high_contrast",
+        ("i", false, true) => "view.inspector",
+        ("n", false, true) => "sheets.add_sheet",
+        ("x", false, true) => "sheets.delete_sheet",
+        ("r", false, true) => "table.add_row",
+        ("w", false, true) => "table.delete_row",
+        ("k", false, true) => "table.add_col",
+        ("l", false, true) => "table.delete_col",
+        ("s", false, true) => "table.sort_asc",
+        ("d", false, true) => "table.sort_desc",
+        ("f", false, true) => "table.freeze_header",
+        ("u", false, true) => "table.unfreeze_panes",
+        ("b", false, true) => "format.borders",
+        ("g", false, true) => "format.fill_cycle",
+        ("0", false, true) => "format.general",
+        ("1", false, true) => "format.number",
+        ("4", false, true) => "format.currency",
+        ("5", false, true) => "format.percentage",
+        (".", false, true) => "table.adjust_decimals_increase",
+        (",", false, true) => "table.adjust_decimals_decrease",
+        ("c", false, true) => "sheets.insert_chart",
+        ("j", false, true) => "sheets.insert_shape",
+        ("m", false, true) => "sheets.insert_image",
+        ("o", false, true) => "sheets.worksheet-objects",
+        ("t", false, true) => "sheets.cycle_chart_kind",
+        ("y", false, true) => "sheets.copy_chart",
+        ("p", false, true) => "table.pivot_sum",
+        ("2", false, true) => "table.pivot_count",
+        ("3", false, true) => "table.pivot_average",
+        ("8", false, true) => "table.pivot_min",
+        ("9", false, true) => "table.pivot_max",
+        ("6", false, true) => "view.appearance.system",
+        ("7", false, true) => "view.appearance.light",
+        ("[", false, true) => "view.window-frame.system",
+        ("]", false, true) => "view.window-frame.loom",
+        ("z", false, true) if app.get_recovery_paused() => "sheets.retry-recovery",
+        _ => return false,
+    };
+    dispatch_command(app, command_id)
+}
+
+/// Wire platform shortcut labels and root Ctrl/Cmd shortcut dispatch.
+pub(crate) fn wire_shortcuts(app: &SheetsApp) {
+    app.set_mod_key(PRIMARY_MOD.into());
+    let app_ref = app.as_weak();
+    app.on_shortcut_pressed(move |key, shift, alt| {
+        app_ref
+            .upgrade()
+            .is_some_and(|app| dispatch_shortcut(&app, key.as_str(), shift, alt))
+    });
+}

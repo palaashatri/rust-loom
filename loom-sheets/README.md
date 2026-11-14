@@ -8,7 +8,7 @@ Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workb
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1104 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
+- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1107 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 
@@ -62,17 +62,36 @@ Evidence tags used below:
 
 ## Keyboard shortcuts
 
+On macOS, `Cmd` replaces `Ctrl` (`Alt` corresponds to `Option`). Menus and the command palette display the active platform modifier labels.
+
 | Keys | Action |
 |---|---|
 | Alt+F / Alt+E / Alt+V / Alt+T / Alt+H, or F10 | Open the File / Edit / View / Table / Help menu (F10 opens the first); arrows walk, Enter runs, Escape closes |
-| Ctrl+K | Command palette |
-| Ctrl+N / Ctrl+O | New / Open |
+| Ctrl+K / Ctrl+Shift+P / F1 | Toggle Command Palette |
+| Ctrl+N / Ctrl+Shift+N / Ctrl+O | New / New from template / Open |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
-| Ctrl+E | Export CSV |
+| Ctrl+E / Ctrl+Shift+E | Export CSV / Export XLSX |
 | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / Redo |
 | Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A | Cut / Copy / Paste / Select all |
+| Ctrl+D | Fill down |
 | Ctrl+B / Ctrl+I / Ctrl+U | Bold / Italic / Underline |
+| Ctrl+Shift+L / M / R | Align left / center / right |
+| Ctrl+Shift+. / Ctrl+Shift+, | Increase / decrease font size |
+| Ctrl+Alt+0 / 1 / 4 / 5 | General / Number / Currency / Percent format |
+| Ctrl+Alt+. / Ctrl+Alt+, | Increase / decrease decimal places |
+| Ctrl+Alt+B / Ctrl+Alt+G | Toggle borders / cycle fill color |
+| Ctrl+Alt+N / Ctrl+Alt+X (or Ctrl+Shift+Backspace) | Add sheet / Delete active sheet (also via the sheet-bar `-` button and Table menu) |
+| Ctrl+Alt+R / Ctrl+Alt+W (or Ctrl+Alt+Down / Up) | Add row / Delete row |
+| Ctrl+Alt+K / Ctrl+Alt+L (or Ctrl+Alt+Right / Left) | Add column / Delete column |
+| Ctrl+Alt+S / Ctrl+Alt+D | Sort ascending / Sort descending |
+| Ctrl+Alt+F / Ctrl+Alt+U | Freeze header row / Unfreeze panes |
+| Ctrl+Alt+C / J / M / T / Y | Insert Chart / Shape / Image; Cycle chart kind / Copy chart |
+| Ctrl+Alt+P / 2 / 3 / 8 / 9 | Pivot summary: Sum / Count / Average / Min / Max |
+| Ctrl+Alt+I | Toggle Inspector |
 | Ctrl+= or Ctrl++ / Ctrl+- / Ctrl+0 | Zoom in / out / actual size |
+| Ctrl+Alt+6 / 7 / Ctrl+Shift+D / H | Appearance: System / Light / Dark / High Contrast |
+| Ctrl+Alt+[ / ] | Window frame: System / Loom |
+| Ctrl+Alt+Z | Retry recovery (when recovery is paused) |
 | Arrows, Shift+Arrows | Move / extend selection |
 | Ctrl+Arrow, Ctrl+Shift+Arrow | Jump to data edge / extend to it |
 | Page Up / Page Down, Home, Ctrl+Home, Ctrl+End | Move a screen, to column A, to A1, to the last used cell (Shift extends) |

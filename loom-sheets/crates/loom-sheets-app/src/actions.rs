@@ -109,6 +109,7 @@ pub(crate) fn register_sheet_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    crate::command_dispatch::wire_shortcuts(app);
     wire_template_navigation(app);
     dimension_actions::register(app, state, menu_service);
     {

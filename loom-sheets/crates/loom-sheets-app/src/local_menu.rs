@@ -49,6 +49,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.freeze_header",
     "table.unfreeze_panes",
     "table.pivot_sum",
+    "sheets.add_sheet",
     "sheets.insert_chart",
     "sheets.insert_shape",
     "sheets.insert_image",
@@ -60,21 +61,33 @@ loom_desktop::local_menu_bindings!(SheetsApp, SUPPORTED_COMMANDS, set_status_lef
 /// Sheets' menu bar with only the commands Sheets handles enabled. Help >
 /// Keyboard Shortcuts opens the command palette.
 pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
-    use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
+    use loom_desktop::{build_standard_menu_bar, CommandState, Menu, MenuItem, MenuShortcut};
     let mut menu_bar = build_standard_menu_bar(
         "Loom Sheets",
         vec![
-            MenuItem::action("file.new_template", "New from Template..."),
+            MenuItem::action_with_shortcut(
+                "file.new_template",
+                "New from Template...",
+                MenuShortcut::primary_shift("N"),
+            ),
             MenuItem::action_with_shortcut(
                 "file.export_csv",
                 "Export to CSV...",
                 MenuShortcut::primary("E"),
             ),
-            MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
+            MenuItem::action_with_shortcut(
+                "file.export_xlsx",
+                "Export to Excel (.xlsx)...",
+                MenuShortcut::primary_shift("E"),
+            ),
         ],
         vec![],
         [
-            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+            vec![
+                CommandState::check("view.inspector", "Format Inspector", false)
+                    .with_shortcut(MenuShortcut::primary_alt("I"))
+                    .menu_item(),
+            ],
             loom_desktop::appearance::menu_items(),
             loom_desktop::window_frame::menu_items(),
         ]
@@ -82,21 +95,82 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
         vec![Menu::new(
             "Table",
             vec![
-                MenuItem::action("table.add_row", "Add Row"),
-                MenuItem::action("table.delete_row", "Delete Row"),
-                MenuItem::action("table.add_col", "Add Column"),
-                MenuItem::action("table.delete_col", "Delete Column"),
-                MenuItem::action("table.sort_asc", "Sort Ascending"),
-                MenuItem::action("table.sort_desc", "Sort Descending"),
-                MenuItem::action("table.freeze_header", "Freeze Header Row"),
-                MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
-                MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
-                MenuItem::action("sheets.insert_chart", "Insert Chart"),
-                MenuItem::action("sheets.insert_shape", "Insert Shape"),
-                MenuItem::action("sheets.insert_image", "Insert Image"),
-                MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
+                MenuItem::action_with_shortcut(
+                    "table.add_row",
+                    "Add Row",
+                    MenuShortcut::primary_alt("R"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.delete_row",
+                    "Delete Row",
+                    MenuShortcut::primary_alt("W"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.add_col",
+                    "Add Column",
+                    MenuShortcut::primary_alt("K"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.delete_col",
+                    "Delete Column",
+                    MenuShortcut::primary_alt("L"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.sort_asc",
+                    "Sort Ascending",
+                    MenuShortcut::primary_alt("S"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.sort_desc",
+                    "Sort Descending",
+                    MenuShortcut::primary_alt("D"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.freeze_header",
+                    "Freeze Header Row",
+                    MenuShortcut::primary_alt("F"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.unfreeze_panes",
+                    "Unfreeze Panes",
+                    MenuShortcut::primary_alt("U"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "table.pivot_sum",
+                    "Pivot Summary (Sum)",
+                    MenuShortcut::primary_alt("P"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "sheets.insert_chart",
+                    "Insert Chart",
+                    MenuShortcut::primary_alt("C"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "sheets.insert_shape",
+                    "Insert Shape",
+                    MenuShortcut::primary_alt("J"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "sheets.insert_image",
+                    "Insert Image",
+                    MenuShortcut::primary_alt("M"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "sheets.add_sheet",
+                    "Add Sheet",
+                    MenuShortcut::primary_alt("N"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "sheets.delete_sheet",
+                    "Delete Sheet",
+                    MenuShortcut::primary_alt("X"),
+                ),
             ],
         )],
+    );
+    menu_bar.apply_command_state(
+        &CommandState::action("help.shortcuts", "Keyboard Shortcuts")
+            .with_shortcut(MenuShortcut::primary_shift("P")),
     );
     menu_bar.disable_items_except(SUPPORTED_COMMANDS);
     menu_bar

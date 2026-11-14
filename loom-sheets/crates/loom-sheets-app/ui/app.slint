@@ -53,8 +53,10 @@ export component SheetsApp inherits Window {
     in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <int> toolbar-menu: 0;
+    in property <string> mod-key: "Ctrl+";
     property <length> toolbar-menu-x: 0px;
     callback toolbar-command(string);
+    callback shortcut-pressed(string, bool, bool) -> bool;
     in-out property <bool> show-inspector: false;
     in-out property <bool> inspector-preference: false;
     in-out property <bool> inspector-quiet-open: false;
@@ -378,31 +380,16 @@ export component SheetsApp inherits Window {
                 root.cycle-region(event.modifiers.shift);
                 return accept;
             }
+            if (event.text == Key.F1) { root.open-palette(); return accept; }
             if (event.modifiers.control || event.modifiers.meta) {
+                if (root.shortcut-pressed(event.text, event.modifiers.shift, event.modifiers.alt)) { return accept; }
                 let k = event.text;
-                if (k == Key.K || k == "k") { root.open-palette(); return accept; }
-                if (k == "n" || k == "N") { root.new-sheet(); return accept; }
-                if (k == "o" || k == "O") { root.open-sheet(); return accept; }
-                if (k == "s" || k == "S") {
-                    if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); }
-                    return accept;
+                if (!event.modifiers.alt) {
+                    if (k == "k" || k == "K" || ((k == "p" || k == "P") && event.modifiers.shift)) { root.open-palette(); return accept; }
+                    if (k == "s" || k == "S") { if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); } return accept; }
+                    if (k == "z" || k == "Z" || k == "y") { if (event.modifiers.shift || k == "y") { root.redo(); } else { root.undo(); } return accept; }
+                    if (k == "a" || k == "A") { root.select-all(); return accept; }
                 }
-                if (k == "e" || k == "E") { root.export-csv(); return accept; }
-                if (k == "q" || k == "Q") { root.window-close(); return accept; }
-                if (k == "z" || k == "Z" || k == "y") {
-                    if (event.modifiers.shift || k == "y") { root.redo(); } else { root.undo(); }
-                    return accept;
-                }
-                if (k == "c" || k == "C") { root.copy-selection(); return accept; }
-                if (k == "x" || k == "X") { root.cut-selection(); return accept; }
-                if (k == "v" || k == "V") { root.paste-selection(); return accept; }
-                if (k == "a" || k == "A") { root.select-all(); return accept; }
-                if (k == "b" || k == "B") { root.toggle-bold(); return accept; }
-                if (k == "i" || k == "I") { root.toggle-italic(); return accept; }
-                if (k == "u" || k == "U") { root.toggle-underline(); return accept; }
-                if (k == "=" || k == "+") { root.zoom-in(); return accept; }
-                if (k == "-") { root.zoom-out(); return accept; }
-                if (k == "0") { root.zoom-actual(); return accept; }
             }
             if (event.text == Key.Backspace || event.text == Key.Delete) { root.clear-selected-cells(); return accept; }
             if (event.text == Key.Escape) {
@@ -457,6 +444,7 @@ export component SheetsApp inherits Window {
                 can-add-sheet: true;
                 select-sheet(idx) => { root.select-sheet(idx); }
                 add-sheet => { root.add-sheet(); }
+                delete-sheet => { root.delete-sheet(); }
             }
             formula-bar := FormulaNameBar {
                 selection-range: root.selection-range;
@@ -703,6 +691,7 @@ export component SheetsApp inherits Window {
         content-width: root.width;
         content-height: root.height;
         menu-y: action-toolbar.bottom-y;
+        mod-key: root.mod-key;
         close-requested => { root.close-toolbar-overflow(); }
         command(id) => { root.close-toolbar-overflow(); root.toolbar-command(id); }
     }
@@ -712,6 +701,7 @@ export component SheetsApp inherits Window {
         kind: root.toolbar-menu;
         menu-x: root.toolbar-menu-x;
         menu-y: action-toolbar.bottom-y;
+        mod-key: root.mod-key;
         inspector-visible: root.inspector-visible;
         cell-bold: root.cell-bold;
         cell-italic: root.cell-italic;

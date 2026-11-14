@@ -6,6 +6,7 @@ use std::collections::HashSet;
 // are checked in `toolbar_tests.rs`. These are the remaining icon buttons.
 const SHARED_ACTIONS: &[(&str, &str)] = &[
     ("Add sheet", "Add a worksheet to this workbook."),
+    ("Delete sheet", "Delete the active worksheet."),
     (
         "Commit formula",
         "Apply the formula bar entry to the selected cell.",

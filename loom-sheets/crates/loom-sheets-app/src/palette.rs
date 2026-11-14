@@ -221,219 +221,128 @@ pub fn command_matches(command: &PaletteCommand, query: &str) -> bool {
     if query.is_empty() {
         return true;
     }
-    let fields = [command.label, command.id, command.keywords].map(|field| field.to_lowercase());
+    let fields = [
+        command.label,
+        command.id,
+        command.keywords,
+        command.shortcut,
+    ]
+    .map(|field| field.to_lowercase());
     fields.iter().any(|field| field.contains(&query))
         || query
             .split_whitespace()
             .all(|word| fields.iter().any(|field| field.contains(word)))
 }
 
-/// Platform shortcut hint for palette rows (Cmd on macOS, Ctrl elsewhere).
-const fn sc(mac: &'static str, other: &'static str) -> &'static str {
-    if cfg!(target_os = "macos") {
-        mac
-    } else {
-        other
-    }
-}
-
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     [
-        (
-            PaletteAction::NewSheet,
-            "sheets.new",
-            "New Workbook",
-            sc("Cmd+N", "Ctrl+N"),
-        ),
+        (PaletteAction::NewSheet, "sheets.new", "New Workbook"),
         (
             PaletteAction::NewFromTemplate,
             "sheets.new-template",
             "New from Template...",
-            "",
         ),
-        (
-            PaletteAction::OpenSheet,
-            "sheets.open",
-            "Open Workbook",
-            sc("Cmd+O", "Ctrl+O"),
-        ),
-        (
-            PaletteAction::SaveSheet,
-            "sheets.save",
-            "Save Workbook",
-            sc("Cmd+S", "Ctrl+S"),
-        ),
+        (PaletteAction::OpenSheet, "sheets.open", "Open Workbook"),
+        (PaletteAction::SaveSheet, "sheets.save", "Save Workbook"),
         (
             PaletteAction::SaveAsSheet,
             "sheets.save-as",
             "Save Workbook As",
-            sc("Cmd+Shift+S", "Ctrl+Shift+S"),
         ),
         (
             PaletteAction::RetryRecovery,
             "sheets.retry-recovery",
             "Retry Recovery",
-            "",
         ),
-        (
-            PaletteAction::ExportCsv,
-            "sheets.export-csv",
-            "Export CSV",
-            sc("Cmd+E", "Ctrl+E"),
-        ),
+        (PaletteAction::ExportCsv, "sheets.export-csv", "Export CSV"),
         (
             PaletteAction::ExportXlsx,
             "sheets.export-xlsx",
             "Export Excel (.xlsx)",
-            "",
         ),
-        (
-            PaletteAction::Cut,
-            "sheets.cut",
-            "Cut",
-            sc("Cmd+X", "Ctrl+X"),
-        ),
-        (
-            PaletteAction::Copy,
-            "sheets.copy",
-            "Copy",
-            sc("Cmd+C", "Ctrl+C"),
-        ),
-        (
-            PaletteAction::Paste,
-            "sheets.paste",
-            "Paste",
-            sc("Cmd+V", "Ctrl+V"),
-        ),
-        (
-            PaletteAction::SelectAll,
-            "sheets.select-all",
-            "Select All",
-            sc("Cmd+A", "Ctrl+A"),
-        ),
-        (PaletteAction::AddRow, "table.add_row", "Add Row", ""),
-        (
-            PaletteAction::DeleteRow,
-            "table.delete_row",
-            "Delete Row",
-            "",
-        ),
-        (PaletteAction::AddCol, "table.add_col", "Add Column", ""),
+        (PaletteAction::Cut, "sheets.cut", "Cut"),
+        (PaletteAction::Copy, "sheets.copy", "Copy"),
+        (PaletteAction::Paste, "sheets.paste", "Paste"),
+        (PaletteAction::SelectAll, "sheets.select-all", "Select All"),
+        (PaletteAction::AddRow, "table.add_row", "Add Row"),
+        (PaletteAction::DeleteRow, "table.delete_row", "Delete Row"),
+        (PaletteAction::AddCol, "table.add_col", "Add Column"),
         (
             PaletteAction::DeleteCol,
             "table.delete_col",
             "Delete Column",
-            "",
         ),
-        (
-            PaletteAction::SortAsc,
-            "table.sort_asc",
-            "Sort Ascending",
-            "",
-        ),
+        (PaletteAction::SortAsc, "table.sort_asc", "Sort Ascending"),
         (
             PaletteAction::SortDesc,
             "table.sort_desc",
             "Sort Descending",
-            "",
         ),
         (
             PaletteAction::FreezeHeader,
             "table.freeze_header",
             "Freeze Header Row",
-            "",
         ),
         (
             PaletteAction::UnfreezePanes,
             "table.unfreeze_panes",
             "Unfreeze Panes",
-            "",
         ),
         (
             PaletteAction::DeleteSheet,
             "sheets.delete_sheet",
             "Delete Sheet",
-            "",
         ),
-        (
-            PaletteAction::Bold,
-            "sheets.bold",
-            "Bold",
-            sc("Cmd+B", "Ctrl+B"),
-        ),
-        (
-            PaletteAction::Italic,
-            "sheets.italic",
-            "Italic",
-            sc("Cmd+I", "Ctrl+I"),
-        ),
-        (
-            PaletteAction::Underline,
-            "sheets.underline",
-            "Underline",
-            sc("Cmd+U", "Ctrl+U"),
-        ),
-        (
-            PaletteAction::AlignLeft,
-            "sheets.align-left",
-            "Align Left",
-            "",
-        ),
+        (PaletteAction::Bold, "sheets.bold", "Bold"),
+        (PaletteAction::Italic, "sheets.italic", "Italic"),
+        (PaletteAction::Underline, "sheets.underline", "Underline"),
+        (PaletteAction::AlignLeft, "sheets.align-left", "Align Left"),
         (
             PaletteAction::AlignCenter,
             "sheets.align-center",
             "Align Center",
-            "",
         ),
         (
             PaletteAction::AlignRight,
             "sheets.align-right",
             "Align Right",
-            "",
         ),
         (
             PaletteAction::FormatCurrency,
             "format.currency",
             "Format as Currency ($)",
-            "",
         ),
         (
             PaletteAction::FormatPercent,
             "format.percentage",
             "Format as Percentage (%)",
-            "",
         ),
         (
             PaletteAction::FormatGeneral,
             "format.general",
             "Format as General",
-            "",
         ),
         (
             PaletteAction::FormatNumber,
             "format.number",
             "Format as Number (1.23)",
-            "",
         ),
         (
             PaletteAction::DecimalsIncrease,
             "table.adjust_decimals_increase",
             "Decimals: Increase",
-            "",
         ),
         (
             PaletteAction::DecimalsDecrease,
             "table.adjust_decimals_decrease",
             "Decimals: Decrease",
-            "",
         ),
         (
             PaletteAction::Organize,
             "sheets.organize",
             "Sort by This Column (A→Z)",
-            "",
         ),
-        (PaletteAction::FillDown, "table.fill_down", "Fill Down", ""),
+        (PaletteAction::FillDown, "table.fill_down", "Fill Down"),
         (
             PaletteAction::InsertChart,
             "sheets.insert_chart",
@@ -442,91 +351,68 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             } else {
                 "Change Chart Source"
             },
-            "",
         ),
         (
             PaletteAction::InsertShape,
             "sheets.insert_shape",
             "Insert Shape",
-            "",
         ),
         (
             PaletteAction::InsertImage,
             "sheets.insert_image",
             "Insert Image",
-            "",
         ),
         (
             PaletteAction::CycleChartKind,
             "sheets.cycle_chart_kind",
             "Cycle Chart Kind",
-            "",
         ),
-        (
-            PaletteAction::CopyChart,
-            "sheets.copy_chart",
-            "Copy Chart",
-            "",
-        ),
+        (PaletteAction::CopyChart, "sheets.copy_chart", "Copy Chart"),
         (
             PaletteAction::WorksheetObjects,
             "sheets.worksheet-objects",
             "Select Worksheet Objects",
-            "F6",
         ),
-        (
-            PaletteAction::Borders,
-            "format.borders",
-            "Borders: Toggle",
-            "",
-        ),
+        (PaletteAction::Borders, "format.borders", "Borders: Toggle"),
         (
             PaletteAction::FillCycle,
             "format.fill_cycle",
             "Fill: Cycle Color",
-            "",
         ),
         (
             PaletteAction::FontIncrease,
             "format.font_increase",
             "Font Size: Increase",
-            "",
         ),
         (
             PaletteAction::FontDecrease,
             "format.font_decrease",
             "Font Size: Decrease",
-            "",
         ),
         (
             PaletteAction::PivotSum,
             "table.pivot_sum",
             "Pivot Summary: Sum",
-            "",
         ),
         (
             PaletteAction::PivotCount,
             "table.pivot_count",
             "Pivot Summary: Count",
-            "",
         ),
         (
             PaletteAction::PivotAverage,
             "table.pivot_average",
             "Pivot Summary: Average",
-            "",
         ),
         (
             PaletteAction::PivotMin,
             "table.pivot_min",
             "Pivot Summary: Min",
-            "",
         ),
         (
             PaletteAction::PivotMax,
             "table.pivot_max",
             "Pivot Summary: Max",
-            "",
         ),
     ]
     .into_iter()
@@ -535,7 +421,6 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             PaletteAction::Appearance(choice),
             choice.command_id(),
             choice.label(),
-            "",
         )
     }))
     .chain(
@@ -546,29 +431,18 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
                     PaletteAction::WindowFrame(choice),
                     choice.command_id(),
                     choice.label(),
-                    "",
                 )
             }),
     )
     .chain([
-        (
-            PaletteAction::Undo,
-            "sheets.undo",
-            "Undo",
-            sc("Cmd+Z", "Ctrl+Z"),
-        ),
-        (
-            PaletteAction::Redo,
-            "sheets.redo",
-            "Redo",
-            sc("Cmd+Shift+Z", "Ctrl+Shift+Z"),
-        ),
+        (PaletteAction::Undo, "sheets.undo", "Undo"),
+        (PaletteAction::Redo, "sheets.redo", "Redo"),
     ])
-    .map(|(action, id, label, shortcut)| PaletteCommand {
+    .map(|(action, id, label)| PaletteCommand {
         action,
         id,
         label,
-        shortcut,
+        shortcut: crate::command_dispatch::shortcut_for_id(id),
         keywords: keywords_for(id),
     })
     .filter(|c| match c.action {

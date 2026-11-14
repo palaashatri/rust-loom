@@ -10,11 +10,12 @@ export component SheetTabs inherits Rectangle {
     in property <bool> can-add-sheet: true;
     callback select-sheet(int);
     callback add-sheet;
+    callback delete-sheet;
 
     height: Theme.tokens.metrics.sheet-tab-height + (Theme.scaled-control-height - Theme.tokens.metrics.control-height);
     background: Theme.palette().chrome;
 
-    // The add button comes first at the reading start, then the tabs.
+    // The add/delete buttons sit at the reading start, then the tabs.
     if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.sm;
         padding-left: Theme.tokens.space.md;
@@ -27,6 +28,14 @@ export component SheetTabs inherits Rectangle {
             tooltip: "Add a worksheet to this workbook.";
             enabled: root.can-add-sheet;
             clicked => { root.add-sheet(); }
+        }
+
+        LoomIconButton {
+            icon: "minus";
+            label: "Delete sheet";
+            tooltip: "Delete the active worksheet.";
+            enabled: root.sheets.length > 1;
+            clicked => { root.delete-sheet(); }
         }
 
         LoomTabStrip {
@@ -55,6 +64,14 @@ export component SheetTabs inherits Rectangle {
             items: root.sheets;
             current: root.active-sheet;
             selected(idx) => { root.select-sheet(idx); }
+        }
+
+        LoomIconButton {
+            icon: "minus";
+            label: "Delete sheet";
+            tooltip: "Delete the active worksheet.";
+            enabled: root.sheets.length > 1;
+            clicked => { root.delete-sheet(); }
         }
 
         LoomIconButton {

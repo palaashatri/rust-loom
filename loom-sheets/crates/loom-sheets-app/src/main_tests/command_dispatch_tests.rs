@@ -531,3 +531,36 @@ fn history_stacks_evict_oldest_past_the_bound() {
         _ => panic!("expected range transaction"),
     }
 }
+
+#[test]
+fn every_palette_command_and_menu_item_exposes_a_shortcut() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_can_undo(true);
+    app.set_can_redo(true);
+    app.set_recovery_paused(true);
+    let commands = master_palette(&app);
+    assert!(commands.len() >= 54);
+    for cmd in &commands {
+        assert!(
+            !cmd.shortcut.is_empty(),
+            "command {} ({}) must define a keyboard shortcut",
+            cmd.id,
+            cmd.label
+        );
+    }
+
+    let menu = local_menu::sheets_menu_bar();
+    let shortcuts_item = menu
+        .find_item("help.shortcuts")
+        .expect("Help -> Keyboard Shortcuts");
+    assert!(
+        shortcuts_item.has_keyboard_shortcut(),
+        "Help -> Keyboard Shortcuts should expose a shortcut"
+    );
+    let add_sheet_item = menu
+        .find_item("sheets.add_sheet")
+        .expect("Table -> Add Sheet");
+    assert!(add_sheet_item.is_enabled());
+    assert!(add_sheet_item.has_keyboard_shortcut());
+}

@@ -15,6 +15,7 @@ export component SheetToolbarOverflow inherits Rectangle {
     in property <length> content-width: 0px;
     in property <length> content-height: 0px;
     in property <length> menu-y: 0px;
+    in property <string> mod-key: "Ctrl+";
     callback close-requested;
     callback command(string);
     public function focus-first-action() {
@@ -27,10 +28,10 @@ export component SheetToolbarOverflow inherits Rectangle {
     property <int> selected: 2;
     property <[string]> base-labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands"];
     property <[string]> base-ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette"];
-    property <[string]> base-shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K"];
+    property <[string]> base-shortcuts: [root.mod-key + "Z", root.mod-key + "Shift+Z", root.mod-key + "N", root.mod-key + "O", root.mod-key + "S", root.mod-key + "Shift+S", root.mod-key + "K"];
     property <[string]> compact-labels: ["Undo", "Redo", "New", "Open", "Save", "Save As", "Commands", "Add Sheet", "Chart", "Shape", "Image"];
     property <[string]> compact-ids: ["edit.undo", "edit.redo", "file.new", "file.open", "file.save", "file.save_as", "app.palette", "sheets.add_sheet", "sheets.insert_chart", "sheets.insert_shape", "sheets.insert_image"];
-    property <[string]> compact-shortcuts: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+K", "", "", "", ""];
+    property <[string]> compact-shortcuts: [root.mod-key + "Z", root.mod-key + "Shift+Z", root.mod-key + "N", root.mod-key + "O", root.mod-key + "S", root.mod-key + "Shift+S", root.mod-key + "K", root.mod-key + "Alt+N", root.mod-key + "Alt+C", root.mod-key + "Alt+J", root.mod-key + "Alt+M"];
     property <[string]> labels: SheetToolbarLayout.compact ? root.compact-labels : root.base-labels;
     property <[string]> ids: SheetToolbarLayout.compact ? root.compact-ids : root.base-ids;
     property <[string]> shortcuts: SheetToolbarLayout.compact ? root.compact-shortcuts : root.base-shortcuts;
@@ -55,7 +56,7 @@ export component SheetToolbarOverflow inherits Rectangle {
     popup-panel := Rectangle {
         x: root.rtl ? 8px : max(8px, root.content-width - self.width - 8px);
         y: root.menu-y + 8px;
-        width: min(240px * max(1.0, Theme.text-scale), max(1px, root.content-width - 16px));
+        width: min(268px * max(1.0, Theme.text-scale), max(1px, root.content-width - 16px));
         height: min(popup-layout.preferred-height, root.content-height - root.menu-y - 16px);
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;
