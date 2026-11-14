@@ -829,3 +829,95 @@ fn compact_inspector_drawer_does_not_dim_the_worksheet_outside_the_panel() {
         "clicking outside the compact inspector drawer still closes it"
     );
 }
+
+#[test]
+fn decimals_stepper_row_is_unclipped_above_the_fold_at_1280x800() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    apply_layout_breakpoints(&app, 1280);
+    app.set_show_inspector(true);
+    app.set_inspector_tab(1);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render Format inspector");
+
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&app, "Cell").count(),
+        0,
+        "redundant Cell heading above Font Style must stay removed"
+    );
+
+    let scroll = ElementHandle::find_by_element_id(&app, "SheetInspector::inspector-scroll")
+        .next()
+        .expect("inspector-scroll element");
+    let scroll_pos = scroll.absolute_position();
+    let scroll_size = scroll.size();
+    assert!(
+        scroll_size.width > 0.0 && scroll_size.height > 0.0,
+        "inspector-scroll must have non-zero viewport bounds, got {scroll_size:?}"
+    );
+    let scroll_right = scroll_pos.x + scroll_size.width;
+    let scroll_bottom = scroll_pos.y + scroll_size.height;
+
+    let find_one = |label: &str, role: AccessibleRole| -> ElementHandle {
+        let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label)
+            .filter(|e| e.accessible_role() == Some(role))
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "expected one {role:?} element named {label}"
+        );
+        found.into_iter().next().expect("checked len == 1")
+    };
+
+    let dec_label = find_one("Decimals", AccessibleRole::Text);
+    let dec_field = find_one("Decimals count", AccessibleRole::TextInput);
+    let dec_minus = find_one("Decrease displayed decimal places", AccessibleRole::Button);
+    let dec_plus = find_one("Increase displayed decimal places", AccessibleRole::Button);
+
+    let value_box_width =
+        (dec_minus.absolute_position().x - 2.0) - (dec_field.absolute_position().x - 8.0);
+    assert!(
+        value_box_width >= 100.0,
+        "Decimals count value box must stay at least 100 px wide, got {value_box_width}"
+    );
+    assert!(
+        dec_field.size().width >= 48.0,
+        "Decimals count input inside the value box must stay usable, got {}",
+        dec_field.size().width
+    );
+    assert!(
+        dec_minus.size().width >= 24.0
+            && dec_minus.size().height >= 24.0
+            && dec_plus.size().width >= 24.0
+            && dec_plus.size().height >= 24.0,
+        "Decimals step buttons must keep usable hit targets"
+    );
+    assert!(
+        dec_field.absolute_position().x
+            >= dec_label.absolute_position().x + dec_label.size().width - 1.0
+            && (dec_field.absolute_position().y - dec_label.absolute_position().y).abs() < 12.0,
+        "at 1280x800 (1.0x text scale), Decimals stepper row must fit on a single horizontal row"
+    );
+
+    for (name, elem) in [
+        ("Decimals label", &dec_label),
+        ("Decimals count box", &dec_field),
+        ("Decrease Decimals button", &dec_minus),
+        ("Increase Decimals button", &dec_plus),
+    ] {
+        let pos = elem.absolute_position();
+        let size = elem.size();
+        assert!(
+            size.width > 0.0 && size.height > 0.0,
+            "{name} must have non-zero size, got {size:?}"
+        );
+        assert!(
+            pos.x >= scroll_pos.x - 0.5
+                && pos.x + size.width <= scroll_right + 0.5
+                && pos.y >= scroll_pos.y - 0.5
+                && pos.y + size.height <= scroll_bottom + 0.5,
+            "{name} bounds ({pos:?}, {size:?}) must fit unclipped inside inspector-scroll ({scroll_pos:?}, {scroll_size:?}) without scrolling"
+        );
+    }
+}
