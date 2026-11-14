@@ -50,6 +50,24 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.freeze_header",
     "table.unfreeze_panes",
     "table.pivot_sum",
+    "table.pivot_count",
+    "table.pivot_average",
+    "table.adjust_decimals_increase",
+    "table.adjust_decimals_decrease",
+    "format.bold",
+    "format.italic",
+    "format.underline",
+    "format.font_increase",
+    "format.font_decrease",
+    "format.align_left",
+    "format.align_center",
+    "format.align_right",
+    "format.general",
+    "format.number",
+    "format.currency",
+    "format.percentage",
+    "format.borders",
+    "format.fill_cycle",
     "sheets.add_sheet",
     "sheets.insert_chart",
     "sheets.insert_shape",
@@ -93,82 +111,151 @@ pub(crate) fn sheets_menu_bar() -> loom_desktop::MenuBar {
             loom_desktop::window_frame::menu_items(),
         ]
         .concat(),
-        vec![Menu::new(
-            "Table",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "table.add_row",
-                    "Add Row",
-                    MenuShortcut::primary_alt("R"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.delete_row",
-                    "Delete Row",
-                    MenuShortcut::primary_alt("W"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.add_col",
-                    "Add Column",
-                    MenuShortcut::primary_alt("K"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.delete_col",
-                    "Delete Column",
-                    MenuShortcut::primary_alt("L"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.sort_asc",
-                    "Sort Ascending",
-                    MenuShortcut::primary_alt("S"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.sort_desc",
-                    "Sort Descending",
-                    MenuShortcut::primary_alt("D"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.freeze_header",
-                    "Freeze Header Row",
-                    MenuShortcut::primary_alt("F"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.unfreeze_panes",
-                    "Unfreeze Panes",
-                    MenuShortcut::primary_alt("U"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "table.pivot_sum",
-                    "Pivot Summary (Sum)",
-                    MenuShortcut::primary_alt("P"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "sheets.insert_chart",
-                    "Insert Chart",
-                    MenuShortcut::primary_alt("C"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "sheets.insert_shape",
-                    "Insert Shape",
-                    MenuShortcut::primary_alt("J"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "sheets.insert_image",
-                    "Insert Image",
-                    MenuShortcut::primary_alt("M"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "sheets.add_sheet",
-                    "Add Sheet",
-                    MenuShortcut::primary_alt("N"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "sheets.delete_sheet",
-                    "Delete Sheet",
-                    MenuShortcut::primary_alt("X"),
-                ),
-            ],
-        )],
+        vec![
+            Menu::new(
+                "Insert",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "sheets.add_sheet",
+                        "Add Sheet",
+                        MenuShortcut::primary_alt("N"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "sheets.insert_chart",
+                        "Insert Chart",
+                        MenuShortcut::primary_alt("C"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "sheets.insert_shape",
+                        "Insert Shape",
+                        MenuShortcut::primary_alt("J"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "sheets.insert_image",
+                        "Insert Image",
+                        MenuShortcut::primary_alt("M"),
+                    ),
+                ],
+            ),
+            Menu::new(
+                "Table",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "table.add_row",
+                        "Add Row",
+                        MenuShortcut::primary_alt("R"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "table.delete_row",
+                        "Delete Row",
+                        MenuShortcut::primary_alt("W"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "table.add_col",
+                        "Add Column",
+                        MenuShortcut::primary_alt("K"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "table.delete_col",
+                        "Delete Column",
+                        MenuShortcut::primary_alt("L"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "table.freeze_header",
+                        "Freeze Header Row",
+                        MenuShortcut::primary_alt("F"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "table.unfreeze_panes",
+                        "Unfreeze Panes",
+                        MenuShortcut::primary_alt("U"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "sheets.delete_sheet",
+                        "Delete Sheet",
+                        MenuShortcut::primary_alt("X"),
+                    ),
+                ],
+            ),
+            Menu::new(
+                "Organize",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "table.sort_asc",
+                        "Sort Ascending",
+                        MenuShortcut::primary_alt("S"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "table.sort_desc",
+                        "Sort Descending",
+                        MenuShortcut::primary_alt("D"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "table.pivot_sum",
+                        "Pivot Summary (Sum)",
+                        MenuShortcut::primary_alt("P"),
+                    ),
+                    MenuItem::action("table.pivot_count", "Pivot Summary (Count)"),
+                    MenuItem::action("table.pivot_average", "Pivot Summary (Average)"),
+                ],
+            ),
+            Menu::new(
+                "Format",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "format.bold",
+                        "Bold",
+                        MenuShortcut::primary("B"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "format.italic",
+                        "Italic",
+                        MenuShortcut::primary("I"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "format.underline",
+                        "Underline",
+                        MenuShortcut::primary("U"),
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::action("format.font_increase", "Bigger Text"),
+                    MenuItem::action("format.font_decrease", "Smaller Text"),
+                    MenuItem::Separator,
+                    MenuItem::action("format.align_left", "Align Left"),
+                    MenuItem::action("format.align_center", "Align Center"),
+                    MenuItem::action("format.align_right", "Align Right"),
+                    MenuItem::Separator,
+                    MenuItem::action("format.general", "General Format"),
+                    MenuItem::action("format.number", "Number Format"),
+                    MenuItem::action("format.currency", "Currency Format"),
+                    MenuItem::action("format.percentage", "Percentage Format"),
+                    MenuItem::action("table.adjust_decimals_increase", "Increase Decimals"),
+                    MenuItem::action("table.adjust_decimals_decrease", "Decrease Decimals"),
+                    MenuItem::Separator,
+                    MenuItem::action("format.borders", "Toggle Borders"),
+                    MenuItem::action("format.fill_cycle", "Cycle Cell Fill"),
+                ],
+            ),
+        ],
     );
+    if cfg!(target_os = "macos") {
+        // Match Apple Numbers menu bar ordering on macOS:
+        // App | File | Edit | Insert | Table | Organize | Format | View | Window | Help
+        if let Some(view_pos) = menu_bar.menus.iter().position(|m| m.title == "View") {
+            let view_menu = menu_bar.menus.remove(view_pos);
+            let insert_at = menu_bar
+                .menus
+                .iter()
+                .position(|m| m.title == "Window")
+                .unwrap_or(menu_bar.menus.len());
+            menu_bar.menus.insert(insert_at, view_menu);
+        }
+    }
     menu_bar.apply_command_state(
         &CommandState::action("help.shortcuts", "Keyboard Shortcuts")
             .with_shortcut(MenuShortcut::primary_shift("P")),

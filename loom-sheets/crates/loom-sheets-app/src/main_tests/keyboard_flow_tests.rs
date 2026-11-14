@@ -300,7 +300,15 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     let s = launched(&[("A1", "1")]);
     let grid = focus_weak(&s.app);
     let menus = labels(&s.app);
-    let document_menus = ["File", "Edit", "View", "Table", "Help"];
+    let document_menus: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "File", "Edit", "Insert", "Table", "Organize", "Format", "View", "Help",
+        ]
+    } else {
+        &[
+            "File", "Edit", "View", "Insert", "Table", "Organize", "Format", "Help",
+        ]
+    };
     let listed_document_menus: Vec<&str> = menus
         .iter()
         .filter(|label| document_menus.contains(&label.as_str()))

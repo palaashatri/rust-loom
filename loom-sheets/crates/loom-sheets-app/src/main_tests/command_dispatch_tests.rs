@@ -551,6 +551,18 @@ fn every_palette_command_and_menu_item_exposes_a_shortcut() {
     }
 
     let menu = local_menu::sheets_menu_bar();
+    let titles: Vec<&str> = menu.menus.iter().map(|m| m.title.as_str()).collect();
+    for expected in [
+        "File", "Edit", "Insert", "Table", "Organize", "Format", "View", "Window", "Help",
+    ] {
+        assert!(
+            titles.contains(&expected),
+            "menu bar missing {expected}: {titles:?}"
+        );
+    }
+    assert!(menu
+        .find_item("format.bold")
+        .is_some_and(|i| i.is_enabled()));
     let shortcuts_item = menu
         .find_item("help.shortcuts")
         .expect("Help -> Keyboard Shortcuts");
