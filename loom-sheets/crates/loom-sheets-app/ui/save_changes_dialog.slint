@@ -2,6 +2,8 @@ import { LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 export component SaveChangesDialog inherits Rectangle {
+    width: 100%;
+    height: 100%;
     in property <bool> open: false;
     in property <bool> close-mode: false;
     in property <string> document-name: "";

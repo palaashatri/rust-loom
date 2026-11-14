@@ -2,6 +2,8 @@ import { LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 export component WelcomeGuideModal inherits Rectangle {
+    width: 100%;
+    height: 100%;
     in property <bool> open: false;
     in-out property <int> step: 0;
     in property <string> mod-key: "Ctrl+";

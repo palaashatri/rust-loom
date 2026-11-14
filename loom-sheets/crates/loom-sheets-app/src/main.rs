@@ -160,6 +160,7 @@ use command_dispatch::*;
 
 mod cell_actions;
 pub(crate) use cell_actions::register_cell_edit_action;
+mod data_tools;
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 pub(crate) const DEFAULT_VISIBLE_COLS: u32 = 8;
@@ -575,7 +576,13 @@ fn grid_geometry_fit(
         .collect();
     let row_heights: Vec<f32> = (0..viewport.visible_rows)
         .filter_map(|index| viewport.row_at(index))
-        .map(|row| dimension_size(row, default_row_height, &scaled_rows))
+        .map(|row| {
+            if sheet.hidden_rows.contains(&row) {
+                0.0
+            } else {
+                dimension_size(row, default_row_height, &scaled_rows)
+            }
+        })
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
@@ -975,6 +982,7 @@ fn project_sheet_inner_with_preview(
     );
 
     scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);
+    data_tools::sync_data_tools_state(app, sheet);
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
@@ -2288,6 +2296,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     register_cell_edit_action(&app, &state, &menu_service);
+    data_tools::register_data_tools_actions(&app, &state, &menu_service);
     recovery_pause::wire(&app, &state);
     {
         let app_ref = app.as_weak();

@@ -4,10 +4,13 @@
 //! validation: older packages without `alignments`/`styles` still load as
 //! unstyled sheets.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::style::CellStyle;
-use crate::{CellAlignment, CellRef, NumberFormat, Sheet};
+use crate::{
+    AutoFilterState, CellAlignment, CellRange, CellRef, DataValidationRule, NumberFormat, Sheet,
+    SheetValidation, ValidationCriteria,
+};
 use serde::{Deserialize, Serialize};
 
 fn is_false(value: &bool) -> bool {
@@ -91,6 +94,38 @@ struct PersistedObject {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct PersistedAutoFilter {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    header_row: u32,
+    #[serde(default)]
+    column_filters: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedValidation {
+    range: String,
+    kind: String,
+    #[serde(default)]
+    items: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_range: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    min_i64: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_i64: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    min_f64: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_f64: Option<f64>,
+    #[serde(default)]
+    allow_blank: bool,
+    #[serde(default)]
+    error_message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct PersistedSheet {
     name: String,
     cells: Vec<PersistedCell>,
@@ -110,6 +145,14 @@ struct PersistedSheet {
     chart: Option<PersistedChart>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     objects: Vec<PersistedObject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_filter: Option<PersistedAutoFilter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden_rows: Vec<u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    named_ranges: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    validations: Vec<PersistedValidation>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -217,6 +260,90 @@ impl From<&Sheet> for PersistedSheet {
                     path: object.path.clone(),
                     asset: object.asset.clone(),
                     fill: Some(object.fill.as_str().to_string()),
+                })
+                .collect(),
+            auto_filter: (sheet.auto_filter.enabled
+                || !sheet.auto_filter.column_filters.is_empty())
+            .then(|| PersistedAutoFilter {
+                enabled: sheet.auto_filter.enabled,
+                header_row: sheet.auto_filter.header_row,
+                column_filters: sheet
+                    .auto_filter
+                    .column_filters
+                    .iter()
+                    .map(|(col, vals)| (col.to_string(), vals.iter().cloned().collect()))
+                    .collect(),
+            }),
+            hidden_rows: sheet.hidden_rows.iter().copied().collect(),
+            named_ranges: sheet
+                .named_ranges
+                .iter()
+                .map(|(name, range)| (name.clone(), range.to_a1()))
+                .collect(),
+            validations: sheet
+                .validations
+                .iter()
+                .map(|v| match &v.rule.criteria {
+                    ValidationCriteria::List(items) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "list".to_string(),
+                        items: items.clone(),
+                        source_range: None,
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::RangeList(src) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "range-list".to_string(),
+                        items: Vec::new(),
+                        source_range: Some(src.to_a1()),
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::WholeNumberBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "whole".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: Some(*min),
+                        max_i64: Some(*max),
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::DecimalBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "decimal".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: Some(*min),
+                        max_f64: Some(*max),
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::TextLengthBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "text-len".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: Some(*min as i64),
+                        max_i64: Some(*max as i64),
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
                 })
                 .collect(),
         }
@@ -394,6 +521,55 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    if let Some(af) = raw.auto_filter {
+        let mut column_filters = BTreeMap::new();
+        for (col_str, vals) in af.column_filters {
+            let col = col_str
+                .parse::<u32>()
+                .map_err(|_| format!("invalid auto_filter column {col_str:?}"))?;
+            column_filters.insert(col, vals.into_iter().collect::<BTreeSet<String>>());
+        }
+        sheet.auto_filter = AutoFilterState {
+            enabled: af.enabled,
+            header_row: af.header_row,
+            column_filters,
+        };
+    }
+    sheet.hidden_rows = raw.hidden_rows.into_iter().collect();
+    for (name, range_a1) in raw.named_ranges {
+        let range = CellRange::parse(&range_a1)
+            .ok_or_else(|| format!("invalid named range target {range_a1:?}"))?;
+        sheet.set_named_range(&name, range)?;
+    }
+    for v in raw.validations {
+        let range = CellRange::parse(&v.range)
+            .ok_or_else(|| format!("invalid validation range {:?}", v.range))?;
+        let criteria = match v.kind.as_str() {
+            "list" => ValidationCriteria::List(v.items),
+            "range-list" => {
+                let src_a1 = v.source_range.unwrap_or_default();
+                let src = CellRange::parse(&src_a1)
+                    .ok_or_else(|| format!("invalid validation source range {src_a1:?}"))?;
+                ValidationCriteria::RangeList(src)
+            }
+            "whole" => ValidationCriteria::WholeNumberBetween(
+                v.min_i64.unwrap_or(i64::MIN),
+                v.max_i64.unwrap_or(i64::MAX),
+            ),
+            "decimal" => ValidationCriteria::DecimalBetween(
+                v.min_f64.unwrap_or(f64::NEG_INFINITY),
+                v.max_f64.unwrap_or(f64::INFINITY),
+            ),
+            "text-len" => ValidationCriteria::TextLengthBetween(
+                v.min_i64.unwrap_or(0).max(0) as usize,
+                v.max_i64.unwrap_or(u32::MAX as i64).max(0) as usize,
+            ),
+            other => return Err(format!("unknown validation kind {other:?}")),
+        };
+        let mut rule = DataValidationRule::new(criteria, v.error_message);
+        rule.allow_blank = v.allow_blank;
+        sheet.validations.push(SheetValidation { range, rule });
+    }
     Ok(sheet)
 }
 

@@ -1,5 +1,6 @@
 import { LoomCanvasHandle } from "foundation.slint";
 import { GridPointer } from "grid_pointer.slint";
+import { DataToolsState } from "data_tools.slint";
 import { Theme } from "theme.slint";
 
 /// The pinned column and row headers and the select-all corner. They follow the
@@ -93,6 +94,25 @@ export component SheetHeaders inherits Rectangle {
                         if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
                             GridPointer.header-pressed(false, c + root.view-col-origin, event.modifiers.shift);
                         }
+                    }
+                }
+                if DataToolsState.autofilter-enabled : Rectangle {
+                    x: parent.width - 22px;
+                    y: (parent.height - 16px) / 2;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 3px;
+                    property <bool> is-filtered: c < DataToolsState.col-filtered.length && DataToolsState.col-filtered[c];
+                    background: is-filtered ? Theme.palette().selection-soft : transparent;
+                    Text {
+                        text: is-filtered ? "▼" : "▾";
+                        font-size: 10px;
+                        color: is-filtered ? Theme.control-accent : Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea {
+                        clicked => { DataToolsState.open-column-filter(c + root.view-col-origin); }
                     }
                 }
                 TouchArea {

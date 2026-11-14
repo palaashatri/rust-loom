@@ -48,6 +48,28 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "edit.copy" | "sheets.copy" => app.invoke_copy_selection(),
         "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
+        "edit.find" | "sheets.find" => crate::data_tools::open_find_replace(app, false),
+        "edit.replace" | "sheets.replace" => crate::data_tools::open_find_replace(app, true),
+        "data.toggle_filter" | "sheets.toggle-filter" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_toggle_auto_filter();
+        }
+        "data.filter_column" | "sheets.filter-column" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_open_filter_column();
+        }
+        "data.clear_filter" | "sheets.clear-filter" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_all_filters();
+        }
+        "data.named_ranges" | "sheets.named-ranges" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_open_named_ranges();
+        }
+        "data.validation" | "sheets.validation" => {
+            app.global::<crate::DataToolsState>().set_val_expanded(true);
+            app.invoke_show_inspector_tab(1);
+        }
         "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
         "help.welcome" | "sheets.welcome" => crate::welcome_guide::open(app),
         "view.inspector" => app.invoke_toggle_inspector(),
@@ -163,6 +185,13 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "edit.copy" | "sheets.copy" => sc("Cmd+C", "Ctrl+C"),
         "edit.paste" | "sheets.paste" => sc("Cmd+V", "Ctrl+V"),
         "edit.select_all" | "sheets.select-all" => sc("Cmd+A", "Ctrl+A"),
+        "edit.find" | "sheets.find" => sc("Cmd+F", "Ctrl+F"),
+        "edit.replace" | "sheets.replace" => sc("Cmd+H", "Ctrl+H"),
+        "data.toggle_filter" | "sheets.toggle-filter" => sc("Cmd+Alt+A", "Ctrl+Alt+A"),
+        "data.filter_column" | "sheets.filter-column" => sc("Cmd+Alt+Q", "Ctrl+Alt+Q"),
+        "data.clear_filter" | "sheets.clear-filter" => sc("Cmd+Alt+E", "Ctrl+Alt+E"),
+        "data.named_ranges" | "sheets.named-ranges" => sc("Cmd+Alt+H", "Ctrl+Alt+H"),
+        "data.validation" | "sheets.validation" => sc("Cmd+Alt+V", "Ctrl+Alt+V"),
         "table.fill_down" => sc("Cmd+D", "Ctrl+D"),
         "app.palette" => sc("Cmd+K", "Ctrl+K"),
         "help.shortcuts" => sc("Cmd+Shift+P", "Ctrl+Shift+P"),
@@ -270,6 +299,13 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("c", false, false) => "edit.copy",
         ("v", false, false) => "edit.paste",
         ("a", false, false) => "edit.select_all",
+        ("f", false, false) => "edit.find",
+        ("h", false, false) => "edit.replace",
+        ("a", false, true) => "data.toggle_filter",
+        ("q", false, true) => "data.filter_column",
+        ("e", false, true) => "data.clear_filter",
+        ("h", false, true) => "data.named_ranges",
+        ("v", false, true) => "data.validation",
         ("d", false, false) => "table.fill_down",
         ("b", false, false) => "format.bold",
         ("i", false, false) => "format.italic",
