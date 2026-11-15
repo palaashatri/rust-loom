@@ -7,16 +7,15 @@ use std::sync::Arc;
 use loom_desktop::NativeMenuBar;
 use loom_sheets_core::{
     build_pivot_sheet, compute_pivot_table, detect_headers, extract_unique_values,
-    plan_pivot_updates, CellRange, CellRef, CellStyle, PivotAggregation, PivotFieldConfig,
-    RangeEdit, Sheet,
+    plan_pivot_updates, CellRange, CellRef, CellStyle, PivotAggregation, PivotFieldConfig, Sheet,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::analysis::unique_sheet_name;
 use crate::{
-    apply_sheet, commit_range_edit, commit_workbook_transaction, selection_from_app,
+    apply_sheet, commit_transaction, commit_workbook_transaction, selection_from_app,
     sync_current_to_tabs, sync_menu_state, sync_sheet_tabs, GuiState, PivotBuilderState,
-    PivotFieldItem, PivotPreviewRow, SheetsApp,
+    PivotFieldItem, PivotPreviewRow, SheetTransaction, SheetsApp,
 };
 
 #[derive(Debug, Clone)]
@@ -25,6 +24,8 @@ struct PivotBuilderSession {
     headers: Vec<String>,
     filter_values: Vec<String>,
     filter_value_idx: usize,
+    /// The destination text typed by the user is not a valid cell reference.
+    dest_invalid: bool,
 }
 
 impl Default for PivotBuilderSession {
@@ -34,6 +35,7 @@ impl Default for PivotBuilderSession {
             headers: Vec::new(),
             filter_values: vec!["(All)".to_string()],
             filter_value_idx: 0,
+            dest_invalid: false,
         }
     }
 }
@@ -105,6 +107,46 @@ fn init_session_for_range(sheet: &Sheet, range: CellRange) -> PivotBuilderSessio
         headers,
         filter_values: vec!["(All)".to_string()],
         filter_value_idx: 0,
+        dest_invalid: false,
+    }
+}
+
+const DEST_INVALID_MSG: &str = "Destination must be a valid cell reference such as A1.";
+const DEST_OVERLAP_MSG: &str =
+    "Pivot output would overwrite its source range. Choose a destination outside the source range.";
+
+/// Whether an output block of `rows` x `cols` anchored at `anchor` touches `source`.
+fn block_overlaps_source(source: CellRange, anchor: CellRef, rows: u32, cols: u32) -> bool {
+    let end = CellRef {
+        row: anchor.row.saturating_add(rows.saturating_sub(1)),
+        col: anchor.col.saturating_add(cols.saturating_sub(1)),
+    };
+    source.intersects(CellRange::new(anchor, end))
+}
+
+/// Builds one undoable transaction covering both pivot values and styles.
+fn pivot_snapshot_transaction(
+    sheet: &Sheet,
+    updates: &[(CellRef, String, bool)],
+) -> SheetTransaction {
+    let mut after = sheet.clone();
+    for (cell, raw, is_bold) in updates {
+        if raw.is_empty() {
+            after.clear_cell(*cell);
+        } else {
+            after.set_raw(*cell, raw.as_str());
+        }
+        if *is_bold {
+            let style = CellStyle {
+                bold: true,
+                ..after.cell_style(*cell)
+            };
+            after.set_cell_style(*cell, style);
+        }
+    }
+    SheetTransaction::Snapshot {
+        before: Box::new(sheet.clone()),
+        after: Box::new(after),
     }
 }
 
@@ -118,13 +160,14 @@ fn publish_session(app: &SheetsApp, sheet: &Sheet, session: &PivotBuilderSession
     )));
     pb.set_title(SharedString::from(&session.config.title));
     pb.set_dest_new_sheet(session.config.destination_new_sheet);
-    pb.set_dest_cell(SharedString::from(
-        session
-            .config
-            .destination_cell
-            .unwrap_or(CellRef { row: 0, col: 0 })
-            .to_a1(),
-    ));
+    let dest = session
+        .config
+        .destination_cell
+        .unwrap_or(CellRef { row: 0, col: 0 });
+    // Never overwrite text the user is still typing (e.g. an invalid cell).
+    if !session.dest_invalid && CellRef::parse(pb.get_dest_cell().as_str()) != Some(dest) {
+        pb.set_dest_cell(SharedString::from(dest.to_a1()));
+    }
 
     let items: Vec<PivotFieldItem> = session
         .headers
@@ -188,7 +231,21 @@ fn publish_session(app: &SheetsApp, sheet: &Sheet, session: &PivotBuilderSession
                 })
                 .collect();
             pb.set_preview_rows(ModelRc::new(VecModel::from(preview)));
-            pb.set_error_text(SharedString::default());
+            let dest_error = if session.config.destination_new_sheet {
+                None
+            } else if session.dest_invalid {
+                Some(DEST_INVALID_MSG)
+            } else if block_overlaps_source(
+                session.config.source_range,
+                dest,
+                result.row_count as u32,
+                result.col_count as u32,
+            ) {
+                Some(DEST_OVERLAP_MSG)
+            } else {
+                None
+            };
+            pb.set_error_text(SharedString::from(dest_error.unwrap_or_default()));
             pb.set_summary_text(SharedString::from(format!(
                 "{} rows × {} cols",
                 result.row_count, result.col_count
@@ -370,10 +427,20 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
     }
 
     {
+        let app_ref = app.as_weak();
+        let state = state.clone();
         let session = session.clone();
         pb.on_set_dest_cell(move |text| {
-            if let Some(cell) = CellRef::parse(text.as_str()) {
-                session.borrow_mut().config.destination_cell = Some(cell);
+            if let Some(app) = app_ref.upgrade() {
+                let mut sess = session.borrow_mut();
+                match CellRef::parse(text.as_str()) {
+                    Some(cell) => {
+                        sess.config.destination_cell = Some(cell);
+                        sess.dest_invalid = false;
+                    }
+                    None => sess.dest_invalid = true,
+                }
+                publish_session(&app, &state.current.borrow(), &sess);
             }
         });
     }
@@ -412,7 +479,15 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     return;
                 }
                 crate::object_actions::cancel_active_gesture(&app, &state);
-                let cfg = session.borrow().config.clone();
+                let (cfg, dest_invalid) = {
+                    let sess = session.borrow();
+                    (sess.config.clone(), sess.dest_invalid)
+                };
+                if !cfg.destination_new_sheet && dest_invalid {
+                    app.global::<PivotBuilderState>()
+                        .set_error_text(SharedString::from(DEST_INVALID_MSG));
+                    return;
+                }
                 if cfg.destination_new_sheet {
                     let built = {
                         let current = state.current.borrow();
@@ -448,25 +523,19 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     };
                     match planned {
                         Ok(updates) => {
+                            if updates
+                                .iter()
+                                .any(|(cell, _, _)| cfg.source_range.contains(*cell))
+                            {
+                                app.global::<PivotBuilderState>()
+                                    .set_error_text(SharedString::from(DEST_OVERLAP_MSG));
+                                return;
+                            }
                             let mut sheet = state.current.borrow_mut();
-                            let edit = RangeEdit::from_cells(
-                                &sheet,
-                                updates.iter().map(|(c, raw, _)| {
-                                    (*c, (!raw.is_empty()).then(|| raw.clone()))
-                                }),
-                            );
+                            let tx = pivot_snapshot_transaction(&sheet, &updates);
                             let mut undo = state.undo_stack.borrow_mut();
                             let mut redo = state.redo_stack.borrow_mut();
-                            commit_range_edit(&mut sheet, &mut undo, &mut redo, edit);
-                            let bold_style = CellStyle {
-                                bold: true,
-                                ..Default::default()
-                            };
-                            for (cell, _, is_bold) in &updates {
-                                if *is_bold {
-                                    sheet.set_cell_style(*cell, bold_style);
-                                }
-                            }
+                            commit_transaction(&mut sheet, &mut undo, &mut redo, tx);
                             drop(undo);
                             drop(redo);
                             drop(sheet);
@@ -486,5 +555,43 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlap_detects_source_collisions() {
+        let src = CellRange::parse("A1:D5").unwrap();
+        let at = |a: &str| CellRef::parse(a).unwrap();
+        assert!(block_overlaps_source(src, at("A1"), 3, 2));
+        assert!(block_overlaps_source(src, at("D5"), 1, 1));
+        assert!(!block_overlaps_source(src, at("F1"), 1, 1));
+        assert!(block_overlaps_source(src, at("C4"), 4, 4));
+        assert!(!block_overlaps_source(src, at("F1"), 5, 3));
+    }
+
+    #[test]
+    fn pivot_transaction_undoes_values_and_styles() {
+        let mut sheet = Sheet::new("S");
+        sheet.set_str("F1", "keep");
+        let before_style = sheet.cell_style(CellRef::parse("F1").unwrap());
+        let updates = vec![
+            (CellRef::parse("F1").unwrap(), "Region".to_string(), true),
+            (CellRef::parse("G1").unwrap(), "1".to_string(), false),
+        ];
+        let tx = pivot_snapshot_transaction(&sheet, &updates);
+        tx.apply(&mut sheet);
+        assert!(sheet.cell_style(CellRef::parse("F1").unwrap()).bold);
+        assert_eq!(sheet.raw(CellRef::parse("F1").unwrap()), Some("Region"));
+        tx.revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("F1").unwrap()), Some("keep"));
+        assert_eq!(
+            sheet.cell_style(CellRef::parse("F1").unwrap()),
+            before_style
+        );
+        assert_eq!(sheet.raw(CellRef::parse("G1").unwrap()), None);
     }
 }

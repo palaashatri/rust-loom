@@ -51,6 +51,10 @@ component FieldRoleButton inherits Rectangle {
     in property <bool> active: false;
     in property <string> a11y-label;
     callback clicked();
+    // Keyboard entry point: Enter/Space activate the role toggle exactly like
+    // a pointer click, and clicking moves focus here so the ring stays honest.
+    public function grab-focus() { focus.focus(); }
+    out property <bool> has-focus: focus.has-focus;
 
     height: 24px;
     min-width: 44px;
@@ -60,6 +64,7 @@ component FieldRoleButton inherits Rectangle {
     border-color: root.active ? Theme.palette().selection : Theme.palette().border;
     accessible-role: button;
     accessible-label: root.a11y-label;
+    accessible-action-default => { root.clicked(); }
 
     Text {
         text: root.label;
@@ -70,8 +75,26 @@ component FieldRoleButton inherits Rectangle {
         vertical-alignment: center;
     }
 
+    if focus.has-focus : Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 2px;
+        border-width: 2px;
+        border-color: Theme.palette().focus;
+        background: transparent;
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+
     TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { focus.focus(); root.clicked(); }
     }
 }
 
@@ -91,314 +114,336 @@ export component PivotBuilderModal inherits Rectangle {
             clicked => { PivotBuilderState.close-builder(); }
         }
 
-        FocusScope {
+        pivot-focus := FocusScope {
+            width: 100%;
+            height: 100%;
             enabled: root.open;
+            init => { self.focus(); }
             key-pressed(event) => {
                 if (event.text == Key.Escape) {
                     PivotBuilderState.close-builder();
                     return accept;
                 }
+                // Tab wraps between the header Close button and the footer
+                // Create button, so focus cannot reach the worksheet behind
+                // the modal while the builder is open.
+                if (event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) {
+                    if (self.has-focus || pivot-close.has-focus) { pivot-create.grab-focus(); return accept; }
+                    return reject;
+                }
+                if (event.text == Key.Tab) {
+                    if (self.has-focus || pivot-create.has-focus) { pivot-close.grab-focus(); return accept; }
+                    return reject;
+                }
                 return reject;
             }
-        }
 
-        LoomPanel {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(760px, parent.width - 32px);
-            height: min(620px, parent.height - 32px);
-            border-radius: Theme.tokens.metrics.radius-large;
-            border-width: 1px;
-            border-color: Theme.palette().border;
+            LoomPanel {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(760px, parent.width - 32px);
+                height: min(620px, parent.height - 32px);
+                border-radius: Theme.tokens.metrics.radius-large;
+                border-width: 1px;
+                border-color: Theme.palette().border;
 
-            TouchArea { }
+                TouchArea { }
 
-            VerticalLayout {
-                padding: Theme.tokens.space.xl;
-                spacing: Theme.tokens.space.md;
-
-                // Header
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    Text {
-                        text: "Create Pivot Table";
-                        font-size: Theme.type.title;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                    }
-                    LoomButton {
-                        label: "Close";
-                        variant: "ghost";
-                        accessible-label: "Close Pivot Table Builder";
-                        clicked => { PivotBuilderState.close-builder(); }
-                    }
-                }
-
-                // Source range & title row
-                HorizontalLayout {
+                VerticalLayout {
+                    padding: Theme.tokens.space.xl;
                     spacing: Theme.tokens.space.md;
-                    VerticalLayout {
-                        spacing: 4px;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: "Source Range";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink-secondary;
-                        }
-                        LoomTextField {
-                            placeholder: "e.g. A1:D20";
-                            value <=> PivotBuilderState.source-range;
-                            accessible-label: "Pivot source range";
-                            edited(val) => { PivotBuilderState.set-source-range(val); }
-                        }
-                    }
-                    VerticalLayout {
-                        spacing: 4px;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: "Pivot Title";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink-secondary;
-                        }
-                        LoomTextField {
-                            placeholder: "Pivot Table";
-                            value <=> PivotBuilderState.title;
-                            accessible-label: "Pivot table title";
-                            edited(val) => { PivotBuilderState.set-title(val); }
-                        }
-                    }
-                }
 
-                // Main split: Field selector (left) + Live Preview (right)
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.md;
-                    vertical-stretch: 1;
-
-                    // Left: Field configuration
-                    VerticalLayout {
-                        width: 310px;
+                    // Header
+                    HorizontalLayout {
                         spacing: Theme.tokens.space.sm;
-
                         Text {
-                            text: "Detected Fields";
-                            font-size: Theme.type.caption;
-                            font-weight: 600;
-                            color: Theme.palette().ink-secondary;
+                            text: "Create Pivot Table";
+                            font-size: Theme.type.title;
+                            font-weight: 700;
+                            color: Theme.palette().ink;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        pivot-close := LoomButton {
+                            label: "Close";
+                            variant: "ghost";
+                            accessible-label: "Close Pivot Table Builder";
+                            clicked => { PivotBuilderState.close-builder(); }
+                        }
+                    }
+
+                    // Source range & title row
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.md;
+                        VerticalLayout {
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: "Source Range";
+                                font-size: Theme.type.caption;
+                                font-weight: 600;
+                                color: Theme.palette().ink-secondary;
+                            }
+                            LoomTextField {
+                                placeholder: "e.g. A1:D20";
+                                value <=> PivotBuilderState.source-range;
+                                accessible-label: "Pivot source range";
+                                edited(val) => { PivotBuilderState.set-source-range(val); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: "Pivot Title";
+                                font-size: Theme.type.caption;
+                                font-weight: 600;
+                                color: Theme.palette().ink-secondary;
+                            }
+                            LoomTextField {
+                                placeholder: "Pivot Table";
+                                value <=> PivotBuilderState.title;
+                                accessible-label: "Pivot table title";
+                                edited(val) => { PivotBuilderState.set-title(val); }
+                            }
+                        }
+                    }
+
+                    // Main split: Field selector (left) + Live Preview (right)
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.md;
+                        vertical-stretch: 1;
+
+                        // Left: Field configuration
+                        VerticalLayout {
+                            width: 310px;
+                            spacing: Theme.tokens.space.sm;
+
+                            Text {
+                                text: "Detected Fields";
+                                font-size: Theme.type.caption;
+                                font-weight: 600;
+                                color: Theme.palette().ink-secondary;
+                            }
+
+                            Flickable {
+                                vertical-stretch: 1;
+                                viewport-height: field-list.preferred-height;
+                                field-list := VerticalLayout {
+                                    spacing: 6px;
+                                    for field in PivotBuilderState.fields : Rectangle {
+                                        height: 34px;
+                                        border-radius: Theme.tokens.metrics.radius-small;
+                                        background: Theme.palette().surface-sunken;
+                                        border-width: 1px;
+                                        border-color: Theme.palette().border;
+
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+                                            Text {
+                                                text: field.name;
+                                                font-size: Theme.type.body;
+                                                color: Theme.palette().ink;
+                                                overflow: elide;
+                                                horizontal-stretch: 1;
+                                                vertical-alignment: center;
+                                            }
+                                            FieldRoleButton {
+                                                label: "Row";
+                                                active: field.is-row;
+                                                a11y-label: "Toggle " + field.name + " as Row field";
+                                                clicked => { PivotBuilderState.toggle-row-field(field.index); }
+                                            }
+                                            FieldRoleButton {
+                                                label: "Col";
+                                                active: field.is-col;
+                                                a11y-label: "Toggle " + field.name + " as Column field";
+                                                clicked => { PivotBuilderState.toggle-col-field(field.index); }
+                                            }
+                                            FieldRoleButton {
+                                                label: field.is-val ? (
+                                                    field.val-agg == 1 ? "Cnt" :
+                                                    field.val-agg == 2 ? "Avg" :
+                                                    field.val-agg == 3 ? "Min" :
+                                                    field.val-agg == 4 ? "Max" : "Sum"
+                                                ) : "Val";
+                                                active: field.is-val;
+                                                a11y-label: "Toggle " + field.name + " as Value field";
+                                                clicked => {
+                                                    if (field.is-val) {
+                                                        PivotBuilderState.cycle-val-agg(field.index);
+                                                    } else {
+                                                        PivotBuilderState.toggle-val-field(field.index);
+                                                    }
+                                                }
+                                            }
+                                            if (field.is-val) : FieldRoleButton {
+                                                label: "×";
+                                                active: false;
+                                                a11y-label: "Remove " + field.name + " from Values";
+                                                clicked => { PivotBuilderState.toggle-val-field(field.index); }
+                                            }
+                                            FieldRoleButton {
+                                                label: "Flt";
+                                                active: field.is-filter;
+                                                a11y-label: "Filter by " + field.name;
+                                                clicked => { PivotBuilderState.select-filter-field(field.index); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Filter value selector when a filter field is active
+                            if (PivotBuilderState.filter-field-idx >= 0) : VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "Filter Value";
+                                    font-size: Theme.type.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                                // A field can publish dozens of values. The row
+                                // scrolls horizontally inside a fixed-height
+                                // viewport instead of overflowing the column.
+                                Flickable {
+                                    height: 24px;
+                                    viewport-width: max(self.width, filter-values.preferred-width);
+                                    viewport-height: self.height;
+                                    filter-values := HorizontalLayout {
+                                        spacing: 4px;
+                                        for fval[fidx] in PivotBuilderState.filter-values : FieldRoleButton {
+                                            label: fval;
+                                            active: PivotBuilderState.filter-value-idx == fidx;
+                                            a11y-label: "Filter value " + fval;
+                                            clicked => { PivotBuilderState.select-filter-value(fidx); }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Destination selector
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "Destination";
+                                    font-size: Theme.type.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.xs;
+                                    LoomButton {
+                                        label: "New Sheet";
+                                        variant: PivotBuilderState.dest-new-sheet ? "primary" : "secondary";
+                                        accessible-label: "Place pivot on new sheet";
+                                        clicked => { PivotBuilderState.set-dest-new-sheet(true); }
+                                    }
+                                    LoomButton {
+                                        label: "Current Sheet";
+                                        variant: !PivotBuilderState.dest-new-sheet ? "primary" : "secondary";
+                                        accessible-label: "Place pivot on current sheet";
+                                        clicked => { PivotBuilderState.set-dest-new-sheet(false); }
+                                    }
+                                    if (!PivotBuilderState.dest-new-sheet) : LoomTextField {
+                                        width: 72px;
+                                        placeholder: "A1";
+                                        value <=> PivotBuilderState.dest-cell;
+                                        accessible-label: "Destination top-left cell";
+                                        edited(val) => { PivotBuilderState.set-dest-cell(val); }
+                                    }
+                                }
+                            }
                         }
 
-                        Flickable {
-                            vertical-stretch: 1;
-                            viewport-height: field-list.preferred-height;
-                            field-list := VerticalLayout {
-                                spacing: 6px;
-                                for field in PivotBuilderState.fields : Rectangle {
-                                    height: 34px;
-                                    border-radius: Theme.tokens.metrics.radius-small;
-                                    background: Theme.palette().surface-sunken;
-                                    border-width: 1px;
-                                    border-color: Theme.palette().border;
+                        // Right: Live Preview
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: Theme.tokens.space.xs;
 
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 6px;
-                                        spacing: 4px;
-                                        Text {
-                                            text: field.name;
-                                            font-size: Theme.type.body;
-                                            color: Theme.palette().ink;
-                                            overflow: elide;
-                                            horizontal-stretch: 1;
-                                            vertical-alignment: center;
-                                        }
-                                        FieldRoleButton {
-                                            label: "Row";
-                                            active: field.is-row;
-                                            a11y-label: "Toggle " + field.name + " as Row field";
-                                            clicked => { PivotBuilderState.toggle-row-field(field.index); }
-                                        }
-                                        FieldRoleButton {
-                                            label: "Col";
-                                            active: field.is-col;
-                                            a11y-label: "Toggle " + field.name + " as Column field";
-                                            clicked => { PivotBuilderState.toggle-col-field(field.index); }
-                                        }
-                                        FieldRoleButton {
-                                            label: field.is-val ? (
-                                                field.val-agg == 1 ? "Cnt" :
-                                                field.val-agg == 2 ? "Avg" :
-                                                field.val-agg == 3 ? "Min" :
-                                                field.val-agg == 4 ? "Max" : "Sum"
-                                            ) : "Val";
-                                            active: field.is-val;
-                                            a11y-label: "Toggle " + field.name + " as Value field";
-                                            clicked => {
-                                                if (field.is-val) {
-                                                    PivotBuilderState.cycle-val-agg(field.index);
-                                                } else {
-                                                    PivotBuilderState.toggle-val-field(field.index);
+                            HorizontalLayout {
+                                Text {
+                                    text: "Live Preview";
+                                    font-size: Theme.type.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink-secondary;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: PivotBuilderState.summary-text;
+                                    font-size: Theme.type.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+
+                            Rectangle {
+                                vertical-stretch: 1;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+                                background: Theme.palette().surface;
+                                clip: true;
+
+                                if (PivotBuilderState.error-text != "") : Text {
+                                    text: PivotBuilderState.error-text;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().danger;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                }
+
+                                if (PivotBuilderState.error-text == "") : Flickable {
+                                    width: 100%;
+                                    height: 100%;
+                                    viewport-height: preview-col.preferred-height;
+                                    preview-col := VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 2px;
+                                        for prow in PivotBuilderState.preview-rows : Rectangle {
+                                            height: 24px;
+                                            background: prow.is-header ? Theme.palette().surface-sunken :
+                                                        prow.is-total ? Theme.palette().surface-sunken : transparent;
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                padding-left: 6px;
+                                                padding-right: 6px;
+                                                for cell in prow.cells : Text {
+                                                    text: cell;
+                                                    font-size: Theme.type.caption;
+                                                    font-weight: (prow.is-header || prow.is-total) ? 700 : 400;
+                                                    color: Theme.palette().ink;
+                                                    horizontal-stretch: 1;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
                                                 }
                                             }
                                         }
-                                        if (field.is-val) : FieldRoleButton {
-                                            label: "×";
-                                            active: false;
-                                            a11y-label: "Remove " + field.name + " from Values";
-                                            clicked => { PivotBuilderState.toggle-val-field(field.index); }
-                                        }
-                                        FieldRoleButton {
-                                            label: "Flt";
-                                            active: field.is-filter;
-                                            a11y-label: "Filter by " + field.name;
-                                            clicked => { PivotBuilderState.select-filter-field(field.index); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Filter value selector when a filter field is active
-                        if (PivotBuilderState.filter-field-idx >= 0) : VerticalLayout {
-                            spacing: 4px;
-                            Text {
-                                text: "Filter Value";
-                                font-size: Theme.type.caption;
-                                font-weight: 600;
-                                color: Theme.palette().ink-secondary;
-                            }
-                            HorizontalLayout {
-                                spacing: 4px;
-                                for fval[fidx] in PivotBuilderState.filter-values : FieldRoleButton {
-                                    label: fval;
-                                    active: PivotBuilderState.filter-value-idx == fidx;
-                                    a11y-label: "Filter value " + fval;
-                                    clicked => { PivotBuilderState.select-filter-value(fidx); }
-                                }
-                            }
-                        }
-
-                        // Destination selector
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text {
-                                text: "Destination";
-                                font-size: Theme.type.caption;
-                                font-weight: 600;
-                                color: Theme.palette().ink-secondary;
-                            }
-                            HorizontalLayout {
-                                spacing: Theme.tokens.space.xs;
-                                LoomButton {
-                                    label: "New Sheet";
-                                    variant: PivotBuilderState.dest-new-sheet ? "primary" : "secondary";
-                                    accessible-label: "Place pivot on new sheet";
-                                    clicked => { PivotBuilderState.set-dest-new-sheet(true); }
-                                }
-                                LoomButton {
-                                    label: "Current Sheet";
-                                    variant: !PivotBuilderState.dest-new-sheet ? "primary" : "secondary";
-                                    accessible-label: "Place pivot on current sheet";
-                                    clicked => { PivotBuilderState.set-dest-new-sheet(false); }
-                                }
-                                if (!PivotBuilderState.dest-new-sheet) : LoomTextField {
-                                    width: 72px;
-                                    placeholder: "A1";
-                                    value <=> PivotBuilderState.dest-cell;
-                                    accessible-label: "Destination top-left cell";
-                                    edited(val) => { PivotBuilderState.set-dest-cell(val); }
-                                }
-                            }
-                        }
-                    }
-
-                    // Right: Live Preview
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: Theme.tokens.space.xs;
-
-                        HorizontalLayout {
-                            Text {
-                                text: "Live Preview";
-                                font-size: Theme.type.caption;
-                                font-weight: 600;
-                                color: Theme.palette().ink-secondary;
-                                horizontal-stretch: 1;
-                            }
-                            Text {
-                                text: PivotBuilderState.summary-text;
-                                font-size: Theme.type.caption;
-                                color: Theme.palette().ink-secondary;
-                            }
-                        }
-
-                        Rectangle {
-                            vertical-stretch: 1;
-                            border-radius: Theme.tokens.metrics.radius-small;
-                            border-width: 1px;
-                            border-color: Theme.palette().border;
-                            background: Theme.palette().surface;
-                            clip: true;
-
-                            if (PivotBuilderState.error-text != "") : Text {
-                                text: PivotBuilderState.error-text;
-                                font-size: Theme.type.body;
-                                color: Theme.palette().danger;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                wrap: word-wrap;
-                            }
-
-                            if (PivotBuilderState.error-text == "") : Flickable {
-                                width: 100%;
-                                height: 100%;
-                                viewport-height: preview-col.preferred-height;
-                                preview-col := VerticalLayout {
-                                    padding: 6px;
-                                    spacing: 2px;
-                                    for prow in PivotBuilderState.preview-rows : Rectangle {
-                                        height: 24px;
-                                        background: prow.is-header ? Theme.palette().surface-sunken :
-                                                    prow.is-total ? Theme.palette().surface-sunken : transparent;
-                                        HorizontalLayout {
-                                            spacing: 8px;
-                                            padding-left: 6px;
-                                            padding-right: 6px;
-                                            for cell in prow.cells : Text {
-                                                text: cell;
-                                                font-size: Theme.type.caption;
-                                                font-weight: (prow.is-header || prow.is-total) ? 700 : 400;
-                                                color: Theme.palette().ink;
-                                                horizontal-stretch: 1;
-                                                overflow: elide;
-                                                vertical-alignment: center;
-                                            }
-                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                // Footer actions
-                HorizontalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    Rectangle { horizontal-stretch: 1; }
-                    LoomButton {
-                        label: "Cancel";
-                        variant: "secondary";
-                        accessible-label: "Cancel Pivot Table Builder";
-                        clicked => { PivotBuilderState.close-builder(); }
-                    }
-                    LoomButton {
-                        label: "Create Pivot Table";
-                        variant: "primary";
-                        enabled: PivotBuilderState.error-text == "";
-                        accessible-label: "Create Pivot Table";
-                        clicked => { PivotBuilderState.apply-pivot-builder(); }
+                    // Footer actions
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        Rectangle { horizontal-stretch: 1; }
+                        LoomButton {
+                            label: "Cancel";
+                            variant: "secondary";
+                            accessible-label: "Cancel Pivot Table Builder";
+                            clicked => { PivotBuilderState.close-builder(); }
+                        }
+                        pivot-create := LoomButton {
+                            label: "Create Pivot Table";
+                            variant: "primary";
+                            enabled: PivotBuilderState.error-text == "";
+                            accessible-label: "Create Pivot Table";
+                            clicked => { PivotBuilderState.apply-pivot-builder(); }
+                        }
                     }
                 }
             }
