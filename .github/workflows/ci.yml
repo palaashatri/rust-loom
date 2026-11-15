@@ -67,6 +67,17 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test Sheets workspace
         working-directory: loom-sheets
+        # `cargo clippy --all-targets` above already compiles every test target,
+        # so the only work this step adds is linking and running. Building the
+        # Sheets test binaries with full debuginfo needs more memory than a
+        # standard runner has: linking was killed (exit 143) before any test
+        # printed a line, on three consecutive runs, while `main` passes the
+        # same job. Line-tables-only keeps backtraces useful (assertions are
+        # governed by debug-assertions, not by this setting) and two build jobs
+        # keep peak compilation memory down.
+        env:
+          CARGO_PROFILE_TEST_DEBUG: 1
+          CARGO_BUILD_JOBS: 2
         run: cargo test --workspace --locked
 
   # Writer and Present are active applications too. Their suites run on Linux
