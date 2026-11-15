@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use loom_sheets_core::{
-    export_workbook_sheet_pdf_with_options, preview_workbook_sheet_pages, CellAlignment,
+    export_workbook_sheet_pdf_with_options, preview_workbook_sheet_page, CellAlignment,
     PageOrientation, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
 };
 use slint::{Color, ComponentHandle, ModelRc, SharedString, VecModel};
@@ -86,6 +86,12 @@ pub(crate) fn options_from_ui(app: &SheetsApp) -> PdfExportOptions {
 
 /// Open the Print Preview & Page Setup modal and render page 1.
 pub(crate) fn open(app: &SheetsApp, state: &GuiState) {
+    // Commit a pending formula-bar draft first so the preview and PDF match
+    // what is on screen.
+    let draft = app.get_formula_edit_buffer();
+    if draft != app.get_selection_formula() {
+        app.invoke_commit_selected_cell(draft);
+    }
     let ui = app.global::<PrintPreviewState>();
     ui.set_current_page(1);
     ui.set_status_message(SharedString::new());
@@ -96,19 +102,17 @@ pub(crate) fn open(app: &SheetsApp, state: &GuiState) {
 /// Recompute paginated preview from the active sheet and current Page Setup options.
 pub(crate) fn refresh_preview(app: &SheetsApp, state: &GuiState) {
     let options = options_from_ui(app);
-    let pages = {
-        let (sheets, active) = crate::workbook_sheets(state);
-        preview_workbook_sheet_pages(&sheets, active, options)
-    };
-    let total = pages.len().max(1);
     let ui = app.global::<PrintPreviewState>();
-    let current = (ui.get_current_page().max(1) as usize).min(total);
+    let requested = ui.get_current_page().max(1) as usize;
+    let (total, page) = {
+        let (sheets, active) = crate::workbook_sheets(state);
+        preview_workbook_sheet_page(&sheets, active, options, requested)
+    };
+    let total = total.max(1);
+    let current = requested.min(total);
     ui.set_total_pages(total as i32);
     ui.set_current_page(current as i32);
-
-    if let Some(page) = pages.get(current - 1) {
-        apply_page_to_ui(&ui, page);
-    }
+    apply_page_to_ui(&ui, &page);
 }
 
 fn apply_page_to_ui(ui: &PrintPreviewState<'_>, page: &SheetPagePreview) {
@@ -164,7 +168,7 @@ fn apply_page_to_ui(ui: &PrintPreviewState<'_>, page: &SheetPagePreview) {
             let align = match cell.align {
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
-                _ => 0,
+                _ => 0, // `cell.align` is already General-resolved by the core
             };
             PrintPreviewCellView {
                 x_pt: cell.x_pt,
@@ -249,7 +253,15 @@ pub(crate) fn write_print_temp_pdf(app: &SheetsApp, state: &GuiState) -> Result<
     } else {
         sanitized
     };
-    let path = std::env::temp_dir().join(format!("loom-sheets-print-{stem}.pdf"));
+    static PRINT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = PRINT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "loom-sheets-print-{stem}-{}-{nanos}-{seq}.pdf",
+        std::process::id()
+    ));
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|err| format!("Failed to prepare print PDF: {err}"))?;
     Ok(path)
@@ -479,5 +491,62 @@ mod tests {
         assert!(printed.starts_with(b"%PDF-1.4"));
         assert!(printed.windows(5).any(|w| w == b"%%EOF"));
         let _ = std::fs::remove_file(&print_path);
+    }
+
+    #[test]
+    fn print_temp_pdfs_are_unique_per_operation() {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let mut sheet = Sheet::new("Invoice");
+        sheet.set_str("A1", "x");
+        let state = test_state_with_dialogs(sheet, vec![]);
+        wire_callbacks(&app, &state);
+        let a = write_print_temp_pdf(&app, &state).expect("first");
+        let b = write_print_temp_pdf(&app, &state).expect("second");
+        assert_ne!(a, b);
+        assert!(a.exists() && b.exists());
+        let _ = std::fs::remove_file(a);
+        let _ = std::fs::remove_file(b);
+    }
+
+    #[test]
+    fn preview_right_aligns_general_numbers_and_shows_only_selected_page() {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let mut sheet = Sheet::new("Nums");
+        for row in 1..=200 {
+            sheet.set_str(&format!("A{row}"), &row.to_string());
+        }
+        let state = test_state_with_dialogs(sheet, vec![]);
+        wire_callbacks(&app, &state);
+        open(&app, &state);
+        let ui = app.global::<PrintPreviewState>();
+        assert!(ui.get_total_pages() > 1);
+        let first = ui.get_cells().row_data(0).expect("cell");
+        assert_eq!(first.align, 2);
+        assert!(ui.get_cells().row_count() < 200);
+    }
+
+    #[test]
+    fn open_commits_pending_formula_draft() {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let mut sheet = Sheet::new("Draft");
+        sheet.set_str("A1", "old");
+        let state = test_state_with_dialogs(sheet, vec![]);
+        crate::cell_actions::register_cell_edit_action(
+            &app,
+            &state,
+            &std::sync::Arc::new(crate::NativeMenuBar::new()),
+        );
+        wire_callbacks(&app, &state);
+        app.set_selected_cell("A1".into());
+        app.set_selection_formula("old".into());
+        app.set_formula_edit_buffer("new".into());
+        open(&app, &state);
+        assert_eq!(
+            state.current.borrow().raw(CellRef::parse("A1").unwrap()),
+            Some("new")
+        );
     }
 }

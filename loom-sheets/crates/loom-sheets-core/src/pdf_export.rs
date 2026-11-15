@@ -9,7 +9,7 @@ use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
 
 use crate::style::{CellAlignment, CellBorders, FillColor};
 use crate::workbook::evaluate_workbook;
-use crate::{CellRef, Sheet, Value};
+use crate::{CellRange, CellRef, Sheet, Value};
 
 const DEFAULT_COL_WIDTH_PT: f32 = 60.0;
 const DEFAULT_ROW_HEIGHT_PT: f32 = 18.0;
@@ -179,6 +179,34 @@ struct PageLayoutPlan {
     is_empty: bool,
 }
 
+/// Scale at which every column (and the row gutter) fits `usable_w`, honoring
+/// the 20% floor and the 10 pt minimum rendered column width.
+fn fit_scale_for_width(raw_col_widths: &[f32], base_gutter: f32, usable_w: f32) -> f32 {
+    let rendered = |scale: f32| -> f32 {
+        base_gutter * scale
+            + raw_col_widths
+                .iter()
+                .map(|w| (w * scale).max(10.0))
+                .sum::<f32>()
+    };
+    if rendered(1.0) <= usable_w {
+        return 1.0;
+    }
+    let (mut lo, mut hi) = (0.20f32, 1.0f32);
+    if rendered(lo) > usable_w {
+        return lo;
+    }
+    for _ in 0..24 {
+        let mid = (lo + hi) * 0.5;
+        if rendered(mid) <= usable_w {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 fn build_page_plan(
     sheets: &[Sheet],
     sheet_index: usize,
@@ -254,14 +282,7 @@ fn build_page_plan(
         PrintScale::Actual100 => 1.0,
         PrintScale::Scale75 => 0.75,
         PrintScale::Scale50 => 0.50,
-        PrintScale::FitOnePageWide => {
-            let total_w: f32 = raw_col_widths.iter().sum();
-            if total_w > raw_col_table_w && total_w > 0.0 {
-                (raw_col_table_w / total_w).clamp(0.20, 1.0)
-            } else {
-                1.0
-            }
-        }
+        PrintScale::FitOnePageWide => fit_scale_for_width(&raw_col_widths, base_gutter, usable_w),
     };
 
     let row_gutter_w = base_gutter * scale_factor;
@@ -278,11 +299,10 @@ fn build_page_plan(
         .map(|h| (h * scale_factor).max(10.0))
         .collect();
 
-    let col_bands = if options.scale == PrintScale::FitOnePageWide {
-        vec![(0, max_col + 1)]
-    } else {
-        partition_columns(&col_widths, col_table_w)
-    };
+    // FitOnePageWide only keeps a single band when the scaled columns really
+    // fit; otherwise (minimum widths/scale floor) fall back to column bands
+    // so no column is silently dropped off the page.
+    let col_bands = partition_columns(&col_widths, col_table_w);
     let frozen_rows = if options.repeat_frozen_rows {
         sheet.freeze_rows.min(max_row + 1)
     } else {
@@ -424,12 +444,37 @@ pub fn preview_workbook_sheet_pages(
     }
 
     let total_pages = plan.row_bands.len() * plan.col_bands.len();
-    let mut pages = Vec::with_capacity(total_pages);
-    let mut page_num = 0usize;
+    (0..total_pages)
+        .map(|idx| build_preview_page(&sheet, &plan, idx))
+        .collect()
+}
 
-    for row_band in &plan.row_bands {
-        for &(col_start, col_end) in &plan.col_bands {
-            page_num += 1;
+/// Number of printed pages for `sheets[sheet_index]` and the page it renders.
+/// Only the cells of the requested 1-based `page` are materialized, so UI
+/// navigation does not allocate cells for every page.
+pub fn preview_workbook_sheet_page(
+    sheets: &[Sheet],
+    sheet_index: usize,
+    options: PdfExportOptions,
+    page: usize,
+) -> (usize, SheetPagePreview) {
+    let (sheet, plan) = build_page_plan(sheets, sheet_index, options);
+    if plan.is_empty {
+        let mut pages = preview_workbook_sheet_pages(sheets, sheet_index, options);
+        return (1, pages.remove(0));
+    }
+    let total = plan.row_bands.len() * plan.col_bands.len();
+    let idx = page.clamp(1, total.max(1)) - 1;
+    (total, build_preview_page(&sheet, &plan, idx))
+}
+
+fn build_preview_page(sheet: &Sheet, plan: &PageLayoutPlan, page_idx: usize) -> SheetPagePreview {
+    let total_pages = plan.row_bands.len() * plan.col_bands.len();
+    let page_num = page_idx + 1;
+    let row_band = &plan.row_bands[page_idx / plan.col_bands.len()];
+    let (col_start, col_end) = plan.col_bands[page_idx % plan.col_bands.len()];
+    {
+        {
             let col_headers = if plan.include_headers {
                 (col_start..col_end).map(column_letters).collect()
             } else {
@@ -456,9 +501,8 @@ pub fn preview_workbook_sheet_pages(
                 for col in col_start..col_end {
                     let w = plan.col_widths[col as usize];
                     if let Some(span) =
-                        band_cell_span(&sheet, &plan, row_band, row_idx, col_start..col_end, col)
+                        band_cell_span(sheet, plan, row_band, row_idx, col_start..col_end, col)
                     {
-                        let style = sheet.cell_style(span.anchor);
                         let raw_value = if span.render_text {
                             plan.evaluated
                                 .get(&span.anchor)
@@ -468,6 +512,7 @@ pub fn preview_workbook_sheet_pages(
                         } else {
                             String::new()
                         };
+                        let style = sheet.effective_style(span.anchor, &raw_value);
                         let display = style.format_value(&raw_value);
                         let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
                             * plan.scale_factor)
@@ -504,7 +549,7 @@ pub fn preview_workbook_sheet_pages(
                             text: clipped,
                             bold: style.bold,
                             italic: style.italic,
-                            align: sheet.cell_alignment(span.anchor),
+                            align: resolved_alignment(sheet, plan, span.anchor),
                             fill_rgb: fill_color_rgb(style.fill),
                             text_rgb: text_style.fill_rgb,
                             has_border: style.borders != CellBorders::NONE,
@@ -516,7 +561,7 @@ pub fn preview_workbook_sheet_pages(
                 y_top += h;
             }
 
-            pages.push(SheetPagePreview {
+            SheetPagePreview {
                 page_number: page_num,
                 total_pages,
                 width_pt: plan.page_w,
@@ -534,11 +579,24 @@ pub fn preview_workbook_sheet_pages(
                 include_gridlines: plan.include_gridlines,
                 is_empty: false,
                 cells,
-            });
+            }
         }
     }
+}
 
-    pages
+/// Alignment with `General` resolved from the evaluated value (numbers go
+/// right), shared by the PDF renderer and the on-screen preview.
+fn resolved_alignment(sheet: &Sheet, plan: &PageLayoutPlan, cell: CellRef) -> CellAlignment {
+    let alignment = sheet.cell_alignment(cell);
+    let is_numeric = plan
+        .evaluated
+        .get(&cell)
+        .is_some_and(|v| matches!(v, Value::Number(_)));
+    if alignment == CellAlignment::General && is_numeric {
+        CellAlignment::Right
+    } else {
+        alignment
+    }
 }
 
 fn used_bounds(sheet: &Sheet, evaluated: &HashMap<CellRef, Value>) -> Option<(u32, u32)> {
@@ -776,7 +834,16 @@ fn draw_table_band(
                 let span_w = span.width_pt;
                 let span_h = span.height_pt;
                 let span_y_bot = y_top - span_h;
-                let style = sheet.cell_style(span.anchor);
+                let raw_value = if span.render_text {
+                    plan.evaluated
+                        .get(&span.anchor)
+                        .map(Value::display)
+                        .or_else(|| sheet.cells.get(&span.anchor).map(|c| c.raw.clone()))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let style = sheet.effective_style(span.anchor, &raw_value);
 
                 if let Some(fill_rgb) = fill_color_rgb(style.fill) {
                     doc.draw_rect(
@@ -791,7 +858,8 @@ fn draw_table_band(
                 if include_gridlines {
                     doc.draw_rect(page, cell_x, span_y_bot, span_w, span_h, grid_stroke);
                 }
-                if style.borders != CellBorders::NONE {
+                let borders = span_borders(sheet, &span);
+                if borders != CellBorders::NONE {
                     draw_borders(
                         doc,
                         page,
@@ -799,20 +867,10 @@ fn draw_table_band(
                         span_y_bot,
                         span_w,
                         span_h,
-                        style.borders,
+                        borders,
                         border_stroke,
                     );
                 }
-
-                let raw_value = if span.render_text {
-                    plan.evaluated
-                        .get(&span.anchor)
-                        .map(Value::display)
-                        .or_else(|| sheet.cells.get(&span.anchor).map(|c| c.raw.clone()))
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                };
                 let display = style.format_value(&raw_value);
                 if !display.is_empty() {
                     let size_pt = ((style.font_size.unwrap_or(13) as f32 * 0.72)
@@ -830,12 +888,8 @@ fn draw_table_band(
                     let pad_x = CELL_PAD_X_PT * plan.scale_factor;
                     let max_text_w = (span_w - 2.0 * pad_x).max(4.0);
                     let alignment = sheet.cell_alignment(span.anchor);
-                    let is_numeric = plan
-                        .evaluated
-                        .get(&span.anchor)
-                        .is_some_and(|v| matches!(v, Value::Number(_)));
-                    let align_right = alignment == CellAlignment::Right
-                        || (alignment == CellAlignment::General && is_numeric);
+                    let align_right =
+                        resolved_alignment(sheet, plan, span.anchor) == CellAlignment::Right;
                     let aligned_x = |line: &str| {
                         let line_w = text_width_pt(line, &text_style);
                         if alignment == CellAlignment::Center {
@@ -879,6 +933,8 @@ fn draw_table_band(
 
 struct BandCellSpan {
     anchor: CellRef,
+    /// Drawn extent of the span after clamping to this page band.
+    covered: CellRange,
     width_pt: f32,
     height_pt: f32,
     render_text: bool,
@@ -915,15 +971,24 @@ fn band_cell_span(
         let last_col = c1.min(cols.end.saturating_sub(1));
         let width_pt: f32 = (col..=last_col).map(|c| plan.col_widths[c as usize]).sum();
         let mut height_pt = 0.0f32;
+        let mut last_row = row;
         for k in row_idx..rows.len() {
             let r = rows[k];
             if r > r1 || (k > row_idx && r != rows[k - 1] + 1) {
                 break;
             }
             height_pt += plan.row_heights[r as usize];
+            last_row = r;
         }
         return Some(BandCellSpan {
             anchor: CellRef { row: r0, col: c0 },
+            covered: CellRange::new(
+                CellRef { row: r0, col: c0 },
+                CellRef {
+                    row: last_row,
+                    col: last_col,
+                },
+            ),
             width_pt,
             height_pt,
             render_text: row == r0 && col == c0,
@@ -931,10 +996,36 @@ fn band_cell_span(
     }
     Some(BandCellSpan {
         anchor: CellRef { row, col },
+        covered: CellRange::new(CellRef { row, col }, CellRef { row, col }),
         width_pt: plan.col_widths[col as usize],
         height_pt: plan.row_heights[row as usize],
         render_text: true,
     })
+}
+
+/// Border edges for a possibly merged block.
+///
+/// `BorderPreset::Outer` stores each outer edge on the perimeter cell that owns
+/// it, and merged spans skip every covered cell, so reading only the anchor
+/// would lose the right edge of a horizontal merge (for example the right edge
+/// of `A1:B1`) and the bottom edge of a vertical one.
+fn span_borders(sheet: &Sheet, span: &BandCellSpan) -> CellBorders {
+    let (r0, r1) = (span.covered.start.row, span.covered.end.row);
+    let (c0, c1) = (span.covered.start.col, span.covered.end.col);
+    if (r0, c0) == (r1, c1) {
+        return sheet.cell_style(span.anchor).borders;
+    }
+    let mut borders = CellBorders::NONE;
+    for row in r0..=r1 {
+        for col in c0..=c1 {
+            let edges = sheet.cell_style(CellRef { row, col }).borders;
+            borders.top |= row == r0 && edges.top;
+            borders.bottom |= row == r1 && edges.bottom;
+            borders.left |= col == c0 && edges.left;
+            borders.right |= col == c1 && edges.right;
+        }
+    }
+    borders
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1088,6 +1179,124 @@ fn wrap_text_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_general_numbers_right_align_and_conditional_style_applies() {
+        let mut sheet = Sheet::new("CF");
+        sheet.set_str("A1", "150");
+        sheet.set_str("A2", "text");
+        sheet.add_conditional_rule(crate::CellConditionalRule {
+            range: crate::CellRange::parse("A1:A2").unwrap(),
+            operator: crate::ConditionalOperator::GreaterThan,
+            value: "100".to_string(),
+            fill: crate::style::FillColor::Yellow,
+            text_color: Some(0x00C6_2828),
+        });
+        let options = PdfExportOptions::default();
+        let pages = preview_sheet_pages(&sheet, options);
+        let a1 = pages[0]
+            .cells
+            .iter()
+            .find(|c| (c.row, c.col) == (0, 0))
+            .unwrap();
+        let a2 = pages[0]
+            .cells
+            .iter()
+            .find(|c| (c.row, c.col) == (1, 0))
+            .unwrap();
+        assert_eq!(a1.align, CellAlignment::Right);
+        assert_eq!(a2.align, CellAlignment::General);
+        assert!(a1.fill_rgb.is_some());
+        assert!(a2.fill_rgb.is_none());
+        assert_eq!(a1.text_rgb, rgb_from_u32(0x00C6_2828));
+        // PDF path must carry the same fill (yellow rect operator count differs).
+        let plain = {
+            let mut s = sheet.clone();
+            s.clear_conditional_rules(crate::CellRange::parse("A1:A2").unwrap());
+            export_sheet_pdf_with_options(&s, options)
+        };
+        assert_ne!(export_sheet_pdf_with_options(&sheet, options), plain);
+    }
+
+    #[test]
+    fn single_page_preview_builds_only_requested_page() {
+        let mut sheet = Sheet::new("Long");
+        for row in 1..=200 {
+            sheet.set_str(&format!("A{row}"), &row.to_string());
+        }
+        let options = PdfExportOptions::default();
+        let all = preview_sheet_pages(&sheet, options);
+        assert!(all.len() > 1);
+        let (total, page2) =
+            preview_workbook_sheet_page(std::slice::from_ref(&sheet), 0, options, 2);
+        assert_eq!(total, all.len());
+        assert_eq!(page2.page_number, 2);
+        assert_eq!(page2.cells.len(), all[1].cells.len());
+        let (_, clamped) =
+            preview_workbook_sheet_page(std::slice::from_ref(&sheet), 0, options, 999);
+        assert_eq!(clamped.page_number, total);
+    }
+
+    #[test]
+    fn fit_one_page_wide_never_drops_columns() {
+        let mut sheet = Sheet::new("Wide");
+        for col in 0..100u32 {
+            sheet.set_str(&crate::CellRef { row: 0, col }.to_a1(), "x");
+        }
+        let options = PdfExportOptions {
+            scale: PrintScale::FitOnePageWide,
+            ..PdfExportOptions::default()
+        };
+        let pages = preview_sheet_pages(&sheet, options);
+        let mut seen = std::collections::BTreeSet::new();
+        for page in &pages {
+            let usable = page.width_pt - 2.0 * page.margin_pt;
+            let used: f32 = page.row_gutter_pt + page.col_widths_pt.iter().sum::<f32>();
+            assert!(used <= usable + 0.05, "band {used} exceeds {usable}");
+            seen.extend(page.cells.iter().map(|c| c.col));
+        }
+        assert_eq!(seen.len(), 100);
+    }
+
+    #[test]
+    fn merged_span_keeps_perimeter_borders_from_covered_cells() {
+        // `BorderPreset::Outer` on A1:B1 stores the right edge on B1, and the
+        // merged span skips B1, so the exported PDF would lose that edge.
+        let mut sheet = Sheet::new("MergedBorder");
+        sheet.set_str("A1", "Heading");
+        let range = crate::CellRange::parse("A1:B1").expect("range");
+        assert!(sheet.merge_cells(range));
+        assert!(sheet.apply_border_preset(range, crate::BorderPreset::Outer));
+        let options = PdfExportOptions {
+            include_gridlines: false,
+            ..PdfExportOptions::default()
+        };
+        let (plan_sheet, plan) = build_page_plan(std::slice::from_ref(&sheet), 0, options);
+        let rows = plan.row_bands.first().expect("row band");
+        let (first_col, last_col) = plan.col_bands[0];
+        let span = band_cell_span(&plan_sheet, &plan, rows, 0, first_col..last_col, first_col)
+            .expect("merged span");
+        assert_eq!(span.covered.end.col, 1, "span covers A1:B1");
+        let borders = span_borders(&plan_sheet, &span);
+        assert!(borders.top && borders.bottom && borders.left);
+        assert!(borders.right, "right edge stored on the covered cell B1");
+
+        // A vertical merge keeps its bottom edge the same way.
+        let mut sheet = Sheet::new("MergedVertical");
+        sheet.set_str("A1", "Tall");
+        let range = crate::CellRange::parse("A1:A3").expect("range");
+        sheet.merge_cells(range);
+        sheet.apply_border_preset(range, crate::BorderPreset::Outer);
+        let (plan_sheet, plan) = build_page_plan(std::slice::from_ref(&sheet), 0, options);
+        let rows = plan.row_bands[0].clone();
+        let (first_col, last_col) = plan.col_bands[0];
+        let span = band_cell_span(&plan_sheet, &plan, &rows, 0, first_col..last_col, first_col)
+            .expect("merged span");
+        assert_eq!(span.covered.end.row, 2, "span covers A1:A3");
+        let borders = span_borders(&plan_sheet, &span);
+        assert!(borders.bottom, "bottom edge stored on the covered cell A3");
+        assert!(borders.top && borders.left && borders.right);
+    }
 
     #[test]
     fn empty_sheet_produces_valid_single_page_pdf() {
