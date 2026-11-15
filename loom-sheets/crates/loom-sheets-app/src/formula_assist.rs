@@ -198,9 +198,19 @@ pub(crate) fn analyze_formula_cursor(
         while start > 1 && is_ident_char(bytes[start - 1]) {
             start -= 1;
         }
+        // Replace the whole identifier, not just the text left of the caret,
+        // so accepting at `=SU|M(A1)` yields `=SUM(A1)`.
+        let mut end = cursor;
+        while bytes.get(end).is_some_and(|b| is_ident_char(*b)) {
+            end += 1;
+        }
         let preceded_by_ref_marker = start > 1 && matches!(bytes[start - 1], b'!' | b'\'' | b'$');
-        let followed_by_paren = bytes.get(cursor) == Some(&b'(');
-        let followed_by_bang = bytes.get(cursor) == Some(&b'!');
+        // A complete `NAME(` call is only suppressed when the caret sits at the
+        // end of the name. Inside the name the token is replaced whole, so
+        // `=SU|M(A1)` still offers SUM instead of leaving `=SUM(M(A1)`.
+        let at_token_end = end == cursor;
+        let followed_by_paren = at_token_end && bytes.get(end) == Some(&b'(');
+        let followed_by_bang = at_token_end && bytes.get(end) == Some(&b'!');
         if !preceded_by_ref_marker
             && !followed_by_paren
             && !followed_by_bang
@@ -209,7 +219,7 @@ pub(crate) fn analyze_formula_cursor(
             let prefix = &formula[start..cursor];
             let docs = matching_functions(prefix, MAX_SUGGESTIONS);
             if !docs.is_empty() {
-                prefix_span = Some((start, cursor));
+                prefix_span = Some((start, end));
                 suggestions = docs
                     .into_iter()
                     .map(|doc| SuggestionItem {
@@ -715,6 +725,21 @@ mod tests {
         let (applied, cursor) = apply_suggestion("=su", None, "SUM").unwrap();
         assert_eq!(applied, "=SUM(");
         assert_eq!(cursor, 5);
+    }
+
+    #[test]
+    fn autocomplete_replaces_the_complete_identifier_at_a_mid_token_caret() {
+        // Caret sits between "SU" and "M": the suggestion must replace "SUM".
+        let analysis = analyze_formula_cursor("=SUM(A1)", Some(3));
+        assert!(analysis.active);
+        assert_eq!(analysis.prefix_span, Some((1, 4)));
+        let (applied, cursor) = apply_suggestion("=SUM(A1)", Some(3), "SUM").unwrap();
+        assert_eq!(applied, "=SUM(A1)");
+        assert_eq!(cursor, 4);
+
+        // A shorter mid-token prefix still replaces the complete token.
+        let (applied, _) = apply_suggestion("=SUMMA(A1)", Some(3), "SUM").unwrap();
+        assert_eq!(applied, "=SUM(A1)");
     }
 
     #[test]

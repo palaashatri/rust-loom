@@ -309,7 +309,9 @@ fn expanded_catalog_templates_have_working_formulas_formats_and_light_previews()
             14,
             "Tax Summary",
             "B19",
-            "Refund",
+            // B12 excludes the pre-tax 401(k) amount already absent from W-2
+            // box 1 wages, so the corrected estimate leaves a balance due.
+            "Owed",
             loom_sheets_core::NumberFormat::General,
         ),
         (

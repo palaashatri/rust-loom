@@ -49,14 +49,27 @@ fn text_matches(haystack: &str, query: &str, match_case: bool, whole_cell: bool)
             haystack.contains(query)
         }
     } else {
-        let hay_lower = haystack.to_lowercase();
-        let query_lower = query.to_lowercase();
+        let hay_lower = fold_lower(haystack);
+        let query_lower = fold_lower(query);
         if whole_cell {
             hay_lower == query_lower
         } else {
             hay_lower.contains(&query_lower)
         }
     }
+}
+
+/// Case-folds `text` for case-insensitive comparison.
+///
+/// `str::to_lowercase` applies Unicode's contextual final-sigma rule, so it can
+/// disagree with per-character `char::to_lowercase`. Find, whole-cell matching
+/// and Replace must share one equivalence relation, so both sides are folded
+/// per character and `Σ`/`ς` map to the same character.
+fn fold_lower(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|ch| if ch == 'ς' { 'σ' } else { ch })
+        .collect()
 }
 
 /// Finds all matching cells in a single worksheet in deterministic row-major order.
@@ -177,21 +190,22 @@ pub fn replace_cell_raw(
         }
         return Some(raw.replace(query, replacement));
     }
-    let hay_lower = raw.to_lowercase();
-    let query_lower = query.to_lowercase();
-    if !hay_lower.contains(&query_lower) {
-        return None;
-    }
+    let query_lower = fold_lower(query);
     // Case-insensitive replacement preserving unmatched slices of `raw`.
-    // Map lowercased byte offsets back to original-string byte offsets, and
+    // Map folded byte offsets back to original-string byte offsets, and
     // replace only when both ends of a match fall on original char boundaries.
     let mut lower = String::with_capacity(raw.len());
     let mut starts: Vec<(usize, usize)> = Vec::new();
     for (raw_off, ch) in raw.char_indices() {
         starts.push((lower.len(), raw_off));
-        lower.extend(ch.to_lowercase());
+        for folded in ch.to_lowercase() {
+            lower.push(if folded == 'ς' { 'σ' } else { folded });
+        }
     }
     starts.push((lower.len(), raw.len()));
+    if !lower.contains(&query_lower) {
+        return None;
+    }
     let to_raw = |lo: usize| {
         starts
             .binary_search_by_key(&lo, |&(l, _)| l)
@@ -588,6 +602,26 @@ mod tests {
         assert_eq!(
             replace_cell_raw("\u{212A}xab", "ab", "cd", false, false).as_deref(),
             Some("\u{212A}xcd")
+        );
+    }
+
+    #[test]
+    fn case_insensitive_replace_agrees_with_find_on_final_sigma() {
+        // `str::to_lowercase` lowercases a word-final Σ to ς; per-character
+        // lowering produces σ. Find and Replace must still agree.
+        let raw = "ΟΣ";
+        let query = "ος";
+        assert!(text_matches(raw, query, false, false));
+        assert_eq!(
+            replace_cell_raw(raw, query, "x", false, false).as_deref(),
+            Some("x")
+        );
+        // Whole-cell matching must use the same equivalence.
+        assert!(text_matches(raw, query, false, true));
+        // Non-final sigma keeps working in both directions.
+        assert_eq!(
+            replace_cell_raw("ΣΟΦΙΑ", "σο", "so", false, false).as_deref(),
+            Some("soΦΙΑ")
         );
     }
 

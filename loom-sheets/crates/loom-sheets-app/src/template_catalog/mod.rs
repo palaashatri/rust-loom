@@ -82,3 +82,25 @@ pub(super) fn set_format(
         s.decimal_places = decimals;
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tax_summary_does_not_double_deduct_pretax_401k() {
+        let sheet = finance::tax_summary();
+        let vals = loom_sheets_core::evaluate(&sheet);
+        let at = |a1: &str| {
+            vals.get(&CellRef::parse(a1).expect("valid cell"))
+                .map(|v| v.display())
+                .unwrap_or_default()
+        };
+        // 92,000 + 14,500 + 1,850 + 620 = 108,970 gross.
+        assert_eq!(at("B6"), "108970");
+        // W-2 box 1 wages already exclude the 8,500 pre-tax 401(k), so only the
+        // standard deduction and the HSA contribution reduce taxable income.
+        assert_eq!(at("B12"), "17800");
+        assert_eq!(at("B14"), "91170");
+    }
+}

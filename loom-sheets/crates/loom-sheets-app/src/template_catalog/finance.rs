@@ -259,12 +259,14 @@ pub(super) fn tax_summary() -> Sheet {
             ("B8", "Amount"),
             ("A9", "Standard Deduction"),
             ("B9", "14600"),
-            ("A10", "401(k) Contribution"),
+            ("A10", "401(k) Contribution (already excluded from W-2)"),
             ("B10", "8500"),
             ("A11", "HSA Contribution"),
             ("B11", "3200"),
             ("A12", "Total Deductions"),
-            ("B12", "=SUM(B9:B11)"),
+            // Pre-tax employee 401(k) contributions are already excluded from
+            // W-2 box 1 wages above, so B10 is shown for reference only.
+            ("B12", "=SUM(B9,B11)"),
             ("A14", "Taxable Income"),
             ("B14", "=MAX(0, B6-B12)"),
             ("A15", "Effective Tax Rate"),

@@ -486,8 +486,9 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("7", false, true) => "view.appearance.light",
         ("[", false, true) => "view.window-frame.system",
         ("]", false, true) => "view.window-frame.loom",
-        ("[", true, true) => "arrange.send_to_back",
-        ("]", true, true) => "arrange.bring_to_front",
+        // Shift+`[`/`]` reach this path as `{`/`}` in Slint's winit adapter.
+        ("[", true, true) | ("{", _, true) => "arrange.send_to_back",
+        ("]", true, true) | ("}", _, true) => "arrange.bring_to_front",
         ("z", false, true) if app.get_recovery_paused() => "sheets.retry-recovery",
         _ => return false,
     };

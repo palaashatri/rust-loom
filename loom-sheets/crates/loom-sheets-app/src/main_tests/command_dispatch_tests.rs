@@ -654,6 +654,9 @@ fn advertised_shortcuts_dispatch_without_collisions() {
         ("v", true, true, "edit.paste_formats"),
         ("]", true, true, "arrange.bring_to_front"),
         ("[", true, true, "arrange.send_to_back"),
+        // Shifted punctuation arrives as the logical character on winit.
+        ("}", true, true, "arrange.bring_to_front"),
+        ("{", true, true, "arrange.send_to_back"),
         ("w", true, true, "format.wrap_text"),
         ("g", true, true, "format.merge"),
         ("e", true, true, "format.text_color_cycle"),
