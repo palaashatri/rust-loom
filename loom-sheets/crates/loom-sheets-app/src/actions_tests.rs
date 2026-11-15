@@ -464,7 +464,7 @@ fn test_paste_single_into_range_with_undo() {
 
     let target_sel = GridSelection::new(CellRef { row: 10, col: 0 }, CellRef { row: 11, col: 1 });
     let data = vec![vec!["$99.00".to_string()]];
-    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data, false);
     assert_eq!(pasted, 4);
     assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), Some("$99.00"));
     assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), Some("$99.00"));
@@ -488,7 +488,7 @@ fn test_paste_matrix_with_undo_redo() {
         vec!["Alpha".to_string(), "Beta".to_string()],
         vec!["Gamma".to_string(), "Delta".to_string()],
     ];
-    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data, false);
     assert_eq!(pasted, 4);
     assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
     assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), Some("Beta"));
@@ -956,7 +956,8 @@ fn test_deep_audit_clipboard_and_range_operations() {
     let mut redo = Vec::new();
     let target_sel =
         GridSelection::new(CellRef::parse("C1").unwrap(), CellRef::parse("C1").unwrap());
-    let pasted_count = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &matrix);
+    let pasted_count =
+        paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &matrix, false);
     assert_eq!(pasted_count, 4);
     assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), Some("Alpha"));
     assert_eq!(sheet.raw(CellRef::parse("D1").unwrap()), Some("Beta"));

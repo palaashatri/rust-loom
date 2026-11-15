@@ -26,6 +26,10 @@ struct PersistedCell {
     #[serde(rename = "ref")]
     reference: String,
     raw: String,
+    /// Literal text that starts with `=` (Paste Values Only). Optional so
+    /// files written before this flag existed still load.
+    #[serde(default, skip_serializing_if = "is_false")]
+    text: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -240,6 +244,7 @@ impl From<&Sheet> for PersistedSheet {
                 .map(|(reference, cell)| PersistedCell {
                     reference: reference.to_a1(),
                     raw: cell.raw.clone(),
+                    text: cell.text,
                 })
                 .collect(),
             alignments: sheet
@@ -517,7 +522,13 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             .ok_or_else(|| format!("invalid cell reference {:?}", cell.reference))?;
         if sheet
             .cells
-            .insert(reference, crate::Cell { raw: cell.raw })
+            .insert(
+                reference,
+                crate::Cell {
+                    raw: cell.raw,
+                    text: cell.text,
+                },
+            )
             .is_some()
         {
             return Err(format!("duplicate cell reference {:?}", cell.reference));
@@ -804,6 +815,32 @@ pub fn workbook_from_json(s: &str) -> Result<WorkbookFile, String> {
 mod tests {
     use super::*;
     use crate::evaluate;
+
+    #[test]
+    fn literal_text_starting_with_equals_survives_save_and_reload() {
+        // Paste Values Only can produce text such as `=1+1`. It must stay
+        // text through persistence instead of reloading as a formula.
+        let mut sheet = Sheet::new("values");
+        let a1 = CellRef::parse("A1").unwrap();
+        sheet.set_literal(a1, "=1+1");
+        let json = sheet_to_json(&sheet);
+        assert!(json.contains("\"text\":true"), "{json}");
+        let back = sheet_from_json(&json).unwrap();
+        assert_eq!(back.raw(a1), Some("=1+1"));
+        assert_eq!(
+            evaluate(&back).get(&a1).map(|value| value.display()),
+            Some("=1+1".to_string()),
+            "reloaded cell must not evaluate as a formula"
+        );
+
+        // Older files have no `text` flag and keep formula semantics.
+        let legacy = r#"{"name":"s","cells":[{"ref":"A1","raw":"=1+1"}]}"#;
+        let legacy = sheet_from_json(legacy).unwrap();
+        assert_eq!(
+            evaluate(&legacy).get(&a1).map(|value| value.display()),
+            Some("2".to_string())
+        );
+    }
 
     #[test]
     fn a_malformed_text_colour_is_an_error_not_a_dropped_colour() {

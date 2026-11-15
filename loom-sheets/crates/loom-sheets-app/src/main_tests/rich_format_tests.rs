@@ -177,3 +177,33 @@ fn paste_special_values_only_and_formats_only() {
         assert!(sheet.cell_style(b1).bold);
     }
 }
+
+#[test]
+fn paste_values_only_keeps_formula_shaped_text_literal() {
+    // `="=1+1"` evaluates to the text `=1+1`. Values Only must write that text
+    // as data, not as a formula that would display 2.
+    let s = wired(&[("A1", "=\"=1+1\""), ("B1", "0")]);
+    let b1 = CellRef::parse("B1").unwrap();
+    select(&s, "A1");
+    s.app.invoke_copy_selection();
+    select(&s, "B1");
+    s.app.global::<CellRichFormat>().invoke_paste_values_only();
+    {
+        let sheet = s.state.current.borrow();
+        assert_eq!(sheet.raw(b1), Some("=1+1"));
+        assert_eq!(
+            evaluate(&sheet).get(&b1).map(|value| value.display()),
+            Some("=1+1".to_string())
+        );
+    }
+    // Undo restores the original number, and the value is numeric again.
+    undo_last(&s);
+    {
+        let sheet = s.state.current.borrow();
+        assert_eq!(sheet.raw(b1), Some("0"));
+        assert_eq!(
+            evaluate(&sheet).get(&b1).map(|value| value.display()),
+            Some("0".to_string())
+        );
+    }
+}

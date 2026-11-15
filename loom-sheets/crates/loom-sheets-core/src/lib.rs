@@ -55,8 +55,9 @@ pub use interop::{
 pub use objects::{reorder_objects, SheetObject, SheetObjectKind, ZOrderAction};
 pub use pdf_export::{
     export_sheet_pdf, export_sheet_pdf_with_options, export_workbook_sheet_pdf,
-    export_workbook_sheet_pdf_with_options, preview_sheet_pages, preview_workbook_sheet_pages,
-    PageOrientation, PagePreviewCell, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
+    export_workbook_sheet_pdf_with_options, preview_sheet_pages, preview_workbook_sheet_page,
+    preview_workbook_sheet_pages, PageOrientation, PagePreviewCell, PaperSize, PdfExportOptions,
+    PrintScale, SheetPagePreview,
 };
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
@@ -389,22 +390,47 @@ impl CalcError {
 }
 
 /// A cell in the workbook.
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Cell {
     /// Raw input: a formula like `=A1+B2` or a literal.
     pub raw: String,
+    /// Set when `raw` is literal text even though it starts with `=`.
+    ///
+    /// Paste Values Only can evaluate a formula to text such as `=1+1`.
+    /// Writing that through the normal raw path would make it a formula
+    /// again, so the cell records that its contents are text and must never
+    /// be parsed as a formula.
+    pub text: bool,
 }
 
 impl Cell {
-    /// Is this a formula? (starts with `=`)
+    /// Creates a cell whose raw input is parsed normally (a leading `=`
+    /// starts a formula).
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self {
+            raw: raw.into(),
+            text: false,
+        }
+    }
+
+    /// Creates a cell that stores `raw` as literal text, even when it starts
+    /// with `=`.
+    pub fn literal(raw: impl Into<String>) -> Self {
+        Self {
+            raw: raw.into(),
+            text: true,
+        }
+    }
+
+    /// Is this a formula? (starts with `=`, and is not literal text)
     pub fn is_formula(&self) -> bool {
-        self.raw.starts_with('=')
+        !self.text && self.raw.starts_with('=')
     }
 }
 
 impl banded::StoredValue for Cell {
     fn is_formula(&self) -> bool {
-        self.raw.starts_with('=')
+        Cell::is_formula(self)
     }
 
     fn heap_bytes(&self) -> usize {
@@ -1521,7 +1547,15 @@ impl Sheet {
 
     /// Set a cell's exact raw input at a resolved cell reference.
     pub fn set_raw(&mut self, r: CellRef, raw: impl Into<String>) {
-        self.cells.insert(r, Cell { raw: raw.into() });
+        self.cells.insert(r, Cell::new(raw));
+    }
+
+    /// Set a cell's contents as literal text, even when it starts with `=`.
+    ///
+    /// This is the Values Only write path: the string is displayed and
+    /// exported verbatim and never evaluated as a formula.
+    pub fn set_literal(&mut self, r: CellRef, raw: impl Into<String>) {
+        self.cells.insert(r, Cell::literal(raw));
     }
 
     /// Get raw content of a cell.
@@ -2288,8 +2322,8 @@ pub type RangeSelection = GridSelection;
 /// dimensions after reopening.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeEdit {
-    before: BTreeMap<CellRef, Option<String>>,
-    after: BTreeMap<CellRef, Option<String>>,
+    before: BTreeMap<CellRef, Option<Cell>>,
+    after: BTreeMap<CellRef, Option<Cell>>,
 }
 
 impl RangeEdit {
@@ -2297,8 +2331,30 @@ impl RangeEdit {
     pub fn replace(sheet: &Sheet, cell: CellRef, after: Option<String>) -> Self {
         let mut before = BTreeMap::new();
         let mut after_map = BTreeMap::new();
-        before.insert(cell, sheet.raw(cell).map(str::to_owned));
-        after_map.insert(cell, after);
+        before.insert(cell, sheet.cells.get(&cell).cloned());
+        after_map.insert(cell, after.map(Cell::new));
+        Self {
+            before,
+            after: after_map,
+        }
+    }
+
+    /// Builds an edit from a Values Only paste.
+    ///
+    /// Values Only writes the *displayed* value. A value that starts with `=`
+    /// would be read back as a formula through the raw path, so it is stored
+    /// as literal text; every other value keeps normal literal semantics
+    /// (numbers stay numbers).
+    pub fn replace_value(sheet: &Sheet, cell: CellRef, raw: String) -> Self {
+        let mut before = BTreeMap::new();
+        let mut after_map = BTreeMap::new();
+        before.insert(cell, sheet.cells.get(&cell).cloned());
+        let after = if raw.starts_with('=') {
+            Cell::literal(raw)
+        } else {
+            Cell::new(raw)
+        };
+        after_map.insert(cell, Some(after));
         Self {
             before,
             after: after_map,
@@ -2307,10 +2363,10 @@ impl RangeEdit {
 
     /// Builds an edit that copies `source` to a destination top-left cell.
     pub fn copy(sheet: &Sheet, source: CellRange, destination: CellRef) -> Self {
-        let source_values: BTreeMap<CellRef, Option<String>> = source
+        let source_values: BTreeMap<CellRef, Option<Cell>> = source
             .cells()
             .into_iter()
-            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .map(|cell| (cell, sheet.cells.get(&cell).cloned()))
             .collect();
         let row_delta = destination.row as i64 - source.start.row as i64;
         let col_delta = destination.col as i64 - source.start.col as i64;
@@ -2322,15 +2378,9 @@ impl RangeEdit {
                 row: shifted_coordinate(source_cell.row, row_delta),
                 col: shifted_coordinate(source_cell.col, col_delta),
             };
-            before.insert(target, sheet.raw(target).map(str::to_owned));
-            after.insert(
-                target,
-                shifted_raw(
-                    source_values.get(&source_cell).cloned().flatten(),
-                    col_delta,
-                    row_delta,
-                ),
-            );
+            before.insert(target, sheet.cells.get(&target).cloned());
+            let source_value = source_values.get(&source_cell).cloned().flatten();
+            after.insert(target, copy_cell(source_value, col_delta, row_delta));
         }
 
         Self { before, after }
@@ -2344,10 +2394,10 @@ impl RangeEdit {
     pub fn fill(sheet: &Sheet, source: CellRange, target: CellRange) -> Self {
         let source_rows = source.end.row - source.start.row + 1;
         let source_cols = source.end.col - source.start.col + 1;
-        let source_values: BTreeMap<CellRef, Option<String>> = source
+        let source_values: BTreeMap<CellRef, Option<Cell>> = source
             .cells()
             .into_iter()
-            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .map(|cell| (cell, sheet.cells.get(&cell).cloned()))
             .collect();
         let mut before = BTreeMap::new();
         let mut after = BTreeMap::new();
@@ -2359,10 +2409,10 @@ impl RangeEdit {
             };
             let row_delta = destination.row as i64 - source_cell.row as i64;
             let col_delta = destination.col as i64 - source_cell.col as i64;
-            before.insert(destination, sheet.raw(destination).map(str::to_owned));
+            before.insert(destination, sheet.cells.get(&destination).cloned());
             after.insert(
                 destination,
-                shifted_raw(
+                copy_cell(
                     source_values.get(&source_cell).cloned().flatten(),
                     col_delta,
                     row_delta,
@@ -2383,8 +2433,8 @@ impl RangeEdit {
         for (cell, value) in updates {
             before
                 .entry(cell)
-                .or_insert_with(|| sheet.raw(cell).map(str::to_owned));
-            after.insert(cell, value);
+                .or_insert_with(|| sheet.cells.get(&cell).cloned());
+            after.insert(cell, value.map(Cell::new));
         }
         Self { before, after }
     }
@@ -2410,13 +2460,13 @@ impl RangeEdit {
     /// (rather than only logical length) matches the memory released when the
     /// maps and their owned values are dropped.
     pub fn memory_bytes(&self) -> usize {
-        fn map_bytes(map: &BTreeMap<CellRef, Option<String>>) -> usize {
+        fn map_bytes(map: &BTreeMap<CellRef, Option<Cell>>) -> usize {
             std::mem::size_of_val(map)
                 + map
                     .values()
-                    .map(|value| value.as_ref().map_or(0, String::capacity))
+                    .map(|value| value.as_ref().map_or(0, |cell| cell.raw.capacity()))
                     .sum::<usize>()
-                + map.len() * std::mem::size_of::<(CellRef, Option<String>)>()
+                + map.len() * std::mem::size_of::<(CellRef, Option<Cell>)>()
         }
         map_bytes(&self.before) + map_bytes(&self.after)
     }
@@ -2450,10 +2500,28 @@ fn shifted_raw(raw: Option<String>, col_delta: i64, row_delta: i64) -> Option<St
     })
 }
 
-fn apply_sparse_values(sheet: &mut Sheet, values: &BTreeMap<CellRef, Option<String>>) {
-    for (cell, raw) in values {
-        match raw {
-            Some(raw) => sheet.set_raw(*cell, raw.clone()),
+/// Copy or fill one cell to a new position.
+///
+/// Literal text is data, not a formula, so its contents never shift. Every
+/// other cell keeps raw-copy/fill semantics.
+fn copy_cell(value: Option<Cell>, col_delta: i64, row_delta: i64) -> Option<Cell> {
+    let cell = value?;
+    if cell.text {
+        return Some(cell);
+    }
+    Some(Cell::new(shifted_raw(
+        Some(cell.raw),
+        col_delta,
+        row_delta,
+    )?))
+}
+
+fn apply_sparse_values(sheet: &mut Sheet, values: &BTreeMap<CellRef, Option<Cell>>) {
+    for (cell, value) in values {
+        match value {
+            Some(value) => {
+                sheet.cells.insert(*cell, value.clone());
+            }
             None => {
                 sheet.clear_cell(*cell);
             }
@@ -3274,9 +3342,10 @@ pub fn sheet_to_xlsx_data(
             let cell = CellRef { row, col };
             let value = vals.get(&cell).cloned().unwrap_or(Value::Empty);
             let formula = sheet
-                .raw(cell)
-                .filter(|raw| raw.starts_with('='))
-                .map(|raw| raw[1..].to_string());
+                .cells
+                .get(&cell)
+                .filter(|cell| cell.is_formula())
+                .map(|cell| cell.raw[1..].to_string());
             let (number, boolean) = match &value {
                 Value::Number(n) if n.is_finite() => (Some(*n), None),
                 Value::Bool(b) => (None, Some(*b)),

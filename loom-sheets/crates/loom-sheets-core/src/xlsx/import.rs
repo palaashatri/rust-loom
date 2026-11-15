@@ -210,7 +210,17 @@ fn fill_sheet(
             }
         };
         if let Some(raw) = raw {
-            sheet.cells.insert(cell.at, Cell { raw });
+            // A cached string cell that starts with `=` is data, not a
+            // formula: OOXML distinguishes them by the `<f>` element.
+            let text = cell.formula.is_none() && raw.starts_with('=');
+            sheet.cells.insert(
+                cell.at,
+                if text {
+                    Cell::literal(raw)
+                } else {
+                    Cell::new(raw)
+                },
+            );
         }
         let xf = styles.xfs.get(cell.style).copied().unwrap_or_default();
         if !xf.style.is_default() {

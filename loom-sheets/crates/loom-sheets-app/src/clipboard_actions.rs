@@ -394,6 +394,7 @@ fn paste_cells(
         &mut state.redo_stack.borrow_mut(),
         target,
         &data,
+        false,
     );
     if let (Some(formats), Some(before), true) = (formats, before, pasted > 0) {
         // The formats join the values in one undo step: the paste's own step is
@@ -440,6 +441,7 @@ pub(crate) fn paste_values_only(
         &mut state.redo_stack.borrow_mut(),
         target,
         &data,
+        true,
     );
     if pasted > 0 {
         apply_sheet(app, state);

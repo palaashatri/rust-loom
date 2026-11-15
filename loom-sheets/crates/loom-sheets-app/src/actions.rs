@@ -1252,6 +1252,7 @@ pub(crate) fn paste_selection(
     redo_stack: &mut Vec<SheetTransaction>,
     target_sel: GridSelection,
     data: &[Vec<String>],
+    values_only: bool,
 ) -> usize {
     if data.is_empty() || data[0].is_empty() {
         return 0;
@@ -1265,7 +1266,11 @@ pub(crate) fn paste_selection(
         for r in target_range.start.row..=target_range.end.row {
             for c in target_range.start.col..=target_range.end.col {
                 let cell = CellRef { row: r, col: c };
-                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                let edit = if values_only {
+                    RangeEdit::replace_value(sheet, cell, val.clone())
+                } else {
+                    RangeEdit::replace(sheet, cell, Some(val.clone()))
+                };
                 edits.push(edit);
             }
         }
@@ -1277,7 +1282,11 @@ pub(crate) fn paste_selection(
                     row: origin.row.saturating_add(r_off as u32),
                     col: origin.col.saturating_add(c_off as u32),
                 };
-                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                let edit = if values_only {
+                    RangeEdit::replace_value(sheet, cell, val.clone())
+                } else {
+                    RangeEdit::replace(sheet, cell, Some(val.clone()))
+                };
                 edits.push(edit);
             }
         }
