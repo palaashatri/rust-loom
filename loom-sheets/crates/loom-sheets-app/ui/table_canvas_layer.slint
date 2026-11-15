@@ -37,7 +37,7 @@ export global SheetTableState {
     in-out property <bool> active-alternating-rows: true;
     in-out property <bool> has-active-table: false;
 
-    callback select-table(int);
+    callback select-table(string);
     callback insert-table();
     callback rename-active-table(string);
     callback set-active-table-style(int);
@@ -130,7 +130,7 @@ export component TableCanvasLayer inherits Rectangle {
             }
 
             TouchArea {
-                clicked => { SheetTableState.select-table(idx); }
+                clicked => { SheetTableState.select-table(t.id); }
             }
         }
     }

@@ -181,6 +181,17 @@ fn record_table_snapshot(state: &GuiState, before: Sheet, after: Sheet) {
     state.redo_stack.borrow_mut().clear();
 }
 
+/// A1 anchor of the table with stable identity `id` (not a filtered model index).
+fn table_anchor_by_id(tables: &[loom_sheets_core::SheetTable], id: &str) -> Option<String> {
+    tables.iter().find(|t| t.id == id).map(|t| {
+        CellRef {
+            row: t.start_row,
+            col: t.start_col,
+        }
+        .to_a1()
+    })
+}
+
 /// Insert a new non-overlapping 5x4 canvas table near the active cell.
 pub(crate) fn insert_canvas_table(
     app: &SheetsApp,
@@ -192,6 +203,10 @@ pub(crate) fn insert_canvas_table(
     let created = {
         let mut sheet = state.current.borrow_mut();
         insert_table(&mut sheet.tables, row, col, 5, 4)
+    };
+    let Some(created) = created else {
+        app.set_status_left("No free space to insert a table".into());
+        return;
     };
     let after = state.current.borrow().clone();
     record_table_snapshot(state, before, after);
@@ -385,19 +400,13 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
     {
         let app_ref = app.as_weak();
         let state = Rc::clone(state);
-        table_state.on_select_table(move |idx| {
+        table_state.on_select_table(move |id| {
             let Some(app) = app_ref.upgrade() else {
                 return;
             };
             let anchor = {
                 let sheet = state.current.borrow();
-                sheet.tables.get(idx as usize).map(|t| {
-                    CellRef {
-                        row: t.start_row,
-                        col: t.start_col,
-                    }
-                    .to_a1()
-                })
+                table_anchor_by_id(&sheet.tables, id.as_str())
             };
             if let Some(a1) = anchor {
                 app.set_selected_cell(SharedString::from(&a1));
@@ -413,6 +422,17 @@ mod tests {
     use super::*;
     use crate::{register_sheet_actions, start_hub, FileFilter, NativeFileDialogs, StartHubState};
     use loom_test_support::capture::set_platform;
+
+    #[test]
+    fn select_resolves_table_identity_not_model_index() {
+        let tables = vec![
+            loom_sheets_core::SheetTable::new("a", "A", 0, 0, 2, 2),
+            loom_sheets_core::SheetTable::new("b", "B", 50, 3, 2, 2),
+        ];
+        // Table "b" would be model index 0 if "a" were outside the viewport.
+        assert_eq!(table_anchor_by_id(&tables, "b").as_deref(), Some("D51"));
+        assert_eq!(table_anchor_by_id(&tables, "missing"), None);
+    }
 
     fn test_state() -> Rc<GuiState> {
         let filter = FileFilter::new("Loom", ["looms"]).expect("filter");

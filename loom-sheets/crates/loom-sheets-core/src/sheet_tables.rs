@@ -205,18 +205,24 @@ fn rect_is_free(existing: &[SheetTable], row: u32, col: u32, rows: u32, cols: u3
 ///
 /// Prefers `(preferred_row, preferred_col)` when free; otherwise tries placing to
 /// the right of existing tables with a 1-column gutter, or below existing tables
-/// with a 2-row gutter (to leave room for the title banner).
+/// with a 2-row gutter (to leave room for the title banner). Returns `None`
+/// when no in-bounds, non-overlapping position remains.
 pub fn find_free_placement(
     existing: &[SheetTable],
     preferred_row: u32,
     preferred_col: u32,
     rows: u32,
     cols: u32,
-) -> (u32, u32) {
+) -> Option<(u32, u32)> {
     let rows = rows.max(1);
     let cols = cols.max(1);
-    if rect_is_free(existing, preferred_row, preferred_col, rows, cols) {
-        return (preferred_row, preferred_col);
+    let usable = |row: u32, col: u32| {
+        row.checked_add(rows - 1).is_some()
+            && col.checked_add(cols - 1).is_some()
+            && rect_is_free(existing, row, col, rows, cols)
+    };
+    if usable(preferred_row, preferred_col) {
+        return Some((preferred_row, preferred_col));
     }
 
     // Try placing to the right of each existing table at its start_row (with a 1-col gap).
@@ -232,8 +238,8 @@ pub fn find_free_placement(
     }
 
     for (row, col) in candidates {
-        if rect_is_free(existing, row, col, rows, cols) {
-            return (row, col);
+        if usable(row, col) {
+            return Some((row, col));
         }
     }
 
@@ -244,27 +250,33 @@ pub fn find_free_placement(
         .max()
         .map(|r| r.saturating_add(3))
         .unwrap_or(preferred_row);
-    while !rect_is_free(existing, row, preferred_col, rows, cols) {
-        row = row.saturating_add(rows + 2);
+    while !usable(row, preferred_col) {
+        let next = row.saturating_add(rows.saturating_add(2));
+        if next == row {
+            // Coordinate saturated: no further position exists.
+            return None;
+        }
+        row = next;
     }
-    (row, preferred_col)
+    Some((row, preferred_col))
 }
 
-/// Insert a new non-overlapping [`SheetTable`] into `tables` and return a clone of it.
+/// Insert a new non-overlapping [`SheetTable`] into `tables` and return a clone of it,
+/// or `None` when no position is available.
 pub fn insert_table(
     tables: &mut Vec<SheetTable>,
     preferred_row: u32,
     preferred_col: u32,
     rows: u32,
     cols: u32,
-) -> SheetTable {
+) -> Option<SheetTable> {
     let (start_row, start_col) =
-        find_free_placement(tables, preferred_row, preferred_col, rows, cols);
+        find_free_placement(tables, preferred_row, preferred_col, rows, cols)?;
     let id = next_table_id(tables);
     let name = next_table_name(tables);
     let table = SheetTable::new(id, name, start_row, start_col, rows, cols);
     tables.push(table.clone());
-    table
+    Some(table)
 }
 
 /// Return the index of the first table containing `(row, col)`, if any.
@@ -278,19 +290,28 @@ mod tests {
     use crate::{sheet_from_json, sheet_to_json, Sheet};
 
     #[test]
+    fn placement_terminates_when_extents_saturate() {
+        let tables = vec![SheetTable::new("t1", "Table 1", 1, 1, u32::MAX, u32::MAX)];
+        assert_eq!(find_free_placement(&tables, 1, 1, 5, 4), None);
+        let mut tables = tables;
+        assert!(insert_table(&mut tables, 1, 1, 5, 4).is_none());
+        assert_eq!(tables.len(), 1);
+    }
+
+    #[test]
     fn non_overlapping_placement_picks_free_regions() {
         let mut tables = Vec::new();
-        let first = insert_table(&mut tables, 0, 0, 5, 4);
+        let first = insert_table(&mut tables, 0, 0, 5, 4).expect("placement");
         assert_eq!((first.start_row, first.start_col), (0, 0));
         assert_eq!(first.name, "Table 1");
         assert_eq!(first.range_label(), "A1:D5");
 
         // Requesting the same origin must not overlap the first table.
-        let second = insert_table(&mut tables, 1, 1, 5, 4);
+        let second = insert_table(&mut tables, 1, 1, 5, 4).expect("placement");
         assert!(!first.overlaps(&second));
         assert_eq!(second.name, "Table 2");
 
-        let third = insert_table(&mut tables, 0, 0, 5, 4);
+        let third = insert_table(&mut tables, 0, 0, 5, 4).expect("placement");
         assert!(!first.overlaps(&third));
         assert!(!second.overlaps(&third));
         assert_eq!(third.name, "Table 3");
@@ -299,8 +320,8 @@ mod tests {
     #[test]
     fn table_at_finds_containing_table() {
         let mut tables = Vec::new();
-        let t1 = insert_table(&mut tables, 0, 0, 4, 3);
-        let t2 = insert_table(&mut tables, 10, 5, 3, 3);
+        let t1 = insert_table(&mut tables, 0, 0, 4, 3).expect("placement");
+        let t2 = insert_table(&mut tables, 10, 5, 3, 3).expect("placement");
         assert_eq!(
             table_at(&tables, t1.start_row + 1, t1.start_col + 1),
             Some(0)
@@ -312,7 +333,7 @@ mod tests {
     #[test]
     fn sheet_tables_persist_and_legacy_json_loads_cleanly() {
         let mut sheet = Sheet::new("Canvas");
-        let mut t = insert_table(&mut sheet.tables, 2, 1, 6, 4);
+        let mut t = insert_table(&mut sheet.tables, 2, 1, 6, 4).expect("placement");
         t.style = TableStylePreset::Jade;
         t.show_title = false;
         t.alternating_rows = false;
