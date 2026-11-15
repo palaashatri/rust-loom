@@ -133,6 +133,15 @@ fn display_cell(sheet: &Sheet, vals: &HashMap<CellRef, Value>, row: u32, col: u3
     }
 }
 
+/// Exact grouping key: numbers keep full precision, other values use their
+/// trimmed display text. Rounding for display never merges distinct keys.
+fn cell_key(sheet: &Sheet, vals: &HashMap<CellRef, Value>, row: u32, col: u32) -> String {
+    match vals.get(&CellRef { row, col }) {
+        Some(Value::Number(n)) if n.is_finite() => format!("{n}"),
+        _ => display_cell(sheet, vals, row, col).trim().to_string(),
+    }
+}
+
 fn parse_numeric(sheet: &Sheet, vals: &HashMap<CellRef, Value>, row: u32, col: u32) -> Option<f64> {
     let cell = CellRef { row, col };
     if let Some(Value::Number(n)) = vals.get(&cell) {
@@ -176,7 +185,7 @@ pub fn extract_unique_values(sheet: &Sheet, range: CellRange, field_idx: usize) 
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for row in (range.start.row + 1)..=range.end.row {
-        let val = display_cell(sheet, &vals, row, col).trim().to_string();
+        let val = cell_key(sheet, &vals, row, col);
         if !val.is_empty() && seen.insert(val.clone()) {
             out.push(val);
         }
@@ -216,7 +225,18 @@ fn abs_col_range(qualifier: &str, col: u32, first_row_1: u32, last_row_1: u32) -
 }
 
 fn escape_criteria(val: &str) -> String {
-    val.replace('"', "\"\"")
+    // `~` first so the escapes added for `*` and `?` are not escaped again.
+    let escaped = val
+        .replace('~', "~~")
+        .replace('*', "~*")
+        .replace('?', "~?")
+        .replace('"', "\"\"");
+    // A leading comparison operator would otherwise be parsed as one.
+    if escaped.starts_with(['<', '>', '=']) {
+        format!("={escaped}")
+    } else {
+        escaped
+    }
 }
 
 fn build_ifs_formula(
@@ -232,8 +252,21 @@ fn build_ifs_formula(
         args.push(crit_range.clone());
         args.push(format!("\"{}\"", escape_criteria(crit_val)));
     }
-    if agg == PivotAggregation::Count && args.is_empty() {
-        return format!("=COUNTA({val_range})");
+    if agg == PivotAggregation::Count {
+        // Count only rows where the selected value field is non-empty, as the preview does.
+        if criteria.is_empty() {
+            return format!("=COUNTA({val_range})");
+        }
+        args.push(val_range.to_string());
+        args.push("\"<>\"".to_string());
+    } else if criteria.is_empty() {
+        let fn_name = match agg {
+            PivotAggregation::Sum => "SUM",
+            PivotAggregation::Average => "AVERAGE",
+            PivotAggregation::Min => "MIN",
+            _ => "MAX",
+        };
+        return format!("={fn_name}({val_range})");
     }
     let fn_name = match agg {
         PivotAggregation::Sum => "SUMIFS",
@@ -243,6 +276,24 @@ fn build_ifs_formula(
         PivotAggregation::Max => "MAXIFS",
     };
     format!("={fn_name}({})", args.join(","))
+}
+
+/// Live formula for a bucket. Buckets with no current values still get a
+/// formula (so later source edits populate them) that displays blank until
+/// the bucket has data.
+fn live_formula(
+    agg: PivotAggregation,
+    val_range: &str,
+    criteria: &[(String, String)],
+    empty_now: bool,
+) -> String {
+    let core = build_ifs_formula(agg, val_range, criteria);
+    if !empty_now || agg == PivotAggregation::Count {
+        return core;
+    }
+    let mut count_crit = build_ifs_formula(PivotAggregation::Count, val_range, criteria);
+    count_crit.remove(0);
+    format!("=IF({count_crit}=0,\"\",{})", &core[1..])
 }
 
 fn validate_config(config: &PivotFieldConfig, num_cols: usize) -> Result<(), String> {
@@ -306,47 +357,63 @@ fn compute_pivot_table_with_qualifier(
     let first_data_1 = range.start.row + 2;
     let last_data_1 = range.end.row + 1;
 
+    let key_at =
+        |row: u32, field: usize| cell_key(sheet, &vals, row, range.start.col + field as u32);
+    let filter_active: Option<(usize, String)> =
+        config.filter_field.as_ref().and_then(|(idx, val)| {
+            let trimmed = val.trim();
+            (!trimmed.is_empty() && trimmed != "(All)").then(|| (*idx, trimmed.to_string()))
+        });
+
     // Collect matching data rows after applying optional filter.
     let mut matching_rows: Vec<u32> = Vec::new();
     for row in (range.start.row + 1)..=range.end.row {
-        if let Some((f_idx, ref filter_val)) = config.filter_field {
-            let trimmed = filter_val.trim();
-            if !trimmed.is_empty() && trimmed != "(All)" {
-                let cell_val = display_cell(sheet, &vals, row, range.start.col + f_idx as u32);
-                if cell_val.trim() != trimmed {
-                    continue;
-                }
+        if let Some((idx, ref wanted)) = filter_active {
+            if key_at(row, idx) != *wanted {
+                continue;
             }
         }
         matching_rows.push(row);
     }
 
-    // Extract unique row keys and optional column keys in first-appearance order.
+    // Index rows once by exact row/column key, in first-appearance order.
     let mut row_keys: Vec<Vec<String>> = Vec::new();
-    let mut row_key_set: HashSet<Vec<String>> = HashSet::new();
+    let mut row_key_pos: HashMap<Vec<String>, usize> = HashMap::new();
+    let mut row_bucket: Vec<Vec<u32>> = Vec::new();
     let mut col_keys: Vec<String> = Vec::new();
-    let mut col_key_set: HashSet<String> = HashSet::new();
+    let mut col_key_pos: HashMap<String, usize> = HashMap::new();
+    let mut col_bucket: Vec<Vec<u32>> = Vec::new();
+    let mut cell_bucket: HashMap<(usize, usize), Vec<u32>> = HashMap::new();
 
     for &row in &matching_rows {
         let rk: Vec<String> = config
             .row_fields
             .iter()
-            .map(|&rf| {
-                display_cell(sheet, &vals, row, range.start.col + rf as u32)
-                    .trim()
-                    .to_string()
-            })
+            .map(|&rf| key_at(row, rf))
             .collect();
-        if row_key_set.insert(rk.clone()) {
-            row_keys.push(rk);
-        }
-        if let Some(cf) = config.col_field {
-            let ck = display_cell(sheet, &vals, row, range.start.col + cf as u32)
-                .trim()
-                .to_string();
-            if col_key_set.insert(ck.clone()) {
-                col_keys.push(ck);
+        let ri = match row_key_pos.get(&rk) {
+            Some(&i) => i,
+            None => {
+                row_key_pos.insert(rk.clone(), row_keys.len());
+                row_keys.push(rk);
+                row_bucket.push(Vec::new());
+                row_keys.len() - 1
             }
+        };
+        row_bucket[ri].push(row);
+        if let Some(cf) = config.col_field {
+            let ck = key_at(row, cf);
+            let ci = match col_key_pos.get(&ck) {
+                Some(&i) => i,
+                None => {
+                    col_key_pos.insert(ck.clone(), col_keys.len());
+                    col_keys.push(ck);
+                    col_bucket.push(Vec::new());
+                    col_keys.len() - 1
+                }
+            };
+            col_bucket[ci].push(row);
+            cell_bucket.entry((ri, ci)).or_default().push(row);
         }
     }
 
@@ -429,22 +496,37 @@ fn compute_pivot_table_with_qualifier(
         (nums, non_empty)
     };
 
+    let val_range_of = |vf: usize| {
+        abs_col_range(
+            &qualifier,
+            range.start.col + vf as u32,
+            first_data_1,
+            last_data_1,
+        )
+    };
+    let total_fn = |agg: PivotAggregation| match agg {
+        PivotAggregation::Sum | PivotAggregation::Count => "SUM",
+        PivotAggregation::Average => "AVERAGE",
+        PivotAggregation::Min => "MIN",
+        PivotAggregation::Max => "MAX",
+    };
+    let no_rows: Vec<u32> = Vec::new();
+    let cf_range = config.col_field.map(|cf| {
+        abs_col_range(
+            &qualifier,
+            range.start.col + cf as u32,
+            first_data_1,
+            last_data_1,
+        )
+    });
+
     // Data rows.
     for (r_idx, rk) in row_keys.iter().enumerate() {
         let mut row_cells: Vec<PivotCell> = rk
             .iter()
             .map(|part| PivotCell::label(part.clone(), false, false))
             .collect();
-
-        let row_matches: Vec<u32> = matching_rows
-            .iter()
-            .copied()
-            .filter(|&r| {
-                config.row_fields.iter().enumerate().all(|(i, &rf)| {
-                    display_cell(sheet, &vals, r, range.start.col + rf as u32).trim() == rk[i]
-                })
-            })
-            .collect();
+        let row_matches = &row_bucket[r_idx];
 
         let mut base_criteria: Vec<(String, String)> = config
             .row_fields
@@ -466,99 +548,59 @@ fn compute_pivot_table_with_qualifier(
             base_criteria.push(fc.clone());
         }
 
-        if let Some(cf) = config.col_field {
-            let cf_range = abs_col_range(
-                &qualifier,
-                range.start.col + cf as u32,
-                first_data_1,
-                last_data_1,
-            );
-            for ck in &col_keys {
-                let cell_rows: Vec<u32> = row_matches
-                    .iter()
-                    .copied()
-                    .filter(|&r| {
-                        display_cell(sheet, &vals, r, range.start.col + cf as u32).trim() == ck
-                    })
-                    .collect();
+        if let Some(cf_range) = &cf_range {
+            for (c_idx, ck) in col_keys.iter().enumerate() {
+                let cell_rows = cell_bucket.get(&(r_idx, c_idx)).unwrap_or(&no_rows);
                 let mut cell_crit = base_criteria.clone();
                 cell_crit.push((cf_range.clone(), ck.clone()));
                 for &(vf, agg) in &config.value_fields {
-                    let (nums, non_empty) = bucket_stats(&cell_rows, vf);
+                    let (nums, non_empty) = bucket_stats(cell_rows, vf);
                     let agg_val = aggregate_slice(&nums, non_empty, agg);
-                    let formula = if agg_val.is_some() {
-                        let val_range = abs_col_range(
-                            &qualifier,
-                            range.start.col + vf as u32,
-                            first_data_1,
-                            last_data_1,
-                        );
-                        Some(build_ifs_formula(agg, &val_range, &cell_crit))
-                    } else {
-                        None
-                    };
-                    row_cells.push(PivotCell::value(agg_val, formula, false));
+                    let formula =
+                        live_formula(agg, &val_range_of(vf), &cell_crit, agg_val.is_none());
+                    row_cells.push(PivotCell::value(agg_val, Some(formula), false));
                 }
             }
             // Row Grand Total column(s).
             let sheet_row = anchor.row + 1 + r_idx as u32;
             let num_val_fields = config.value_fields.len();
-            for (v_idx, &(vf, agg)) in config.value_fields.iter().enumerate() {
-                let (nums, non_empty) = bucket_stats(&row_matches, vf);
+            for &(vf, agg) in &config.value_fields {
+                let (nums, non_empty) = bucket_stats(row_matches, vf);
                 let agg_val = aggregate_slice(&nums, non_empty, agg);
-                let formula = if agg_val.is_some() && !col_keys.is_empty() {
-                    if num_val_fields == 1 {
-                        let start_c = CellRef {
-                            row: sheet_row,
-                            col: anchor.col + config.row_fields.len() as u32,
-                        }
-                        .to_a1();
-                        let end_c = CellRef {
-                            row: sheet_row,
-                            col: anchor.col
-                                + config.row_fields.len() as u32
-                                + col_keys.len() as u32
-                                - 1,
-                        }
-                        .to_a1();
-                        let fn_name = match agg {
-                            PivotAggregation::Sum | PivotAggregation::Count => "SUM",
-                            PivotAggregation::Average => "AVERAGE",
-                            PivotAggregation::Min => "MIN",
-                            PivotAggregation::Max => "MAX",
-                        };
-                        Some(format!("={fn_name}({start_c}:{end_c})"))
-                    } else {
-                        let val_range = abs_col_range(
-                            &qualifier,
-                            range.start.col + vf as u32,
-                            first_data_1,
-                            last_data_1,
-                        );
-                        let _ = v_idx;
-                        Some(build_ifs_formula(agg, &val_range, &base_criteria))
-                    }
-                } else {
+                let formula = if col_keys.is_empty() {
                     None
+                } else if num_val_fields == 1 && agg != PivotAggregation::Average {
+                    let first_col = anchor.col + config.row_fields.len() as u32;
+                    let start_c = CellRef {
+                        row: sheet_row,
+                        col: first_col,
+                    }
+                    .to_a1();
+                    let end_c = CellRef {
+                        row: sheet_row,
+                        col: first_col + col_keys.len() as u32 - 1,
+                    }
+                    .to_a1();
+                    Some(format!("={}({start_c}:{end_c})", total_fn(agg)))
+                } else {
+                    // Average (and multi-field) totals come from source rows,
+                    // never from averaging subgroup means.
+                    Some(live_formula(
+                        agg,
+                        &val_range_of(vf),
+                        &base_criteria,
+                        agg_val.is_none(),
+                    ))
                 };
                 row_cells.push(PivotCell::value(agg_val, formula, true));
             }
         } else {
             for &(vf, agg) in &config.value_fields {
-                let (nums, non_empty) = bucket_stats(&row_matches, vf);
+                let (nums, non_empty) = bucket_stats(row_matches, vf);
                 let agg_val = aggregate_slice(&nums, non_empty, agg);
-                let formula = if agg_val.is_some() {
-                    let val_range = abs_col_range(
-                        &qualifier,
-                        range.start.col + vf as u32,
-                        first_data_1,
-                        last_data_1,
-                    );
-                    Some(build_ifs_formula(agg, &val_range, &base_criteria))
-                } else {
-                    None
-                };
-                row_cells.push(PivotCell::value(agg_val, formula, false));
+                let formula =
+                    live_formula(agg, &val_range_of(vf), &base_criteria, agg_val.is_none());
+                row_cells.push(PivotCell::value(agg_val, Some(formula), false));
             }
         }
 
@@ -577,46 +619,36 @@ fn compute_pivot_table_with_qualifier(
     let first_pivot_data_row = anchor.row + 1;
     let last_pivot_data_row = anchor.row + row_keys.len() as u32;
     let total_data_cols = out_headers.len() - config.row_fields.len();
+    let n_vals = config.value_fields.len();
 
     for offset in 0..total_data_cols {
         let col_idx = config.row_fields.len() + offset;
         let abs_pivot_col = anchor.col + col_idx as u32;
-        let agg = if config.col_field.is_some() {
-            config.value_fields[offset % config.value_fields.len()].1
-        } else {
-            config.value_fields[offset].1
-        };
+        let (vf, agg) = config.value_fields[offset % n_vals];
 
-        // Compute exact grand total value from matching rows.
-        let mut col_nums = Vec::new();
-        let mut col_non_empty = 0usize;
-        let is_grand_total_col =
-            config.col_field.is_some() && offset >= col_keys.len() * config.value_fields.len();
-        let vf = if config.col_field.is_some() {
-            config.value_fields[offset % config.value_fields.len()].0
-        } else {
-            config.value_fields[offset].0
+        // Exact grand total value from the matching source rows.
+        let bucket_col = (config.col_field.is_some() && offset < col_keys.len() * n_vals)
+            .then(|| offset / n_vals);
+        let source_rows = match bucket_col {
+            Some(ci) => &col_bucket[ci],
+            None => &matching_rows,
         };
-        if is_grand_total_col || config.col_field.is_none() {
-            let (nums, non_empty) = bucket_stats(&matching_rows, vf);
-            col_nums = nums;
-            col_non_empty = non_empty;
-        } else if let Some(cf) = config.col_field {
-            let ck = &col_keys[offset / config.value_fields.len()];
-            let col_matches: Vec<u32> = matching_rows
-                .iter()
-                .copied()
-                .filter(|&r| {
-                    display_cell(sheet, &vals, r, range.start.col + cf as u32).trim() == ck
-                })
-                .collect();
-            let (nums, non_empty) = bucket_stats(&col_matches, vf);
-            col_nums = nums;
-            col_non_empty = non_empty;
-        }
-
+        let (col_nums, col_non_empty) = bucket_stats(source_rows, vf);
         let total_val = aggregate_slice(&col_nums, col_non_empty, agg);
-        let formula = if total_val.is_some() && !row_keys.is_empty() {
+        let formula = if row_keys.is_empty() {
+            None
+        } else if agg == PivotAggregation::Average {
+            let mut crit: Vec<(String, String)> = filter_crit.iter().cloned().collect();
+            if let (Some(ci), Some(cf_range)) = (bucket_col, &cf_range) {
+                crit.push((cf_range.clone(), col_keys[ci].clone()));
+            }
+            Some(live_formula(
+                agg,
+                &val_range_of(vf),
+                &crit,
+                total_val.is_none(),
+            ))
+        } else {
             let start_c = CellRef {
                 row: first_pivot_data_row,
                 col: abs_pivot_col,
@@ -627,15 +659,7 @@ fn compute_pivot_table_with_qualifier(
                 col: abs_pivot_col,
             }
             .to_a1();
-            let fn_name = match agg {
-                PivotAggregation::Sum | PivotAggregation::Count => "SUM",
-                PivotAggregation::Average => "AVERAGE",
-                PivotAggregation::Min => "MIN",
-                PivotAggregation::Max => "MAX",
-            };
-            Some(format!("={fn_name}({start_c}:{end_c})"))
-        } else {
-            None
+            Some(format!("={}({start_c}:{end_c})", total_fn(agg)))
         };
         total_row.push(PivotCell::value(total_val, formula, true));
     }
