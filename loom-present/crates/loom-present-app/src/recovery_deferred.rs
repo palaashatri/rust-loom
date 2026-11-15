@@ -649,12 +649,8 @@ fn schedule_retry_if_needed(app: &PresentApp) {
     if import_warning_pending() || RETRY_ARMED.with(Cell::get) {
         return;
     }
-    let should_schedule = with_state(|state| {
-        if !state.stale || state.recovery_error.is_none() || state.auto_retry_used {
-            return false;
-        }
-        true
-    });
+    let should_schedule =
+        with_state(|state| state.stale && state.recovery_error.is_some() && !state.auto_retry_used);
     if !should_schedule {
         return;
     }
