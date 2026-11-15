@@ -1,7 +1,6 @@
 import {TemplateChooserModal} from "template_chooser.slint";
 import {SheetModals} from "sheet_modals.slint";
-import {PivotBuilderState,PrintPreviewState,StartHubState} from "sheet_modals.slint";
-export {PivotBuilderState,PrintPreviewState,StartHubState}
+export {PivotBuilderState,PrintPreviewState,StartHubState} from "sheet_modals.slint";
 import {XlsxImportWarningDialog} from "xlsx_import_warning.slint";
 import {SaveChangesDialog} from "save_changes_dialog.slint";
 import {DataToolsOverlay,DataToolsState} from "data_tools.slint";
@@ -20,8 +19,7 @@ import {FormulaNameBar,SheetActionToolbar,SheetGridSurface,SheetInspector,SheetT
 import {Theme,ResponsivePolicy} from "theme.slint";
 export {Theme,ResponsivePolicy} from "theme.slint";
 export {LocalMenu,LocalMenuEntry} from "foundation.slint";
-import {GridPointer,CellSpill,CellInk,CellRichFormat} from "grid_pointer.slint";
-export {GridPointer,CellSpill,CellInk,CellRichFormat}
+export {GridPointer,CellSpill,CellInk,CellRichFormat} from "grid_pointer.slint";
 export {FormulaAssist} from "formula_assist.slint";
 export {SheetTableState} from "table_canvas_layer.slint";
 export component SheetsApp inherits Window {
@@ -391,7 +389,7 @@ export component SheetsApp inherits Window {
                 if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
                 return reject;
             }
-            if (root.palette-open || root.template-chooser-open || root.welcome-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open || DataToolsState.modal-open || PrintPreviewState.open || CellRichFormat.cf-modal-open || PivotBuilderState.open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.welcome-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open || DataToolsState.modal-open || modals.modal-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
                 root.cycle-region(event.modifiers.shift);
                 return accept;
@@ -741,7 +739,7 @@ export component SheetsApp inherits Window {
         navigate-template-selection(delta) => { root.navigate-template-selection(delta); }
     }
 
-    SheetModals {
+    modals := SheetModals {
         width: 100%;
         height: 100%;
         welcome-open: root.welcome-open;

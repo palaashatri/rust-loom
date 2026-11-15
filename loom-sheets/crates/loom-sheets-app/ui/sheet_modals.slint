@@ -14,6 +14,9 @@ export component SheetModals inherits Rectangle {
     in-out property <int> step: 0;
     in property <string> mod-key: "Ctrl";
     in property <bool> focus-request: false;
+    // Any sheet-level modal that owns the keyboard while it is open. The window
+    // consults this so background navigation commands cannot run behind one.
+    out property <bool> modal-open: PivotBuilderState.open || PrintPreviewState.open || CellRichFormat.cf-modal-open;
     callback close-guide();
     callback try-action(string);
 
