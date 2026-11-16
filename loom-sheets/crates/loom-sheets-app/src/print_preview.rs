@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use loom_sheets_core::{
-    export_workbook_sheet_pdf_with_options, preview_workbook_sheet_page, CellAlignment,
+    export_workbook_sheet_pdf_with_options, preview_workbook_sheet_page, CellAlignment, CellRef,
     PageOrientation, PaperSize, PdfExportOptions, PrintScale, SheetPagePreview,
 };
 use slint::{Color, ComponentHandle, ModelRc, SharedString, VecModel};
@@ -87,16 +87,29 @@ pub(crate) fn options_from_ui(app: &SheetsApp) -> PdfExportOptions {
 /// Open the Print Preview & Page Setup modal and render page 1.
 pub(crate) fn open(app: &SheetsApp, state: &GuiState) {
     // Commit a pending formula-bar draft first so the preview and PDF match
-    // what is on screen.
+    // what is on screen. A rejected draft (validation, a paused recovery, or a
+    // close in progress) keeps the edit visible and leaves the preview shut:
+    // exporting the previous value would contradict the formula bar.
     let draft = app.get_formula_edit_buffer();
-    if draft != app.get_selection_formula() {
-        app.invoke_commit_selected_cell(draft);
+    if draft != app.get_selection_formula() && !commit_draft(app, state, draft.as_str()) {
+        return;
     }
     let ui = app.global::<PrintPreviewState>();
     ui.set_current_page(1);
     ui.set_status_message(SharedString::new());
     ui.set_open(true);
     refresh_preview(app, state);
+}
+
+/// Commits the formula-bar draft and reports whether the sheet now holds it.
+fn commit_draft(app: &SheetsApp, state: &GuiState, draft: &str) -> bool {
+    let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) else {
+        return false;
+    };
+    let before = state.current.borrow().raw(cell).map(str::to_owned);
+    app.invoke_commit_selected_cell(SharedString::from(draft));
+    let after = state.current.borrow().raw(cell).map(str::to_owned);
+    before != after
 }
 
 /// Recompute paginated preview from the active sheet and current Page Setup options.
