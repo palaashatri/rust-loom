@@ -2,8 +2,57 @@ import { LoomButton, LoomPanel, LoomTextField } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { CellRichFormat } from "rich_format.slint";
 
+// A palette color that can be reached and chosen with the keyboard. A plain
+// TouchArea ignores focus and key events, so the swatch owns a FocusScope and
+// mirrors the FieldRoleButton pattern used by the pivot builder.
+component ColorSwatch inherits Rectangle {
+    in property <color> tint: #E5E7EB;
+    in property <bool> selected: false;
+    in property <string> a11y-label: "";
+    in property <length> swatch-size: 24px;
+    in property <length> swatch-radius: 4px;
+    callback clicked();
+    public function grab-focus() { focus.focus(); }
+    out property <bool> has-focus: focus.has-focus;
+
+    width: root.swatch-size;
+    height: root.swatch-size;
+    border-radius: root.swatch-radius;
+    background: root.tint;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.palette().selection : Theme.palette().border;
+    accessible-role: button;
+    accessible-label: root.a11y-label;
+    accessible-action-default => { root.clicked(); }
+
+    if focus.has-focus : Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 2px;
+        border-width: 2px;
+        border-color: Theme.palette().focus;
+        background: transparent;
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+
+    TouchArea {
+        clicked => { focus.focus(); root.clicked(); }
+    }
+}
+
 export component ConditionalFormatModal inherits Rectangle {
     in property <bool> open: false;
+    // Spoken names for the fixed palettes, in swatch order.
+    property <[string]> fill-names: ["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"];
+    property <[string]> text-names: ["Red", "Orange", "Green", "Blue", "Purple", "Gray", "Black"];
 
     visible: root.open;
     background: #00000066;
@@ -26,14 +75,20 @@ export component ConditionalFormatModal inherits Rectangle {
                     CellRichFormat.cf-close();
                     return accept;
                 }
-                // Tab is a closed cycle between the header Close button and
-                // Clear Selection Rules, so focus never leaves the modal.
+                // Tab is a closed cycle: the header Close button, the form
+                // controls, then Clear Selection Rules, every active-rule
+                // Remove button, and back to Close.
                 if (event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) {
                     if (self.has-focus || cf-close.has-focus) { cf-clear.grab-focus(); return accept; }
                     return reject;
                 }
                 if (event.text == Key.Tab) {
-                    if (self.has-focus || cf-clear.has-focus) { cf-close.grab-focus(); return accept; }
+                    // With rules present the next tab stop is the first Remove
+                    // button, so only an empty list wraps straight to Close.
+                    if (self.has-focus || (cf-clear.has-focus && CellRichFormat.cf-rules.length == 0)) {
+                        cf-close.grab-focus();
+                        return accept;
+                    }
                     return reject;
                 }
                 return reject;
@@ -100,16 +155,11 @@ export component ConditionalFormatModal inherits Rectangle {
                             vertical-alignment: center;
                             width: 44px;
                         }
-                        for swatch[idx] in [#FECACA, #FED7AA, #FEF08A, #BBF7D0, #BFDBFE, #DDD6FE, #E5E7EB] : Rectangle {
-                            width: 24px;
-                            height: 24px;
-                            border-radius: 4px;
-                            background: swatch;
-                            border-width: CellRichFormat.cf-fill == idx ? 2px : 1px;
-                            border-color: CellRichFormat.cf-fill == idx ? Theme.palette().selection : Theme.palette().border;
-                            TouchArea {
-                                clicked => { CellRichFormat.cf-fill = idx; }
-                            }
+                        for swatch[idx] in [#FECACA, #FED7AA, #FEF08A, #BBF7D0, #BFDBFE, #DDD6FE, #E5E7EB] : ColorSwatch {
+                            tint: swatch;
+                            selected: CellRichFormat.cf-fill == idx;
+                            a11y-label: "Fill color " + root.fill-names[idx];
+                            clicked => { CellRichFormat.cf-fill = idx; }
                         }
                         LoomButton {
                             label: "None";
@@ -132,16 +182,13 @@ export component ConditionalFormatModal inherits Rectangle {
                             variant: CellRichFormat.cf-text-color == -1 ? "primary" : "ghost";
                             clicked => { CellRichFormat.cf-text-color = -1; }
                         }
-                        for ink-swatch[idx] in [#C62828, #E65100, #2E7D32, #1565C0, #6A1B9A, #616161, #000000] : Rectangle {
-                            width: 22px;
-                            height: 22px;
-                            border-radius: 11px;
-                            background: ink-swatch;
-                            border-width: CellRichFormat.cf-text-color == idx ? 2px : 1px;
-                            border-color: CellRichFormat.cf-text-color == idx ? Theme.palette().selection : Theme.palette().border;
-                            TouchArea {
-                                clicked => { CellRichFormat.cf-text-color = idx; }
-                            }
+                        for swatch[idx] in [#C62828, #E65100, #2E7D32, #1565C0, #6A1B9A, #616161, #000000] : ColorSwatch {
+                            tint: swatch;
+                            selected: CellRichFormat.cf-text-color == idx;
+                            swatch-size: 22px;
+                            swatch-radius: 11px;
+                            a11y-label: "Text color " + root.text-names[idx];
+                            clicked => { CellRichFormat.cf-text-color = idx; }
                         }
                     }
 
@@ -183,22 +230,44 @@ export component ConditionalFormatModal inherits Rectangle {
                                 border-radius: Theme.tokens.metrics.radius-small;
                                 border-width: 1px;
                                 border-color: Theme.palette().border;
-                                HorizontalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 8px;
-                                    spacing: 8px;
-                                    Text {
-                                        text: rule.range + ": " + rule.operator + " \"" + rule.value + "\" (" + rule.fill-name + ")";
-                                        font-size: Theme.type.caption;
-                                        color: Theme.palette().ink;
-                                        horizontal-stretch: 1;
-                                        vertical-alignment: center;
-                                        overflow: elide;
+                                // The row is not a tab stop, but as the ancestor
+                                // of the Remove button it sees that button's
+                                // keys: Tab past the last rule closes the cycle,
+                                // Backtab from the first rule returns to Clear
+                                // Selection Rules.
+                                FocusScope {
+                                    focus-on-tab-navigation: false;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Tab && !event.modifiers.shift
+                                            && idx == CellRichFormat.cf-rules.length - 1) {
+                                            cf-close.grab-focus();
+                                            return accept;
+                                        }
+                                        if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && idx == 0) {
+                                            cf-clear.grab-focus();
+                                            return accept;
+                                        }
+                                        return reject;
                                     }
-                                    LoomButton {
-                                        label: "Remove";
-                                        variant: "ghost";
-                                        clicked => { CellRichFormat.cf-remove-rule(idx); }
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: rule.range + ": " + rule.operator + " \"" + rule.value + "\" (" + rule.fill-name + ")";
+                                            font-size: Theme.type.caption;
+                                            color: Theme.palette().ink;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        LoomButton {
+                                            label: "Remove";
+                                            variant: "ghost";
+                                            clicked => { CellRichFormat.cf-remove-rule(idx); }
+                                        }
                                     }
                                 }
                             }
