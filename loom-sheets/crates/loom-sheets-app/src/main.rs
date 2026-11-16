@@ -1580,7 +1580,7 @@ pub(crate) struct GuiState {
     pub(crate) import_filter: FileFilter,
     pub(crate) csv_filter: FileFilter,
     pub(crate) xlsx_filter: FileFilter,
-    pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
+    pub(crate) clipboard: RefCell<Option<Vec<Vec<loom_sheets_core::Cell>>>>,
     pub(crate) object_gesture: RefCell<Option<object_actions::ObjectGesture>>,
     pub(crate) object_context_generation: Cell<u64>,
     pub(crate) pending_first_run_welcome: Cell<bool>,

@@ -684,6 +684,14 @@ pub fn plan_pivot_updates(
     qualify_source: bool,
 ) -> Result<Vec<(CellRef, Cell, bool)>, String> {
     let result = compute_pivot_table_with_qualifier(source, config, qualify_source, anchor)?;
+    // The output must fit the addressable sheet: a table placed near the last
+    // row or column would otherwise store cells that A1 references cannot
+    // name, and nothing later checks the extent.
+    let end_row = u64::from(anchor.row) + result.row_count as u64;
+    let end_col = u64::from(anchor.col) + result.col_count as u64;
+    if end_row > u64::from(crate::MAX_ROWS) || end_col > u64::from(crate::MAX_COLUMNS) {
+        return Err("Pivot output extends beyond the last sheet row or column.".to_string());
+    }
     let mut updates = Vec::with_capacity(result.row_count * result.col_count);
     for (r_idx, row) in result.rows.iter().enumerate() {
         for (c_idx, cell) in row.iter().enumerate() {
@@ -910,5 +918,46 @@ mod tests {
             let res = compute_pivot_table(&s, &cfg).unwrap();
             assert_eq!(res.rows[1][1].numeric, Some(expected_north));
         }
+    }
+
+    #[test]
+    fn plan_rejects_output_that_runs_past_the_last_row_or_column() {
+        let s = sample_sales_sheet();
+        let cfg = PivotFieldConfig {
+            source_range: CellRange::parse("A1:D5").unwrap(),
+            row_fields: vec![0],
+            col_field: None,
+            value_fields: vec![(3, PivotAggregation::Sum)],
+            filter_field: None,
+            destination_new_sheet: false,
+            destination_cell: None,
+            title: "Bounds".to_string(),
+        };
+        let rows = compute_pivot_table(&s, &cfg).unwrap().row_count as u32;
+        let cols = compute_pivot_table(&s, &cfg).unwrap().col_count as u32;
+
+        // One row past the last addressable row, then one column past the last.
+        let last_row = CellRef {
+            row: crate::MAX_ROWS - rows + 1,
+            col: 0,
+        };
+        assert!(plan_pivot_updates(&s, &cfg, last_row, false)
+            .unwrap_err()
+            .contains("beyond the last sheet row or column"));
+        let last_col = CellRef {
+            row: 0,
+            col: crate::MAX_COLUMNS - cols + 1,
+        };
+        assert!(plan_pivot_updates(&s, &cfg, last_col, false)
+            .unwrap_err()
+            .contains("beyond the last sheet row or column"));
+
+        // Exactly fitting the last row and column is still accepted.
+        let fits = CellRef {
+            row: crate::MAX_ROWS - rows,
+            col: crate::MAX_COLUMNS - cols,
+        };
+        let updates = plan_pivot_updates(&s, &cfg, fits, false).unwrap();
+        assert_eq!(updates.len(), rows as usize * cols as usize);
     }
 }

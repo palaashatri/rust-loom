@@ -9,7 +9,7 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
     Cell, CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
-    SheetChart, SheetObject,
+    SheetChart, SheetObject, Value,
 };
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 
@@ -1213,6 +1213,23 @@ pub(crate) fn register_sheet_actions(
     }
 }
 
+/// A cell for an evaluated value, keeping the value's type.
+///
+/// A `Text` value becomes literal text, so `="00123"` stays `00123` instead of
+/// turning into the number `123`. An array result uses its top-left element,
+/// which is what the anchor cell displays.
+pub(crate) fn cell_from_value(value: &Value) -> Cell {
+    match value {
+        Value::Text(text) => Cell::literal(text.clone()),
+        Value::Array(items, _, _) => match items.first() {
+            Some(Value::Text(text)) => Cell::literal(text.clone()),
+            Some(first) => Cell::new(first.display()),
+            None => Cell::new(String::new()),
+        },
+        other => Cell::new(other.display()),
+    }
+}
+
 /// Copy values from a worksheet selection into a 2D matrix of raw strings.
 #[allow(dead_code)]
 pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<String>> {
@@ -1222,27 +1239,44 @@ pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<Strin
 /// Copy values from a worksheet selection, using calculated values for spill cells.
 pub(crate) fn copy_selection_with_values(
     sheet: &Sheet,
-    values: Option<&std::collections::HashMap<CellRef, loom_sheets_core::Value>>,
+    values: Option<&std::collections::HashMap<CellRef, Value>>,
     sel: GridSelection,
 ) -> Vec<Vec<String>> {
+    copy_selection_cells(sheet, values, sel)
+        .into_iter()
+        .map(|row| row.into_iter().map(|cell| cell.raw).collect())
+        .collect()
+}
+
+/// Copy the selection as whole cells, keeping each raw text and its
+/// literal-text flag.
+///
+/// The private copy needs both: an ordinary paste must not re-parse literal
+/// text `00123` as a number, and must not treat literal text starting with `=`
+/// as a formula. Spill cells have no raw text, so their calculated value is
+/// converted with its type kept.
+pub(crate) fn copy_selection_cells(
+    sheet: &Sheet,
+    values: Option<&std::collections::HashMap<CellRef, Value>>,
+    sel: GridSelection,
+) -> Vec<Vec<Cell>> {
     let range = sel.range();
-    let mut rows = Vec::new();
-    for r in range.start.row..=range.end.row {
-        let mut row = Vec::new();
-        for c in range.start.col..=range.end.col {
-            let cell = CellRef { row: r, col: c };
-            let val = match sheet.raw(cell) {
-                Some(raw) if !raw.is_empty() => raw.to_string(),
-                _ => values
-                    .and_then(|v| v.get(&cell))
-                    .map(|v| v.display())
-                    .unwrap_or_default(),
-            };
-            row.push(val);
-        }
-        rows.push(row);
-    }
-    rows
+    (range.start.row..=range.end.row)
+        .map(|row| {
+            (range.start.col..=range.end.col)
+                .map(|col| {
+                    let cell = CellRef { row, col };
+                    match sheet.cells.get(&cell) {
+                        Some(stored) if !stored.raw.is_empty() => stored.clone(),
+                        _ => values
+                            .and_then(|values| values.get(&cell))
+                            .map(cell_from_value)
+                            .unwrap_or_else(|| Cell::new(String::new())),
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Paste a 2D matrix into a worksheet with full undo transaction recording.

@@ -340,6 +340,42 @@ fn sheets_paste_parses_external_html_table() {
 }
 
 #[test]
+fn internal_paste_keeps_literal_text_that_looks_like_a_number_or_formula() {
+    let (app, state) = state_with(&[("A1", "placeholder")]);
+    let a1 = CellRef::parse("A1").unwrap();
+    let a2 = CellRef::parse("A2").unwrap();
+    {
+        let mut sheet = state.current.borrow_mut();
+        sheet.set_literal(a1, "00123");
+        sheet.set_literal(a2, "=A1+1");
+    }
+    apply_sheet(&app, &state);
+
+    select(&app, &state, "A1", "A2");
+    app.invoke_copy_selection();
+    select(&app, &state, "C3", "C3");
+    app.invoke_paste_selection();
+
+    let sheet = state.current.borrow();
+    let c3 = CellRef::parse("C3").unwrap();
+    let c4 = CellRef::parse("C4").unwrap();
+    assert_eq!(sheet.raw(c3), Some("00123"));
+    assert!(
+        sheet.cells.get(&c3).is_some_and(|cell| cell.text),
+        "an internal paste must keep literal text from becoming the number 123"
+    );
+    assert_eq!(sheet.raw(c4), Some("=A1+1"));
+    assert!(
+        sheet.cells.get(&c4).is_some_and(|cell| cell.text),
+        "literal text must not shift or start evaluating as a formula"
+    );
+    assert_eq!(
+        evaluate(&sheet).get(&c4).map(|value| value.display()),
+        Some("=A1+1".to_string())
+    );
+}
+
+#[test]
 fn copying_a_spill_range_copies_spill_values_not_blanks() {
     let (app, state) = state_with(&[("A1", "=SEQUENCE(3)")]);
     apply_sheet(&app, &state);

@@ -16,7 +16,7 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::{parse_csv_records, shift_formula_references, Cell, CellRef, Sheet, Value};
 use slint::{ComponentHandle, SharedString};
 
-use crate::actions::{copy_selection_with_values, paste_selection};
+use crate::actions::{cell_from_value, copy_selection_cells, paste_selection};
 use crate::paste_formats::{self, CellFormat};
 use crate::{
     apply_sheet, clear_selection, evaluate_current, selection_from_app, sync_menu_state,
@@ -39,7 +39,8 @@ struct LastCopy {
 /// was Sheets itself (so formulas follow), and their formats when the source
 /// carried any (plain text does not).
 struct Pasteable {
-    cells: Vec<Vec<String>>,
+    /// Whole cells, so a copy of literal text stays text on an ordinary paste.
+    cells: Vec<Vec<Cell>>,
     origin: Option<CellRef>,
     formats: Option<Vec<Vec<CellFormat>>>,
     evaluated_values: Option<Vec<Vec<Cell>>>,
@@ -136,8 +137,7 @@ fn evaluated_rows(
                     let literal = stored.is_some_and(|c| c.text);
                     if raw.starts_with('=') || raw.is_empty() {
                         match values.get(&cell) {
-                            Some(Value::Text(text)) => Cell::literal(text.clone()),
-                            Some(value) => Cell::new(value.display()),
+                            Some(value) => cell_from_value(value),
                             None if literal => Cell::literal(raw),
                             None => Cell::new(raw),
                         }
@@ -219,7 +219,7 @@ fn external_cells_data(
 /// Copy the selection privately and onto the system clipboard.
 fn copy_to_clipboards(state: &GuiState, sel: GridSelection) -> usize {
     let values = evaluate_current(state);
-    let data = copy_selection_with_values(&state.current.borrow(), Some(&values), sel);
+    let data = copy_selection_cells(&state.current.borrow(), Some(&values), sel);
     let count = data.iter().map(Vec::len).sum();
     let external = external_rows(&state.current.borrow(), &values, sel);
     let evaluated = evaluated_rows(&state.current.borrow(), &values, sel);
@@ -291,9 +291,9 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
         if let Ok(table) = loom_objects::Table::from_json(json) {
             let grid = loom_clipboard::table_to_sheets_range(&table);
             let formats = paste_formats::from_grid(&grid);
-            let rows: Vec<Vec<String>> = grid
+            let rows: Vec<Vec<Cell>> = grid
                 .into_iter()
-                .map(|row| row.into_iter().map(|c| c.value).collect())
+                .map(|row| row.into_iter().map(|c| Cell::new(c.value)).collect())
                 .collect();
             if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
                 return Some(Pasteable {
@@ -312,9 +312,9 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
             if let Some(table) = loom_clipboard::html_to_table(html) {
                 let grid = loom_clipboard::table_to_sheets_range(&table);
                 let formats = paste_formats::from_grid(&grid);
-                let rows: Vec<Vec<String>> = grid
+                let rows: Vec<Vec<Cell>> = grid
                     .into_iter()
-                    .map(|row| row.into_iter().map(|c| c.value).collect())
+                    .map(|row| row.into_iter().map(|c| Cell::new(c.value)).collect())
                     .collect();
                 if !rows.is_empty() && rows.iter().any(|r| !r.is_empty()) {
                     return Some(Pasteable {
@@ -335,7 +335,10 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
         .filter(|text| !text.is_empty())?;
     let rows = parse_tsv(&text);
     (!rows.is_empty() && rows.iter().any(|row| !row.is_empty())).then_some(Pasteable {
-        cells: rows,
+        cells: rows
+            .into_iter()
+            .map(|row| row.into_iter().map(Cell::new).collect())
+            .collect(),
         origin: None,
         formats: None,
         evaluated_values: None,
@@ -343,14 +346,17 @@ fn clipboard_cells(state: &GuiState) -> Option<Pasteable> {
 }
 
 /// Move the relative references of every formula by a whole-grid offset.
-fn shift_cells(mut cells: Vec<Vec<String>>, dc: i64, dr: i64) -> Vec<Vec<String>> {
+///
+/// Literal text is left alone even when it starts with `=`, because it is text
+/// the user wrote, not a formula.
+fn shift_cells(mut cells: Vec<Vec<Cell>>, dc: i64, dr: i64) -> Vec<Vec<Cell>> {
     let (dc, dr) = (
         dc.clamp(-1_000_000, 1_000_000) as i32,
         dr.clamp(-1_000_000, 1_000_000) as i32,
     );
     for cell in cells.iter_mut().flatten() {
-        if cell.starts_with('=') {
-            *cell = shift_formula_references(cell, dc, dr);
+        if !cell.text && cell.raw.starts_with('=') {
+            cell.raw = shift_formula_references(&cell.raw, dc, dr);
         }
     }
     cells
@@ -362,7 +368,7 @@ fn shift_cells(mut cells: Vec<Vec<String>>, dc: i64, dr: i64) -> Vec<Vec<String>
 fn paste_cells(
     state: &GuiState,
     sel: GridSelection,
-    cells: Vec<Vec<String>>,
+    cells: Vec<Vec<Cell>>,
     origin: Option<CellRef>,
     formats: Option<Vec<Vec<CellFormat>>>,
 ) -> usize {
@@ -386,10 +392,10 @@ fn paste_cells(
             .map(|r| {
                 (0..cols)
                     .map(|c| {
-                        if source.starts_with('=') {
-                            shift_formula_references(&source, c as i32, r as i32)
-                        } else {
+                        if source.text || !source.raw.starts_with('=') {
                             source.clone()
+                        } else {
+                            Cell::new(shift_formula_references(&source.raw, c as i32, r as i32))
                         }
                     })
                     .collect()
@@ -402,10 +408,6 @@ fn paste_cells(
     let before = formats
         .is_some()
         .then(|| Box::new(state.current.borrow().clone()));
-    let data: Vec<Vec<Cell>> = data
-        .into_iter()
-        .map(|row| row.into_iter().map(Cell::new).collect())
-        .collect();
     let pasted = paste_selection(
         &mut state.current.borrow_mut(),
         &mut state.undo_stack.borrow_mut(),
@@ -444,11 +446,7 @@ pub(crate) fn paste_values_only(
     let sel = selection_from_app(app);
     let cells: Vec<Vec<Cell>> = match pasteable.evaluated_values {
         Some(values) => values,
-        None => pasteable
-            .cells
-            .into_iter()
-            .map(|row| row.into_iter().map(Cell::new).collect())
-            .collect(),
+        None => pasteable.cells,
     };
     let range = sel.range();
     let fill = cells.len() == 1 && cells[0].len() == 1 && range.start != range.end;
@@ -635,10 +633,62 @@ mod tests {
 
     #[test]
     fn formulas_move_their_relative_references_but_not_absolute_ones() {
-        let cells = shift_cells(rows(&[&["=A1+$B$1", "text", "7"]]), 2, 3);
-        assert_eq!(cells[0][0], "=C4+$B$1");
-        assert_eq!(cells[0][1], "text");
-        assert_eq!(cells[0][2], "7");
+        let cells = shift_cells(
+            vec![vec![
+                Cell::new("=A1+$B$1"),
+                Cell::new("text"),
+                Cell::new("7"),
+            ]],
+            2,
+            3,
+        );
+        assert_eq!(cells[0][0].raw, "=C4+$B$1");
+        assert_eq!(cells[0][1].raw, "text");
+        assert_eq!(cells[0][2].raw, "7");
+    }
+
+    #[test]
+    fn shifting_leaves_literal_text_that_looks_like_a_formula_alone() {
+        let cells = shift_cells(
+            vec![vec![
+                Cell::new("=A1+1"),
+                Cell::literal("=A1+1"),
+                Cell::literal("00123"),
+            ]],
+            2,
+            3,
+        );
+        assert_eq!(cells[0][0].raw, "=C4+1");
+        assert!(!cells[0][0].text);
+        assert_eq!(cells[0][1].raw, "=A1+1");
+        assert!(cells[0][1].text, "literal text must not become a formula");
+        assert_eq!(cells[0][2].raw, "00123");
+        assert!(cells[0][2].text, "literal text must not become a number");
+    }
+
+    #[test]
+    fn values_only_paste_of_an_array_uses_its_typed_first_element() {
+        let mut sheet = Sheet::new("Spill");
+        let a1 = CellRef::parse("A1").unwrap();
+        sheet.set_str("A1", "={\"00123\";\"x\"}");
+        let mut values = std::collections::HashMap::new();
+        values.insert(
+            a1,
+            Value::Array(
+                vec![
+                    Value::Text("00123".to_string()),
+                    Value::Text("x".to_string()),
+                ],
+                2,
+                1,
+            ),
+        );
+        let cells = evaluated_rows(&sheet, &values, GridSelection::new(a1, a1));
+        assert_eq!(cells[0][0].raw, "00123");
+        assert!(
+            cells[0][0].text,
+            "the array's text element must stay text, not become the number 123"
+        );
     }
 
     #[test]
