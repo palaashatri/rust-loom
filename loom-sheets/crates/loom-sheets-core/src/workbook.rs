@@ -38,6 +38,10 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
         for (cell, raw) in &sheet.cells {
             if raw.is_formula() {
                 formula_cells.push((index, *cell));
+            } else if raw.text {
+                // A literal-flagged cell is text, never a number or a bool:
+                // `="00123"` must not become 123.
+                results[index].insert(*cell, Value::Text(raw.raw.clone()));
             } else {
                 results[index].insert(*cell, parse_literal(&raw.raw));
             }

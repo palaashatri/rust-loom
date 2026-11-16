@@ -8,7 +8,7 @@ use std::sync::Arc;
 use loom_desktop::NativeMenuBar;
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
-    CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
+    Cell, CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
     SheetChart, SheetObject,
 };
 use slint::{ComponentHandle, Model, SharedString, VecModel};
@@ -1246,12 +1246,16 @@ pub(crate) fn copy_selection_with_values(
 }
 
 /// Paste a 2D matrix into a worksheet with full undo transaction recording.
+///
+/// Each entry carries its raw text plus whether that text is literal, so a
+/// Values Only paste can keep evaluated text such as `00123` or `=1+1` from
+/// being re-parsed as a number or a formula.
 pub(crate) fn paste_selection(
     sheet: &mut Sheet,
     undo_stack: &mut Vec<SheetTransaction>,
     redo_stack: &mut Vec<SheetTransaction>,
     target_sel: GridSelection,
-    data: &[Vec<String>],
+    data: &[Vec<Cell>],
     values_only: bool,
 ) -> usize {
     if data.is_empty() || data[0].is_empty() {
@@ -1269,7 +1273,7 @@ pub(crate) fn paste_selection(
                 let edit = if values_only {
                     RangeEdit::replace_value(sheet, cell, val.clone())
                 } else {
-                    RangeEdit::replace(sheet, cell, Some(val.clone()))
+                    RangeEdit::replace_cell(sheet, cell, Some(val.clone()))
                 };
                 edits.push(edit);
             }
@@ -1285,7 +1289,7 @@ pub(crate) fn paste_selection(
                 let edit = if values_only {
                     RangeEdit::replace_value(sheet, cell, val.clone())
                 } else {
-                    RangeEdit::replace(sheet, cell, Some(val.clone()))
+                    RangeEdit::replace_cell(sheet, cell, Some(val.clone()))
                 };
                 edits.push(edit);
             }

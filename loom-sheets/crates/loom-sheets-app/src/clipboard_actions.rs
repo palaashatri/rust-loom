@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use loom_desktop::NativeMenuBar;
-use loom_sheets_core::{parse_csv_records, shift_formula_references, CellRef, Sheet};
+use loom_sheets_core::{parse_csv_records, shift_formula_references, Cell, CellRef, Sheet, Value};
 use slint::{ComponentHandle, SharedString};
 
 use crate::actions::{copy_selection_with_values, paste_selection};
@@ -29,8 +29,8 @@ struct LastCopy {
     origin: CellRef,
     /// Each copied cell's style and alignment, pasted along with its value.
     formats: Vec<Vec<CellFormat>>,
-    /// Evaluated display values for Paste Values Only.
-    evaluated_values: Vec<Vec<String>>,
+    /// Evaluated values for Paste Values Only, each with its value type kept.
+    evaluated_values: Vec<Vec<Cell>>,
     /// The text Copy wrote to the system clipboard; `None` when that write failed.
     external_text: Option<String>,
 }
@@ -42,7 +42,7 @@ struct Pasteable {
     cells: Vec<Vec<String>>,
     origin: Option<CellRef>,
     formats: Option<Vec<Vec<CellFormat>>>,
-    evaluated_values: Option<Vec<Vec<String>>>,
+    evaluated_values: Option<Vec<Vec<Cell>>>,
 }
 
 /// "1 cell" or "N cells".
@@ -114,23 +114,37 @@ fn external_rows(
         .collect()
 }
 
-/// Evaluated values for Paste Values Only, preserving evaluated empty strings.
+/// Evaluated values for Paste Values Only.
+///
+/// The evaluated type is kept: `="00123"` produces `Value::Text`, so the
+/// pasted cell stays text instead of turning into the number `123`, and a
+/// numeric result stays numeric. Literal source cells keep their own text
+/// flag so a text cell holding `00123` does not become a number either.
 fn evaluated_rows(
     sheet: &Sheet,
-    values: &std::collections::HashMap<CellRef, loom_sheets_core::Value>,
+    values: &std::collections::HashMap<CellRef, Value>,
     sel: GridSelection,
-) -> Vec<Vec<String>> {
+) -> Vec<Vec<Cell>> {
     let range = sel.range();
     (range.start.row..=range.end.row)
         .map(|row| {
             (range.start.col..=range.end.col)
                 .map(|col| {
                     let cell = CellRef { row, col };
-                    let raw = sheet.raw(cell).unwrap_or_default().to_string();
+                    let stored = sheet.cells.get(&cell);
+                    let raw = stored.map(|c| c.raw.as_str()).unwrap_or_default();
+                    let literal = stored.is_some_and(|c| c.text);
                     if raw.starts_with('=') || raw.is_empty() {
-                        values.get(&cell).map(|v| v.display()).unwrap_or(raw)
+                        match values.get(&cell) {
+                            Some(Value::Text(text)) => Cell::literal(text.clone()),
+                            Some(value) => Cell::new(value.display()),
+                            None if literal => Cell::literal(raw),
+                            None => Cell::new(raw),
+                        }
+                    } else if literal {
+                        Cell::literal(raw)
                     } else {
-                        raw
+                        Cell::new(raw)
                     }
                 })
                 .collect()
@@ -388,6 +402,10 @@ fn paste_cells(
     let before = formats
         .is_some()
         .then(|| Box::new(state.current.borrow().clone()));
+    let data: Vec<Vec<Cell>> = data
+        .into_iter()
+        .map(|row| row.into_iter().map(Cell::new).collect())
+        .collect();
     let pasted = paste_selection(
         &mut state.current.borrow_mut(),
         &mut state.undo_stack.borrow_mut(),
@@ -424,7 +442,14 @@ pub(crate) fn paste_values_only(
         return false;
     };
     let sel = selection_from_app(app);
-    let cells = pasteable.evaluated_values.unwrap_or(pasteable.cells);
+    let cells: Vec<Vec<Cell>> = match pasteable.evaluated_values {
+        Some(values) => values,
+        None => pasteable
+            .cells
+            .into_iter()
+            .map(|row| row.into_iter().map(Cell::new).collect())
+            .collect(),
+    };
     let range = sel.range();
     let fill = cells.len() == 1 && cells[0].len() == 1 && range.start != range.end;
     let (target, data) = if fill {
@@ -632,6 +657,9 @@ mod tests {
             external_rows(&sheet, &values, sel),
             rows(&[&["=IF(A1=0,\"\",A1)"]])
         );
-        assert_eq!(evaluated_rows(&sheet, &values, sel), rows(&[&[""]]));
+        assert_eq!(
+            evaluated_rows(&sheet, &values, sel),
+            vec![vec![Cell::literal("")]]
+        );
     }
 }

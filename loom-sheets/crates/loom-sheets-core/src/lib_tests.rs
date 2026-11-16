@@ -1634,3 +1634,29 @@ fn merge_cells_handles_full_sheet_span_sparsely() {
     assert_eq!(sheet.raw(b2), None);
     assert_eq!(sheet.raw(c3), None);
 }
+
+#[test]
+fn literal_text_keeps_its_type_instead_of_becoming_a_number() {
+    // Paste Values Only of `="00123"` produces the text `00123`. A literal
+    // cell must keep that exact text: number parsing would drop the leading
+    // zeros and turn the value into 123.
+    let mut sheet = Sheet::new("Values");
+    let a1 = CellRef::parse("A1").unwrap();
+    let a2 = CellRef::parse("A2").unwrap();
+    sheet.set_literal(a1, "00123");
+    sheet.set_literal(a2, "=1+1");
+
+    let values = evaluate(&sheet);
+    assert_eq!(values.get(&a1), Some(&Value::Text("00123".to_string())));
+    assert_eq!(values.get(&a2), Some(&Value::Text("=1+1".to_string())));
+    assert_eq!(values[&a1].display(), "00123");
+
+    // Ordinary raw cells keep literal parsing, including numeric coercion.
+    let mut sheet = Sheet::new("Raw");
+    sheet.set_str("A1", "00123");
+    assert_eq!(
+        evaluate(&sheet).get(&a1),
+        Some(&Value::Number(123.0)),
+        "set_str must keep normal input semantics"
+    );
+}

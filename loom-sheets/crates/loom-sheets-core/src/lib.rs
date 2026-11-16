@@ -2328,11 +2328,36 @@ pub struct RangeEdit {
 
 impl RangeEdit {
     /// Builds an edit that replaces a single cell's raw value, preserving absent cells.
+    ///
+    /// When `after` is the same raw string the cell already holds, the existing
+    /// cell is kept. A literal draft such as `=1+1` therefore stays literal
+    /// instead of silently becoming a formula again.
     pub fn replace(sheet: &Sheet, cell: CellRef, after: Option<String>) -> Self {
+        let existing = sheet.cells.get(&cell);
+        let after = after.map(|raw| match existing {
+            Some(current) if current.raw == raw => current.clone(),
+            _ => Cell::new(raw),
+        });
+        let mut before = BTreeMap::new();
+        let mut after_map = BTreeMap::new();
+        before.insert(cell, existing.cloned());
+        after_map.insert(cell, after);
+        Self {
+            before,
+            after: after_map,
+        }
+    }
+
+    /// Builds an edit that replaces a single cell with an exact cell value.
+    ///
+    /// Unlike [`Self::replace`], the caller's text/formula identity is kept
+    /// even when the raw string matches the current cell, which is what a
+    /// Values Only paste needs.
+    pub fn replace_cell(sheet: &Sheet, cell: CellRef, after: Option<Cell>) -> Self {
         let mut before = BTreeMap::new();
         let mut after_map = BTreeMap::new();
         before.insert(cell, sheet.cells.get(&cell).cloned());
-        after_map.insert(cell, after.map(Cell::new));
+        after_map.insert(cell, after);
         Self {
             before,
             after: after_map,
@@ -2341,24 +2366,11 @@ impl RangeEdit {
 
     /// Builds an edit from a Values Only paste.
     ///
-    /// Values Only writes the *displayed* value. A value that starts with `=`
-    /// would be read back as a formula through the raw path, so it is stored
-    /// as literal text; every other value keeps normal literal semantics
-    /// (numbers stay numbers).
-    pub fn replace_value(sheet: &Sheet, cell: CellRef, raw: String) -> Self {
-        let mut before = BTreeMap::new();
-        let mut after_map = BTreeMap::new();
-        before.insert(cell, sheet.cells.get(&cell).cloned());
-        let after = if raw.starts_with('=') {
-            Cell::literal(raw)
-        } else {
-            Cell::new(raw)
-        };
-        after_map.insert(cell, Some(after));
-        Self {
-            before,
-            after: after_map,
-        }
+    /// The caller supplies the evaluated value with its type intact: text that
+    /// merely looks like a number or a formula (`="00123"`, `=1+1`) stays
+    /// text, while numeric results stay numeric.
+    pub fn replace_value(sheet: &Sheet, cell: CellRef, after: Cell) -> Self {
+        Self::replace_cell(sheet, cell, Some(after))
     }
 
     /// Builds an edit that copies `source` to a destination top-left cell.
@@ -2424,6 +2436,10 @@ impl RangeEdit {
     }
 
     /// Builds an edit from explicit `(cell, new_raw)` updates.
+    ///
+    /// An update whose raw string matches the current cell keeps the existing
+    /// cell, so rewriting an unchanged literal draft cannot flip it to a
+    /// formula.
     pub fn from_cells(
         sheet: &Sheet,
         updates: impl IntoIterator<Item = (CellRef, Option<String>)>,
@@ -2431,10 +2447,13 @@ impl RangeEdit {
         let mut before = BTreeMap::new();
         let mut after = BTreeMap::new();
         for (cell, value) in updates {
-            before
-                .entry(cell)
-                .or_insert_with(|| sheet.cells.get(&cell).cloned());
-            after.insert(cell, value.map(Cell::new));
+            let existing = sheet.cells.get(&cell);
+            before.entry(cell).or_insert_with(|| existing.cloned());
+            let next = value.map(|raw| match existing {
+                Some(current) if current.raw == raw => current.clone(),
+                _ => Cell::new(raw),
+            });
+            after.insert(cell, next);
         }
         Self { before, after }
     }
@@ -2908,6 +2927,7 @@ impl CalculationCache {
             for cell in ready {
                 let value = match sheet.cells.get(&cell) {
                     None => Value::Empty,
+                    Some(raw) if raw.text => Value::Text(raw.raw.clone()),
                     Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
                     Some(raw) => match parse_formula(raw.raw[1..].trim()) {
                         Ok(formula) => {
@@ -2969,6 +2989,7 @@ impl CalculationCache {
                     evaluated.insert(cell);
                     let value = match sheet.cells.get(&cell) {
                         None => Value::Empty,
+                        Some(raw) if raw.text => Value::Text(raw.raw.clone()),
                         Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
                         Some(raw) => match parse_formula(raw.raw[1..].trim()) {
                             Ok(formula) => {
