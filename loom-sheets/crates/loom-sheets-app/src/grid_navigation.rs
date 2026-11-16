@@ -118,11 +118,7 @@ pub(crate) fn reveal_selected(
         .iter()
         .map(|(&index, &size)| (index, size * zoom))
         .collect();
-    let rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&index, &size)| (index, size * zoom))
-        .collect();
+    let rows = crate::scaled_row_heights(sheet, zoom);
     let fit_cols = fit_count(
         viewport.first_col,
         (width - GRID_ROW_HEADER_WIDTH * text).max(default_col_width),

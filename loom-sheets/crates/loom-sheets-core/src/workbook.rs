@@ -38,6 +38,10 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
         for (cell, raw) in &sheet.cells {
             if raw.is_formula() {
                 formula_cells.push((index, *cell));
+            } else if raw.text {
+                // A literal-flagged cell is text, never a number or a bool:
+                // `="00123"` must not become 123.
+                results[index].insert(*cell, Value::Text(raw.raw.clone()));
             } else {
                 results[index].insert(*cell, parse_literal(&raw.raw));
             }
@@ -48,7 +52,12 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
     let mut parsed: HashMap<Node, crate::Formula> = HashMap::new();
     let mut deps: HashMap<Node, HashSet<Node>> = HashMap::new();
     for &(index, cell) in &formula_cells {
-        let body = sheets[index].raw(cell).unwrap()[1..].trim().to_string();
+        let raw_body = sheets[index].raw(cell).unwrap()[1..].trim();
+        let body = if sheets[index].named_ranges.is_empty() {
+            raw_body.to_string()
+        } else {
+            crate::data_tools::expand_named_ranges_in_formula(raw_body, &sheets[index].named_ranges)
+        };
         match parse_formula(&body) {
             Ok(formula) => {
                 let mut local = HashSet::new();

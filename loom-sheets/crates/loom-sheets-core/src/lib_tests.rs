@@ -1520,3 +1520,143 @@ fn grid_selection_extend_and_collapse_keep_keyboard_semantics() {
     assert_eq!(collapsed.focus, CellRef::parse("B2").unwrap());
     assert_eq!(collapsed.label(), "B2");
 }
+
+#[test]
+fn border_presets_apply_per_edge_borders() {
+    let mut sheet = Sheet::new("Borders");
+    let range = CellRange::parse("A1:C3").unwrap();
+    assert!(sheet.apply_border_preset(range, BorderPreset::Outer));
+
+    let a1 = sheet.cell_style(CellRef::parse("A1").unwrap()).borders;
+    assert!(a1.top && a1.left && !a1.bottom && !a1.right);
+    let b2 = sheet.cell_style(CellRef::parse("B2").unwrap()).borders;
+    assert!(!b2.any());
+    let c3 = sheet.cell_style(CellRef::parse("C3").unwrap()).borders;
+    assert!(c3.bottom && c3.right && !c3.top && !c3.left);
+
+    assert!(sheet.apply_border_preset(range, BorderPreset::None));
+    assert!(!sheet
+        .cell_style(CellRef::parse("A1").unwrap())
+        .borders
+        .any());
+
+    assert!(sheet.apply_border_preset(range, BorderPreset::All));
+    assert!(sheet
+        .cell_style(CellRef::parse("B2").unwrap())
+        .borders
+        .all());
+}
+
+#[test]
+fn merge_unmerge_and_persistence_roundtrip() {
+    let mut sheet = Sheet::new("Merge");
+    let a1 = CellRef::parse("A1").unwrap();
+    let b1 = CellRef::parse("B1").unwrap();
+    let b2 = CellRef::parse("B2").unwrap();
+    sheet.set_raw(b1, "Kept");
+    sheet.set_raw(b2, "Cleared");
+
+    // 1x1 merge is a no-op
+    assert!(!sheet.merge_cells(CellRange::new(a1, a1)));
+
+    let span = CellRange::parse("A1:B2").unwrap();
+    assert!(sheet.merge_cells(span));
+    assert_eq!(sheet.raw(a1), Some("Kept"));
+    assert_eq!(sheet.raw(b1), None);
+    assert_eq!(sheet.raw(b2), None);
+    assert_eq!(sheet.merge_at(b2), Some(span));
+    assert!(!sheet.is_merged_covered(a1));
+    assert!(sheet.is_merged_covered(b2));
+
+    let mut style = sheet.cell_style(a1);
+    style.strikethrough = true;
+    style.borders = CellBorders {
+        top: true,
+        right: false,
+        bottom: true,
+        left: false,
+    };
+    sheet.set_cell_style(a1, style);
+    sheet.add_conditional_rule(CellConditionalRule {
+        range: span,
+        operator: ConditionalOperator::Contains,
+        value: "kept".to_string(),
+        fill: style::FillColor::Green,
+        text_color: Some(0x002E_7D32),
+    });
+
+    let json = sheet_to_json(&sheet);
+    let back = sheet_from_json(&json).unwrap();
+    assert_eq!(back.merged_ranges, vec![span]);
+    assert_eq!(back.conditional_rules.len(), 1);
+    assert!(back.cell_style(a1).strikethrough);
+    assert!(back.cell_style(a1).borders.top);
+    assert!(!back.cell_style(a1).borders.right);
+
+    assert!(sheet.unmerge_cells(CellRange::new(b2, b2)));
+    assert!(sheet.merged_ranges.is_empty());
+    assert!(!sheet.is_merged_covered(b2));
+}
+
+#[test]
+fn conditional_formatting_effective_style_applies_fill_and_text_color() {
+    let mut sheet = Sheet::new("CF");
+    let a1 = CellRef::parse("A1").unwrap();
+    let a2 = CellRef::parse("A2").unwrap();
+    sheet.add_conditional_rule(CellConditionalRule {
+        range: CellRange::parse("A1:A5").unwrap(),
+        operator: ConditionalOperator::GreaterThan,
+        value: "100".to_string(),
+        fill: style::FillColor::Yellow,
+        text_color: Some(0x00C6_2828),
+    });
+
+    let match_style = sheet.effective_style(a1, "150");
+    assert_eq!(match_style.fill, style::FillColor::Yellow);
+    assert_eq!(match_style.text_color, Some(0x00C6_2828));
+
+    let miss_style = sheet.effective_style(a2, "50");
+    assert_eq!(miss_style.fill, style::FillColor::None);
+    assert_eq!(miss_style.text_color, None);
+}
+
+#[test]
+fn merge_cells_handles_full_sheet_span_sparsely() {
+    let mut sheet = Sheet::new("SparseMerge");
+    let b2 = CellRef::parse("B2").unwrap();
+    let c3 = CellRef::parse("C3").unwrap();
+    sheet.set_str("B2", "kept");
+    sheet.set_str("C3", "discarded");
+
+    let full = CellRange::parse("A1:XFD1048576").unwrap();
+    assert!(sheet.merge_cells(full));
+    assert_eq!(sheet.raw(CellRef::parse("A1").unwrap()), Some("kept"));
+    assert_eq!(sheet.raw(b2), None);
+    assert_eq!(sheet.raw(c3), None);
+}
+
+#[test]
+fn literal_text_keeps_its_type_instead_of_becoming_a_number() {
+    // Paste Values Only of `="00123"` produces the text `00123`. A literal
+    // cell must keep that exact text: number parsing would drop the leading
+    // zeros and turn the value into 123.
+    let mut sheet = Sheet::new("Values");
+    let a1 = CellRef::parse("A1").unwrap();
+    let a2 = CellRef::parse("A2").unwrap();
+    sheet.set_literal(a1, "00123");
+    sheet.set_literal(a2, "=1+1");
+
+    let values = evaluate(&sheet);
+    assert_eq!(values.get(&a1), Some(&Value::Text("00123".to_string())));
+    assert_eq!(values.get(&a2), Some(&Value::Text("=1+1".to_string())));
+    assert_eq!(values[&a1].display(), "00123");
+
+    // Ordinary raw cells keep literal parsing, including numeric coercion.
+    let mut sheet = Sheet::new("Raw");
+    sheet.set_str("A1", "00123");
+    assert_eq!(
+        evaluate(&sheet).get(&a1),
+        Some(&Value::Number(123.0)),
+        "set_str must keep normal input semantics"
+    );
+}

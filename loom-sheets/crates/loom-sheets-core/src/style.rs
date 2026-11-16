@@ -108,6 +108,89 @@ impl FillColor {
     }
 }
 
+/// Per-edge cell border flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct CellBorders {
+    pub top: bool,
+    pub right: bool,
+    pub bottom: bool,
+    pub left: bool,
+}
+
+impl CellBorders {
+    /// No borders on any edge.
+    pub const NONE: Self = Self {
+        top: false,
+        right: false,
+        bottom: false,
+        left: false,
+    };
+
+    /// Thin borders on all four edges.
+    pub const ALL: Self = Self {
+        top: true,
+        right: true,
+        bottom: true,
+        left: true,
+    };
+
+    /// Whether any edge has a border.
+    pub const fn any(self) -> bool {
+        self.top || self.right || self.bottom || self.left
+    }
+
+    /// Whether all four edges have a border.
+    pub const fn all(self) -> bool {
+        self.top && self.right && self.bottom && self.left
+    }
+
+    /// Encode edges into a 4-bit mask (top=1, right=2, bottom=4, left=8).
+    pub const fn to_mask(self) -> u8 {
+        (self.top as u8)
+            | ((self.right as u8) << 1)
+            | ((self.bottom as u8) << 2)
+            | ((self.left as u8) << 3)
+    }
+
+    /// Decode edges from a 4-bit mask (top=1, right=2, bottom=4, left=8).
+    pub const fn from_mask(mask: u8) -> Self {
+        Self {
+            top: (mask & 1) != 0,
+            right: (mask & 2) != 0,
+            bottom: (mask & 4) != 0,
+            left: (mask & 8) != 0,
+        }
+    }
+}
+
+/// Border preset applied to a cell or range selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BorderPreset {
+    All,
+    Outer,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    None,
+}
+
+impl BorderPreset {
+    /// Parse a border preset name (case-insensitive).
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "all" => Some(Self::All),
+            "outer" => Some(Self::Outer),
+            "top" => Some(Self::Top),
+            "bottom" => Some(Self::Bottom),
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            "none" | "clear" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
 /// Visual and numerical formatting style applied to a worksheet cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CellStyle {
@@ -117,12 +200,14 @@ pub struct CellStyle {
     pub italic: bool,
     /// Underline text decoration.
     pub underline: bool,
+    /// Strikethrough text decoration.
+    pub strikethrough: bool,
     /// Display number format.
     pub number_format: NumberFormat,
     /// Custom decimal places (if applicable).
     pub decimal_places: Option<u8>,
-    /// All-edges cell border.
-    pub border: bool,
+    /// Per-edge cell borders.
+    pub borders: CellBorders,
     /// Cell fill swatch (`None` is paper).
     pub fill: FillColor,
     /// Explicit font size in px (`None` follows the theme body size).
@@ -148,9 +233,10 @@ impl CellStyle {
             bold: false,
             italic: false,
             underline: false,
+            strikethrough: false,
             number_format: NumberFormat::General,
             decimal_places: None,
-            border: false,
+            borders: CellBorders::NONE,
             fill: FillColor::None,
             font_size: None,
             text_color: None,
@@ -163,9 +249,10 @@ impl CellStyle {
         !self.bold
             && !self.italic
             && !self.underline
+            && !self.strikethrough
             && self.number_format == NumberFormat::General
             && self.decimal_places.is_none()
-            && !self.border
+            && !self.borders.any()
             && self.fill == FillColor::None
             && self.font_size.is_none()
             && self.text_color.is_none()
@@ -292,14 +379,34 @@ mod tests {
 
         let mut style = CellStyle::default();
         assert!(style.is_default());
-        style.border = true;
+        style.borders = CellBorders::ALL;
         assert!(!style.is_default());
-        style.border = false;
+        style.borders = CellBorders::NONE;
+        style.strikethrough = true;
+        assert!(!style.is_default());
+        style.strikethrough = false;
         style.fill = FillColor::Yellow;
         assert!(!style.is_default());
         style.fill = FillColor::None;
         style.font_size = Some(18);
         assert!(!style.is_default());
+    }
+
+    #[test]
+    fn test_cell_borders_mask_roundtrip() {
+        let b = CellBorders {
+            top: true,
+            right: false,
+            bottom: true,
+            left: true,
+        };
+        assert!(b.any());
+        assert!(!b.all());
+        let mask = b.to_mask();
+        assert_eq!(CellBorders::from_mask(mask), b);
+        assert_eq!(CellBorders::NONE.to_mask(), 0);
+        assert_eq!(CellBorders::ALL.to_mask(), 0b1111);
+        assert!(CellBorders::ALL.all());
     }
 
     #[test]

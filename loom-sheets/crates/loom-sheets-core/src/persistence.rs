@@ -4,10 +4,13 @@
 //! validation: older packages without `alignments`/`styles` still load as
 //! unstyled sheets.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::style::CellStyle;
-use crate::{CellAlignment, CellRef, NumberFormat, Sheet};
+use crate::style::{CellBorders, CellStyle, FillColor};
+use crate::{
+    AutoFilterState, CellAlignment, CellConditionalRule, CellRange, CellRef, ConditionalOperator,
+    DataValidationRule, NumberFormat, Sheet, SheetValidation, ValidationCriteria,
+};
 use serde::{Deserialize, Serialize};
 
 fn is_false(value: &bool) -> bool {
@@ -23,6 +26,10 @@ struct PersistedCell {
     #[serde(rename = "ref")]
     reference: String,
     raw: String,
+    /// Literal text that starts with `=` (Paste Values Only). Optional so
+    /// files written before this flag existed still load.
+    #[serde(default, skip_serializing_if = "is_false")]
+    text: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,6 +37,18 @@ struct PersistedAlignment {
     #[serde(rename = "ref")]
     reference: String,
     align: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedBorders {
+    #[serde(default, skip_serializing_if = "is_false")]
+    top: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    right: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    bottom: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    left: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,12 +61,16 @@ struct PersistedStyle {
     italic: bool,
     #[serde(default)]
     underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    strikethrough: bool,
     #[serde(default)]
     format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     decimals: Option<u8>,
     #[serde(default, skip_serializing_if = "is_false")]
     border: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    borders: Option<PersistedBorders>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +83,17 @@ struct PersistedStyle {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct PersistedConditionalRule {
+    range: String,
+    operator: String,
+    value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct PersistedChart {
     kind: String,
     title: String,
@@ -69,10 +103,22 @@ struct PersistedChart {
     start_row: u32,
     #[serde(default)]
     end_row: Option<u32>,
+    #[serde(default = "default_chart_show_legend")]
+    show_legend: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    x_axis_label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    y_axis_label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    series_name: String,
 }
 
 fn default_chart_start_row() -> u32 {
     1
+}
+
+fn default_chart_show_legend() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,6 +134,38 @@ struct PersistedObject {
     asset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fill: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedAutoFilter {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    header_row: u32,
+    #[serde(default)]
+    column_filters: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedValidation {
+    range: String,
+    kind: String,
+    #[serde(default)]
+    items: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_range: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    min_i64: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_i64: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    min_f64: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_f64: Option<f64>,
+    #[serde(default)]
+    allow_blank: bool,
+    #[serde(default)]
+    error_message: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,6 +188,20 @@ struct PersistedSheet {
     chart: Option<PersistedChart>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     objects: Vec<PersistedObject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_filter: Option<PersistedAutoFilter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden_rows: Vec<u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    named_ranges: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    validations: Vec<PersistedValidation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    merges: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    conditional_rules: Vec<PersistedConditionalRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tables: Vec<crate::SheetTable>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -152,6 +244,7 @@ impl From<&Sheet> for PersistedSheet {
                 .map(|(reference, cell)| PersistedCell {
                     reference: reference.to_a1(),
                     raw: cell.raw.clone(),
+                    text: cell.text,
                 })
                 .collect(),
             alignments: sheet
@@ -172,9 +265,18 @@ impl From<&Sheet> for PersistedSheet {
                     bold: style.bold,
                     italic: style.italic,
                     underline: style.underline,
+                    strikethrough: style.strikethrough,
                     format: Some(number_format_as_str(style.number_format).to_string()),
                     decimals: style.decimal_places,
-                    border: style.border,
+                    border: style.borders.all(),
+                    borders: (style.borders.any() && !style.borders.all()).then_some(
+                        PersistedBorders {
+                            top: style.borders.top,
+                            right: style.borders.right,
+                            bottom: style.borders.bottom,
+                            left: style.borders.left,
+                        },
+                    ),
                     fill: (style.fill != crate::style::FillColor::None)
                         .then(|| style.fill.as_str().to_string()),
                     font: style.font_size,
@@ -203,6 +305,10 @@ impl From<&Sheet> for PersistedSheet {
                 val_col: chart.val_col,
                 start_row: chart.start_row,
                 end_row: chart.end_row,
+                show_legend: chart.show_legend,
+                x_axis_label: chart.x_axis_label.clone(),
+                y_axis_label: chart.y_axis_label.clone(),
+                series_name: chart.series_name.clone(),
             }),
             objects: sheet
                 .objects
@@ -219,6 +325,109 @@ impl From<&Sheet> for PersistedSheet {
                     fill: Some(object.fill.as_str().to_string()),
                 })
                 .collect(),
+            auto_filter: (sheet.auto_filter.enabled
+                || !sheet.auto_filter.column_filters.is_empty())
+            .then(|| PersistedAutoFilter {
+                enabled: sheet.auto_filter.enabled,
+                header_row: sheet.auto_filter.header_row,
+                column_filters: sheet
+                    .auto_filter
+                    .column_filters
+                    .iter()
+                    .map(|(col, vals)| (col.to_string(), vals.iter().cloned().collect()))
+                    .collect(),
+            }),
+            hidden_rows: sheet.hidden_rows.iter().copied().collect(),
+            named_ranges: sheet
+                .named_ranges
+                .iter()
+                .map(|(name, range)| (name.clone(), range.to_a1()))
+                .collect(),
+            validations: sheet
+                .validations
+                .iter()
+                .map(|v| match &v.rule.criteria {
+                    ValidationCriteria::List(items) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "list".to_string(),
+                        items: items.clone(),
+                        source_range: None,
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::RangeList(src) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "range-list".to_string(),
+                        items: Vec::new(),
+                        source_range: Some(src.to_a1()),
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::WholeNumberBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "whole".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: Some(*min),
+                        max_i64: Some(*max),
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::DecimalBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "decimal".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: None,
+                        max_i64: None,
+                        min_f64: Some(*min),
+                        max_f64: Some(*max),
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                    ValidationCriteria::TextLengthBetween(min, max) => PersistedValidation {
+                        range: v.range.to_a1(),
+                        kind: "text-len".to_string(),
+                        items: Vec::new(),
+                        source_range: None,
+                        min_i64: Some(*min as i64),
+                        max_i64: Some(*max as i64),
+                        min_f64: None,
+                        max_f64: None,
+                        allow_blank: v.rule.allow_blank,
+                        error_message: v.rule.error_message.clone(),
+                    },
+                })
+                .collect(),
+            merges: sheet
+                .merged_ranges
+                .iter()
+                .map(|range| range.to_a1())
+                .collect(),
+            conditional_rules: sheet
+                .conditional_rules
+                .iter()
+                .map(|rule| PersistedConditionalRule {
+                    range: rule.range.to_a1(),
+                    operator: rule.operator.as_str().to_string(),
+                    value: rule.value.clone(),
+                    fill: (rule.fill != FillColor::None).then(|| rule.fill.as_str().to_string()),
+                    color: rule
+                        .text_color
+                        .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
+                })
+                .collect(),
+            tables: sheet.tables.clone(),
         }
     }
 }
@@ -313,7 +522,13 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             .ok_or_else(|| format!("invalid cell reference {:?}", cell.reference))?;
         if sheet
             .cells
-            .insert(reference, crate::Cell { raw: cell.raw })
+            .insert(
+                reference,
+                crate::Cell {
+                    raw: cell.raw,
+                    text: cell.text,
+                },
+            )
             .is_some()
         {
             return Err(format!("duplicate cell reference {:?}", cell.reference));
@@ -333,13 +548,24 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
     for style in raw.styles {
         let reference = CellRef::parse(&style.reference)
             .ok_or_else(|| format!("invalid style reference {:?}", style.reference))?;
+        let borders = match style.borders {
+            Some(b) => CellBorders {
+                top: b.top,
+                right: b.right,
+                bottom: b.bottom,
+                left: b.left,
+            },
+            None if style.border => CellBorders::ALL,
+            None => CellBorders::NONE,
+        };
         let value = CellStyle {
             bold: style.bold,
             italic: style.italic,
             underline: style.underline,
+            strikethrough: style.strikethrough,
             number_format: parse_number_format(style.format.as_deref())?,
             decimal_places: style.decimals,
-            border: style.border,
+            borders,
             fill: parse_fill(style.fill.as_deref())?,
             font_size: style.font,
             text_color: parse_text_color(style.color.as_deref())?,
@@ -363,6 +589,10 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
                 val_col: chart.val_col,
                 start_row: chart.start_row,
                 end_row: chart.end_row,
+                show_legend: chart.show_legend,
+                x_axis_label: chart.x_axis_label,
+                y_axis_label: chart.y_axis_label,
+                series_name: chart.series_name,
             })
         })
         .transpose()?;
@@ -394,6 +624,97 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    if let Some(af) = raw.auto_filter {
+        let mut column_filters = BTreeMap::new();
+        for (col_str, vals) in af.column_filters {
+            let col = col_str
+                .parse::<u32>()
+                .map_err(|_| format!("invalid auto_filter column {col_str:?}"))?;
+            column_filters.insert(col, vals.into_iter().collect::<BTreeSet<String>>());
+        }
+        sheet.auto_filter = AutoFilterState {
+            enabled: af.enabled,
+            header_row: af.header_row,
+            column_filters,
+        };
+    }
+    sheet.hidden_rows = raw.hidden_rows.into_iter().collect();
+    for (name, range_a1) in raw.named_ranges {
+        let range = CellRange::parse(&range_a1)
+            .ok_or_else(|| format!("invalid named range target {range_a1:?}"))?;
+        sheet.set_named_range(&name, range)?;
+    }
+    for v in raw.validations {
+        let range = CellRange::parse(&v.range)
+            .ok_or_else(|| format!("invalid validation range {:?}", v.range))?;
+        let criteria = match v.kind.as_str() {
+            "list" => ValidationCriteria::List(v.items),
+            "range-list" => {
+                let src_a1 = v.source_range.unwrap_or_default();
+                let src = CellRange::parse(&src_a1)
+                    .ok_or_else(|| format!("invalid validation source range {src_a1:?}"))?;
+                ValidationCriteria::RangeList(src)
+            }
+            "whole" => ValidationCriteria::WholeNumberBetween(
+                v.min_i64.unwrap_or(i64::MIN),
+                v.max_i64.unwrap_or(i64::MAX),
+            ),
+            "decimal" => ValidationCriteria::DecimalBetween(
+                v.min_f64.unwrap_or(f64::NEG_INFINITY),
+                v.max_f64.unwrap_or(f64::INFINITY),
+            ),
+            "text-len" => ValidationCriteria::TextLengthBetween(
+                v.min_i64.unwrap_or(0).max(0) as usize,
+                v.max_i64.unwrap_or(u32::MAX as i64).max(0) as usize,
+            ),
+            other => return Err(format!("unknown validation kind {other:?}")),
+        };
+        let mut rule = DataValidationRule::new(criteria, v.error_message);
+        rule.allow_blank = v.allow_blank;
+        sheet.validations.push(SheetValidation { range, rule });
+    }
+    for merge in raw.merges {
+        let range =
+            CellRange::parse(&merge).ok_or_else(|| format!("invalid merge range {merge:?}"))?;
+        if range.start == range.end {
+            return Err(format!("invalid single-cell merge range {merge:?}"));
+        }
+        if sheet
+            .merged_ranges
+            .iter()
+            .any(|existing| existing.intersects(range))
+        {
+            return Err(format!("overlapping merge range {merge:?}"));
+        }
+        if let Some((&cell, _)) = sheet.cells.iter().find(|(&cell, cell_data)| {
+            cell != range.start && range.contains(cell) && !cell_data.raw.is_empty()
+        }) {
+            return Err(format!(
+                "merge range {merge:?} covers non-empty cell {}",
+                cell.to_a1()
+            ));
+        }
+        sheet.merged_ranges.push(range);
+    }
+    sheet
+        .merged_ranges
+        .sort_by_key(|r| (r.start.row, r.start.col, r.end.row, r.end.col));
+    for rule in raw.conditional_rules {
+        let range = CellRange::parse(&rule.range)
+            .ok_or_else(|| format!("invalid conditional range {:?}", rule.range))?;
+        let operator = ConditionalOperator::parse(&rule.operator)
+            .ok_or_else(|| format!("unknown conditional operator {:?}", rule.operator))?;
+        let fill = parse_fill(rule.fill.as_deref())?;
+        let text_color = parse_text_color(rule.color.as_deref())?;
+        sheet.add_conditional_rule(CellConditionalRule {
+            range,
+            operator,
+            value: rule.value,
+            fill,
+            text_color,
+        });
+    }
+    sheet.tables = raw.tables;
     Ok(sheet)
 }
 
@@ -496,6 +817,32 @@ mod tests {
     use crate::evaluate;
 
     #[test]
+    fn literal_text_starting_with_equals_survives_save_and_reload() {
+        // Paste Values Only can produce text such as `=1+1`. It must stay
+        // text through persistence instead of reloading as a formula.
+        let mut sheet = Sheet::new("values");
+        let a1 = CellRef::parse("A1").unwrap();
+        sheet.set_literal(a1, "=1+1");
+        let json = sheet_to_json(&sheet);
+        assert!(json.contains("\"text\":true"), "{json}");
+        let back = sheet_from_json(&json).unwrap();
+        assert_eq!(back.raw(a1), Some("=1+1"));
+        assert_eq!(
+            evaluate(&back).get(&a1).map(|value| value.display()),
+            Some("=1+1".to_string()),
+            "reloaded cell must not evaluate as a formula"
+        );
+
+        // Older files have no `text` flag and keep formula semantics.
+        let legacy = r#"{"name":"s","cells":[{"ref":"A1","raw":"=1+1"}]}"#;
+        let legacy = sheet_from_json(legacy).unwrap();
+        assert_eq!(
+            evaluate(&legacy).get(&a1).map(|value| value.display()),
+            Some("2".to_string())
+        );
+    }
+
+    #[test]
     fn a_malformed_text_colour_is_an_error_not_a_dropped_colour() {
         let json = r##"{"name":"s","cells":[],"styles":[{"ref":"A1","color":"#12"}]}"##;
         let error = sheet_from_json(json).unwrap_err();
@@ -516,9 +863,10 @@ mod tests {
                 bold: true,
                 italic: false,
                 underline: true,
+                strikethrough: false,
                 number_format: NumberFormat::Currency,
                 decimal_places: Some(0),
-                border: false,
+                borders: CellBorders::NONE,
                 fill: crate::style::FillColor::None,
                 font_size: None,
                 text_color: None,
@@ -531,9 +879,10 @@ mod tests {
                 bold: false,
                 italic: true,
                 underline: false,
+                strikethrough: true,
                 number_format: NumberFormat::Percentage,
                 decimal_places: Some(2),
-                border: true,
+                borders: CellBorders::ALL,
                 fill: crate::style::FillColor::Blue,
                 font_size: Some(18),
                 text_color: Some(0x00C0_3A2B),
@@ -547,13 +896,15 @@ mod tests {
         assert!(back_a1.bold);
         assert!(back_a1.underline);
         assert!(!back_a1.italic);
+        assert!(!back_a1.strikethrough);
         assert_eq!(back_a1.number_format, NumberFormat::Currency);
         assert_eq!(back_a1.decimal_places, Some(0));
         let back_b1 = back.cell_style(b1);
         assert!(back_b1.italic);
+        assert!(back_b1.strikethrough);
         assert_eq!(back_b1.number_format, NumberFormat::Percentage);
         assert_eq!(back_b1.decimal_places, Some(2));
-        assert!(back_b1.border);
+        assert!(back_b1.borders.all());
         assert_eq!(back_b1.fill, crate::style::FillColor::Blue);
         assert_eq!(back_b1.font_size, Some(18));
         assert_eq!(back_b1.text_color, Some(0x00C0_3A2B));
@@ -749,8 +1100,47 @@ mod tests {
         let chart = json["chart"].as_object_mut().unwrap();
         chart.remove("start_row");
         chart.remove("end_row");
+        chart.remove("show_legend");
         let restored = sheet_from_json(&json.to_string()).unwrap().chart.unwrap();
         assert_eq!(restored.start_row, 1);
         assert_eq!(restored.end_row, None);
+        assert!(restored.show_legend);
+    }
+
+    #[test]
+    fn chart_customization_fields_roundtrip() {
+        let mut sheet = Sheet::new("CustomChart");
+        sheet.chart = Some(crate::SheetChart {
+            kind: crate::ChartKind::Line,
+            title: "Quarterly Revenue".to_string(),
+            cat_col: 0,
+            val_col: 1,
+            start_row: 1,
+            end_row: Some(4),
+            show_legend: false,
+            x_axis_label: "Quarter".to_string(),
+            y_axis_label: "USD".to_string(),
+            series_name: "Revenue".to_string(),
+        });
+        let restored = sheet_from_json(&sheet_to_json(&sheet))
+            .unwrap()
+            .chart
+            .unwrap();
+        assert!(!restored.show_legend);
+        assert_eq!(restored.x_axis_label, "Quarter");
+        assert_eq!(restored.y_axis_label, "USD");
+        assert_eq!(restored.series_name, "Revenue");
+    }
+
+    #[test]
+    fn merge_decode_rejects_non_empty_covered_cells_instead_of_discarding() {
+        let mut sheet = Sheet::new("Merged");
+        sheet.set_str("A1", "head");
+        assert!(sheet.merge_cells(CellRange::parse("A1:B1").unwrap()));
+        // Unrestricted setter writes into covered cell B1 after merge.
+        sheet.set_str("B1", "later");
+        let json = sheet_to_json(&sheet);
+        let err = sheet_from_json(&json).unwrap_err();
+        assert!(err.contains("B1"), "unexpected error: {err}");
     }
 }

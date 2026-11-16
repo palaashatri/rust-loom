@@ -131,7 +131,7 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     rebuild_palette(&app, "");
     assert_eq!(
         app.get_palette_commands().row_count(),
-        55 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
+        91 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
     );
     let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(
@@ -586,4 +586,121 @@ fn every_palette_command_and_menu_item_exposes_a_shortcut() {
         .expect("Table -> Add Sheet");
     assert!(add_sheet_item.is_enabled());
     assert!(add_sheet_item.has_keyboard_shortcut());
+}
+
+#[test]
+fn advertised_shortcuts_dispatch_without_collisions() {
+    use std::cell::Cell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    crate::set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let last_action = Rc::new(Cell::new(""));
+    {
+        let r = last_action.clone();
+        app.global::<crate::PrintPreviewState>()
+            .on_open_preview(move || r.set("file.print"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::SheetInspectorActions>()
+            .on_export_pdf(move || r.set("file.export_pdf"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::SheetInspectorActions>()
+            .on_arrange_object(move |mode| match mode {
+                2 => r.set("arrange.bring_to_front"),
+                3 => r.set("arrange.send_to_back"),
+                _ => {}
+            });
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_paste_values_only(move || r.set("edit.paste_values"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_paste_formats_only(move || r.set("edit.paste_formats"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_toggle_wrap_text(move || r.set("format.wrap_text"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_merge_cells(move || r.set("format.merge"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_cycle_text_color(move || r.set("format.text_color_cycle"));
+    }
+    {
+        let r = last_action.clone();
+        app.global::<crate::CellRichFormat>()
+            .on_auto_text_color(move || r.set("format.text_color_auto"));
+    }
+
+    for (key, shift, alt, expected) in [
+        ("p", false, false, "file.print"),
+        ("f", true, true, "file.export_pdf"),
+        ("v", true, false, "edit.paste_values"),
+        ("v", true, true, "edit.paste_formats"),
+        ("]", true, true, "arrange.bring_to_front"),
+        ("[", true, true, "arrange.send_to_back"),
+        // Shifted punctuation arrives as the logical character on winit.
+        ("}", true, true, "arrange.bring_to_front"),
+        ("{", true, true, "arrange.send_to_back"),
+        ("w", true, true, "format.wrap_text"),
+        ("g", true, true, "format.merge"),
+        ("e", true, true, "format.text_color_cycle"),
+        ("q", true, true, "format.text_color_auto"),
+    ] {
+        last_action.set("");
+        assert!(
+            crate::command_dispatch::dispatch_shortcut(&app, key, shift, alt),
+            "expected ({key}, {shift}, {alt}) to dispatch"
+        );
+        assert_eq!(last_action.get(), expected);
+    }
+
+    // Verify table.delete_row does not fire on format.wrap_text's shortcut,
+    // and Cmd/Ctrl+Alt+W still routes to table.delete_row without wrapping text.
+    last_action.set("");
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "w", false, true
+    ));
+    assert_eq!(last_action.get(), "");
+
+    // Distinct non-empty shortcut labels across the newly disambiguated commands.
+    let ids = [
+        "file.print",
+        "file.export_pdf",
+        "table.pivot_sum",
+        "edit.paste_values",
+        "edit.paste_formats",
+        "data.validation",
+        "format.wrap_text",
+        "table.delete_row",
+        "format.merge",
+        "format.fill_cycle",
+        "format.text_color_cycle",
+        "data.clear_filter",
+        "format.text_color_auto",
+        "data.filter_column",
+        "arrange.bring_to_front",
+        "arrange.send_to_back",
+    ];
+    let mut seen = HashSet::new();
+    for id in ids {
+        let label = crate::command_dispatch::shortcut_for_id(id);
+        assert!(!label.is_empty(), "missing shortcut for {id}");
+        assert!(seen.insert(label), "duplicate shortcut {label} for {id}");
+    }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::style::{CellAlignment, CellStyle, FillColor};
+use crate::style::{CellAlignment, CellBorders, CellStyle, FillColor};
 
 use super::number_formats::{builtin_format_code, parse_number_format};
 use super::styles::{fill_from_rgb, rgb_for_fill};
@@ -44,6 +44,7 @@ struct FontFacts {
     bold: bool,
     italic: bool,
     underline: bool,
+    strikethrough: bool,
     size: Option<u8>,
     color: Option<u32>,
     approximated: bool,
@@ -103,11 +104,10 @@ fn font_facts(body: &str) -> FontFacts {
         underline: contains_element(body, "u")
             && attr(elements(body, "u").next().map_or("", |u| u.attrs), "val").as_deref()
                 != Some("none"),
+        strikethrough: truthy_flag(body, "strike"),
         size,
         color,
-        approximated: color_unresolved
-            || contains_element(body, "strike")
-            || contains_element(body, "vertAlign"),
+        approximated: color_unresolved || contains_element(body, "vertAlign"),
     }
 }
 
@@ -144,20 +144,28 @@ fn fill_facts(body: &str) -> (FillColor, bool) {
     (fill, !exact)
 }
 
-/// `(any border, approximated)` for one `<border>` element.
-fn border_facts(body: &str) -> (bool, bool) {
-    let sides: Vec<Option<String>> = ["left", "right", "top", "bottom"]
+/// `(borders, approximated)` for one `<border>` element.
+fn border_facts(body: &str) -> (CellBorders, bool) {
+    let side_style = |side: &str| {
+        elements(body, side)
+            .next()
+            .and_then(|value| attr(value.attrs, "style"))
+            .filter(|style| !style.eq_ignore_ascii_case("none"))
+    };
+    let left = side_style("left");
+    let right = side_style("right");
+    let top = side_style("top");
+    let bottom = side_style("bottom");
+    let borders = CellBorders {
+        top: top.is_some(),
+        right: right.is_some(),
+        bottom: bottom.is_some(),
+        left: left.is_some(),
+    };
+    let non_thin = [&left, &right, &top, &bottom]
         .iter()
-        .map(|side| {
-            elements(body, side)
-                .next()
-                .and_then(|value| attr(value.attrs, "style"))
-                .filter(|style| !style.eq_ignore_ascii_case("none"))
-        })
-        .collect();
-    let drawn = sides.iter().filter(|side| side.is_some()).count();
-    let all_thin = drawn == 4 && sides.iter().all(|side| side.as_deref() == Some("thin"));
-    (drawn > 0, drawn > 0 && !all_thin)
+        .any(|s| s.as_deref().is_some_and(|v| v != "thin"));
+    (borders, non_thin)
 }
 
 pub(super) fn parse_styles(xml: &str) -> StyleTable {
@@ -176,7 +184,7 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
     let fills: Vec<(FillColor, bool)> = elements(xml, "fill")
         .map(|tag| fill_facts(tag.body))
         .collect();
-    let borders: Vec<(bool, bool)> = elements(xml, "border")
+    let borders: Vec<(CellBorders, bool)> = elements(xml, "border")
         .map(|tag| border_facts(tag.body))
         .collect();
     let Some(cell_xfs) = elements(xml, "cellXfs").next() else {
@@ -195,6 +203,7 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 bold: false,
                 italic: false,
                 underline: false,
+                strikethrough: false,
                 size: None,
                 color: None,
                 approximated: false,
@@ -203,10 +212,10 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
             .get(index(&xf, "fillId"))
             .copied()
             .unwrap_or((FillColor::None, false));
-        let (border, border_approximated) = borders
+        let (borders, border_approximated) = borders
             .get(index(&xf, "borderId"))
             .copied()
-            .unwrap_or((false, false));
+            .unwrap_or((CellBorders::NONE, false));
         let number_id = attr(xf.attrs, "numFmtId")
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0);
@@ -239,9 +248,10 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 bold: font.bold,
                 italic: font.italic,
                 underline: font.underline,
+                strikethrough: font.strikethrough,
                 number_format: number.format,
                 decimal_places: number.decimals,
-                border,
+                borders,
                 fill,
                 font_size: font.size,
                 text_color: font.color,

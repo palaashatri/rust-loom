@@ -10,6 +10,66 @@ use std::sync::Arc;
 use crate::style::FillColor;
 use crate::CellRef;
 
+/// Z-order arrangement operations for worksheet objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZOrderAction {
+    /// Move the selected object one step closer to the front.
+    BringForward,
+    /// Move the selected object one step closer to the back.
+    SendBackward,
+    /// Move the selected object to the very front (end of `objects`).
+    BringToFront,
+    /// Move the selected object to the very back (index 0 of `objects`).
+    SendToBack,
+}
+
+/// Reorder `objects[index]` according to `action`.
+///
+/// Returns `Some(new_index)` when the list order changed, or `None` when
+/// `index` is out of bounds or the object is already at the target boundary.
+pub fn reorder_objects(
+    objects: &mut Vec<SheetObject>,
+    index: usize,
+    action: ZOrderAction,
+) -> Option<usize> {
+    let len = objects.len();
+    if index >= len {
+        return None;
+    }
+    match action {
+        ZOrderAction::BringForward => {
+            if index + 1 >= len {
+                return None;
+            }
+            objects.swap(index, index + 1);
+            Some(index + 1)
+        }
+        ZOrderAction::SendBackward => {
+            if index == 0 {
+                return None;
+            }
+            objects.swap(index, index - 1);
+            Some(index - 1)
+        }
+        ZOrderAction::BringToFront => {
+            if index + 1 >= len {
+                return None;
+            }
+            let obj = objects.remove(index);
+            objects.push(obj);
+            Some(len - 1)
+        }
+        ZOrderAction::SendToBack => {
+            if index == 0 {
+                return None;
+            }
+            let obj = objects.remove(index);
+            objects.insert(0, obj);
+            Some(0)
+        }
+    }
+}
+
 /// The two non-cell object kinds currently supported by Sheets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SheetObjectKind {
@@ -175,5 +235,71 @@ mod tests {
         );
         assert!(shape.after_deleted_row(3).is_none());
         assert!(shape.after_deleted_col(4).is_none());
+    }
+
+    #[test]
+    fn reorder_objects_handles_all_z_order_actions_and_boundaries() {
+        let a = SheetObject::shape(CellRef { row: 0, col: 0 }, "A");
+        let b = SheetObject::shape(CellRef { row: 1, col: 0 }, "B");
+        let c = SheetObject::shape(CellRef { row: 2, col: 0 }, "C");
+        let mut objects = vec![a, b, c];
+
+        assert_eq!(
+            reorder_objects(&mut objects, 0, ZOrderAction::BringForward),
+            Some(1)
+        );
+        assert_eq!(
+            objects.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            ["B", "A", "C"]
+        );
+
+        assert_eq!(
+            reorder_objects(&mut objects, 1, ZOrderAction::BringToFront),
+            Some(2)
+        );
+        assert_eq!(
+            objects.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            ["B", "C", "A"]
+        );
+
+        assert_eq!(
+            reorder_objects(&mut objects, 2, ZOrderAction::BringForward),
+            None
+        );
+        assert_eq!(
+            reorder_objects(&mut objects, 2, ZOrderAction::BringToFront),
+            None
+        );
+
+        assert_eq!(
+            reorder_objects(&mut objects, 2, ZOrderAction::SendBackward),
+            Some(1)
+        );
+        assert_eq!(
+            objects.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            ["B", "A", "C"]
+        );
+
+        assert_eq!(
+            reorder_objects(&mut objects, 2, ZOrderAction::SendToBack),
+            Some(0)
+        );
+        assert_eq!(
+            objects.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            ["C", "B", "A"]
+        );
+
+        assert_eq!(
+            reorder_objects(&mut objects, 0, ZOrderAction::SendBackward),
+            None
+        );
+        assert_eq!(
+            reorder_objects(&mut objects, 0, ZOrderAction::SendToBack),
+            None
+        );
+        assert_eq!(
+            reorder_objects(&mut objects, 99, ZOrderAction::BringForward),
+            None
+        );
     }
 }

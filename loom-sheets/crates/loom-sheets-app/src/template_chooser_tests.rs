@@ -76,14 +76,15 @@ fn keyboard_selection_scrolls_to_the_selected_template_in_all_templates() {
     app.set_template_category(0);
     app.set_template_chooser_open(true);
 
-    for (label, scale, expected_scroll) in [("1.0", 1.0, 7), ("1.25", 1.25, 6), ("1.5", 1.5, 5)] {
+    for (label, scale, expected_scroll) in [("1.0", 1.0, 14), ("1.25", 1.25, 13), ("1.5", 1.5, 12)]
+    {
         app.set_template_selected(0);
         app.set_template_scroll_position(0);
         app.set_template_text_scale(scale);
-        for _ in 0..10 {
+        for _ in 0..26 {
             press(&app, slint::platform::Key::RightArrow);
         }
-        assert_eq!(app.get_template_selected(), 2);
+        assert_eq!(app.get_template_selected(), 26);
         assert_eq!(app.get_template_scroll_position(), expected_scroll);
 
         let image = snapshot_component(&app, 1024.0, 720.0, 1.0)
@@ -217,5 +218,214 @@ fn opening_the_chooser_from_the_menu_takes_keyboard_focus_from_the_grid() {
         app.get_template_selected(),
         before,
         "Right must move the chooser selection, not the grid cursor behind it"
+    );
+}
+
+#[test]
+fn expanded_catalog_templates_have_working_formulas_formats_and_light_previews() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_template_chooser_open(true);
+
+    // Check every category renders its cards with light previews (not blank/black).
+    for (category, expected_titles) in [
+        (
+            3,
+            &[
+                "Loan Amortization",
+                "Retirement Planner",
+                "Debt Payoff",
+                "Tax Summary",
+            ][..],
+        ),
+        (
+            4,
+            &[
+                "Travel Itinerary",
+                "Habit & Workout Log",
+                "Event Budget",
+                "Meal Planner",
+            ][..],
+        ),
+        (
+            5,
+            &[
+                "Profit & Loss",
+                "Employee Timesheet",
+                "Inventory Tracker",
+                "Project Schedule",
+            ][..],
+        ),
+        (
+            6,
+            &[
+                "Gradebook",
+                "Attendance Tracker",
+                "GPA Calculator",
+                "Lab Data & Chart",
+            ][..],
+        ),
+    ] {
+        app.set_template_category(category);
+        let _image =
+            snapshot_component(&app, 1280.0, 720.0, 1.0).expect("render category template cards");
+        for title in expected_titles {
+            let cards: Vec<_> =
+                i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, title)
+                    .filter(|card| card.size().height >= 96.0)
+                    .collect();
+            assert!(
+                !cards.is_empty(),
+                "template card {title:?} must be visible in category {category}"
+            );
+        }
+    }
+
+    // Verify all 16 catalog sheets (11..=26) evaluate with zero formula errors and
+    // expected formula results and number formats.
+    let probes = [
+        (
+            11,
+            "Loan Amortization",
+            "B6",
+            "1419.47",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            12,
+            "Retirement Planner",
+            "B7",
+            "33",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            13,
+            "Debt Payoff",
+            "B6",
+            "41100",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            14,
+            "Tax Summary",
+            "B19",
+            // B12 excludes the pre-tax 401(k) amount already absent from W-2
+            // box 1 wages, so the corrected estimate leaves a balance due.
+            "Owed",
+            loom_sheets_core::NumberFormat::General,
+        ),
+        (
+            15,
+            "Travel Itinerary",
+            "E11",
+            "1795",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            16,
+            "Habit & Workout Log",
+            "B11",
+            "5",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            17,
+            "Event Budget",
+            "D12",
+            "4330",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            18,
+            "Meal Planner",
+            "E9",
+            "74.65",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            19,
+            "Profit & Loss",
+            "F11",
+            "96900",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            20,
+            "Employee Timesheet",
+            "E11",
+            "1980",
+            loom_sheets_core::NumberFormat::Currency,
+        ),
+        (
+            21,
+            "Inventory Tracker",
+            "C8",
+            "2",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            22,
+            "Project Schedule",
+            "C8",
+            "2",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            23,
+            "Gradebook",
+            "E11",
+            "2",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            24,
+            "Attendance Tracker",
+            "G9",
+            "3",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+        (
+            25,
+            "GPA Calculator",
+            "D9",
+            "Honors",
+            loom_sheets_core::NumberFormat::General,
+        ),
+        (
+            26,
+            "Lab Data & Chart",
+            "D9",
+            "20",
+            loom_sheets_core::NumberFormat::Number,
+        ),
+    ];
+
+    for (idx, expected_name, probe_a1, expected_prefix, expected_fmt) in probes {
+        let sheet = crate::template_sheet(idx);
+        assert_eq!(sheet.name, expected_name, "template {idx} name");
+        let vals = loom_sheets_core::evaluate(&sheet);
+        for (cell, val) in &vals {
+            assert!(
+                !matches!(val, loom_sheets_core::Value::Error(_)),
+                "template {idx} ({expected_name}) cell {cell:?} evaluated to error: {val:?}"
+            );
+        }
+        let cell = CellRef::parse(probe_a1).unwrap();
+        let display = vals.get(&cell).map(|v| v.display()).unwrap_or_default();
+        assert!(
+            display.starts_with(expected_prefix),
+            "template {idx} ({expected_name}) {probe_a1}: expected prefix {expected_prefix:?}, got {display:?}"
+        );
+        assert_eq!(
+            sheet.cell_style(cell).number_format,
+            expected_fmt,
+            "template {idx} ({expected_name}) {probe_a1} format"
+        );
+    }
+
+    let lab = crate::template_sheet(26);
+    assert!(
+        lab.chart.is_some(),
+        "Lab Data & Chart template must include a chart"
     );
 }

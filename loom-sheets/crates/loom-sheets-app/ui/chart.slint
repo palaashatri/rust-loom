@@ -1,6 +1,8 @@
 import { LoomIconButton, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { Doc } from "doc_palette.slint";
+import { SheetChartConfig } from "chart_inspector.slint";
+import { SheetChartPieLegend, SheetChartLegendBar } from "chart_legend.slint";
 
 export component SheetChart inherits Rectangle {
     in property <string> title: "Chart";
@@ -224,6 +226,11 @@ export component SheetChart inherits Rectangle {
             color: Theme.palette().paper-ink;
             font-size: Theme.tokens.typography.caption * root.text-scale;
         }
+        if SheetChartConfig.chart-exists && (SheetChartConfig.show-legend || SheetChartConfig.x-axis-label != "" || SheetChartConfig.y-axis-label != "") : SheetChartLegendBar {
+            series-label: root.series-label;
+            kind: root.kind;
+            text-scale: root.text-scale;
+        }
 
         // Plot Area
         Rectangle {
@@ -370,33 +377,13 @@ export component SheetChart inherits Rectangle {
                     }
                 }
 
-                Flickable {
+                if SheetChartConfig.show-legend : SheetChartPieLegend {
                     horizontal-stretch: 1;
                     height: parent.height;
-                    viewport-height: pie-legend.preferred-height;
-
-                    pie-legend := VerticalLayout {
-                        spacing: 2px;
-
-                        for idx in root.categories.length : HorizontalLayout {
-                            spacing: 6px;
-                            Rectangle {
-                                y: 4px;
-                                width: 8px;
-                                height: 8px;
-                                border-radius: 2px;
-                                background: Doc.accent;
-                                opacity: idx < root.pie-opacities.length ? root.pie-opacities[idx] : 1.0;
-                            }
-                            Text {
-                                text: (idx < root.categories.length ? root.categories[idx] : "") + " — " + (idx < root.values-display.length ? root.values-display[idx] : "");
-                                font-size: Theme.tokens.typography.micro * root.text-scale;
-                                color: Theme.palette().paper-ink;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                    }
+                    categories: root.categories;
+                    values-display: root.values-display;
+                    pie-opacities: root.pie-opacities;
+                    text-scale: root.text-scale;
                 }
             }
 

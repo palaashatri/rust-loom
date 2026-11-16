@@ -61,6 +61,24 @@ pub(crate) fn register_cell_edit_action(
             }
             crate::object_actions::cancel_active_gesture(&app, &state);
             if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
+                let validation_err = {
+                    let current = state.current.borrow();
+                    let vals = evaluate_current(&state);
+                    current
+                        .validate_cell_input(cell, draft.as_str(), &vals)
+                        .err()
+                };
+                let dt = app.global::<crate::DataToolsState>();
+                if let Some(msg) = validation_err {
+                    let feedback = format!("Validation failed for {}: {msg}", cell.to_a1());
+                    dt.set_val_feedback(SharedString::from(feedback.clone()));
+                    dt.set_val_feedback_error(true);
+                    app.set_formula_feedback(SharedString::from(feedback.clone()));
+                    app.set_status_left(SharedString::from(feedback));
+                    return;
+                }
+                dt.set_val_feedback_error(false);
+                dt.set_val_feedback(SharedString::default());
                 state.tab_run.note_commit(cell);
                 let committed = {
                     let mut current = state.current.borrow_mut();

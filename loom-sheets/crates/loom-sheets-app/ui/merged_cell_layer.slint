@@ -1,0 +1,61 @@
+import { Theme } from "theme.slint";
+import { CellInk, CellRichFormat } from "grid_pointer.slint";
+
+export component MergedCellLayer inherits Rectangle {
+    in property <float> zoom-factor: 1.0;
+    in property <bool> editing: false;
+    in property <string> edit-text: "";
+
+    property <color> readable-line: Theme.active-theme == "high-contrast"
+        ? Theme.palette().paper
+        : Theme.palette().paper-line;
+
+    for m in CellRichFormat.merged-views : Rectangle {
+        x: m.x;
+        y: m.y;
+        width: m.width;
+        height: m.height;
+        clip: true;
+        background: m.fill-idx == 0 ? #FECACA
+            : m.fill-idx == 1 ? #FED7AA
+            : m.fill-idx == 2 ? #FEF08A
+            : m.fill-idx == 3 ? #BBF7D0
+            : m.fill-idx == 4 ? #BFDBFE
+            : m.fill-idx == 5 ? #DDD6FE
+            : m.fill-idx == 6 ? #E5E7EB
+            : m.in-selection && !m.is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : root.readable-line)
+            : Theme.palette().paper;
+        border-width: m.is-active ? 2px : 1px;
+        border-color: m.is-active ? Theme.palette().accent : Theme.palette().paper-line;
+
+        if m.border-top : Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.palette().ink; }
+        if m.border-bottom : Rectangle { x: 0px; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.palette().ink; }
+        if m.border-left : Rectangle { x: 0px; y: 0px; width: 2px; height: parent.height; background: Theme.palette().ink; }
+        if m.border-right : Rectangle { x: parent.width - 2px; y: 0px; width: 2px; height: parent.height; background: Theme.palette().ink; }
+
+        Text {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: (m.is-active && root.editing) ? root.edit-text : m.text;
+            font-family: Theme.document-font-family;
+            accessible-role: AccessibleRole.none;
+            font-size: m.font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
+            font-weight: m.bold ? 700 : 400;
+            font-italic: m.italic;
+            color: CellInk.paint(m.ink, Theme.palette().paper-ink);
+            wrap: m.wraps ? TextWrap.word-wrap : TextWrap.no-wrap;
+            horizontal-alignment: m.align == 1 ? TextHorizontalAlignment.center : (m.align == 2 ? TextHorizontalAlignment.right : TextHorizontalAlignment.left);
+            vertical-alignment: m.wraps ? TextVerticalAlignment.top : TextVerticalAlignment.center;
+            overflow: TextOverflow.elide;
+        }
+        if m.underline : Rectangle {
+            x: 8px; y: parent.height - 3px; width: parent.width - 16px; height: 1px;
+            background: CellInk.paint(m.ink, Theme.palette().paper-ink);
+        }
+        if m.strikethrough : Rectangle {
+            x: 8px; y: parent.height / 2; width: parent.width - 16px; height: 1px;
+            background: CellInk.paint(m.ink, Theme.palette().paper-ink);
+        }
+    }
+}

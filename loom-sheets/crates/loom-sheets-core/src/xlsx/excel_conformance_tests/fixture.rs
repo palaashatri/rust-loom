@@ -149,7 +149,7 @@ fn sales() -> Sheet {
         style(&mut s, a1, |v| {
             v.bold = true;
             v.fill = FillColor::Gray;
-            v.border = true;
+            v.borders = crate::style::CellBorders::ALL;
         });
         s.set_cell_alignment(cell(a1), CellAlignment::Center);
     }
@@ -190,7 +190,7 @@ fn sales() -> Sheet {
         v.underline = true;
         v.font_size = Some(16);
         v.fill = FillColor::Yellow;
-        v.border = true;
+        v.borders = crate::style::CellBorders::ALL;
     });
     s.set_cell_alignment(cell("A2"), CellAlignment::Left);
     s.set_cell_alignment(cell("A3"), CellAlignment::Center);
@@ -226,6 +226,7 @@ fn sales() -> Sheet {
         val_col: 3,
         start_row: 1,
         end_row: Some(3),
+        ..Default::default()
     });
     let mut shape = SheetObject::shape(cell("I22"), "Quarterly target");
     shape.fill = FillColor::Yellow;

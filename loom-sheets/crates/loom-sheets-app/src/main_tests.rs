@@ -20,6 +20,12 @@ mod grid_accessibility_tests;
 #[path = "main_tests/ink_tests.rs"]
 mod ink_tests;
 
+#[path = "main_tests/rich_format_tests.rs"]
+mod rich_format_tests;
+
+#[path = "main_tests/pivot_builder_tests.rs"]
+mod pivot_builder_tests;
+
 #[path = "main_tests/paste_format_tests.rs"]
 mod paste_format_tests;
 

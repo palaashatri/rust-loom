@@ -640,10 +640,11 @@ fn focused_grid_rejects_non_printable_edit_keys() {
         moves_ref.set((row_delta, col_delta));
     });
 
+    // F1 is deliberately absent: it is a global shortcut that opens the
+    // command palette, which the next block covers.
     for text in [
         slint::platform::Key::Backspace.into(),
         slint::platform::Key::Delete.into(),
-        slint::platform::Key::F1.into(),
         slint::platform::Key::Insert.into(),
     ] {
         app.invoke_focus_grid();
@@ -660,6 +661,25 @@ fn focused_grid_rejects_non_printable_edit_keys() {
         });
     assert_eq!(begins.get(), 0);
     assert_eq!(moves.get(), (0, -1));
+
+    // F1 opens the command palette, so the grid sits behind an overlay that
+    // owns the keyboard: focusing it again must not let it navigate.
+    let navigated = moves.get();
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::F1.into(),
+        });
+    app.invoke_focus_grid();
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Backtab.into(),
+        });
+    assert_eq!(
+        moves.get(),
+        navigated,
+        "the grid must stay behind the palette"
+    );
+    assert_eq!(begins.get(), 0);
 }
 
 #[test]

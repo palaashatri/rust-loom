@@ -5,6 +5,12 @@ import {
     ChartingPreview, BudgetPreview, MonthlyBudgetPreview, MonthlyGoalPreview,
     PortfolioPreview, NetWorthPreview, InvoicePreview,
 } from "template_previews.slint";
+import {
+    LoanAmortizationPreview, RetirementPlannerPreview, DebtPayoffPreview, TaxSummaryPreview,
+    TravelItineraryPreview, HabitWorkoutPreview, EventBudgetPreview, MealPlannerPreview,
+    ProfitLossPreview, EmployeeTimesheetPreview, InventoryTrackerPreview, ProjectSchedulePreview,
+    GradebookPreview, AttendanceTrackerPreview, GpaCalculatorPreview, LabDataChartPreview,
+} from "template_catalog_previews.slint";
 
 export component SheetsTemplateCard inherits Rectangle {
     in property <string> title: "";
@@ -75,7 +81,15 @@ export component SheetsTemplateOption inherits SheetsTemplateCard {
     in property <int> index: 0;
     in property <int> current: 0;
 
-    title: ["Blank", "Monthly Budget", "Invoice & Expenses", "Checklist", "Table and Chart", "Expense Summary", "Sales Chart", "Budget", "Monthly Goal", "Portfolio", "Net Worth"][root.index];
+    title: [
+        "Blank", "Monthly Budget", "Invoice & Expenses", "Checklist",
+        "Table and Chart", "Expense Summary", "Sales Chart", "Budget",
+        "Monthly Goal", "Portfolio", "Net Worth",
+        "Loan Amortization", "Retirement Planner", "Debt Payoff", "Tax Summary",
+        "Travel Itinerary", "Habit & Workout Log", "Event Budget", "Meal Planner",
+        "Profit & Loss", "Employee Timesheet", "Inventory Tracker", "Project Schedule",
+        "Gradebook", "Attendance Tracker", "GPA Calculator", "Lab Data & Chart",
+    ][root.index];
     selected: root.current == root.index;
 
     if root.index == 0 : BlankPreview {}
@@ -89,6 +103,51 @@ export component SheetsTemplateOption inherits SheetsTemplateCard {
     if root.index == 8 : MonthlyGoalPreview {}
     if root.index == 9 : PortfolioPreview {}
     if root.index == 10 : NetWorthPreview {}
+    if root.index == 11 : LoanAmortizationPreview {}
+    if root.index == 12 : RetirementPlannerPreview {}
+    if root.index == 13 : DebtPayoffPreview {}
+    if root.index == 14 : TaxSummaryPreview {}
+    if root.index == 15 : TravelItineraryPreview {}
+    if root.index == 16 : HabitWorkoutPreview {}
+    if root.index == 17 : EventBudgetPreview {}
+    if root.index == 18 : MealPlannerPreview {}
+    if root.index == 19 : ProfitLossPreview {}
+    if root.index == 20 : EmployeeTimesheetPreview {}
+    if root.index == 21 : InventoryTrackerPreview {}
+    if root.index == 22 : ProjectSchedulePreview {}
+    if root.index == 23 : GradebookPreview {}
+    if root.index == 24 : AttendanceTrackerPreview {}
+    if root.index == 25 : GpaCalculatorPreview {}
+    if root.index == 26 : LabDataChartPreview {}
+}
+
+export component TemplateCardRow inherits Rectangle {
+    in property <[int]> ids: [];
+    in property <int> current: 0;
+    in property <float> text-scale: 1.0;
+    callback select(int);
+    height: max(160px, 110px + 44px * root.text-scale);
+
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.lg;
+        alignment: start;
+        for id in root.ids : SheetsTemplateOption {
+            index: id;
+            current: root.current;
+            text-scale: root.text-scale;
+            clicked => { root.select(id); }
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.lg;
+        alignment: end;
+        for slot in root.ids.length : SheetsTemplateOption {
+            index: root.ids[root.ids.length - 1 - slot];
+            current: root.current;
+            text-scale: root.text-scale;
+            clicked => { root.select(root.ids[root.ids.length - 1 - slot]); }
+        }
+    }
 }
 
 export component TemplateChooserFooter inherits Rectangle {

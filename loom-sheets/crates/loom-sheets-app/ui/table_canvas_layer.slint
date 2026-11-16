@@ -1,0 +1,137 @@
+import { Theme } from "theme.slint";
+
+export struct TableBandView {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    style-idx: int,
+}
+
+export struct SheetTableView {
+    id: string,
+    name: string,
+    range-label: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    header-row-height: length,
+    header-col-width: length,
+    style-idx: int,
+    show-title: bool,
+    alternating-rows: bool,
+    header-rows: int,
+    header-cols: int,
+    active: bool,
+}
+
+export global SheetTableState {
+    in-out property <[SheetTableView]> tables: [];
+    in-out property <[TableBandView]> alternating-bands: [];
+    in-out property <int> active-index: -1;
+    in-out property <string> active-name: "";
+    in-out property <string> active-range: "";
+    in-out property <int> active-style: 0;
+    in-out property <bool> active-show-title: true;
+    in-out property <bool> active-alternating-rows: true;
+    in-out property <bool> has-active-table: false;
+
+    callback select-table(string);
+    callback insert-table();
+    callback rename-active-table(string);
+    callback set-active-table-style(int);
+    callback toggle-active-table-title();
+    callback toggle-active-table-alternating();
+    callback delete-active-table();
+}
+
+export component TableCanvasLayer inherits Rectangle {
+    in property <float> zoom-factor: 1.0;
+
+    pure function preset-accent(style-idx: int) -> color {
+        style-idx == 1 ? #0F766E
+            : style-idx == 2 ? #1D4ED8
+            : style-idx == 3 ? #C2410C
+            : style-idx == 4 ? #374151
+            : #334155
+    }
+
+    pure function preset-band(style-idx: int) -> color {
+        style-idx == 1 ? #0F766E12
+            : style-idx == 2 ? #1D4ED812
+            : style-idx == 3 ? #C2410C12
+            : style-idx == 4 ? #37415112
+            : #33415510
+    }
+
+    pure function preset-header(style-idx: int) -> color {
+        style-idx == 1 ? #0F766E24
+            : style-idx == 2 ? #1D4ED824
+            : style-idx == 3 ? #C2410C24
+            : style-idx == 4 ? #37415124
+            : #3341551F
+    }
+
+    // Alternating row bands: translucent and touch-transparent so cells remain interactive.
+    for band in SheetTableState.alternating-bands : Rectangle {
+        x: band.x;
+        y: band.y;
+        width: band.width;
+        height: band.height;
+        background: root.preset-band(band.style-idx);
+    }
+
+    // Table frames, header bands, and clickable title pills.
+    for t[idx] in SheetTableState.tables : Rectangle {
+        x: t.x;
+        y: t.y;
+        width: t.width;
+        height: t.height;
+        border-width: t.active ? 2px : 1px;
+        border-color: t.active ? root.preset-accent(t.style-idx) : root.preset-accent(t.style-idx).with-alpha(0.55);
+
+        if t.header-rows > 0 && t.header-row-height > 0px : Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: min(parent.height, t.header-row-height);
+            background: root.preset-header(t.style-idx);
+        }
+
+        if t.header-cols > 0 && t.header-col-width > 0px : Rectangle {
+            x: 0px;
+            y: 0px;
+            width: min(parent.width, t.header-col-width);
+            height: parent.height;
+            background: root.preset-header(t.style-idx);
+        }
+
+        if t.show-title : Rectangle {
+            x: 0px;
+            y: -21px * root.zoom-factor;
+            width: min(parent.width, max(96px * root.zoom-factor, title-text.preferred-width + 18px * root.zoom-factor));
+            height: 20px * root.zoom-factor;
+            border-radius: 4px;
+            background: t.active ? root.preset-accent(t.style-idx) : root.preset-accent(t.style-idx).with-alpha(0.82);
+
+            title-text := Text {
+                x: 8px * root.zoom-factor;
+                width: parent.width - 16px * root.zoom-factor;
+                height: parent.height;
+                text: t.name;
+                font-size: 11px * root.zoom-factor * max(1.0, Theme.text-scale);
+                font-weight: 700;
+                color: #FFFFFF;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: AccessibleRole.button;
+                accessible-label: "Table " + t.name + " (" + t.range-label + ")";
+            }
+
+            TouchArea {
+                clicked => { SheetTableState.select-table(t.id); }
+            }
+        }
+    }
+}

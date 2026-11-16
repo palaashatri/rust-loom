@@ -202,7 +202,7 @@ pub fn from_csv(name: &str, csv: &str) -> Sheet {
                 row: row as u32,
                 col: col as u32,
             };
-            sheet.cells.insert(cr, Cell { raw: f.clone() });
+            sheet.cells.insert(cr, Cell::new(f.clone()));
         }
     }
     sheet
@@ -284,9 +284,7 @@ pub fn from_csv_with_dialect(name: &str, csv: &str, delimiter: char) -> Sheet {
                     row: row as u32,
                     col: col as u32,
                 },
-                Cell {
-                    raw: (*raw).clone(),
-                },
+                Cell::new((*raw).clone()),
             );
         }
     }

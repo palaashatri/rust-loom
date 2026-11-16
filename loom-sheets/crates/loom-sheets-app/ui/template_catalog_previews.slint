@@ -1,0 +1,300 @@
+// Original miniature preview cards for the 16 expanded Loom Sheets templates.
+
+export component LoanAmortizationPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 16px;
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #dcfce7; }
+        Rectangle { width: 44px; border-radius: 2px; background: #10b981; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #16a34a; }
+        for idx in 4 : Rectangle {
+            height: 12px;
+            background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff;
+            HorizontalLayout {
+                spacing: 0px;
+                Rectangle { width: 22px; border-width: 0.5px; border-color: #e5e7eb; }
+                Rectangle { width: 38px; border-width: 0.5px; border-color: #e5e7eb; }
+                Rectangle { width: 38px; border-width: 0.5px; border-color: #e5e7eb; }
+                Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e5e7eb; }
+            }
+        }
+    }
+}
+
+export component RetirementPlannerPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 40px;
+        spacing: 5px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 14px; height: 10px; border-radius: 2px; background: #93c5fd; }
+        Rectangle { width: 14px; height: 16px; border-radius: 2px; background: #60a5fa; }
+        Rectangle { width: 14px; height: 24px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 14px; height: 34px; border-radius: 2px; background: #2563eb; }
+        Rectangle { width: 14px; height: 40px; border-radius: 2px; background: #10b981; }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #dbeafe; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+export component DebtPayoffPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    Rectangle { height: 12px; background: #7c3aed; border-radius: 2px; }
+    for row in [96px, 74px, 52px, 32px] : HorizontalLayout {
+        height: 11px;
+        spacing: 4px;
+        cross-axis-alignment: center;
+        Rectangle { width: 28px; height: 7px; border-radius: 2px; background: #e2e8f0; }
+        Rectangle { width: row; height: 7px; border-radius: 2px; background: #a78bfa; }
+    }
+    Rectangle { height: 12px; background: #f1f5f9; }
+}
+
+export component TaxSummaryPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 14px;
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #dcfce7; }
+        Rectangle { width: 42px; border-radius: 2px; background: #bbf7d0; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 11px; background: #16a34a; }
+        Rectangle { height: 12px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 12px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 12px; background: #dcfce7; border-width: 0.5px; border-color: #bbf7d0; }
+    }
+    Rectangle { height: 14px; border-radius: 2px; background: #f1f5f9; }
+}
+
+export component TravelItineraryPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 16px;
+        spacing: 4px;
+        Rectangle { width: 42px; border-radius: 2px; background: #2563eb; }
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #dbeafe; }
+    }
+    for idx in 4 : HorizontalLayout {
+        height: 14px;
+        spacing: 3px;
+        Rectangle { width: 20px; border-radius: 2px; background: #bfdbfe; }
+        Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e2e8f0; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; }
+        Rectangle { width: 26px; border-width: 0.5px; border-color: #e2e8f0; background: #f0fdf4; }
+    }
+}
+
+export component HabitWorkoutPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    Rectangle { height: 12px; background: #ea580c; border-radius: 2px; }
+    for idx in 4 : HorizontalLayout {
+        height: 12px;
+        spacing: 2px;
+        Rectangle { width: 22px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { horizontal-stretch: 1; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { width: 14px; border-radius: 2px; background: idx == 2 ? #fed7aa : #10b981; }
+    }
+    Rectangle { height: 12px; background: #ffedd5; }
+}
+
+export component EventBudgetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 22px;
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #ede9fe; }
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #dcfce7; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #7c3aed; }
+        Rectangle { height: 13px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 13px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 13px; background: #f1f5f9; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+}
+
+export component MealPlannerPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    Rectangle { height: 12px; background: #16a34a; border-radius: 2px; }
+    for idx in 5 : HorizontalLayout {
+        height: 11px;
+        spacing: 2px;
+        Rectangle { width: 22px; background: #dcfce7; border-radius: 1px; }
+        Rectangle { horizontal-stretch: 1; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { width: 24px; background: #f1f5f9; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+}
+
+export component ProfitLossPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    Rectangle { height: 12px; background: #1d4ed8; }
+    Rectangle { height: 11px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+    Rectangle { height: 11px; background: #dbeafe; }
+    Rectangle { height: 11px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+    Rectangle { height: 11px; background: #fee2e2; }
+    Rectangle { height: 13px; background: #dcfce7; }
+}
+
+export component EmployeeTimesheetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 14px;
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #f1f5f9; }
+        Rectangle { width: 34px; border-radius: 2px; background: #dcfce7; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 11px; background: #16a34a; }
+        for idx in 4 : HorizontalLayout {
+            height: 12px;
+            spacing: 0px;
+            Rectangle { width: 34px; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { width: 30px; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { horizontal-stretch: 1; background: #f0fdf4; border-width: 0.5px; border-color: #e5e7eb; }
+        }
+    }
+}
+
+export component InventoryTrackerPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    Rectangle { height: 12px; background: #ca8a04; border-radius: 2px; }
+    for idx in 4 : HorizontalLayout {
+        height: 14px;
+        spacing: 2px;
+        Rectangle { width: 24px; background: #fef9c3; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { horizontal-stretch: 1; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { width: 18px; border-radius: 2px; background: (idx == 1 || idx == 3) ? #fca5a5 : #86efac; }
+    }
+    Rectangle { height: 11px; background: #f1f5f9; }
+}
+
+export component ProjectSchedulePreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    Rectangle { height: 12px; background: #2563eb; border-radius: 2px; }
+    for bar in [
+        { offset: 0px, len: 40px, color: #10b981 },
+        { offset: 18px, len: 48px, color: #10b981 },
+        { offset: 36px, len: 56px, color: #3b82f6 },
+        { offset: 58px, len: 42px, color: #f59e0b },
+        { offset: 82px, len: 36px, color: #94a3b8 },
+    ] : Rectangle {
+        height: 11px;
+        background: #f8fafc;
+        Rectangle {
+            x: bar.offset;
+            y: 2px;
+            width: bar.len;
+            height: 7px;
+            border-radius: 2px;
+            background: bar.color;
+        }
+    }
+}
+
+export component GradebookPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    Rectangle { height: 12px; background: #7c3aed; border-radius: 2px; }
+    for idx in 4 : HorizontalLayout {
+        height: 13px;
+        spacing: 2px;
+        Rectangle { width: 38px; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { horizontal-stretch: 1; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { width: 16px; border-radius: 2px; background: idx == 3 ? #fde68a : #bbf7d0; }
+    }
+    Rectangle { height: 13px; background: #ede9fe; }
+}
+
+export component AttendanceTrackerPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    Rectangle { height: 12px; background: #16a34a; border-radius: 2px; }
+    for idx in 4 : HorizontalLayout {
+        height: 13px;
+        spacing: 2px;
+        Rectangle { width: 34px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        for d in 5 : Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 2px;
+            background: (idx == 1 && d == 1) || (idx == 3 && (d == 2 || d == 4)) ? #fecaca : #bbf7d0;
+        }
+    }
+    Rectangle { height: 12px; background: #dcfce7; }
+}
+
+export component GpaCalculatorPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    Rectangle { height: 12px; background: #2563eb; border-radius: 2px; }
+    for idx in 3 : HorizontalLayout {
+        height: 13px;
+        spacing: 0px;
+        Rectangle { width: 52px; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { width: 24px; background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { horizontal-stretch: 1; background: #eff6ff; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+    HorizontalLayout {
+        height: 18px;
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #dbeafe; }
+        Rectangle { width: 38px; border-radius: 2px; background: #10b981; }
+    }
+}
+
+export component LabDataChartPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    Rectangle {
+        height: 42px;
+        border-radius: 2px;
+        background: #f8fafc;
+        border-width: 0.5px;
+        border-color: #cbd5e1;
+        for pt in [
+            { x: 10px, y: 32px },
+            { x: 30px, y: 26px },
+            { x: 52px, y: 20px },
+            { x: 74px, y: 14px },
+            { x: 96px, y: 9px },
+            { x: 116px, y: 4px },
+        ] : Rectangle {
+            x: pt.x;
+            y: pt.y;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: #2563eb;
+        }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #dbeafe; }
+        Rectangle { height: 12px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 12px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+}

@@ -8,7 +8,7 @@ use loom_desktop::{
 };
 use loom_sheets_core::{
     compute_pivot, evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv,
-    CalcError, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
+    CalcError, Cell, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
     PivotAggregation, Sheet, SheetModel, SheetObject, Value,
 };
 
@@ -463,8 +463,8 @@ fn test_paste_single_into_range_with_undo() {
     let mut redo = state.redo_stack.borrow_mut();
 
     let target_sel = GridSelection::new(CellRef { row: 10, col: 0 }, CellRef { row: 11, col: 1 });
-    let data = vec![vec!["$99.00".to_string()]];
-    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+    let data = vec![vec![Cell::new("$99.00")]];
+    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data, false);
     assert_eq!(pasted, 4);
     assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), Some("$99.00"));
     assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), Some("$99.00"));
@@ -485,10 +485,10 @@ fn test_paste_matrix_with_undo_redo() {
 
     let target_sel = GridSelection::new(CellRef { row: 5, col: 5 }, CellRef { row: 5, col: 5 });
     let data = vec![
-        vec!["Alpha".to_string(), "Beta".to_string()],
-        vec!["Gamma".to_string(), "Delta".to_string()],
+        vec![Cell::new("Alpha"), Cell::new("Beta")],
+        vec![Cell::new("Gamma"), Cell::new("Delta")],
     ];
-    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data, false);
     assert_eq!(pasted, 4);
     assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
     assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), Some("Beta"));
@@ -505,6 +505,37 @@ fn test_paste_matrix_with_undo_redo() {
     tx.apply(&mut sheet);
     assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
     assert_eq!(sheet.raw(CellRef { row: 6, col: 6 }), Some("Delta"));
+}
+
+#[test]
+fn test_values_only_paste_keeps_the_evaluated_text_type() {
+    let state = make_test_state();
+    let mut sheet = state.current.borrow_mut();
+    let mut undo = state.undo_stack.borrow_mut();
+    let mut redo = state.redo_stack.borrow_mut();
+
+    let cell = CellRef { row: 10, col: 0 };
+    let target_sel = GridSelection::new(cell, cell);
+    // Paste Values Only of `="00123"`: the evaluated value is text, and the
+    // paste must not turn it into the number 123.
+    let data = vec![vec![Cell::literal("00123")]];
+    let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data, true);
+    assert_eq!(pasted, 1);
+    assert_eq!(sheet.raw(cell), Some("00123"));
+    assert_eq!(
+        evaluate(&sheet).get(&cell),
+        Some(&Value::Text("00123".to_string())),
+        "Values Only must write the evaluated text, not the number"
+    );
+
+    // A normal paste of the same characters keeps raw input semantics.
+    let raw = vec![vec![Cell::new("00123")]];
+    paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &raw, false);
+    assert_eq!(
+        evaluate(&sheet).get(&cell),
+        Some(&Value::Number(123.0)),
+        "a normal paste still parses numbers"
+    );
 }
 
 #[test]
@@ -956,7 +987,11 @@ fn test_deep_audit_clipboard_and_range_operations() {
     let mut redo = Vec::new();
     let target_sel =
         GridSelection::new(CellRef::parse("C1").unwrap(), CellRef::parse("C1").unwrap());
-    let pasted_count = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &matrix);
+    let cells: Vec<Vec<Cell>> = matrix
+        .iter()
+        .map(|row| row.iter().map(Cell::new).collect())
+        .collect();
+    let pasted_count = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &cells, false);
     assert_eq!(pasted_count, 4);
     assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), Some("Alpha"));
     assert_eq!(sheet.raw(CellRef::parse("D1").unwrap()), Some("Beta"));
@@ -1285,11 +1320,11 @@ fn test_borders_fill_and_font_size_toggle_undo() {
     assert!(toggle_selection_borders(
         &mut sheet, &mut undo, &mut redo, range
     ));
-    assert!(sheet.cell_style(cell).border);
+    assert!(sheet.cell_style(cell).borders.all());
     assert!(toggle_selection_borders(
         &mut sheet, &mut undo, &mut redo, range
     ));
-    assert!(!sheet.cell_style(cell).border);
+    assert!(!sheet.cell_style(cell).borders.any());
     assert_eq!(undo.len(), 2);
 
     assert!(cycle_selection_fill(

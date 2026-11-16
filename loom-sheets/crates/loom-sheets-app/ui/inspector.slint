@@ -5,9 +5,13 @@ import {
 import { Theme } from "theme.slint";
 import { SheetFieldRow, SheetStepperRow, SheetFillRow, SheetTextColorRow, SheetChoiceRow, SheetHeading } from "inspector_rows.slint";
 import { SheetInspectorActions, SheetObjectGeometry, SheetObjectGeometryFields } from "object_inspector.slint";
+import { SheetChartConfig, SheetChartActions, SheetChartInspectorFields } from "chart_inspector.slint";
 export { SheetInspectorActions, SheetObjectGeometry } from "object_inspector.slint";
-import { CellInk } from "grid_pointer.slint";
+export { SheetChartConfig, SheetChartActions } from "chart_inspector.slint";
+import { CellInk, CellRichFormat } from "grid_pointer.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
+import { DataValidationSection } from "validation_inspector.slint";
+import { SheetTableInspectorSection } from "table_inspector.slint";
 
 export component SheetInspector inherits LoomPanel {
     in property <string> selection-range: "A1";
@@ -222,6 +226,8 @@ export component SheetInspector inherits LoomPanel {
                         increase => { root.add-table-col(); }
                         decrease => { root.delete-table-col(); }
                     }
+
+                    SheetTableInspectorSection {}
                 }
 
                 // Object geometry is shown while an object is selected and the
@@ -236,11 +242,14 @@ export component SheetInspector inherits LoomPanel {
                     height-label: SheetObjectGeometry.views[SheetObjectGeometry.selected].height-label;
                 }
 
+                if root.inspector-tab == 1 && SheetChartConfig.chart-exists && root.inspector-search == "" : SheetChartInspectorFields {}
+
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     SheetHeading { title: "Font Style"; }
                     if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
+                        alignment: start;
                         LoomIconButton {
                             icon: "bold";
                             label: "Toggle bold formatting (Cell inspector)";
@@ -265,10 +274,26 @@ export component SheetInspector inherits LoomPanel {
                             text-scale: Theme.text-scale;
                             clicked => { root.toggle-underline(); }
                         }
+                        LoomButton {
+                            label: "S";
+                            width: 32px;
+                            height: 32px;
+                            variant: CellRichFormat.selected-strikethrough ? "primary" : "secondary";
+                            accessible-label: "Toggle strikethrough formatting";
+                            clicked => { CellRichFormat.toggle-strikethrough(); }
+                        }
                     }
                     if Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         alignment: end;
+                        LoomButton {
+                            label: "S";
+                            width: 32px;
+                            height: 32px;
+                            variant: CellRichFormat.selected-strikethrough ? "primary" : "secondary";
+                            accessible-label: "Toggle strikethrough formatting";
+                            clicked => { CellRichFormat.toggle-strikethrough(); }
+                        }
                         LoomIconButton {
                             icon: "underline";
                             label: "Toggle underline formatting (Cell inspector)";
@@ -382,6 +407,99 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetHeading { title: "Alignment"; }
                     SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
+                    DataValidationSection { }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for preset in [
+                            { key: "all", label: "All" },
+                            { key: "outer", label: "Outer" },
+                            { key: "top", label: "Top" },
+                            { key: "bottom", label: "Bot" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for preset in [
+                            { key: "left", label: "Left" },
+                            { key: "right", label: "Right" },
+                            { key: "none", label: "None" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: end;
+                        for preset in [
+                            { key: "bottom", label: "Bot" },
+                            { key: "top", label: "Top" },
+                            { key: "outer", label: "Outer" },
+                            { key: "all", label: "All" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: end;
+                        for preset in [
+                            { key: "none", label: "None" },
+                            { key: "right", label: "Right" },
+                            { key: "left", label: "Left" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: start;
+                        LoomButton {
+                            label: "Merge";
+                            variant: CellRichFormat.selected-merged ? "primary" : "secondary";
+                            clicked => { CellRichFormat.merge-cells(); }
+                        }
+                        LoomButton {
+                            label: "Unmerge";
+                            variant: "secondary";
+                            clicked => { CellRichFormat.unmerge-cells(); }
+                        }
+                        LoomButton {
+                            label: "Rules…";
+                            variant: "secondary";
+                            clicked => { CellRichFormat.open-conditional-formatting(); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: end;
+                        LoomButton {
+                            label: "Rules…";
+                            variant: "secondary";
+                            clicked => { CellRichFormat.open-conditional-formatting(); }
+                        }
+                        LoomButton {
+                            label: "Unmerge";
+                            variant: "secondary";
+                            clicked => { CellRichFormat.unmerge-cells(); }
+                        }
+                        LoomButton {
+                            label: "Merge";
+                            variant: CellRichFormat.selected-merged ? "primary" : "secondary";
+                            clicked => { CellRichFormat.merge-cells(); }
+                        }
+                    }
                     SheetStepperRow {
                         label: "Row height";
                         field-label: "Selected row height";

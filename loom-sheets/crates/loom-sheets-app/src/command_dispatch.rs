@@ -22,6 +22,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
             .window()
             .dispatch_event(slint::platform::WindowEvent::CloseRequested),
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
+        "file.start_hub" | "sheets.start-hub" => crate::start_hub::open_hub(app),
         "file.new_template" | "sheets.new-template" => {
             app.set_template_chooser_open(true);
             app.invoke_focus_template_chooser();
@@ -42,12 +43,64 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "sheets.retry-recovery" => app.invoke_retry_recovery(),
         "file.export_csv" | "sheets.export-csv" => app.invoke_export_csv(),
         "file.export_xlsx" | "sheets.export-xlsx" => app.invoke_export_xlsx(),
+        "file.export_pdf" | "sheets.export-pdf" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_export_pdf();
+        }
+        "file.print" | "sheets.print-preview" => {
+            app.global::<crate::PrintPreviewState>()
+                .invoke_open_preview();
+        }
+        "arrange.bring_forward" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(0);
+        }
+        "arrange.send_backward" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(1);
+        }
+        "arrange.bring_to_front" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(2);
+        }
+        "arrange.send_to_back" => {
+            app.global::<crate::SheetInspectorActions>()
+                .invoke_arrange_object(3);
+        }
         "edit.undo" | "sheets.undo" => app.invoke_undo(),
         "edit.redo" | "sheets.redo" => app.invoke_redo(),
         "edit.cut" | "sheets.cut" => app.invoke_cut_selection(),
         "edit.copy" | "sheets.copy" => app.invoke_copy_selection(),
         "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
+        "edit.paste_values" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_paste_values_only(),
+        "edit.paste_formats" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_paste_formats_only(),
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
+        "edit.find" | "sheets.find" => crate::data_tools::open_find_replace(app, false),
+        "edit.replace" | "sheets.replace" => crate::data_tools::open_find_replace(app, true),
+        "data.toggle_filter" | "sheets.toggle-filter" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_toggle_auto_filter();
+        }
+        "data.filter_column" | "sheets.filter-column" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_open_filter_column();
+        }
+        "data.clear_filter" | "sheets.clear-filter" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_all_filters();
+        }
+        "data.named_ranges" | "sheets.named-ranges" => {
+            app.global::<crate::DataToolsState>()
+                .invoke_open_named_ranges();
+        }
+        "data.validation" | "sheets.validation" => {
+            app.global::<crate::DataToolsState>().set_val_expanded(true);
+            app.invoke_show_inspector_tab(1);
+        }
         "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
         "help.welcome" | "sheets.welcome" => crate::welcome_guide::open(app),
         "view.inspector" => app.invoke_toggle_inspector(),
@@ -60,6 +113,21 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.delete_row" => app.invoke_delete_row(),
         "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),
         "table.delete_col" => app.invoke_delete_col(),
+        "table.insert_table" => app.global::<crate::SheetTableState>().invoke_insert_table(),
+        "table.toggle_title" => app
+            .global::<crate::SheetTableState>()
+            .invoke_toggle_active_table_title(),
+        "table.toggle_alternating_rows" => app
+            .global::<crate::SheetTableState>()
+            .invoke_toggle_active_table_alternating(),
+        "table.cycle_style" => {
+            let ts = app.global::<crate::SheetTableState>();
+            let next = (ts.get_active_style() + 1) % 5;
+            ts.invoke_set_active_table_style(next);
+        }
+        "table.delete_table" => app
+            .global::<crate::SheetTableState>()
+            .invoke_delete_active_table(),
         "table.sort_asc" | "sheets.sort-asc" => app.invoke_sort_ascending(),
         "table.sort_desc" | "sheets.sort-desc" => app.invoke_sort_descending(),
         "table.freeze_header" | "sheets.freeze-header" => app.invoke_freeze_panes(),
@@ -80,6 +148,44 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.adjust_decimals_increase" => app.invoke_adjust_decimals(1),
         "table.adjust_decimals_decrease" => app.invoke_adjust_decimals(-1),
         "format.borders" | "sheets.borders" => app.invoke_toggle_borders(),
+        "format.borders_all" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("all".into()),
+        "format.borders_outer" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("outer".into()),
+        "format.borders_top" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("top".into()),
+        "format.borders_bottom" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("bottom".into()),
+        "format.borders_left" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("left".into()),
+        "format.borders_right" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("right".into()),
+        "format.borders_none" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_apply_border_preset("none".into()),
+        "format.strikethrough" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_toggle_strikethrough(),
+        "format.wrap_text" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_toggle_wrap_text(),
+        "format.text_color_cycle" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_cycle_text_color(),
+        "format.text_color_auto" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_auto_text_color(),
+        "format.merge" => app.global::<crate::CellRichFormat>().invoke_merge_cells(),
+        "format.unmerge" => app.global::<crate::CellRichFormat>().invoke_unmerge_cells(),
+        "format.conditional_formatting" => app
+            .global::<crate::CellRichFormat>()
+            .invoke_open_conditional_formatting(),
         "format.fill_cycle" | "sheets.fill-cycle" => app.invoke_cycle_fill(),
         "format.font_increase" => app.invoke_adjust_font(1),
         "format.font_decrease" => app.invoke_adjust_font(-1),
@@ -100,6 +206,9 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.pivot_average" => app.invoke_pivot_summary(2),
         "table.pivot_min" => app.invoke_pivot_summary(3),
         "table.pivot_max" => app.invoke_pivot_summary(4),
+        "table.pivot_builder" => app
+            .global::<crate::PivotBuilderState>()
+            .invoke_open_builder(),
         _ => return false,
     }
     true
@@ -150,6 +259,7 @@ const fn sc(mac: &'static str, other: &'static str) -> &'static str {
 pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
     match id {
         "file.new" | "sheets.new" => sc("Cmd+N", "Ctrl+N"),
+        "file.start_hub" | "sheets.start-hub" => sc("Cmd+Shift+O", "Ctrl+Shift+O"),
         "file.new_template" | "sheets.new-template" => sc("Cmd+Shift+N", "Ctrl+Shift+N"),
         "file.open" | "sheets.open" => sc("Cmd+O", "Ctrl+O"),
         "file.save" | "sheets.save" => sc("Cmd+S", "Ctrl+S"),
@@ -157,12 +267,27 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "sheets.retry-recovery" => sc("Cmd+Alt+Z", "Ctrl+Alt+Z"),
         "file.export_csv" | "sheets.export-csv" => sc("Cmd+E", "Ctrl+E"),
         "file.export_xlsx" | "sheets.export-xlsx" => sc("Cmd+Shift+E", "Ctrl+Shift+E"),
+        "file.export_pdf" | "sheets.export-pdf" => sc("Cmd+Shift+Alt+F", "Ctrl+Shift+Alt+F"),
+        "file.print" | "sheets.print-preview" => sc("Cmd+P", "Ctrl+P"),
+        "arrange.bring_forward" => sc("Cmd+Alt+]", "Ctrl+Alt+]"),
+        "arrange.send_backward" => sc("Cmd+Alt+[", "Ctrl+Alt+["),
+        "arrange.bring_to_front" => sc("Cmd+Shift+Alt+]", "Ctrl+Shift+Alt+]"),
+        "arrange.send_to_back" => sc("Cmd+Shift+Alt+[", "Ctrl+Shift+Alt+["),
         "edit.undo" | "sheets.undo" => sc("Cmd+Z", "Ctrl+Z"),
         "edit.redo" | "sheets.redo" => sc("Cmd+Shift+Z", "Ctrl+Shift+Z"),
         "edit.cut" | "sheets.cut" => sc("Cmd+X", "Ctrl+X"),
         "edit.copy" | "sheets.copy" => sc("Cmd+C", "Ctrl+C"),
         "edit.paste" | "sheets.paste" => sc("Cmd+V", "Ctrl+V"),
+        "edit.paste_values" => sc("Cmd+Shift+V", "Ctrl+Shift+V"),
+        "edit.paste_formats" => sc("Cmd+Shift+Alt+V", "Ctrl+Shift+Alt+V"),
         "edit.select_all" | "sheets.select-all" => sc("Cmd+A", "Ctrl+A"),
+        "edit.find" | "sheets.find" => sc("Cmd+F", "Ctrl+F"),
+        "edit.replace" | "sheets.replace" => sc("Cmd+H", "Ctrl+H"),
+        "data.toggle_filter" | "sheets.toggle-filter" => sc("Cmd+Alt+A", "Ctrl+Alt+A"),
+        "data.filter_column" | "sheets.filter-column" => sc("Cmd+Alt+Q", "Ctrl+Alt+Q"),
+        "data.clear_filter" | "sheets.clear-filter" => sc("Cmd+Alt+E", "Ctrl+Alt+E"),
+        "data.named_ranges" | "sheets.named-ranges" => sc("Cmd+Alt+H", "Ctrl+Alt+H"),
+        "data.validation" | "sheets.validation" => sc("Cmd+Alt+V", "Ctrl+Alt+V"),
         "table.fill_down" => sc("Cmd+D", "Ctrl+D"),
         "app.palette" => sc("Cmd+K", "Ctrl+K"),
         "help.shortcuts" => sc("Cmd+Shift+P", "Ctrl+Shift+P"),
@@ -177,6 +302,11 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.delete_row" => sc("Cmd+Alt+W", "Ctrl+Alt+W"),
         "table.add_col" | "sheets.add-col" => sc("Cmd+Alt+K", "Ctrl+Alt+K"),
         "table.delete_col" => sc("Cmd+Alt+L", "Ctrl+Alt+L"),
+        "table.insert_table" => sc("Cmd+Alt+T", "Ctrl+Alt+T"),
+        "table.cycle_style" => sc("Cmd+Alt+Y", "Ctrl+Alt+Y"),
+        "table.toggle_title" => sc("Cmd+Alt+U", "Ctrl+Alt+U"),
+        "table.toggle_alternating_rows" => sc("Cmd+Alt+B", "Ctrl+Alt+B"),
+        "table.delete_table" => sc("Cmd+Alt+Backspace", "Ctrl+Alt+Backspace"),
         "table.sort_asc" | "sheets.sort-asc" | "sheets.organize" => sc("Cmd+Alt+S", "Ctrl+Alt+S"),
         "table.sort_desc" | "sheets.sort-desc" => sc("Cmd+Alt+D", "Ctrl+Alt+D"),
         "table.freeze_header" | "sheets.freeze-header" => sc("Cmd+Alt+F", "Ctrl+Alt+F"),
@@ -194,6 +324,20 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.adjust_decimals_increase" => sc("Cmd+Alt+.", "Ctrl+Alt+."),
         "table.adjust_decimals_decrease" => sc("Cmd+Alt+,", "Ctrl+Alt+,"),
         "format.borders" | "sheets.borders" => sc("Cmd+Alt+B", "Ctrl+Alt+B"),
+        "format.borders_all" => sc("Cmd+Shift+7", "Ctrl+Shift+7"),
+        "format.borders_outer" => sc("Cmd+Shift+8", "Ctrl+Shift+8"),
+        "format.borders_top" => sc("Cmd+Shift+Up", "Ctrl+Shift+Up"),
+        "format.borders_bottom" => sc("Cmd+Shift+Down", "Ctrl+Shift+Down"),
+        "format.borders_left" => sc("Cmd+Shift+Left", "Ctrl+Shift+Left"),
+        "format.borders_right" => sc("Cmd+Shift+Right", "Ctrl+Shift+Right"),
+        "format.borders_none" => sc("Cmd+Shift+0", "Ctrl+Shift+0"),
+        "format.strikethrough" => sc("Cmd+Shift+X", "Ctrl+Shift+X"),
+        "format.wrap_text" => sc("Cmd+Shift+Alt+W", "Ctrl+Shift+Alt+W"),
+        "format.text_color_cycle" => sc("Cmd+Shift+Alt+E", "Ctrl+Shift+Alt+E"),
+        "format.text_color_auto" => sc("Cmd+Shift+Alt+Q", "Ctrl+Shift+Alt+Q"),
+        "format.merge" => sc("Cmd+Shift+Alt+G", "Ctrl+Shift+Alt+G"),
+        "format.unmerge" => sc("Cmd+Shift+G", "Ctrl+Shift+G"),
+        "format.conditional_formatting" => sc("Cmd+Alt+O", "Ctrl+Alt+O"),
         "format.fill_cycle" | "sheets.fill-cycle" => sc("Cmd+Alt+G", "Ctrl+Alt+G"),
         "format.font_increase" => sc("Cmd+Shift+.", "Ctrl+Shift+."),
         "format.font_decrease" => sc("Cmd+Shift+,", "Ctrl+Shift+,"),
@@ -208,6 +352,7 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.pivot_average" => sc("Cmd+Alt+3", "Ctrl+Alt+3"),
         "table.pivot_min" => sc("Cmd+Alt+8", "Ctrl+Alt+8"),
         "table.pivot_max" => sc("Cmd+Alt+9", "Ctrl+Alt+9"),
+        "table.pivot_builder" => sc("Cmd+Alt+Shift+P", "Ctrl+Alt+Shift+P"),
         "view.appearance.system" => sc("Cmd+Alt+6", "Ctrl+Alt+6"),
         "view.appearance.light" => sc("Cmd+Alt+7", "Ctrl+Alt+7"),
         "view.appearance.dark" => sc("Cmd+Shift+D", "Ctrl+Shift+D"),
@@ -264,12 +409,23 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("s", true, false) => "file.save_as",
         ("e", false, false) => "file.export_csv",
         ("e", true, false) => "file.export_xlsx",
+        ("f", true, true) => "file.export_pdf",
+        ("p", false, false) => "file.print",
         ("z", false, false) => "edit.undo",
         ("z", true, false) | ("y", false, false) => "edit.redo",
         ("x", false, false) => "edit.cut",
         ("c", false, false) => "edit.copy",
         ("v", false, false) => "edit.paste",
+        ("v", true, false) => "edit.paste_values",
+        ("v", true, true) => "edit.paste_formats",
         ("a", false, false) => "edit.select_all",
+        ("f", false, false) => "edit.find",
+        ("h", false, false) => "edit.replace",
+        ("a", false, true) => "data.toggle_filter",
+        ("q", false, true) => "data.filter_column",
+        ("e", false, true) => "data.clear_filter",
+        ("h", false, true) => "data.named_ranges",
+        ("v", false, true) => "data.validation",
         ("d", false, false) => "table.fill_down",
         ("b", false, false) => "format.bold",
         ("i", false, false) => "format.italic",
@@ -302,6 +458,12 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("u", false, true) => "table.unfreeze_panes",
         ("b", false, true) => "format.borders",
         ("g", false, true) => "format.fill_cycle",
+        ("g", true, true) => "format.merge",
+        ("g", true, false) => "format.unmerge",
+        ("w", true, true) => "format.wrap_text",
+        ("e", true, true) => "format.text_color_cycle",
+        ("q", true, true) => "format.text_color_auto",
+        ("x", true, false) => "format.strikethrough",
         ("0", false, true) => "format.general",
         ("1", false, true) => "format.number",
         ("4", false, true) => "format.currency",
@@ -315,6 +477,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("t", false, true) => "sheets.cycle_chart_kind",
         ("y", false, true) => "sheets.copy_chart",
         ("p", false, true) => "table.pivot_sum",
+        ("p", true, true) => "table.pivot_builder",
         ("2", false, true) => "table.pivot_count",
         ("3", false, true) => "table.pivot_average",
         ("8", false, true) => "table.pivot_min",
@@ -323,6 +486,9 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("7", false, true) => "view.appearance.light",
         ("[", false, true) => "view.window-frame.system",
         ("]", false, true) => "view.window-frame.loom",
+        // Shift+`[`/`]` reach this path as `{`/`}` in Slint's winit adapter.
+        ("[", true, true) | ("{", _, true) => "arrange.send_to_back",
+        ("]", true, true) | ("}", _, true) => "arrange.bring_to_front",
         ("z", false, true) if app.get_recovery_paused() => "sheets.retry-recovery",
         _ => return false,
     };

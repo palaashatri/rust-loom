@@ -5,12 +5,17 @@ import {
 } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { GridPointer, CellSpill, CellInk } from "grid_pointer.slint";
+import { GridPointer, CellSpill, CellInk, CellRichFormat } from "grid_pointer.slint";
 import { CellOverflowLayer } from "cell_overflow.slint";
+import { MergedCellLayer } from "merged_cell_layer.slint";
+import { TableCanvasLayer, SheetTableState, SheetTableView, TableBandView } from "table_canvas_layer.slint";
+export { SheetTableState, SheetTableView, TableBandView } from "table_canvas_layer.slint";
 import { SheetHeaders } from "sheet_headers.slint";
 import { SheetScrollBar } from "sheet_scrollbar.slint";
+import { FormulaRefCellOverlay, FormulaAssist, FormulaAssistPopup } from "formula_assist.slint";
 
 export { SheetTabs, FormulaNameBar, SheetStatusRow } from "sheet_bars.slint";
+export { FormulaAssist, FormulaAssistPopup } from "formula_assist.slint";
 
 export { SheetActionToolbar } from "toolbar.slint";
 
@@ -233,7 +238,12 @@ export component SheetTable inherits Rectangle {
                             property <bool> is-bold: cell-idx < root.cell-bolds.length && root.cell-bolds[cell-idx];
                             property <bool> is-italic: cell-idx < root.cell-italics.length && root.cell-italics[cell-idx];
                             property <bool> is-underline: cell-idx < root.cell-underlines.length && root.cell-underlines[cell-idx];
-                            property <bool> is-bordered: cell-idx < root.cell-borders.length && root.cell-borders[cell-idx];
+                            property <bool> is-strikethrough: cell-idx < CellRichFormat.strikethroughs.length && CellRichFormat.strikethroughs[cell-idx];
+                            property <bool> border-top: cell-idx < CellRichFormat.border-tops.length && CellRichFormat.border-tops[cell-idx];
+                            property <bool> border-right: cell-idx < CellRichFormat.border-rights.length && CellRichFormat.border-rights[cell-idx];
+                            property <bool> border-bottom: cell-idx < CellRichFormat.border-bottoms.length && CellRichFormat.border-bottoms[cell-idx];
+                            property <bool> border-left: cell-idx < CellRichFormat.border-lefts.length && CellRichFormat.border-lefts[cell-idx];
+                            property <bool> is-merged-covered: cell-idx < CellRichFormat.merged-covered.length && CellRichFormat.merged-covered[cell-idx];
                             property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
                             property <int> spill-kind: cell-idx < CellSpill.kinds.length ? CellSpill.kinds[cell-idx] : 0;
                             property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
@@ -254,10 +264,10 @@ export component SheetTable inherits Rectangle {
                             // no longer stack into a double line. User borders
                             // draw all four sides.
                             Rectangle {
-                                x: is-bordered ? 0px : -1px;
-                                y: is-bordered ? 0px : -1px;
-                                width: is-bordered ? parent.width : parent.width + 1px;
-                                height: is-bordered ? parent.height : parent.height + 1px;
+                                x: -1px;
+                                y: -1px;
+                                width: parent.width + 1px;
+                                height: parent.height + 1px;
                                 background: fill-idx == 0 ? #FECACA
                                     : fill-idx == 1 ? #FED7AA
                                     : fill-idx == 2 ? #FEF08A
@@ -267,15 +277,19 @@ export component SheetTable inherits Rectangle {
                                     : fill-idx == 6 ? #E5E7EB
                                     : in-selection && !is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : readable-line)
                                     : Theme.palette().paper;
-                                border-width: is-bordered ? 2px : 1px;
-                                border-color: is-bordered ? Theme.palette().ink : Theme.palette().paper-line;
+                                border-width: 1px;
+                                border-color: Theme.palette().paper-line;
                             }
+                            if border-top : Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.palette().ink; }
+                            if border-bottom : Rectangle { x: 0px; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.palette().ink; }
+                            if border-left : Rectangle { x: 0px; y: 0px; width: 2px; height: parent.height; background: Theme.palette().ink; }
+                            if border-right : Rectangle { x: parent.width - 2px; y: 0px; width: 2px; height: parent.height; background: Theme.palette().ink; }
 
                             Text {
                                 x: 8px;
                                 width: parent.width - 16px;
                                 height: parent.height;
-                                text: spill-kind == 1 ? "" : root.cells[r * root.cols.length + c];
+                                text: (spill-kind == 1 || is-merged-covered) ? "" : root.cells[r * root.cols.length + c];
                                 font-family: Theme.document-font-family;
                                 accessible-role: AccessibleRole.none;
                                 font-size: font-px * 1px * root.zoom-factor * max(1.0, Theme.text-scale);
@@ -305,12 +319,20 @@ export component SheetTable inherits Rectangle {
                                 accessible-label: root.cell-labels[cell-idx];
                             }
 
-                            if is-underline : Rectangle {
+                            if is-underline && !is-merged-covered : Rectangle {
                                 x: 8px;
                                 y: parent.height - 3px;
                                 width: parent.width - 16px;
                                 height: 1px;
-                                background: Theme.palette().paper-ink;
+                                background: CellInk.paint(ink, Theme.palette().paper-ink);
+                            }
+
+                            if is-strikethrough && !is-merged-covered : Rectangle {
+                                x: 8px;
+                                y: parent.height / 2;
+                                width: parent.width - 16px;
+                                height: 1px;
+                                background: CellInk.paint(ink, Theme.palette().paper-ink);
                             }
 
                             // While a value is being typed the active cell shows it,
@@ -335,6 +357,13 @@ export component SheetTable inherits Rectangle {
                                     vertical-alignment: center;
                                     overflow: elide;
                                 }
+                            }
+
+                            FormulaRefCellOverlay {
+                                width: parent.width;
+                                height: parent.height;
+                                global-row: global-row;
+                                global-col: global-col;
                             }
 
                             SheetSelectionOverlay {
@@ -363,6 +392,24 @@ export component SheetTable inherits Rectangle {
                             }
                         }
                     }
+                }
+
+                MergedCellLayer {
+                    editing: root.editing;
+                    edit-text: root.edit-text;
+                    x: root.grid-col-offset;
+                    y: root.grid-row-offset;
+                    width: root.grid-visible-width;
+                    height: root.grid-visible-height;
+                    zoom-factor: root.zoom-factor;
+                }
+
+                TableCanvasLayer {
+                    x: root.grid-col-offset;
+                    y: root.grid-row-offset;
+                    width: root.grid-visible-width;
+                    height: root.grid-visible-height;
+                    zoom-factor: root.zoom-factor;
                 }
 
                 CellOverflowLayer {
@@ -506,7 +553,7 @@ export component SheetGridSurface inherits Rectangle {
                     else { root.navigate-selection(2100000000, 2100000000); }
                     return accept;
             }
-            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow)) {
+            if ((event.modifiers.control || event.modifiers.meta) && !event.modifiers.alt && (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow)) {
                 GridPointer.jump(event.text == Key.UpArrow ? -1 : event.text == Key.DownArrow ? 1 : 0, event.text == Key.LeftArrow ? -1 : event.text == Key.RightArrow ? 1 : 0, event.modifiers.shift);
                 return accept;
             }

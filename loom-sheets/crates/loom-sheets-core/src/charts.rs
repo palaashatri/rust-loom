@@ -60,6 +60,14 @@ pub struct SheetChart {
     pub start_row: u32,
     /// Last data row, inclusive. None preserves legacy charts that use all rows.
     pub end_row: Option<u32>,
+    /// Whether the chart overlay displays its legend.
+    pub show_legend: bool,
+    /// Optional X-axis label shown in the chart overlay and inspector.
+    pub x_axis_label: String,
+    /// Optional Y-axis label shown in the chart overlay and inspector.
+    pub y_axis_label: String,
+    /// Optional custom series name overriding the source column header.
+    pub series_name: String,
 }
 
 impl Default for SheetChart {
@@ -71,6 +79,10 @@ impl Default for SheetChart {
             val_col: 1,
             start_row: 1,
             end_row: None,
+            show_legend: true,
+            x_axis_label: String::new(),
+            y_axis_label: String::new(),
+            series_name: String::new(),
         }
     }
 }

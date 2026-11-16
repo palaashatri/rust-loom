@@ -5,7 +5,7 @@
 //! ordering and cycle detection. CSV import/export is included for
 //! interoperability. The GUI (a documented follow-on) consumes this engine.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use loom_package::zip::PackageArchive;
 
@@ -15,6 +15,8 @@ pub use charts::{
 };
 
 pub mod banded;
+pub mod conditional_format;
+pub mod data_tools;
 pub mod dates;
 mod formula;
 pub mod functions;
@@ -31,26 +33,42 @@ pub(crate) mod functions_util;
 pub mod interop;
 mod number_text;
 pub mod objects;
+pub mod pdf_export;
 pub mod persistence;
+pub mod pivot_builder;
 pub mod refs;
 pub mod row_order;
+pub mod sheet_tables;
 pub mod style;
 mod style_fit;
 pub mod workbook;
 pub mod xlsx;
 pub use banded::{BandedMap, StoredValue};
+pub use conditional_format::{CellConditionalRule, ConditionalOperator};
+pub use data_tools::{AutoFilterState, FindMatch, FindOptions, SheetValidation};
 pub use formula::{parse_formula, Formula};
 pub(crate) use formula::{BinOp, Expr};
 pub use interop::{
     from_csv, from_csv_sniffed, from_csv_with_dialect, parse_csv_records, sniff_csv_dialect,
     to_csv, to_csv_with_formulas, to_csv_with_values, CsvDialect,
 };
-pub use objects::{SheetObject, SheetObjectKind};
+pub use objects::{reorder_objects, SheetObject, SheetObjectKind, ZOrderAction};
+pub use pdf_export::{
+    export_sheet_pdf, export_sheet_pdf_with_options, export_workbook_sheet_pdf,
+    export_workbook_sheet_pdf_with_options, preview_sheet_pages, preview_workbook_sheet_page,
+    preview_workbook_sheet_pages, PageOrientation, PagePreviewCell, PaperSize, PdfExportOptions,
+    PrintScale, SheetPagePreview,
+};
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };
+pub use pivot_builder::{
+    build_pivot_sheet, compute_pivot_table, detect_headers, extract_unique_values,
+    plan_pivot_updates, PivotCell, PivotFieldConfig, PivotTableResult,
+};
 pub use row_order::RowOrder;
-pub use style::{CellAlignment, CellStyle};
+pub use sheet_tables::{SheetTable, TableStylePreset};
+pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
 pub use xlsx::{
     export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
     XlsxImportWarning,
@@ -372,22 +390,47 @@ impl CalcError {
 }
 
 /// A cell in the workbook.
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Cell {
     /// Raw input: a formula like `=A1+B2` or a literal.
     pub raw: String,
+    /// Set when `raw` is literal text even though it starts with `=`.
+    ///
+    /// Paste Values Only can evaluate a formula to text such as `=1+1`.
+    /// Writing that through the normal raw path would make it a formula
+    /// again, so the cell records that its contents are text and must never
+    /// be parsed as a formula.
+    pub text: bool,
 }
 
 impl Cell {
-    /// Is this a formula? (starts with `=`)
+    /// Creates a cell whose raw input is parsed normally (a leading `=`
+    /// starts a formula).
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self {
+            raw: raw.into(),
+            text: false,
+        }
+    }
+
+    /// Creates a cell that stores `raw` as literal text, even when it starts
+    /// with `=`.
+    pub fn literal(raw: impl Into<String>) -> Self {
+        Self {
+            raw: raw.into(),
+            text: true,
+        }
+    }
+
+    /// Is this a formula? (starts with `=`, and is not literal text)
     pub fn is_formula(&self) -> bool {
-        self.raw.starts_with('=')
+        !self.text && self.raw.starts_with('=')
     }
 }
 
 impl banded::StoredValue for Cell {
     fn is_formula(&self) -> bool {
-        self.raw.starts_with('=')
+        Cell::is_formula(self)
     }
 
     fn heap_bytes(&self) -> usize {
@@ -475,6 +518,20 @@ pub struct Sheet {
     pub chart: Option<SheetChart>,
     /// Drawings and local image attachments anchored to worksheet cells.
     pub objects: Vec<SheetObject>,
+    /// Non-destructive column AutoFilter state.
+    pub auto_filter: AutoFilterState,
+    /// Row indexes hidden by AutoFilter.
+    pub hidden_rows: BTreeSet<u32>,
+    /// Named ranges keyed by uppercase identifier.
+    pub named_ranges: BTreeMap<String, CellRange>,
+    /// Cell data validation rules.
+    pub validations: Vec<SheetValidation>,
+    /// Merged cell spans (normalized, non-overlapping, each covering >= 2 cells).
+    pub merged_ranges: Vec<CellRange>,
+    /// Conditional formatting rules evaluated against cell display values.
+    pub conditional_rules: Vec<CellConditionalRule>,
+    /// Independent named canvas tables on this worksheet.
+    pub tables: Vec<SheetTable>,
 }
 
 impl Sheet {
@@ -491,6 +548,13 @@ impl Sheet {
             row_heights: BTreeMap::new(),
             chart: None,
             objects: Vec::new(),
+            auto_filter: AutoFilterState::default(),
+            hidden_rows: BTreeSet::new(),
+            named_ranges: BTreeMap::new(),
+            validations: Vec::new(),
+            merged_ranges: Vec::new(),
+            conditional_rules: Vec::new(),
+            tables: Vec::new(),
         }
     }
 
@@ -592,6 +656,161 @@ impl Sheet {
     pub fn unfreeze_panes(&mut self) {
         self.freeze_rows = 0;
         self.freeze_cols = 0;
+    }
+
+    /// Apply a border preset (`all`, `outer`, `top`, `bottom`, `left`, `right`, `none`) to `range`.
+    /// Returns `true` if any cell style changed.
+    pub fn apply_border_preset(&mut self, range: CellRange, preset: BorderPreset) -> bool {
+        let mut changed = false;
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                let cell = CellRef { row, col };
+                let prev = self.cell_style(cell);
+                let mut next = prev;
+                match preset {
+                    BorderPreset::All => next.borders = CellBorders::ALL,
+                    BorderPreset::None => next.borders = CellBorders::NONE,
+                    BorderPreset::Outer => {
+                        if row == range.start.row {
+                            next.borders.top = true;
+                        }
+                        if row == range.end.row {
+                            next.borders.bottom = true;
+                        }
+                        if col == range.start.col {
+                            next.borders.left = true;
+                        }
+                        if col == range.end.col {
+                            next.borders.right = true;
+                        }
+                    }
+                    BorderPreset::Top => {
+                        if row == range.start.row {
+                            next.borders.top = true;
+                        }
+                    }
+                    BorderPreset::Bottom => {
+                        if row == range.end.row {
+                            next.borders.bottom = true;
+                        }
+                    }
+                    BorderPreset::Left => {
+                        if col == range.start.col {
+                            next.borders.left = true;
+                        }
+                    }
+                    BorderPreset::Right => {
+                        if col == range.end.col {
+                            next.borders.right = true;
+                        }
+                    }
+                }
+                if next != prev {
+                    self.set_cell_style(cell, next);
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Merge `range` into a single spanned cell. Keeps the anchor cell's value
+    /// (or the first non-empty cell's value if the anchor is empty) and clears
+    /// covered cells. Returns `false` if `range` is a single cell or already merged.
+    pub fn merge_cells(&mut self, range: CellRange) -> bool {
+        if range.start == range.end {
+            return false;
+        }
+        if self.merged_ranges.contains(&range) {
+            return false;
+        }
+        self.merged_ranges
+            .retain(|existing| !existing.intersects(range));
+        let anchor = range.start;
+        let mut kept_raw = self.raw(anchor).unwrap_or_default().to_string();
+        let covered: Vec<CellRef> = self
+            .cells
+            .iter()
+            .filter_map(|(&cell, _)| (cell != anchor && range.contains(cell)).then_some(cell))
+            .collect();
+        for cell in covered {
+            if kept_raw.is_empty() {
+                if let Some(raw) = self.raw(cell) {
+                    if !raw.is_empty() {
+                        kept_raw = raw.to_string();
+                    }
+                }
+            }
+            self.cells.remove(&cell);
+        }
+        if !kept_raw.is_empty() && self.raw(anchor) != Some(kept_raw.as_str()) {
+            self.set_raw(anchor, &kept_raw);
+        }
+        self.merged_ranges.push(range);
+        self.merged_ranges
+            .sort_by_key(|r| (r.start.row, r.start.col, r.end.row, r.end.col));
+        true
+    }
+
+    /// Unmerge any merged spans intersecting `range`. Returns `true` if any were removed.
+    pub fn unmerge_cells(&mut self, range: CellRange) -> bool {
+        let before = self.merged_ranges.len();
+        self.merged_ranges
+            .retain(|existing| !existing.intersects(range));
+        self.merged_ranges.len() != before
+    }
+
+    /// Returns the merged range containing `cell`, if any.
+    pub fn merge_at(&self, cell: CellRef) -> Option<CellRange> {
+        self.merged_ranges
+            .iter()
+            .copied()
+            .find(|r| r.contains(cell))
+    }
+
+    /// Returns `true` if `cell` is covered by a merged span and is not its top-left anchor.
+    pub fn is_merged_covered(&self, cell: CellRef) -> bool {
+        self.merge_at(cell).is_some_and(|range| range.start != cell)
+    }
+
+    /// Add a conditional formatting rule to the sheet.
+    pub fn add_conditional_rule(&mut self, rule: CellConditionalRule) {
+        self.conditional_rules.push(rule);
+    }
+
+    /// Remove a conditional formatting rule by index.
+    pub fn remove_conditional_rule(&mut self, index: usize) -> bool {
+        if index < self.conditional_rules.len() {
+            self.conditional_rules.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear all conditional formatting rules that intersect `range`.
+    pub fn clear_conditional_rules(&mut self, range: CellRange) -> usize {
+        let before = self.conditional_rules.len();
+        self.conditional_rules
+            .retain(|rule| !rule.range.intersects(range));
+        before - self.conditional_rules.len()
+    }
+
+    /// Compute the effective style of `cell`, applying any matching conditional
+    /// formatting rules on top of the cell's base style.
+    pub fn effective_style(&self, cell: CellRef, display_value: &str) -> CellStyle {
+        let mut style = self.cell_style(cell);
+        for rule in &self.conditional_rules {
+            if rule.range.contains(cell) && rule.matches(display_value) {
+                if rule.fill != style::FillColor::None {
+                    style.fill = rule.fill;
+                }
+                if let Some(color) = rule.text_color {
+                    style.text_color = Some(color);
+                }
+            }
+        }
+        style
     }
 }
 
@@ -804,6 +1023,7 @@ impl DependencyGraph {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationCriteria {
     List(Vec<String>),
+    RangeList(CellRange),
     WholeNumberBetween(i64, i64),
     DecimalBetween(f64, f64),
     TextLengthBetween(usize, usize),
@@ -845,6 +1065,7 @@ impl DataValidationRule {
                     Err(self.error_message.clone())
                 }
             }
+            ValidationCriteria::RangeList(_) => Err(self.error_message.clone()),
             ValidationCriteria::WholeNumberBetween(min, max) => {
                 if let Ok(n) = trimmed.parse::<i64>() {
                     if n >= *min && n <= *max {
@@ -1326,7 +1547,15 @@ impl Sheet {
 
     /// Set a cell's exact raw input at a resolved cell reference.
     pub fn set_raw(&mut self, r: CellRef, raw: impl Into<String>) {
-        self.cells.insert(r, Cell { raw: raw.into() });
+        self.cells.insert(r, Cell::new(raw));
+    }
+
+    /// Set a cell's contents as literal text, even when it starts with `=`.
+    ///
+    /// This is the Values Only write path: the string is displayed and
+    /// exported verbatim and never evaluated as a formula.
+    pub fn set_literal(&mut self, r: CellRef, raw: impl Into<String>) {
+        self.cells.insert(r, Cell::literal(raw));
     }
 
     /// Get raw content of a cell.
@@ -1382,6 +1611,66 @@ impl Sheet {
             cols = cols.max(object.anchor.col.saturating_add(1));
         }
         SheetDimensions::new(rows, cols)
+    }
+
+    /// Creates or updates a named range on this worksheet.
+    pub fn set_named_range(&mut self, name: &str, range: CellRange) -> Result<(), String> {
+        let trimmed = name.trim();
+        if !data_tools::valid_named_range_name(trimmed) {
+            return Err(format!("invalid named range {name:?}"));
+        }
+        self.named_ranges
+            .insert(trimmed.to_ascii_uppercase(), range);
+        Ok(())
+    }
+
+    /// Removes a named range by name (case-insensitive).
+    pub fn remove_named_range(&mut self, name: &str) -> bool {
+        self.named_ranges
+            .remove(&name.trim().to_ascii_uppercase())
+            .is_some()
+    }
+
+    /// Resolves a named range by name (case-insensitive).
+    pub fn resolve_named_range(&self, name: &str) -> Option<CellRange> {
+        self.named_ranges
+            .get(&name.trim().to_ascii_uppercase())
+            .copied()
+    }
+
+    /// Attaches or replaces a data validation rule for `range`.
+    pub fn set_validation(&mut self, range: CellRange, rule: DataValidationRule) {
+        self.validations.retain(|existing| existing.range != range);
+        self.validations.push(SheetValidation { range, rule });
+    }
+
+    /// Clears any data validation rule whose target range equals `range` or contains `range.start`.
+    pub fn clear_validation(&mut self, range: CellRange) -> bool {
+        let before = self.validations.len();
+        self.validations
+            .retain(|existing| existing.range != range && !existing.range.contains(range.start));
+        self.validations.len() != before
+    }
+
+    /// Returns the most recently added validation rule covering `cell`, if any.
+    pub fn validation_for_cell(&self, cell: CellRef) -> Option<&SheetValidation> {
+        self.validations
+            .iter()
+            .rev()
+            .find(|v| v.range.contains(cell))
+    }
+
+    /// Validates candidate raw input for `cell` against any matching validation rule.
+    pub fn validate_cell_input(
+        &self,
+        cell: CellRef,
+        input: &str,
+        values: &HashMap<CellRef, Value>,
+    ) -> Result<(), String> {
+        let Some(validation) = self.validation_for_cell(cell) else {
+            return Ok(());
+        };
+        data_tools::validate_input_against_rule(&validation.rule, self, values, input)
     }
 }
 
@@ -1939,6 +2228,14 @@ impl CellRange {
             && cell.col <= self.end.col
     }
 
+    /// Whether this range overlaps another range.
+    pub fn intersects(self, other: CellRange) -> bool {
+        self.start.row <= other.end.row
+            && self.end.row >= other.start.row
+            && self.start.col <= other.end.col
+            && self.end.col >= other.start.col
+    }
+
     /// Cells in row-major order.
     pub fn cells(self) -> Vec<CellRef> {
         let mut cells = Vec::new();
@@ -2025,16 +2322,25 @@ pub type RangeSelection = GridSelection;
 /// dimensions after reopening.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeEdit {
-    before: BTreeMap<CellRef, Option<String>>,
-    after: BTreeMap<CellRef, Option<String>>,
+    before: BTreeMap<CellRef, Option<Cell>>,
+    after: BTreeMap<CellRef, Option<Cell>>,
 }
 
 impl RangeEdit {
     /// Builds an edit that replaces a single cell's raw value, preserving absent cells.
+    ///
+    /// When `after` is the same raw string the cell already holds, the existing
+    /// cell is kept. A literal draft such as `=1+1` therefore stays literal
+    /// instead of silently becoming a formula again.
     pub fn replace(sheet: &Sheet, cell: CellRef, after: Option<String>) -> Self {
+        let existing = sheet.cells.get(&cell);
+        let after = after.map(|raw| match existing {
+            Some(current) if current.raw == raw => current.clone(),
+            _ => Cell::new(raw),
+        });
         let mut before = BTreeMap::new();
         let mut after_map = BTreeMap::new();
-        before.insert(cell, sheet.raw(cell).map(str::to_owned));
+        before.insert(cell, existing.cloned());
         after_map.insert(cell, after);
         Self {
             before,
@@ -2042,12 +2348,37 @@ impl RangeEdit {
         }
     }
 
+    /// Builds an edit that replaces a single cell with an exact cell value.
+    ///
+    /// Unlike [`Self::replace`], the caller's text/formula identity is kept
+    /// even when the raw string matches the current cell, which is what a
+    /// Values Only paste needs.
+    pub fn replace_cell(sheet: &Sheet, cell: CellRef, after: Option<Cell>) -> Self {
+        let mut before = BTreeMap::new();
+        let mut after_map = BTreeMap::new();
+        before.insert(cell, sheet.cells.get(&cell).cloned());
+        after_map.insert(cell, after);
+        Self {
+            before,
+            after: after_map,
+        }
+    }
+
+    /// Builds an edit from a Values Only paste.
+    ///
+    /// The caller supplies the evaluated value with its type intact: text that
+    /// merely looks like a number or a formula (`="00123"`, `=1+1`) stays
+    /// text, while numeric results stay numeric.
+    pub fn replace_value(sheet: &Sheet, cell: CellRef, after: Cell) -> Self {
+        Self::replace_cell(sheet, cell, Some(after))
+    }
+
     /// Builds an edit that copies `source` to a destination top-left cell.
     pub fn copy(sheet: &Sheet, source: CellRange, destination: CellRef) -> Self {
-        let source_values: BTreeMap<CellRef, Option<String>> = source
+        let source_values: BTreeMap<CellRef, Option<Cell>> = source
             .cells()
             .into_iter()
-            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .map(|cell| (cell, sheet.cells.get(&cell).cloned()))
             .collect();
         let row_delta = destination.row as i64 - source.start.row as i64;
         let col_delta = destination.col as i64 - source.start.col as i64;
@@ -2059,15 +2390,9 @@ impl RangeEdit {
                 row: shifted_coordinate(source_cell.row, row_delta),
                 col: shifted_coordinate(source_cell.col, col_delta),
             };
-            before.insert(target, sheet.raw(target).map(str::to_owned));
-            after.insert(
-                target,
-                shifted_raw(
-                    source_values.get(&source_cell).cloned().flatten(),
-                    col_delta,
-                    row_delta,
-                ),
-            );
+            before.insert(target, sheet.cells.get(&target).cloned());
+            let source_value = source_values.get(&source_cell).cloned().flatten();
+            after.insert(target, copy_cell(source_value, col_delta, row_delta));
         }
 
         Self { before, after }
@@ -2081,10 +2406,10 @@ impl RangeEdit {
     pub fn fill(sheet: &Sheet, source: CellRange, target: CellRange) -> Self {
         let source_rows = source.end.row - source.start.row + 1;
         let source_cols = source.end.col - source.start.col + 1;
-        let source_values: BTreeMap<CellRef, Option<String>> = source
+        let source_values: BTreeMap<CellRef, Option<Cell>> = source
             .cells()
             .into_iter()
-            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .map(|cell| (cell, sheet.cells.get(&cell).cloned()))
             .collect();
         let mut before = BTreeMap::new();
         let mut after = BTreeMap::new();
@@ -2096,10 +2421,10 @@ impl RangeEdit {
             };
             let row_delta = destination.row as i64 - source_cell.row as i64;
             let col_delta = destination.col as i64 - source_cell.col as i64;
-            before.insert(destination, sheet.raw(destination).map(str::to_owned));
+            before.insert(destination, sheet.cells.get(&destination).cloned());
             after.insert(
                 destination,
-                shifted_raw(
+                copy_cell(
                     source_values.get(&source_cell).cloned().flatten(),
                     col_delta,
                     row_delta,
@@ -2107,6 +2432,29 @@ impl RangeEdit {
             );
         }
 
+        Self { before, after }
+    }
+
+    /// Builds an edit from explicit `(cell, new_raw)` updates.
+    ///
+    /// An update whose raw string matches the current cell keeps the existing
+    /// cell, so rewriting an unchanged literal draft cannot flip it to a
+    /// formula.
+    pub fn from_cells(
+        sheet: &Sheet,
+        updates: impl IntoIterator<Item = (CellRef, Option<String>)>,
+    ) -> Self {
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+        for (cell, value) in updates {
+            let existing = sheet.cells.get(&cell);
+            before.entry(cell).or_insert_with(|| existing.cloned());
+            let next = value.map(|raw| match existing {
+                Some(current) if current.raw == raw => current.clone(),
+                _ => Cell::new(raw),
+            });
+            after.insert(cell, next);
+        }
         Self { before, after }
     }
 
@@ -2131,13 +2479,13 @@ impl RangeEdit {
     /// (rather than only logical length) matches the memory released when the
     /// maps and their owned values are dropped.
     pub fn memory_bytes(&self) -> usize {
-        fn map_bytes(map: &BTreeMap<CellRef, Option<String>>) -> usize {
+        fn map_bytes(map: &BTreeMap<CellRef, Option<Cell>>) -> usize {
             std::mem::size_of_val(map)
                 + map
                     .values()
-                    .map(|value| value.as_ref().map_or(0, String::capacity))
+                    .map(|value| value.as_ref().map_or(0, |cell| cell.raw.capacity()))
                     .sum::<usize>()
-                + map.len() * std::mem::size_of::<(CellRef, Option<String>)>()
+                + map.len() * std::mem::size_of::<(CellRef, Option<Cell>)>()
         }
         map_bytes(&self.before) + map_bytes(&self.after)
     }
@@ -2171,10 +2519,28 @@ fn shifted_raw(raw: Option<String>, col_delta: i64, row_delta: i64) -> Option<St
     })
 }
 
-fn apply_sparse_values(sheet: &mut Sheet, values: &BTreeMap<CellRef, Option<String>>) {
-    for (cell, raw) in values {
-        match raw {
-            Some(raw) => sheet.set_raw(*cell, raw.clone()),
+/// Copy or fill one cell to a new position.
+///
+/// Literal text is data, not a formula, so its contents never shift. Every
+/// other cell keeps raw-copy/fill semantics.
+fn copy_cell(value: Option<Cell>, col_delta: i64, row_delta: i64) -> Option<Cell> {
+    let cell = value?;
+    if cell.text {
+        return Some(cell);
+    }
+    Some(Cell::new(shifted_raw(
+        Some(cell.raw),
+        col_delta,
+        row_delta,
+    )?))
+}
+
+fn apply_sparse_values(sheet: &mut Sheet, values: &BTreeMap<CellRef, Option<Cell>>) {
+    for (cell, value) in values {
+        match value {
+            Some(value) => {
+                sheet.cells.insert(*cell, value.clone());
+            }
             None => {
                 sheet.clear_cell(*cell);
             }
@@ -2561,6 +2927,7 @@ impl CalculationCache {
             for cell in ready {
                 let value = match sheet.cells.get(&cell) {
                     None => Value::Empty,
+                    Some(raw) if raw.text => Value::Text(raw.raw.clone()),
                     Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
                     Some(raw) => match parse_formula(raw.raw[1..].trim()) {
                         Ok(formula) => {
@@ -2622,6 +2989,7 @@ impl CalculationCache {
                     evaluated.insert(cell);
                     let value = match sheet.cells.get(&cell) {
                         None => Value::Empty,
+                        Some(raw) if raw.text => Value::Text(raw.raw.clone()),
                         Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
                         Some(raw) => match parse_formula(raw.raw[1..].trim()) {
                             Ok(formula) => {
@@ -2995,9 +3363,10 @@ pub fn sheet_to_xlsx_data(
             let cell = CellRef { row, col };
             let value = vals.get(&cell).cloned().unwrap_or(Value::Empty);
             let formula = sheet
-                .raw(cell)
-                .filter(|raw| raw.starts_with('='))
-                .map(|raw| raw[1..].to_string());
+                .cells
+                .get(&cell)
+                .filter(|cell| cell.is_formula())
+                .map(|cell| cell.raw[1..].to_string());
             let (number, boolean) = match &value {
                 Value::Number(n) if n.is_finite() => (Some(*n), None),
                 Value::Bool(b) => (None, Some(*b)),

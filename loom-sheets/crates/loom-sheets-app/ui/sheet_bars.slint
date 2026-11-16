@@ -3,6 +3,86 @@ import { LoomStatusBar, LoomStatusText } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { SheetsOperationStatusText } from "operation_status_text.slint";
 import { GridPointer } from "grid_pointer.slint";
+import { FormulaAssist } from "formula_assist.slint";
+
+component FormulaFieldScope inherits FocusScope {
+    in-out property <string> value: "";
+    in property <string> selection-formula: "";
+    in property <int> focus-request: 0;
+    in property <bool> is-editing: false;
+    callback commit-advance(string, int, int);
+    callback cancel;
+
+    horizontal-stretch: 1;
+    focus-on-tab-navigation: false;
+    property <int> restore-caret-seq: FormulaAssist.restore-caret-seq;
+    changed restore-caret-seq => {
+        field.focus-at(FormulaAssist.caret-byte-offset);
+    }
+
+    capture-key-pressed(event) => {
+        if (event.text == Key.F4 && !event.modifiers.control && !event.modifiers.meta && !event.modifiers.alt) {
+            FormulaAssist.caret-byte-offset = field.cursor-position-byte-offset;
+            FormulaAssist.cycle-f4();
+            return accept;
+        }
+        if (FormulaAssist.popup-open && FormulaAssist.suggestions.length > 0 && !event.modifiers.control && !event.modifiers.meta && !event.modifiers.alt) {
+            if (event.text == Key.UpArrow) {
+                FormulaAssist.selected-suggestion = max(0, FormulaAssist.selected-suggestion - 1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                FormulaAssist.selected-suggestion = min(FormulaAssist.suggestions.length - 1, FormulaAssist.selected-suggestion + 1);
+                return accept;
+            }
+            if (event.text == Key.Return || (event.text == Key.Tab && !event.modifiers.shift)) {
+                FormulaAssist.caret-byte-offset = field.cursor-position-byte-offset;
+                FormulaAssist.accept-suggestion(FormulaAssist.selected-suggestion);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                FormulaAssist.dismiss-popup();
+                return accept;
+            }
+        }
+        return reject;
+    }
+
+    field := LoomTextField {
+        label: "Formula bar";
+        description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
+        placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
+        value <=> root.value;
+        value-font-family: Theme.document-font-family;
+        horizontal-stretch: 1;
+        capture-tab: true;
+        focus-request: root.focus-request;
+        changed focused => {
+            if (self.focused) {
+                FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
+                FormulaAssist.editing-state-changed(true);
+            } else if (!root.is-editing) {
+                FormulaAssist.editing-state-changed(false);
+            }
+        }
+        changed cursor-position-byte-offset => {
+            FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
+            if (self.focused) {
+                FormulaAssist.caret-moved(self.cursor-position-byte-offset);
+            }
+        }
+        edited(text) => {
+            FormulaAssist.caret-byte-offset = self.cursor-position-byte-offset;
+            FormulaAssist.formula-edited(text);
+        }
+        accepted(text) => { root.commit-advance(text, 1, 0); }
+        tabbed(back) => { root.commit-advance(root.value, 0, back ? -1 : 1); }
+        cancelled => {
+            root.value = root.selection-formula;
+            root.cancel();
+        }
+    }
+}
 
 export component SheetTabs inherits Rectangle {
     in property <[string]> sheets: ["Sheet 1"];
@@ -94,6 +174,7 @@ export component FormulaNameBar inherits Rectangle {
     in property <bool> is-editing: false;
     in-out property <string> name-text: "A1";
     changed selection-range => { root.name-text = root.selection-range; }
+    changed is-editing => { FormulaAssist.editing-state-changed(root.is-editing); }
     callback commit(string);
     callback commit-advance(string, int, int);
     callback cancel;
@@ -140,23 +221,13 @@ export component FormulaNameBar inherits Rectangle {
             vertical-alignment: center;
         }
 
-        LoomTextField {
-            label: "Formula bar";
-            description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
-            placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
+        FormulaFieldScope {
             value <=> root.formula-edit-buffer;
-            value-font-family: Theme.document-font-family;
-            horizontal-stretch: 1;
-            capture-tab: true;
+            selection-formula: root.selection-formula;
             focus-request: root.focus-seq;
-            // Enter commits and moves down; Tab and Shift+Tab commit and move
-            // sideways, as in every spreadsheet. The check button commits in place.
-            accepted(text) => { root.commit-advance(text, 1, 0); }
-            tabbed(back) => { root.commit-advance(root.formula-edit-buffer, 0, back ? -1 : 1); }
-            cancelled => {
-                root.formula-edit-buffer = root.selection-formula;
-                root.cancel();
-            }
+            is-editing: root.is-editing;
+            commit-advance(text, row-delta, col-delta) => { root.commit-advance(text, row-delta, col-delta); }
+            cancel => { root.cancel(); }
         }
 
         if root.show-quick-formulas : HorizontalLayout {
@@ -227,22 +298,13 @@ export component FormulaNameBar inherits Rectangle {
             LoomButton { label: "SUM"; variant: "ghost"; clicked => { root.quick-formula("SUM"); } }
         }
 
-        LoomTextField {
-            label: "Formula bar";
-            description: "Edit the selected cell's value or formula. Enter commits, Escape cancels";
-            placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
+        FormulaFieldScope {
             value <=> root.formula-edit-buffer;
-            horizontal-stretch: 1;
-            capture-tab: true;
+            selection-formula: root.selection-formula;
             focus-request: root.focus-seq;
-            // Enter commits and moves down; Tab and Shift+Tab commit and move
-            // sideways, as in every spreadsheet. The check button commits in place.
-            accepted(text) => { root.commit-advance(text, 1, 0); }
-            tabbed(back) => { root.commit-advance(root.formula-edit-buffer, 0, back ? -1 : 1); }
-            cancelled => {
-                root.formula-edit-buffer = root.selection-formula;
-                root.cancel();
-            }
+            is-editing: root.is-editing;
+            commit-advance(text, row-delta, col-delta) => { root.commit-advance(text, row-delta, col-delta); }
+            cancel => { root.cancel(); }
         }
 
         Text {

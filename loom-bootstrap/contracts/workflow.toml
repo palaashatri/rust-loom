@@ -51,7 +51,7 @@ text_scales = [1.0, 1.25, 1.5]
 directions = ["ltr", "rtl"]
 
 [application_status]
-sheets = "ACCEPTED"
+sheets = "IN_PROGRESS"
 writer = "IN_PROGRESS"
 present = "IN_PROGRESS"
 photo = "LOCKED"

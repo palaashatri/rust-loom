@@ -13,10 +13,12 @@ fn wire_everything(session: &Session) {
     let (app, state) = (&session.app, &session.state);
     register_sheet_actions(app, state, &menu_service);
     crate::chart_actions::register_chart_actions(app, state);
+    crate::chart_actions::register_chart_inspector_actions(app, state, &menu_service);
     register_history_actions(app, state, &menu_service);
     object_actions::register_object_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);
     crate::ink_actions::wire(app, state, &menu_service);
+    crate::sheet_tables::wire(app, state, &menu_service);
 }
 
 fn fingerprint(state: &GuiState) -> String {
@@ -44,6 +46,10 @@ fn table() -> Vec<(&'static str, Action)> {
         a("adjust_decimals", |app| app.invoke_adjust_decimals(1)),
         a("adjust_font", |app| app.invoke_adjust_font(1)),
         a("adjust_row_height", |app| app.invoke_adjust_row_height(5)),
+        a("arrange_object", |app| {
+            app.global::<SheetInspectorActions>()
+                .invoke_arrange_object(0)
+        }),
         a("clear_selected_cells", |app| {
             app.invoke_clear_selected_cells()
         }),
@@ -97,6 +103,14 @@ fn table() -> Vec<(&'static str, Action)> {
         }),
         a("set_cell_alignment", |app| app.invoke_set_cell_alignment(1)),
         a("set_cell_format", |app| app.invoke_set_cell_format(1)),
+        a("set_chart_kind", |app| {
+            app.global::<SheetChartActions>().invoke_set_chart_kind(1)
+        }),
+        a("set_chart_title", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_chart_title("Title".into());
+        }),
         a("set_col_width", |app| {
             let _ = app.invoke_set_col_width("96".into());
         }),
@@ -117,16 +131,147 @@ fn table() -> Vec<(&'static str, Action)> {
         a("set_row_height", |app| {
             let _ = app.invoke_set_row_height("32".into());
         }),
+        a("set_series_name", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_series_name("Series".into());
+        }),
+        a("set_x_axis_label", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_x_axis_label("X".into());
+        }),
+        a("set_y_axis_label", |app| {
+            let _ = app
+                .global::<SheetChartActions>()
+                .invoke_set_y_axis_label("Y".into());
+        }),
         a("sort_ascending", |app| app.invoke_sort_ascending()),
         a("sort_descending", |app| app.invoke_sort_descending()),
         a("toggle_bold", |app| app.invoke_toggle_bold()),
         a("toggle_borders", |app| app.invoke_toggle_borders()),
+        a("toggle_chart_legend", |app| {
+            app.global::<SheetChartActions>()
+                .invoke_toggle_chart_legend()
+        }),
         a("toggle_italic", |app| app.invoke_toggle_italic()),
+        a("toggle_strikethrough", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_toggle_strikethrough()
+        }),
         a("toggle_underline", |app| app.invoke_toggle_underline()),
+        a("toggle_wrap_text", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_toggle_wrap_text()
+        }),
         a("undo", |app| app.invoke_undo()),
         a("unfreeze_panes", |app| app.invoke_unfreeze_panes()),
+        a("unmerge_cells", |app| {
+            app.global::<crate::CellRichFormat>().invoke_unmerge_cells()
+        }),
         a("wrap_toggled", |app| {
             app.global::<CellInk>().invoke_wrap_toggled()
+        }),
+        a("apply_column_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_apply_column_filter()
+        }),
+        a("apply_validation", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_apply_validation()
+        }),
+        a("clear_all_filters", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_all_filters()
+        }),
+        a("clear_column_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_column_filter()
+        }),
+        a("clear_validation", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_clear_validation()
+        }),
+        a("delete_named_range", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_delete_named_range("Amounts".into())
+        }),
+        a("replace_all", |app| {
+            app.global::<crate::DataToolsState>().invoke_replace_all()
+        }),
+        a("replace_current", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_replace_current()
+        }),
+        a("save_named_range", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_save_named_range("Amounts".into(), "A1:A2".into())
+        }),
+        a("toggle_auto_filter", |app| {
+            app.global::<crate::DataToolsState>()
+                .invoke_toggle_auto_filter()
+        }),
+        a("apply_border_preset", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_apply_border_preset("all".into())
+        }),
+        a("auto_text_color", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_auto_text_color()
+        }),
+        a("cf_add_rule", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_add_rule(0, "10".into(), 0, 0)
+        }),
+        a("cf_clear_selection", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_clear_selection()
+        }),
+        a("cf_remove_rule", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cf_remove_rule(0)
+        }),
+        a("cycle_text_color", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_cycle_text_color()
+        }),
+        a("merge_cells", |app| {
+            app.global::<crate::CellRichFormat>().invoke_merge_cells()
+        }),
+        a("paste_formats_only", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_paste_formats_only()
+        }),
+        a("paste_values_only", |app| {
+            app.global::<crate::CellRichFormat>()
+                .invoke_paste_values_only()
+        }),
+        a("insert_table", |app| {
+            app.global::<crate::SheetTableState>().invoke_insert_table()
+        }),
+        a("rename_active_table", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_rename_active_table("Sales".into())
+        }),
+        a("set_active_table_style", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_set_active_table_style(1)
+        }),
+        a("toggle_active_table_title", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_toggle_active_table_title()
+        }),
+        a("toggle_active_table_alternating", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_toggle_active_table_alternating()
+        }),
+        a("delete_active_table", |app| {
+            app.global::<crate::SheetTableState>()
+                .invoke_delete_active_table()
+        }),
+        a("apply_pivot_builder", |app| {
+            app.global::<crate::PivotBuilderState>()
+                .invoke_apply_pivot_builder()
         }),
     ]
 }

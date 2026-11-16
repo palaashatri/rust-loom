@@ -7,9 +7,7 @@ fn at(row: u32, col: u32) -> CellRef {
 }
 
 fn cell(raw: &str) -> Cell {
-    Cell {
-        raw: raw.to_string(),
-    }
+    Cell::new(raw)
 }
 
 /// Distinct coordinates spread over several bands, in a fixed scrambled order.

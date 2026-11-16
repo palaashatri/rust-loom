@@ -581,32 +581,44 @@ pub(super) fn open_workbook_from_picker(
     }
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
-            let open_text = format!("Opening {}…", path.display());
-            let result = state
-                .open_operations
-                .borrow_mut()
-                .start_picker_load(path, state.worker_revision.get());
-            match result {
-                Ok(operation) => {
-                    if let Some(revision) = authorized_dirty_revision {
-                        state
-                            .open_operations
-                            .borrow_mut()
-                            .authorize_dirty_replacement(operation, revision);
-                    }
-                    app.set_template_chooser_open(false);
-                    state.pending_first_run_welcome.set(false);
-                    app.set_status_left(SharedString::from(open_text));
-                }
-                Err(error) => {
-                    app.set_status_left(SharedString::from(format!("Open failed: {error}")))
-                }
-            }
+            open_workbook_at_path(app, state, path, authorized_dirty_revision);
         }
         Ok(None) => app.set_status_left("Open cancelled".into()),
         Err(error) => {
             app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
         }
+    }
+}
+
+pub(crate) fn open_workbook_at_path(
+    app: &SheetsApp,
+    state: &GuiState,
+    path: PathBuf,
+    authorized_dirty_revision: Option<u64>,
+) {
+    if crate::close_operations::reject_admission(app, state) {
+        return;
+    }
+    let open_text = format!("Opening {}…", path.display());
+    let result = state
+        .open_operations
+        .borrow_mut()
+        .start_picker_load(path.clone(), state.worker_revision.get());
+    match result {
+        Ok(operation) => {
+            if let Some(revision) = authorized_dirty_revision {
+                state
+                    .open_operations
+                    .borrow_mut()
+                    .authorize_dirty_replacement(operation, revision);
+            }
+            app.set_template_chooser_open(false);
+            app.global::<crate::StartHubState>().set_open(false);
+            state.pending_first_run_welcome.set(false);
+            crate::start_hub::record_recent_workbook(&path);
+            app.set_status_left(SharedString::from(open_text));
+        }
+        Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
     }
 }
 

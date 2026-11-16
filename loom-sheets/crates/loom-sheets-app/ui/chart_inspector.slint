@@ -1,0 +1,89 @@
+// Editable customization properties for the worksheet chart.
+// Using globals lets the chart inspector and chart overlay share state
+// without growing the ceilinged app.slint root.
+import { LoomToggle } from "foundation.slint";
+import { SheetChoiceRow, SheetFieldRow, SheetHeading } from "inspector_rows.slint";
+import { Theme } from "theme.slint";
+
+export global SheetChartConfig {
+    in-out property <bool> chart-exists: false;
+    in-out property <bool> show-legend: true;
+    in-out property <string> title: "Chart";
+    in-out property <string> kind: "bar";
+    in-out property <string> x-axis-label: "";
+    in-out property <string> y-axis-label: "";
+    in-out property <string> series-name: "";
+    in-out property <string> source-range: "";
+}
+
+export global SheetChartActions {
+    callback set-chart-title(string) -> bool;
+    callback set-chart-kind(int);
+    callback toggle-chart-legend();
+    callback set-x-axis-label(string) -> bool;
+    callback set-y-axis-label(string) -> bool;
+    callback set-series-name(string) -> bool;
+}
+
+export component SheetChartInspectorFields inherits VerticalLayout {
+    spacing: Theme.tokens.space.md;
+
+    function kind-index() -> int {
+        if (SheetChartConfig.kind == "line") { return 1; }
+        if (SheetChartConfig.kind == "pie") { return 2; }
+        if (SheetChartConfig.kind == "scatter") { return 3; }
+        return 0;
+    }
+
+    SheetHeading { title: "Chart"; }
+    SheetChoiceRow {
+        choices: ["Bar", "Line", "Pie", "Scatter"];
+        current: root.kind-index();
+        chosen(idx) => { SheetChartActions.set-chart-kind(idx); }
+    }
+    SheetFieldRow {
+        label: "Title";
+        field-label: "Chart title";
+        value: SheetChartConfig.title;
+        editable: true;
+        edited(text) => { SheetChartActions.set-chart-title(text); }
+    }
+    HorizontalLayout {
+        alignment: Theme.rtl ? end : start;
+        LoomToggle {
+            label: "Show legend";
+            checked: SheetChartConfig.show-legend;
+            accessible-checkable: true;
+            accessible-checked: SheetChartConfig.show-legend;
+            toggled => { SheetChartActions.toggle-chart-legend(); }
+        }
+    }
+    SheetFieldRow {
+        label: "X axis";
+        field-label: "Chart X-axis label";
+        value: SheetChartConfig.x-axis-label;
+        editable: true;
+        placeholder: SheetChartConfig.x-axis-label == "";
+        edited(text) => { SheetChartActions.set-x-axis-label(text); }
+    }
+    SheetFieldRow {
+        label: "Y axis";
+        field-label: "Chart Y-axis label";
+        value: SheetChartConfig.y-axis-label;
+        editable: true;
+        placeholder: SheetChartConfig.y-axis-label == "";
+        edited(text) => { SheetChartActions.set-y-axis-label(text); }
+    }
+    SheetFieldRow {
+        label: "Series";
+        field-label: "Chart series name";
+        value: SheetChartConfig.series-name;
+        editable: true;
+        edited(text) => { SheetChartActions.set-series-name(text); }
+    }
+    SheetFieldRow {
+        label: "Source";
+        field-label: "Chart source range";
+        value: SheetChartConfig.source-range;
+    }
+}

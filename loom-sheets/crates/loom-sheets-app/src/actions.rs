@@ -8,8 +8,8 @@ use std::sync::Arc;
 use loom_desktop::NativeMenuBar;
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
-    CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
-    SheetChart, SheetObject,
+    Cell, CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
+    SheetChart, SheetObject, Value,
 };
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 
@@ -457,7 +457,7 @@ pub(crate) fn register_sheet_actions(
                     &mut state.redo_stack.borrow_mut(),
                     sel.range(),
                 ) {
-                    let on = state.current.borrow().cell_style(sel.anchor).border;
+                    let on = state.current.borrow().cell_style(sel.anchor).borders.any();
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     announce_toggle(&app, "Borders", on);
@@ -985,6 +985,8 @@ pub(crate) fn register_sheet_actions(
     crate::clipboard_actions::wire(app, state, menu_service);
     crate::grid_pointer::wire(app, state, menu_service);
     crate::ink_actions::wire(app, state, menu_service);
+    crate::rich_format_actions::wire(app, state, menu_service);
+    crate::pivot_builder::wire(app, state, menu_service);
 
     {
         let state = state.clone();
@@ -1211,6 +1213,23 @@ pub(crate) fn register_sheet_actions(
     }
 }
 
+/// A cell for an evaluated value, keeping the value's type.
+///
+/// A `Text` value becomes literal text, so `="00123"` stays `00123` instead of
+/// turning into the number `123`. An array result uses its top-left element,
+/// which is what the anchor cell displays.
+pub(crate) fn cell_from_value(value: &Value) -> Cell {
+    match value {
+        Value::Text(text) => Cell::literal(text.clone()),
+        Value::Array(items, _, _) => match items.first() {
+            Some(Value::Text(text)) => Cell::literal(text.clone()),
+            Some(first) => Cell::new(first.display()),
+            None => Cell::new(String::new()),
+        },
+        other => Cell::new(other.display()),
+    }
+}
+
 /// Copy values from a worksheet selection into a 2D matrix of raw strings.
 #[allow(dead_code)]
 pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<String>> {
@@ -1220,36 +1239,58 @@ pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<Strin
 /// Copy values from a worksheet selection, using calculated values for spill cells.
 pub(crate) fn copy_selection_with_values(
     sheet: &Sheet,
-    values: Option<&std::collections::HashMap<CellRef, loom_sheets_core::Value>>,
+    values: Option<&std::collections::HashMap<CellRef, Value>>,
     sel: GridSelection,
 ) -> Vec<Vec<String>> {
+    copy_selection_cells(sheet, values, sel)
+        .into_iter()
+        .map(|row| row.into_iter().map(|cell| cell.raw).collect())
+        .collect()
+}
+
+/// Copy the selection as whole cells, keeping each raw text and its
+/// literal-text flag.
+///
+/// The private copy needs both: an ordinary paste must not re-parse literal
+/// text `00123` as a number, and must not treat literal text starting with `=`
+/// as a formula. Spill cells have no raw text, so their calculated value is
+/// converted with its type kept.
+pub(crate) fn copy_selection_cells(
+    sheet: &Sheet,
+    values: Option<&std::collections::HashMap<CellRef, Value>>,
+    sel: GridSelection,
+) -> Vec<Vec<Cell>> {
     let range = sel.range();
-    let mut rows = Vec::new();
-    for r in range.start.row..=range.end.row {
-        let mut row = Vec::new();
-        for c in range.start.col..=range.end.col {
-            let cell = CellRef { row: r, col: c };
-            let val = match sheet.raw(cell) {
-                Some(raw) if !raw.is_empty() => raw.to_string(),
-                _ => values
-                    .and_then(|v| v.get(&cell))
-                    .map(|v| v.display())
-                    .unwrap_or_default(),
-            };
-            row.push(val);
-        }
-        rows.push(row);
-    }
-    rows
+    (range.start.row..=range.end.row)
+        .map(|row| {
+            (range.start.col..=range.end.col)
+                .map(|col| {
+                    let cell = CellRef { row, col };
+                    match sheet.cells.get(&cell) {
+                        Some(stored) if !stored.raw.is_empty() => stored.clone(),
+                        _ => values
+                            .and_then(|values| values.get(&cell))
+                            .map(cell_from_value)
+                            .unwrap_or_else(|| Cell::new(String::new())),
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Paste a 2D matrix into a worksheet with full undo transaction recording.
+///
+/// Each entry carries its raw text plus whether that text is literal, so a
+/// Values Only paste can keep evaluated text such as `00123` or `=1+1` from
+/// being re-parsed as a number or a formula.
 pub(crate) fn paste_selection(
     sheet: &mut Sheet,
     undo_stack: &mut Vec<SheetTransaction>,
     redo_stack: &mut Vec<SheetTransaction>,
     target_sel: GridSelection,
-    data: &[Vec<String>],
+    data: &[Vec<Cell>],
+    values_only: bool,
 ) -> usize {
     if data.is_empty() || data[0].is_empty() {
         return 0;
@@ -1263,7 +1304,11 @@ pub(crate) fn paste_selection(
         for r in target_range.start.row..=target_range.end.row {
             for c in target_range.start.col..=target_range.end.col {
                 let cell = CellRef { row: r, col: c };
-                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                let edit = if values_only {
+                    RangeEdit::replace_value(sheet, cell, val.clone())
+                } else {
+                    RangeEdit::replace_cell(sheet, cell, Some(val.clone()))
+                };
                 edits.push(edit);
             }
         }
@@ -1275,7 +1320,11 @@ pub(crate) fn paste_selection(
                     row: origin.row.saturating_add(r_off as u32),
                     col: origin.col.saturating_add(c_off as u32),
                 };
-                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                let edit = if values_only {
+                    RangeEdit::replace_value(sheet, cell, val.clone())
+                } else {
+                    RangeEdit::replace_cell(sheet, cell, Some(val.clone()))
+                };
                 edits.push(edit);
             }
         }

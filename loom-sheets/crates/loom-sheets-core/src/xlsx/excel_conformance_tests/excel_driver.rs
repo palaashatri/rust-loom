@@ -207,13 +207,17 @@ fn compare_sheet(
         if want_fill != got_fill {
             out.push(format!("{at}: fill {want_fill:?} vs Excel {got_fill:?}"));
         }
-        let outlined = ["borderLeft", "borderTop", "borderBottom", "borderRight"]
-            .iter()
-            .all(|side| excel[*side].as_i64().is_some_and(|line| line > 0));
-        // A neighbour's border shows on the shared edge, so only a styled
-        // border must be present on all four sides.
-        if style.border && !outlined {
-            out.push(format!("{at}: border missing on a side in Excel"));
+        // A neighbour's border shows on the shared edge, so only check edges
+        // that this cell's style enables.
+        for (enabled, side) in [
+            (style.borders.left, "borderLeft"),
+            (style.borders.top, "borderTop"),
+            (style.borders.bottom, "borderBottom"),
+            (style.borders.right, "borderRight"),
+        ] {
+            if enabled && !excel[side].as_i64().is_some_and(|line| line > 0) {
+                out.push(format!("{at}: {side} missing in Excel"));
+            }
         }
         let want_align = match key.alignment {
             CellAlignment::Left => -4131,

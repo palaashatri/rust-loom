@@ -49,9 +49,14 @@ use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
 mod inspector_search;
+mod pivot_builder;
+mod rich_format_actions;
+mod sheet_tables;
+mod start_hub;
 #[cfg(test)]
 use inspector_search::inspector_section_visibility;
 mod paste_formats;
+mod print_preview;
 mod tab_run;
 use analysis::{plan_chart, plan_chart_in_range};
 
@@ -87,6 +92,9 @@ use object_layout::editor_dimensions_with_width;
 use object_layout::{editor_dimensions_with_preview, project_sheet_objects};
 
 mod chart_actions;
+#[cfg(test)]
+#[path = "charts_arrange_pdf_tests.rs"]
+mod charts_arrange_pdf_tests;
 
 mod appearance;
 mod local_menu;
@@ -130,10 +138,13 @@ mod journey;
 use journey::*;
 
 mod cell_spill;
+mod formula_assist;
+mod formula_catalog;
 mod responsive_layout;
 mod scroll_projection;
 mod selection_projection;
 pub(crate) use selection_projection::update_selection_range;
+mod template_catalog;
 mod template_navigation;
 mod welcome_guide;
 mod window_chrome;
@@ -157,6 +168,7 @@ use command_dispatch::*;
 
 mod cell_actions;
 pub(crate) use cell_actions::register_cell_edit_action;
+mod data_tools;
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 pub(crate) const DEFAULT_VISIBLE_COLS: u32 = 8;
@@ -272,26 +284,28 @@ fn project_sheet_grid_with_values(
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
             };
+            let formatted_val = style.format_value(&raw_val);
             let display_val = style.format_value_fit(
                 &raw_val,
                 sheet.col_width(col),
                 formatting::effective_font_size(style) as f32,
             );
+            let effective = sheet.effective_style(cell, &formatted_val);
             cell_labels.push(accessible_cell_label(cell, sheet.raw(cell), &raw_val));
             cells.push(display_val);
             cell_alignments.push(align_code);
-            cell_bolds.push(style.bold);
-            cell_italics.push(style.italic);
-            cell_underlines.push(style.underline);
-            cell_borders.push(style.border);
-            cell_fills.push(style.fill.swatch_index());
-            cell_font_sizes.push(formatting::effective_font_size(style) as i32);
+            cell_bolds.push(effective.bold);
+            cell_italics.push(effective.italic);
+            cell_underlines.push(effective.underline);
+            cell_borders.push(effective.borders.any());
+            cell_fills.push(effective.fill.swatch_index());
+            cell_font_sizes.push(formatting::effective_font_size(effective) as i32);
             cell_text_colors.push(
-                style
+                effective
                     .text_color
                     .map_or(-1, |rgb| (rgb & 0x00FF_FFFF) as i32),
             );
-            cell_wraps.push(style.wrap);
+            cell_wraps.push(effective.wrap);
         }
     }
 
@@ -346,10 +360,23 @@ fn dimension_size(
     default_size: f32,
     custom: &std::collections::BTreeMap<u32, f32>,
 ) -> f32 {
-    valid_dimension(
-        custom.get(&index).copied().unwrap_or(default_size),
-        default_size,
-    )
+    match custom.get(&index).copied() {
+        Some(size) if size.is_finite() && size >= 0.0 => size,
+        _ => default_size,
+    }
+}
+
+pub(crate) fn scaled_row_heights(sheet: &Sheet, zoom: f32) -> std::collections::BTreeMap<u32, f32> {
+    let mut heights: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .filter(|(_, &height)| height.is_finite() && height > 0.0)
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
+    for &row in &sheet.hidden_rows {
+        heights.insert(row, 0.0);
+    }
+    heights
 }
 
 pub(crate) fn dimension_extent(
@@ -359,7 +386,7 @@ pub(crate) fn dimension_extent(
 ) -> f32 {
     let mut extent = count as f32 * default_size;
     for (&index, &size) in custom {
-        if index < count && size.is_finite() && size > 0.0 {
+        if index < count && size.is_finite() && size >= 0.0 {
             extent += size - default_size;
         }
     }
@@ -373,7 +400,7 @@ pub(crate) fn dimension_offset(
 ) -> f32 {
     let mut offset = first as f32 * default_size;
     for &size in custom.range(..first).map(|(_, size)| size) {
-        if size.is_finite() && size > 0.0 {
+        if size.is_finite() && size >= 0.0 {
             offset += size - default_size;
         }
     }
@@ -403,7 +430,7 @@ fn dimension_index_at_offset(
         if custom_index >= count
             || custom_index < index
             || !custom_size.is_finite()
-            || custom_size <= 0.0
+            || custom_size < 0.0
         {
             continue;
         }
@@ -561,11 +588,7 @@ fn grid_geometry_fit(
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
+    let scaled_rows = scaled_row_heights(sheet, zoom);
     let column_widths: Vec<f32> = (0..viewport.visible_cols)
         .filter_map(|index| viewport.column_at(index))
         .map(|col| dimension_size(col, default_col_width, &scaled_cols))
@@ -648,11 +671,7 @@ fn viewport_from_app(
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
-    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
-        .row_heights
-        .iter()
-        .map(|(&row, &height)| (row, height * zoom))
-        .collect();
+    let scaled_rows = scaled_row_heights(sheet, zoom);
     let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
     viewport_from_dimensions(
@@ -972,6 +991,9 @@ fn project_sheet_inner_with_preview(
     );
 
     scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);
+    data_tools::sync_data_tools_state(app, sheet);
+    rich_format_actions::publish_viewport(app, sheet, vals, viewport, selection, zoom);
+    sheet_tables::project_tables(app, sheet, viewport, selection, zoom);
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
@@ -1470,7 +1492,16 @@ pub(crate) fn select_cell(app: &SheetsApp, state: &GuiState, r: i32, c: i32) {
     let refr = CellRef { row: r, col: c };
     let vals = values_for_projection(state);
     let sheet = state.current.borrow();
-    update_selection(app, &sheet, &vals, refr);
+    if let Some(merged) = sheet.merge_at(refr) {
+        update_selection_range(
+            app,
+            &sheet,
+            &vals,
+            GridSelection::new(merged.end, merged.start),
+        );
+    } else {
+        update_selection(app, &sheet, &vals, refr);
+    }
 }
 
 fn inspector_tab_index(index: i32) -> i32 {
@@ -1549,7 +1580,7 @@ pub(crate) struct GuiState {
     pub(crate) import_filter: FileFilter,
     pub(crate) csv_filter: FileFilter,
     pub(crate) xlsx_filter: FileFilter,
-    pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
+    pub(crate) clipboard: RefCell<Option<Vec<Vec<loom_sheets_core::Cell>>>>,
     pub(crate) object_gesture: RefCell<Option<object_actions::ObjectGesture>>,
     pub(crate) object_context_generation: Cell<u64>,
     pub(crate) pending_first_run_welcome: Cell<bool>,
@@ -1695,7 +1726,9 @@ impl GuiState {
 
     /// Recheck full content after undo/redo, where the edit marker alone would
     /// stay set even after returning exactly to the last saved workbook. The
-    /// check compares cell digests, so it costs the same for any workbook size.
+    /// check compares active sheet index, cell/style/alignment digests, and
+    /// layout metadata (including `auto_filter`, `hidden_rows`, `named_ranges`,
+    /// and `validations`).
     pub(crate) fn recompute_dirty_from_saved(&self) {
         let Some(saved) = self.last_saved.borrow().clone() else {
             self.dirty_content.set(true);
@@ -1769,6 +1802,18 @@ fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
+fn export_pdf_request(state: &GuiState) -> SaveFileRequest {
+    let filters = FileFilter::new("PDF Document", ["pdf"])
+        .map(|filter| vec![filter])
+        .unwrap_or_default();
+    SaveFileRequest {
+        title: "Export Sheet to PDF".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(format!("{}.pdf", state.current.borrow().name)),
+        filters,
+    }
+}
+
 pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
     {
         let state = Rc::clone(state);
@@ -1796,6 +1841,21 @@ pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
             }
         });
     }
+    {
+        let state = Rc::clone(state);
+        let app_ref = app.as_weak();
+        app.global::<crate::SheetInspectorActions>()
+            .on_export_pdf(move || {
+                if let Some(app) = app_ref.upgrade() {
+                    export_operations::export_with_picker(
+                        &app,
+                        &state,
+                        export_operations::ExportFormat::Pdf,
+                    );
+                }
+            });
+    }
+    print_preview::wire_callbacks(app, state);
 }
 
 /// The one document identity used by the window title, the close prompt, and
@@ -2285,6 +2345,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     register_cell_edit_action(&app, &state, &menu_service);
+    data_tools::register_data_tools_actions(&app, &state, &menu_service);
     recovery_pause::wire(&app, &state);
     {
         let app_ref = app.as_weak();
@@ -2297,10 +2358,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+    formula_assist::register_callbacks(&app, &state);
     {
         let app_ref = app.as_weak();
+        let state = state.clone();
         app.on_begin_edit(move |initial_text| {
             if let Some(app) = app_ref.upgrade() {
+                formula_assist::sync_assist(&app, &state, initial_text.as_str());
                 app.set_formula_edit_buffer(initial_text);
                 app.invoke_focus_formula_bar();
             }
@@ -2446,8 +2510,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     wire_appearance_menu_sync(&menu_service, &state);
 
     register_sheet_actions(&app, &state, &menu_service);
+    start_hub::wire(&app, &state, &menu_service);
+    sheet_tables::wire(&app, &state, &menu_service);
     welcome_guide::wire(&app, &state, &menu_service);
     chart_actions::register_chart_actions(&app, &state);
+    chart_actions::register_chart_inspector_actions(&app, &state, &menu_service);
     object_actions::register_object_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
@@ -2463,7 +2530,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         sync_chart_to_app(&app, &state.current.borrow());
     }
     if startup_open.is_none() && !session.recovered_unsaved && !args.objects && !args.chart {
-        app.set_template_chooser_open(true);
+        if args.template_chooser {
+            app.set_template_chooser_open(true);
+        } else {
+            start_hub::open_hub(&app);
+        }
         state
             .pending_first_run_welcome
             .set(welcome_guide::should_show_on_first_run());
@@ -2522,6 +2593,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.invoke_focus_template_chooser();
     } else if app.get_welcome_open() {
         app.invoke_focus_welcome();
+        let app_ref = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if app.get_welcome_open()
+                    && !app.get_save_changes_open()
+                    && !app.get_xlsx_import_warning_open()
+                    && !app.get_template_chooser_open()
+                {
+                    app.invoke_focus_welcome();
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
     } else {
         app.invoke_focus_grid();
         // Activation of the shown window can restore a different focus item

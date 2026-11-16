@@ -13,8 +13,8 @@
 
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
-    export_xlsx_sheets, import_xlsx_sheets, to_csv_with_values, CellAlignment, CellRef, CellStyle,
-    ChartKind, NumberFormat, Sheet, SheetChart, SheetObject, Value,
+    export_xlsx_sheets, import_xlsx_sheets, to_csv_with_values, CellAlignment, CellBorders,
+    CellRef, CellStyle, ChartKind, NumberFormat, Sheet, SheetChart, SheetObject, Value,
 };
 use std::path::PathBuf;
 
@@ -25,7 +25,7 @@ fn at(a1: &str) -> CellRef {
 fn header_style() -> CellStyle {
     CellStyle {
         bold: true,
-        border: true,
+        borders: CellBorders::ALL,
         fill: FillColor::Gray,
         ..CellStyle::new()
     }
@@ -134,6 +134,7 @@ fn fixture_workbook() -> Vec<Sheet> {
         val_col: 3,
         start_row: 1,
         end_row: Some(4),
+        ..Default::default()
     });
     sales
         .objects

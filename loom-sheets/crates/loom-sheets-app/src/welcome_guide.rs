@@ -1,5 +1,6 @@
 //! Interactive first-run and on-demand Welcome Guide for Loom Sheets.
 
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,10 +21,8 @@ pub(crate) fn should_show_on_first_run() -> bool {
     settings_file::read(&path, WELCOME_SEEN_KEY).as_deref() != Some("true")
 }
 
-/// Persists that the Welcome Guide has been shown to the user.
-pub(crate) fn mark_seen() {
-    let path = settings_file::path_for_application(APPLICATION_ID);
-    let _ = settings_file::write(&path, WELCOME_SEEN_KEY, "true");
+fn mark_seen_at(path: &Path) {
+    let _ = settings_file::write(path, WELCOME_SEEN_KEY, "true");
 }
 
 /// Opens the Welcome Guide at Step 1 and moves keyboard focus into it.
@@ -35,12 +34,27 @@ pub(crate) fn open(app: &SheetsApp) {
 
 /// Wires Welcome Guide close and interactive "Try" callbacks.
 pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
+    wire_with_settings_path(
+        app,
+        state,
+        menu_service,
+        settings_file::path_for_application(APPLICATION_ID),
+    );
+}
+
+fn wire_with_settings_path(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    settings_path: PathBuf,
+) {
     {
         let app_ref = app.as_weak();
+        let settings_path = settings_path.clone();
         app.on_welcome_close(move || {
             if let Some(app) = app_ref.upgrade() {
                 app.set_welcome_open(false);
-                mark_seen();
+                mark_seen_at(&settings_path);
                 app.invoke_focus_grid();
             }
         });
@@ -54,7 +68,7 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                 return;
             };
             app.set_welcome_open(false);
-            mark_seen();
+            mark_seen_at(&settings_path);
             match action.as_str() {
                 "templates" => {
                     crate::command_dispatch::dispatch_command(&app, "file.new_template");
@@ -75,10 +89,10 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     );
                 }
                 "table-menu" => {
-                    app.set_toolbar_menu(3);
+                    app.invoke_open_toolbar_menu(3);
                 }
                 "export-menu" => {
-                    app.set_toolbar_menu(5);
+                    app.invoke_open_toolbar_menu(5);
                 }
                 "palette" => {
                     app.invoke_open_palette();
@@ -95,13 +109,15 @@ fn load_practice_sheet(app: &SheetsApp, state: &GuiState, menu_service: &Arc<Nat
     if crate::mutation_guard::refused(app, state) {
         return;
     }
-    if state.is_dirty() {
+    if state.is_dirty() || crate::open_operations::has_formula_draft(app) {
         app.set_status_left(SharedString::from(
             "Current workbook has unsaved edits — use New from Template to try an example",
         ));
         app.invoke_focus_grid();
         return;
     }
+    crate::object_actions::cancel_active_gesture(app, state);
+    state.open_operations.borrow_mut().document_replaced();
     let sheet = crate::starter_workbook();
     state.install_workbook(vec![sheet], 0);
     *state.save_path.borrow_mut() = None;
@@ -155,7 +171,10 @@ mod tests {
             FileFilter::new("Excel", ["xlsx"]).expect("filter"),
         ));
         let menu_service = Arc::new(NativeMenuBar::new());
-        wire(&app, &state, &menu_service);
+        let dir = std::env::temp_dir().join(format!("loom-welcome-ui-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let settings_path = dir.join(APPLICATION_ID).join("settings.toml");
+        wire_with_settings_path(&app, &state, &menu_service, settings_path.clone());
 
         open(&app);
         assert!(app.get_welcome_open());
@@ -164,6 +183,10 @@ mod tests {
         app.invoke_welcome_try_action("palette".into());
         assert!(!app.get_welcome_open());
         assert!(app.get_palette_open());
+        assert_eq!(
+            settings_file::read(&settings_path, WELCOME_SEEN_KEY).as_deref(),
+            Some("true")
+        );
 
         app.set_palette_open(false);
         open(&app);
@@ -176,5 +199,47 @@ mod tests {
         app.invoke_welcome_try_action("table-menu".into());
         assert!(!app.get_welcome_open());
         assert_eq!(app.get_toolbar_menu(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sample_budget_protects_formula_draft_and_advances_generation() {
+        crate::set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let dialogs = Rc::new(ScriptedFileDialogs::new([], []));
+        let state = Rc::new(GuiState::new(
+            crate::blank_sheet(),
+            None,
+            dialogs,
+            FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+            FileFilter::new("CSV", ["csv"]).expect("filter"),
+            FileFilter::new("CSV", ["csv"]).expect("filter"),
+            FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+        ));
+        let menu_service = Arc::new(NativeMenuBar::new());
+        let dir =
+            std::env::temp_dir().join(format!("loom-welcome-draft-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let settings_path = dir.join(APPLICATION_ID).join("settings.toml");
+        wire_with_settings_path(&app, &state, &menu_service, settings_path);
+
+        let initial_gen = state.open_operations.borrow().document_generation();
+        state.mark_saved();
+        app.set_selection_formula("=1+1".into());
+        app.set_formula_edit_buffer("=1+2".into());
+        app.invoke_welcome_try_action("sample-budget".into());
+        assert_eq!(
+            state.open_operations.borrow().document_generation(),
+            initial_gen
+        );
+        assert!(app.get_status_left().contains("unsaved edits"));
+
+        app.set_formula_edit_buffer("=1+1".into());
+        app.invoke_welcome_try_action("sample-budget".into());
+        assert_eq!(
+            state.open_operations.borrow().document_generation(),
+            initial_gen + 1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
