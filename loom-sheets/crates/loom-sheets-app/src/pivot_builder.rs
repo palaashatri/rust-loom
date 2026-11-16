@@ -7,9 +7,10 @@ use std::sync::Arc;
 use loom_desktop::NativeMenuBar;
 use loom_sheets_core::{
     build_pivot_sheet, compute_pivot_table, detect_headers, extract_unique_values,
-    plan_pivot_updates, CellRange, CellRef, CellStyle, PivotAggregation, PivotFieldConfig, Sheet,
+    plan_pivot_updates, Cell, CellRange, CellRef, CellStyle, PivotAggregation, PivotFieldConfig,
+    Sheet,
 };
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::analysis::unique_sheet_name;
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
     PivotFieldItem, PivotPreviewRow, SheetTransaction, SheetsApp,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct PivotBuilderSession {
     config: PivotFieldConfig,
     headers: Vec<String>,
@@ -26,6 +27,9 @@ struct PivotBuilderSession {
     filter_value_idx: usize,
     /// The destination text typed by the user is not a valid cell reference.
     dest_invalid: bool,
+    /// The published field rows. Toggling a role updates these rows in place
+    /// instead of replacing the model, so the focused role button survives.
+    fields: Rc<VecModel<PivotFieldItem>>,
 }
 
 impl Default for PivotBuilderSession {
@@ -36,6 +40,7 @@ impl Default for PivotBuilderSession {
             filter_values: vec!["(All)".to_string()],
             filter_value_idx: 0,
             dest_invalid: false,
+            fields: Rc::new(VecModel::default()),
         }
     }
 }
@@ -108,6 +113,7 @@ fn init_session_for_range(sheet: &Sheet, range: CellRange) -> PivotBuilderSessio
         filter_values: vec!["(All)".to_string()],
         filter_value_idx: 0,
         dest_invalid: false,
+        fields: Rc::new(VecModel::default()),
     }
 }
 
@@ -127,14 +133,16 @@ fn block_overlaps_source(source: CellRange, anchor: CellRef, rows: u32, cols: u3
 /// Builds one undoable transaction covering both pivot values and styles.
 fn pivot_snapshot_transaction(
     sheet: &Sheet,
-    updates: &[(CellRef, String, bool)],
+    updates: &[(CellRef, Cell, bool)],
 ) -> SheetTransaction {
     let mut after = sheet.clone();
-    for (cell, raw, is_bold) in updates {
-        if raw.is_empty() {
+    for (cell, value, is_bold) in updates {
+        if value.raw.is_empty() {
             after.clear_cell(*cell);
+        } else if value.text {
+            after.set_literal(*cell, &value.raw);
         } else {
-            after.set_raw(*cell, raw.as_str());
+            after.set_raw(*cell, &value.raw);
         }
         if *is_bold {
             let style = CellStyle {
@@ -194,7 +202,19 @@ fn publish_session(app: &SheetsApp, sheet: &Sheet, session: &PivotBuilderSession
             }
         })
         .collect();
-    pb.set_fields(ModelRc::new(VecModel::from(items)));
+    // Update existing rows in place when the field set is unchanged. Replacing
+    // the whole model would re-create every row and drop focus from the role
+    // button the user just activated with the keyboard.
+    if session.fields.row_count() == items.len() {
+        for (row, item) in items.into_iter().enumerate() {
+            if session.fields.row_data(row).as_ref() != Some(&item) {
+                session.fields.set_row_data(row, item);
+            }
+        }
+    } else {
+        session.fields.set_vec(items);
+    }
+    pb.set_fields(ModelRc::from(session.fields.clone()));
 
     pb.set_filter_field_idx(
         session
@@ -579,8 +599,8 @@ mod tests {
         sheet.set_str("F1", "keep");
         let before_style = sheet.cell_style(CellRef::parse("F1").unwrap());
         let updates = vec![
-            (CellRef::parse("F1").unwrap(), "Region".to_string(), true),
-            (CellRef::parse("G1").unwrap(), "1".to_string(), false),
+            (CellRef::parse("F1").unwrap(), Cell::new("Region"), true),
+            (CellRef::parse("G1").unwrap(), Cell::new("1"), false),
         ];
         let tx = pivot_snapshot_transaction(&sheet, &updates);
         tx.apply(&mut sheet);

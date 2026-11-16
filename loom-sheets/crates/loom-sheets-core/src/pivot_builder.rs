@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::refs::quote_sheet_name;
-use crate::{evaluate, CellRange, CellRef, CellStyle, PivotAggregation, Sheet, Value};
+use crate::{evaluate, Cell, CellRange, CellRef, CellStyle, PivotAggregation, Sheet, Value};
 
 /// Configuration for building an interactive pivot table from a source range.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -682,7 +682,7 @@ pub fn plan_pivot_updates(
     config: &PivotFieldConfig,
     anchor: CellRef,
     qualify_source: bool,
-) -> Result<Vec<(CellRef, String, bool)>, String> {
+) -> Result<Vec<(CellRef, Cell, bool)>, String> {
     let result = compute_pivot_table_with_qualifier(source, config, qualify_source, anchor)?;
     let mut updates = Vec::with_capacity(result.row_count * result.col_count);
     for (r_idx, row) in result.rows.iter().enumerate() {
@@ -691,9 +691,15 @@ pub fn plan_pivot_updates(
                 row: anchor.row + r_idx as u32,
                 col: anchor.col + c_idx as u32,
             };
-            let raw = cell.formula.clone().unwrap_or_else(|| cell.display.clone());
+            // A generated aggregate is a formula; every label is literal text,
+            // including one that happens to start with `=` such as `=1+1`.
+            let value = match &cell.formula {
+                Some(formula) => Cell::new(formula.clone()),
+                None if cell.display.starts_with('=') => Cell::literal(cell.display.clone()),
+                None => Cell::new(cell.display.clone()),
+            };
             let is_bold = cell.is_header || cell.is_total;
-            updates.push((target, raw, is_bold));
+            updates.push((target, value, is_bold));
         }
     }
     Ok(updates)
@@ -713,9 +719,13 @@ pub fn build_pivot_sheet(source: &Sheet, config: &PivotFieldConfig) -> Result<Sh
         bold: true,
         ..Default::default()
     };
-    for (cell, raw, is_bold) in updates {
-        if !raw.is_empty() {
-            pivot.set_raw(cell, &raw);
+    for (cell, value, is_bold) in updates {
+        if !value.raw.is_empty() {
+            if value.text {
+                pivot.set_literal(cell, &value.raw);
+            } else {
+                pivot.set_raw(cell, &value.raw);
+            }
         }
         if is_bold {
             pivot.set_cell_style(cell, bold_style);
@@ -847,6 +857,35 @@ mod tests {
         );
         assert!(pivot.cell_style(CellRef::parse("A1").unwrap()).bold);
         assert!(pivot.cell_style(CellRef::parse("A4").unwrap()).bold);
+    }
+
+    #[test]
+    fn pivot_labels_starting_with_equals_stay_literal_text() {
+        // A source label such as `=1+1` is data. Writing it through the raw
+        // path would turn the pivot output into a formula.
+        let mut s = Sheet::new("Labels");
+        s.set_str("A1", "Key");
+        s.set_str("B1", "Amount");
+        s.set_literal(CellRef::parse("A2").unwrap(), "=1+1");
+        s.set_str("B2", "5");
+        let cfg = PivotFieldConfig {
+            source_range: CellRange::parse("A1:B2").unwrap(),
+            row_fields: vec![0],
+            col_field: None,
+            value_fields: vec![(1, PivotAggregation::Sum)],
+            filter_field: None,
+            destination_new_sheet: true,
+            destination_cell: None,
+            title: "Literal Labels".to_string(),
+        };
+        let pivot = build_pivot_sheet(&s, &cfg).unwrap();
+        let label = CellRef::parse("A2").unwrap();
+        assert_eq!(pivot.raw(label), Some("=1+1"));
+        assert_eq!(pivot.cells.get(&label).map(|cell| cell.text), Some(true));
+        assert_eq!(
+            evaluate(&pivot).get(&label),
+            Some(&Value::Text("=1+1".to_string()))
+        );
     }
 
     #[test]
