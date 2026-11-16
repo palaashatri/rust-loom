@@ -208,9 +208,12 @@ pub(crate) fn analyze_formula_cursor(
         // A complete `NAME(` call is only suppressed when the caret sits at the
         // end of the name. Inside the name the token is replaced whole, so
         // `=SU|M(A1)` still offers SUM instead of leaving `=SUM(M(A1)`.
+        // A sheet qualifier (`=su|m!A1`) is different: the name is complete at
+        // `!` wherever the caret is, and accepting a function there would leave
+        // `=SUM(!A1)`.
         let at_token_end = end == cursor;
         let followed_by_paren = at_token_end && bytes.get(end) == Some(&b'(');
-        let followed_by_bang = at_token_end && bytes.get(end) == Some(&b'!');
+        let followed_by_bang = bytes.get(end) == Some(&b'!');
         if !preceded_by_ref_marker
             && !followed_by_paren
             && !followed_by_bang
@@ -740,6 +743,22 @@ mod tests {
         // A shorter mid-token prefix still replaces the complete token.
         let (applied, _) = apply_suggestion("=SUMMA(A1)", Some(3), "SUM").unwrap();
         assert_eq!(applied, "=SUM(A1)");
+    }
+
+    #[test]
+    fn autocomplete_skips_a_sheet_name_at_a_mid_token_caret() {
+        // `su|m!A1` is a sheet qualifier, not a function call. Accepting SUM
+        // here would produce `=SUM(!A1)`.
+        let analysis = analyze_formula_cursor("=sum!A1", Some(3));
+        assert!(analysis.active);
+        assert_eq!(analysis.prefix_span, None);
+        assert!(analysis.suggestions.is_empty());
+        assert!(apply_suggestion("=sum!A1", Some(3), "SUM").is_none());
+
+        // The same holds with the caret at the end of the sheet name.
+        let analysis = analyze_formula_cursor("=sum!A1", None);
+        assert_eq!(analysis.prefix_span, None);
+        assert!(analysis.suggestions.is_empty());
     }
 
     #[test]
