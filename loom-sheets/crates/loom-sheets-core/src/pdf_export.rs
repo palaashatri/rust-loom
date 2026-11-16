@@ -982,8 +982,14 @@ fn band_cell_span(
         }
         return Some(BandCellSpan {
             anchor: CellRef { row: r0, col: c0 },
+            // Only this page band can be drawn. Starting `covered` at the
+            // merge's original anchor would make border lookup rescan rows that
+            // were printed on earlier pages (quadratic for a tall merge).
             covered: CellRange::new(
-                CellRef { row: r0, col: c0 },
+                CellRef {
+                    row,
+                    col: first_col,
+                },
                 CellRef {
                     row: last_row,
                     col: last_col,
@@ -1013,17 +1019,20 @@ fn span_borders(sheet: &Sheet, span: &BandCellSpan) -> CellBorders {
     let (r0, r1) = (span.covered.start.row, span.covered.end.row);
     let (c0, c1) = (span.covered.start.col, span.covered.end.col);
     if (r0, c0) == (r1, c1) {
-        return sheet.cell_style(span.anchor).borders;
+        // Use the covered cell, not the merge anchor: on a continuation page
+        // they differ, and only the drawn piece owns the edges here.
+        return sheet.cell_style(span.covered.start).borders;
     }
     let mut borders = CellBorders::NONE;
+    // Only perimeter cells can contribute an edge. Reading interior styles
+    // cannot change the result.
+    for col in c0..=c1 {
+        borders.top |= sheet.cell_style(CellRef { row: r0, col }).borders.top;
+        borders.bottom |= sheet.cell_style(CellRef { row: r1, col }).borders.bottom;
+    }
     for row in r0..=r1 {
-        for col in c0..=c1 {
-            let edges = sheet.cell_style(CellRef { row, col }).borders;
-            borders.top |= row == r0 && edges.top;
-            borders.bottom |= row == r1 && edges.bottom;
-            borders.left |= col == c0 && edges.left;
-            borders.right |= col == c1 && edges.right;
-        }
+        borders.left |= sheet.cell_style(CellRef { row, col: c0 }).borders.left;
+        borders.right |= sheet.cell_style(CellRef { row, col: c1 }).borders.right;
     }
     borders
 }
@@ -1296,6 +1305,47 @@ mod tests {
         let borders = span_borders(&plan_sheet, &span);
         assert!(borders.bottom, "bottom edge stored on the covered cell A3");
         assert!(borders.top && borders.left && borders.right);
+    }
+
+    #[test]
+    fn continuation_page_clips_the_merged_span_to_its_own_band() {
+        // A merged range taller than a page is drawn in pieces. The piece on
+        // page 2 must not rescan rows already printed on page 1: the merge's
+        // top border belongs to page 1 only, and starting `covered` at the
+        // original anchor is quadratic for a very tall merge.
+        let mut sheet = Sheet::new("TallMerge");
+        sheet.set_str("A1", "Tall");
+        let range = crate::CellRange::parse("A1:A80").expect("range");
+        assert!(sheet.merge_cells(range));
+        assert!(sheet.apply_border_preset(range, crate::BorderPreset::Outer));
+        let options = PdfExportOptions {
+            include_gridlines: false,
+            include_headers: false,
+            ..PdfExportOptions::default()
+        };
+        let (plan_sheet, plan) = build_page_plan(std::slice::from_ref(&sheet), 0, options);
+        assert!(
+            plan.row_bands.len() > 1,
+            "the merge must cross a page break"
+        );
+        let rows = plan.row_bands[1].clone();
+        let first_page_row = rows[0];
+        assert!(first_page_row > 0, "page 2 starts below the merge anchor");
+        let (first_col, last_col) = plan.col_bands[0];
+        let span = band_cell_span(&plan_sheet, &plan, &rows, 0, first_col..last_col, first_col)
+            .expect("merged span on page 2");
+        assert_eq!(span.anchor.row, 0, "the merge still starts at A1");
+        assert_eq!(
+            span.covered.start.row, first_page_row,
+            "covered starts at the first row drawn on this page"
+        );
+        assert!(!span.render_text, "only the first piece draws the text");
+        let borders = span_borders(&plan_sheet, &span);
+        assert!(!borders.top, "the top edge stays on page 1");
+        assert!(
+            borders.left && borders.right,
+            "side edges run down the merge"
+        );
     }
 
     #[test]
