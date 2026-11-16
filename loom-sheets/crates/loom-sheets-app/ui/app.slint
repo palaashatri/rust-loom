@@ -329,6 +329,11 @@ export component SheetsApp inherits Window {
         }
     }
     property <int> region: 0;
+    // Any surface that owns the keyboard; the grid stays behind it.
+    property <bool> overlay-open: root.palette-open || root.template-chooser-open
+        || root.welcome-open || root.toolbar-overflow-open || root.toolbar-menu != 0
+        || root.xlsx-import-warning-open || root.save-changes-open
+        || DataToolsState.modal-open || modals.modal-open;
     function cycle-region(backwards: bool) {
         let outside = !grid-surface.grid-has-focus;
         if (root.object-state != 0) { root.object-state = 0; root.region = 0; grid-surface.focus-grid(); }
@@ -371,8 +376,7 @@ export component SheetsApp inherits Window {
         }
     }
     changed palette-open => {
-        if (!root.palette-open && !root.template-chooser-open && !root.save-changes-open
-            && !root.xlsx-import-warning-open && root.object-state == 0) {
+        if (!root.overlay-open && root.object-state == 0) {
             grid-surface.focus-grid();
         }
     }
@@ -389,7 +393,7 @@ export component SheetsApp inherits Window {
                 if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; }
                 return reject;
             }
-            if (root.palette-open || root.template-chooser-open || root.welcome-open || root.toolbar-overflow-open || root.toolbar-menu != 0 || root.xlsx-import-warning-open || DataToolsState.modal-open || modals.modal-open) { return reject; }
+            if (root.overlay-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
                 root.cycle-region(event.modifiers.shift);
                 return accept;
@@ -499,7 +503,7 @@ export component SheetsApp inherits Window {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     grid-surface := SheetGridSurface {
-                        keyboard-active: !root.save-changes-open && !root.xlsx-import-warning-open && !root.welcome-open && !DataToolsState.modal-open;
+                        keyboard-active: !root.overlay-open;
                         width: parent.width;
                         height: parent.height;
                         editing: root.is-editing;
