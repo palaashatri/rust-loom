@@ -1,0 +1,447 @@
+import { LoomButton } from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export global WelcomeGuideState {
+    in-out property <bool> open: false;
+    in-out property <int> step: 0;
+    in-out property <string> mod-key: "Ctrl+";
+    in-out property <bool> focus-request: false;
+    callback close-guide();
+    callback try-action(string);
+}
+
+component StepBullet inherits Rectangle {
+    in property <string> text-value;
+    height: max(Theme.tokens.metrics.icon-small, bullet-text.preferred-height);
+
+    Icon {
+        x: Theme.rtl ? parent.width - self.width : 0px;
+        y: (parent.height - self.height) / 2;
+        icon: "check";
+        tint: Theme.palette().accent;
+        size: Theme.tokens.metrics.icon-small;
+    }
+
+    bullet-text := Text {
+        x: Theme.rtl ? 0px : Theme.tokens.metrics.icon-small + Theme.tokens.space.md;
+        y: (parent.height - self.height) / 2;
+        width: max(40px, parent.width - Theme.tokens.metrics.icon-small - Theme.tokens.space.md);
+        height: self.preferred-height;
+        text: root.text-value;
+        color: Theme.palette().ink;
+        font-family: Theme.ui-font-family;
+        font-size: Theme.type.body;
+        wrap: word-wrap;
+        horizontal-alignment: Theme.rtl ? right : left;
+    }
+}
+
+export component WelcomeGuideModal inherits Rectangle {
+    in property <bool> open: WelcomeGuideState.open;
+    property <bool> guide-open: root.open;
+    property <bool> focus-req: WelcomeGuideState.focus-request;
+
+    width: root.open ? 100% : 0px;
+    height: root.open ? 100% : 0px;
+    visible: root.open;
+    background: Theme.palette().scrim;
+
+    pure function clamped-step() -> int {
+        WelcomeGuideState.step < 0 ? 0 : WelcomeGuideState.step > 6 ? 6 : WelcomeGuideState.step
+    }
+
+    pure function dot-step(idx: int) -> int {
+        Theme.rtl ? (6 - idx) : idx
+    }
+
+    pure function step-icon(s: int) -> string {
+        if (s == 0) { "document" }
+        else if (s == 1) { "format" }
+        else if (s == 2) { "table" }
+        else if (s == 3) { "layers" }
+        else if (s == 4) { "comment" }
+        else if (s == 5) { "export" }
+        else { "search" }
+    }
+
+    pure function step-title(s: int) -> string {
+        if (s == 0) { "Welcome to Loom Writer" }
+        else if (s == 1) { "Typography, Styles & Languages" }
+        else if (s == 2) { "Tables, Pictures & Charts" }
+        else if (s == 3) { "Headers, Footers & Footnotes" }
+        else if (s == 4) { "Review, Comments & Tracked Changes" }
+        else if (s == 5) { "Print Preview & Multi-Format Export" }
+        else { "Command Palette & Shortcuts" }
+    }
+
+    pure function step-subtitle(s: int) -> string {
+        if (s == 0) { "Local-first documents with automatic crash recovery and 18 ready-to-use templates." }
+        else if (s == 1) { "Rich character and paragraph formatting across Latin and RTL/bidi scripts." }
+        else if (s == 2) { "Structured content blocks built for clean pagination, resizing, and accessibility." }
+        else if (s == 3) { "Running page furniture and smart footnotes that flow cleanly across pages." }
+        else if (s == 4) { "Collaborate with anchored discussions, tracked edits, and revision-aware output." }
+        else if (s == 5) { "Inspect exact page geometry and export faithful PDF, Word, and Markdown files." }
+        else { "Navigate every tool by keyboard and tune Loom Writer to your display theme." }
+    }
+
+    pure function step-bullet-one(s: int) -> string {
+        if (s == 0) { "Save native .loomdoc files locally or open and export Microsoft Word .docx documents." }
+        else if (s == 1) { "Apply heading styles, font families, text colors, highlights, superscript, and subscript." }
+        else if (s == 2) { "Create typed tables with merged or split cells and custom column proportions." }
+        else if (s == 3) { "Add headers and footers with dynamic page and total-page fields." }
+        else if (s == 4) { "Attach anchored comments to selections and record insertions and deletions as revisions." }
+        else if (s == 5) { "Adjust paper size, orientation, and margin presets right inside Print Preview." }
+        else { "Press " + WelcomeGuideState.mod-key + "K, " + WelcomeGuideState.mod-key + "Shift+P, or F1 to open the Command Palette." }
+    }
+
+    pure function step-bullet-two(s: int) -> string {
+        if (s == 0) { "Crash recovery checkpoints keep unsaved edits safe between sessions." }
+        else if (s == 1) { "Format bulleted and numbered lists, alignment, justification, and indentation." }
+        else if (s == 2) { "Insert resizable pictures with alt text and preserve pasted charts cleanly." }
+        else if (s == 3) { "Suppress first-page headers or footers for title and cover layouts." }
+        else if (s == 4) { "Export PDFs in either Final or Review view and round-trip revisions with .docx." }
+        else if (s == 5) { "Switch between Final and With Markup views before saving to PDF." }
+        else { "Search by action name or shortcut, and switch Light, Dark, or High-Contrast themes." }
+    }
+
+    pure function step-bullet-three(s: int) -> string {
+        if (s == 0) { "Start immediately from 18 built-in templates spanning memos, reports, briefs, and CVs." }
+        else if (s == 1) { "Full RTL and bidirectional text layout mirrors smoothly at any UI scale." }
+        else if (s == 2) { "Navigate cells and media directly with keyboard focus and inspector controls." }
+        else if (s == 3) { "Long footnotes paginate automatically with continued overflow across page breaks." }
+        else if (s == 4) { "Accept or reject tracked edits individually or all at once from the Review drawer." }
+        else if (s == 5) { "Share finished documents cleanly to PDF, Word (.docx), or plain Markdown." }
+        else { "Use " + WelcomeGuideState.mod-key + "S to save, " + WelcomeGuideState.mod-key + "Z to undo, and Escape to return focus to the page." }
+    }
+
+    pure function try-label(s: int) -> string {
+        if (s == 0) { "Browse Templates" }
+        else if (s == 1) { "Load Practice Document" }
+        else if (s == 2) { "Insert Sample Table" }
+        else if (s == 3) { "Open Headers & Footers" }
+        else if (s == 4) { "Open Tracked Changes" }
+        else if (s == 5) { "Open Print Preview" }
+        else { "Open Command Palette" }
+    }
+
+    pure function try-action-id(s: int) -> string {
+        if (s == 0) { "templates" }
+        else if (s == 1) { "sample-doc" }
+        else if (s == 2) { "insert-table" }
+        else if (s == 3) { "headers-footers" }
+        else if (s == 4) { "review-panel" }
+        else if (s == 5) { "print-preview" }
+        else { "palette" }
+    }
+
+    function step-prev() {
+        if (root.clamped-step() > 0) {
+            WelcomeGuideState.step = root.clamped-step() - 1;
+        }
+    }
+
+    function step-next() {
+        if (root.clamped-step() < 6) {
+            WelcomeGuideState.step = root.clamped-step() + 1;
+        } else {
+            WelcomeGuideState.close-guide();
+        }
+    }
+
+    function focus-initial() {
+        if (root.open) {
+            key-handler.focus();
+            next-btn.grab-focus();
+        }
+    }
+
+    init => { root.focus-initial(); }
+    changed guide-open => { root.focus-initial(); }
+    changed focus-req => { root.focus-initial(); }
+
+    backdrop-touch := TouchArea {
+        enabled: root.open;
+        clicked => {
+            WelcomeGuideState.close-guide();
+        }
+    }
+
+    key-handler := FocusScope {
+        enabled: root.open;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(parent.width - 48px, 660px * (1.0 + 0.28 * (max(1.0, Theme.text-scale) - 1.0)));
+        height: min(parent.height - 48px, max(360px, card-layout.preferred-height));
+
+        key-pressed(event) => {
+            if (!root.open) { return reject; }
+            if (event.text == Key.Escape) {
+                WelcomeGuideState.close-guide();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                if (Theme.rtl) {
+                    if (root.clamped-step() < 6) { root.step-next(); }
+                } else {
+                    root.step-prev();
+                }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (Theme.rtl) {
+                    root.step-prev();
+                } else if (root.clamped-step() < 6) {
+                    root.step-next();
+                }
+                return accept;
+            }
+            if (event.text == Key.Tab) {
+                if (close-btn.has-focus) {
+                    try-btn.grab-focus();
+                } else if (try-btn.has-focus) {
+                    if (root.clamped-step() > 0) {
+                        prev-btn.grab-focus();
+                    } else {
+                        next-btn.grab-focus();
+                    }
+                } else if (prev-btn.has-focus) {
+                    next-btn.grab-focus();
+                } else {
+                    close-btn.grab-focus();
+                }
+                return accept;
+            }
+            if (event.text == Key.Backtab) {
+                if (close-btn.has-focus) {
+                    next-btn.grab-focus();
+                } else if (next-btn.has-focus) {
+                    if (root.clamped-step() > 0) {
+                        prev-btn.grab-focus();
+                    } else {
+                        try-btn.grab-focus();
+                    }
+                } else if (prev-btn.has-focus) {
+                    try-btn.grab-focus();
+                } else {
+                    close-btn.grab-focus();
+                }
+                return accept;
+            }
+            return reject;
+        }
+
+        card := Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.palette().panel;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border-strong;
+            clip: true;
+
+            TouchArea {
+                enabled: root.open;
+            }
+
+            card-layout := VerticalLayout {
+                padding: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.lg;
+
+                // Header: step badge + title + Close button (mirrored in RTL)
+                header-row := Rectangle {
+                    height: max(header-title-col.preferred-height, max(36px, close-btn.preferred-height));
+
+                    header-badge := Rectangle {
+                        property <length> badge-size: max(36px, Theme.tokens.metrics.icon-size + 16px);
+                        x: Theme.rtl ? parent.width - self.width : 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: self.badge-size;
+                        height: self.badge-size;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        background: Theme.palette().selection-soft;
+                        border-width: 1px;
+                        border-color: Theme.palette().accent;
+
+                        Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            icon: root.step-icon(root.clamped-step());
+                            tint: Theme.palette().accent;
+                            size: Theme.tokens.metrics.icon-size;
+                        }
+                    }
+
+                    header-title-col := VerticalLayout {
+                        property <length> badge-w: header-badge.width + Theme.tokens.space.md;
+                        property <length> close-w: close-btn.preferred-width + Theme.tokens.space.md;
+                        x: Theme.rtl ? self.close-w : self.badge-w;
+                        y: (parent.height - self.height) / 2;
+                        width: max(80px, parent.width - self.badge-w - self.close-w);
+                        height: self.preferred-height;
+                        spacing: 2px;
+
+                        Text {
+                            text: "Step " + (root.clamped-step() + 1) + " of 7";
+                            color: Theme.palette().accent;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+
+                        Text {
+                            text: root.step-title(root.clamped-step());
+                            color: Theme.palette().ink;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.heading;
+                            font-weight: 700;
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+                    }
+
+                    close-btn := LoomButton {
+                        x: Theme.rtl ? 0px : parent.width - self.width;
+                        y: (parent.height - self.height) / 2;
+                        width: self.preferred-width;
+                        height: self.preferred-height;
+                        label: "Close";
+                        icon: "close";
+                        variant: "ghost";
+                        accessible-name: "Close Welcome Guide";
+                        clicked => {
+                            WelcomeGuideState.close-guide();
+                        }
+                    }
+                }
+
+                // Body in a scrollable container so 2.0x text scaling never clips controls
+                Flickable {
+                    vertical-stretch: 1;
+                    preferred-height: body-col.preferred-height;
+                    viewport-height: body-col.preferred-height;
+
+                    body-col := VerticalLayout {
+                        width: parent.width;
+                        spacing: Theme.tokens.space.lg;
+
+                        Text {
+                            text: root.step-subtitle(root.clamped-step());
+                            color: Theme.palette().ink-secondary;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.body-large;
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+
+                        Rectangle {
+                            background: Theme.palette().surface-raised;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+
+                            VerticalLayout {
+                                padding: Theme.tokens.space.lg;
+                                spacing: Theme.tokens.space.md;
+
+                                StepBullet { text-value: root.step-bullet-one(root.clamped-step()); }
+                                StepBullet { text-value: root.step-bullet-two(root.clamped-step()); }
+                                StepBullet { text-value: root.step-bullet-three(root.clamped-step()); }
+                            }
+                        }
+
+                        Rectangle {
+                            height: try-btn.preferred-height;
+
+                            try-btn := LoomButton {
+                                x: Theme.rtl ? parent.width - self.width : 0px;
+                                y: 0px;
+                                width: self.preferred-width;
+                                height: self.preferred-height;
+                                label: "Try: " + root.try-label(root.clamped-step());
+                                icon: "sparkle";
+                                variant: "secondary";
+                                accessible-name: "Try " + root.try-label(root.clamped-step());
+                                clicked => {
+                                    WelcomeGuideState.try-action(root.try-action-id(root.clamped-step()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+
+                // Footer: interactive step dots + Previous / Next navigation
+                footer-row := Rectangle {
+                    height: max(dots-row.preferred-height, nav-group.height);
+
+                    dots-row := HorizontalLayout {
+                        x: Theme.rtl ? parent.width - self.width : 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: self.preferred-width;
+                        height: self.preferred-height;
+                        spacing: Theme.tokens.space.sm;
+
+                        for idx in [0, 1, 2, 3, 4, 5, 6]: TouchArea {
+                            width: root.dot-step(idx) == root.clamped-step() ? 22px : 10px;
+                            height: 20px;
+                            accessible-role: button;
+                            accessible-label: "Welcome Guide Step " + (root.dot-step(idx) + 1);
+                            clicked => {
+                                WelcomeGuideState.step = root.dot-step(idx);
+                            }
+
+                            Rectangle {
+                                x: 0px;
+                                y: (parent.height - self.height) / 2;
+                                width: parent.width;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: root.dot-step(idx) == root.clamped-step()
+                                    ? Theme.palette().accent
+                                    : Theme.palette().border-strong;
+                            }
+                        }
+                    }
+
+                    nav-group := Rectangle {
+                        x: Theme.rtl ? 0px : parent.width - self.width;
+                        y: (parent.height - self.height) / 2;
+                        width: prev-btn.preferred-width + Theme.tokens.space.md + next-btn.preferred-width;
+                        height: max(prev-btn.preferred-height, next-btn.preferred-height);
+
+                        prev-btn := LoomButton {
+                            x: Theme.rtl ? next-btn.preferred-width + Theme.tokens.space.md : 0px;
+                            y: (parent.height - self.height) / 2;
+                            width: self.preferred-width;
+                            height: self.preferred-height;
+                            label: "Previous";
+                            icon: Theme.rtl ? "chevron-right" : "chevron-left";
+                            variant: "secondary";
+                            enabled: root.clamped-step() > 0;
+                            accessible-name: "Previous Welcome Step";
+                            clicked => { root.step-prev(); }
+                        }
+
+                        next-btn := LoomButton {
+                            x: Theme.rtl ? 0px : prev-btn.preferred-width + Theme.tokens.space.md;
+                            y: (parent.height - self.height) / 2;
+                            width: self.preferred-width;
+                            height: self.preferred-height;
+                            label: root.clamped-step() < 6 ? "Next" : "Get Started";
+                            icon: root.clamped-step() < 6 ? (Theme.rtl ? "chevron-left" : "chevron-right") : "check";
+                            variant: "primary";
+                            accessible-name: root.clamped-step() < 6 ? "Next Welcome Step" : "Finish Welcome Guide";
+                            clicked => { root.step-next(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

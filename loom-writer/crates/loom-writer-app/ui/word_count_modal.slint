@@ -1,0 +1,285 @@
+import { LoomButton, LoomPanel, LoomSectionHeader } from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export global WordCountState {
+    in-out property <bool> open: false;
+    in-out property <int> words: 0;
+    in-out property <int> chars-with-spaces: 0;
+    in-out property <int> chars-without-spaces: 0;
+    in-out property <int> paragraphs: 0;
+    in-out property <int> sentences: 0;
+    in-out property <int> pages: 1;
+    in-out property <int> tables: 0;
+    in-out property <int> images: 0;
+    in-out property <int> charts: 0;
+    in-out property <int> footnotes: 0;
+    in-out property <int> comments: 0;
+    in-out property <int> tracked-changes: 0;
+    in-out property <string> reading-time: "0 min";
+
+    callback open-dialog();
+    callback close-dialog();
+}
+
+component StatRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> zebra: false;
+
+    height: max(
+        Theme.tokens.metrics.control-height,
+        max(lbl.preferred-height, val.preferred-height) + Theme.tokens.space.sm
+    );
+    background: root.zebra ? Theme.palette().surface-raised : transparent;
+    border-radius: Theme.tokens.metrics.radius-small;
+
+    lbl := Text {
+        x: Theme.rtl ? parent.width - self.width - Theme.tokens.space.md : Theme.tokens.space.md;
+        y: (parent.height - self.height) / 2;
+        width: max(60px, parent.width * 0.64 - Theme.tokens.space.md);
+        height: self.preferred-height;
+        text: root.label;
+        color: Theme.palette().ink-secondary;
+        font-family: Theme.ui-font-family;
+        font-size: Theme.type.body;
+        wrap: word-wrap;
+        horizontal-alignment: Theme.rtl ? right : left;
+    }
+
+    val := Text {
+        x: Theme.rtl ? Theme.tokens.space.md : parent.width - self.width - Theme.tokens.space.md;
+        y: (parent.height - self.height) / 2;
+        width: max(40px, parent.width * 0.34 - Theme.tokens.space.md);
+        height: self.preferred-height;
+        text: root.value;
+        color: Theme.palette().ink;
+        font-family: Theme.ui-font-family;
+        font-size: Theme.type.body;
+        font-weight: 700;
+        horizontal-alignment: Theme.rtl ? left : right;
+        overflow: elide;
+    }
+}
+
+component SummaryPill inherits Rectangle {
+    in property <string> caption;
+    in property <string> value;
+
+    background: Theme.palette().surface-raised;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.md;
+        spacing: 2px;
+
+        Text {
+            text: root.caption;
+            color: Theme.palette().ink-secondary;
+            font-family: Theme.ui-font-family;
+            font-size: Theme.type.caption;
+            horizontal-alignment: Theme.rtl ? right : left;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.value;
+            color: Theme.palette().accent;
+            font-family: Theme.ui-font-family;
+            font-size: Theme.type.heading;
+            font-weight: 700;
+            horizontal-alignment: Theme.rtl ? right : left;
+            overflow: elide;
+        }
+    }
+}
+
+export component WordCountModal inherits Rectangle {
+    in property <bool> open: WordCountState.open;
+    property <bool> modal-open: root.open;
+
+    width: root.open ? 100% : 0px;
+    height: root.open ? 100% : 0px;
+    visible: root.open;
+    background: Theme.palette().scrim;
+
+    function focus-initial() {
+        if (root.open) {
+            key-handler.focus();
+            close-btn.grab-focus();
+        }
+    }
+
+    init => { root.focus-initial(); }
+    changed modal-open => { root.focus-initial(); }
+
+    backdrop-touch := TouchArea {
+        enabled: root.open;
+        clicked => {
+            WordCountState.close-dialog();
+        }
+    }
+
+    key-handler := FocusScope {
+        enabled: root.open;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(parent.width - 48px, 490px * (1.0 + 0.25 * (max(1.0, Theme.text-scale) - 1.0)));
+        height: min(parent.height - 48px, max(340px, card-col.preferred-height));
+
+        key-pressed(event) => {
+            if (!root.open) { return reject; }
+            if (event.text == Key.Escape || event.text == Key.Return) {
+                WordCountState.close-dialog();
+                return accept;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                close-btn.grab-focus();
+                return accept;
+            }
+            return reject;
+        }
+
+        LoomPanel {
+            width: 100%;
+            height: 100%;
+            clip: true;
+
+            TouchArea {
+                enabled: root.open;
+            }
+
+            card-col := VerticalLayout {
+                padding: Theme.tokens.space.xl;
+                spacing: Theme.tokens.space.lg;
+
+                header-row := Rectangle {
+                    height: max(title-group.preferred-height, 32px);
+
+                    header-icon := Rectangle {
+                        x: Theme.rtl ? parent.width - self.width : 0px;
+                        y: (parent.height - self.height) / 2;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        background: Theme.palette().selection-soft;
+                        border-width: 1px;
+                        border-color: Theme.palette().accent;
+
+                        Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            icon: "document";
+                            tint: Theme.palette().accent;
+                            size: Theme.tokens.metrics.icon-small;
+                        }
+                    }
+
+                    title-group := VerticalLayout {
+                        property <length> lead-w: header-icon.width + Theme.tokens.space.md;
+                        x: Theme.rtl ? 0px : self.lead-w;
+                        y: (parent.height - self.height) / 2;
+                        width: max(80px, parent.width - self.lead-w);
+                        spacing: 2px;
+
+                        Text {
+                            text: "Word Count & Statistics";
+                            color: Theme.palette().ink;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.heading;
+                            font-weight: 700;
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+                    }
+                }
+
+                // Key metrics overview strip (mirrored cleanly in RTL)
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+
+                    SummaryPill {
+                        horizontal-stretch: 1;
+                        caption: Theme.rtl ? "Reading time" : "Words";
+                        value: Theme.rtl ? WordCountState.reading-time : "" + WordCountState.words;
+                    }
+
+                    SummaryPill {
+                        horizontal-stretch: 1;
+                        caption: "Pages";
+                        value: "" + WordCountState.pages;
+                    }
+
+                    SummaryPill {
+                        horizontal-stretch: 1;
+                        caption: Theme.rtl ? "Words" : "Reading time";
+                        value: Theme.rtl ? "" + WordCountState.words : WordCountState.reading-time;
+                    }
+                }
+
+                // Detailed counts inside scrollable container for 2.0x scale safety
+                Flickable {
+                    vertical-stretch: 1;
+                    preferred-height: stats-col.preferred-height;
+                    viewport-height: stats-col.preferred-height;
+
+                    stats-col := VerticalLayout {
+                        width: parent.width;
+                        spacing: Theme.tokens.space.sm;
+
+                        LoomSectionHeader {
+                            title: "Text & Structure";
+                            detail: "Counts across document body and tables";
+                        }
+
+                        StatRow { label: "Words"; value: "" + WordCountState.words; zebra: true; }
+                        StatRow { label: "Characters (with spaces)"; value: "" + WordCountState.chars-with-spaces; zebra: false; }
+                        StatRow { label: "Characters (without spaces)"; value: "" + WordCountState.chars-without-spaces; zebra: true; }
+                        StatRow { label: "Paragraphs"; value: "" + WordCountState.paragraphs; zebra: false; }
+                        StatRow { label: "Sentences"; value: "" + WordCountState.sentences; zebra: true; }
+                        StatRow { label: "Pages"; value: "" + WordCountState.pages; zebra: false; }
+                        StatRow { label: "Estimated reading time"; value: WordCountState.reading-time; zebra: true; }
+
+                        Rectangle { height: Theme.tokens.space.sm; background: transparent; }
+
+                        LoomSectionHeader {
+                            title: "Objects & Review";
+                            detail: "Embedded elements and annotations";
+                        }
+
+                        StatRow { label: "Tables"; value: "" + WordCountState.tables; zebra: true; }
+                        StatRow { label: "Images"; value: "" + WordCountState.images; zebra: false; }
+                        StatRow { label: "Charts"; value: "" + WordCountState.charts; zebra: true; }
+                        StatRow { label: "Footnotes"; value: "" + WordCountState.footnotes; zebra: false; }
+                        StatRow { label: "Comments"; value: "" + WordCountState.comments; zebra: true; }
+                        StatRow { label: "Tracked changes"; value: "" + WordCountState.tracked-changes; zebra: false; }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+
+                footer-row := Rectangle {
+                    height: close-btn.preferred-height;
+
+                    close-btn := LoomButton {
+                        x: Theme.rtl ? 0px : parent.width - self.width;
+                        y: 0px;
+                        width: self.preferred-width;
+                        height: self.preferred-height;
+                        label: "Close";
+                        variant: "primary";
+                        accessible-name: "Close Word Count";
+                        clicked => {
+                            WordCountState.close-dialog();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

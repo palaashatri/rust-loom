@@ -1,0 +1,563 @@
+import { LoomButton, LoomPanel, LoomSectionHeader } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export struct PrintPreviewTextLine {
+    x_pt: float,
+    y_pt: float,
+    w_pt: float,
+    h_pt: float,
+    text: string,
+    font_pt: float,
+    bold: bool,
+    italic: bool,
+    color: color,
+    align: int,
+}
+
+export struct PrintPreviewBoxRect {
+    x_pt: float,
+    y_pt: float,
+    w_pt: float,
+    h_pt: float,
+    fill_color: color,
+    border_color: color,
+    has_fill: bool,
+    has_border: bool,
+}
+
+export global PrintPreviewState {
+    in-out property <bool> open: false;
+    in-out property <int> paper-size: 0;       // 0 = A4, 1 = US Letter
+    in-out property <int> orientation: 0;      // 0 = Portrait, 1 = Landscape
+    in-out property <int> margin-preset: 0;    // 0 = Normal, 1 = Narrow, 2 = Wide
+    in-out property <int> revision-view: 0;    // 0 = Final, 1 = With Markup
+    in-out property <int> current-page: 1;
+    in-out property <int> total-pages: 1;
+    in-out property <float> page-width-pt: 595.0;
+    in-out property <float> page-height-pt: 842.0;
+    in-out property <float> margin-top-pt: 72.0;
+    in-out property <float> margin-bottom-pt: 72.0;
+    in-out property <float> margin-left-pt: 72.0;
+    in-out property <float> margin-right-pt: 72.0;
+    in-out property <string> doc-title: "";
+    in-out property <bool> is-empty: false;
+    in-out property <[PrintPreviewTextLine]> lines: [];
+    in-out property <[PrintPreviewBoxRect]> boxes: [];
+    in-out property <string> status-message: "";
+
+    callback open-preview();
+    callback close-preview();
+    callback settings-changed();
+    callback apply-page-setup();
+    callback prev-page();
+    callback next-page();
+    callback export-pdf();
+}
+
+component SetupOptionLabel inherits Text {
+    color: Theme.palette().ink-secondary;
+    font-family: Theme.ui-font-family;
+    font-size: Theme.type.caption;
+    font-weight: 600;
+    horizontal-alignment: Theme.rtl ? right : left;
+}
+
+component SetupChoiceButton inherits Rectangle {
+    in property <string> label;
+    in property <string> a11y;
+    in property <bool> active: false;
+    out property <bool> has-focus: btn.has-focus;
+    callback clicked();
+    public function grab-focus() { btn.grab-focus(); }
+
+    horizontal-stretch: 1;
+    preferred-width: btn.preferred-width;
+    height: btn.preferred-height;
+
+    btn := LoomButton {
+        width: 100%;
+        label: root.label;
+        selected: root.active;
+        accessible-name: root.a11y;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component PrintPreviewModal inherits Rectangle {
+    in property <bool> open: PrintPreviewState.open;
+    property <bool> preview-open: root.open;
+
+    width: root.open ? 100% : 0px;
+    height: root.open ? 100% : 0px;
+    visible: root.open;
+    background: Theme.palette().scrim;
+
+    function focus-initial() {
+        if (root.open) {
+            key-handler.focus();
+            export-btn.grab-focus();
+        }
+    }
+
+    function step-focus(forward: bool) {
+        if (forward) {
+            if (close-btn.has-focus) { a4-btn.grab-focus(); }
+            else if (a4-btn.has-focus) { letter-btn.grab-focus(); }
+            else if (letter-btn.has-focus) { portrait-btn.grab-focus(); }
+            else if (portrait-btn.has-focus) { landscape-btn.grab-focus(); }
+            else if (landscape-btn.has-focus) { normal-btn.grab-focus(); }
+            else if (normal-btn.has-focus) { narrow-btn.grab-focus(); }
+            else if (narrow-btn.has-focus) { wide-btn.grab-focus(); }
+            else if (wide-btn.has-focus) { final-btn.grab-focus(); }
+            else if (final-btn.has-focus) { markup-btn.grab-focus(); }
+            else if (markup-btn.has-focus) { apply-btn.grab-focus(); }
+            else if (apply-btn.has-focus) { export-btn.grab-focus(); }
+            else if (export-btn.has-focus) {
+                if (PrintPreviewState.current-page > 1) { prev-btn.grab-focus(); }
+                else if (PrintPreviewState.current-page < PrintPreviewState.total-pages) { next-btn.grab-focus(); }
+                else { close-btn.grab-focus(); }
+            } else if (prev-btn.has-focus && PrintPreviewState.current-page < PrintPreviewState.total-pages) {
+                next-btn.grab-focus();
+            } else { close-btn.grab-focus(); }
+        } else {
+            if (close-btn.has-focus) {
+                if (PrintPreviewState.current-page < PrintPreviewState.total-pages) { next-btn.grab-focus(); }
+                else if (PrintPreviewState.current-page > 1) { prev-btn.grab-focus(); }
+                else { export-btn.grab-focus(); }
+            } else if (next-btn.has-focus) {
+                if (PrintPreviewState.current-page > 1) { prev-btn.grab-focus(); }
+                else { export-btn.grab-focus(); }
+            } else if (prev-btn.has-focus) { export-btn.grab-focus(); }
+            else if (export-btn.has-focus) { apply-btn.grab-focus(); }
+            else if (apply-btn.has-focus) { markup-btn.grab-focus(); }
+            else if (markup-btn.has-focus) { final-btn.grab-focus(); }
+            else if (final-btn.has-focus) { wide-btn.grab-focus(); }
+            else if (wide-btn.has-focus) { narrow-btn.grab-focus(); }
+            else if (narrow-btn.has-focus) { normal-btn.grab-focus(); }
+            else if (normal-btn.has-focus) { landscape-btn.grab-focus(); }
+            else if (landscape-btn.has-focus) { portrait-btn.grab-focus(); }
+            else if (portrait-btn.has-focus) { letter-btn.grab-focus(); }
+            else if (letter-btn.has-focus) { a4-btn.grab-focus(); }
+            else { close-btn.grab-focus(); }
+        }
+    }
+
+    init => { root.focus-initial(); }
+    changed preview-open => { root.focus-initial(); }
+
+    backdrop-touch := TouchArea {
+        enabled: root.open;
+        clicked => { PrintPreviewState.close-preview(); }
+    }
+
+    key-handler := FocusScope {
+        enabled: root.open;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(parent.width - 32px, 1080px);
+        height: min(parent.height - 32px, 760px);
+
+        key-pressed(event) => {
+            if (!root.open) { return reject; }
+            if (event.text == Key.Escape) { PrintPreviewState.close-preview(); return accept; }
+            if (event.text == Key.PageUp) { PrintPreviewState.prev-page(); return accept; }
+            if (event.text == Key.PageDown) { PrintPreviewState.next-page(); return accept; }
+            if (event.text == Key.LeftArrow) {
+                if (Theme.rtl) { PrintPreviewState.next-page(); } else { PrintPreviewState.prev-page(); }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (Theme.rtl) { PrintPreviewState.prev-page(); } else { PrintPreviewState.next-page(); }
+                return accept;
+            }
+            if (event.text == Key.Tab) { root.step-focus(true); return accept; }
+            if (event.text == Key.Backtab) { root.step-focus(false); return accept; }
+            return reject;
+        }
+
+        LoomPanel {
+            width: 100%;
+            height: 100%;
+            clip: true;
+
+            TouchArea { enabled: root.open; }
+
+            split-root := Rectangle {
+                property <length> setup-w: min(
+                    430px,
+                    290px * (1.0 + 0.45 * (max(1.0, Theme.text-scale) - 1.0))
+                );
+                width: 100%;
+                height: 100%;
+
+                preview-pane := Rectangle {
+                    x: Theme.rtl ? split-root.setup-w + 1px : 0px;
+                    y: 0px;
+                    width: max(200px, split-root.width - split-root.setup-w - 1px);
+                    height: split-root.height;
+                    background: Theme.palette().surface-sunken;
+
+                    VerticalLayout {
+                        padding: Theme.tokens.space.lg;
+                        spacing: Theme.tokens.space.md;
+
+                        preview-top := Rectangle {
+                            height: max(preview-heading.preferred-height, preview-dims.preferred-height);
+
+                            preview-heading := Text {
+                                x: Theme.rtl ? parent.width - self.width : 0px;
+                                y: (parent.height - self.height) / 2;
+                                width: min(self.preferred-width, parent.width * 0.58);
+                                text: PrintPreviewState.doc-title != "" ? PrintPreviewState.doc-title : "Untitled document";
+                                color: Theme.palette().ink;
+                                font-family: Theme.ui-font-family;
+                                font-size: Theme.type.title;
+                                font-weight: 700;
+                                overflow: elide;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                            }
+
+                            preview-dims := Text {
+                                x: Theme.rtl ? 0px : parent.width - self.width;
+                                y: (parent.height - self.height) / 2;
+                                width: min(self.preferred-width, parent.width * 0.4);
+                                text: (PrintPreviewState.paper-size == 1 ? "US Letter" : "A4")
+                                    + " • " + (PrintPreviewState.orientation == 1 ? "Landscape" : "Portrait");
+                                color: Theme.palette().ink-secondary;
+                                font-family: Theme.ui-font-family;
+                                font-size: Theme.type.caption;
+                                overflow: elide;
+                                horizontal-alignment: Theme.rtl ? left : right;
+                            }
+                        }
+
+                        paper-stage := Rectangle {
+                            property <float> safe-w: max(80.0, (self.width - 24px) / 1px);
+                            property <float> safe-h: max(80.0, (self.height - 24px) / 1px);
+                            property <float> page-w-pt: max(100.0, PrintPreviewState.page-width-pt);
+                            property <float> page-h-pt: max(100.0, PrintPreviewState.page-height-pt);
+                            property <float> paper-scale: min(self.safe-w / self.page-w-pt, self.safe-h / self.page-h-pt);
+                            vertical-stretch: 1;
+                            clip: true;
+
+                            paper-sheet := Rectangle {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: paper-stage.page-w-pt * paper-stage.paper-scale * 1px;
+                                height: paper-stage.page-h-pt * paper-stage.paper-scale * 1px;
+                                background: Theme.palette().paper;
+                                border-width: 1px;
+                                border-color: Theme.palette().border-strong;
+                                drop-shadow-blur: 14px;
+                                drop-shadow-offset-y: 3px;
+                                drop-shadow-color: Theme.palette().shadow;
+                                clip: true;
+
+                                Rectangle {
+                                    x: PrintPreviewState.margin-left-pt * paper-stage.paper-scale * 1px;
+                                    y: PrintPreviewState.margin-top-pt * paper-stage.paper-scale * 1px;
+                                    width: max(0px, (paper-stage.page-w-pt - PrintPreviewState.margin-left-pt - PrintPreviewState.margin-right-pt) * paper-stage.paper-scale * 1px);
+                                    height: max(0px, (paper-stage.page-h-pt - PrintPreviewState.margin-top-pt - PrintPreviewState.margin-bottom-pt) * paper-stage.paper-scale * 1px);
+                                    border-width: 1px;
+                                    border-color: Theme.palette().paper-line;
+                                    background: transparent;
+                                }
+
+                                for rect-item in PrintPreviewState.boxes: Rectangle {
+                                    x: rect-item.x_pt * paper-stage.paper-scale * 1px;
+                                    y: rect-item.y_pt * paper-stage.paper-scale * 1px;
+                                    width: max(1px, rect-item.w_pt * paper-stage.paper-scale * 1px);
+                                    height: max(1px, rect-item.h_pt * paper-stage.paper-scale * 1px);
+                                    background: rect-item.has_fill ? rect-item.fill_color : transparent;
+                                    border-width: rect-item.has_border ? 1px : 0px;
+                                    border-color: rect-item.border_color;
+                                }
+
+                                for line in PrintPreviewState.lines: Text {
+                                    x: line.x_pt * paper-stage.paper-scale * 1px;
+                                    y: line.y_pt * paper-stage.paper-scale * 1px;
+                                    width: max(1px, line.w_pt * paper-stage.paper-scale * 1px);
+                                    height: max(1px, line.h_pt * paper-stage.paper-scale * 1px);
+                                    text: line.text;
+                                    color: line.color;
+                                    font-family: Theme.document-font-family;
+                                    font-size: max(4px, line.font_pt * paper-stage.paper-scale * 1px);
+                                    font-weight: line.bold ? 700 : 400;
+                                    font-italic: line.italic;
+                                    horizontal-alignment: line.align == 1 ? center : line.align == 2 ? right : left;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                if (PrintPreviewState.is-empty): Text {
+                                    x: PrintPreviewState.margin-left-pt * paper-stage.paper-scale * 1px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: max(40px, (paper-stage.page-w-pt - PrintPreviewState.margin-left-pt - PrintPreviewState.margin-right-pt) * paper-stage.paper-scale * 1px);
+                                    text: "Blank document — add paragraphs, tables, or headers to preview.";
+                                    color: Theme.palette().paper-muted;
+                                    font-family: Theme.ui-font-family;
+                                    font-size: Theme.type.body;
+                                    wrap: word-wrap;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+
+                        pager-bar := Rectangle {
+                            height: max(prev-btn.preferred-height, page-status.preferred-height);
+
+                            pager-inner := Rectangle {
+                                property <length> gap: Theme.tokens.space.md;
+                                x: (parent.width - self.width) / 2;
+                                y: 0px;
+                                width: prev-btn.preferred-width + self.gap + page-status.preferred-width + self.gap + next-btn.preferred-width;
+                                height: parent.height;
+
+                                prev-btn := LoomButton {
+                                    x: Theme.rtl ? parent.width - self.width : 0px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: self.preferred-width;
+                                    height: self.preferred-height;
+                                    label: "Prev Page";
+                                    icon: Theme.rtl ? "chevron-right" : "chevron-left";
+                                    variant: "secondary";
+                                    enabled: PrintPreviewState.current-page > 1;
+                                    accessible-name: "Previous Preview Page";
+                                    clicked => { PrintPreviewState.prev-page(); }
+                                }
+
+                                page-status := Text {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    text: "Page " + PrintPreviewState.current-page + " of " + PrintPreviewState.total-pages;
+                                    color: Theme.palette().ink;
+                                    font-family: Theme.ui-font-family;
+                                    font-size: Theme.type.body;
+                                    font-weight: 600;
+                                }
+
+                                next-btn := LoomButton {
+                                    x: Theme.rtl ? 0px : parent.width - self.width;
+                                    y: (parent.height - self.height) / 2;
+                                    width: self.preferred-width;
+                                    height: self.preferred-height;
+                                    label: "Next Page";
+                                    icon: Theme.rtl ? "chevron-left" : "chevron-right";
+                                    variant: "secondary";
+                                    enabled: PrintPreviewState.current-page < PrintPreviewState.total-pages;
+                                    accessible-name: "Next Preview Page";
+                                    clicked => { PrintPreviewState.next-page(); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: Theme.rtl ? split-root.setup-w : split-root.width - split-root.setup-w - 1px;
+                    y: 0px;
+                    width: 1px;
+                    height: split-root.height;
+                    background: Theme.palette().border;
+                }
+
+                setup-pane := Rectangle {
+                    x: Theme.rtl ? 0px : split-root.width - split-root.setup-w;
+                    y: 0px;
+                    width: split-root.setup-w;
+                    height: split-root.height;
+                    background: Theme.palette().surface;
+
+                    VerticalLayout {
+                        padding: Theme.tokens.space.lg;
+                        spacing: Theme.tokens.space.md;
+
+                        setup-header := Rectangle {
+                            height: max(setup-title.preferred-height, close-btn.preferred-height);
+
+                            setup-title := Text {
+                                x: Theme.rtl ? close-btn.preferred-width + Theme.tokens.space.sm : 0px;
+                                y: (parent.height - self.height) / 2;
+                                width: max(60px, parent.width - close-btn.preferred-width - Theme.tokens.space.sm);
+                                text: "Print Preview";
+                                color: Theme.palette().ink;
+                                font-family: Theme.ui-font-family;
+                                font-size: Theme.type.title;
+                                font-weight: 700;
+                                overflow: elide;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                            }
+
+                            close-btn := LoomButton {
+                                x: Theme.rtl ? 0px : parent.width - self.width;
+                                y: (parent.height - self.height) / 2;
+                                width: self.preferred-width;
+                                height: self.preferred-height;
+                                label: "Close";
+                                icon: "close";
+                                variant: "ghost";
+                                accessible-name: "Close Print Preview";
+                                clicked => { PrintPreviewState.close-preview(); }
+                            }
+                        }
+
+                        LoomSectionHeader { title: "Page Setup"; detail: "Changes preview live"; }
+
+                        Flickable {
+                            vertical-stretch: 1;
+                            viewport-height: setup-fields.preferred-height;
+
+                            setup-fields := VerticalLayout {
+                                width: parent.width;
+                                spacing: Theme.tokens.space.md;
+
+                                SetupOptionLabel { text: "Paper Size"; }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.sm;
+                                    a4-btn := SetupChoiceButton {
+                                        label: "A4";
+                                        a11y: "Paper Size A4";
+                                        active: PrintPreviewState.paper-size == 0;
+                                        clicked => { PrintPreviewState.paper-size = 0; PrintPreviewState.settings-changed(); }
+                                    }
+                                    letter-btn := SetupChoiceButton {
+                                        label: "US Letter";
+                                        a11y: "Paper Size US Letter";
+                                        active: PrintPreviewState.paper-size == 1;
+                                        clicked => { PrintPreviewState.paper-size = 1; PrintPreviewState.settings-changed(); }
+                                    }
+                                }
+
+                                SetupOptionLabel { text: "Orientation"; }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.sm;
+                                    portrait-btn := SetupChoiceButton {
+                                        label: "Portrait";
+                                        a11y: "Orientation Portrait";
+                                        active: PrintPreviewState.orientation == 0;
+                                        clicked => { PrintPreviewState.orientation = 0; PrintPreviewState.settings-changed(); }
+                                    }
+                                    landscape-btn := SetupChoiceButton {
+                                        label: "Landscape";
+                                        a11y: "Orientation Landscape";
+                                        active: PrintPreviewState.orientation == 1;
+                                        clicked => { PrintPreviewState.orientation = 1; PrintPreviewState.settings-changed(); }
+                                    }
+                                }
+
+                                SetupOptionLabel { text: "Margins"; }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.sm;
+                                    normal-btn := SetupChoiceButton {
+                                        label: "Normal";
+                                        a11y: "Margins Normal";
+                                        active: PrintPreviewState.margin-preset == 0;
+                                        clicked => { PrintPreviewState.margin-preset = 0; PrintPreviewState.settings-changed(); }
+                                    }
+                                    narrow-btn := SetupChoiceButton {
+                                        label: "Narrow";
+                                        a11y: "Margins Narrow";
+                                        active: PrintPreviewState.margin-preset == 1;
+                                        clicked => { PrintPreviewState.margin-preset = 1; PrintPreviewState.settings-changed(); }
+                                    }
+                                    wide-btn := SetupChoiceButton {
+                                        label: "Wide";
+                                        a11y: "Margins Wide";
+                                        active: PrintPreviewState.margin-preset == 2;
+                                        clicked => { PrintPreviewState.margin-preset = 2; PrintPreviewState.settings-changed(); }
+                                    }
+                                }
+
+                                SetupOptionLabel { text: "Revision View"; }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.sm;
+                                    final-btn := SetupChoiceButton {
+                                        label: "Final";
+                                        a11y: "Revision View Final";
+                                        active: PrintPreviewState.revision-view == 0;
+                                        clicked => { PrintPreviewState.revision-view = 0; PrintPreviewState.settings-changed(); }
+                                    }
+                                    markup-btn := SetupChoiceButton {
+                                        label: "With Markup";
+                                        a11y: "Revision View With Markup";
+                                        active: PrintPreviewState.revision-view == 1;
+                                        clicked => { PrintPreviewState.revision-view = 1; PrintPreviewState.settings-changed(); }
+                                    }
+                                }
+
+                                Rectangle {
+                                    background: Theme.palette().surface-raised;
+                                    border-radius: Theme.tokens.metrics.radius-medium;
+                                    border-width: 1px;
+                                    border-color: Theme.palette().border;
+
+                                    VerticalLayout {
+                                        padding: Theme.tokens.space.md;
+                                        spacing: Theme.tokens.space.xs;
+
+                                        Text {
+                                            text: "Page size: " + Math.round(PrintPreviewState.page-width-pt)
+                                                + " x " + Math.round(PrintPreviewState.page-height-pt) + " pt";
+                                            color: Theme.palette().ink;
+                                            font-family: Theme.ui-font-family;
+                                            font-size: Theme.type.caption;
+                                            wrap: word-wrap;
+                                            horizontal-alignment: Theme.rtl ? right : left;
+                                        }
+
+                                        Text {
+                                            text: "Margins (T/B/L/R): "
+                                                + Math.round(PrintPreviewState.margin-top-pt) + " / "
+                                                + Math.round(PrintPreviewState.margin-bottom-pt) + " / "
+                                                + Math.round(PrintPreviewState.margin-left-pt) + " / "
+                                                + Math.round(PrintPreviewState.margin-right-pt) + " pt";
+                                            color: Theme.palette().ink-secondary;
+                                            font-family: Theme.ui-font-family;
+                                            font-size: Theme.type.caption;
+                                            wrap: word-wrap;
+                                            horizontal-alignment: Theme.rtl ? right : left;
+                                        }
+
+                                        if (PrintPreviewState.status-message != ""): Text {
+                                            text: PrintPreviewState.status-message;
+                                            color: Theme.palette().accent;
+                                            font-family: Theme.ui-font-family;
+                                            font-size: Theme.type.caption;
+                                            font-weight: 600;
+                                            wrap: word-wrap;
+                                            horizontal-alignment: Theme.rtl ? right : left;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.palette().border; }
+
+                        VerticalLayout {
+                            spacing: Theme.tokens.space.sm;
+
+                            apply-btn := LoomButton {
+                                width: 100%;
+                                label: "Apply Setup to Document";
+                                icon: "check";
+                                variant: "secondary";
+                                accessible-name: "Apply Page Setup to Document";
+                                clicked => { PrintPreviewState.apply-page-setup(); }
+                            }
+
+                            export-btn := LoomButton {
+                                width: 100%;
+                                label: "Export PDF…";
+                                icon: "export";
+                                variant: "primary";
+                                accessible-name: "Export PDF from Print Preview";
+                                clicked => { PrintPreviewState.export-pdf(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
