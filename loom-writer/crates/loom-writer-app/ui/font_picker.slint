@@ -51,7 +51,8 @@ export global FontPicker {
 /// The closed font field: the family of the selection, which opens the list.
 /// Enter, Space and Down open it; typing a letter opens it filtered.
 export component WriterFontField inherits Rectangle {
-    height: Theme.scaled-control-height;
+    height: max(24px, Theme.scaled-control-height);
+    clip: true;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: field-focus.has-focus ? 2px : 1px;
     border-color: field-focus.has-focus
@@ -82,6 +83,10 @@ export component WriterFontField inherits Rectangle {
                 FontPicker.open-requested();
                 return accept;
             }
+            if (event.text == Key.Escape && FontPicker.open) {
+                FontPicker.close-requested();
+                return accept;
+            }
             if (event.text == Key.Escape || event.text == Key.Tab || event.text == Key.Backtab
                 || event.text == Key.F6 || event.text == Key.UpArrow || event.text == "") {
                 return reject;
@@ -98,18 +103,19 @@ export component WriterFontField inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
         spacing: Theme.tokens.space.sm;
-        alignment: Theme.rtl ? end : start;
+        alignment: start;
         Text {
+            min-width: 0px;
             text: FontPicker.current;
             font-family: FontPicker.current-family == "" ? Theme.ui-font-family : FontPicker.current-family;
             font-size: Theme.type.body;
             color: Theme.palette().ink;
             vertical-alignment: center;
-            horizontal-alignment: Theme.rtl ? right : left;
+            horizontal-alignment: left;
             horizontal-stretch: 1;
             overflow: elide;
             accessible-role: none;
@@ -128,14 +134,45 @@ export component WriterFontField inherits Rectangle {
             y: (parent.height - self.height) / 2;
         }
     }
+    if Theme.rtl : HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+        alignment: end;
+        Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: "chevron-down";
+            tint: Theme.palette().ink-secondary;
+            y: (parent.height - self.height) / 2;
+        }
+        if FontPicker.current-note != "" : Text {
+            text: FontPicker.current-note;
+            font-size: Theme.type.caption;
+            color: Theme.palette().warning;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        Text {
+            min-width: 0px;
+            text: FontPicker.current;
+            font-family: FontPicker.current-family == "" ? Theme.ui-font-family : FontPicker.current-family;
+            font-size: Theme.type.body;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            horizontal-stretch: 1;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
 }
 
 /// The open list under the field: a search box and the fonts around the
 /// highlight. Up and Down move, Page Up and Page Down move by a screen, Enter
 /// chooses, Escape closes. The mouse wheel scrolls.
 export component WriterFontList inherits Rectangle {
-    property <length> row-height: Theme.scaled-control-height;
-    height: layout.preferred-height + 2 * Theme.tokens.space.sm;
+    property <length> row-height: max(24px, Theme.scaled-control-height);
+    height: layout.preferred-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: Theme.palette().border-strong;
@@ -179,7 +216,7 @@ export component WriterFontList inherits Rectangle {
                 horizontal-alignment: Theme.rtl ? right : left;
                 height: root.row-height;
                 vertical-alignment: center;
-                accessible-role: none;
+                accessible-role: text;
             }
 
             Rectangle {
@@ -214,6 +251,8 @@ export component WriterFontList inherits Rectangle {
                         // it is in use or not installed.
                         if !line.heading : Rectangle {
                             border-radius: Theme.tokens.metrics.radius-small;
+                            border-width: line.index == FontPicker.selected ? 1px : 0px;
+                            border-color: line.index == FontPicker.selected ? Theme.palette().focus : transparent;
                             background: line.index == FontPicker.selected ? Theme.palette().selection-soft
                                 : row-touch.has-hover ? Theme.palette().surface-sunken
                                 : transparent;
@@ -226,18 +265,19 @@ export component WriterFontList inherits Rectangle {
                             row-touch := TouchArea {
                                 clicked => { FontPicker.choose(line.index); }
                             }
-                            HorizontalLayout {
+                            if !Theme.rtl : HorizontalLayout {
                                 padding-left: Theme.tokens.space.md;
                                 padding-right: Theme.tokens.space.md;
                                 spacing: Theme.tokens.space.sm;
-                                alignment: Theme.rtl ? end : start;
+                                alignment: start;
                                 Text {
+                                    min-width: 0px;
                                     text: line.label;
                                     font-family: line.family == "" ? Theme.ui-font-family : line.family;
                                     font-size: Theme.type.body;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
-                                    horizontal-alignment: Theme.rtl ? right : left;
+                                    horizontal-alignment: left;
                                     horizontal-stretch: 1;
                                     overflow: elide;
                                     accessible-role: none;
@@ -247,6 +287,31 @@ export component WriterFontList inherits Rectangle {
                                     font-size: Theme.type.caption;
                                     color: line.tag == "Not installed" ? Theme.palette().warning : Theme.palette().ink-secondary;
                                     vertical-alignment: center;
+                                    accessible-role: none;
+                                }
+                            }
+                            if Theme.rtl : HorizontalLayout {
+                                padding-left: Theme.tokens.space.md;
+                                padding-right: Theme.tokens.space.md;
+                                spacing: Theme.tokens.space.sm;
+                                alignment: end;
+                                if line.tag != "" : Text {
+                                    text: line.tag;
+                                    font-size: Theme.type.caption;
+                                    color: line.tag == "Not installed" ? Theme.palette().warning : Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    accessible-role: none;
+                                }
+                                Text {
+                                    min-width: 0px;
+                                    text: line.label;
+                                    font-family: line.family == "" ? Theme.ui-font-family : line.family;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
                                     accessible-role: none;
                                 }
                             }
@@ -260,7 +325,7 @@ export component WriterFontList inherits Rectangle {
                 font-size: Theme.type.caption;
                 color: Theme.palette().ink-secondary;
                 horizontal-alignment: Theme.rtl ? right : left;
-                accessible-role: none;
+                accessible-role: text;
             }
         }
     }

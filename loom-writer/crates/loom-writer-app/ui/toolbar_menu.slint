@@ -28,97 +28,125 @@ export component WriterToolbarMenu inherits Rectangle {
     in property <int> text-alignment: WriterFormatState.text-alignment;
     in property <int> heading-level: 0;
     in property <int> list-style-index: 0;
+    in property <string> primary-mod: "Ctrl";
+    in property <string> alt-mod: "Alt";
     callback command(string);
     callback close-requested;
     public function focus-menu() { menu-focus.focus(); }
 
     property <int> selected: 0;
     /// Each row: the command id it runs, its label and shortcut, whether it shows
-    /// a check mark, and whether it can run now.
-    property <[{ id: string, label: string, shortcut: string, checked: bool, enabled: bool }]> rows:
+    /// a check mark, whether it is checkable, and whether it can run now.
+    property <[{ id: string, label: string, shortcut: string, checked: bool, checkable: bool, enabled: bool }]> rows:
         root.kind == 1 ? [
-            { id: "view.inspector", label: "Format Inspector", shortcut: "", checked: root.inspector-visible, enabled: true },
-            { id: "view.navigator", label: "Outline Navigator", shortcut: "", checked: root.navigator-visible, enabled: true },
-            { id: "app.palette", label: "Command Palette", shortcut: "Ctrl+K", checked: false, enabled: true },
-            { id: "view.appearance.system", label: "Appearance: System", shortcut: "", checked: Theme.appearance == "system", enabled: true },
-            { id: "view.appearance.light", label: "Appearance: Light", shortcut: "", checked: Theme.appearance == "light", enabled: true },
-            { id: "view.appearance.dark", label: "Appearance: Dark", shortcut: "", checked: Theme.appearance == "dark", enabled: true },
-            { id: "view.appearance.high_contrast", label: "Appearance: High Contrast", shortcut: "", checked: Theme.appearance == "high-contrast", enabled: true },
+            { id: "view.inspector", label: "Format Inspector", shortcut: root.primary-mod + "+" + root.alt-mod + "+I", checked: root.inspector-visible, checkable: true, enabled: true },
+            { id: "view.navigator", label: "Outline Navigator", shortcut: "", checked: root.navigator-visible, checkable: true, enabled: true },
+            { id: "app.palette", label: "Command Palette", shortcut: root.primary-mod + "+K", checked: false, checkable: false, enabled: true },
+            { id: "review.word_count", label: "Word Count", shortcut: root.primary-mod + "+Shift+C", checked: false, checkable: false, enabled: true },
+            { id: "file.start_hub", label: "Start Hub", shortcut: root.primary-mod + "+Shift+O", checked: false, checkable: false, enabled: true },
+            { id: "help.welcome", label: "Welcome Guide", shortcut: root.primary-mod + "+Shift+/", checked: false, checkable: false, enabled: true },
+            { id: "view.appearance.system", label: "Appearance: System", shortcut: "", checked: Theme.appearance == "system", checkable: true, enabled: true },
+            { id: "view.appearance.light", label: "Appearance: Light", shortcut: "", checked: Theme.appearance == "light", checkable: true, enabled: true },
+            { id: "view.appearance.dark", label: "Appearance: Dark", shortcut: "", checked: Theme.appearance == "dark", checkable: true, enabled: true },
+            { id: "view.appearance.high_contrast", label: "Appearance: High Contrast", shortcut: "", checked: Theme.appearance == "high-contrast", checkable: true, enabled: true },
         ]
         : root.kind == 2 ? [
-            { id: "view.zoom_in", label: "Zoom In", shortcut: "", checked: false, enabled: root.page-zoom < 1.99 },
-            { id: "view.zoom_out", label: "Zoom Out", shortcut: "", checked: false, enabled: root.page-zoom > 0.51 },
-            { id: "view.zoom_actual", label: "Actual Size", shortcut: "", checked: Math.abs(root.page-zoom - 1.0) < 0.01, enabled: true },
-            { id: "view.zoom_fit_width", label: "Fit Width", shortcut: "", checked: false, enabled: root.view-width > 48px && root.page-width-pt > 0.0 },
-            { id: "view.zoom_fit_page", label: "Fit Page", shortcut: "", checked: false, enabled: root.view-width > 48px && root.view-height > 48px && root.page-width-pt > 0.0 && root.page-height-pt > 0.0 },
+            { id: "view.zoom_in", label: "Zoom In", shortcut: root.primary-mod + "+=", checked: false, checkable: false, enabled: root.page-zoom < 1.99 },
+            { id: "view.zoom_out", label: "Zoom Out", shortcut: root.primary-mod + "+-", checked: false, checkable: false, enabled: root.page-zoom > 0.51 },
+            { id: "view.zoom_actual", label: "Actual Size", shortcut: root.primary-mod + "+0", checked: Math.abs(root.page-zoom - 1.0) < 0.01, checkable: true, enabled: true },
+            { id: "view.zoom_fit_width", label: "Fit Width", shortcut: "", checked: false, checkable: false, enabled: root.view-width > 48px && root.page-width-pt > 0.0 },
+            { id: "view.zoom_fit_page", label: "Fit Page", shortcut: "", checked: false, checkable: false, enabled: root.view-width > 48px && root.view-height > 48px && root.page-width-pt > 0.0 && root.page-height-pt > 0.0 },
         ]
         : root.kind == 3 ? [
-            { id: "insert.page_break", label: "Page Break", shortcut: "Ctrl+Enter", checked: false, enabled: true },
-            { id: "insert.line_break", label: "Line Break", shortcut: "Shift+Enter", checked: false, enabled: true },
-            { id: "insert.table", label: "Table", shortcut: "", checked: false, enabled: true },
-            { id: "insert.image", label: "Picture...", shortcut: "", checked: false, enabled: true },
-            { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, enabled: true },
-            { id: "insert.comment", label: "Comment", shortcut: "", checked: false, enabled: true },
-            { id: "writer.footnotes", label: "Footnotes…", shortcut: "", checked: false, enabled: true },
+            { id: "insert.page_break", label: "Page Break", shortcut: root.primary-mod + "+Enter", checked: false, checkable: false, enabled: true },
+            { id: "insert.line_break", label: "Line Break", shortcut: "Shift+Enter", checked: false, checkable: false, enabled: true },
+            { id: "insert.table", label: "Table", shortcut: "", checked: false, checkable: false, enabled: true },
+            { id: "insert.image", label: "Picture...", shortcut: "", checked: false, checkable: false, enabled: true },
+            { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, checkable: false, enabled: true },
+            { id: "insert.comment", label: "Comment", shortcut: "", checked: false, checkable: false, enabled: true },
+            { id: "insert.header_footer", label: "Headers & Footers\u{2026}", shortcut: root.primary-mod + "+" + root.alt-mod + "+H", checked: false, checkable: false, enabled: true },
+            { id: "writer.footnotes", label: "Footnotes\u{2026}", shortcut: "", checked: false, checkable: false, enabled: true },
         ]
         : root.kind == 4 ? (WriterFormatState.justify-available ? [
-            { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
-            { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
-            { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
-            { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
-            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, enabled: WriterFormatState.color-formatting-available },
-            { id: "writer.style.superscript", label: "Superscript", shortcut: "", checked: WriterFormatState.superscript-selected, enabled: WriterFormatState.inline-formatting-available },
-            { id: "writer.style.subscript", label: "Subscript", shortcut: "", checked: WriterFormatState.subscript-selected, enabled: WriterFormatState.inline-formatting-available },
-            { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
-            { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
-            { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
-            { id: "format.align_justify", label: "Justify", shortcut: "", checked: root.text-alignment == 3, enabled: true },
+            { id: "format.bold", label: "Bold", shortcut: root.primary-mod + "+B", checked: root.is-bold, checkable: true, enabled: true },
+            { id: "format.italic", label: "Italic", shortcut: root.primary-mod + "+I", checked: root.is-italic, checkable: true, enabled: true },
+            { id: "format.underline", label: "Underline", shortcut: root.primary-mod + "+U", checked: root.is-underline, checkable: true, enabled: true },
+            { id: "format.strikethrough", label: "Strikethrough", shortcut: root.primary-mod + "+Shift+X", checked: root.is-strikethrough, checkable: true, enabled: true },
+            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, checkable: true, enabled: WriterFormatState.color-formatting-available },
+            { id: "writer.style.superscript", label: "Superscript", shortcut: root.primary-mod + "+Shift+.", checked: WriterFormatState.superscript-selected, checkable: true, enabled: WriterFormatState.inline-formatting-available },
+            { id: "writer.style.subscript", label: "Subscript", shortcut: root.primary-mod + "+Shift+,", checked: WriterFormatState.subscript-selected, checkable: true, enabled: WriterFormatState.inline-formatting-available },
+            { id: "format.align_left", label: "Align Left", shortcut: root.primary-mod + "+Shift+L", checked: root.text-alignment == 0, checkable: true, enabled: true },
+            { id: "format.align_center", label: "Align Center", shortcut: root.primary-mod + "+Shift+E", checked: root.text-alignment == 1, checkable: true, enabled: true },
+            { id: "format.align_right", label: "Align Right", shortcut: root.primary-mod + "+Shift+R", checked: root.text-alignment == 2, checkable: true, enabled: true },
+            { id: "format.align_justify", label: "Justify", shortcut: root.primary-mod + "+Shift+J", checked: root.text-alignment == 3, checkable: true, enabled: true },
         ] : [
-            { id: "format.bold", label: "Bold", shortcut: "Ctrl+B", checked: root.is-bold, enabled: true },
-            { id: "format.italic", label: "Italic", shortcut: "Ctrl+I", checked: root.is-italic, enabled: true },
-            { id: "format.underline", label: "Underline", shortcut: "Ctrl+U", checked: root.is-underline, enabled: true },
-            { id: "format.strikethrough", label: "Strikethrough", shortcut: "", checked: root.is-strikethrough, enabled: true },
-            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, enabled: WriterFormatState.color-formatting-available },
-            { id: "writer.style.superscript", label: "Superscript", shortcut: "", checked: WriterFormatState.superscript-selected, enabled: WriterFormatState.inline-formatting-available },
-            { id: "writer.style.subscript", label: "Subscript", shortcut: "", checked: WriterFormatState.subscript-selected, enabled: WriterFormatState.inline-formatting-available },
-            { id: "format.align_left", label: "Align Left", shortcut: "", checked: root.text-alignment == 0, enabled: true },
-            { id: "format.align_center", label: "Align Center", shortcut: "", checked: root.text-alignment == 1, enabled: true },
-            { id: "format.align_right", label: "Align Right", shortcut: "", checked: root.text-alignment == 2, enabled: true },
+            { id: "format.bold", label: "Bold", shortcut: root.primary-mod + "+B", checked: root.is-bold, checkable: true, enabled: true },
+            { id: "format.italic", label: "Italic", shortcut: root.primary-mod + "+I", checked: root.is-italic, checkable: true, enabled: true },
+            { id: "format.underline", label: "Underline", shortcut: root.primary-mod + "+U", checked: root.is-underline, checkable: true, enabled: true },
+            { id: "format.strikethrough", label: "Strikethrough", shortcut: root.primary-mod + "+Shift+X", checked: root.is-strikethrough, checkable: true, enabled: true },
+            { id: "writer.style.color", label: "Text Color", shortcut: "", checked: WriterFormatState.foreground-color != "" && !WriterFormatState.foreground-color-mixed, checkable: true, enabled: WriterFormatState.color-formatting-available },
+            { id: "writer.style.superscript", label: "Superscript", shortcut: root.primary-mod + "+Shift+.", checked: WriterFormatState.superscript-selected, checkable: true, enabled: WriterFormatState.inline-formatting-available },
+            { id: "writer.style.subscript", label: "Subscript", shortcut: root.primary-mod + "+Shift+,", checked: WriterFormatState.subscript-selected, checkable: true, enabled: WriterFormatState.inline-formatting-available },
+            { id: "format.align_left", label: "Align Left", shortcut: root.primary-mod + "+Shift+L", checked: root.text-alignment == 0, checkable: true, enabled: true },
+            { id: "format.align_center", label: "Align Center", shortcut: root.primary-mod + "+Shift+E", checked: root.text-alignment == 1, checkable: true, enabled: true },
+            { id: "format.align_right", label: "Align Right", shortcut: root.primary-mod + "+Shift+R", checked: root.text-alignment == 2, checkable: true, enabled: true },
         ])
         : root.kind == 5 ? [
-            { id: "paragraph.body", label: "Body", shortcut: "", checked: root.heading-level == 0, enabled: true },
-            { id: "paragraph.h1", label: "Heading 1", shortcut: "", checked: root.heading-level == 1, enabled: true },
-            { id: "paragraph.h2", label: "Heading 2", shortcut: "", checked: root.heading-level == 2, enabled: true },
-            { id: "paragraph.h3", label: "Heading 3", shortcut: "", checked: root.heading-level == 3, enabled: true },
-            { id: "writer.direction.auto", label: "Automatic Direction", shortcut: "", checked: WriterFormatState.paragraph-direction == 0, enabled: WriterFormatState.paragraph-formatting-available },
-            { id: "writer.direction.ltr", label: "Left to Right", shortcut: "", checked: WriterFormatState.paragraph-direction == 1, enabled: WriterFormatState.paragraph-formatting-available },
-            { id: "writer.direction.rtl", label: "Right to Left", shortcut: "", checked: WriterFormatState.paragraph-direction == 2, enabled: WriterFormatState.paragraph-formatting-available },
-            { id: "writer.align.start", label: "Align Start", shortcut: "", checked: WriterFormatState.logical-alignment == 0, enabled: WriterFormatState.paragraph-formatting-available },
-            { id: "writer.align.end", label: "Align End", shortcut: "", checked: WriterFormatState.logical-alignment == 1, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "paragraph.body", label: "Body", shortcut: root.primary-mod + "+" + root.alt-mod + "+0", checked: root.heading-level == 0, checkable: true, enabled: true },
+            { id: "paragraph.h1", label: "Heading 1", shortcut: root.primary-mod + "+" + root.alt-mod + "+1", checked: root.heading-level == 1, checkable: true, enabled: true },
+            { id: "paragraph.h2", label: "Heading 2", shortcut: root.primary-mod + "+" + root.alt-mod + "+2", checked: root.heading-level == 2, checkable: true, enabled: true },
+            { id: "paragraph.h3", label: "Heading 3", shortcut: root.primary-mod + "+" + root.alt-mod + "+3", checked: root.heading-level == 3, checkable: true, enabled: true },
+            { id: "writer.direction.auto", label: "Automatic Direction", shortcut: "", checked: WriterFormatState.paragraph-direction == 0, checkable: true, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.direction.ltr", label: "Left to Right", shortcut: "", checked: WriterFormatState.paragraph-direction == 1, checkable: true, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.direction.rtl", label: "Right to Left", shortcut: "", checked: WriterFormatState.paragraph-direction == 2, checkable: true, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.align.start", label: "Align Start", shortcut: "", checked: WriterFormatState.logical-alignment == 0, checkable: true, enabled: WriterFormatState.paragraph-formatting-available },
+            { id: "writer.align.end", label: "Align End", shortcut: "", checked: WriterFormatState.logical-alignment == 1, checkable: true, enabled: WriterFormatState.paragraph-formatting-available },
         ]
         : root.kind == 6 ? [
-            { id: "list.none", label: "No List", shortcut: "", checked: root.list-style-index == 0, enabled: true },
-            { id: "list.bulleted", label: "Bulleted List", shortcut: "", checked: root.list-style-index == 1, enabled: true },
-            { id: "list.numbered", label: "Numbered List", shortcut: "", checked: root.list-style-index == 2, enabled: true },
+            { id: "list.none", label: "No List", shortcut: "", checked: root.list-style-index == 0, checkable: true, enabled: true },
+            { id: "list.bulleted", label: "Bulleted List", shortcut: root.primary-mod + "+Shift+8", checked: root.list-style-index == 1, checkable: true, enabled: true },
+            { id: "list.numbered", label: "Numbered List", shortcut: root.primary-mod + "+Shift+7", checked: root.list-style-index == 2, checkable: true, enabled: true },
         ]
         : root.kind == 7 ? [
-            { id: "file.export_pdf", label: "PDF", shortcut: "Ctrl+E", checked: false, enabled: true },
-            { id: "file.export_md", label: "Markdown", shortcut: "", checked: false, enabled: true },
-            { id: "file.export_docx", label: "Word (.docx)", shortcut: "", checked: false, enabled: true },
+            { id: "file.print_preview", label: "Print Preview\u{2026}", shortcut: root.primary-mod + "+P", checked: false, checkable: false, enabled: true },
+            { id: "file.export_pdf", label: "PDF", shortcut: root.primary-mod + "+E", checked: false, checkable: false, enabled: true },
+            { id: "file.export_docx", label: "Word (.docx)", shortcut: root.primary-mod + "+Shift+E", checked: false, checkable: false, enabled: true },
+            { id: "file.export_md", label: "Markdown", shortcut: "", checked: false, checkable: false, enabled: true },
         ]
         : root.kind == 8 ? [
-            { id: "edit.undo", label: "Undo", shortcut: "Ctrl+Z", checked: false, enabled: root.can-undo },
-            { id: "edit.redo", label: "Redo", shortcut: "Ctrl+Shift+Z", checked: false, enabled: root.can-redo },
-            { id: "file.new", label: "New", shortcut: "Ctrl+N", checked: false, enabled: true },
-            { id: "file.open", label: "Open", shortcut: "Ctrl+O", checked: false, enabled: true },
-            { id: "file.save", label: "Save", shortcut: "Ctrl+S", checked: false, enabled: true },
-            { id: "file.save_as", label: "Save As", shortcut: "Ctrl+Shift+S", checked: false, enabled: true },
-            { id: "edit.find", label: "Find", shortcut: "Ctrl+F", checked: false, enabled: true },
-            { id: "writer.review.open", label: "Tracked Changes", shortcut: "", checked: WriterReviewState.panel-open, enabled: true },
+            { id: "edit.undo", label: "Undo", shortcut: root.primary-mod + "+Z", checked: false, checkable: false, enabled: root.can-undo },
+            { id: "edit.redo", label: "Redo", shortcut: root.primary-mod + "+Shift+Z", checked: false, checkable: false, enabled: root.can-redo },
+            { id: "file.new", label: "New", shortcut: root.primary-mod + "+N", checked: false, checkable: false, enabled: true },
+            { id: "file.start_hub", label: "Start Hub\u{2026}", shortcut: root.primary-mod + "+Shift+O", checked: false, checkable: false, enabled: true },
+            { id: "file.open", label: "Open", shortcut: root.primary-mod + "+O", checked: false, checkable: false, enabled: true },
+            { id: "file.save", label: "Save", shortcut: root.primary-mod + "+S", checked: false, checkable: false, enabled: true },
+            { id: "file.save_as", label: "Save As", shortcut: root.primary-mod + "+Shift+S", checked: false, checkable: false, enabled: true },
+            { id: "file.print_preview", label: "Print Preview\u{2026}", shortcut: root.primary-mod + "+P", checked: false, checkable: false, enabled: true },
+            { id: "edit.find", label: "Find", shortcut: root.primary-mod + "+F", checked: false, checkable: false, enabled: true },
+            { id: "edit.replace", label: "Find & Replace", shortcut: root.primary-mod + "+H", checked: false, checkable: false, enabled: true },
+            { id: "writer.review.open", label: "Tracked Changes", shortcut: root.primary-mod + "+Shift+T", checked: WriterReviewState.panel-open, checkable: true, enabled: true },
+            { id: "help.welcome", label: "Welcome Guide", shortcut: root.primary-mod + "+Shift+/", checked: false, checkable: false, enabled: true },
         ]
         : [];
 
-    changed kind => { root.selected = 0; }
+    changed kind => {
+        root.selected = 0;
+        menu-scroll.viewport-y = 0px;
+    }
+
+    changed selected => {
+        if (root.rows.length > 0 && items.preferred-height > menu-scroll.height) {
+            let step = items.preferred-height / root.rows.length;
+            let row-top = root.selected * step;
+            let row-bottom = row-top + step;
+            let view-top = -menu-scroll.viewport-y;
+            if (row-top < view-top) {
+                menu-scroll.viewport-y = -row-top;
+            } else if (row-bottom > view-top + menu-scroll.height) {
+                menu-scroll.viewport-y = -(row-bottom - menu-scroll.height);
+            }
+        }
+    }
 
     visible: root.kind != 0;
     background: transparent;
@@ -144,8 +172,8 @@ export component WriterToolbarMenu inherits Rectangle {
             ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
             : max(0px, min(root.menu-x, root.width - self.width - 8px));
         y: root.menu-y;
-        width: 240px * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
-        height: items.preferred-height;
+        width: min(296px * max(1.0, Theme.text-scale), max(1px, root.width - 16px));
+        height: min(items.preferred-height, max(140px, root.height - root.menu-y - 16px));
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -154,17 +182,37 @@ export component WriterToolbarMenu inherits Rectangle {
         drop-shadow-offset-y: 4px;
         drop-shadow-color: Theme.palette().shadow;
 
-        items := VerticalLayout {
-            spacing: 2px;
-            padding: Theme.tokens.space.sm;
-            for row[idx] in root.rows : LoomMenuItem {
-                label: row.label;
-                shortcut: row.shortcut;
-                checked: row.checked;
-                checkable: row.checked;
-                enabled: row.enabled;
-                selected: idx == root.selected;
-                activated => { root.command(row.id); }
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            clip: true;
+
+            menu-scroll := Flickable {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: items.preferred-height;
+
+                items := VerticalLayout {
+                    width: parent.width;
+                    spacing: 2px;
+                    padding: Theme.tokens.space.sm;
+                    for row[idx] in root.rows : LoomMenuItem {
+                        label: row.label;
+                        shortcut: row.shortcut;
+                        checked: row.checked;
+                        checkable: row.checkable;
+                        enabled: row.enabled;
+                        selected: idx == root.selected;
+                        pointer-hovered => { root.selected = idx; }
+                        activated => { root.command(row.id); }
+                    }
+                }
             }
         }
     }

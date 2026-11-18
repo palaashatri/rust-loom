@@ -71,9 +71,9 @@ export component WriterDocumentEditor inherits Rectangle {
 
     if root.text == "" : Text {
         // Keep the empty-page prompt clear of the insertion caret at column one.
-        x: 2px * root.page-zoom;
+        x: max(4px, 4px * root.page-zoom);
         y: 0px;
-        width: max(0px, root.width - 2px * root.page-zoom);
+        width: max(0px, root.width - max(4px, 4px * root.page-zoom));
         height: root.height;
         text: root.placeholder;
         font-family: Theme.document-font-family;
@@ -184,7 +184,7 @@ export component WriterDocumentEditor inherits Rectangle {
             width: max(1px, pic.width * root.page-zoom);
             height: max(1px, pic.height * root.page-zoom);
             accessible-role: none;
-            Image {
+            if pic.source.width > 0 && pic.source.height > 0 : Image {
                 x: 0px;
                 y: 0px;
                 width: parent.width;
@@ -193,6 +193,36 @@ export component WriterDocumentEditor inherits Rectangle {
                 image-fit: fill;
                 accessible-role: image;
                 accessible-label: pic.label;
+            }
+            if pic.source.width == 0 || pic.source.height == 0 : Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                background: Theme.palette().surface-sunken;
+                border-width: max(1px, 1px * root.page-zoom);
+                border-color: Theme.active-theme == "high-contrast"
+                    ? Theme.palette().border
+                    : Theme.palette().danger;
+                border-radius: Theme.tokens.metrics.radius-small;
+                clip: true;
+                accessible-role: image;
+                accessible-label: pic.label;
+                Text {
+                    x: Theme.tokens.space.sm;
+                    y: Theme.tokens.space.sm;
+                    width: max(0px, parent.width - 2 * Theme.tokens.space.sm);
+                    height: max(0px, parent.height - 2 * Theme.tokens.space.sm);
+                    text: pic.label;
+                    font-family: Theme.document-font-family;
+                    font-size: max(9px, Theme.tokens.typography.caption * root.page-zoom);
+                    color: Theme.palette().ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    accessible-role: none;
+                }
             }
             // The outline and corner handles of the selected picture.
             Rectangle {
