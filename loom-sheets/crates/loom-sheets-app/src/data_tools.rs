@@ -154,15 +154,10 @@ pub(crate) fn open_column_filter(app: &SheetsApp, state: &Rc<GuiState>, col: u32
 pub(crate) fn sync_data_tools_state(app: &SheetsApp, sheet: &Sheet) {
     let dt = app.global::<DataToolsState>();
     dt.set_autofilter_enabled(sheet.auto_filter.enabled);
-    let col_origin = app.get_view_col_origin().max(0) as u32;
-    let visible_cols = app.get_cols().row_count() as u32;
-    let filtered: Vec<bool> = (0..visible_cols)
-        .map(|i| {
-            sheet
-                .auto_filter
-                .column_filters
-                .contains_key(&(col_origin + i))
-        })
+    let filtered: Vec<bool> = app
+        .get_cols()
+        .iter()
+        .map(|col| col >= 0 && sheet.auto_filter.column_filters.contains_key(&(col as u32)))
         .collect();
     dt.set_col_filtered(ModelRc::new(VecModel::from(filtered)));
     sync_named_ranges_model(app, sheet);

@@ -144,3 +144,43 @@ fn the_name_box_goes_to_a_far_cell_and_shows_it_and_rejects_nonsense() {
     );
     assert!(app.get_status_left().contains("not a cell or range"));
 }
+
+#[test]
+fn hundred_thousand_hidden_rows_stay_out_of_the_materialized_cell_window_and_hit_testing_selects_visible_rows(
+) {
+    let (app, state) = projected(&[("A1", "Above"), ("B100002", "Below")]);
+    {
+        let mut sheet = state.current.borrow_mut();
+        sheet.hidden_rows.extend(1..=100_000);
+    }
+    project_current(&app, &state);
+
+    let row_count = app.get_rows().row_count();
+    let col_count = app.get_cols().row_count();
+    assert!(
+        row_count <= 40,
+        "expected materialized rows bounded by viewport, got {row_count}"
+    );
+    assert_eq!(app.get_cells().row_count(), row_count * col_count);
+    assert_eq!(app.get_rows().row_data(0), Some(0));
+    assert_eq!(app.get_rows().row_data(1), Some(100_001));
+    assert_eq!(app.get_row_headers().row_data(0).unwrap().as_str(), "1");
+    assert_eq!(
+        app.get_row_headers().row_data(1).unwrap().as_str(),
+        "100002"
+    );
+
+    let pointer = app.global::<GridPointer>();
+    let width = app.get_grid_column_widths().row_data(0).unwrap();
+    let height = app.get_grid_row_heights().row_data(0).unwrap();
+    pointer.invoke_cell_pressed(0, 0, false);
+    pointer.invoke_cell_dragged(0, 0, width * 1.5, height * 1.5);
+    assert_eq!(selected(&app), "A1:B100002");
+    assert_eq!(
+        selection_from_app(&app).focus,
+        CellRef {
+            row: 100_001,
+            col: 1
+        }
+    );
+}

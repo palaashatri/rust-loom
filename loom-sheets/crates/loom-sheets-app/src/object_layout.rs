@@ -172,12 +172,19 @@ pub(crate) fn editor_dimensions_with_preview(
     };
     // Room to keep scrolling past the last used or selected cell, so the
     // grid never ends exactly where the user last looked.
+    let min_visible_rows = crate::DEFAULT_VISIBLE_ROWS.max(fill_rows);
     let mut rows = dimensions
         .rows
         .max(selected.row.saturating_add(1))
-        .max(crate::DEFAULT_VISIBLE_ROWS)
-        .max(fill_rows)
-        .saturating_add(ahead_rows);
+        .max(min_visible_rows.saturating_add(sheet.hidden_rows.len() as u32))
+        .max(
+            sheet
+                .hidden_rows
+                .last()
+                .map_or(0, |&last| last.saturating_add(2)),
+        )
+        .saturating_add(ahead_rows)
+        .min(crate::scroll_projection::MAX_GRID_ROWS);
     let mut cols = dimensions
         .cols
         .max(selected.col.saturating_add(1))

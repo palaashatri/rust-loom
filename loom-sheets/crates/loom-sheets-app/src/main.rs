@@ -228,16 +228,48 @@ fn accessible_cell_label(cell: CellRef, raw: Option<&str>, value: &str) -> Strin
     }
 }
 
+/// The non-hidden worksheet rows inside `viewport`'s row span.
+/// Falls back to `viewport.first_row` when every row in the span is hidden
+/// so the grid never materializes an empty row model.
+pub(crate) fn materialized_rows(sheet: &Sheet, viewport: SheetViewport) -> Vec<u32> {
+    let start = viewport.first_row;
+    let end = start.saturating_add(viewport.visible_rows.max(1));
+    let mut rows = Vec::new();
+    let mut cursor = start;
+    for &hidden in sheet.hidden_rows.range(start..end) {
+        if hidden > cursor {
+            rows.extend(cursor..hidden);
+        }
+        cursor = hidden.saturating_add(1);
+    }
+    if cursor < end {
+        rows.extend(cursor..end);
+    }
+    if rows.is_empty() {
+        rows.push(start);
+    }
+    rows
+}
+
+/// The worksheet columns inside `viewport`'s column span.
+pub(crate) fn materialized_cols(viewport: SheetViewport) -> Vec<u32> {
+    let start = viewport.first_col;
+    let end = start.saturating_add(viewport.visible_cols.max(1));
+    (start..end).collect()
+}
+
 fn project_sheet_grid_with_values(
     sheet: &Sheet,
     values: &std::collections::HashMap<CellRef, Value>,
     viewport: SheetViewport,
 ) -> ProjectedSheetGrid {
-    let rows: Vec<i32> = (0..viewport.visible_rows).map(|row| row as i32).collect();
-    let cols: Vec<i32> = (0..viewport.visible_cols).map(|col| col as i32).collect();
-    let column_headers = (0..viewport.visible_cols)
-        .filter_map(|index| viewport.column_at(index))
-        .map(|column| {
+    let mat_rows = materialized_rows(sheet, viewport);
+    let mat_cols = materialized_cols(viewport);
+    let rows: Vec<i32> = mat_rows.iter().map(|&row| row as i32).collect();
+    let cols: Vec<i32> = mat_cols.iter().map(|&col| col as i32).collect();
+    let column_headers = mat_cols
+        .iter()
+        .map(|&column| {
             CellRef {
                 row: 0,
                 col: column,
@@ -247,11 +279,8 @@ fn project_sheet_grid_with_values(
             .to_string()
         })
         .collect();
-    let row_headers = (0..viewport.visible_rows)
-        .filter_map(|index| viewport.row_at(index))
-        .map(|row| (row + 1).to_string())
-        .collect();
-    let cap = (viewport.visible_rows * viewport.visible_cols) as usize;
+    let row_headers = mat_rows.iter().map(|&row| (row + 1).to_string()).collect();
+    let cap = mat_rows.len() * mat_cols.len();
     let mut cells = Vec::with_capacity(cap);
     let mut cell_labels = Vec::with_capacity(cap);
     let mut cell_alignments = Vec::with_capacity(cap);
@@ -263,14 +292,8 @@ fn project_sheet_grid_with_values(
     let mut cell_font_sizes = Vec::with_capacity(cap);
     let mut cell_text_colors = Vec::with_capacity(cap);
     let mut cell_wraps = Vec::with_capacity(cap);
-    for local_row in 0..viewport.visible_rows {
-        for local_col in 0..viewport.visible_cols {
-            let Some(row) = viewport.row_at(local_row) else {
-                continue;
-            };
-            let Some(col) = viewport.column_at(local_col) else {
-                continue;
-            };
+    for &row in &mat_rows {
+        for &col in &mat_cols {
             let cell = CellRef { row, col };
             let style = sheet.cell_style(cell);
             let raw_val = cell_value(sheet, values, row, col);
@@ -473,8 +496,25 @@ fn dimension_visible_count(
     };
     let mut consumed = 0.0_f32;
     let mut index = first;
+    for (&custom_index, &custom_size) in custom.range(first..count) {
+        if !custom_size.is_finite() || custom_size < 0.0 {
+            continue;
+        }
+        while index < custom_index && (consumed < viewport_size || index == first) {
+            consumed += default_size;
+            index += 1;
+        }
+        if consumed >= viewport_size && index > first {
+            return index.saturating_sub(first).max(1);
+        }
+        consumed += custom_size;
+        index += 1;
+        if consumed >= viewport_size && index > first {
+            return index.saturating_sub(first).max(1);
+        }
+    }
     while index < count && (consumed < viewport_size || index == first) {
-        consumed += dimension_size(index, default_size, custom);
+        consumed += default_size;
         index += 1;
     }
     index.saturating_sub(first).max(1)
@@ -589,13 +629,15 @@ fn grid_geometry_fit(
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
     let scaled_rows = scaled_row_heights(sheet, zoom);
-    let column_widths: Vec<f32> = (0..viewport.visible_cols)
-        .filter_map(|index| viewport.column_at(index))
-        .map(|col| dimension_size(col, default_col_width, &scaled_cols))
+    let mat_cols = materialized_cols(viewport);
+    let mat_rows = materialized_rows(sheet, viewport);
+    let column_widths: Vec<f32> = mat_cols
+        .iter()
+        .map(|&col| dimension_size(col, default_col_width, &scaled_cols))
         .collect();
-    let row_heights: Vec<f32> = (0..viewport.visible_rows)
-        .filter_map(|index| viewport.row_at(index))
-        .map(|row| dimension_size(row, default_row_height, &scaled_rows))
+    let row_heights: Vec<f32> = mat_rows
+        .iter()
+        .map(|&row| dimension_size(row, default_row_height, &scaled_rows))
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
