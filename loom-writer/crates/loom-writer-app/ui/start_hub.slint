@@ -1,5 +1,7 @@
 import { LoomButton, LoomSearchField } from "foundation.slint";
+import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { StartHubTemplateThumb } from "template_previews.slint";
 
 export struct StartHubRecentItem {
     name: string,
@@ -27,10 +29,11 @@ export global StartHubState {
 
 component StartHubSidebarItem inherits Rectangle {
     in property <string> label: "";
+    in property <string> icon-name: "document";
     in property <bool> active: false;
     callback clicked();
 
-    height: max(34px, Theme.scaled-control-height + 4px);
+    height: max(36px, Theme.scaled-control-height + 6px);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: tab-focus.has-focus ? 2px : 0px;
     border-color: Theme.palette().focus;
@@ -42,36 +45,88 @@ component StartHubSidebarItem inherits Rectangle {
     accessible-checked: root.active;
     accessible-action-default => { root.clicked(); }
 
-    HorizontalLayout {
-        padding-left: Theme.tokens.space.md;
-        padding-right: Theme.tokens.space.md;
-        alignment: Theme.rtl ? end : start;
+    if root.active : Rectangle {
+        x: Theme.rtl ? parent.width - 3px : 0px; y: 6px; width: 3px; height: parent.height - 12px;
+        border-radius: 1.5px; background: Theme.palette().accent;
+    }
 
+    HorizontalLayout {
+        padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.md; alignment: Theme.rtl ? end : start; cross-axis-alignment: center;
+
+        if !Theme.rtl : Icon {
+            size: Theme.tokens.metrics.icon-size; icon: root.icon-name;
+            tint: root.active ? Theme.palette().accent : Theme.palette().ink-secondary;
+        }
         Text {
-            text: root.label;
-            font-size: Theme.type.body;
-            font-weight: root.active ? 700 : 500;
+            text: root.label; font-size: Theme.type.body; font-weight: root.active ? 700 : 500;
             color: root.active ? Theme.palette().accent : Theme.palette().ink;
-            horizontal-alignment: Theme.rtl ? right : left;
-            vertical-alignment: center;
-            overflow: elide;
+            horizontal-alignment: Theme.rtl ? right : left; vertical-alignment: center; overflow: elide;
+        }
+        if Theme.rtl : Icon {
+            size: Theme.tokens.metrics.icon-size; icon: root.icon-name;
+            tint: root.active ? Theme.palette().accent : Theme.palette().ink-secondary;
         }
     }
 
     tab-focus := FocusScope {
         key-pressed(event) => {
-            if (event.text == Key.Return || event.text == " ") {
-                root.clicked();
-                return accept;
-            }
+            if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
             return reject;
         }
     }
+    item-touch := TouchArea { clicked => { tab-focus.focus(); root.clicked(); } }
+}
 
-    item-touch := TouchArea {
-        clicked => {
-            tab-focus.focus();
-            root.clicked();
+component QuickStartCard inherits Rectangle {
+    in property <string> label: "Blank";
+    in property <string> preview-kind: "blank";
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: card-col.preferred-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: card-touch.pressed ? Theme.palette().surface-sunken
+        : card-touch.has-hover ? Theme.palette().surface-raised : Theme.palette().panel;
+    border-width: 1px;
+    border-color: card-touch.has-hover ? Theme.palette().accent : Theme.palette().border;
+    accessible-role: button;
+    accessible-label: "Quick Start " + root.label;
+    accessible-action-default => { root.clicked(); }
+
+    card-col := VerticalLayout {
+        padding: Theme.tokens.space.sm; spacing: 6px; alignment: center; cross-axis-alignment: center;
+        StartHubTemplateThumb { width: 64px; height: 84px; preview-kind: root.preview-kind; }
+        Text {
+            text: root.label; font-family: Theme.ui-font-family; font-size: Theme.type.caption; font-weight: 600;
+            color: Theme.palette().ink; horizontal-alignment: center; wrap: word-wrap; horizontal-stretch: 1;
+        }
+    }
+    card-touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component DocPageBadge inherits Rectangle {
+    in property <string> kind: "LOOM";
+    property <bool> is-docx: root.kind == "DOCX";
+
+    width: 30px; height: 38px; border-radius: 4px;
+    background: Theme.palette().paper;
+    border-width: 1px; border-color: Theme.active-theme == "high-contrast" ? #000000 : Theme.palette().border-strong;
+    drop-shadow-blur: 4px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.palette().shadow; clip: true;
+
+    Rectangle {
+        x: parent.width - 8px; y: 0px; width: 8px; height: 8px;
+        background: Theme.palette().surface-sunken; border-width: 0.5px; border-color: Theme.palette().border;
+    }
+    Rectangle { x: 5px; y: 10px; width: 14px; height: 2px; border-radius: 1px; background: #cbd5e1; }
+    Rectangle { x: 5px; y: 15px; width: 18px; height: 2px; border-radius: 1px; background: #e2e8f0; }
+    Rectangle { x: 5px; y: 20px; width: 12px; height: 2px; border-radius: 1px; background: #e2e8f0; }
+    Rectangle {
+        x: 2px; y: parent.height - 13px; width: parent.width - 4px; height: 11px; border-radius: 2.5px;
+        background: root.is-docx ? #1d4ed8 : #6241ad;
+        Text {
+            text: root.kind; font-size: 6.5px; font-weight: 700; color: #ffffff;
+            horizontal-alignment: center; vertical-alignment: center;
         }
     }
 }
@@ -82,91 +137,51 @@ component StartHubRecentRow inherits Rectangle {
     callback select-row();
     callback activate-row();
 
-    height: max(54px, 28px + 22px * max(1.0, Theme.text-scale));
+    height: max(54px, 24px + 20px * max(1.0, Theme.text-scale));
     border-radius: Theme.tokens.metrics.radius-medium;
-    background: root.selected
-        ? Theme.palette().selection-soft
-        : (row-touch.has-hover ? Theme.palette().surface : transparent);
+    background: root.selected ? Theme.palette().selection-soft
+        : (row-touch.has-hover ? Theme.palette().surface-raised : transparent);
     border-width: root.selected ? 1px : 0px;
     border-color: Theme.palette().accent;
-
-    property <length> badge-w: max(42px, 34px * max(1.0, Theme.text-scale));
-    property <length> badge-h: max(30px, 24px * max(1.0, Theme.text-scale));
 
     row-touch := TouchArea {
         clicked => { root.select-row(); }
         double-clicked => { root.activate-row(); }
     }
 
-    badge := Rectangle {
-        x: Theme.rtl
-            ? parent.width - Theme.tokens.space.md - self.width
-            : Theme.tokens.space.md;
+    badge := DocPageBadge {
+        kind: root.item.kind;
+        x: Theme.rtl ? parent.width - Theme.tokens.space.md - self.width : Theme.tokens.space.md;
         y: (parent.height - self.height) / 2;
-        width: root.badge-w;
-        height: root.badge-h;
-        border-radius: Theme.tokens.metrics.radius-small;
-        background: Theme.palette().selection-soft;
-
-        Text {
-            text: root.item.kind;
-            font-size: Theme.type.caption;
-            font-weight: 700;
-            color: Theme.palette().accent;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
 
     open-btn := LoomButton {
-        label: "Open";
-        accessible-name: "Open " + root.item.name;
-        variant: "secondary";
-        width: self.preferred-width;
-        x: Theme.rtl
-            ? Theme.tokens.space.md
-            : parent.width - Theme.tokens.space.md - self.width;
+        label: "Open"; accessible-name: "Open " + root.item.name;
+        variant: root.selected ? "primary" : "secondary"; width: self.preferred-width;
+        x: Theme.rtl ? Theme.tokens.space.md : parent.width - Theme.tokens.space.md - self.width;
         y: (parent.height - self.height) / 2;
         clicked => { root.activate-row(); }
     }
 
     subtitle-label := Text {
-        text: root.item.subtitle;
-        font-size: Theme.type.caption;
-        color: Theme.palette().ink-secondary;
+        text: root.item.subtitle; font-size: Theme.type.caption; color: Theme.palette().ink-secondary;
         width: self.preferred-width;
-        x: Theme.rtl
-            ? open-btn.x + open-btn.width + Theme.tokens.space.md
-            : open-btn.x - Theme.tokens.space.md - self.width;
-        y: (parent.height - self.height) / 2;
-        vertical-alignment: center;
+        x: Theme.rtl ? open-btn.x + open-btn.width + Theme.tokens.space.md : open-btn.x - Theme.tokens.space.md - self.width;
+        y: (parent.height - self.height) / 2; vertical-alignment: center;
     }
 
     VerticalLayout {
-        x: Theme.rtl
-            ? subtitle-label.x + subtitle-label.width + Theme.tokens.space.md
-            : badge.x + badge.width + Theme.tokens.space.md;
-        width: max(0px, Theme.rtl
-            ? badge.x - Theme.tokens.space.md - self.x
-            : subtitle-label.x - Theme.tokens.space.md - self.x);
-        height: parent.height;
-        alignment: center;
-        spacing: 2px;
+        x: Theme.rtl ? subtitle-label.x + subtitle-label.width + Theme.tokens.space.md : badge.x + badge.width + Theme.tokens.space.md;
+        width: max(0px, Theme.rtl ? badge.x - Theme.tokens.space.md - self.x : subtitle-label.x - Theme.tokens.space.md - self.x);
+        height: parent.height; alignment: center; spacing: 2px;
 
         Text {
-            text: root.item.name;
-            font-size: Theme.type.body;
-            font-weight: 600;
-            color: Theme.palette().ink;
-            horizontal-alignment: Theme.rtl ? right : left;
-            overflow: elide;
+            text: root.item.name; font-size: Theme.type.body; font-weight: 600; color: Theme.palette().ink;
+            horizontal-alignment: Theme.rtl ? right : left; overflow: elide;
         }
         Text {
-            text: root.item.path;
-            font-size: Theme.type.caption;
-            color: Theme.palette().ink-secondary;
-            horizontal-alignment: Theme.rtl ? right : left;
-            overflow: elide;
+            text: root.item.path; font-size: Theme.type.caption; color: Theme.palette().ink-secondary;
+            horizontal-alignment: Theme.rtl ? right : left; overflow: elide;
         }
     }
 }
@@ -174,26 +189,18 @@ component StartHubRecentRow inherits Rectangle {
 export component StartHubModal inherits Rectangle {
     in property <bool> focus-request: StartHubState.focus-request;
     property <length> list-scroll-y: 0px;
+    property <bool> show-quick-start: StartHubState.sidebar-tab == 0 && StartHubState.search-query == "";
+
     background: Theme.palette().scrim;
     accessible-role: groupbox;
     accessible-label: "Loom Writer Start Hub";
 
-    init => {
-        hub-focus.focus();
-    }
-
-    public function focus-start-hub() {
-        hub-focus.focus();
-    }
-
-    changed focus-request => {
-        if (StartHubState.open) {
-            hub-focus.focus();
-        }
-    }
+    init => { hub-focus.focus(); }
+    public function focus-start-hub() { hub-focus.focus(); }
+    changed focus-request => { if (StartHubState.open) { hub-focus.focus(); } }
 
     function reveal-selected-row() {
-        let row-h = max(54px, 28px + 22px * max(1.0, Theme.text-scale)) + 4px;
+        let row-h = max(54px, 24px + 20px * max(1.0, Theme.text-scale)) + 4px;
         let top = Theme.tokens.space.sm + max(0, StartHubState.selected-index) * row-h;
         let bottom = top + row-h;
         let min-scroll = min(0px, recents-flickable.height - recents-list.preferred-height);
@@ -204,213 +211,224 @@ export component StartHubModal inherits Rectangle {
         }
     }
 
-    TouchArea {
-        clicked => { StartHubState.close-hub(); }
-    }
+    TouchArea { clicked => { StartHubState.close-hub(); } }
 
     hub-focus := FocusScope {
         key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                StartHubState.close-hub();
-                return accept;
-            }
+            if (event.text == Key.Escape) { StartHubState.close-hub(); return accept; }
             if (event.text == Key.DownArrow && StartHubState.recents.length > 0) {
                 StartHubState.selected-index = min(StartHubState.recents.length - 1, StartHubState.selected-index + 1);
-                root.reveal-selected-row();
-                return accept;
+                root.reveal-selected-row(); return accept;
             }
             if (event.text == Key.UpArrow && StartHubState.recents.length > 0) {
                 StartHubState.selected-index = max(0, StartHubState.selected-index - 1);
-                root.reveal-selected-row();
-                return accept;
+                root.reveal-selected-row(); return accept;
             }
             if (event.text == Key.Return) {
                 if (StartHubState.selected-index >= 0 && StartHubState.selected-index < StartHubState.recents.length) {
                     StartHubState.open-recent(StartHubState.recents[StartHubState.selected-index].path);
-                } else {
-                    StartHubState.new-document();
-                }
+                } else { StartHubState.new-document(); }
                 return accept;
             }
             if (event.text == Key.Tab && !event.modifiers.shift && new-template-button.has-focus) {
-                hub-focus.focus();
-                return accept;
+                hub-focus.focus(); return accept;
             }
             if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && hub-focus.has-focus) {
-                new-template-button.grab-focus();
-                return accept;
+                new-template-button.grab-focus(); return accept;
             }
             return reject;
         }
 
-        Rectangle {
-            width: min(980px, max(480px, root.width - 48px));
-            height: min(600px, max(min(320px, root.height - 16px), root.height - 80px));
+        modal-card := Rectangle {
+            width: min(1020px, max(480px, root.width - 48px));
+            height: min(656px, max(min(320px, root.height - 16px), root.height - 64px));
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
             background: Theme.palette().surface;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            clip: true;
-            drop-shadow-blur: 24px;
-            drop-shadow-offset-y: 8px;
-            drop-shadow-color: Theme.palette().shadow;
+            border-width: 1px; border-color: Theme.palette().border-strong; clip: true;
+            drop-shadow-blur: 32px; drop-shadow-offset-y: 12px; drop-shadow-color: Theme.palette().shadow;
 
             TouchArea { }
 
             sidebar := Rectangle {
                 x: Theme.rtl ? parent.width - self.width : 0px;
-                width: 210px + 70px * (max(1.0, Theme.text-scale) - 1.0);
+                width: 216px + 64px * (max(1.0, Theme.text-scale) - 1.0);
                 height: parent.height;
                 background: Theme.palette().panel;
 
                 Rectangle {
                     x: Theme.rtl ? 0px : parent.width - 1px;
-                    width: 1px;
-                    height: parent.height;
-                    background: Theme.palette().border;
+                    width: 1px; height: parent.height; background: Theme.palette().border;
                 }
 
                 VerticalLayout {
-                    padding: Theme.tokens.space.lg;
-                    spacing: Theme.tokens.space.sm;
+                    padding: Theme.tokens.space.lg; spacing: Theme.tokens.space.sm;
 
-                    Text {
-                        text: "Loom Writer";
-                        font-size: Theme.type.title;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                    }
-                    Text {
-                        text: "Documents";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: Theme.rtl ? right : left;
+                    brand-row := Rectangle {
+                        height: max(40px, brand-text.preferred-height);
+                        emblem := Rectangle {
+                            x: Theme.rtl ? parent.width - self.width : 0px; y: (parent.height - self.height) / 2;
+                            width: 36px; height: 36px; border-radius: Theme.tokens.metrics.radius-medium;
+                            background: Theme.palette().accent;
+                            drop-shadow-blur: 6px; drop-shadow-offset-y: 2px; drop-shadow-color: Theme.palette().shadow;
+                            Icon {
+                                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                                size: 18px; icon: "document"; tint: Theme.palette().accent-ink;
+                            }
+                        }
+                        brand-text := VerticalLayout {
+                            property <length> lead-w: emblem.width + Theme.tokens.space.md;
+                            x: Theme.rtl ? 0px : self.lead-w; y: (parent.height - self.height) / 2;
+                            width: max(60px, parent.width - self.lead-w); spacing: 1px;
+                            Text {
+                                text: "Loom Writer"; font-size: Theme.type.title; font-weight: 700;
+                                color: Theme.palette().ink; horizontal-alignment: Theme.rtl ? right : left; overflow: elide;
+                            }
+                            Text {
+                                text: "Local-first Word Processor"; font-size: Theme.type.caption;
+                                color: Theme.palette().ink-secondary; horizontal-alignment: Theme.rtl ? right : left; wrap: word-wrap;
+                            }
+                        }
                     }
 
                     Rectangle { height: Theme.tokens.space.md; }
 
                     StartHubSidebarItem {
-                        label: "Recents";
-                        active: StartHubState.sidebar-tab == 0;
-                        clicked => {
-                            StartHubState.sidebar-tab = 0;
-                            StartHubState.tab-changed(0);
-                        }
+                        label: "Recents"; icon-name: "clock"; active: StartHubState.sidebar-tab == 0;
+                        clicked => { StartHubState.sidebar-tab = 0; StartHubState.tab-changed(0); }
                     }
                     StartHubSidebarItem {
-                        label: "Documents on Disk";
-                        active: StartHubState.sidebar-tab == 1;
-                        clicked => {
-                            StartHubState.sidebar-tab = 1;
-                            StartHubState.tab-changed(1);
-                        }
+                        label: "Documents on Disk"; icon-name: "folder"; active: StartHubState.sidebar-tab == 1;
+                        clicked => { StartHubState.sidebar-tab = 1; StartHubState.tab-changed(1); }
                     }
 
                     Rectangle { vertical-stretch: 1; }
+
+                    if modal-card.height >= 420px : Rectangle { height: 1px; background: Theme.palette().border; }
+                    if modal-card.height >= 420px : VerticalLayout {
+                        padding-top: Theme.tokens.space.sm; spacing: Theme.tokens.space.xs;
+                        for hint in ["\u{2191} \u{2193}  Select document", "\u{21B5}  Open selected", "Esc  Close hub"] : Text {
+                            text: hint; font-size: Theme.type.caption; color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left; overflow: elide;
+                        }
+                    }
                 }
             }
 
             VerticalLayout {
                 x: Theme.rtl ? 0px : sidebar.width;
-                width: parent.width - sidebar.width;
-                height: parent.height;
-                padding: Theme.tokens.space.xl;
-                spacing: Theme.tokens.space.md;
+                width: parent.width - sidebar.width; height: parent.height;
+                padding: Theme.tokens.space.xl; spacing: Theme.tokens.space.md;
 
-                // Header bar
                 Rectangle {
-                    height: Theme.scaled-control-height;
-                    background: transparent;
+                    height: max(Theme.scaled-control-height, header-title.preferred-height);
 
                     close-button := LoomButton {
-                        label: "Close";
-                        variant: "ghost";
+                        label: "Close"; icon: "close"; variant: "ghost"; accessible-name: "Close Start Hub";
                         width: self.preferred-width;
-                        x: Theme.rtl ? 0px : parent.width - self.width;
-                        y: (parent.height - self.height) / 2;
+                        x: Theme.rtl ? 0px : parent.width - self.width; y: (parent.height - self.height) / 2;
                         clicked => { StartHubState.close-hub(); }
                     }
-
                     search-field := LoomSearchField {
-                        width: 220px;
-                        label: "Filter recent documents";
-                        placeholder: "Filter documents…";
+                        width: min(220px, max(160px, parent.width * 0.36));
+                        label: "Filter recent documents"; placeholder: "Filter documents\u{2026}";
                         value <=> StartHubState.search-query;
-                        x: Theme.rtl
-                            ? close-button.x + close-button.width + Theme.tokens.space.sm
-                            : close-button.x - Theme.tokens.space.sm - self.width;
+                        x: Theme.rtl ? close-button.x + close-button.width + Theme.tokens.space.sm : close-button.x - Theme.tokens.space.sm - self.width;
                         y: (parent.height - self.height) / 2;
                         edited(text) => { StartHubState.search-edited(text); }
                     }
-
-                    Text {
-                        text: StartHubState.sidebar-tab == 0 ? "Recent Documents" : "Documents on Disk";
-                        font-size: Theme.type.title;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
+                    header-title := Text {
+                        text: StartHubState.sidebar-tab == 0
+                            ? (StartHubState.search-query == "" ? "Start" : "Recent Documents")
+                            : "Documents on Disk";
+                        font-size: Theme.type.heading; font-weight: 700; color: Theme.palette().ink;
                         x: Theme.rtl ? search-field.x + search-field.width + Theme.tokens.space.md : 0px;
-                        width: max(0px, Theme.rtl
-                            ? parent.width - self.x
-                            : search-field.x - Theme.tokens.space.md);
-                        height: parent.height;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        width: max(0px, Theme.rtl ? parent.width - self.x : search-field.x - Theme.tokens.space.md);
+                        height: parent.height; horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center; overflow: elide;
                     }
                 }
 
-                // Recents browser well
+                if root.show-quick-start : VerticalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    Rectangle {
+                        height: max(quick-hdr.preferred-height, all-tmpl-btn.preferred-height);
+                        quick-hdr := Text {
+                            text: "Quick Start"; font-size: Theme.type.title; font-weight: 700; color: Theme.palette().ink;
+                            x: Theme.rtl ? parent.width - self.width : 0px; y: (parent.height - self.height) / 2;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+                        all-tmpl-btn := LoomButton {
+                            label: Theme.rtl ? "\u{2190} All 18 Templates" : "All 18 Templates \u{2192}";
+                            variant: "ghost"; accessible-name: "All 18 Templates"; width: self.preferred-width;
+                            x: Theme.rtl ? 0px : parent.width - self.width; y: (parent.height - self.height) / 2;
+                            clicked => { StartHubState.new-document(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.md;
+                        for slot in [0, 1, 2, 3] : QuickStartCard {
+                            property <int> card-i: Theme.rtl ? 3 - slot : slot;
+                            label: self.card-i == 0 ? "Blank" : self.card-i == 1 ? "Executive Report"
+                                : self.card-i == 2 ? "Business Letter" : "Curriculum Vitae";
+                            preview-kind: self.card-i == 0 ? "blank" : self.card-i == 1 ? "report"
+                                : self.card-i == 2 ? "letter" : "cv";
+                            clicked => { if (self.card-i == 0) { StartHubState.blank-document(); } else { StartHubState.new-document(); } }
+                        }
+                    }
+                }
+
+                if root.show-quick-start : Rectangle {
+                    height: recents-subhdr.preferred-height;
+                    recents-subhdr := Text {
+                        text: "Recent Documents"; font-size: Theme.type.title; font-weight: 700; color: Theme.palette().ink;
+                        x: Theme.rtl ? parent.width - self.width : 0px; horizontal-alignment: Theme.rtl ? right : left;
+                    }
+                    if StartHubState.recents.length > 0 : Text {
+                        text: StartHubState.recents.length + (StartHubState.recents.length == 1 ? " file" : " files");
+                        font-size: Theme.type.caption; color: Theme.palette().ink-secondary;
+                        x: Theme.rtl ? 0px : parent.width - self.width; y: (parent.height - self.height) / 2;
+                    }
+                }
+
                 Rectangle {
-                    vertical-stretch: 1;
-                    border-radius: Theme.tokens.metrics.radius-medium;
-                    background: Theme.palette().surface-sunken;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
-                    clip: true;
+                    vertical-stretch: 1; border-radius: Theme.tokens.metrics.radius-medium;
+                    background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border; clip: true;
 
                     VerticalLayout {
                         visible: StartHubState.recents.length == 0;
-                        alignment: center;
-                        padding: Theme.tokens.space.xl;
-                        spacing: Theme.tokens.space.sm;
+                        alignment: center; cross-axis-alignment: center;
+                        padding: Theme.tokens.space.lg; spacing: Theme.tokens.space.sm;
 
-                        Text {
-                            text: StartHubState.search-query == ""
-                                ? "No recent documents yet."
-                                : "No documents match \"" + StartHubState.search-query + "\".";
-                            font-size: Theme.type.body;
-                            font-weight: 600;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: center;
+                        Rectangle {
+                            width: 40px; height: 40px; border-radius: 20px;
+                            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border;
+                            Icon {
+                                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                                size: 18px; icon: StartHubState.search-query == "" ? "document" : "search"; tint: Theme.palette().accent;
+                            }
                         }
                         Text {
-                            text: "Choose New from Template to browse templates, or Open File… to open an existing document.";
-                            font-size: Theme.type.caption;
-                            color: Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            wrap: word-wrap;
+                            text: StartHubState.search-query == "" ? "No recent documents yet."
+                                : "No documents match \"" + StartHubState.search-query + "\".";
+                            font-size: Theme.type.body; font-weight: 600; color: Theme.palette().ink; horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "Choose a Quick Start card above, browse all 18 templates, or open a file from disk.";
+                            font-size: Theme.type.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; wrap: word-wrap;
                         }
                     }
 
                     recents-flickable := Flickable {
                         visible: StartHubState.recents.length > 0;
-                        width: 100%;
-                        height: 100%;
-                        viewport-width: self.width;
-                        viewport-height: max(self.height, recents-list.preferred-height);
-                        viewport-y <=> root.list-scroll-y;
+                        width: 100%; height: 100%; viewport-width: self.width;
+                        viewport-height: max(self.height, recents-list.preferred-height); viewport-y <=> root.list-scroll-y;
 
                         recents-list := VerticalLayout {
-                            width: parent.width;
-                            padding: Theme.tokens.space.sm;
-                            spacing: 4px;
-
+                            width: parent.width; padding: Theme.tokens.space.sm; spacing: 4px;
                             for item[idx] in StartHubState.recents : StartHubRecentRow {
-                                item: item;
-                                selected: idx == StartHubState.selected-index;
+                                item: item; selected: idx == StartHubState.selected-index;
                                 select-row => { StartHubState.selected-index = idx; }
                                 activate-row => { StartHubState.open-recent(item.path); }
                             }
@@ -418,37 +436,22 @@ export component StartHubModal inherits Rectangle {
                     }
                 }
 
-                // Footer action bar
                 Rectangle {
-                    height: Theme.scaled-control-height;
-                    background: transparent;
-
+                    height: max(Theme.scaled-control-height, blank-button.preferred-height) + 4px;
                     blank-button := LoomButton {
-                        label: "Blank Document";
-                        variant: "secondary";
-                        width: self.preferred-width;
-                        x: Theme.rtl ? parent.width - self.width : 0px;
-                        y: (parent.height - self.height) / 2;
+                        label: "Blank Document"; variant: "secondary"; width: self.preferred-width;
+                        x: Theme.rtl ? parent.width - self.width : 0px; y: (parent.height - self.height) / 2;
                         clicked => { StartHubState.blank-document(); }
                     }
-
                     open-file-button := LoomButton {
-                        label: "Open File…";
-                        variant: "secondary";
-                        width: self.preferred-width;
-                        x: Theme.rtl
-                            ? blank-button.x - Theme.tokens.space.sm - self.width
-                            : blank-button.x + blank-button.width + Theme.tokens.space.sm;
+                        label: "Open File\u{2026}"; variant: "secondary"; width: self.preferred-width;
+                        x: Theme.rtl ? blank-button.x - Theme.tokens.space.sm - self.width : blank-button.x + blank-button.width + Theme.tokens.space.sm;
                         y: (parent.height - self.height) / 2;
                         clicked => { StartHubState.open-file(); }
                     }
-
                     new-template-button := LoomButton {
-                        label: "New from Template";
-                        variant: "primary";
-                        width: self.preferred-width;
-                        x: Theme.rtl ? 0px : parent.width - self.width;
-                        y: (parent.height - self.height) / 2;
+                        label: "New from Template"; variant: "primary"; width: self.preferred-width;
+                        x: Theme.rtl ? 0px : parent.width - self.width; y: (parent.height - self.height) / 2;
                         clicked => { StartHubState.new-document(); }
                     }
                 }
