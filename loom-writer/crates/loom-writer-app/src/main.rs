@@ -2140,6 +2140,21 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
     }
 }
 
+fn sync_headless_local_menu(app: &WriterApp) {
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&local_menu::writer_menu_bar());
+    let _ = local_menu::sync(app, &menu_service);
+    // In-window screenshots reflect the Linux/Windows bar rather than the macOS app menu slot.
+    let labels: Vec<SharedString> = app
+        .get_local_menu_labels()
+        .iter()
+        .filter(|label| label.as_str() != "Loom Writer")
+        .collect();
+    if !labels.is_empty() {
+        app.set_local_menu_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    }
+}
+
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
@@ -2148,6 +2163,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     templates::install_catalog(&app);
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
+    sync_headless_local_menu(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
     appearance::apply_ui_font(&app, true);
     let mut doc = match &args.open {
@@ -4035,6 +4051,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
+    sync_headless_local_menu(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));

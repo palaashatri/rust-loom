@@ -230,7 +230,7 @@ export component StartHubModal inherits Rectangle {
 
         Rectangle {
             width: min(980px, max(480px, root.width - 48px));
-            height: min(600px, max(360px, root.height - 48px));
+            height: min(600px, max(min(320px, root.height - 16px), root.height - 80px));
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
@@ -410,7 +410,7 @@ export component StartHubModal inherits Rectangle {
 
                     blank-button := LoomButton {
                         label: "Blank Document";
-                        variant: "ghost";
+                        variant: "secondary";
                         width: self.preferred-width;
                         x: Theme.rtl ? parent.width - self.width : 0px;
                         y: (parent.height - self.height) / 2;

@@ -33,8 +33,8 @@ component WriterTemplateCard inherits Rectangle {
     in property <string> preview-kind: "";
     callback clicked;
 
-    width: 160px;
-    height: 236px + 22px * (max(1.0, Theme.text-scale) - 1.0);
+    width: 160px + 28px * (max(1.0, Theme.text-scale) - 1.0);
+    height: 236px + 34px * (max(1.0, Theme.text-scale) - 1.0);
     border-radius: Theme.tokens.metrics.radius-medium;
     background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
@@ -86,12 +86,12 @@ component WriterTemplateCard inherits Rectangle {
         }
 
         Rectangle {
-            height: 22px * max(1.0, Theme.text-scale);
+            height: 22px + 28px * (max(1.0, Theme.text-scale) - 1.0);
             border-radius: Theme.tokens.metrics.radius-small;
             background: root.selected ? Theme.palette().accent : transparent;
             HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
+                padding-left: 6px;
+                padding-right: 6px;
                 alignment: center;
                 cross-axis-alignment: center;
                 Text {
@@ -101,8 +101,9 @@ component WriterTemplateCard inherits Rectangle {
                     color: root.selected ? Theme.palette().accent-ink : Theme.palette().ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
+                    wrap: word-wrap;
                     overflow: elide;
-                    max-width: root.width - 16px;
+                    max-width: root.width - 12px;
                 }
             }
         }
@@ -198,7 +199,7 @@ component TemplateCardRow inherits Rectangle {
         };
     }
 
-    height: 236px + 22px * (max(1.0, Theme.text-scale) - 1.0);
+    height: 236px + 34px * (max(1.0, Theme.text-scale) - 1.0);
     background: transparent;
 
     HorizontalLayout {
@@ -318,7 +319,7 @@ export component TemplateChooserModal inherits Rectangle {
     }
 
     function reveal-selected-template() {
-        let card-h = 236px + 22px * (max(1.0, Theme.text-scale) - 1.0);
+        let card-h = 236px + 34px * (max(1.0, Theme.text-scale) - 1.0);
         let row-stride = card-h + Theme.tokens.space.xl;
         let header-end = Theme.tokens.space.xl + chooser-heading.preferred-height + Theme.tokens.space.xl;
         let row-top = header-end + root.template-row(root.template-selected) * row-stride;
@@ -389,7 +390,7 @@ export component TemplateChooserModal inherits Rectangle {
     Rectangle {
         width: min(1160px, max(1px, root.width - 48px));
         x: (root.width - self.width) / 2;
-        height: min(760px, max(480px, root.height - 48px));
+        height: min(720px, max(min(360px, root.height - 16px), root.height - 80px));
         y: (root.height - self.height) / 2;
         border-radius: Theme.tokens.metrics.radius-large;
         border-width: 1px;
@@ -484,8 +485,8 @@ export component TemplateChooserModal inherits Rectangle {
                                 for col-idx in root.template-columns : Rectangle {
                                     property <int> slot-col: Theme.rtl ? (root.template-columns - 1 - col-idx) : col-idx;
                                     property <int> slot-idx: row-idx * root.template-columns + self.slot-col;
-                                    width: 160px;
-                                    height: 236px + 22px * (max(1.0, Theme.text-scale) - 1.0);
+                                    width: 160px + 28px * (max(1.0, Theme.text-scale) - 1.0);
+                                    height: 236px + 34px * (max(1.0, Theme.text-scale) - 1.0);
                                     background: transparent;
                                     if self.slot-idx < WriterTemplateCatalog.templates.length : WriterTemplateOption {
                                         descriptor: WriterTemplateCatalog.templates[parent.slot-idx];

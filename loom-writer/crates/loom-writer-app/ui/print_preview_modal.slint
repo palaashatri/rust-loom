@@ -154,8 +154,8 @@ export component PrintPreviewModal inherits Rectangle {
         enabled: root.open;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: min(parent.width - 32px, 1080px);
-        height: min(parent.height - 32px, 760px);
+        width: min(parent.width - 48px, 1080px);
+        height: max(min(320px, parent.height - 16px), min(parent.height - 80px, 720px));
 
         key-pressed(event) => {
             if (!root.open) { return reject; }
@@ -401,7 +401,7 @@ export component PrintPreviewModal inherits Rectangle {
                             }
                         }
 
-                        LoomSectionHeader { title: "Page Setup"; detail: "Changes preview live"; }
+                        LoomSectionHeader { title: "Page Setup"; detail: "Live preview"; }
 
                         Flickable {
                             vertical-stretch: 1;
@@ -506,7 +506,7 @@ export component PrintPreviewModal inherits Rectangle {
                                         }
 
                                         Text {
-                                            text: "Margins (T/B/L/R): "
+                                            text: "Margins: "
                                                 + Math.round(PrintPreviewState.margin-top-pt) + " / "
                                                 + Math.round(PrintPreviewState.margin-bottom-pt) + " / "
                                                 + Math.round(PrintPreviewState.margin-left-pt) + " / "

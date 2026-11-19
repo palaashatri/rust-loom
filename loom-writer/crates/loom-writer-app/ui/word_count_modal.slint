@@ -1,4 +1,4 @@
-import { LoomButton, LoomPanel, LoomSectionHeader } from "foundation.slint";
+import { LoomButton, LoomPanel } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 
@@ -28,8 +28,8 @@ component StatRow inherits Rectangle {
     in property <bool> zebra: false;
 
     height: max(
-        Theme.tokens.metrics.control-height,
-        max(lbl.preferred-height, val.preferred-height) + Theme.tokens.space.sm
+        22px + 4px * (max(1.0, Theme.text-scale) - 1.0),
+        max(lbl.preferred-height, val.preferred-height) + 2px
     );
     background: root.zebra ? Theme.palette().surface-raised : transparent;
     border-radius: Theme.tokens.metrics.radius-small;
@@ -62,6 +62,39 @@ component StatRow inherits Rectangle {
     }
 }
 
+component StatSectionHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+
+    height: max(22px, hdr.preferred-height + 4px);
+    background: transparent;
+
+    hdr := HorizontalLayout {
+        padding-left: Theme.tokens.space.xs;
+        padding-right: Theme.tokens.space.xs;
+        spacing: Theme.tokens.space.sm;
+        alignment: space-between;
+
+        Text {
+            text: Theme.rtl ? root.detail : root.title;
+            color: Theme.rtl ? Theme.palette().ink-secondary : Theme.palette().ink;
+            font-family: Theme.ui-font-family;
+            font-size: Theme.rtl ? Theme.type.caption : Theme.type.body;
+            font-weight: Theme.rtl ? 500 : 700;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: Theme.rtl ? root.title : root.detail;
+            color: Theme.rtl ? Theme.palette().ink : Theme.palette().ink-secondary;
+            font-family: Theme.ui-font-family;
+            font-size: Theme.rtl ? Theme.type.body : Theme.type.caption;
+            font-weight: Theme.rtl ? 700 : 500;
+            vertical-alignment: center;
+        }
+    }
+}
+
 component SummaryPill inherits Rectangle {
     in property <string> caption;
     in property <string> value;
@@ -72,7 +105,7 @@ component SummaryPill inherits Rectangle {
     border-color: Theme.palette().border;
 
     VerticalLayout {
-        padding: Theme.tokens.space.md;
+        padding: Theme.tokens.space.sm;
         spacing: 2px;
 
         Text {
@@ -126,8 +159,8 @@ export component WordCountModal inherits Rectangle {
         enabled: root.open;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: min(parent.width - 48px, 490px * (1.0 + 0.25 * (max(1.0, Theme.text-scale) - 1.0)));
-        height: min(parent.height - 48px, max(340px, card-col.preferred-height));
+        width: min(parent.width - 48px, 520px * (1.0 + 0.25 * (max(1.0, Theme.text-scale) - 1.0)));
+        height: min(parent.height - 80px, max(340px, card-col.preferred-height));
 
         key-pressed(event) => {
             if (!root.open) { return reject; }
@@ -152,8 +185,8 @@ export component WordCountModal inherits Rectangle {
             }
 
             card-col := VerticalLayout {
-                padding: Theme.tokens.space.xl;
-                spacing: Theme.tokens.space.lg;
+                padding: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.sm;
 
                 header-row := Rectangle {
                     height: max(title-group.preferred-height, 32px);
@@ -227,11 +260,11 @@ export component WordCountModal inherits Rectangle {
 
                     stats-col := VerticalLayout {
                         width: parent.width;
-                        spacing: Theme.tokens.space.sm;
+                        spacing: 1px;
 
-                        LoomSectionHeader {
+                        StatSectionHeader {
                             title: "Text & Structure";
-                            detail: "Counts across document body and tables";
+                            detail: "Body & tables";
                         }
 
                         StatRow { label: "Words"; value: "" + WordCountState.words; zebra: true; }
@@ -242,11 +275,11 @@ export component WordCountModal inherits Rectangle {
                         StatRow { label: "Pages"; value: "" + WordCountState.pages; zebra: false; }
                         StatRow { label: "Estimated reading time"; value: WordCountState.reading-time; zebra: true; }
 
-                        Rectangle { height: Theme.tokens.space.sm; background: transparent; }
+                        Rectangle { height: Theme.tokens.space.xs; background: transparent; }
 
-                        LoomSectionHeader {
+                        StatSectionHeader {
                             title: "Objects & Review";
-                            detail: "Embedded elements and annotations";
+                            detail: "Elements";
                         }
 
                         StatRow { label: "Tables"; value: "" + WordCountState.tables; zebra: true; }
