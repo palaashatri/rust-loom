@@ -78,6 +78,7 @@ pub(super) fn make_test_state(
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
         registry: Arc::new(Mutex::new(registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
     (app, state)
 }

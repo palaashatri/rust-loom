@@ -369,7 +369,6 @@ export component WriterDocumentEditor inherits Rectangle {
         text-cursor-width: 0px;
         accessible-role: none;
         edited => {
-            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
             root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
         }
         cursor-position-changed(_) => {

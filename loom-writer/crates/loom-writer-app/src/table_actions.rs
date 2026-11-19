@@ -633,6 +633,38 @@ pub(crate) fn handle_table_key(
     ctrl: bool,
     alt: bool,
 ) -> bool {
+    let matches_key = |k: slint::platform::Key, name: &str| -> bool {
+        let s: slint::SharedString = k.into();
+        key == s.as_str() || key == name
+    };
+
+    let is_arrow = matches_key(slint::platform::Key::RightArrow, "Right")
+        || matches_key(slint::platform::Key::LeftArrow, "Left")
+        || matches_key(slint::platform::Key::DownArrow, "Down")
+        || matches_key(slint::platform::Key::UpArrow, "Up");
+
+    // A collapsed caret-navigation key leaves the virtual cell range and
+    // continues through the editor's normal navigation path. This includes
+    // page and word/line navigation, not only the four plain arrows.
+    let navigates_caret = is_arrow
+        || matches_key(slint::platform::Key::PageUp, "PageUp")
+        || matches_key(slint::platform::Key::PageDown, "PageDown")
+        || matches_key(slint::platform::Key::Home, "Home")
+        || matches_key(slint::platform::Key::End, "End");
+
+    // Fast path for plain character typing so keystrokes do not build
+    // TableTextMap / WriterTable snapshots when no table shortcut applies.
+    let might_handle = (navigates_caret
+        && !shift
+        && !alt
+        && get_table_cell_selection_range().is_some())
+        || (ctrl && !alt && !shift && table_format_actions::Emphasis::from_shortcut(key).is_some())
+        || (ctrl && alt)
+        || (shift && !ctrl && !alt && is_arrow);
+    if !might_handle {
+        return false;
+    }
+
     let caret = state.current.borrow().selection().anchor;
     let doc = state.current.borrow();
     let Some(loc) = doc.table_cell_at_offset(caret) else {
@@ -642,27 +674,6 @@ pub(crate) fn handle_table_key(
         return false;
     };
     drop(doc);
-
-    let matches_key = |k: slint::platform::Key, name: &str| -> bool {
-        let s: slint::SharedString = k.into();
-        key == s.as_str() || key == name
-    };
-
-    // A collapsed caret-navigation key leaves the virtual cell range and
-    // continues through the editor's normal navigation path. This includes
-    // page and word/line navigation, not only the four plain arrows.
-    let navigates_caret = [
-        (slint::platform::Key::RightArrow, "Right"),
-        (slint::platform::Key::LeftArrow, "Left"),
-        (slint::platform::Key::DownArrow, "Down"),
-        (slint::platform::Key::UpArrow, "Up"),
-        (slint::platform::Key::PageUp, "PageUp"),
-        (slint::platform::Key::PageDown, "PageDown"),
-        (slint::platform::Key::Home, "Home"),
-        (slint::platform::Key::End, "End"),
-    ]
-    .into_iter()
-    .any(|(key_code, name)| matches_key(key_code, name));
     if !shift && !alt && navigates_caret && get_table_cell_selection_range().is_some() {
         clear_table_cell_selection_range();
         let doc = state.current.borrow();

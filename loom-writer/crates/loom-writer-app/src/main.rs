@@ -50,6 +50,7 @@ mod pointer_hit_test;
 mod press_reveal;
 mod print_preview;
 mod projection;
+mod projection_sync;
 mod revision_actions;
 mod save_flow;
 mod start_hub;
@@ -111,7 +112,9 @@ use loom_writer_core::{
     floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
     WriterDocument,
 };
-use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString, VecModel};
+#[cfg(test)]
+use slint::VecModel;
+use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString};
 
 slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
@@ -1073,6 +1076,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
     // `registry.search` is deterministic (score → order → id) and is the sole
     // ranking used by the palette. An empty query lists every currently-enabled
     // command in registry order so the user sees the full palette.
+    let catalog = master_palette(app);
     let items: Vec<CommandPaletteItem> = if trimmed.is_empty() {
         let mut specs: Vec<&CommandSpec> = registry
             .commands()
@@ -1087,9 +1091,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
         specs
             .into_iter()
             .filter_map(|spec| {
-                let palette = master_palette(app)
-                    .into_iter()
-                    .find(|c| c.id == spec.id.as_str())?;
+                let palette = catalog.iter().find(|c| c.id == spec.id.as_str())?;
                 Some(CommandPaletteItem {
                     id: palette.id.into(),
                     label: palette.label.into(),
@@ -1103,9 +1105,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
             .into_iter()
             .filter(|spec| spec.enabled)
             .filter_map(|spec| {
-                let palette = master_palette(app)
-                    .into_iter()
-                    .find(|c| c.id == spec.id.as_str())?;
+                let palette = catalog.iter().find(|c| c.id == spec.id.as_str())?;
                 Some(CommandPaletteItem {
                     id: palette.id.into(),
                     label: palette.label.into(),
@@ -1115,7 +1115,9 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
             })
             .collect()
     };
-    app.set_palette_commands(Rc::new(VecModel::from(items)).into());
+    projection_sync::sync_vec_model(&app.get_palette_commands(), items, |m| {
+        app.set_palette_commands(m)
+    });
     let count = app.get_palette_commands().row_count() as i32;
     let selected = app.get_palette_selected();
     if selected >= count && count > 0 {
@@ -1148,6 +1150,7 @@ pub(crate) struct GuiState {
     pdf_filter: FileFilter,
     registry: Arc<Mutex<CommandRegistry>>,
     menu_service: RefCell<Option<Arc<NativeMenuBar>>>,
+    last_projected_view_width: Cell<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1251,7 +1254,9 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     let selection = doc.selection();
     let announcement = selection_announcement(doc, &selection);
     app.set_doc_title(doc.title.as_str().into());
-    app.set_doc_content(SharedString::from(text));
+    if app.get_doc_content().as_str() != text {
+        app.set_doc_content(SharedString::from(text));
+    }
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     formatting_actions::project_document_controls(app, doc);
@@ -1293,7 +1298,9 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
             orphaned: thread.orphaned,
         })
         .collect();
-    app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
+    projection_sync::sync_vec_model(&app.get_comment_entries(), comment_entries, |m| {
+        app.set_comment_entries(m)
+    });
     let counts = status_left_text(word_count, char_count, block_count);
     let status_text = match get_recovery_notice() {
         Some(notice) => format!("{notice} · {counts}"),
@@ -1340,6 +1347,7 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
 /// released, because setting properties can call back into the controller.
 fn refresh_render_projection_of(app: &WriterApp, state: &GuiState) {
     let viewport = *state.viewport.borrow();
+    state.last_projected_view_width.set(app.get_view_width());
     let computed = compute_render_projection(app, &state.current.borrow(), viewport);
     publish_render_projection(app, computed);
 }
@@ -1378,28 +1386,41 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
         match_rects,
         picture_selected,
     } = computed;
-    app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
-    app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
-    app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
-    app.global::<WriterReviewState>()
-        .set_revision_marks(Rc::new(VecModel::from(projection.revision_marks)).into());
-    app.global::<WriterHeaderFooterState>()
-        .set_page_lines(Rc::new(VecModel::from(projection.header_footer_lines)).into());
+    projection_sync::sync_render_blocks(app, projection.rows);
+    projection_sync::sync_vec_model(
+        &app.get_selection_rects(),
+        projection.selection_rects,
+        |m| app.set_selection_rects(m),
+    );
+    projection_sync::sync_vec_model(&app.get_comment_rects(), projection.comment_rects, |m| {
+        app.set_comment_rects(m)
+    });
+    let review = app.global::<WriterReviewState>();
+    projection_sync::sync_vec_model(
+        &review.get_revision_marks(),
+        projection.revision_marks,
+        |m| review.set_revision_marks(m),
+    );
+    let hf = app.global::<WriterHeaderFooterState>();
+    projection_sync::sync_vec_model(&hf.get_page_lines(), projection.header_footer_lines, |m| {
+        hf.set_page_lines(m)
+    });
     let footnotes = app.global::<WriterFootnoteState>();
-    footnotes.set_page_lines(Rc::new(VecModel::from(projection.footnote_lines)).into());
-    footnotes.set_page_references(Rc::new(VecModel::from(projection.footnote_references)).into());
-    // Compare against this component's own model: a thread-local cache lets
-    // one WriterApp suppress publication to another app with identical cells.
-    let table_rects = app.get_table_cell_rects();
-    let table_rects_changed = table_rects.row_count() != projection.table_cell_rects.len()
-        || projection
-            .table_cell_rects
-            .iter()
-            .enumerate()
-            .any(|(index, rect)| table_rects.row_data(index).as_ref() != Some(rect));
-    if table_rects_changed {
-        app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
-    }
+    projection_sync::sync_vec_model(
+        &footnotes.get_page_lines(),
+        projection.footnote_lines,
+        |m| footnotes.set_page_lines(m),
+    );
+    projection_sync::sync_vec_model(
+        &footnotes.get_page_references(),
+        projection.footnote_references,
+        |m| footnotes.set_page_references(m),
+    );
+    projection_sync::sync_vec_model(
+        &app.get_table_cell_rects(),
+        projection.table_cell_rects,
+        |m| app.set_table_cell_rects(m),
+    );
     picture_view::publish(app, &projection.images, picture_selected);
     app.set_page_count(projection.page_count);
 
@@ -1409,8 +1430,10 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
-    app.global::<FindBar>()
-        .set_match_rects(Rc::new(VecModel::from(match_rects)).into());
+    let find_bar = app.global::<FindBar>();
+    projection_sync::sync_vec_model(&find_bar.get_match_rects(), match_rects, |m| {
+        find_bar.set_match_rects(m)
+    });
 }
 
 /// Rows, selection rectangles and comment rectangles for every page, the way
@@ -1709,6 +1732,7 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     state.syncing_editor.set(true);
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
+    state.last_projected_view_width.set(app.get_view_width());
     apply_document_with_viewport(app, &current, viewport);
     if recovery_write == RecoveryWrite::Now && document_is_dirty(state) {
         if let Err(error) = recovery::record_document(&current, state.save_path.borrow().as_deref())
@@ -3028,13 +3052,15 @@ fn wire_writer_shared_callbacks(
         let app_ref = app.as_weak();
         app.on_page_scroll_changed(move |scroll_x, scroll_y| {
             if let Some(app) = app_ref.upgrade() {
-                let (next_x, next_y) = {
+                let (prev_x, prev_y, next_x, next_y) = {
                     let mut viewport = state.viewport.borrow_mut();
+                    let prev_x = viewport.scroll_x;
+                    let prev_y = viewport.scroll_y;
                     let next_x = normalize_page_scroll(scroll_x);
                     let next_y = normalize_page_scroll(scroll_y);
                     viewport.scroll_x = next_x;
                     viewport.scroll_y = next_y;
-                    (next_x, next_y)
+                    (prev_x, prev_y, next_x, next_y)
                 };
                 // Flickable normally clamps these values itself. The explicit
                 // rebinding also keeps headless/property-driven updates from
@@ -3045,7 +3071,15 @@ fn wire_writer_shared_callbacks(
                 if (app.get_scroll_y() - next_y).abs() > f32::EPSILON {
                     app.set_scroll_y(next_y);
                 }
-                refresh_render_projection_of(&app, &state);
+                let view_width_changed =
+                    (state.last_projected_view_width.get() - app.get_view_width()).abs()
+                        > f32::EPSILON;
+                if (prev_x - next_x).abs() > f32::EPSILON
+                    || (prev_y - next_y).abs() > f32::EPSILON
+                    || view_width_changed
+                {
+                    refresh_render_projection_of(&app, &state);
+                }
             }
         });
     }
@@ -3656,6 +3690,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pdf_filter,
         registry: Arc::new(Mutex::new(initial_registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
     // Seed only a fresh document: a recovered session already contains
     // whatever the previous seeded run added.
@@ -4049,6 +4084,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         pdf_filter: FileFilter::new("PDF", ["pdf"]).map_err(|error| error.to_string())?,
         registry: Arc::new(Mutex::new(initial_registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
 
     wire_writer_journey_callbacks(&app, &state);
