@@ -463,25 +463,51 @@ fn cmd_and_ctrl_select_all_selects_without_typing_and_bolds() {
 
 #[test]
 fn alt_space_is_swallowed_on_ctrl_platforms_without_inserting_space_and_templates_opens() {
-    let (app, state) = setup_app(text_document("Hello"));
-    app.set_shortcut_modifier("Ctrl+".into());
-    app.invoke_focus_page();
-    app.invoke_selection_changed(5, 5);
+    let s = crate::keyboard_flow_tests::launched("Hello");
+    s.app.set_shortcut_modifier("Ctrl".into());
+    s.app.set_selection_anchor(5);
+    s.app.set_selection_focus(5);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
 
-    send_chord(&app, &[Key::Alt], " ");
+    tap_raw(&s.app, "!");
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render after !");
     assert_eq!(
-        state.current.borrow().editor_text(),
-        "Hello",
+        s.state.current.borrow().editor_text(),
+        "Hello!",
+        "Baseline typing must reach the page"
+    );
+
+    send_chord(&s.app, &[Key::Alt], " ");
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render after alt+space");
+    assert_eq!(
+        s.app.get_doc_content().as_str(),
+        "Hello!",
+        "Alt+Space must not insert a literal space into TextInput"
+    );
+    assert_eq!(
+        s.state.current.borrow().editor_text(),
+        "Hello!",
         "Alt+Space must not insert a literal space into the document"
     );
 
-    tap_raw(&app, " ");
+    tap_raw(&s.app, " ");
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render after plain space");
     assert_eq!(
-        state.current.borrow().editor_text(),
-        "Hello ",
+        s.state.current.borrow().editor_text(),
+        "Hello! ",
         "Plain Space must still insert normally after Alt+Space"
     );
 
-    assert!(dispatch_command(&app, "file.templates"));
-    assert!(app.get_template_chooser_open());
+    assert!(dispatch_command(&s.app, "file.templates"));
+    assert!(
+        s.app.get_save_changes_open(),
+        "dirty document guards before switching to templates"
+    );
+
+    let clean = crate::keyboard_flow_tests::launched("Clean");
+    assert!(dispatch_command(&clean.app, "file.templates"));
+    assert!(
+        clean.app.get_template_chooser_open(),
+        "clean document opens template chooser directly"
+    );
 }

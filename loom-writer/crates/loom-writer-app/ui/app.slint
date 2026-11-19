@@ -371,7 +371,7 @@ export component WriterApp inherits Window {
         template-chooser-open: root.template-chooser-open;
         save-changes-open: root.save-changes-open;
         modal-open: overlays.modal-open;
-        swallow-alt-space: root.shortcut-modifier != "Cmd+";
+        swallow-alt-space: root.shortcut-modifier != "Cmd";
         toolbar-menu-kind: root.toolbar-menu-kind;
         open-menu-for-key(event) => { return root.open-menu-for-key(event); }
         leave-chrome(backwards) => { root.leave-chrome(backwards); }
