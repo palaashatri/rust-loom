@@ -609,3 +609,159 @@ fn bold_on_a_merged_cell_skips_the_cells_it_covers() {
         Some("Hi")
     );
 }
+
+#[test]
+fn delete_table_in_middle_keeps_surrounding_paragraphs_and_places_caret_at_next_block() {
+    let mut document = document_with_table_between_paragraphs();
+    let table_offset = document
+        .editor_text()
+        .find("North")
+        .expect("offset inside table");
+    let new_caret = document
+        .delete_table_at_offset(table_offset)
+        .expect("delete middle table");
+    assert_eq!(kinds(&document), ["paragraph", "paragraph"]);
+    assert_eq!(document.blocks[0].text.as_str(), "Intro");
+    assert_eq!(document.blocks[1].text.as_str(), "Outro");
+    // Block 0 is "Intro" (5 bytes) + '\n' (1 byte) => block 1 starts at 6.
+    assert_eq!(new_caret, 6);
+    assert_eq!(document.selection().anchor, 6);
+    assert_eq!(document.selection().focus, 6);
+}
+
+#[test]
+fn delete_trailing_table_places_caret_at_end_of_previous_paragraph() {
+    let mut document = document();
+    document.insert_table_block(usize::MAX, 2, 2).unwrap();
+    let caret_in_table = document.selection().anchor;
+    let new_caret = document
+        .delete_table_at_offset(caret_in_table)
+        .expect("delete trailing table");
+    assert_eq!(kinds(&document), ["paragraph", "paragraph"]);
+    assert_eq!(document.editor_text(), "First\nSecond");
+    assert_eq!(new_caret, "First\nSecond".len());
+    assert_eq!(document.selection().anchor, new_caret);
+}
+
+#[test]
+fn delete_only_table_block_leaves_one_empty_editable_paragraph() {
+    let mut document = WriterDocument::new("only-table", "Only Table");
+    let mut table = Table::new(1, 2);
+    table.set_cell_text(0, 0, "Alpha");
+    table.set_cell_text(0, 1, "Beta");
+    document.blocks.push(RichBlock::table_block(1, table));
+
+    // Also verify delete_table_row_at_offset preserves its single-row guard.
+    assert!(document.delete_table_row_at_offset(0).is_err());
+
+    // Delete from a delimiter/separator offset inside the single table block.
+    let separator_offset = document
+        .editor_text()
+        .find(TABLE_CELL_SEPARATOR)
+        .expect("cell separator");
+    let new_caret = document
+        .delete_table_at_offset(separator_offset)
+        .expect("delete sole table block");
+    assert_eq!(new_caret, 0);
+    assert_eq!(document.blocks.len(), 1);
+    assert_eq!(document.blocks[0].kind, "paragraph");
+    assert_eq!(document.blocks[0].text.as_str(), "");
+    assert_eq!(document.selection().anchor, 0);
+
+    // Remaining empty paragraph is immediately editable.
+    document.replace_selection_text("Fresh text").unwrap();
+    assert_eq!(document.editor_text(), "Fresh text");
+}
+
+#[test]
+fn delete_table_cleans_up_table_footnotes_and_orphans_table_comments() {
+    let mut document = document_with_table_between_paragraphs();
+    let intro_id = document.blocks[0].id;
+    let table_id = document.blocks[1].id;
+    let outro_id = document.blocks[2].id;
+    let table_text = document.blocks[1].text.as_str().to_owned();
+    let north_local = table_text.find("North").expect("North in table");
+
+    document
+        .insert_footnote(intro_id, 2, "Intro footnote")
+        .unwrap();
+    let table_note = document
+        .insert_footnote(table_id, north_local, "Table footnote")
+        .unwrap();
+    document
+        .insert_footnote(outro_id, 3, "Outro footnote")
+        .unwrap();
+
+    let table_comment = document
+        .add_comment_thread(
+            table_id,
+            north_local,
+            north_local + "North".len(),
+            "Check row",
+        )
+        .unwrap();
+    let outro_comment = document
+        .add_comment_thread(outro_id, 0, 5, "Keep outro comment")
+        .unwrap();
+
+    let table_start = document.blocks[0].text.len_bytes() + 1;
+    let table_end = table_start + table_text.len();
+    document
+        .delete_table_at_offset(table_end)
+        .expect("delete table from end boundary");
+
+    assert!(document
+        .footnotes
+        .iter()
+        .all(|note| note.id != table_note && note.block_id != table_id));
+    assert_eq!(document.footnotes.len(), 2);
+    assert!(document.validate_footnotes().is_ok());
+
+    let orphaned = document
+        .comments
+        .iter()
+        .find(|comment| comment.id == table_comment)
+        .expect("orphaned comment kept for review");
+    assert!(orphaned.orphaned);
+    assert_eq!((orphaned.start, orphaned.end), (0, 0));
+
+    let live: Vec<&str> = document
+        .live_comment_threads()
+        .into_iter()
+        .map(|comment| comment.id.as_str())
+        .collect();
+    assert_eq!(live, vec![outro_comment.as_str()]);
+}
+
+#[test]
+fn delete_table_outside_table_returns_error_without_mutating_document() {
+    let mut document = document_with_table_between_paragraphs();
+    let before_blocks = document.blocks.clone();
+
+    // Paragraph before table (including its end boundary just before '\n').
+    assert_eq!(
+        document.delete_table_at_offset(0),
+        Err("Offset is not in a table".to_string())
+    );
+    assert_eq!(
+        document.delete_table_at_offset("Intro".len()),
+        Err("Offset is not in a table".to_string())
+    );
+    // Paragraph after table and out-of-bounds offset.
+    let outro_start = document.editor_text().find("Outro").unwrap();
+    assert_eq!(
+        document.delete_table_at_offset(outro_start),
+        Err("Offset is not in a table".to_string())
+    );
+    assert_eq!(
+        document.delete_table_at_offset(usize::MAX),
+        Err("Offset is not in a table".to_string())
+    );
+    assert_eq!(document.blocks, before_blocks);
+
+    let mut empty = WriterDocument::new("empty", "Empty");
+    assert_eq!(
+        empty.delete_table_at_offset(0),
+        Err("Offset is not in a table".to_string())
+    );
+}
