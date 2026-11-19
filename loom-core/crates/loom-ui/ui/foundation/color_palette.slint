@@ -1,0 +1,490 @@
+// Loom shared color well and 48-color palette popover foundation components.
+//
+// Token-driven color selector and palette grid for Writer, Sheets, and Present.
+// Swatch colors are passed via `LoomColorSwatch` models from Rust; all chrome
+// surfaces, borders, focus rings, and automatic/mixed indicators use `Theme`.
+
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+import { LoomButton, LoomTextField } from "controls.slint";
+
+export struct LoomColorSwatch {
+    name: string,
+    hex: string,
+    swatch: color,
+}
+
+component ColorPreviewChip inherits Rectangle {
+    in property <color> explicit-color: Theme.palette().ink;
+    in property <bool> is-automatic: true;
+    in property <bool> is-mixed: false;
+    in property <bool> enabled: true;
+    in property <length> chip-size: 20px;
+
+    width: root.chip-size;
+    height: root.chip-size;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: 1px;
+    border-color: root.enabled ? Theme.palette().border-strong : Theme.palette().border;
+    clip: true;
+    background: root.is-mixed ? Theme.palette().surface-sunken
+        : root.is-automatic ? Theme.palette().paper
+        : root.explicit-color;
+
+    if root.is-mixed : Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 2px;
+        border-radius: 1px;
+        background: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+    }
+
+    if !root.is-mixed && root.is-automatic : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        Text {
+            x: 0px;
+            y: 1px;
+            width: parent.width;
+            height: parent.height - 5px;
+            text: "A";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: root.enabled ? Theme.palette().paper-ink : Theme.palette().ink-disabled;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-role: none;
+            accessible-label: "";
+        }
+
+        Rectangle {
+            x: 2px;
+            y: parent.height - 4px;
+            width: parent.width - 4px;
+            height: 2px;
+            border-radius: 1px;
+            background: root.enabled ? Theme.palette().paper-ink : Theme.palette().ink-disabled;
+        }
+    }
+}
+
+export component LoomColorWell inherits Rectangle {
+    in property <string> label: "Text Color";
+    in property <string> accessible-name: "Text Color";
+    in property <color> current-color: Theme.palette().ink;
+    in property <bool> is-automatic: true;
+    in property <bool> is-mixed: false;
+    in property <string> color-label: "Automatic";
+    in property <bool> open: false;
+    in property <bool> enabled: true;
+    callback toggled();
+
+    public function grab-focus() { focus.focus(); }
+    out property <bool> has-focus: focus.has-focus;
+    private property <string> value-label: root.is-mixed ? "Mixed" : root.color-label;
+
+    height: Theme.scaled-control-height;
+    min-width: 120px;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: !root.enabled ? Theme.palette().border
+        : focus.has-focus ? Theme.palette().focus
+        : root.open ? Theme.palette().accent
+        : touch.has-hover ? Theme.palette().border-strong
+        : Theme.palette().border;
+    drop-shadow-blur: root.enabled ? 1px : 0px;
+    drop-shadow-offset-y: root.enabled ? 0.5px : 0px;
+    drop-shadow-color: root.enabled ? Theme.palette().shadow : transparent;
+    background: !root.enabled ? Theme.palette().surface-sunken
+        : touch.pressed ? Theme.palette().surface-sunken
+        : root.open ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().selection-soft
+        : Theme.palette().surface;
+
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.accessible-name != "" ? root.accessible-name : root.label;
+    accessible-value: root.value-label;
+    accessible-description: root.open ? "Expanded, " + root.value-label : root.value-label;
+    accessible-action-default => { if (root.enabled) { root.toggled(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        if !Theme.rtl : ColorPreviewChip {
+            explicit-color: root.current-color;
+            is-automatic: root.is-automatic;
+            is-mixed: root.is-mixed;
+            enabled: root.enabled;
+        }
+        if Theme.rtl : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: root.open ? "chevron-up" : "chevron-down";
+            tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+        }
+
+        Text {
+            text: root.color-label;
+            font-size: Theme.type.body;
+            font-weight: 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            horizontal-alignment: Theme.rtl ? right : left;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            accessible-role: none;
+            accessible-label: "";
+        }
+
+        if !Theme.rtl : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: root.open ? "chevron-up" : "chevron-down";
+            tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+        }
+        if Theme.rtl : ColorPreviewChip {
+            explicit-color: root.current-color;
+            is-automatic: root.is-automatic;
+            is-mixed: root.is-mixed;
+            enabled: root.enabled;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.Return || event.text == Key.Space) { root.toggled(); return accept; }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { focus.focus(); root.toggled(); }
+    }
+}
+
+component ColorSwatchTile inherits Rectangle {
+    in property <LoomColorSwatch> swatch;
+    in property <string> kind-label: "Text color";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback picked(string);
+    callback close-requested();
+
+    width: 24px;
+    height: 24px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: (tile-focus.has-focus || root.selected) ? 2px : 1px;
+    border-color: (tile-focus.has-focus || root.selected) ? Theme.palette().focus
+        : tile-touch.has-hover ? Theme.palette().ink
+        : Theme.palette().border;
+    background: root.swatch.swatch;
+
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.kind-label + " " + root.swatch.name + " (" + root.swatch.hex + ")";
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-action-default => { if (root.enabled) { root.picked(root.swatch.hex); } }
+
+    // Inner hairline keeps white swatches crisp on light surfaces, black swatches
+    // crisp on dark surfaces, and blue/violet selections distinct from the focus ring.
+    Rectangle {
+        x: (tile-focus.has-focus || root.selected) ? 2px : 1px;
+        y: (tile-focus.has-focus || root.selected) ? 2px : 1px;
+        width: max(0px, parent.width - self.x * 2);
+        height: max(0px, parent.height - self.y * 2);
+        border-radius: max(0px, parent.border-radius - self.x);
+        border-width: 1px;
+        border-color: (tile-focus.has-focus || root.selected)
+            ? Theme.palette().surface-raised
+            : Theme.palette().border-strong;
+        background: transparent;
+    }
+
+    tile-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.Return || event.text == Key.Space) { root.picked(root.swatch.hex); return accept; }
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            return reject;
+        }
+    }
+
+    tile-touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { tile-focus.focus(); root.picked(root.swatch.hex); }
+    }
+}
+
+component PaletteStateBadge inherits Rectangle {
+    in property <string> text: "";
+
+    height: Theme.scaled-control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface-sunken;
+
+    HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        Text {
+            text: root.text;
+            font-size: Theme.type.caption;
+            font-weight: 600;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+            accessible-label: root.text;
+        }
+    }
+}
+
+component PaletteAutomaticRow inherits Rectangle {
+    in property <string> kind-label: "Text color";
+    in property <string> automatic-label: "Automatic";
+    in property <bool> active: true;
+    in property <bool> enabled: true;
+    callback activated();
+    callback close-requested();
+
+    public function grab-focus() { auto-focus.focus(); }
+
+    horizontal-stretch: 1;
+    height: Theme.scaled-control-height;
+    min-width: 120px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: auto-focus.has-focus ? 2px : 1px;
+    border-color: !root.enabled ? Theme.palette().border
+        : auto-focus.has-focus ? Theme.palette().focus
+        : root.active ? Theme.palette().accent
+        : auto-touch.has-hover ? Theme.palette().border-strong
+        : Theme.palette().border;
+    background: !root.enabled ? Theme.palette().surface-sunken
+        : auto-touch.pressed ? Theme.palette().surface-sunken
+        : root.active ? Theme.palette().selection-soft
+        : auto-touch.has-hover ? Theme.palette().selection-soft
+        : Theme.palette().surface;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.kind-label + " " + root.automatic-label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { if (root.enabled) { root.activated(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        if !Theme.rtl : ColorPreviewChip { chip-size: 18px; is-automatic: true; is-mixed: false; enabled: root.enabled; }
+        if Theme.rtl && root.active : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: "check";
+            tint: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+        }
+
+        Text {
+            text: root.automatic-label;
+            font-size: Theme.type.body;
+            font-weight: root.active ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            horizontal-alignment: Theme.rtl ? right : left;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            accessible-role: none;
+            accessible-label: "";
+        }
+
+        if !Theme.rtl && root.active : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: "check";
+            tint: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+        }
+        if Theme.rtl : ColorPreviewChip { chip-size: 18px; is-automatic: true; is-mixed: false; enabled: root.enabled; }
+    }
+
+    auto-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.Return || event.text == Key.Space) { root.activated(); return accept; }
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            return reject;
+        }
+    }
+
+    auto-touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { auto-focus.focus(); root.activated(); }
+    }
+}
+
+export component LoomColorPalette inherits Rectangle {
+    in property <[LoomColorSwatch]> swatches: [];
+    in property <string> selected-hex: "";
+    in property <bool> is-automatic: true;
+    in property <bool> is-mixed: false;
+    in property <string> automatic-label: "Automatic";
+    in property <string> kind-label: "Text color";
+    in-out property <string> hex-input: "";
+    in property <string> hex-error: "";
+    in property <int> columns: 8;
+    in property <bool> enabled: true;
+    callback select-color(string);
+    callback select-automatic();
+    callback hex-edited(string);
+    callback hex-submitted(string);
+    callback close-requested();
+
+    public function grab-focus() { auto-row.grab-focus(); }
+
+    private property <int> safe-columns: max(1, root.columns);
+    private property <bool> auto-active: root.is-automatic && !root.is-mixed;
+    private property <string> badge-text: root.is-mixed ? "Mixed"
+        : (!root.is-automatic && root.selected-hex != "") ? root.selected-hex
+        : "";
+
+    min-width: max(264px, palette-layout.min-width);
+    preferred-width: max(280px, palette-layout.preferred-width);
+    min-height: palette-layout.min-height;
+    preferred-height: palette-layout.preferred-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    background: Theme.palette().surface-raised;
+    drop-shadow-blur: 20px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: groupbox;
+    accessible-label: root.kind-label + " palette";
+
+    card-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close-requested(); return accept; }
+            return reject;
+        }
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            clicked => { card-focus.focus(); }
+        }
+
+        palette-layout := VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            padding: Theme.tokens.space.lg;
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+                if Theme.rtl && root.badge-text != "" : PaletteStateBadge { text: root.badge-text; }
+                auto-row := PaletteAutomaticRow {
+                    kind-label: root.kind-label;
+                    automatic-label: root.automatic-label;
+                    active: root.auto-active;
+                    enabled: root.enabled;
+                    activated => { root.select-automatic(); }
+                    close-requested => { root.close-requested(); }
+                }
+                if !Theme.rtl && root.badge-text != "" : PaletteStateBadge { text: root.badge-text; }
+            }
+
+            if root.swatches.length > 0 : Rectangle { height: 1px; background: Theme.palette().border; }
+
+            if root.swatches.length > 0 : VerticalLayout {
+                spacing: Theme.tokens.space.md;
+
+                for row-idx in floor((root.swatches.length + root.safe-columns - 1) / root.safe-columns) : HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    alignment: center;
+
+                    for col-idx in root.safe-columns : Rectangle {
+                        property <int> swatch-col: Theme.rtl ? root.safe-columns - 1 - col-idx : col-idx;
+                        property <int> swatch-idx: row-idx * root.safe-columns + swatch-col;
+                        width: 24px;
+                        height: 24px;
+                        background: transparent;
+
+                        if swatch-idx >= 0 && swatch-idx < root.swatches.length : ColorSwatchTile {
+                            property <LoomColorSwatch> entry: root.swatches[swatch-idx];
+                            swatch: self.entry;
+                            kind-label: root.kind-label;
+                            selected: !root.is-automatic && !root.is-mixed
+                                && root.selected-hex != ""
+                                && root.selected-hex == self.entry.hex;
+                            enabled: root.enabled;
+                            picked(hex) => { root.select-color(hex); }
+                            close-requested => { root.close-requested(); }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.palette().border; }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    cross-axis-alignment: center;
+                    if Theme.rtl : LoomButton {
+                        label: "Apply";
+                        variant: "secondary";
+                        enabled: root.enabled;
+                        clicked => { root.hex-submitted(root.hex-input); }
+                    }
+                    LoomTextField {
+                        horizontal-stretch: 1;
+                        field-min-width: 108px;
+                        label: root.kind-label + " hex";
+                        placeholder: "#RRGGBB";
+                        enabled: root.enabled;
+                        invalid: root.hex-error != "";
+                        value <=> root.hex-input;
+                        edited(text) => { root.hex-edited(text); }
+                        accepted(text) => { root.hex-submitted(text); }
+                        cancelled => { root.close-requested(); }
+                    }
+                    if !Theme.rtl : LoomButton {
+                        label: "Apply";
+                        variant: "secondary";
+                        enabled: root.enabled;
+                        clicked => { root.hex-submitted(root.hex-input); }
+                    }
+                }
+
+                if root.hex-error != "" : Text {
+                    text: root.hex-error;
+                    font-size: Theme.type.caption;
+                    color: Theme.palette().danger;
+                    horizontal-alignment: Theme.rtl ? right : left;
+                    wrap: word-wrap;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: root.hex-error;
+                    accessible-live-region: AccessibleLiveness.polite;
+                }
+            }
+        }
+    }
+}
