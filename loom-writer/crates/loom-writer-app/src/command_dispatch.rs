@@ -150,6 +150,7 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "app.quit" | "loom writer.quit" => app.invoke_application_quit_requested(),
         "file.new" | "writer.new" => app.invoke_new_doc(),
         "file.start_hub" => crate::start_hub::open_hub(app),
+        "file.templates" => app.invoke_new_doc(),
         "file.open" | "writer.open" => app.invoke_open_doc(),
         "file.save" | "writer.save" => app.invoke_save_doc(),
         "file.save_as" | "writer.save-as" => app.invoke_save_as_doc(),

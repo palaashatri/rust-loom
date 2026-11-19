@@ -167,6 +167,7 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             shortcut: shortcut_for_id("writer.new"),
         },
         cmd_entry("file.start_hub", "Open Start Hub…"),
+        cmd_entry("file.templates", "Browse Templates…"),
         PaletteCommand {
             action: PaletteAction::NewFromSample,
             id: "writer.new-sample",

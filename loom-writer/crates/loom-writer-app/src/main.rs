@@ -688,6 +688,13 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             12,
         ),
         (
+            "file.templates",
+            "Browse Templates…",
+            "Choose from 18 built-in document templates",
+            "file",
+            13,
+        ),
+        (
             "file.print_preview",
             "Print Preview…",
             "Preview paginated output and configure page setup",
@@ -1006,6 +1013,7 @@ fn sync_writer_registry_enablement(
     for id in [
         "app.palette",
         "file.start_hub",
+        "file.templates",
         "file.print_preview",
         "edit.find",
         "edit.replace",

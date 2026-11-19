@@ -8,6 +8,7 @@ export component WriterShortcutScope inherits FocusScope {
     in property <bool> template-chooser-open;
     in property <bool> save-changes-open;
     in property <bool> modal-open: false;
+    in property <bool> swallow-alt-space: false;
     in property <int> toolbar-menu-kind;
     callback open-menu-for-key(KeyEvent) -> bool;
     callback leave-chrome(bool);
@@ -48,6 +49,9 @@ export component WriterShortcutScope inherits FocusScope {
     // TextInput (the page, find bar, or comment box), which would otherwise consume
     // shifted/Option printable keys before they bubble up.
     capture-key-pressed(event) => {
+        if (root.swallow-alt-space && event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta && event.text == " ") {
+            return accept;
+        }
         if (root.modal-open) { return reject; }
         if (root.open-menu-for-key(event)) { return accept; }
         if (!root.palette-open && !root.template-chooser-open && root.toolbar-menu-kind == 0 && !root.save-changes-open) {

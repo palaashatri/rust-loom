@@ -298,6 +298,7 @@ fn palette_shortcut_search_and_supported_command_dispatch_parity() {
         ("cmd+p", "file.print_preview"),
         ("ctrl+shift+c", "review.word_count"),
         ("ctrl+shift+o", "file.start_hub"),
+        ("templates", "file.templates"),
         ("ctrl+shift+/", "help.welcome"),
         ("f1", "help.welcome"),
     ] {
@@ -458,4 +459,29 @@ fn cmd_and_ctrl_select_all_selects_without_typing_and_bolds() {
             "Cmd/Ctrl+B after Cmd/Ctrl+A must bold the whole selection"
         );
     }
+}
+
+#[test]
+fn alt_space_is_swallowed_on_ctrl_platforms_without_inserting_space_and_templates_opens() {
+    let (app, state) = setup_app(text_document("Hello"));
+    app.set_shortcut_modifier("Ctrl+".into());
+    app.invoke_focus_page();
+    app.invoke_selection_changed(5, 5);
+
+    send_chord(&app, &[Key::Alt], " ");
+    assert_eq!(
+        state.current.borrow().editor_text(),
+        "Hello",
+        "Alt+Space must not insert a literal space into the document"
+    );
+
+    tap_raw(&app, " ");
+    assert_eq!(
+        state.current.borrow().editor_text(),
+        "Hello ",
+        "Plain Space must still insert normally after Alt+Space"
+    );
+
+    assert!(dispatch_command(&app, "file.templates"));
+    assert!(app.get_template_chooser_open());
 }
