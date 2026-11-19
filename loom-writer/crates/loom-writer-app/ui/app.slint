@@ -494,9 +494,11 @@ export component WriterApp inherits Window {
                                 if (t == "y" || t == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
                                 return accept;
                             }
+                            if (plain && (t == "a" || t == "A")) { page-canvas.select-all(); return accept; }
                             if (plain && (t == "c" || t == "C")) { root.copy(); return accept; }
                             if (plain && (t == "x" || t == "X")) { root.cut(); return accept; }
                             if (plain && (t == "v" || t == "V")) { root.paste(); return accept; }
+                            if (m && app-focus.dispatch-shortcut-chord(event)) { return accept; }
                             if (root.open-menu-for-key(event)) { return accept; }
                             if (t == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
                             if (t == Key.Tab) {

@@ -62,6 +62,72 @@ export component WriterShortcutScope inherits FocusScope {
         }
         return reject;
     }
+    public function dispatch-shortcut-chord(event: KeyEvent) -> bool {
+        if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open || root.modal-open) { return false; }
+        if (event.modifiers.control || event.modifiers.meta) {
+            if (!event.modifiers.shift && !event.modifiers.alt) {
+                if (event.text == Key.K || event.text == "k" || event.text == "K") {
+                    root.open-palette();
+                    return true;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-doc();
+                    return true;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-doc();
+                    return true;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    root.save-doc();
+                    return true;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return true;
+                }
+                if (event.text == "b" || event.text == "B") {
+                    root.toggle-bold();
+                    return true;
+                }
+                if (event.text == "i" || event.text == "I") {
+                    root.toggle-italic();
+                    return true;
+                }
+                if (event.text == "u" || event.text == "U") {
+                    root.toggle-underline();
+                    return true;
+                }
+                if (event.text == "z" || event.text == "Z") {
+                    root.undo();
+                    return true;
+                }
+                if (event.text == "f" || event.text == "F") {
+                    FindBar.open-requested(false);
+                    return true;
+                }
+                if (event.text == "h" || event.text == "H") {
+                    FindBar.open-requested(true);
+                    return true;
+                }
+            }
+            if (event.modifiers.shift && !event.modifiers.alt) {
+                if (event.text == "s" || event.text == "S") {
+                    root.save-as-doc();
+                    return true;
+                }
+                if (event.text == "z" || event.text == "Z") {
+                    root.redo();
+                    return true;
+                }
+            }
+            if (root.shortcut-pressed(event.text, event.modifiers.shift, event.modifiers.alt)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     key-pressed(event) => {
         if (root.palette-open || root.template-chooser-open || root.toolbar-menu-kind != 0 || root.save-changes-open || root.modal-open) { return reject; }
         if (event.text == Key.F6) { root.leave-chrome(event.modifiers.shift); return accept; }
@@ -73,67 +139,7 @@ export component WriterShortcutScope inherits FocusScope {
             return accept;
         }
         if (root.open-menu-for-key(event)) { return accept; }
-        if (event.modifiers.control || event.modifiers.meta) {
-            if (!event.modifiers.shift && !event.modifiers.alt) {
-                if (event.text == Key.K || event.text == "k" || event.text == "K") {
-                    root.open-palette();
-                    return accept;
-                }
-                if (event.text == "n" || event.text == "N") {
-                    root.new-doc();
-                    return accept;
-                }
-                if (event.text == "o" || event.text == "O") {
-                    root.open-doc();
-                    return accept;
-                }
-                if (event.text == "s" || event.text == "S") {
-                    root.save-doc();
-                    return accept;
-                }
-                if (event.text == "e" || event.text == "E") {
-                    root.export-pdf();
-                    return accept;
-                }
-                if (event.text == "b" || event.text == "B") {
-                    root.toggle-bold();
-                    return accept;
-                }
-                if (event.text == "i" || event.text == "I") {
-                    root.toggle-italic();
-                    return accept;
-                }
-                if (event.text == "u" || event.text == "U") {
-                    root.toggle-underline();
-                    return accept;
-                }
-                if (event.text == "z" || event.text == "Z") {
-                    root.undo();
-                    return accept;
-                }
-                if (event.text == "f" || event.text == "F") {
-                    FindBar.open-requested(false);
-                    return accept;
-                }
-                if (event.text == "h" || event.text == "H") {
-                    FindBar.open-requested(true);
-                    return accept;
-                }
-            }
-            if (event.modifiers.shift && !event.modifiers.alt) {
-                if (event.text == "s" || event.text == "S") {
-                    root.save-as-doc();
-                    return accept;
-                }
-                if (event.text == "z" || event.text == "Z") {
-                    root.redo();
-                    return accept;
-                }
-            }
-            if (root.shortcut-pressed(event.text, event.modifiers.shift, event.modifiers.alt)) {
-                return accept;
-            }
-        }
+        if (root.dispatch-shortcut-chord(event)) { return accept; }
         return reject;
     }
     @children

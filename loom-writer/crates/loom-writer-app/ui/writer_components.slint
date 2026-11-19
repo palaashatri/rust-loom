@@ -100,6 +100,7 @@ export component WriterPageCanvas inherits Rectangle {
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     public function focus-document() { document-editor.focus-editor(); }
+    public function select-all() { document-editor.select-all(); }
 
     background: Theme.palette().canvas;
     horizontal-stretch: 1;

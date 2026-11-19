@@ -429,3 +429,33 @@ fn new_modals_stay_in_bounds_and_readable_across_scales_and_rtl() {
         }
     }
 }
+
+#[test]
+fn cmd_and_ctrl_select_all_selects_without_typing_and_bolds() {
+    for modifier in [Key::Control, Key::Meta] {
+        let (app, state) = setup_app(text_document("Hello Select All"));
+        app.invoke_focus_page();
+        app.invoke_selection_changed(16, 16);
+
+        send_chord(&app, &[modifier], "a");
+        assert_eq!(
+            state.current.borrow().editor_text(),
+            "Hello Select All",
+            "Cmd/Ctrl+A must not insert 'a' into the editor"
+        );
+        assert_eq!(app.get_selection_anchor(), 0);
+        assert_eq!(app.get_selection_focus(), 16);
+
+        send_chord(&app, &[modifier], "b");
+        let doc = state.current.borrow();
+        assert!(
+            app.get_is_bold()
+                && !doc.blocks[0].runs.is_empty()
+                && doc.blocks[0]
+                    .runs
+                    .iter()
+                    .all(|r| r.style.weight == loom_text::FontWeight::Bold),
+            "Cmd/Ctrl+B after Cmd/Ctrl+A must bold the whole selection"
+        );
+    }
+}

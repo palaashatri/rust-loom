@@ -53,6 +53,7 @@ export component WriterDocumentEditor inherits Rectangle {
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     public function focus-editor() { editor.focus(); }
+    public function select-all() { editor.select-all(); }
 
     horizontal-stretch: 1;
     vertical-stretch: 1;
