@@ -41,7 +41,9 @@ pub(crate) fn publish_viewport(
     selection: GridSelection,
     zoom: f32,
 ) {
-    let cap = (viewport.visible_rows * viewport.visible_cols) as usize;
+    let mat_rows = crate::materialized_rows(sheet, viewport);
+    let mat_cols = crate::materialized_cols(viewport);
+    let cap = mat_rows.len() * mat_cols.len();
     let mut strikethroughs = Vec::with_capacity(cap);
     let mut border_tops = Vec::with_capacity(cap);
     let mut border_rights = Vec::with_capacity(cap);
@@ -49,14 +51,8 @@ pub(crate) fn publish_viewport(
     let mut border_lefts = Vec::with_capacity(cap);
     let mut merged_covered = Vec::with_capacity(cap);
 
-    for local_row in 0..viewport.visible_rows {
-        let Some(row) = viewport.row_at(local_row) else {
-            continue;
-        };
-        for local_col in 0..viewport.visible_cols {
-            let Some(col) = viewport.column_at(local_col) else {
-                continue;
-            };
+    for &row in &mat_rows {
+        for &col in &mat_cols {
             let cell = CellRef { row, col };
             let style = sheet.cell_style(cell);
             strikethroughs.push(style.strikethrough);

@@ -12,7 +12,9 @@ use loom_desktop::NativeMenuBar;
 use loom_sheets_core::{CellRef, Sheet, Value};
 use slint::{ComponentHandle, Model, SharedString};
 
-use crate::grid_pointer::{commit_resize, index_at, COL_WIDTH_RANGE};
+use crate::grid_pointer::{
+    commit_resize, index_at, index_for_slot, slot_for_index, COL_WIDTH_RANGE,
+};
 use crate::{
     evaluate, project_current, project_current_without_reveal, selection_from_app,
     update_selection_range, GridPointer, GridSelection, GuiState, SheetsApp,
@@ -168,8 +170,10 @@ pub(crate) fn after_drag(
     };
     let widths: Vec<f32> = app.get_grid_column_widths().iter().collect();
     let heights: Vec<f32> = app.get_grid_row_heights().iter().collect();
-    let col = (origin.1 - app.get_view_col_origin()).max(0) as usize;
-    let row = (origin.0 - app.get_view_row_origin()).max(0) as usize;
+    let cols: Vec<i32> = app.get_cols().iter().collect();
+    let rows: Vec<i32> = app.get_rows().iter().collect();
+    let col = slot_for_index(&cols, origin.1).min(widths.len());
+    let row = slot_for_index(&rows, origin.0).min(heights.len());
     let along_x = widths.iter().take(col).sum::<f32>() + local.0;
     let along_y = heights.iter().take(row).sum::<f32>() + local.1;
     let pointer = (
@@ -229,9 +233,13 @@ pub(crate) fn tick(app: &SheetsApp, state: &GuiState) {
         pointer.0.clamp(0.0, body.0 - 1.0) - app.get_grid_scroll_x() - app.get_grid_col_offset();
     let y =
         pointer.1.clamp(0.0, body.1 - 1.0) - app.get_grid_scroll_y() - app.get_grid_row_offset();
+    let cols: Vec<i32> = app.get_cols().iter().collect();
+    let rows: Vec<i32> = app.get_rows().iter().collect();
     let target = CellRef {
-        row: (app.get_view_row_origin() as usize + index_at(&heights, 0, y)) as u32,
-        col: (app.get_view_col_origin() as usize + index_at(&widths, 0, x)) as u32,
+        row: index_for_slot(&rows, app.get_view_row_origin(), index_at(&heights, 0, y)).max(0)
+            as u32,
+        col: index_for_slot(&cols, app.get_view_col_origin(), index_at(&widths, 0, x)).max(0)
+            as u32,
     };
     let selection = GridSelection::new(anchor, target);
     if selection != selection_from_app(app) {

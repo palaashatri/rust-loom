@@ -69,6 +69,22 @@ fn visible_sizes(model: slint::ModelRc<f32>) -> Vec<f32> {
     model.iter().collect()
 }
 
+pub(crate) fn slot_for_index(indices: &[i32], worksheet_index: i32) -> usize {
+    if indices.is_empty() {
+        return 0;
+    }
+    indices
+        .partition_point(|&idx| idx < worksheet_index)
+        .min(indices.len() - 1)
+}
+
+pub(crate) fn index_for_slot(indices: &[i32], origin: i32, slot: usize) -> i32 {
+    indices
+        .get(slot)
+        .copied()
+        .unwrap_or_else(|| origin + slot as i32)
+}
+
 /// The selection for a click on a column or row header: the whole column or
 /// row up to the sheet's used extent, with Shift extending from the anchor.
 pub(crate) fn header_selection(
@@ -140,10 +156,12 @@ fn cell_dragged(app: &SheetsApp, state: &GuiState, origin: (i32, i32), local: (f
     let (row_origin, col_origin) = (app.get_view_row_origin(), app.get_view_col_origin());
     let widths = visible_sizes(app.get_grid_column_widths());
     let heights = visible_sizes(app.get_grid_row_heights());
-    let col =
-        col_origin + index_at(&widths, (origin.1 - col_origin).max(0) as usize, local.0) as i32;
-    let row =
-        row_origin + index_at(&heights, (origin.0 - row_origin).max(0) as usize, local.1) as i32;
+    let cols: Vec<i32> = app.get_cols().iter().collect();
+    let rows: Vec<i32> = app.get_rows().iter().collect();
+    let col_slot = index_at(&widths, slot_for_index(&cols, origin.1), local.0);
+    let row_slot = index_at(&heights, slot_for_index(&rows, origin.0), local.1);
+    let col = index_for_slot(&cols, col_origin, col_slot);
+    let row = index_for_slot(&rows, row_origin, row_slot);
     // The pressed cell, remembered in Rust: the grid recycles its elements
     // while it scrolls, so the cell that reports the drag may be another one.
     let start = crate::grid_gestures::drag_anchor().unwrap_or(CellRef {

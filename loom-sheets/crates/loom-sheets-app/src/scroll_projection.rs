@@ -187,7 +187,7 @@ fn scrolled_viewport(
 /// Rows and columns the grid keeps beyond the last visible one.
 const TAIL_ROWS: u32 = 30;
 const TAIL_COLS: u32 = 12;
-const MAX_GRID_ROWS: u32 = 1_048_576;
+pub(crate) const MAX_GRID_ROWS: u32 = 1_048_576;
 const MAX_GRID_COLS: u32 = 16_384;
 
 /// `dimensions`, extended so at least a tail's worth of rows and columns lies
@@ -214,10 +214,15 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     let (viewport, dimensions, grew) = scrolled_viewport(app, &sheet, zoom);
     // New rows change the scrollable extent, which only a full grid update
     // publishes.
+    let mat_rows = crate::materialized_rows(&sheet, viewport);
+    let current_rows = app.get_rows();
     let window_moved = grew
         || viewport.first_row as i32 != app.get_view_row_origin()
         || viewport.first_col as i32 != app.get_view_col_origin()
-        || viewport.visible_rows as usize != app.get_rows().row_count()
+        || mat_rows.len() != current_rows.row_count()
+        || mat_rows.first().copied().map(|r| r as i32) != current_rows.row_data(0)
+        || mat_rows.last().copied().map(|r| r as i32)
+            != current_rows.row_data(current_rows.row_count().saturating_sub(1))
         || viewport.visible_cols as usize != app.get_cols().row_count();
     let fit_col_width = valid_dimension(app.get_grid_col_width() / zoom, GRID_COL_WIDTH);
     let geometry = grid_geometry_fit(&sheet, dimensions, viewport, fit_col_width, zoom);
@@ -337,13 +342,21 @@ fn publish_spill(app: &SheetsApp, grid: &ProjectedSheetGrid, geometry: &GridGeom
     if let Some(model) = refresh_model(ink.get_wraps(), grid.cell_wraps.clone()) {
         ink.set_wraps(model);
     }
-    let spill = cell_spill::compute(
+    let mut spill = cell_spill::compute(
         &face,
         grid.cols.len(),
         &geometry.column_widths,
         &geometry.row_heights,
         zoom,
     );
+    for item in &mut spill.items {
+        if let Some(&r) = grid.rows.get(item.row as usize) {
+            item.row = r;
+        }
+        if let Some(&c) = grid.cols.get(item.col as usize) {
+            item.col = c;
+        }
+    }
     let global = app.global::<CellSpill>();
     if let Some(model) = refresh_model(global.get_kinds(), spill.kinds) {
         global.set_kinds(model);

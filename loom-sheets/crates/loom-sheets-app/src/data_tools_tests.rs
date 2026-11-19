@@ -131,8 +131,12 @@ fn autofilter_hides_and_restores_rows_non_destructively() {
     dt.invoke_apply_column_filter();
     assert!(!dt.get_filter_popup_open());
     assert!(state.current.borrow().hidden_rows.contains(&2));
-    let heights = app.get_grid_row_heights();
-    assert_eq!(heights.row_data(2), Some(0.0));
+    let materialized_rows: Vec<i32> = app.get_rows().iter().collect();
+    assert!(
+        !materialized_rows.contains(&2),
+        "hidden row 2 must be excluded from materialized rows: {materialized_rows:?}"
+    );
+    assert!(app.get_grid_row_heights().iter().all(|h| h > 0.0));
     // Data remains intact.
     assert_eq!(
         state.current.borrow().raw(CellRef::parse("A3").unwrap()),
@@ -141,6 +145,7 @@ fn autofilter_hides_and_restores_rows_non_destructively() {
 
     assert!(dispatch_command(&app, "data.clear_filter"));
     assert!(state.current.borrow().hidden_rows.is_empty());
+    assert_eq!(app.get_rows().row_data(2), Some(2));
     assert!(app.get_grid_row_heights().row_data(2).unwrap_or(0.0) > 0.0);
 }
 

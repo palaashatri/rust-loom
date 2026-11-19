@@ -220,14 +220,12 @@ export component SheetTable inherits Rectangle {
                     height: root.grid-visible-height;
                     spacing: 0px;
 
-                    for r in root.rows : Row {
-                        for c in root.cols : Rectangle {
+                    for global-row[r] in root.rows : Row {
+                        for global-col[c] in root.cols : Rectangle {
                             min-width: root.grid-column-widths[c];
                             max-width: root.grid-column-widths[c];
                             min-height: root.grid-row-heights[r];
                             max-height: root.grid-row-heights[r];
-                            property <int> global-row: r + root.view-row-origin;
-                            property <int> global-col: c + root.view-col-origin;
                             property <bool> in-selection: global-row >= root.selection-start-row
                                 && global-row <= root.selection-end-row
                                 && global-col >= root.selection-start-col
@@ -417,8 +415,8 @@ export component SheetTable inherits Rectangle {
                     y: root.grid-row-offset;
                     width: root.grid-visible-width;
                     height: root.grid-visible-height;
-                    editing-row: root.editing ? root.selected-row - root.view-row-origin : -1;
-                    editing-col: root.editing ? root.selected-col - root.view-col-origin : -1;
+                    editing-row: root.editing ? root.selected-row : -1;
+                    editing-col: root.editing ? root.selected-col : -1;
                 }
             }
 

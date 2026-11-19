@@ -136,7 +136,7 @@ pub(crate) fn reveal_selected(
 pub(crate) fn fit_count(first: u32, viewport_size: f32, size_of: impl Fn(u32) -> f32) -> u32 {
     let mut consumed = 0.0_f32;
     let mut count = 0_u32;
-    while count < 100_000 {
+    while count < crate::scroll_projection::MAX_GRID_ROWS {
         let size = size_of(first.saturating_add(count));
         if consumed + size > viewport_size + 0.5 {
             break;
