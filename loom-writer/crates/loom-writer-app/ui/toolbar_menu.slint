@@ -40,7 +40,7 @@ export component WriterToolbarMenu inherits Rectangle {
     property <[{ id: string, label: string, shortcut: string, checked: bool, checkable: bool, enabled: bool }]> rows:
         root.kind == 1 ? [
             { id: "view.inspector", label: "Format Inspector", shortcut: root.primary-mod + "+" + root.alt-mod + "+I", checked: root.inspector-visible, checkable: true, enabled: true },
-            { id: "view.navigator", label: "Outline Navigator", shortcut: "", checked: root.navigator-visible, checkable: true, enabled: true },
+            { id: "view.navigator", label: "Outline Navigator", shortcut: root.primary-mod + "+" + root.alt-mod + "+O", checked: root.navigator-visible, checkable: true, enabled: true },
             { id: "app.palette", label: "Command Palette", shortcut: root.primary-mod + "+K", checked: false, checkable: false, enabled: true },
             { id: "review.word_count", label: "Word Count", shortcut: root.primary-mod + "+Shift+C", checked: false, checkable: false, enabled: true },
             { id: "file.start_hub", label: "Start Hub", shortcut: root.primary-mod + "+Shift+O", checked: false, checkable: false, enabled: true },
@@ -65,7 +65,7 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "insert.chart", label: "Chart from Clipboard", shortcut: "", checked: false, checkable: false, enabled: true },
             { id: "insert.comment", label: "Comment", shortcut: "", checked: false, checkable: false, enabled: true },
             { id: "insert.header_footer", label: "Headers & Footers\u{2026}", shortcut: root.primary-mod + "+" + root.alt-mod + "+H", checked: false, checkable: false, enabled: true },
-            { id: "writer.footnotes", label: "Footnotes\u{2026}", shortcut: "", checked: false, checkable: false, enabled: true },
+            { id: "writer.footnotes", label: "Footnotes\u{2026}", shortcut: root.primary-mod + "+" + root.alt-mod + "+F", checked: false, checkable: false, enabled: true },
         ]
         : root.kind == 4 ? (WriterFormatState.justify-available ? [
             { id: "format.bold", label: "Bold", shortcut: root.primary-mod + "+B", checked: root.is-bold, checkable: true, enabled: true },

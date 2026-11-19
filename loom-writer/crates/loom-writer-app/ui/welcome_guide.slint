@@ -385,11 +385,11 @@ export component WelcomeGuideModal inherits Rectangle {
                         y: (parent.height - self.height) / 2;
                         width: self.preferred-width;
                         height: self.preferred-height;
-                        spacing: Theme.tokens.space.sm;
+                        spacing: Theme.tokens.space.xs;
 
                         for idx in [0, 1, 2, 3, 4, 5, 6]: TouchArea {
-                            width: root.dot-step(idx) == root.clamped-step() ? 22px : 10px;
-                            height: 20px;
+                            width: 24px;
+                            height: 24px;
                             accessible-role: button;
                             accessible-label: "Welcome Guide Step " + (root.dot-step(idx) + 1);
                             clicked => {
@@ -397,10 +397,10 @@ export component WelcomeGuideModal inherits Rectangle {
                             }
 
                             Rectangle {
-                                x: 0px;
-                                y: (parent.height - self.height) / 2;
-                                width: parent.width;
+                                width: root.dot-step(idx) == root.clamped-step() ? 22px : 10px;
                                 height: 8px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                                 border-radius: 4px;
                                 background: root.dot-step(idx) == root.clamped-step()
                                     ? Theme.palette().accent

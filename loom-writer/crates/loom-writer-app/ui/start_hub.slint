@@ -32,6 +32,8 @@ component StartHubSidebarItem inherits Rectangle {
 
     height: max(34px, Theme.scaled-control-height + 4px);
     border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: tab-focus.has-focus ? 2px : 0px;
+    border-color: Theme.palette().focus;
     background: root.active
         ? Theme.palette().selection-soft
         : (item-touch.has-hover ? Theme.palette().surface-sunken : transparent);
@@ -56,8 +58,21 @@ component StartHubSidebarItem inherits Rectangle {
         }
     }
 
+    tab-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     item-touch := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => {
+            tab-focus.focus();
+            root.clicked();
+        }
     }
 }
 
