@@ -8,8 +8,10 @@ use loom_sheets_core::{CellAlignment, CellRef, Sheet, SheetDimensions, SheetView
 use crate::{cell_value, formatting, GRID_COL_WIDTH, GRID_ROW_HEIGHT};
 
 /// The small, renderable slice of a sparse worksheet shown by the Slint grid.
-/// Cell coordinates in this structure are local to the viewport; the
-/// `SheetViewport` owns their corresponding worksheet offsets.
+/// `rows` and `cols` store the materialized worksheet indices for each slot,
+/// while cell arrays use row-major slot order (`r * cols.len() + c`);
+/// consumers must use `rows` and `cols` to recover worksheet coordinates
+/// rather than calculating them from viewport offsets.
 pub(crate) struct ProjectedSheetGrid {
     pub(crate) rows: Vec<i32>,
     pub(crate) cols: Vec<i32>,
@@ -41,8 +43,8 @@ pub(crate) fn accessible_cell_label(cell: CellRef, raw: Option<&str>, value: &st
 }
 
 /// The non-hidden worksheet rows inside `viewport`'s row span.
-/// Falls back to `viewport.first_row` when every row in the span is hidden
-/// so the grid never materializes an empty row model.
+/// Returns an empty vector when every row in the span is hidden so hidden rows
+/// never enter the materialized row, cell, label, or height models.
 pub(crate) fn materialized_rows(sheet: &Sheet, viewport: SheetViewport) -> Vec<u32> {
     let start = viewport.first_row;
     let end = start.saturating_add(viewport.visible_rows.max(1));
@@ -56,9 +58,6 @@ pub(crate) fn materialized_rows(sheet: &Sheet, viewport: SheetViewport) -> Vec<u
     }
     if cursor < end {
         rows.extend(cursor..end);
-    }
-    if rows.is_empty() {
-        rows.push(start);
     }
     rows
 }

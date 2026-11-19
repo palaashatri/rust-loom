@@ -183,4 +183,19 @@ fn hundred_thousand_hidden_rows_stay_out_of_the_materialized_cell_window_and_hit
             col: 1
         }
     );
+
+    // An all-hidden viewport span emits zero materialized rows and cells.
+    let all_hidden_viewport = SheetViewport {
+        first_row: 1,
+        first_col: 0,
+        visible_rows: 10,
+        visible_cols: 4,
+    };
+    let sheet = state.current.borrow();
+    assert!(materialized_rows(&sheet, all_hidden_viewport).is_empty());
+    let grid = project_sheet_grid(&sheet, all_hidden_viewport);
+    assert!(grid.rows.is_empty());
+    assert!(grid.row_headers.is_empty());
+    assert!(grid.cells.is_empty());
+    assert!(grid.cell_labels.is_empty());
 }
