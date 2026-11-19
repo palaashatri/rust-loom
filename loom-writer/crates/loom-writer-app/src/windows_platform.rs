@@ -215,16 +215,15 @@ pub(crate) fn init_backend_if_needed() -> Result<(), String> {
 }
 
 fn has_pending_keyboard_input() -> bool {
-    let mut msg = std::mem::MaybeUninit::<Msg>::uninit();
-    unsafe {
-        PeekMessageW(
-            msg.as_mut_ptr(),
-            null_mut(),
-            WM_KEYFIRST,
-            WM_KEYLAST,
-            PM_NOREMOVE,
-        ) != 0
-    }
+    let mut msg = Msg {
+        hwnd: null_mut(),
+        message: 0,
+        w_param: 0,
+        l_param: 0,
+        time: 0,
+        pt: Point { x: 0, y: 0 },
+    };
+    unsafe { PeekMessageW(&mut msg, null_mut(), WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE) != 0 }
 }
 
 /// Clear any stale Alt modifier state left behind when Windows modal system
@@ -249,4 +248,21 @@ pub(crate) fn install_alt_modifier_guard(app: &crate::WriterApp) {
         }
         EventResult::Propagate
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_opengl_probe_and_alt_guard_execute_safely() {
+        let _gl = windows_supports_opengl_shaders();
+        let _pending = has_pending_keyboard_input();
+        crate::set_platform();
+        let app = crate::WriterApp::new().expect("create WriterApp");
+        install_alt_modifier_guard(&app);
+        if std::env::var_os("SLINT_BACKEND").is_some() {
+            init_backend_if_needed().expect("init backend with explicit SLINT_BACKEND");
+        }
+    }
 }
