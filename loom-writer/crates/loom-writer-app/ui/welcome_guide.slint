@@ -42,8 +42,8 @@ export component WelcomeGuideModal inherits Rectangle {
     property <bool> guide-open: root.open;
     property <bool> focus-req: WelcomeGuideState.focus-request;
 
-    width: root.open ? 100% : 0px;
-    height: root.open ? 100% : 0px;
+    width: 100%;
+    height: 100%;
     visible: root.open;
     background: Theme.palette().scrim;
 
@@ -92,7 +92,7 @@ export component WelcomeGuideModal inherits Rectangle {
         else if (s == 3) { "Add headers and footers with dynamic page and total-page fields." }
         else if (s == 4) { "Attach anchored comments to selections and record insertions and deletions as revisions." }
         else if (s == 5) { "Adjust paper size, orientation, and margin presets right inside Print Preview." }
-        else { "Press " + WelcomeGuideState.mod-key + "K, " + WelcomeGuideState.mod-key + "Shift+P, or F1 to open the Command Palette." }
+        else { "Press " + WelcomeGuideState.mod-key + "K or " + WelcomeGuideState.mod-key + "Shift+P for the Command Palette, and F1 for this guide." }
     }
 
     pure function step-bullet-two(s: int) -> string {

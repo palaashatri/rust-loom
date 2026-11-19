@@ -87,8 +87,8 @@ export component PrintPreviewModal inherits Rectangle {
     in property <bool> open: PrintPreviewState.open;
     property <bool> preview-open: root.open;
 
-    width: root.open ? 100% : 0px;
-    height: root.open ? 100% : 0px;
+    width: 100%;
+    height: 100%;
     visible: root.open;
     background: Theme.palette().scrim;
 

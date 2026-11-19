@@ -26,6 +26,9 @@ fn mark_seen_at(path: &Path) -> io::Result<()> {
 }
 
 fn mark_seen() {
+    if cfg!(test) {
+        return;
+    }
     let _ = mark_seen_at(&settings_path());
 }
 
@@ -229,6 +232,7 @@ mod tests {
         let dialogs: Rc<dyn crate::FileDialogService> = Rc::new(ScriptedFileDialogs::new([], []));
         let (app, state) = test_state(WriterDocument::new("doc-1", "Test Doc"), dialogs);
         wire_writer_shared_callbacks(&app, &state, None);
+        crate::wire_palette(&app);
         wire(&app, &state, &None);
 
         let guide = app.global::<WelcomeGuideState>();

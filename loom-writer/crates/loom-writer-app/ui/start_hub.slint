@@ -37,7 +37,7 @@ component StartHubSidebarItem inherits Rectangle {
         : (item-touch.has-hover ? Theme.palette().surface-sunken : transparent);
     accessible-role: tab;
     accessible-label: root.label;
-    accessible-selected: root.active;
+    accessible-checked: root.active;
     accessible-action-default => { root.clicked(); }
 
     HorizontalLayout {

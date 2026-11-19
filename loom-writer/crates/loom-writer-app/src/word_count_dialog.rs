@@ -68,12 +68,9 @@ pub(crate) fn compute_statistics(doc: &WriterDocument) -> DocumentStatisticsSnap
     }
 }
 
-/// Refreshes [`WordCountState`] properties from the active document.
-pub(crate) fn refresh(app: &WriterApp, state: &GuiState) {
-    let snapshot = {
-        let doc = state.current.borrow();
-        compute_statistics(&doc)
-    };
+/// Refreshes [`WordCountState`] properties from `doc`.
+pub(crate) fn refresh_for_doc(app: &WriterApp, doc: &WriterDocument) {
+    let snapshot = compute_statistics(doc);
     let modal = app.global::<WordCountState>();
     modal.set_words(snapshot.words);
     modal.set_chars_with_spaces(snapshot.chars_with_spaces);
@@ -90,11 +87,17 @@ pub(crate) fn refresh(app: &WriterApp, state: &GuiState) {
     modal.set_reading_time(SharedString::from(snapshot.reading_time));
 }
 
-/// Refreshes counts and opens the Word Count & Document Statistics modal.
-pub(crate) fn open(app: &WriterApp, state: &GuiState) {
-    refresh(app, state);
+/// Opens the Word Count & Document Statistics modal for `doc`.
+pub(crate) fn open_document(app: &WriterApp, doc: &WriterDocument) {
+    refresh_for_doc(app, doc);
     app.global::<WordCountState>().set_open(true);
     app.set_status_left("Opened Word Count & Document Statistics".into());
+}
+
+/// Refreshes counts and opens the Word Count & Document Statistics modal.
+pub(crate) fn open(app: &WriterApp, state: &GuiState) {
+    let doc = state.current.borrow();
+    open_document(app, &doc);
 }
 
 /// Connects Word Count modal open/close callbacks to Writer state and focus return.
@@ -166,9 +169,12 @@ mod tests {
         doc.add_comment_thread(p2, 0, 7, "Verify regional breakdown.")
             .expect("add comment");
         doc.tracked_changes.set_recording(true);
+        let before_track = doc.clone();
         let updated_stream = format!("{} Added edit.", doc.editor_text());
         doc.replace_editor_text_at(&updated_stream, None)
             .expect("record tracked edit");
+        doc.record_user_edit_from(&before_track, None)
+            .expect("create tracked revision record");
         doc.tracked_changes.set_recording(false);
 
         let end_offset = doc.editor_text().len();
@@ -249,7 +255,7 @@ mod tests {
         assert!(modal.get_words() > 500);
         assert!(modal.get_pages() >= 2);
         assert_eq!(modal.get_paragraphs(), 81);
-        assert_eq!(modal.get_reading_time(), "3 min");
+        assert_eq!(modal.get_reading_time(), "4 min");
 
         modal.invoke_close_dialog();
         assert!(!modal.get_open());

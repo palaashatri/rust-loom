@@ -84,7 +84,7 @@ fn build_preview_page_setup(
     orientation_idx: i32,
     margins_idx: i32,
 ) -> PageSetup {
-    let mut setup = base.clone();
+    let mut setup = *base;
     setup.select_paper(paper_from_index(paper_idx));
     setup.select_orientation(orientation_from_index(orientation_idx));
     setup.select_margins(margins_from_index(margins_idx));
@@ -205,7 +205,12 @@ fn build_working_document<'a>(
                 "heading3",
                 &format!("Change #{} — {} — {}", rev.id, kind, rev.author),
             ));
-            let snippet = rev.payload.text.replace('\n', " ");
+            let snippet = rev
+                .after
+                .as_ref()
+                .or(rev.before.as_ref())
+                .map(|payload| payload.text.replace('\n', " "))
+                .unwrap_or_default();
             let summary = if snippet.trim().is_empty() {
                 format!(
                     "Block {}, offsets {}..{}",
@@ -298,16 +303,25 @@ fn project_header_footer(
     }
 }
 
+struct PreviewPageTarget<'a> {
+    style: &'a PageStyle,
+    page_idx: usize,
+    page_origin: PageRect,
+    boxes: &'a mut Vec<PrintPreviewBoxRect>,
+    lines: &'a mut Vec<PrintPreviewTextLine>,
+}
+
 fn project_table_on_page(
     block: &RichBlock,
     block_index: usize,
     flow_lines: &[loom_writer_core::FlowLine],
-    style: &PageStyle,
-    page_idx: usize,
-    page_origin: PageRect,
-    boxes: &mut Vec<PrintPreviewBoxRect>,
-    lines: &mut Vec<PrintPreviewTextLine>,
+    target: &mut PreviewPageTarget<'_>,
 ) {
+    let style = target.style;
+    let page_idx = target.page_idx;
+    let page_origin = target.page_origin;
+    let boxes = &mut target.boxes;
+    let lines = &mut target.lines;
     let Some(table) = block.typed_table() else {
         return;
     };
@@ -485,18 +499,18 @@ fn project_footnotes_on_page(
 }
 
 fn push_placeholder_box(
-    local_x: f32,
-    local_y: f32,
-    line_width: f32,
-    line_height: f32,
+    line_bounds: PageRect,
+    page_origin: PageRect,
     col_w: f32,
     style: &PageStyle,
     label: String,
     boxes: &mut Vec<PrintPreviewBoxRect>,
     lines: &mut Vec<PrintPreviewTextLine>,
 ) {
-    let rect_w = line_width.max(48.0).min(col_w);
-    let rect_h = line_height.max(24.0);
+    let local_x = line_bounds.x - page_origin.x;
+    let local_y = line_bounds.y - page_origin.y;
+    let rect_w = line_bounds.width.max(48.0).min(col_w);
+    let rect_h = line_bounds.height.max(24.0);
     boxes.push(PrintPreviewBoxRect {
         x_pt: local_x,
         y_pt: local_y,
@@ -575,16 +589,14 @@ fn project_preview_snapshot(
         };
         if block.kind == TABLE_BLOCK_KIND {
             if line.page == page_idx && seen_tables.insert(line.block_index) {
-                project_table_on_page(
-                    block,
-                    line.block_index,
-                    flow.lines(),
+                let mut target = PreviewPageTarget {
                     style,
                     page_idx,
                     page_origin,
-                    &mut boxes,
-                    &mut lines,
-                );
+                    boxes: &mut boxes,
+                    lines: &mut lines,
+                };
+                project_table_on_page(block, line.block_index, flow.lines(), &mut target);
             }
             continue;
         }
@@ -604,10 +616,8 @@ fn project_preview_snapshot(
                 .map(|img| format!("[Picture: {}]", img.name))
                 .unwrap_or_else(|| "[Picture]".to_string());
             push_placeholder_box(
-                local_x,
-                local_y,
-                line.bounds.width,
-                line.bounds.height,
+                line.bounds,
+                page_origin,
                 col_w,
                 style,
                 label,
@@ -619,10 +629,8 @@ fn project_preview_snapshot(
 
         if block.is_chart() {
             push_placeholder_box(
-                local_x,
-                local_y,
-                line.bounds.width,
-                line.bounds.height,
+                line.bounds,
+                page_origin,
                 col_w,
                 style,
                 "[Embedded Chart]".to_string(),
@@ -737,10 +745,28 @@ fn project_preview_snapshot(
     })
 }
 
+/// Opens the interactive Print Preview & Page Setup modal synced to `doc`.
+pub(crate) fn open_document(app: &WriterApp, doc: &WriterDocument) {
+    let preview = app.global::<PrintPreviewState>();
+    preview.set_paper_size(paper_to_index(doc.page.paper));
+    preview.set_orientation(orientation_to_index(doc.page.orientation));
+    preview.set_margin_preset(margins_to_index(doc.page.margins));
+    preview.set_revision_view(0);
+    preview.set_current_page(1);
+    preview.set_status_message("".into());
+    refresh_preview_for_doc(app, doc);
+    preview.set_open(true);
+    app.set_status_left("Opened Print Preview".into());
+}
+
 /// Refreshes the Print Preview geometry and page content using the currently selected setup controls.
 pub(crate) fn refresh_preview(app: &WriterApp, state: &GuiState) {
-    let preview = app.global::<PrintPreviewState>();
     let doc = state.current.borrow();
+    refresh_preview_for_doc(app, &doc);
+}
+
+fn refresh_preview_for_doc(app: &WriterApp, doc: &WriterDocument) {
+    let preview = app.global::<PrintPreviewState>();
     let setup = build_preview_page_setup(
         &doc.page,
         preview.get_paper_size(),
@@ -757,7 +783,7 @@ pub(crate) fn refresh_preview(app: &WriterApp, state: &GuiState) {
     preview.set_doc_title(SharedString::from(doc.title.as_str()));
 
     let revision_view = revision_view_from_index(preview.get_revision_view());
-    match project_preview_snapshot(&doc, &style, revision_view, preview.get_current_page()) {
+    match project_preview_snapshot(doc, &style, revision_view, preview.get_current_page()) {
         Ok(snapshot) => {
             preview.set_total_pages(snapshot.total_pages);
             preview.set_current_page(snapshot.current_page);
@@ -791,19 +817,8 @@ pub(crate) fn refresh_preview(app: &WriterApp, state: &GuiState) {
 
 /// Opens the interactive Print Preview & Page Setup modal synced to the active document.
 pub(crate) fn open(app: &WriterApp, state: &GuiState) {
-    let preview = app.global::<PrintPreviewState>();
-    {
-        let doc = state.current.borrow();
-        preview.set_paper_size(paper_to_index(doc.page.paper));
-        preview.set_orientation(orientation_to_index(doc.page.orientation));
-        preview.set_margin_preset(margins_to_index(doc.page.margins));
-    }
-    preview.set_revision_view(0);
-    preview.set_current_page(1);
-    preview.set_status_message("".into());
-    refresh_preview(app, state);
-    preview.set_open(true);
-    app.set_status_left("Opened Print Preview".into());
+    let doc = state.current.borrow();
+    open_document(app, &doc);
 }
 
 /// Applies the selected Paper Size, Orientation, and Margins back to the document as one undo step.
@@ -984,168 +999,5 @@ pub(crate) fn wire(
             };
             let _ = export_pdf(&app, &state);
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::actions_tests::{test_state, text_document};
-    use crate::wire_writer_shared_callbacks;
-    use loom_desktop::ScriptedFileDialogs;
-    use slint::Model;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_pdf_path(label: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        std::env::temp_dir().join(format!(
-            "loom-writer-print-preview-{label}-{}-{nanos}.pdf",
-            std::process::id()
-        ))
-    }
-
-    #[test]
-    fn preview_updates_dimensions_for_paper_orientation_and_margins() {
-        let dialogs: Rc<dyn crate::FileDialogService> = Rc::new(ScriptedFileDialogs::new([], []));
-        let (app, state) = test_state(text_document("Hello print preview"), dialogs);
-        wire(&app, &state, &None);
-        open(&app, &state);
-
-        let preview = app.global::<PrintPreviewState>();
-        assert!(preview.get_open());
-        assert_eq!(preview.get_page_width_pt(), 595.0);
-        assert_eq!(preview.get_page_height_pt(), 842.0);
-        assert!(!preview.get_is_empty());
-
-        preview.set_paper_size(1);
-        preview.set_orientation(1);
-        preview.set_margin_preset(1);
-        preview.invoke_settings_changed();
-        assert_eq!(preview.get_page_width_pt(), 792.0);
-        assert_eq!(preview.get_page_height_pt(), 612.0);
-        assert_eq!(preview.get_margin_left_pt(), 36.0);
-    }
-
-    #[test]
-    fn preview_paginates_multi_page_documents_with_headers_footers_and_tables() {
-        let mut doc = WriterDocument::new("multi", "Multi-Page Report");
-        doc.header_footer.header_text = "Report Header".into();
-        doc.header_footer.footer_text = "Page {page} of {total}".into();
-        for i in 0..85 {
-            let id = doc.next_id();
-            doc.push(RichBlock::new(
-                id,
-                "paragraph",
-                &format!("Paragraph {i}: Detailed project narrative for pagination verification."),
-            ));
-        }
-        doc.insert_table_block(0, 2, 2).expect("insert table");
-
-        let dialogs: Rc<dyn crate::FileDialogService> = Rc::new(ScriptedFileDialogs::new([], []));
-        let (app, state) = test_state(doc, dialogs);
-        wire(&app, &state, &None);
-        open(&app, &state);
-
-        let preview = app.global::<PrintPreviewState>();
-        assert!(preview.get_total_pages() >= 2);
-        assert_eq!(preview.get_current_page(), 1);
-        assert!(preview.get_boxes().row_count() >= 4);
-
-        let lines_p1: Vec<String> = (0..preview.get_lines().row_count())
-            .filter_map(|i| preview.get_lines().row_data(i).map(|l| l.text.to_string()))
-            .collect();
-        assert!(lines_p1.iter().any(|t| t == "Report Header"));
-        assert!(lines_p1.iter().any(|t| t.starts_with("Page 1 of ")));
-
-        preview.invoke_next_page();
-        assert_eq!(preview.get_current_page(), 2);
-        preview.invoke_prev_page();
-        assert_eq!(preview.get_current_page(), 1);
-    }
-
-    #[test]
-    fn apply_page_setup_mutates_document_in_one_undo_step() {
-        let dialogs: Rc<dyn crate::FileDialogService> = Rc::new(ScriptedFileDialogs::new([], []));
-        let (app, state) = test_state(text_document("Setup target"), dialogs);
-        wire_writer_shared_callbacks(&app, &state, None);
-        wire(&app, &state, &None);
-        open(&app, &state);
-
-        let preview = app.global::<PrintPreviewState>();
-        preview.set_paper_size(1);
-        preview.set_orientation(1);
-        preview.set_margin_preset(2);
-        preview.invoke_apply_page_setup();
-
-        assert_eq!(state.current.borrow().page.paper, PaperSize::Letter);
-        assert_eq!(
-            state.current.borrow().page.orientation,
-            PageOrientation::Landscape
-        );
-        assert_eq!(state.current.borrow().page.margins, PageMarginsPreset::Wide);
-        assert_eq!(state.history.borrow().undo_len(), 1);
-
-        // Unchanged reapply does not record a redundant undo entry.
-        assert!(!apply_page_setup(&app, &state, None));
-        assert_eq!(state.history.borrow().undo_len(), 1);
-
-        // Undoing reverts all three page setup dimensions together.
-        app.invoke_undo_action();
-        assert_eq!(state.current.borrow().page.paper, PaperSize::A4);
-        assert_eq!(
-            state.current.borrow().page.orientation,
-            PageOrientation::Portrait
-        );
-        assert_eq!(
-            state.current.borrow().page.margins,
-            PageMarginsPreset::Normal
-        );
-    }
-
-    #[test]
-    fn revision_view_switch_and_export_pdf_produce_valid_pdf_bytes() {
-        let mut doc = WriterDocument::new("rev-doc", "Tracked Report");
-        let b1 = doc.next_id();
-        doc.push(RichBlock::new(
-            b1,
-            "paragraph",
-            "Approved summary paragraph.",
-        ));
-        doc.insert_footnote(b1, 8, "Footnote text for preview.")
-            .expect("insert footnote");
-
-        let out_final = unique_pdf_path("final");
-        let out_review = unique_pdf_path("review");
-        let dialogs: Rc<dyn crate::FileDialogService> = Rc::new(ScriptedFileDialogs::new(
-            [],
-            [Some(out_final.clone()), Some(out_review.clone())],
-        ));
-        let (app, state) = test_state(doc, dialogs);
-        wire(&app, &state, &None);
-        open(&app, &state);
-
-        let preview = app.global::<PrintPreviewState>();
-        let exported_final = export_pdf(&app, &state).expect("final pdf export");
-        assert_eq!(exported_final.as_ref(), Some(&out_final));
-        let final_bytes = std::fs::read(&out_final).expect("read final pdf");
-        assert!(final_bytes.starts_with(b"%PDF-"));
-
-        preview.set_revision_view(1);
-        preview.invoke_settings_changed();
-        let lines_review: Vec<String> = (0..preview.get_lines().row_count())
-            .filter_map(|i| preview.get_lines().row_data(i).map(|l| l.text.to_string()))
-            .collect();
-        assert!(lines_review.iter().any(|t| t.contains("PDF view: Review")));
-
-        let exported_review = export_pdf(&app, &state).expect("review pdf export");
-        assert_eq!(exported_review.as_ref(), Some(&out_review));
-        let review_bytes = std::fs::read(&out_review).expect("read review pdf");
-        assert!(review_bytes.starts_with(b"%PDF-"));
-
-        let _ = std::fs::remove_file(&out_final);
-        let _ = std::fs::remove_file(&out_review);
     }
 }

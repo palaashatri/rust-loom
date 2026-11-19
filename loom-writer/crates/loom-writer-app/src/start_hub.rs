@@ -184,8 +184,26 @@ pub(crate) fn save_recent_documents_to(settings_path: &Path, entries: &[RecentDo
 
 /// Record a document path at the front of the recent documents list.
 pub(crate) fn record_recent_document(document_path: &Path) {
+    if cfg!(test) {
+        return;
+    }
     let settings_path = settings_file::path_for_application(APPLICATION_ID);
     record_recent_document_in(&settings_path, document_path);
+}
+
+std::thread_local! {
+    static PENDING_RECENT_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Completes a deferred recent-document open after a dirty-document Save/Discard confirmation.
+pub(crate) fn continue_pending_recent_open(
+    app: &WriterApp,
+    state: &GuiState,
+    menu_service: &Option<Arc<NativeMenuBar>>,
+) {
+    if let Some(path) = PENDING_RECENT_PATH.with(|cell| cell.borrow_mut().take()) {
+        open_document_at_path(app, state, path, menu_service);
+    }
 }
 
 pub(crate) fn record_recent_document_in(settings_path: &Path, document_path: &Path) {
@@ -415,11 +433,13 @@ pub(crate) fn wire(
                 return;
             }
             app.global::<StartHubState>().set_open(false);
+            PENDING_RECENT_PATH.with(|cell| *cell.borrow_mut() = Some(path.clone()));
             if !crate::request_document_replacement(
                 &app,
                 &state,
-                crate::PendingReplacement::OpenDocument,
+                crate::PendingReplacement::OpenRecent,
             ) {
+                PENDING_RECENT_PATH.with(|cell| *cell.borrow_mut() = None);
                 open_document_at_path(&app, &state, path, &menu_service);
             }
         });

@@ -155,6 +155,7 @@ pub(crate) fn apply_pending_docx_import(
     if let Some(pending) = pending {
         replace_opened_document(app, state, pending.path.clone(), pending.document);
         sync_writer_menu_if_present(menu_service, app, state);
+        crate::start_hub::record_recent_document(&pending.path);
         app.set_status_left(SharedString::from(format!(
             "Opened {}",
             pending.path.display()

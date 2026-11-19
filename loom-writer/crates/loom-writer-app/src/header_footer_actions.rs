@@ -50,6 +50,7 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
             global.set_error(SharedString::new());
             global.set_dialog_open(false);
             app.set_status_right("Headers and footers updated".into());
+            app.invoke_focus_page();
         });
     }
     {
@@ -59,6 +60,7 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
                 let global = app.global::<WriterHeaderFooterState>();
                 global.set_error(SharedString::new());
                 global.set_dialog_open(false);
+                app.invoke_focus_page();
             }
         });
     }

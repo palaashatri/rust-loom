@@ -91,6 +91,7 @@ pub(crate) fn register(app: &WriterApp, state: &std::rc::Rc<GuiState>) {
                         }
                         .into(),
                     );
+                    app.invoke_focus_page();
                 }
                 Err(error) => global.set_error(error.into()),
             }
@@ -124,6 +125,7 @@ pub(crate) fn register(app: &WriterApp, state: &std::rc::Rc<GuiState>) {
             global.set_error(SharedString::new());
             global.set_dialog_open(false);
             app.set_status_right("Footnote removed".into());
+            app.invoke_focus_page();
         });
     }
     {
@@ -135,6 +137,7 @@ pub(crate) fn register(app: &WriterApp, state: &std::rc::Rc<GuiState>) {
                 global.set_draft_body(SharedString::new());
                 global.set_error(SharedString::new());
                 global.set_dialog_open(false);
+                app.invoke_focus_page();
             }
         });
     }

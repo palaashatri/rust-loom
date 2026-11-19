@@ -554,6 +554,10 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 comment: None,
                 table: false,
                 sample: false,
+                welcome_guide: false,
+                start_hub: false,
+                print_preview: false,
+                word_count: false,
             };
             let error = run_gui_with_dialogs(
                 &args,

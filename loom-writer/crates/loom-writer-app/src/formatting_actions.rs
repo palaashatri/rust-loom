@@ -544,6 +544,7 @@ pub(crate) fn sync_registry_enablement(
     let inline_enabled = inline_formatting::can_format_selection(document, selection.clone())
         || table_actions::table_format_actions::can_format_selection(document, selection);
     for id in [
+        "format.strikethrough",
         "writer.style.color",
         "writer.style.superscript",
         "writer.style.subscript",
@@ -573,6 +574,12 @@ pub(crate) fn command_specs() -> Vec<CommandSpec> {
             77,
         ),
         (
+            "format.strikethrough",
+            "Strikethrough",
+            "Toggle strikethrough on selected text",
+            33,
+        ),
+        (
             "writer.style.color",
             "Text Color",
             "Choose foreground color for selected text",
@@ -593,12 +600,17 @@ pub(crate) fn command_specs() -> Vec<CommandSpec> {
     ]
     .into_iter()
     .map(|(id, label, description, order)| {
-        CommandSpec::new(id, label)
+        let mut spec = CommandSpec::new(id, label)
             .with_undo_label(label)
             .with_description(description)
             .with_category("format")
             .with_order(order)
-            .with_enabled(false)
+            .with_enabled(false);
+        let shortcut = crate::command_dispatch::shortcut_for_id(id);
+        if !shortcut.is_empty() {
+            spec = spec.with_shortcut(shortcut);
+        }
+        spec
     })
     .collect()
 }

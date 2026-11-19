@@ -4,6 +4,7 @@
 
 use crate::{appearance, view_state, WriterApp};
 use loom_desktop::{CommandStateProjection, DesktopError, NativeMenuBar};
+use slint::ComponentHandle;
 
 /// The standard menu uses this ID for Quit on the current platform.
 pub(crate) const QUIT_COMMAND_ID: &str = if cfg!(target_os = "macos") {
@@ -15,9 +16,11 @@ pub(crate) const QUIT_COMMAND_ID: &str = if cfg!(target_os = "macos") {
 /// Commands Writer's menu bar enables; the same list gates the native menu.
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.new",
+    "file.start_hub",
     "file.open",
     "file.save",
     "file.save_as",
+    "file.print_preview",
     "file.export_pdf",
     "file.export_docx",
     "file.export_md",
@@ -26,11 +29,18 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "edit.cut",
     "edit.copy",
     "edit.paste",
+    "edit.find",
+    "edit.replace",
     "app.palette",
     "app.quit",
     "loom writer.quit",
+    "help.welcome",
+    "help.shortcuts",
     "view.inspector",
     "view.navigator",
+    "view.zoom_in",
+    "view.zoom_out",
+    "view.zoom_actual",
     "view.appearance.system",
     "view.appearance.light",
     "view.appearance.dark",
@@ -40,10 +50,13 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "format.bold",
     "format.italic",
     "format.underline",
+    "format.strikethrough",
     "list.level.increase",
     "list.level.decrease",
     "insert.page_break",
     "insert.line_break",
+    "insert.header_footer",
+    "insert.comment",
     "writer.footnotes",
     "insert.table",
     "insert.chart",
@@ -57,6 +70,8 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.delete_column",
     "table.merge_cells",
     "table.split_cell",
+    "writer.review.open",
+    "review.word_count",
 ];
 
 loom_desktop::local_menu_bindings!(WriterApp, SUPPORTED_COMMANDS, set_status_right);
@@ -122,6 +137,10 @@ pub(crate) fn menu_projection(
     }
 
     view_state::project(&mut projection, app);
+    if let Some(mut review) = projection.get("writer.review.open").cloned() {
+        review.checked = Some(app.global::<crate::WriterReviewState>().get_panel_open());
+        projection.insert(review);
+    }
     loom_desktop::appearance::project_checks(&mut projection, appearance::current(app));
     loom_desktop::window_frame::project_checks(&mut projection, crate::window_chrome::current(app));
 
@@ -140,19 +159,43 @@ fn key_shortcut(key: &str, shift: bool) -> loom_desktop::MenuShortcut {
 
 /// Writer's menu bar with only the commands Writer actually handles enabled.
 pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
-    use loom_desktop::{build_standard_menu_bar, Menu, MenuItem, MenuShortcut};
+    use loom_desktop::{build_standard_menu_bar, CommandState, Menu, MenuItem, MenuShortcut};
     let mut menu_bar = build_standard_menu_bar(
         "Loom Writer",
         vec![
+            MenuItem::action_with_shortcut(
+                "file.start_hub",
+                "Start Hub...",
+                MenuShortcut::primary_shift("O"),
+            ),
+            MenuItem::Separator,
+            MenuItem::action_with_shortcut(
+                "file.print_preview",
+                "Print Preview...",
+                MenuShortcut::primary("P"),
+            ),
+            MenuItem::Separator,
             MenuItem::action_with_shortcut(
                 "file.export_pdf",
                 "Export to PDF...",
                 MenuShortcut::primary("E"),
             ),
-            MenuItem::action("file.export_docx", "Export to Word..."),
+            MenuItem::action_with_shortcut(
+                "file.export_docx",
+                "Export to Word...",
+                MenuShortcut::primary_shift("D"),
+            ),
             MenuItem::action("file.export_md", "Export to Markdown..."),
         ],
-        vec![],
+        vec![
+            MenuItem::Separator,
+            MenuItem::action_with_shortcut("edit.find", "Find...", MenuShortcut::primary("F")),
+            MenuItem::action_with_shortcut(
+                "edit.replace",
+                "Find & Replace...",
+                MenuShortcut::primary("H"),
+            ),
+        ],
         [
             vec![
                 MenuItem::check("view.inspector", "Format Inspector", false),
@@ -181,6 +224,11 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                         "Underline",
                         MenuShortcut::primary("U"),
                     ),
+                    MenuItem::action_with_shortcut(
+                        "format.strikethrough",
+                        "Strikethrough",
+                        MenuShortcut::primary_shift("X"),
+                    ),
                     MenuItem::Separator,
                     MenuItem::action_with_shortcut(
                         "list.level.increase",
@@ -207,7 +255,18 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                         "Line Break",
                         key_shortcut("Enter", true),
                     ),
-                    MenuItem::action("writer.footnotes", "Footnotes…"),
+                    MenuItem::Separator,
+                    MenuItem::action_with_shortcut(
+                        "insert.header_footer",
+                        "Headers & Footers…",
+                        MenuShortcut::primary_alt("H"),
+                    ),
+                    MenuItem::action_with_shortcut(
+                        "writer.footnotes",
+                        "Footnotes…",
+                        MenuShortcut::primary_alt("F"),
+                    ),
+                    MenuItem::action("insert.comment", "Comment"),
                 ],
             ),
             Menu::new(
@@ -257,10 +316,33 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                     ),
                 ],
             ),
+            Menu::new(
+                "Review",
+                vec![
+                    MenuItem::check("writer.review.open", "Tracked Changes…", false),
+                    MenuItem::action_with_shortcut(
+                        "review.word_count",
+                        "Word Count…",
+                        MenuShortcut::primary_shift("C"),
+                    ),
+                ],
+            ),
         ],
     );
-    // Application/window/help entries stay disabled until a real host bridge
-    // handles them.
+    menu_bar.apply_command_state(
+        &CommandState::action("help.shortcuts", "Keyboard Shortcuts")
+            .with_shortcut(MenuShortcut::primary_shift("P")),
+    );
+    if let Some(help) = menu_bar.menus.iter_mut().find(|menu| menu.title == "Help") {
+        help.items.insert(
+            0,
+            MenuItem::action_with_shortcut(
+                "help.welcome",
+                "Welcome Guide",
+                MenuShortcut::primary_shift("/"),
+            ),
+        );
+    }
     menu_bar.disable_items_except(SUPPORTED_COMMANDS);
     menu_bar
 }
