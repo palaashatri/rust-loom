@@ -113,6 +113,7 @@ export component WriterFontField inherits Rectangle {
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
         spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
         Text {
             min-width: 0px;
             text: FontPicker.current;
@@ -142,6 +143,7 @@ export component WriterFontField inherits Rectangle {
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
         spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
         Icon {
             size: Theme.tokens.metrics.icon-small;
             icon: FontPicker.open ? "chevron-up" : "chevron-down";
@@ -175,8 +177,14 @@ export component WriterFontField inherits Rectangle {
 /// trackpad scroll, and the highlight is always kept in view.
 export component WriterFontList inherits Rectangle {
     property <length> row-height: max(24px, Theme.scaled-control-height);
-    property <int> page-rows: max(1, Math.floor(scroller.height / root.row-height) - 1);
+    property <length> content-height: FontPicker.lines.length * root.row-height;
+    property <length> list-height: FontPicker.lines.length > 0
+        ? min(260px, max(root.row-height, root.content-height))
+        : 0px;
+    property <length> max-scroll: max(0px, root.content-height - root.list-height);
+    property <int> page-rows: max(1, Math.floor(root.list-height / root.row-height) - 1);
     height: layout.preferred-height;
+    clip: true;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: Theme.palette().border-strong;
@@ -186,8 +194,10 @@ export component WriterFontList inherits Rectangle {
 
     in property <int> focus-tick: FontPicker.search-focus-tick;
     in property <int> line-tick: FontPicker.selected-line;
+    in property <string> query-text: FontPicker.query;
     changed focus-tick => { query.focus-input(); }
     changed line-tick => { root.reveal(); }
+    changed query-text => { scroller.viewport-y = 0px; }
     init => { query.focus-input(); root.reveal(); }
 
     /// Scrolls the minimum that brings the highlighted line fully into view.
@@ -196,9 +206,9 @@ export component WriterFontList inherits Rectangle {
         let top = FontPicker.selected-line * root.row-height;
         let bottom = top + root.row-height;
         if (top < -scroller.viewport-y) {
-            scroller.viewport-y = -top;
-        } else if (bottom > -scroller.viewport-y + scroller.height) {
-            scroller.viewport-y = scroller.height - bottom;
+            scroller.viewport-y = clamp(-top, -root.max-scroll, 0px);
+        } else if (bottom > -scroller.viewport-y + root.list-height) {
+            scroller.viewport-y = clamp(root.list-height - bottom, -root.max-scroll, 0px);
         }
     }
 
@@ -238,19 +248,33 @@ export component WriterFontList inherits Rectangle {
             }
 
             Rectangle {
-                height: FontPicker.lines.length > 0 ? min(280px, max(44px, font-list-layout.preferred-height)) : 0px;
+                height: root.list-height;
                 accessible-role: list;
                 accessible-label: "Fonts";
                 clip: true;
 
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    scroll-event(event) => {
+                        if (root.max-scroll > 0px) {
+                            scroller.viewport-y = clamp(scroller.viewport-y + event.delta-y, -root.max-scroll, 0px);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
                 scroller := Flickable {
+                    interactive: false;
                     width: parent.width;
                     height: parent.height;
                     viewport-width: self.width;
-                    viewport-height: max(self.height, font-list-layout.preferred-height);
+                    viewport-height: max(self.height, root.content-height);
 
                     font-list-layout := VerticalLayout {
                         width: scroller.viewport-width;
+                        height: root.content-height;
                         alignment: start;
                         for line in FontPicker.lines : Rectangle {
                             height: root.row-height;
@@ -340,15 +364,42 @@ export component WriterFontList inherits Rectangle {
                     }
                 }
 
-                // Scrollbar thumb: shown only when the list overflows its window.
-                if font-list-layout.preferred-height > scroller.height : Rectangle {
+                // Interactive scrollbar track: shown only when the list overflows its window.
+                if root.max-scroll > 0px : Rectangle {
+                    property <length> thumb-h: max(24px, (parent.height - 4px) * root.list-height / root.content-height);
+                    property <float> scroll-ratio: clamp(-scroller.viewport-y / root.max-scroll, 0.0, 1.0);
                     x: Theme.rtl ? 1px : parent.width - self.width - 1px;
-                    y: 2px + (parent.height - 4px - self.height) * (scroller.viewport-y / (scroller.height - scroller.viewport-height));
-                    width: 4px;
-                    height: max(24px, (parent.height - 4px) * scroller.height / scroller.viewport-height);
-                    border-radius: 2px;
-                    background: Theme.palette().ink-secondary;
-                    opacity: 0.55;
+                    y: 0px;
+                    width: 10px;
+                    height: parent.height;
+                    background: transparent;
+
+                    Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        y: 2px + (parent.height - 4px - self.height) * parent.scroll-ratio;
+                        width: 4px;
+                        height: parent.thumb-h;
+                        border-radius: 2px;
+                        background: Theme.palette().ink-secondary;
+                        opacity: track-touch.has-hover || track-touch.pressed ? 0.85 : 0.55;
+                    }
+
+                    track-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down || self.pressed) {
+                                let ratio = clamp((self.mouse-y - parent.thumb-h / 2) / max(1px, parent.height - parent.thumb-h), 0.0, 1.0);
+                                scroller.viewport-y = -ratio * root.max-scroll;
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                let ratio = clamp((self.mouse-y - parent.thumb-h / 2) / max(1px, parent.height - parent.thumb-h), 0.0, 1.0);
+                                scroller.viewport-y = -ratio * root.max-scroll;
+                            }
+                        }
+                    }
                 }
             }
 
