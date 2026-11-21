@@ -88,11 +88,22 @@ component QuickStartCard inherits Rectangle {
     border-radius: Theme.tokens.metrics.radius-medium;
     background: card-touch.pressed ? Theme.palette().surface-sunken
         : card-touch.has-hover ? Theme.palette().surface-raised : Theme.palette().panel;
-    border-width: 1px;
-    border-color: card-touch.has-hover ? Theme.palette().accent : Theme.palette().border;
+    border-width: card-focus.has-focus ? 2px : 1px;
+    border-color: card-focus.has-focus ? Theme.palette().focus
+        : card-touch.has-hover ? Theme.palette().accent : Theme.palette().border;
     accessible-role: button;
     accessible-label: "Quick Start " + root.label;
     accessible-action-default => { root.clicked(); }
+
+    card-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     card-col := VerticalLayout {
         padding: Theme.tokens.space.sm; spacing: 6px; alignment: center; cross-axis-alignment: center;

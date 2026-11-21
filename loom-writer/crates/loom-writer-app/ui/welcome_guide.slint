@@ -309,7 +309,7 @@ export component WelcomeGuideModal inherits Rectangle {
                                 horizontal-alignment: Theme.rtl ? right : left;
                             }
 
-                            Flickable {
+                            lesson-scroll := Flickable {
                                 vertical-stretch: 1;
                                 viewport-height: body-col.preferred-height;
 
@@ -388,6 +388,7 @@ export component WelcomeGuideModal inherits Rectangle {
                                 height: 24px;
                                 accessible-role: button;
                                 accessible-label: "Welcome Guide Step " + (root.dot-step(idx) + 1);
+                                accessible-action-default => { WelcomeGuideState.step = root.dot-step(idx); }
                                 clicked => { WelcomeGuideState.step = root.dot-step(idx); }
 
                                 Rectangle {
@@ -397,7 +398,7 @@ export component WelcomeGuideModal inherits Rectangle {
                                     y: (parent.height - self.height) / 2;
                                     border-radius: 4px;
                                     background: root.dot-step(idx) == root.clamped-step()
-                                        ? Theme.palette().accent : Theme.palette().border-strong;
+                                        ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 }
                             }
                         }

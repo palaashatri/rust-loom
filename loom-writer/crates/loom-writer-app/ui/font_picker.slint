@@ -368,6 +368,8 @@ export component WriterFontList inherits Rectangle {
                 if root.max-scroll > 0px : Rectangle {
                     property <length> thumb-h: max(24px, (parent.height - 4px) * root.list-height / root.content-height);
                     property <float> scroll-ratio: clamp(-scroller.viewport-y / root.max-scroll, 0.0, 1.0);
+                    property <length> thumb-y: 2px + (parent.height - 4px - self.thumb-h) * self.scroll-ratio;
+                    property <length> grab-offset: 0px;
                     x: Theme.rtl ? 1px : parent.width - self.width - 1px;
                     y: 0px;
                     width: 10px;
@@ -376,7 +378,7 @@ export component WriterFontList inherits Rectangle {
 
                     Rectangle {
                         x: (parent.width - self.width) / 2;
-                        y: 2px + (parent.height - 4px - self.height) * parent.scroll-ratio;
+                        y: parent.thumb-y;
                         width: 4px;
                         height: parent.thumb-h;
                         border-radius: 2px;
@@ -388,14 +390,19 @@ export component WriterFontList inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         pointer-event(event) => {
-                            if (event.kind == PointerEventKind.down || self.pressed) {
-                                let ratio = clamp((self.mouse-y - parent.thumb-h / 2) / max(1px, parent.height - parent.thumb-h), 0.0, 1.0);
-                                scroller.viewport-y = -ratio * root.max-scroll;
+                            if (event.kind == PointerEventKind.down) {
+                                if (self.mouse-y >= parent.thumb-y && self.mouse-y <= parent.thumb-y + parent.thumb-h) {
+                                    parent.grab-offset = self.mouse-y - parent.thumb-y;
+                                } else {
+                                    parent.grab-offset = parent.thumb-h / 2;
+                                    let ratio = clamp((self.mouse-y - parent.grab-offset - 2px) / max(1px, parent.height - 4px - parent.thumb-h), 0.0, 1.0);
+                                    scroller.viewport-y = -ratio * root.max-scroll;
+                                }
                             }
                         }
                         moved => {
                             if (self.pressed) {
-                                let ratio = clamp((self.mouse-y - parent.thumb-h / 2) / max(1px, parent.height - parent.thumb-h), 0.0, 1.0);
+                                let ratio = clamp((self.mouse-y - parent.grab-offset - 2px) / max(1px, parent.height - 4px - parent.thumb-h), 0.0, 1.0);
                                 scroller.viewport-y = -ratio * root.max-scroll;
                             }
                         }

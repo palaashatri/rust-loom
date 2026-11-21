@@ -373,8 +373,18 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             );
             let global = app.global::<WriterFormatState>();
             global.set_color_error(SharedString::new());
-            let initial_input = inline
-                .foreground_color
+            let pending_color = if selection.is_collapsed()
+                && table_actions::get_table_cell_selection_range().is_none()
+            {
+                typing_style::at(selection.focus).color
+            } else {
+                None
+            };
+            let initial_color = match pending_color {
+                Some(color) => color,
+                None => inline.foreground_color,
+            };
+            let initial_input = initial_color
                 .as_deref()
                 .and_then(parse_hex_rgb)
                 .map(format_hex_rgb)
@@ -650,10 +660,11 @@ fn list_marker_index_for_selection(
     let marker = document.blocks[first].style.list_marker;
     match list_style_index {
         1 => match marker {
+            loom_text::ListMarkerStyle::Disc => 0,
             loom_text::ListMarkerStyle::Circle => 1,
             loom_text::ListMarkerStyle::Square => 2,
             loom_text::ListMarkerStyle::Dash => 3,
-            _ => 0,
+            _ => (document.blocks[first].effective_list_level() as i32) % 3,
         },
         2 => match marker {
             loom_text::ListMarkerStyle::LowerAlpha => 1,
