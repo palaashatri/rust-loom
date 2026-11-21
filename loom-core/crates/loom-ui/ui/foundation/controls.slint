@@ -272,6 +272,7 @@ export component LoomTextField inherits VerticalLayout {
             accessible-role: AccessibleRole.text-input;
             accessible-label: root.label;
             accessible-description: root.description != "" ? root.description : root.title != "" ? root.title : root.label;
+            accessible-action-default => { input.focus(); }
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
@@ -358,6 +359,7 @@ export component LoomSearchField inherits VerticalLayout {
             accessible-role: AccessibleRole.text-input;
             accessible-label: root.label;
             accessible-description: root.description != "" ? root.description : root.title != "" ? root.title : root.label;
+            accessible-action-default => { input.focus(); }
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;

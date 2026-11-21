@@ -6,9 +6,12 @@
 
 use super::*;
 use loom_sheets_core::style::CellStyle;
+use loom_ui::color_palette::{
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+};
+use slint::Model;
 
-/// The seven text colours the inspector offers, as `0xRRGGBB`. Dark enough to
-/// read on the white paper in every theme; the eighth swatch is "Automatic".
+/// The seven text colours offered for shortcuts and conditional formatting, as `0xRRGGBB`.
 pub(crate) const TEXT_PALETTE: [u32; 7] = [
     0x00C6_2828,
     0x00E6_5100,
@@ -19,9 +22,6 @@ pub(crate) const TEXT_PALETTE: [u32; 7] = [
     0x0000_0000,
 ];
 
-/// Names for the status line, in palette order.
-const NAMES: [&str; 7] = ["red", "orange", "green", "blue", "purple", "gray", "black"];
-
 /// Palette slot of a style's text colour, or -1 for automatic or a colour that
 /// came from an imported file and is not one of the seven.
 pub(crate) fn slot_for(color: Option<u32>) -> i32 {
@@ -30,17 +30,103 @@ pub(crate) fn slot_for(color: Option<u32>) -> i32 {
         .map_or(-1, |slot| slot as i32)
 }
 
-/// Show the selected cell's text colour and wrap in the inspector.
-pub(crate) fn publish_selected(app: &SheetsApp, style: CellStyle) {
-    let ink = app.global::<CellInk>();
-    ink.set_selected_slot(slot_for(style.text_color));
-    ink.set_selected_wrap(style.wrap);
+fn ensure_swatches_populated(ink: &CellInk<'_>) {
+    if ink.get_swatches().row_count() == OFFICE_SWATCHES.len() {
+        return;
+    }
+    ink.set_swatches(ModelRc::new(VecModel::from(
+        OFFICE_SWATCHES
+            .iter()
+            .map(|swatch| LoomColorSwatch {
+                name: SharedString::from(swatch.name),
+                hex: SharedString::from(swatch.hex),
+                swatch: color_from_rgb(swatch.rgb),
+            })
+            .collect::<Vec<_>>(),
+    )));
+}
+
+fn ensure_legacy_palette_populated(ink: &CellInk<'_>) {
+    if ink.get_palette().row_count() == TEXT_PALETTE.len() {
+        return;
+    }
     ink.set_palette(ModelRc::new(VecModel::from(
         TEXT_PALETTE
             .iter()
-            .map(|&rgb| slint::Color::from_rgb_u8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
+            .map(|&rgb| color_from_rgb(rgb))
             .collect::<Vec<_>>(),
     )));
+}
+
+fn is_mixed_text_color(sheet: &Sheet, range: CellRange, focus_color: Option<u32>) -> bool {
+    if range.start == range.end {
+        return false;
+    }
+    let span_rows = (range.end.row - range.start.row + 1) as u64;
+    let span_cols = (range.end.col - range.start.col + 1) as u64;
+    let total_cells = span_rows.saturating_mul(span_cols);
+    if total_cells <= 4096 && total_cells <= sheet.styles.len() as u64 + 16 {
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                let color = sheet
+                    .cell_style(CellRef { row, col })
+                    .text_color
+                    .map(|rgb| rgb & 0x00FF_FFFF);
+                if color != focus_color {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    let mut matched_styled = 0u64;
+    for (&cell, style) in sheet.styles.iter() {
+        if range.contains(cell) {
+            matched_styled += 1;
+            if style.text_color.map(|rgb| rgb & 0x00FF_FFFF) != focus_color {
+                return true;
+            }
+        }
+    }
+    // Any cell in `range` absent from `sheet.styles` defaults to Automatic (`None`).
+    focus_color.is_some() && matched_styled < total_cells
+}
+
+/// Show the selected cell's text colour and wrap in the inspector.
+pub(crate) fn publish_selected(app: &SheetsApp, sheet: &Sheet, range: CellRange, style: CellStyle) {
+    let ink = app.global::<CellInk>();
+    ensure_swatches_populated(&ink);
+    ensure_legacy_palette_populated(&ink);
+
+    let focus_color = style.text_color.map(|rgb| rgb & 0x00FF_FFFF);
+    let mixed = is_mixed_text_color(sheet, range, focus_color);
+    let default_color = app.global::<Theme>().invoke_palette().paper_ink;
+
+    ink.set_selected_slot(if mixed { -1 } else { slot_for(focus_color) });
+    ink.set_selected_wrap(style.wrap);
+    ink.set_selected_mixed(mixed);
+    ink.set_hex_error(SharedString::new());
+
+    if mixed {
+        ink.set_selected_hex(SharedString::new());
+        ink.set_selected_color(focus_color.map_or(default_color, color_from_rgb));
+        ink.set_selected_label(SharedString::from("Mixed"));
+        ink.set_hex_input(SharedString::new());
+    } else if let Some(rgb) = focus_color {
+        let hex = format_hex_rgb(rgb);
+        let label = swatch_name_for_rgb(rgb)
+            .map(str::to_string)
+            .unwrap_or_else(|| hex.clone());
+        ink.set_selected_hex(SharedString::from(hex.as_str()));
+        ink.set_selected_color(color_from_rgb(rgb));
+        ink.set_selected_label(SharedString::from(label.as_str()));
+        ink.set_hex_input(SharedString::from(hex.as_str()));
+    } else {
+        ink.set_selected_hex(SharedString::new());
+        ink.set_selected_color(default_color);
+        ink.set_selected_label(SharedString::from("Automatic"));
+        ink.set_hex_input(SharedString::new());
+    }
 }
 
 fn restyle(
@@ -163,26 +249,62 @@ pub(crate) fn toggle_selection_wrap(
     true
 }
 
-fn apply_choice(app: &SheetsApp, state: &GuiState, menu_service: &NativeMenuBar, slot: i32) {
-    let color = usize::try_from(slot)
-        .ok()
-        .and_then(|slot| TEXT_PALETTE.get(slot).copied());
+fn status_label_for(color: Option<u32>) -> String {
+    match color.map(|rgb| rgb & 0x00FF_FFFF) {
+        None => "Text color Automatic".to_string(),
+        Some(rgb) => {
+            let label = swatch_name_for_rgb(rgb)
+                .map(str::to_string)
+                .unwrap_or_else(|| format_hex_rgb(rgb));
+            format!("Text color {label}")
+        }
+    }
+}
+
+fn apply_text_color(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &NativeMenuBar,
+    color: Option<u32>,
+) {
+    let ink = app.global::<CellInk>();
+    ink.set_hex_error(SharedString::new());
+    ink.set_palette_open(false);
+
     let selection = selection_from_app(app);
+    let normalized = color.map(|rgb| rgb & 0x00FF_FFFF);
     if set_selection_text_color(
         &mut state.current.borrow_mut(),
         &mut state.undo_stack.borrow_mut(),
         &mut state.redo_stack.borrow_mut(),
         selection.range(),
-        color,
+        normalized,
     ) {
         apply_sheet(app, state);
         sync_menu_state(menu_service, app, state);
-        let name = usize::try_from(slot)
-            .ok()
-            .and_then(|slot| NAMES.get(slot))
-            .map_or("automatic", |name| name);
-        app.set_status_left(SharedString::from(format!("Text colour {name}")));
+        app.set_status_left(SharedString::from(status_label_for(normalized)));
+    } else {
+        ink.set_hex_input(SharedString::from(
+            normalized.map(format_hex_rgb).unwrap_or_default(),
+        ));
     }
+}
+
+fn apply_choice(app: &SheetsApp, state: &GuiState, menu_service: &NativeMenuBar, slot: i32) {
+    let color = usize::try_from(slot)
+        .ok()
+        .and_then(|slot| TEXT_PALETTE.get(slot).copied());
+    apply_text_color(app, state, menu_service, color);
+}
+
+fn apply_hex(app: &SheetsApp, state: &GuiState, menu_service: &NativeMenuBar, raw: &str) {
+    let Some(rgb) = parse_hex_rgb(raw) else {
+        app.global::<CellInk>().set_hex_error(SharedString::from(
+            "Enter a valid #RRGGBB or #RRGGBBAA hex color.",
+        ));
+        return;
+    };
+    apply_text_color(app, state, menu_service, Some(rgb));
 }
 
 fn apply_wrap(app: &SheetsApp, state: &GuiState, menu_service: &NativeMenuBar) {
@@ -206,6 +328,8 @@ fn apply_wrap(app: &SheetsApp, state: &GuiState, menu_service: &NativeMenuBar) {
 
 pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<NativeMenuBar>) {
     let ink = app.global::<CellInk>();
+    ensure_swatches_populated(&ink);
+    ensure_legacy_palette_populated(&ink);
     {
         let (state, app_ref, menu_service) = (state.clone(), app.as_weak(), menu_service.clone());
         ink.on_color_requested(move |slot| {
@@ -214,6 +338,28 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                     return;
                 }
                 apply_choice(&app, &state, &menu_service, slot);
+            }
+        });
+    }
+    {
+        let (state, app_ref, menu_service) = (state.clone(), app.as_weak(), menu_service.clone());
+        ink.on_color_hex_requested(move |raw| {
+            if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
+                apply_hex(&app, &state, &menu_service, raw.as_str());
+            }
+        });
+    }
+    {
+        let (state, app_ref, menu_service) = (state.clone(), app.as_weak(), menu_service.clone());
+        ink.on_automatic_requested(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if crate::mutation_guard::refused(&app, &state) {
+                    return;
+                }
+                apply_text_color(&app, &state, &menu_service, None);
             }
         });
     }

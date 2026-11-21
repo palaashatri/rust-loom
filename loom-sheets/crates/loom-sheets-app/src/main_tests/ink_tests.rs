@@ -8,6 +8,7 @@ const A1: CellRef = CellRef { row: 0, col: 0 };
 
 fn wired(cells: &[(&str, &str)]) -> keyboard_flow_tests::Session {
     let s = launched(cells);
+    crate::register_history_actions(&s.app, &s.state, &s.menu);
     crate::ink_actions::wire(&s.app, &s.state, &s.menu);
     s
 }
@@ -123,26 +124,228 @@ fn a_wrapped_cell_stays_in_its_own_box_instead_of_spilling_into_neighbours() {
 #[test]
 fn the_inspector_offers_named_swatches_for_every_text_colour() {
     let s = wired(&[("A1", "hello")]);
-    s.app.global::<CellInk>().invoke_wrap_toggled();
-    s.app.global::<CellInk>().invoke_wrap_toggled();
-    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
-    for name in [
-        "Text red",
-        "Text orange",
-        "Text green",
-        "Text blue",
-        "Text purple",
-        "Text gray",
-        "Text black",
-        "Automatic text colour",
-        "Wrap text",
-    ] {
+    s.app.set_inspector_tab(1);
+    let ink = s.app.global::<CellInk>();
+    assert_eq!(
+        ink.get_swatches().row_count(),
+        48,
+        "CellInk.swatches must expose all 48 shared office swatches"
+    );
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render collapsed");
+    for name in ["Text Color", "Wrap text"] {
         assert!(
             ElementHandle::find_by_accessible_label(&s.app, name)
                 .next()
                 .is_some(),
             "no control is named {name:?}"
         );
+    }
+
+    ink.set_palette_open(true);
+    let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render open palette");
+    for name in [
+        "Text color Automatic",
+        "Text color Black (#000000)",
+        "Text color Teal (#0F766E)",
+        "Text color Royal Blue (#1565C0)",
+        "Text color Soft Rose (#FCE7F3)",
+        "Text color hex",
+        "Apply",
+    ] {
+        assert!(
+            ElementHandle::find_by_accessible_label(&s.app, name)
+                .next()
+                .is_some(),
+            "no open-palette control is named {name:?}"
+        );
+    }
+}
+
+#[test]
+fn color_hex_requested_applies_office_swatch_and_custom_hex_and_rejects_invalid() {
+    let s = wired(&[("A1", "hello")]);
+    let ink = s.app.global::<CellInk>();
+
+    // Non-7-slot office swatch: Teal (#0F766E).
+    ink.set_palette_open(true);
+    ink.invoke_color_hex_requested("#0F766E".into());
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x000F_766E)
+    );
+    assert_eq!(ink.get_selected_hex().as_str(), "#0F766E");
+    assert_eq!(ink.get_selected_label().as_str(), "Teal");
+    assert_eq!(ink.get_selected_slot(), -1);
+    assert!(!ink.get_selected_mixed());
+    assert!(!ink.get_palette_open(), "valid swatch pick closes palette");
+    assert_eq!(ink.get_hex_error().as_str(), "");
+    assert_eq!(s.app.get_status_left().as_str(), "Text color Teal");
+    assert_eq!(s.state.undo_stack.borrow().len(), 1);
+
+    // Custom #RRGGBBAA hex with whitespace.
+    ink.set_palette_open(true);
+    ink.invoke_color_hex_requested("  #123456ff  ".into());
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x0012_3456)
+    );
+    assert_eq!(ink.get_selected_hex().as_str(), "#123456");
+    assert_eq!(ink.get_selected_label().as_str(), "#123456");
+    assert!(!ink.get_palette_open(), "valid custom hex closes palette");
+    assert_eq!(ink.get_hex_error().as_str(), "");
+    assert_eq!(s.app.get_status_left().as_str(), "Text color #123456");
+    assert_eq!(s.state.undo_stack.borrow().len(), 2);
+
+    // Invalid hex sets hex-error without mutating the sheet or closing the palette.
+    ink.set_palette_open(true);
+    ink.set_hex_input("not-hex".into());
+    ink.invoke_color_hex_requested("not-hex".into());
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x0012_3456)
+    );
+    assert!(
+        !ink.get_hex_error().is_empty(),
+        "invalid hex must set hex-error"
+    );
+    assert!(
+        ink.get_palette_open(),
+        "invalid hex must leave palette open"
+    );
+    assert_eq!(ink.get_hex_input().as_str(), "not-hex");
+    assert_eq!(s.state.undo_stack.borrow().len(), 2);
+}
+
+#[test]
+fn automatic_requested_and_undo_redo_roundtrip() {
+    let s = wired(&[("A1", "hello")]);
+    let ink = s.app.global::<CellInk>();
+
+    ink.set_palette_open(true);
+    ink.invoke_color_hex_requested("#1E3A8A".into());
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x001E_3A8A)
+    );
+    assert_eq!(ink.get_selected_label().as_str(), "Navy");
+
+    ink.set_palette_open(true);
+    ink.invoke_automatic_requested();
+    assert_eq!(s.state.current.borrow().cell_style(A1).text_color, None);
+    assert_eq!(ink.get_selected_hex().as_str(), "");
+    assert_eq!(ink.get_selected_label().as_str(), "Automatic");
+    assert!(!ink.get_palette_open());
+    assert_eq!(s.app.get_status_left().as_str(), "Text color Automatic");
+    assert_eq!(s.state.undo_stack.borrow().len(), 2);
+
+    s.app.invoke_undo();
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x001E_3A8A)
+    );
+    assert_eq!(ink.get_selected_hex().as_str(), "#1E3A8A");
+    assert_eq!(ink.get_selected_label().as_str(), "Navy");
+
+    s.app.invoke_undo();
+    assert_eq!(s.state.current.borrow().cell_style(A1).text_color, None);
+    assert_eq!(ink.get_selected_label().as_str(), "Automatic");
+
+    s.app.invoke_redo();
+    assert_eq!(
+        s.state.current.borrow().cell_style(A1).text_color,
+        Some(0x001E_3A8A)
+    );
+    assert_eq!(ink.get_selected_hex().as_str(), "#1E3A8A");
+
+    s.app.invoke_redo();
+    assert_eq!(s.state.current.borrow().cell_style(A1).text_color, None);
+    assert_eq!(ink.get_selected_label().as_str(), "Automatic");
+}
+
+#[test]
+fn mixed_selection_text_color_reports_mixed_until_unified() {
+    let s = wired(&[("A1", "one"), ("B1", "two")]);
+    let ink = s.app.global::<CellInk>();
+    let b1 = CellRef::parse("B1").unwrap();
+
+    ink.invoke_color_hex_requested("#1565C0".into());
+    assert!(!ink.get_selected_mixed());
+    assert_eq!(ink.get_selected_label().as_str(), "Royal Blue");
+
+    let range = CellRange::parse("A1:B1").unwrap();
+    let sel = GridSelection::new(A1, b1);
+    {
+        let sheet = s.state.current.borrow();
+        update_selection_range(&s.app, &sheet, &evaluate(&sheet), sel);
+    }
+    assert!(ink.get_selected_mixed());
+    assert_eq!(ink.get_selected_label().as_str(), "Mixed");
+    assert_eq!(ink.get_selected_hex().as_str(), "");
+
+    ink.invoke_color_hex_requested("#0F766E".into());
+    assert!(!ink.get_selected_mixed());
+    assert_eq!(ink.get_selected_label().as_str(), "Teal");
+    assert_eq!(ink.get_selected_hex().as_str(), "#0F766E");
+    for cell in range.cells() {
+        assert_eq!(
+            s.state.current.borrow().cell_style(cell).text_color,
+            Some(0x000F_766E)
+        );
+    }
+}
+
+#[test]
+fn inspector_text_color_palette_fits_across_themes_scales_and_rtl() {
+    for theme in ["light", "dark", "high-contrast"] {
+        for scale in [1.0f32, 1.5, 2.0] {
+            for rtl in [false, true] {
+                let s = wired(&[("A1", "hello")]);
+                apply_theme(&s.app, theme);
+                configure_direction(&s.app, rtl);
+                s.app.set_template_text_scale(scale);
+                s.app.set_inspector_tab(1);
+                s.app.global::<CellInk>().set_palette_open(true);
+                let _ = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render");
+                let panel = ElementHandle::find_by_element_id(&s.app, "SheetsApp::inspector-panel")
+                    .next()
+                    .expect("inspector panel");
+                let left = panel.absolute_position().x + 15.5;
+                let right = panel.absolute_position().x + panel.size().width - 15.5;
+                let well = ElementHandle::find_by_accessible_label(&s.app, "Text Color")
+                    .find(|e| e.size().width > 0.5 && e.size().height > 0.5)
+                    .unwrap_or_else(|| {
+                        panic!("{theme} {scale}x rtl={rtl}: missing \"Text Color\"")
+                    });
+                let well_pos = well.absolute_position();
+                let well_size = well.size();
+                assert!(
+                    well_pos.x >= left && well_pos.x + well_size.width <= right,
+                    "{theme} {scale}x rtl={rtl}: \"Text Color\" overflows inspector padding ({well_pos:?}, {well_size:?}) outside {left}..{right}"
+                );
+                if scale > 1.0 {
+                    well.scroll(0.0, -220.0);
+                    let _ =
+                        snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render scrolled");
+                }
+                for label in [
+                    "Text color Automatic",
+                    "Text color Black (#000000)",
+                    "Text color White (#FFFFFF)",
+                    "Text color hex",
+                    "Apply",
+                ] {
+                    let handle = ElementHandle::find_by_accessible_label(&s.app, label)
+                        .find(|e| e.size().width > 0.5 && e.size().height > 0.5)
+                        .unwrap_or_else(|| panic!("{theme} {scale}x rtl={rtl}: missing {label:?}"));
+                    let pos = handle.absolute_position();
+                    let size = handle.size();
+                    assert!(
+                        pos.x >= left && pos.x + size.width <= right,
+                        "{theme} {scale}x rtl={rtl}: {label:?} overflows inspector padding ({pos:?}, {size:?}) outside {left}..{right}"
+                    );
+                }
+            }
+        }
     }
 }
 

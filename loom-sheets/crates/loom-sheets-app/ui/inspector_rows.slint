@@ -1,7 +1,10 @@
 // Rows of the Sheets inspector. Each row lists its parts from the reading-start
 // edge, so right-to-left is the exact mirror image of left-to-right: label,
 // then field, then the buttons; or buttons, field, label.
-import { LoomTextField, LoomNumericField, LoomButton, LoomIconButton, LoomSectionHeader } from "foundation.slint";
+import {
+    LoomTextField, LoomNumericField, LoomButton, LoomIconButton,
+    LoomSectionHeader, LoomColorWell, LoomColorPalette,
+} from "foundation.slint";
 
 import { Theme } from "theme.slint";
 import { CellInk } from "grid_pointer.slint";
@@ -293,21 +296,58 @@ export component SheetFillRow inherits HorizontalLayout {
     }
 }
 
-/// The text colour choices: seven colours and "Automatic" (the paper's ink).
-/// The palette comes from the app so the swatches and the colours applied are
-/// one list; right-to-left starts from the right edge.
-export component SheetTextColorRow inherits HorizontalLayout {
+/// The text colour selector: shared color well opening the 48-color office palette.
+export component SheetTextColorRow inherits VerticalLayout {
     spacing: Theme.tokens.space.xs;
-    alignment: Theme.rtl ? end : start;
-    for slot in 8 : FillSwatch {
-        property <int> k: Theme.rtl ? 7 - slot : slot;
-        property <int> choice: k == 7 ? -1 : k;
-        swatch-color: k == 7 ? transparent : (k < CellInk.palette.length ? CellInk.palette[k] : transparent);
-        selected: CellInk.selected-slot == self.choice;
-        ring: Theme.palette().ink;
-        swatch-label: ["Text red", "Text orange", "Text green", "Text blue", "Text purple", "Text gray", "Text black", "Automatic text colour"][self.k];
-        swatch-index: self.choice;
-        pick(idx) => { CellInk.color-requested(idx); }
+    alignment: start;
+
+    well := LoomColorWell {
+        label: "Text Color";
+        accessible-name: "Text Color";
+        current-color: CellInk.selected-color;
+        is-automatic: !CellInk.selected-mixed && CellInk.selected-hex == "";
+        is-mixed: CellInk.selected-mixed;
+        color-label: CellInk.selected-mixed ? "Mixed" : CellInk.selected-label;
+        open: CellInk.palette-open;
+        toggled => {
+            if (CellInk.palette-open) {
+                CellInk.hex-error = "";
+                CellInk.palette-open = false;
+            } else {
+                CellInk.palette-open = true;
+            }
+        }
+    }
+
+    if CellInk.palette-open : LoomColorPalette {
+        swatches: CellInk.swatches;
+        selected-hex: CellInk.selected-hex;
+        is-automatic: !CellInk.selected-mixed && CellInk.selected-hex == "";
+        is-mixed: CellInk.selected-mixed;
+        kind-label: "Text color";
+        automatic-label: "Automatic";
+        hex-input <=> CellInk.hex-input;
+        hex-error: CellInk.hex-error;
+        select-color(hex) => {
+            CellInk.color-hex-requested(hex);
+            well.grab-focus();
+        }
+        select-automatic => {
+            CellInk.automatic-requested();
+            well.grab-focus();
+        }
+        hex-edited(_) => { CellInk.hex-error = ""; }
+        hex-submitted(hex) => {
+            CellInk.color-hex-requested(hex);
+            if (!CellInk.palette-open) {
+                well.grab-focus();
+            }
+        }
+        close-requested => {
+            CellInk.hex-error = "";
+            CellInk.palette-open = false;
+            well.grab-focus();
+        }
     }
 }
 

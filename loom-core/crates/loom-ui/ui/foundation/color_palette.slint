@@ -78,6 +78,7 @@ export component LoomColorWell inherits Rectangle {
     in property <bool> is-automatic: true;
     in property <bool> is-mixed: false;
     in property <string> color-label: "Automatic";
+    in property <string> description: "";
     in property <bool> open: false;
     in property <bool> enabled: true;
     callback toggled();
@@ -109,7 +110,8 @@ export component LoomColorWell inherits Rectangle {
     accessible-enabled: root.enabled;
     accessible-label: root.accessible-name != "" ? root.accessible-name : root.label;
     accessible-value: root.value-label;
-    accessible-description: root.open ? "Expanded, " + root.value-label : root.value-label;
+    accessible-description: root.description != "" ? root.description
+        : (root.open ? "Expanded, " + root.value-label : root.value-label);
     accessible-action-default => { if (root.enabled) { root.toggled(); } }
 
     HorizontalLayout {
