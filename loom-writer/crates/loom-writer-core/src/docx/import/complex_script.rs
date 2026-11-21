@@ -19,8 +19,8 @@ pub(super) struct ArchiveLosses {
 }
 
 /// Scans `word/document.xml`, any `word/header*.xml` / `word/footer*.xml`, and
-/// `word/footnotes.xml` in `archive` for complex-script run properties that
-/// differ from Latin formatting.
+/// the resolved footnotes part in `archive` for complex-script run properties
+/// that differ from Latin formatting.
 pub(super) fn archive_losses(
     archive: &PackageArchive,
     body_document: Option<&roxmltree::Document<'_>>,
@@ -50,7 +50,11 @@ pub(super) fn archive_losses(
     if footer_hit {
         losses.locations.push("footers");
     }
-    if scan_archive_part(archive, "word/footnotes.xml", &mut losses.axes) {
+    let footnotes_path = super::super::footnotes::footnotes_part_path(archive)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "word/footnotes.xml".to_string());
+    if scan_archive_part(archive, &footnotes_path, &mut losses.axes) {
         losses.locations.push("footnotes");
     }
 

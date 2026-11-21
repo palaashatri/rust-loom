@@ -755,6 +755,10 @@ pub fn set_selection_list_style(
     };
     for block_index in selected_block_indices(document, selection) {
         let block = &mut document.blocks[block_index];
+        if block.kind == loom_writer_core::TABLE_BLOCK_KIND || block.is_image() || block.is_chart()
+        {
+            continue;
+        }
         block.kind = kind.to_string();
         // A paragraph draws no list level, so unlisting one forgets its level;
         // listing it again starts at the top level instead of the old depth.

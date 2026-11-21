@@ -111,6 +111,9 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "table.delete_row" | "writer.table.delete_row" => {
             sc("Cmd+Opt+Backspace", "Ctrl+Alt+Backspace")
         }
+        "table.delete_table" | "writer.table.delete_table" => {
+            sc("Cmd+Opt+Shift+Backspace", "Ctrl+Alt+Shift+Backspace")
+        }
         "table.merge_cells" | "writer.table.merge_cells" => sc("Cmd+Opt+M", "Ctrl+Alt+M"),
         "table.split_cell" | "writer.table.split_cell" => sc("Cmd+Opt+S", "Ctrl+Alt+S"),
         "writer.review.open" => sc("Cmd+Shift+T", "Ctrl+Shift+T"),
@@ -225,6 +228,9 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         }
         "table.delete_column" | "table.delete_col" | "writer.table.delete_col" => {
             app.invoke_table_action("delete-col".into())
+        }
+        "table.delete_table" | "writer.table.delete_table" => {
+            app.invoke_table_action("delete-table".into())
         }
         "table.merge_cells" | "writer.table.merge_cells" => {
             app.invoke_table_action("merge-cells".into())

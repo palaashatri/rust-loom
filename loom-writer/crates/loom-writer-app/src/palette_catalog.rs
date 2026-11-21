@@ -94,6 +94,7 @@ pub(crate) enum PaletteAction {
     InsertTableColRight,
     DeleteTableRow,
     DeleteTableColumn,
+    DeleteTable,
     MergeTableCells,
     SplitTableCell,
     InsertChart,
@@ -122,6 +123,7 @@ pub(crate) fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) ->
         PaletteAction::InsertTableColRight => dispatch_command(app, "table.insert_col_right"),
         PaletteAction::DeleteTableRow => dispatch_command(app, "table.delete_row"),
         PaletteAction::DeleteTableColumn => dispatch_command(app, "table.delete_column"),
+        PaletteAction::DeleteTable => dispatch_command(app, "table.delete_table"),
         PaletteAction::MergeTableCells => dispatch_command(app, "table.merge_cells"),
         PaletteAction::SplitTableCell => dispatch_command(app, "table.split_cell"),
         PaletteAction::InsertChart => dispatch_command(app, "writer.chart.insert"),
@@ -352,6 +354,12 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "table.delete_column",
             label: "Table: Delete Column",
             shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::DeleteTable,
+            id: "table.delete_table",
+            label: "Table: Delete Table",
+            shortcut: shortcut_for_id("table.delete_table"),
         },
         PaletteCommand {
             action: PaletteAction::MergeTableCells,

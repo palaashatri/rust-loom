@@ -1,6 +1,97 @@
 import { LoomSectionHeader, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
+component TableStyleTile inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <color> header-bg;
+    in property <color> row-a-bg;
+    in property <color> row-b-bg;
+    in property <color> grid-color;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    min-width: 0px;
+    height: 36px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: (tile-focus.has-focus || root.selected) ? 2px : 1px;
+    border-color: tile-focus.has-focus ? Theme.palette().focus
+        : root.selected ? Theme.palette().accent
+        : tile-touch.has-hover ? Theme.palette().border-strong
+        : Theme.palette().border;
+    background: Theme.palette().surface;
+    clip: true;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    // Miniature 3-row table preview inside the frame.
+    Rectangle {
+        x: 3px;
+        y: 3px;
+        width: max(0px, parent.width - 6px);
+        height: max(0px, parent.height - 6px);
+        border-radius: 2px;
+        border-width: 1px;
+        border-color: root.grid-color;
+        clip: true;
+
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                vertical-stretch: 1;
+                background: root.header-bg;
+            }
+            Rectangle {
+                height: 1px;
+                background: root.grid-color;
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                background: root.row-a-bg;
+            }
+            Rectangle {
+                height: 1px;
+                background: root.grid-color;
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                background: root.row-b-bg;
+            }
+        }
+
+        // Subtle vertical column divider to read immediately as a table.
+        Rectangle {
+            x: parent.width * 0.36;
+            y: 0px;
+            width: 1px;
+            height: parent.height;
+            background: root.grid-color;
+            opacity: 0.6;
+        }
+    }
+
+    tile-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    tile-touch := TouchArea {
+        clicked => {
+            tile-focus.focus();
+            root.clicked();
+        }
+    }
+}
+
 export component WriterTableInspector inherits VerticalLayout {
     in-out property <string> current-style-id: "table-style-medium-1";
     in-out property <bool> header-row: true;
@@ -23,36 +114,40 @@ export component WriterTableInspector inherits VerticalLayout {
         // Light styles
         HorizontalLayout {
             spacing: Theme.tokens.space.sm;
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Light 1";
-                variant: root.current-style-id == "table-style-light-1" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-light-1";
+                header-bg: #FFFFFF;
+                row-a-bg: #FFFFFF;
+                row-b-bg: #F8F8F8;
+                grid-color: #B8B8B8;
                 clicked => { root.set-table-style("table-style-light-1"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Light 2";
-                variant: root.current-style-id == "table-style-light-2" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-light-2";
+                header-bg: #EBF2FA;
+                row-a-bg: #F6F9FC;
+                row-b-bg: #FFFFFF;
+                grid-color: #B8CCE4;
                 clicked => { root.set-table-style("table-style-light-2"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Light 3";
-                variant: root.current-style-id == "table-style-light-3" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-light-3";
+                header-bg: #EEEEEE;
+                row-a-bg: #FFFFFF;
+                row-b-bg: #F5F5F5;
+                grid-color: #C8C8C8;
                 clicked => { root.set-table-style("table-style-light-3"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Light 4";
-                variant: root.current-style-id == "table-style-light-4" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-light-4";
+                header-bg: #F4F4F4;
+                row-a-bg: #FFFFFF;
+                row-b-bg: #FFFFFF;
+                grid-color: #8A8A8A;
                 clicked => { root.set-table-style("table-style-light-4"); }
             }
         }
@@ -60,36 +155,40 @@ export component WriterTableInspector inherits VerticalLayout {
         // Medium styles
         HorizontalLayout {
             spacing: Theme.tokens.space.sm;
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
-                label: "Med 1";
-                variant: root.current-style-id == "table-style-medium-1" ? "primary" : "secondary";
+            TableStyleTile {
+                label: "Medium 1";
+                selected: root.current-style-id == "table-style-medium-1";
+                header-bg: #2B579A;
+                row-a-bg: #F2F6FB;
+                row-b-bg: #FFFFFF;
+                grid-color: #B4C6E7;
                 clicked => { root.set-table-style("table-style-medium-1"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
-                label: "Med 2";
-                variant: root.current-style-id == "table-style-medium-2" ? "primary" : "secondary";
+            TableStyleTile {
+                label: "Medium 2";
+                selected: root.current-style-id == "table-style-medium-2";
+                header-bg: #34495E;
+                row-a-bg: #F4F6F7;
+                row-b-bg: #FFFFFF;
+                grid-color: #BDC3C7;
                 clicked => { root.set-table-style("table-style-medium-2"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
-                label: "Med 3";
-                variant: root.current-style-id == "table-style-medium-3" ? "primary" : "secondary";
+            TableStyleTile {
+                label: "Medium 3";
+                selected: root.current-style-id == "table-style-medium-3";
+                header-bg: #2E7D32;
+                row-a-bg: #F1F8E9;
+                row-b-bg: #FFFFFF;
+                grid-color: #A5D6A7;
                 clicked => { root.set-table-style("table-style-medium-3"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
-                label: "Med 4";
-                variant: root.current-style-id == "table-style-medium-4" ? "primary" : "secondary";
+            TableStyleTile {
+                label: "Medium 4";
+                selected: root.current-style-id == "table-style-medium-4";
+                header-bg: #D35400;
+                row-a-bg: #FDF2E9;
+                row-b-bg: #FFFFFF;
+                grid-color: #F5CBA7;
                 clicked => { root.set-table-style("table-style-medium-4"); }
             }
         }
@@ -97,36 +196,40 @@ export component WriterTableInspector inherits VerticalLayout {
         // Dark styles
         HorizontalLayout {
             spacing: Theme.tokens.space.sm;
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Dark 1";
-                variant: root.current-style-id == "table-style-dark-1" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-dark-1";
+                header-bg: #0D1B2A;
+                row-a-bg: #1B263B;
+                row-b-bg: #415A77;
+                grid-color: #778DA9;
                 clicked => { root.set-table-style("table-style-dark-1"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Dark 2";
-                variant: root.current-style-id == "table-style-dark-2" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-dark-2";
+                header-bg: #121416;
+                row-a-bg: #212529;
+                row-b-bg: #343A40;
+                grid-color: #6C757D;
                 clicked => { root.set-table-style("table-style-dark-2"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Dark 3";
-                variant: root.current-style-id == "table-style-dark-3" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-dark-3";
+                header-bg: #00251A;
+                row-a-bg: #004D40;
+                row-b-bg: #00695C;
+                grid-color: #4DB6AC;
                 clicked => { root.set-table-style("table-style-dark-3"); }
             }
-            LoomButton {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                height: Theme.scaled-control-height;
+            TableStyleTile {
                 label: "Dark 4";
-                variant: root.current-style-id == "table-style-dark-4" ? "primary" : "secondary";
+                selected: root.current-style-id == "table-style-dark-4";
+                header-bg: #38006B;
+                row-a-bg: #4A148C;
+                row-b-bg: #6A1B9A;
+                grid-color: #BA68C8;
                 clicked => { root.set-table-style("table-style-dark-4"); }
             }
         }
@@ -135,29 +238,38 @@ export component WriterTableInspector inherits VerticalLayout {
     LoomSectionHeader { title: "Table Options"; }
 
     HorizontalLayout {
-        spacing: Theme.tokens.space.sm;
+        spacing: Theme.tokens.space.xs;
         LoomButton {
             horizontal-stretch: 1;
             min-width: 0px;
             height: Theme.scaled-control-height;
-            label: root.header-row ? "Header On" : "Header Off";
-            variant: root.header-row ? "primary" : "secondary";
+            label: "Header";
+            variant: root.header-row ? "secondary" : "ghost";
+            selected: root.header-row;
+            accessible-checkable: true;
+            accessible-checked: root.header-row;
             clicked => { root.toggle-table-option("header_row"); }
         }
         LoomButton {
             horizontal-stretch: 1;
             min-width: 0px;
             height: Theme.scaled-control-height;
-            label: root.banded-rows ? "Banded On" : "Banded Off";
-            variant: root.banded-rows ? "primary" : "secondary";
+            label: "Banded";
+            variant: root.banded-rows ? "secondary" : "ghost";
+            selected: root.banded-rows;
+            accessible-checkable: true;
+            accessible-checked: root.banded-rows;
             clicked => { root.toggle-table-option("banded_rows"); }
         }
         LoomButton {
             horizontal-stretch: 1;
             min-width: 0px;
             height: Theme.scaled-control-height;
-            label: root.first-column ? "1st Col On" : "1st Col Off";
-            variant: root.first-column ? "primary" : "secondary";
+            label: "1st Col";
+            variant: root.first-column ? "secondary" : "ghost";
+            selected: root.first-column;
+            accessible-checkable: true;
+            accessible-checked: root.first-column;
             clicked => { root.toggle-table-option("first_column"); }
         }
     }
@@ -165,14 +277,15 @@ export component WriterTableInspector inherits VerticalLayout {
     LoomSectionHeader { title: "Rows & Columns"; }
 
     VerticalLayout {
-        spacing: Theme.tokens.space.sm;
+        spacing: Theme.tokens.space.xs;
         HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
             LoomButton {
                 horizontal-stretch: 1;
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "+ Row Above";
+                variant: "secondary";
                 clicked => { root.table-action("insert-row-above"); }
             }
             LoomButton {
@@ -180,16 +293,18 @@ export component WriterTableInspector inherits VerticalLayout {
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "+ Row Below";
+                variant: "secondary";
                 clicked => { root.table-action("insert-row-below"); }
             }
         }
         HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
             LoomButton {
                 horizontal-stretch: 1;
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "+ Col Left";
+                variant: "secondary";
                 clicked => { root.table-action("insert-col-left"); }
             }
             LoomButton {
@@ -197,16 +312,18 @@ export component WriterTableInspector inherits VerticalLayout {
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "+ Col Right";
+                variant: "secondary";
                 clicked => { root.table-action("insert-col-right"); }
             }
         }
         HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
             LoomButton {
                 horizontal-stretch: 1;
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "Del Row";
+                variant: "secondary";
                 clicked => { root.table-action("delete-row"); }
             }
             LoomButton {
@@ -214,16 +331,18 @@ export component WriterTableInspector inherits VerticalLayout {
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "Del Col";
+                variant: "secondary";
                 clicked => { root.table-action("delete-col"); }
             }
         }
         HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
             LoomButton {
                 horizontal-stretch: 1;
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "Merge Cells";
+                variant: "secondary";
                 clicked => { root.table-action("merge-cells"); }
             }
             LoomButton {
@@ -231,8 +350,23 @@ export component WriterTableInspector inherits VerticalLayout {
                 min-width: 0px;
                 height: Theme.scaled-control-height;
                 label: "Split Cell";
+                variant: "secondary";
                 clicked => { root.table-action("split-cell"); }
             }
+        }
+
+        Rectangle {
+            height: Theme.tokens.space.xs;
+            background: transparent;
+        }
+
+        LoomButton {
+            horizontal-stretch: 1;
+            height: Theme.scaled-control-height;
+            label: "Delete Table";
+            icon: "trash-2";
+            variant: "danger";
+            clicked => { root.table-action("delete-table"); }
         }
     }
 }

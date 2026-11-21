@@ -170,13 +170,33 @@ pub(crate) fn set_selection_subscript(
     });
 }
 
+/// Accepts either `Option<&str>` or `&Option<String>` so callers can apply a
+/// color or reset runs to Automatic (`None`).
+pub(crate) trait ForegroundColorArg {
+    fn as_foreground_color(&self) -> Option<&str>;
+}
+
+impl ForegroundColorArg for Option<&str> {
+    fn as_foreground_color(&self) -> Option<&str> {
+        *self
+    }
+}
+
+impl ForegroundColorArg for &Option<String> {
+    fn as_foreground_color(&self) -> Option<&str> {
+        self.as_deref()
+    }
+}
+
+/// Color the selected text, or drop its explicit color (Automatic) for `None`.
 pub(crate) fn set_selection_foreground_color(
     document: &mut WriterDocument,
     selection: DocumentSelection,
-    color: &str,
+    color: impl ForegroundColorArg,
 ) {
+    let color = color.as_foreground_color().map(str::to_owned);
     mutate_text_selection(document, selection, |style| {
-        style.color = Some(color.to_owned());
+        style.color = color.clone();
     });
 }
 

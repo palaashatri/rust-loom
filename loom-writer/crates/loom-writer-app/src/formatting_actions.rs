@@ -5,13 +5,16 @@ use std::rc::Rc;
 
 use loom_command::{CommandInvocation, CommandSpec, InvocationSource};
 use loom_text::ParagraphDirection;
+use loom_ui::color_palette::{
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+};
 use loom_writer_core::{TextSelection, WriterDocument};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::document_formatting::{formatting_state_for_selection, DocumentSelection};
 use crate::{
     apply_with_history, font_picker, inline_formatting, paragraph_alignment, table_actions,
-    typing_style, GuiState, HistoryKind, WriterApp, WriterFormatState,
+    typing_style, GuiState, HistoryKind, LoomColorSwatch, WriterApp, WriterFormatState,
 };
 
 pub(crate) fn set_selection_strikethrough(
@@ -260,6 +263,15 @@ fn toggle_script(app: &WriterApp, state: &GuiState, superscript: bool) {
 
 fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
     let global = app.global::<WriterFormatState>();
+    let swatches: Vec<LoomColorSwatch> = OFFICE_SWATCHES
+        .iter()
+        .map(|swatch| LoomColorSwatch {
+            name: SharedString::from(swatch.name),
+            hex: SharedString::from(swatch.hex),
+            swatch: color_from_rgb(swatch.rgb),
+        })
+        .collect();
+    global.set_color_swatches(ModelRc::new(VecModel::from(swatches)));
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -276,11 +288,14 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             );
             let global = app.global::<WriterFormatState>();
             global.set_color_error(SharedString::new());
-            global.set_color_input(SharedString::from(
-                inline
-                    .foreground_color
-                    .unwrap_or_else(|| "#000000FF".to_string()),
-            ));
+            let initial_input = inline
+                .foreground_color
+                .as_deref()
+                .and_then(parse_hex_rgb)
+                .map(format_hex_rgb)
+                .unwrap_or_default();
+            global.set_color_input(SharedString::from(initial_input));
+            global.set_color_palette_open(false);
             global.set_color_dialog_open(true);
         });
     }
@@ -289,7 +304,24 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         global.on_apply_foreground_color(move || {
             let Some(app) = app_ref.upgrade() else { return };
-            apply_foreground_color(&app, &state);
+            let input = app.global::<WriterFormatState>().get_color_input();
+            apply_foreground_color_input(&app, &state, input.as_str());
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        global.on_select_foreground_color(move |hex| {
+            let Some(app) = app_ref.upgrade() else { return };
+            apply_foreground_color_input(&app, &state, hex.as_str());
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        global.on_reset_foreground_color(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            apply_foreground_color_value(&app, &state, None);
         });
     }
     {
@@ -298,6 +330,7 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             if let Some(app) = app_ref.upgrade() {
                 let global = app.global::<WriterFormatState>();
                 global.set_color_dialog_open(false);
+                global.set_color_palette_open(false);
                 global.set_color_error(SharedString::new());
             }
         });
@@ -313,26 +346,37 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
     }
 }
 
-fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
+fn apply_foreground_color_input(app: &WriterApp, state: &GuiState, input: &str) {
     if !command_allowed(app, state, "writer.style.color") {
         return;
     }
     let global = app.global::<WriterFormatState>();
-    let Some(color) = parse_foreground_color(global.get_color_input().as_str()) else {
+    let Some(color) = parse_foreground_color(input) else {
         let message = "Enter #RRGGBB or #RRGGBBAA using hexadecimal digits";
         global.set_color_error(SharedString::from(message));
         app.set_status_right(SharedString::from(message));
         return;
     };
+    apply_foreground_color_value(app, state, Some(&color));
+}
 
+fn apply_foreground_color_value(app: &WriterApp, state: &GuiState, color: Option<&str>) {
+    if !command_allowed(app, state, "writer.style.color") {
+        return;
+    }
+    let global = app.global::<WriterFormatState>();
     let selection = state.current.borrow().selection();
     if selection.is_collapsed() && table_actions::get_table_cell_selection_range().is_none() {
-        typing_style::set_foreground_color(selection.focus, &color);
-        global.set_foreground_color(SharedString::from(color));
-        global.set_foreground_color_mixed(false);
+        typing_style::set_foreground_color(selection.focus, color);
+        sync_foreground_color_display(&global, color, false);
         global.set_color_dialog_open(false);
+        global.set_color_palette_open(false);
         global.set_color_error(SharedString::new());
-        announce(app, "Foreground color set for new text".to_string());
+        let message = match color {
+            Some(_) => "Foreground color set for new text".to_string(),
+            None => "Text color set to Automatic for new text".to_string(),
+        };
+        announce(app, message);
         return;
     }
 
@@ -340,12 +384,12 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
     inline_formatting::set_selection_foreground_color(
         &mut next,
         DocumentSelection::range(selection.anchor, selection.focus),
-        &color,
+        color,
     );
     table_actions::table_format_actions::set_selection_foreground_color(
         &mut next,
         selection.clone(),
-        &color,
+        color,
     );
     next.set_selection(selection.clone());
     if next != *state.current.borrow()
@@ -354,15 +398,40 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
         return;
     }
     global.set_color_dialog_open(false);
+    global.set_color_palette_open(false);
     global.set_color_error(SharedString::new());
+    let base_message = match color {
+        Some(hex) => format!("Foreground color {hex} applied to selected text"),
+        None => "Text color reset to Automatic".to_string(),
+    };
     announce(
         app,
         with_skipped_items(
-            format!("Foreground color {color} applied to selected text"),
+            base_message,
             unsupported_selection_items(&state.current.borrow(), &selection),
         ),
     );
     sync_menu(app, state);
+}
+
+fn sync_foreground_color_display(global: &WriterFormatState<'_>, color: Option<&str>, mixed: bool) {
+    global.set_foreground_color(SharedString::from(color.unwrap_or_default()));
+    global.set_foreground_color_mixed(mixed);
+    if mixed {
+        global.set_foreground_color_value(SharedString::new());
+        global.set_foreground_color_label(SharedString::from("Mixed"));
+    } else if let Some(rgb) = color.and_then(parse_hex_rgb) {
+        let hex = format_hex_rgb(rgb);
+        let label = swatch_name_for_rgb(rgb)
+            .map(str::to_owned)
+            .unwrap_or_else(|| hex.clone());
+        global.set_foreground_color_value(SharedString::from(hex));
+        global.set_foreground_color_swatch(color_from_rgb(rgb));
+        global.set_foreground_color_label(SharedString::from(label));
+    } else {
+        global.set_foreground_color_value(SharedString::new());
+        global.set_foreground_color_label(SharedString::from("Automatic"));
+    }
 }
 
 fn parse_foreground_color(input: &str) -> Option<String> {
@@ -429,7 +498,7 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
             inline.subscript_mixed = false;
         }
         if let Some(value) = pending.color {
-            inline.foreground_color = Some(value);
+            inline.foreground_color = value;
             inline.foreground_color_mixed = false;
         }
     }
@@ -464,10 +533,11 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
     global.set_superscript_mixed(inline.superscript_mixed);
     global.set_subscript_selected(inline.subscript);
     global.set_subscript_mixed(inline.subscript_mixed);
-    global.set_foreground_color(SharedString::from(
-        inline.foreground_color.unwrap_or_default(),
-    ));
-    global.set_foreground_color_mixed(inline.foreground_color_mixed);
+    sync_foreground_color_display(
+        &global,
+        inline.foreground_color.as_deref(),
+        inline.foreground_color_mixed,
+    );
     global.set_justify_available(paragraph_alignment::selection_can_be_justified(
         document,
         selection.clone(),

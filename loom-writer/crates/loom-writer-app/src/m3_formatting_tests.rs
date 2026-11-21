@@ -371,8 +371,8 @@ fn foreground_color_input_applies_canonical_color_and_refuses_invalid_text() {
     render_format_inspector(&app);
 
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#a1b2c3");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#a1b2c3");
+    invoke_button(&app, "Apply");
     assert_eq!(
         style_at(&state.current.borrow(), 2).color.as_deref(),
         Some("#A1B2C3FF"),
@@ -398,8 +398,8 @@ fn foreground_color_input_applies_canonical_color_and_refuses_invalid_text() {
     let undo_count = state.history.borrow().undo_len();
     let writes_before_invalid = recovery_write_count();
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#GG00FF");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#GG00FF");
+    invoke_button(&app, "Apply");
     assert_eq!(
         *state.current.borrow(),
         before_invalid,
@@ -615,8 +615,8 @@ fn foreground_color_at_a_collapsed_caret_styles_only_new_text() {
     render_format_inspector(&app);
 
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#336699");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#336699");
+    invoke_button(&app, "Apply");
     assert_eq!(state.current.borrow().editor_text(), "plain");
     assert_eq!(state.history.borrow().undo_len(), 0);
 
@@ -637,6 +637,61 @@ fn foreground_color_at_a_collapsed_caret_styles_only_new_text() {
     assert_eq!(
         style_at(&state.current.borrow(), 4).color.as_deref(),
         Some("#000000FF")
+    );
+    typing_style::clear();
+}
+
+#[test]
+fn palette_swatch_selection_and_automatic_reset_round_trip_with_undo() {
+    typing_style::clear();
+    let mut document = text_document("palette text");
+    document.set_selection(TextSelection::range(0, 7));
+    let (app, state) = session(document);
+    render_format_inspector(&app);
+
+    let global = app.global::<WriterFormatState>();
+    assert_eq!(global.get_color_swatches().row_count(), 48);
+    assert_eq!(global.get_foreground_color_label().as_str(), "Black");
+
+    // Pick Royal Blue (#1565C0) from the inline 48-color palette.
+    invoke_button(&app, "Text Color");
+    assert!(global.get_color_palette_open());
+    invoke_button(&app, "Text color Royal Blue (#1565C0)");
+    assert!(!global.get_color_palette_open());
+    assert_eq!(
+        style_at(&state.current.borrow(), 2).color.as_deref(),
+        Some("#1565C0FF")
+    );
+    assert_eq!(global.get_foreground_color_value().as_str(), "#1565C0");
+    assert_eq!(global.get_foreground_color_label().as_str(), "Royal Blue");
+
+    // Reset to Automatic via the palette's Automatic row.
+    invoke_button(&app, "Text Color");
+    invoke_button(&app, "Text color Automatic");
+    assert!(!global.get_color_palette_open());
+    assert_eq!(style_at(&state.current.borrow(), 2).color, None);
+    assert_eq!(global.get_foreground_color_value().as_str(), "");
+    assert_eq!(global.get_foreground_color_label().as_str(), "Automatic");
+
+    // Undo restores Royal Blue; Redo restores Automatic.
+    app.invoke_undo();
+    assert_eq!(
+        style_at(&state.current.borrow(), 2).color.as_deref(),
+        Some("#1565C0FF")
+    );
+    app.invoke_redo();
+    assert_eq!(style_at(&state.current.borrow(), 2).color, None);
+
+    // Collapsed-caret Automatic reset drops explicit color on newly typed text.
+    app.invoke_undo();
+    app.invoke_selection_changed(7, 7);
+    global.invoke_reset_foreground_color();
+    assert_eq!(global.get_foreground_color_label().as_str(), "Automatic");
+    app.invoke_document_edited("paletteX text".into(), 8, 8);
+    assert_eq!(
+        style_at(&state.current.borrow(), 7).color,
+        None,
+        "new text typed after Automatic reset has no explicit color"
     );
     typing_style::clear();
 }

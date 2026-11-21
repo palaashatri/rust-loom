@@ -19,7 +19,8 @@ pub(crate) struct PendingStyle {
     pub(crate) strikethrough: Option<bool>,
     pub(crate) superscript: Option<bool>,
     pub(crate) subscript: Option<bool>,
-    pub(crate) color: Option<String>,
+    /// `Some(None)` is Automatic: the next text drops any explicit color.
+    pub(crate) color: Option<Option<String>>,
     /// The font family as the document stores it (empty: the document font).
     pub(crate) family: Option<String>,
 }
@@ -81,9 +82,10 @@ pub(crate) fn set_family(caret: usize, family: &str) {
     store(pending);
 }
 
-pub(crate) fn set_foreground_color(caret: usize, color: &str) {
+/// Make the text typed next at `caret` take `color`, or Automatic for `None`.
+pub(crate) fn set_foreground_color(caret: usize, color: Option<&str>) {
     let mut pending = at(caret);
-    pending.color = Some(color.to_owned());
+    pending.color = Some(color.map(str::to_owned));
     store(pending);
 }
 
@@ -188,6 +190,17 @@ mod tests {
         assert!(!toggle(3, InlineStyle::Italic, false));
         assert!(at(3).italic == Some(false));
         assert!(at(3).bold.is_none(), "other styles are untouched");
+    }
+
+    #[test]
+    fn a_pending_color_can_be_reset_to_automatic() {
+        clear();
+        set_foreground_color(2, Some("#1565C0FF"));
+        assert_eq!(at(2).color, Some(Some("#1565C0FF".to_owned())));
+        set_foreground_color(2, None);
+        assert_eq!(at(2).color, Some(None), "Automatic is pending, not absent");
+        assert!(!at(2).is_empty());
+        assert_eq!(at(3).color, None, "another caret has nothing pending");
     }
 
     #[test]

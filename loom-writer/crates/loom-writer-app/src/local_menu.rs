@@ -68,6 +68,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.insert_col_right",
     "table.delete_row",
     "table.delete_column",
+    "table.delete_table",
     "table.merge_cells",
     "table.split_cell",
     "writer.review.open",
@@ -92,6 +93,7 @@ const TABLE_STRUCTURAL_COMMANDS: &[&str] = &[
     "table.insert_col_right",
     "table.delete_row",
     "table.delete_column",
+    "table.delete_table",
     "table.merge_cells",
     "table.split_cell",
 ];
@@ -303,6 +305,16 @@ pub(crate) fn writer_menu_bar() -> loom_desktop::MenuBar {
                         MenuShortcut::primary_alt("Backspace"),
                     ),
                     MenuItem::action("table.delete_column", "Delete Column"),
+                    MenuItem::action_with_shortcut(
+                        "table.delete_table",
+                        "Delete Table",
+                        MenuShortcut {
+                            key: "Backspace".into(),
+                            primary_modifier: true,
+                            shift: true,
+                            alt: true,
+                        },
+                    ),
                     MenuItem::Separator,
                     MenuItem::action_with_shortcut(
                         "table.merge_cells",

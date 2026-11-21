@@ -36,8 +36,9 @@ fn paper_from_index(idx: i32) -> PaperSize {
 
 fn paper_to_index(paper: PaperSize) -> i32 {
     match paper {
+        PaperSize::A4 => 0,
         PaperSize::Letter => 1,
-        _ => 0,
+        _ => -1,
     }
 }
 
@@ -65,9 +66,10 @@ fn margins_from_index(idx: i32) -> PageMarginsPreset {
 
 fn margins_to_index(margins: PageMarginsPreset) -> i32 {
     match margins {
+        PageMarginsPreset::Normal => 0,
         PageMarginsPreset::Narrow => 1,
         PageMarginsPreset::Wide => 2,
-        _ => 0,
+        _ => -1,
     }
 }
 
@@ -85,9 +87,13 @@ fn build_preview_page_setup(
     margins_idx: i32,
 ) -> PageSetup {
     let mut setup = *base;
-    setup.select_paper(paper_from_index(paper_idx));
+    if paper_idx >= 0 {
+        setup.select_paper(paper_from_index(paper_idx));
+    }
     setup.select_orientation(orientation_from_index(orientation_idx));
-    setup.select_margins(margins_from_index(margins_idx));
+    if margins_idx >= 0 {
+        setup.select_margins(margins_from_index(margins_idx));
+    }
     setup
 }
 
@@ -166,17 +172,18 @@ fn build_working_document<'a>(
     revision_view: PdfRevisionView,
 ) -> (Cow<'a, WriterDocument>, usize) {
     let original_blocks = doc.blocks.len();
-    if revision_view == PdfRevisionView::Final {
-        return (Cow::Borrowed(doc), original_blocks);
-    }
-
-    let mut review_doc = doc.clone();
-    let view_id = review_doc.next_id();
-    review_doc.push(RichBlock::new(
+    let mut working_doc = doc.clone();
+    let view_id = working_doc.next_id();
+    working_doc.push(RichBlock::new(
         view_id,
         "paragraph",
         &format!("PDF view: {}", revision_view.name()),
     ));
+    if revision_view == PdfRevisionView::Final {
+        return (Cow::Owned(working_doc), original_blocks);
+    }
+
+    let mut review_doc = working_doc;
 
     let revisions = doc.tracked_changes.revisions();
     let heading_id = review_doc.next_id();
