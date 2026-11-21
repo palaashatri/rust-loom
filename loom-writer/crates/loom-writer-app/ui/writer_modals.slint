@@ -1,0 +1,38 @@
+import { WelcomeGuideModal, WelcomeGuideState } from "welcome_guide.slint";
+import { StartHubModal, StartHubState, StartHubRecentItem } from "start_hub.slint";
+import {
+    PrintPreviewModal, PrintPreviewState, PrintPreviewTextLine, PrintPreviewBoxRect,
+} from "print_preview_modal.slint";
+import { WordCountModal, WordCountState } from "word_count_modal.slint";
+
+export {
+    WelcomeGuideState,
+    StartHubState, StartHubRecentItem,
+    PrintPreviewState, PrintPreviewTextLine, PrintPreviewBoxRect,
+    WordCountState,
+}
+
+/// Hosts Writer's top-level feature modals (Welcome Guide, Start Hub,
+/// Print Preview, and Word Count) lazily so closed modals add zero layout or
+/// accessibility nodes.
+export component WriterModals inherits Rectangle {
+    out property <bool> modal-open:
+        WelcomeGuideState.open || StartHubState.open || PrintPreviewState.open || WordCountState.open;
+
+    if WelcomeGuideState.open : WelcomeGuideModal {
+        width: root.width;
+        height: root.height;
+    }
+    if StartHubState.open : StartHubModal {
+        width: root.width;
+        height: root.height;
+    }
+    if PrintPreviewState.open : PrintPreviewModal {
+        width: root.width;
+        height: root.height;
+    }
+    if WordCountState.open : WordCountModal {
+        width: root.width;
+        height: root.height;
+    }
+}

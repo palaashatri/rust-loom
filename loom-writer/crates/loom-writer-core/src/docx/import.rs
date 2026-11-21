@@ -148,9 +148,13 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         }
     }
 
-    if let Some(doc_bytes) = archive.get("word/document.xml") {
-        let xml = String::from_utf8_lossy(doc_bytes);
-        let document = roxmltree::Document::parse(&xml).ok();
+    let document_xml = archive
+        .get("word/document.xml")
+        .map(|doc_bytes| String::from_utf8_lossy(doc_bytes));
+    let document = document_xml
+        .as_deref()
+        .and_then(|xml| roxmltree::Document::parse(xml).ok());
+    if let Some(xml) = document_xml.as_deref() {
         let unsupported_background = document.as_ref().is_some_and(|document| {
             document
                 .root_element()
@@ -191,20 +195,13 @@ pub fn inspect_docx_unsupported(docx_bytes: &[u8]) -> Result<Vec<String>, String
         if xml.contains("<wp:anchor") && !warnings.iter().any(|w: &String| w.contains("Floating")) {
             warnings.push("Floating pictures are placed in the text, one to a line.".to_string());
         }
-        let losses = document
-            .as_ref()
-            .map(complex_script::only_losses)
-            .unwrap_or_default();
-        if !losses.is_empty()
-            && !warnings
-                .iter()
-                .any(|warning: &String| warning.contains("Complex-script"))
+    }
+    if let Some(warning) = complex_script::unsupported_warning(&archive, document.as_ref()) {
+        if !warnings
+            .iter()
+            .any(|warning: &String| warning.contains("Complex-script"))
         {
-            warnings.push(format!(
-                "Complex-script (Arabic/Hebrew) run formatting is not supported: {} \
-                 cannot be represented and is ignored; the affected text itself is imported.",
-                losses.join(", ")
-            ));
+            warnings.push(warning);
         }
     }
 

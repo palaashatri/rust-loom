@@ -13,6 +13,7 @@ mod appearance;
 mod caret_keys;
 mod caret_scroll;
 mod clipboard_actions;
+mod command_dispatch;
 mod document_formatting;
 mod docx_actions;
 mod docx_export;
@@ -47,9 +48,13 @@ mod picture_paste;
 mod picture_view;
 mod pointer_hit_test;
 mod press_reveal;
+mod print_preview;
 mod projection;
+mod projection_sync;
 mod revision_actions;
 mod save_flow;
+mod start_hub;
+use command_dispatch::dispatch_command;
 use palette_catalog::{dispatch_palette_action, master_palette, ranked_matches};
 #[cfg(target_os = "macos")]
 mod macos_window_evidence;
@@ -61,7 +66,11 @@ mod templates;
 mod toolbar_commands;
 mod typing_style;
 mod view_state;
+mod welcome_guide;
 mod window_chrome;
+#[cfg(target_os = "windows")]
+mod windows_platform;
+mod word_count_dialog;
 
 use history::{EditorHistory, HistoryKind};
 use paragraph_alignment::writer_render_alignment;
@@ -103,7 +112,9 @@ use loom_writer_core::{
     floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
     WriterDocument,
 };
-use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString, VecModel};
+#[cfg(test)]
+use slint::VecModel;
+use slint::{ComponentHandle, Model, PhysicalPosition, PhysicalSize, SharedString};
 
 slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
@@ -136,6 +147,10 @@ struct Args {
     table: bool,
     /// Capture the Quick Start sample instead of a blank document.
     sample: bool,
+    welcome_guide: bool,
+    start_hub: bool,
+    print_preview: bool,
+    word_count: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -168,6 +183,10 @@ where
         comment: None,
         table: false,
         sample: false,
+        welcome_guide: false,
+        start_hub: false,
+        print_preview: false,
+        word_count: false,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -248,6 +267,10 @@ where
             }
             "--table" => args.table = true,
             "--sample" => args.sample = true,
+            "--welcome-guide" => args.welcome_guide = true,
+            "--start-hub" => args.start_hub = true,
+            "--print-preview" => args.print_preview = true,
+            "--word-count" => args.word_count = true,
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
@@ -342,73 +365,6 @@ fn export_pdf_file(
     }
     loom_storage::atomic_write(path, &bytes)
         .map_err(|error| format!("atomic write {}: {error}", path.display()))
-}
-
-/// Dispatch one canonical command identifier through the callbacks shared by
-/// toolbar, command-palette, keyboard, and native-menu surfaces.
-///
-/// The native menu uses the unprefixed desktop IDs while the palette retains
-/// its historical `writer.*` IDs.  Keeping both aliases here lets existing
-/// palette entries remain stable without creating a second mutation path.
-fn dispatch_command(app: &WriterApp, id: &str) -> bool {
-    match id {
-        "app.quit" | "loom writer.quit" => app.invoke_application_quit_requested(),
-        "file.new" | "writer.new" => app.invoke_new_doc(),
-        "file.open" | "writer.open" => app.invoke_open_doc(),
-        "file.save" | "writer.save" => app.invoke_save_doc(),
-        "file.save_as" | "writer.save-as" => app.invoke_save_as_doc(),
-        "file.export_pdf" | "writer.export-pdf" => app.invoke_export_pdf(),
-        "file.export_docx" | "writer.export-docx" => app.invoke_export_docx(),
-        "file.export_md" => app.invoke_export_markdown(),
-        "edit.undo" | "writer.undo" => app.invoke_undo(),
-        "edit.redo" | "writer.redo" => app.invoke_redo(),
-        "edit.cut" | "writer.cut" => app.invoke_cut(),
-        "edit.copy" | "writer.copy" => app.invoke_copy(),
-        "edit.paste" | "writer.paste" => app.invoke_paste(),
-        "app.palette" => app.invoke_open_palette(),
-        "writer.footnotes" => app.global::<WriterFootnoteState>().invoke_open_editor(),
-        "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
-        "insert.chart" | "writer.chart.insert" => app.invoke_insert_chart(),
-        "insert.image" | "writer.image.insert" => app.invoke_insert_image(),
-        "picture.larger" | "picture.smaller" | "picture.reset_size" | "picture.alt_text" => {
-            picture_actions::dispatch(app, id);
-        }
-        id if list_level_actions::dispatch(app, id) => {}
-        id if formatting_actions::dispatch(app, id) => {}
-        "table.insert_row_above" | "writer.table.insert_row_above" => {
-            app.invoke_table_action("insert-row-above".into())
-        }
-        "table.insert_row_below" | "writer.table.insert_row_below" => {
-            app.invoke_table_action("insert-row-below".into())
-        }
-        "table.insert_col_left" | "writer.table.insert_col_left" => {
-            app.invoke_table_action("insert-col-left".into())
-        }
-        "table.insert_col_right" | "writer.table.insert_col_right" => {
-            app.invoke_table_action("insert-col-right".into())
-        }
-        "table.delete_row" | "writer.table.delete_row" => {
-            app.invoke_table_action("delete-row".into())
-        }
-        "table.delete_column" | "table.delete_col" | "writer.table.delete_col" => {
-            app.invoke_table_action("delete-col".into())
-        }
-        "table.merge_cells" | "writer.table.merge_cells" => {
-            app.invoke_table_action("merge-cells".into())
-        }
-        "table.split_cell" | "writer.table.split_cell" => {
-            app.invoke_table_action("split-cell".into())
-        }
-        "view.inspector" => app.invoke_toggle_inspector(),
-        id if view_state::dispatch(app, id) => {}
-        id if appearance::dispatch(app, id) => {}
-        id if window_chrome::dispatch(app, id) => {}
-        "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
-        "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
-        "format.underline" | "writer.style.underline-all" => app.invoke_toggle_underline(),
-        _ => return false,
-    }
-    true
 }
 
 /// Queue an accepted native-menu action on Slint's event-loop thread. The
@@ -718,14 +674,206 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Quit Writer after resolving unsaved changes")
             .with_category("file")
             .with_order(60)
-            .with_shortcut("Ctrl+Q")
+            .with_shortcut(command_dispatch::shortcut_for_id(
+                local_menu::QUIT_COMMAND_ID,
+            ))
             .with_enabled(true),
     );
+    for (id, label, desc, cat, order) in [
+        (
+            "file.start_hub",
+            "Open Start Hub…",
+            "Open recent documents and templates hub",
+            "file",
+            12,
+        ),
+        (
+            "file.templates",
+            "Browse Templates…",
+            "Choose from 18 built-in document templates",
+            "file",
+            13,
+        ),
+        (
+            "file.print_preview",
+            "Print Preview…",
+            "Preview paginated output and configure page setup",
+            "file",
+            49,
+        ),
+        (
+            "edit.find",
+            "Find…",
+            "Search text in the document",
+            "edit",
+            40,
+        ),
+        (
+            "edit.replace",
+            "Find & Replace…",
+            "Search and replace text in the document",
+            "edit",
+            41,
+        ),
+        (
+            "view.zoom_in",
+            "Zoom In",
+            "Increase document zoom",
+            "view",
+            30,
+        ),
+        (
+            "view.zoom_out",
+            "Zoom Out",
+            "Decrease document zoom",
+            "view",
+            31,
+        ),
+        (
+            "view.zoom_actual",
+            "Actual Size (100%)",
+            "Reset document zoom to 100%",
+            "view",
+            32,
+        ),
+        (
+            "view.zoom_fit_width",
+            "Fit Page Width",
+            "Fit page width to viewport",
+            "view",
+            33,
+        ),
+        (
+            "view.zoom_fit_page",
+            "Fit Whole Page",
+            "Fit full page into viewport",
+            "view",
+            34,
+        ),
+        (
+            "insert.header_footer",
+            "Headers & Footers…",
+            "Edit running header and footer text",
+            "insert",
+            74,
+        ),
+        (
+            "insert.comment",
+            "Insert Comment",
+            "Attach a comment to the current selection",
+            "insert",
+            76,
+        ),
+        (
+            "writer.review.open",
+            "Open Tracked Changes…",
+            "Review tracked insertions and deletions",
+            "review",
+            10,
+        ),
+        (
+            "review.word_count",
+            "Word Count & Statistics…",
+            "View document word, character, and object counts",
+            "review",
+            20,
+        ),
+        (
+            "list.none",
+            "List: None",
+            "Remove list formatting",
+            "format",
+            80,
+        ),
+        (
+            "list.bulleted",
+            "List: Bulleted",
+            "Format paragraphs as a bulleted list",
+            "format",
+            81,
+        ),
+        (
+            "list.numbered",
+            "List: Numbered",
+            "Format paragraphs as a numbered list",
+            "format",
+            82,
+        ),
+        ("paragraph.h1", "Heading 1", "Apply heading 1", "format", 42),
+        ("paragraph.h2", "Heading 2", "Apply heading 2", "format", 52),
+        ("paragraph.h3", "Heading 3", "Apply heading 3", "format", 62),
+        (
+            "paragraph.body",
+            "Body Text",
+            "Apply body style",
+            "format",
+            72,
+        ),
+        (
+            "format.align_left",
+            "Align Left",
+            "Align text left",
+            "format",
+            83,
+        ),
+        (
+            "format.align_center",
+            "Align Center",
+            "Center text",
+            "format",
+            84,
+        ),
+        (
+            "format.align_right",
+            "Align Right",
+            "Align text right",
+            "format",
+            85,
+        ),
+        (
+            "format.align_justify",
+            "Justify",
+            "Justify text",
+            "format",
+            86,
+        ),
+        (
+            "help.welcome",
+            "Open Welcome Guide",
+            "Open the 7-step Writer walkthrough",
+            "help",
+            10,
+        ),
+        (
+            "help.shortcuts",
+            "Keyboard Shortcuts",
+            "Open the searchable shortcut and command palette",
+            "help",
+            11,
+        ),
+    ] {
+        let mut spec = CommandSpec::new(id, label)
+            .with_undo_label(label)
+            .with_description(desc)
+            .with_category(cat)
+            .with_order(order);
+        let shortcut = command_dispatch::shortcut_for_id(id);
+        if !shortcut.is_empty() {
+            spec = spec.with_shortcut(shortcut);
+        }
+        catalog.push(spec);
+    }
     catalog.extend(paragraph_alignment::command_specs());
     catalog.extend(formatting_actions::command_specs());
     catalog.extend(appearance::command_specs());
     catalog.extend(window_chrome::command_specs());
     catalog.extend(table_actions::table_command_specs());
+    for spec in &mut catalog {
+        let sc = command_dispatch::shortcut_for_id(spec.id.as_str());
+        if !sc.is_empty() {
+            spec.default_shortcut = Some(sc.to_string());
+        }
+    }
     catalog
 }
 
@@ -810,6 +958,10 @@ fn sync_writer_registry_enablement(
         "writer.style.heading-2-all",
         "writer.style.heading-3-all",
         "writer.style.body-all",
+        "paragraph.h1",
+        "paragraph.h2",
+        "paragraph.h3",
+        "paragraph.body",
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
@@ -820,11 +972,18 @@ fn sync_writer_registry_enablement(
         "writer.align.left-all",
         "writer.align.center-all",
         "writer.align.right-all",
+        "format.align_left",
+        "format.align_center",
+        "format.align_right",
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
     let justify_available = paragraph_alignment::selection_can_be_justified(doc, doc.selection());
-    for id in ["writer.align.justify", "writer.align.justify-all"] {
+    for id in [
+        "writer.align.justify",
+        "writer.align.justify-all",
+        "format.align_justify",
+    ] {
         registry.set_enabled(&CommandId::new(id), justify_available);
     }
     formatting_actions::sync_registry_enablement(registry, doc);
@@ -841,6 +1000,7 @@ fn sync_writer_registry_enablement(
     ] {
         registry.set_enabled(&CommandId::new(id), true);
     }
+    // `file.export_pdf` / `docx` / `md` require content blocks; print preview & page setup stay openable.
     for id in [
         "file.export_pdf",
         "writer.export-pdf",
@@ -850,10 +1010,34 @@ fn sync_writer_registry_enablement(
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
-    // App utility commands are always reachable.
-    registry.set_enabled(&CommandId::new("app.palette"), true);
-    registry.set_enabled(&CommandId::new(local_menu::QUIT_COMMAND_ID), true);
-    // view.inspector enablement is drive by window availability, not document.
+    for id in [
+        "app.palette",
+        "file.start_hub",
+        "file.templates",
+        "file.print_preview",
+        "edit.find",
+        "edit.replace",
+        "help.welcome",
+        "help.shortcuts",
+        "view.navigator",
+        "view.zoom_in",
+        "view.zoom_out",
+        "view.zoom_actual",
+        "view.zoom_fit_width",
+        "view.zoom_fit_page",
+        "insert.header_footer",
+        "insert.comment",
+        "writer.footnotes",
+        "writer.review.open",
+        "review.word_count",
+        "list.none",
+        "list.bulleted",
+        "list.numbered",
+        local_menu::QUIT_COMMAND_ID,
+    ] {
+        registry.set_enabled(&CommandId::new(id), true);
+    }
+    // view.inspector enablement is driven by window availability, not document.
 }
 
 /// Invoke a Writer command through the authoritative registry.  The registry is
@@ -900,6 +1084,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
     // `registry.search` is deterministic (score → order → id) and is the sole
     // ranking used by the palette. An empty query lists every currently-enabled
     // command in registry order so the user sees the full palette.
+    let catalog = master_palette(app);
     let items: Vec<CommandPaletteItem> = if trimmed.is_empty() {
         let mut specs: Vec<&CommandSpec> = registry
             .commands()
@@ -914,9 +1099,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
         specs
             .into_iter()
             .filter_map(|spec| {
-                let palette = master_palette(app)
-                    .into_iter()
-                    .find(|c| c.id == spec.id.as_str())?;
+                let palette = catalog.iter().find(|c| c.id == spec.id.as_str())?;
                 Some(CommandPaletteItem {
                     id: palette.id.into(),
                     label: palette.label.into(),
@@ -930,9 +1113,7 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
             .into_iter()
             .filter(|spec| spec.enabled)
             .filter_map(|spec| {
-                let palette = master_palette(app)
-                    .into_iter()
-                    .find(|c| c.id == spec.id.as_str())?;
+                let palette = catalog.iter().find(|c| c.id == spec.id.as_str())?;
                 Some(CommandPaletteItem {
                     id: palette.id.into(),
                     label: palette.label.into(),
@@ -942,7 +1123,9 @@ fn rebuild_palette_with_registry(app: &WriterApp, registry: &CommandRegistry, qu
             })
             .collect()
     };
-    app.set_palette_commands(Rc::new(VecModel::from(items)).into());
+    projection_sync::sync_vec_model(&app.get_palette_commands(), items, |m| {
+        app.set_palette_commands(m)
+    });
     let count = app.get_palette_commands().row_count() as i32;
     let selected = app.get_palette_selected();
     if selected >= count && count > 0 {
@@ -975,6 +1158,7 @@ pub(crate) struct GuiState {
     pdf_filter: FileFilter,
     registry: Arc<Mutex<CommandRegistry>>,
     menu_service: RefCell<Option<Arc<NativeMenuBar>>>,
+    last_projected_view_width: Cell<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -982,6 +1166,7 @@ enum PendingReplacement {
     NewDocument,
     QuickStartSample,
     OpenDocument,
+    OpenRecent,
     DocxImport,
     CreateTemplate(TemplateId),
     /// Closing the window with unsaved changes.
@@ -1077,7 +1262,9 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     let selection = doc.selection();
     let announcement = selection_announcement(doc, &selection);
     app.set_doc_title(doc.title.as_str().into());
-    app.set_doc_content(SharedString::from(text));
+    if app.get_doc_content().as_str() != text {
+        app.set_doc_content(SharedString::from(text));
+    }
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     formatting_actions::project_document_controls(app, doc);
@@ -1119,7 +1306,9 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
             orphaned: thread.orphaned,
         })
         .collect();
-    app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
+    projection_sync::sync_vec_model(&app.get_comment_entries(), comment_entries, |m| {
+        app.set_comment_entries(m)
+    });
     let counts = status_left_text(word_count, char_count, block_count);
     let status_text = match get_recovery_notice() {
         Some(notice) => format!("{notice} · {counts}"),
@@ -1166,6 +1355,7 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
 /// released, because setting properties can call back into the controller.
 fn refresh_render_projection_of(app: &WriterApp, state: &GuiState) {
     let viewport = *state.viewport.borrow();
+    state.last_projected_view_width.set(app.get_view_width());
     let computed = compute_render_projection(app, &state.current.borrow(), viewport);
     publish_render_projection(app, computed);
 }
@@ -1204,28 +1394,41 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
         match_rects,
         picture_selected,
     } = computed;
-    app.set_render_blocks(Rc::new(VecModel::from(projection.rows)).into());
-    app.set_selection_rects(Rc::new(VecModel::from(projection.selection_rects)).into());
-    app.set_comment_rects(Rc::new(VecModel::from(projection.comment_rects)).into());
-    app.global::<WriterReviewState>()
-        .set_revision_marks(Rc::new(VecModel::from(projection.revision_marks)).into());
-    app.global::<WriterHeaderFooterState>()
-        .set_page_lines(Rc::new(VecModel::from(projection.header_footer_lines)).into());
+    projection_sync::sync_render_blocks(app, projection.rows);
+    projection_sync::sync_vec_model(
+        &app.get_selection_rects(),
+        projection.selection_rects,
+        |m| app.set_selection_rects(m),
+    );
+    projection_sync::sync_vec_model(&app.get_comment_rects(), projection.comment_rects, |m| {
+        app.set_comment_rects(m)
+    });
+    let review = app.global::<WriterReviewState>();
+    projection_sync::sync_vec_model(
+        &review.get_revision_marks(),
+        projection.revision_marks,
+        |m| review.set_revision_marks(m),
+    );
+    let hf = app.global::<WriterHeaderFooterState>();
+    projection_sync::sync_vec_model(&hf.get_page_lines(), projection.header_footer_lines, |m| {
+        hf.set_page_lines(m)
+    });
     let footnotes = app.global::<WriterFootnoteState>();
-    footnotes.set_page_lines(Rc::new(VecModel::from(projection.footnote_lines)).into());
-    footnotes.set_page_references(Rc::new(VecModel::from(projection.footnote_references)).into());
-    // Compare against this component's own model: a thread-local cache lets
-    // one WriterApp suppress publication to another app with identical cells.
-    let table_rects = app.get_table_cell_rects();
-    let table_rects_changed = table_rects.row_count() != projection.table_cell_rects.len()
-        || projection
-            .table_cell_rects
-            .iter()
-            .enumerate()
-            .any(|(index, rect)| table_rects.row_data(index).as_ref() != Some(rect));
-    if table_rects_changed {
-        app.set_table_cell_rects(Rc::new(VecModel::from(projection.table_cell_rects)).into());
-    }
+    projection_sync::sync_vec_model(
+        &footnotes.get_page_lines(),
+        projection.footnote_lines,
+        |m| footnotes.set_page_lines(m),
+    );
+    projection_sync::sync_vec_model(
+        &footnotes.get_page_references(),
+        projection.footnote_references,
+        |m| footnotes.set_page_references(m),
+    );
+    projection_sync::sync_vec_model(
+        &app.get_table_cell_rects(),
+        projection.table_cell_rects,
+        |m| app.set_table_cell_rects(m),
+    );
     picture_view::publish(app, &projection.images, picture_selected);
     app.set_page_count(projection.page_count);
 
@@ -1235,8 +1438,10 @@ fn publish_render_projection(app: &WriterApp, computed: ComputedProjection) {
     app.set_page_gap_pt(loom_writer_core::PAGE_GAP_PT);
     app.set_page_width_pt(page_style.width_pt);
     app.set_page_height_pt(page_style.height_pt);
-    app.global::<FindBar>()
-        .set_match_rects(Rc::new(VecModel::from(match_rects)).into());
+    let find_bar = app.global::<FindBar>();
+    projection_sync::sync_vec_model(&find_bar.get_match_rects(), match_rects, |m| {
+        find_bar.set_match_rects(m)
+    });
 }
 
 /// Rows, selection rectangles and comment rectangles for every page, the way
@@ -1535,6 +1740,7 @@ fn apply_state_with(app: &WriterApp, state: &GuiState, recovery_write: RecoveryW
     state.syncing_editor.set(true);
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
+    state.last_projected_view_width.set(app.get_view_width());
     apply_document_with_viewport(app, &current, viewport);
     if recovery_write == RecoveryWrite::Now && document_is_dirty(state) {
         if let Err(error) = recovery::record_document(&current, state.save_path.borrow().as_deref())
@@ -1628,6 +1834,14 @@ fn apply_pending_typing_style(
             document,
             table_range.clone(),
             family,
+        );
+    }
+    if let Some(size_pt) = style.font_size {
+        document_formatting::set_selection_font_size(document, text_range.clone(), size_pt);
+        table_actions::table_format_actions::set_selection_font_size(
+            document,
+            table_range.clone(),
+            size_pt,
         );
     }
     if let Some(on) = style.bold {
@@ -1873,12 +2087,7 @@ fn apply_theme(app: &WriterApp, theme: &str) {
 
 /// Names the platform's modifier in shortcut hints: "Cmd" on macOS, "Ctrl" elsewhere.
 fn apply_shortcut_labels(app: &WriterApp) {
-    let modifier = if cfg!(target_os = "macos") {
-        "Cmd"
-    } else {
-        "Ctrl"
-    };
-    app.set_shortcut_modifier(modifier.into());
+    app.set_shortcut_modifier(command_dispatch::PRIMARY_MOD.into());
 }
 
 fn configure_direction(app: &WriterApp, rtl: bool) {
@@ -1947,6 +2156,21 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
     }
 }
 
+fn sync_headless_local_menu(app: &WriterApp) {
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&local_menu::writer_menu_bar());
+    let _ = local_menu::sync(app, &menu_service);
+    // In-window screenshots reflect the Linux/Windows bar rather than the macOS app menu slot.
+    let labels: Vec<SharedString> = app
+        .get_local_menu_labels()
+        .iter()
+        .filter(|label| label.as_str() != "Loom Writer")
+        .collect();
+    if !labels.is_empty() {
+        app.set_local_menu_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    }
+}
+
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
@@ -1955,6 +2179,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     templates::install_catalog(&app);
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
+    sync_headless_local_menu(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
     appearance::apply_ui_font(&app, true);
     let mut doc = match &args.open {
@@ -1983,6 +2208,18 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         rebuild_palette(&app, "ex");
         app.set_palette_selected(1);
         app.set_palette_open(true);
+    }
+    if args.welcome_guide {
+        welcome_guide::open(&app);
+    }
+    if args.start_hub {
+        start_hub::open_hub(&app);
+    }
+    if args.print_preview {
+        print_preview::open_document(&app, &doc);
+    }
+    if args.word_count {
+        word_count_dialog::open_document(&app, &doc);
     }
     let (w, h) = args.size;
     apply_layout_breakpoints(&app, w);
@@ -2100,6 +2337,7 @@ fn open_document_from_picker(
                     Ok(document) => {
                         replace_opened_document(app, state, path.clone(), document);
                         sync_writer_menu_if_present(menu_service, app, state);
+                        start_hub::record_recent_document(&path);
                         app.set_status_left(SharedString::from(format!(
                             "Opened {}",
                             path.display()
@@ -2175,6 +2413,9 @@ fn continue_pending_replacement_with_quit(
         Some(PendingReplacement::QuickStartSample) => open_quick_start_sample(app, state),
         Some(PendingReplacement::OpenDocument) => {
             open_document_from_picker(app, state, menu_service)
+        }
+        Some(PendingReplacement::OpenRecent) => {
+            start_hub::continue_pending_recent_open(app, state, menu_service)
         }
         Some(PendingReplacement::DocxImport) => {
             docx_actions::apply_pending_docx_import(app, state, menu_service)
@@ -2270,6 +2511,11 @@ fn wire_writer_shared_callbacks(
     docx_actions::wire(app, state, &menu_service);
     save_flow::wire_loss_dialog(app, state, &menu_service);
     picture_actions::wire(app, state);
+    command_dispatch::wire_shortcuts(app);
+    welcome_guide::wire(app, state, &menu_service);
+    start_hub::wire(app, state, &menu_service);
+    print_preview::wire(app, state, &menu_service);
+    word_count_dialog::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2544,6 +2790,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Bold,
                         app.get_is_bold(),
                     );
+                    app.set_is_bold(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Bold,
                         now_on,
@@ -2608,6 +2855,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Underline,
                         app.get_is_underline(),
                     );
+                    app.set_is_underline(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Underline,
                         now_on,
@@ -2665,6 +2913,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Italic,
                         app.get_is_italic(),
                     );
+                    app.set_is_italic(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Italic,
                         now_on,
@@ -2838,13 +3087,15 @@ fn wire_writer_shared_callbacks(
         let app_ref = app.as_weak();
         app.on_page_scroll_changed(move |scroll_x, scroll_y| {
             if let Some(app) = app_ref.upgrade() {
-                let (next_x, next_y) = {
+                let (prev_x, prev_y, next_x, next_y) = {
                     let mut viewport = state.viewport.borrow_mut();
+                    let prev_x = viewport.scroll_x;
+                    let prev_y = viewport.scroll_y;
                     let next_x = normalize_page_scroll(scroll_x);
                     let next_y = normalize_page_scroll(scroll_y);
                     viewport.scroll_x = next_x;
                     viewport.scroll_y = next_y;
-                    (next_x, next_y)
+                    (prev_x, prev_y, next_x, next_y)
                 };
                 // Flickable normally clamps these values itself. The explicit
                 // rebinding also keeps headless/property-driven updates from
@@ -2855,7 +3106,15 @@ fn wire_writer_shared_callbacks(
                 if (app.get_scroll_y() - next_y).abs() > f32::EPSILON {
                     app.set_scroll_y(next_y);
                 }
-                refresh_render_projection_of(&app, &state);
+                let view_width_changed =
+                    (state.last_projected_view_width.get() - app.get_view_width()).abs()
+                        > f32::EPSILON;
+                if (prev_x - next_x).abs() > f32::EPSILON
+                    || (prev_y - next_y).abs() > f32::EPSILON
+                    || view_width_changed
+                {
+                    refresh_render_projection_of(&app, &state);
+                }
             }
         });
     }
@@ -3373,6 +3632,8 @@ fn startup_documents(
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    windows_platform::init_backend_if_needed()?;
     #[cfg(all(target_os = "macos", not(test)))]
     {
         let backend = i_slint_backend_winit::Backend::builder()
@@ -3383,6 +3644,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    #[cfg(all(target_os = "windows", not(test)))]
+    windows_platform::install_alt_modifier_guard(&app);
     window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
@@ -3462,6 +3725,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pdf_filter,
         registry: Arc::new(Mutex::new(initial_registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
     // Seed only a fresh document: a recovered session already contains
     // whatever the previous seeded run added.
@@ -3496,19 +3760,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     local_menu::wire_action(&app, menu_service.clone());
     let _ = local_menu::sync(&app, &menu_service);
-    if args.open.as_deref().is_some_and(|open_path| {
-        Path::new(open_path)
-            .extension()
+    if let Some(open_path) = args.open.as_deref() {
+        let p = Path::new(open_path);
+        if p.extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
-    }) {
-        if let Some(prepared) = prepared_docx {
-            let _ = docx_actions::open_prepared_docx_import(
-                &app,
-                &state,
-                prepared,
-                &Some(menu_service.clone()),
-                true,
-            );
+        {
+            if let Some(prepared) = prepared_docx {
+                if docx_actions::open_prepared_docx_import(
+                    &app,
+                    &state,
+                    prepared,
+                    &Some(menu_service.clone()),
+                    true,
+                ) {
+                    start_hub::record_recent_document(p);
+                }
+            }
+        } else if p.is_file() {
+            start_hub::record_recent_document(p);
         }
     }
     // A choice from any surface refreshes the menu check marks.
@@ -3655,6 +3924,31 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.set_palette_selected(1);
         app.set_palette_open(true);
     }
+    if args.welcome_guide {
+        welcome_guide::open(&app);
+    }
+    if args.start_hub {
+        start_hub::open_hub(&app);
+    }
+    if args.print_preview {
+        print_preview::open(&app, &state);
+    }
+    if args.word_count {
+        word_count_dialog::open(&app, &state);
+    }
+    if !args.template_chooser
+        && !args.palette
+        && !args.welcome_guide
+        && !args.start_hub
+        && !args.print_preview
+        && !args.word_count
+        && args.open.is_none()
+        && args.template.is_none()
+        && recovered.is_none()
+        && welcome_guide::should_show_on_first_run()
+    {
+        welcome_guide::open(&app);
+    }
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     if let Some((x, y)) = args.position {
         app.window().set_position(PhysicalPosition::new(x, y));
@@ -3694,7 +3988,15 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             reported.x, reported.y
         );
     }
-    focus_page_at_launch(&app);
+    let modal_active = args.template_chooser
+        || args.palette
+        || app.global::<WelcomeGuideState>().get_open()
+        || app.global::<StartHubState>().get_open()
+        || app.global::<PrintPreviewState>().get_open()
+        || app.global::<WordCountState>().get_open();
+    if !modal_active {
+        focus_page_at_launch(&app);
+    }
     let res = slint::run_event_loop().map_err(|e| e.to_string());
     if !document_is_dirty(&state) {
         end_session_recovery();
@@ -3768,6 +4070,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     apply_shortcut_labels(&app);
+    sync_headless_local_menu(&app);
     Theme::get(&app).set_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -3817,6 +4120,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         pdf_filter: FileFilter::new("PDF", ["pdf"]).map_err(|error| error.to_string())?,
         registry: Arc::new(Mutex::new(initial_registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
 
     wire_writer_journey_callbacks(&app, &state);
@@ -4420,7 +4724,11 @@ mod frame_bench_tests;
 #[cfg(test)]
 mod kerned_highlight_tests;
 #[cfg(test)]
+mod keyboard_shortcut_tests;
+#[cfg(test)]
 mod page_stack_tests;
+#[cfg(test)]
+mod print_preview_tests;
 #[cfg(test)]
 mod projection_tests;
 #[cfg(test)]

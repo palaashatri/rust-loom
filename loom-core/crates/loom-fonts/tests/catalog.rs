@@ -496,3 +496,55 @@ fn a_file_that_vanishes_after_the_scan_fails_to_load_cleanly() {
     let id = catalog.faces_in_order().next().unwrap().0;
     assert!(matches!(catalog.load(id), Err(FontError::Io(_))));
 }
+
+#[test]
+fn picker_families_excludes_dot_prefixed_hidden_families_while_resolve_keeps_them() {
+    let dir = TempDir::new("hidden-system-families");
+    let regular = inter("Inter-Regular.ttf");
+    fs::write(
+        dir.path().join("dot_sf.ttf"),
+        rename_family(&regular, ".SFNS"),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("dot_spaced.ttf"),
+        rename_family(&regular, " .ADT"),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("alpha.ttf"),
+        rename_family(&regular, "Alpha"),
+    )
+    .unwrap();
+    fs::write(dir.path().join("mr.ttf"), rename_family(&regular, "Mr.De")).unwrap();
+    fs::write(
+        dir.path().join("zebra.ttf"),
+        rename_family(&regular, "Zebra"),
+    )
+    .unwrap();
+
+    let catalog = FontCatalog::scan(&config(vec![dir.path().to_owned()]));
+    assert!(catalog.families().iter().any(|f| f == ".SFNS"));
+    assert!(catalog.families().iter().any(|f| f == ".ADT"));
+
+    let mut expected_picker = vec!["Alpha", "Inter", "Mr.De", "Zebra"];
+    #[cfg(feature = "bundled-script-fallback")]
+    expected_picker.extend(["Noto Naskh Arabic", "Noto Sans Hebrew"]);
+    expected_picker.sort_by_key(|f| f.to_lowercase());
+    assert_eq!(catalog.picker_families(), expected_picker);
+
+    // Imported documents referencing hidden `.`-prefixed families still resolve cleanly.
+    assert!(catalog.has_family(".SFNS"));
+    let resolved = catalog.resolve(".SFNS", 400, false).unwrap();
+    assert!(!resolved.substituted);
+    assert_eq!(catalog.face(resolved.primary()).unwrap().family, ".SFNS");
+    assert!(catalog.has_family(" .ADT"));
+}
+
+#[test]
+fn system_picker_families_never_contain_hidden_dot_families() {
+    let catalog = FontCatalog::system();
+    let picker = catalog.picker_families();
+    assert!(picker.iter().all(|f| !f.trim_start().starts_with('.')));
+    assert!(picker.iter().any(|f| f == "Inter"));
+}

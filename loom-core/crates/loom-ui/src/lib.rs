@@ -7,6 +7,8 @@
 
 slint::include_modules!();
 
+pub mod color_palette;
+
 /// Rust-side compatibility handle for the embeddable legacy command palette.
 pub type CommandPalette = CommandPaletteTestWindow;
 

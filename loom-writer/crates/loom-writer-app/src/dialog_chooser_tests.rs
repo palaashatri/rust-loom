@@ -100,8 +100,8 @@ fn every_template_category_icon_is_a_real_glyph_not_a_dash() {
     let icons = category_icons(&app, width);
     assert_eq!(
         icons.len(),
-        6,
-        "the chooser shows six category icons, found {icons:?}"
+        7,
+        "the chooser shows seven category icons, found {icons:?}"
     );
     for (x, y) in icons {
         let rows = ink_rows(&image, x, y);

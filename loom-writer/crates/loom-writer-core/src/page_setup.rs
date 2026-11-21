@@ -408,7 +408,7 @@ impl PageSetup {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         let needs_geometry =
             self.paper == PaperSize::Custom || self.margins == PageMarginsPreset::Custom;
         if needs_geometry && self.custom_geometry.is_none() {

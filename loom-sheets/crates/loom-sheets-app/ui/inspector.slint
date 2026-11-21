@@ -84,10 +84,15 @@ export component SheetInspector inherits LoomPanel {
         if (root.active) {
             if (!root.quiet-open) { panel-focus.focus(); }
             root.quiet-open = false;
+        } else {
+            CellInk.palette-open = false;
+            CellInk.hex-error = "";
         }
     }
 
     changed inspector-tab => {
+        CellInk.palette-open = false;
+        CellInk.hex-error = "";
         inspector-scroll.viewport-y = 0px;
     }
     changed cell-font-label => {
@@ -341,12 +346,12 @@ export component SheetInspector inherits LoomPanel {
                         increase => { root.adjust-font(1); }
                     }
                     Text {
-                        text: "Text colour";
+                        text: "Text color";
                         font-size: Theme.type.caption;
                         color: Theme.palette().ink-secondary;
                         horizontal-alignment: Theme.rtl ? right : left;
                         accessible-role: AccessibleRole.text;
-                        accessible-label: "Text colour";
+                        accessible-label: "Text color";
                     }
                     SheetTextColorRow { }
                     HorizontalLayout {

@@ -1174,6 +1174,157 @@ mod tests {
     }
 
     #[test]
+    fn deleting_table_via_action_and_command_supports_single_step_undo_redo() {
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        assert!(app.get_is_table_selected());
+        assert!(
+            state
+                .registry
+                .lock()
+                .unwrap()
+                .get(&loom_command::CommandId::new("table.delete_table"))
+                .is_some_and(|spec| spec.enabled),
+            "table.delete_table is enabled while inside a table"
+        );
+
+        let before = state.current.borrow().clone();
+        table_actions::table_action(&app, &state, "delete-table");
+        assert_eq!(app.get_status_right().as_str(), "Deleted the table");
+        assert!(!app.get_is_table_selected());
+        assert!(table_actions::get_table_cell_selection_range().is_none());
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+
+        // Single-step Undo restores the whole table.
+        app.invoke_undo();
+        assert_eq!(*state.current.borrow(), before);
+        assert!(app.get_is_table_selected());
+
+        // Redo removes it again via command dispatch.
+        app.invoke_redo();
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+
+        // Undo and verify dispatch_command("table.delete_table") also deletes it.
+        app.invoke_undo();
+        assert!(crate::command_dispatch::dispatch_command(
+            &app,
+            "table.delete_table"
+        ));
+        assert_eq!(app.get_status_right().as_str(), "Deleted the table");
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+    }
+
+    #[test]
+    fn ctrl_alt_shift_backspace_and_full_table_range_delete_remove_table() {
+        // 1. Ctrl+Alt+Shift+Backspace deletes the table from any cell.
+        let (app, state, _) = make_app_with_active_table_range(0, 0);
+        table_actions::clear_table_cell_selection_range();
+        let backspace: slint::SharedString = slint::platform::Key::Backspace.into();
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            backspace.as_str(),
+            true,
+            true,
+            true
+        ));
+        assert_eq!(app.get_status_right().as_str(), "Deleted the table");
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+
+        // 2. Partial cell range Backspace does NOT delete the table.
+        let (app, state, tbl_id) = make_app_with_active_table_range(0, 0);
+        let doc = state.current.borrow().clone();
+        let tbl = doc.table_from_block(tbl_id).expect("table");
+        let rows = tbl.rows.len();
+        let cols = tbl.columns();
+        assert!(rows >= 2 && cols >= 2);
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id: tbl_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: cols - 1,
+        }));
+        assert!(!table_actions::handle_table_key(
+            &app,
+            &state,
+            backspace.as_str(),
+            false,
+            false,
+            false
+        ));
+        assert!(state.current.borrow().blocks.iter().any(|b| b.id == tbl_id));
+
+        // 3. Full-table cell range Backspace deletes the whole table.
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id: tbl_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: rows - 1,
+            end_col: cols - 1,
+        }));
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            backspace.as_str(),
+            false,
+            false,
+            false
+        ));
+        assert_eq!(app.get_status_right().as_str(), "Deleted the table");
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+
+        // 4. Undo and verify Delete key also deletes when full table is selected.
+        app.invoke_undo();
+        table_actions::set_table_cell_selection_range(Some(table_actions::TableCellRange {
+            block_id: tbl_id,
+            start_row: 0,
+            start_col: 0,
+            end_row: rows - 1,
+            end_col: cols - 1,
+        }));
+        let delete_key: slint::SharedString = slint::platform::Key::Delete.into();
+        assert!(table_actions::handle_table_key(
+            &app,
+            &state,
+            delete_key.as_str(),
+            false,
+            false,
+            false
+        ));
+        assert!(state
+            .current
+            .borrow()
+            .blocks
+            .iter()
+            .all(|b| b.kind != loom_writer_core::TABLE_BLOCK_KIND));
+    }
+
+    #[test]
     fn table_style_and_option_changes_name_the_style_and_option_in_words() {
         let (app, _state) = make_test_app();
         app.invoke_insert_table_size(3, 3);

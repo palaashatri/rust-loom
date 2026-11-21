@@ -245,13 +245,15 @@ pub(crate) fn set_selection_font_size(
     })
 }
 
+/// Color the selected table runs, or drop their explicit color for `None`.
 pub(crate) fn set_selection_foreground_color(
     document: &mut WriterDocument,
     selection: TextSelection,
-    color: &str,
+    color: impl crate::inline_formatting::ForegroundColorArg,
 ) -> bool {
+    let color = color.as_foreground_color().map(str::to_owned);
     mutate_target(document, &selection, |run| {
-        run.color = Some(color.to_owned());
+        run.color = color.clone();
     })
 }
 

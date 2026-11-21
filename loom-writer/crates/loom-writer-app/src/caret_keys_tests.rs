@@ -266,3 +266,97 @@ fn keys_inside_a_table_are_left_to_cell_navigation() {
     }
     assert_eq!(focus(&state), 8);
 }
+
+fn press_shifted_document_edge(app: &WriterApp, key: Key) {
+    let (modifier, key) = match key {
+        Key::End if cfg!(target_os = "macos") => (Key::Meta, Key::DownArrow),
+        Key::Home if cfg!(target_os = "macos") => (Key::Meta, Key::UpArrow),
+        key => (Key::Control, key),
+    };
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: SharedString::from(Key::Shift),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: SharedString::from(modifier),
+    });
+    press(app, key);
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: SharedString::from(modifier),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: SharedString::from(Key::Shift),
+    });
+}
+
+#[test]
+fn shift_document_edge_extends_selection_to_end_and_back_to_start_with_scroll() {
+    let text = (1..=120)
+        .map(|n| format!("Paragraph {n} with enough words to wrap across a line of the page."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = launched(&text);
+    let mid = text.len() / 2;
+    at(&s, mid);
+
+    press_shifted_document_edge(&s.app, Key::End);
+    assert_eq!(anchor(&s.state), mid, "Shift+Ctrl/Cmd+End keeps anchor");
+    assert_eq!(focus(&s.state), text.len(), "and moves focus to end");
+    assert!(
+        s.state.viewport.borrow().scroll_y > 0.0,
+        "and scrolls down to reveal the document end"
+    );
+
+    press_shifted_document_edge(&s.app, Key::Home);
+    assert_eq!(anchor(&s.state), mid, "Shift+Ctrl/Cmd+Home keeps anchor");
+    assert_eq!(focus(&s.state), 0, "and moves focus to document start");
+    assert_eq!(
+        s.state.viewport.borrow().scroll_y,
+        0.0,
+        "and returns scroll to the top margin"
+    );
+}
+
+#[test]
+fn home_and_end_at_top_and_bottom_document_edges_keep_margin_clearance() {
+    let text = (1..=120)
+        .map(|n| format!("Paragraph {n} with enough words to wrap across a line of the page."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = launched(&text);
+
+    // Jump to the bottom edge, then press Home and End on the last line.
+    press_document_edge(&s.app, Key::End);
+    let bottom_scroll = s.state.viewport.borrow().scroll_y;
+    assert!(bottom_scroll > 0.0);
+
+    let last_line_start = text.rfind('\n').unwrap() + 1;
+    press(&s.app, Key::Home);
+    assert_eq!(focus(&s.state), last_line_start);
+    assert!(
+        s.state.viewport.borrow().scroll_y > 0.0,
+        "Home on the last line stays scrolled near the bottom"
+    );
+
+    press(&s.app, Key::End);
+    assert_eq!(focus(&s.state), text.len());
+    assert!(
+        (s.state.viewport.borrow().scroll_y - bottom_scroll).abs() < 1.0,
+        "End returns to the bottom scroll position"
+    );
+
+    // Up on the very first line moves to 0 and keeps top margin; Down on the
+    // very last line moves to the end.
+    press_document_edge(&s.app, Key::Home);
+    at(&s, 5);
+    press(&s.app, Key::UpArrow);
+    assert_eq!(focus(&s.state), 0, "Up on line 0 lands at document start");
+    assert_eq!(s.state.viewport.borrow().scroll_y, 0.0);
+
+    at(&s, last_line_start + 3);
+    press(&s.app, Key::DownArrow);
+    assert_eq!(
+        focus(&s.state),
+        text.len(),
+        "Down on the last line lands at document end"
+    );
+}

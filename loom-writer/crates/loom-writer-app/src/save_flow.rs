@@ -500,6 +500,7 @@ fn write_and_commit(
     state.compatibility_save.set(format == SaveFormat::Loomdoc);
     let checkpoint_result = recovery::checkpoint_document(&document, Some(path.as_path()));
     *state.last_saved.borrow_mut() = document;
+    crate::start_hub::record_recent_document(&path);
     set_recovery_notice(None);
     file_title::sync(app, state);
     app.set_document_dirty(document_is_dirty(state));

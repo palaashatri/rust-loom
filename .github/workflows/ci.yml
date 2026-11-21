@@ -117,6 +117,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test Writer workspace
         working-directory: loom-writer
+        env:
+          CARGO_PROFILE_TEST_DEBUG: 1
+          CARGO_BUILD_JOBS: 2
         run: cargo test --workspace --locked
 
   present:

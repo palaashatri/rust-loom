@@ -32,19 +32,92 @@ fn stats(mut v: Vec<f64>) -> (f64, f64, f64) {
     (pct(&v, 0.5), pct(&v, 0.95), v[v.len() - 1])
 }
 
-fn peak_working_set_mb() -> f64 {
-    let pid = std::process::id();
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!("(Get-Process -Id {pid}).PeakWorkingSet64"),
-        ])
-        .output()
+fn parse_powershell_bytes_mb(output: &str) -> Option<f64> {
+    output
+        .trim()
+        .parse::<f64>()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .map_or(f64::NAN, |b| b / 1048576.0)
+        .filter(|bytes| bytes.is_finite() && *bytes >= 0.0)
+        .map(|bytes| bytes / 1_048_576.0)
+}
+
+fn parse_vmhwm_mb(status: &str) -> Option<f64> {
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|kib| kib.parse::<f64>().ok())
+        .filter(|kib| kib.is_finite() && *kib >= 0.0)
+        .map(|kib| kib / 1_024.0)
+}
+
+fn parse_ps_rss_mb(output: &str) -> Option<f64> {
+    output
+        .split_whitespace()
+        .next()
+        .and_then(|kib| kib.parse::<f64>().ok())
+        .filter(|kib| kib.is_finite() && *kib >= 0.0)
+        .map(|kib| kib / 1_024.0)
+}
+
+fn peak_working_set_mb() -> f64 {
+    #[cfg(target_os = "windows")]
+    {
+        let pid = std::process::id();
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-Process -Id {pid}).PeakWorkingSet64"),
+            ])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| parse_powershell_bytes_mb(&s))
+            .unwrap_or(f64::NAN)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| parse_vmhwm_mb(&status))
+            .unwrap_or(f64::NAN)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let pid = std::process::id().to_string();
+        std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &pid])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| parse_ps_rss_mb(&s))
+            .unwrap_or(f64::NAN)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        f64::NAN
+    }
+}
+
+#[test]
+fn peak_working_set_mb_parses_all_platform_formats_and_reports_current_process() {
+    assert_eq!(parse_powershell_bytes_mb("  104857600 \r\n"), Some(100.0));
+    assert_eq!(
+        parse_vmhwm_mb("Name:\tloom-writer\nVmHWM:\t   65536 kB\nVmRSS:\t   32768 kB\n"),
+        Some(64.0)
+    );
+    assert_eq!(parse_ps_rss_mb("  32768\n"), Some(32.0));
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    {
+        let rss = peak_working_set_mb();
+        assert!(
+            rss.is_finite() && rss > 0.0,
+            "expected positive finite peak RSS on this host, got {rss}"
+        );
+    }
 }
 
 fn paragraph(n: usize) -> String {

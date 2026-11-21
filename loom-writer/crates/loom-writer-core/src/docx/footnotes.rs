@@ -391,7 +391,7 @@ fn append_note_text(out: &mut String, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn footnotes_part_path(archive: &PackageArchive) -> Result<Option<String>, String> {
+pub(super) fn footnotes_part_path(archive: &PackageArchive) -> Result<Option<String>, String> {
     let relationship_bytes = archive.get("word/_rels/document.xml.rels");
     let part_exists = archive.get("word/footnotes.xml").is_some();
     let Some(bytes) = relationship_bytes else {

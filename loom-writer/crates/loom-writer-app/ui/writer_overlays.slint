@@ -1,20 +1,36 @@
-import { TemplateChooserModal } from "template_chooser.slint";
+import { TemplateChooserModal, WriterTemplateCatalog } from "template_chooser.slint";
 import { CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import { LoomWindowResizeEdges, LocalMenuEntry, LocalMenuPopup } from "foundation.slint";
-import { FindBar, FindBarOverlay } from "find_bar.slint";
+import { FindBar, FindBarOverlay, FindRect } from "find_bar.slint";
 import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
 import { DocxImportWarningDialog } from "docx_import_warning.slint";
 import { DocxSaveWarningDialog, DocxSaveWarningState } from "docx_save_warning.slint";
 import { DocxExportReportDialog } from "docx_export_report.slint";
 import { WriterPaletteHost } from "palette_host.slint";
-import { PictureAltDialog } from "writer_components.slint";
+import { PictureAlt, PictureAltDialog, WriterTableCellRect, WriterPageImage, PageImages } from "writer_components.slint";
 import { Theme } from "theme.slint";
 import { WriterTextColorDialog } from "writer_text_color_dialog.slint";
-import { WriterHeaderFooterDialog, WriterHeaderFooterState } from "writer_header_footer.slint";
-import { WriterFootnoteDialog, WriterFootnoteState } from "writer_footnotes.slint";
+import { WriterHeaderFooterDialog, WriterHeaderFooterState, WriterHeaderFooterLine } from "writer_header_footer.slint";
+import { WriterFootnoteDialog, WriterFootnoteState, WriterFootnoteLine, WriterFootnoteReference } from "writer_footnotes.slint";
 import { WriterReviewPanel, WriterReviewState } from "writer_review.slint";
 import { WriterPdfExportDialog } from "writer_pdf_export_dialog.slint";
 import { WriterFormatState } from "alignment_state.slint";
+import { WriterPageGeometry } from "inspector.slint";
+import {
+    WriterModals, WelcomeGuideState, StartHubState, StartHubRecentItem,
+    PrintPreviewState, PrintPreviewTextLine, PrintPreviewBoxRect, WordCountState,
+} from "writer_modals.slint";
+
+export {
+    WriterFormatState, DocxSaveWarningState,
+    WriterHeaderFooterState, WriterHeaderFooterLine,
+    WriterFootnoteState, WriterFootnoteLine, WriterFootnoteReference,
+    WriterReviewState, FindBar, FindRect, WriterTemplateCatalog,
+    WriterTableCellRect, WriterPageImage, PageImages, PictureAlt, WriterPageGeometry,
+    WelcomeGuideState, StartHubState, StartHubRecentItem,
+    PrintPreviewState, PrintPreviewTextLine, PrintPreviewBoxRect,
+    WordCountState,
+}
 
 /// Dialogs, the in-window menu popup, the command palette, the find bar and the
 /// frameless-window resize edges, stacked above the page in the same order as
@@ -26,6 +42,7 @@ export component WriterOverlays inherits Rectangle {
     in-out property <int> template-category;
     callback cancel-template;
     callback create-template(string);
+    callback open-file-requested;
     in property <bool> save-changes-open;
     in property <string> save-changes-document;
     in property <bool> save-changes-closing;
@@ -65,6 +82,12 @@ export component WriterOverlays inherits Rectangle {
     in property <bool> custom-chrome;
     in property <bool> maximized;
     callback window-resize(int);
+    out property <bool> modal-open: modals.modal-open
+        || root.template-chooser-open || root.save-changes-open
+        || root.docx-import-warning-open || root.docx-export-report-open
+        || DocxSaveWarningState.dialog-open || WriterHeaderFooterState.dialog-open
+        || WriterFootnoteState.dialog-open || WriterFormatState.color-dialog-open
+        || PictureAlt.open || WriterReviewState.pdf-export-open;
 
     public function focus-palette() {
         palette-host.grab-focus();
@@ -78,6 +101,7 @@ export component WriterOverlays inherits Rectangle {
         template-category <=> root.template-category;
         cancel-template => { root.cancel-template(); }
         create-template(idx) => { root.create-template(idx); }
+        open-file-requested => { root.open-file-requested(); }
     }
 
 PictureAltDialog {}
@@ -187,6 +211,11 @@ PictureAltDialog {}
             WriterReviewState.pdf-export-open = false;
             WriterReviewState.cancel-pdf-export();
         }
+    }
+
+    modals := WriterModals {
+        width: root.width;
+        height: root.height;
     }
 
     LoomWindowResizeEdges {

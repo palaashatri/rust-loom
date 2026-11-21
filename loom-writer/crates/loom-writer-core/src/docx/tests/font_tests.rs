@@ -216,3 +216,182 @@ fn complex_script_only_formatting_is_disclosed_and_does_not_restyle_latin_text()
         latin_italic.runs
     );
 }
+
+const PKG_REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const R_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+fn build_archive_with_parts(extra_parts: &[(&str, Vec<u8>)], body_inner_xml: &str) -> Vec<u8> {
+    let mut archive = loom_package::zip::PackageArchive::new();
+    let doc_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:document xmlns:w=\"{}\" xmlns:r=\"{R_NS}\"><w:body>{body_inner_xml}</w:body></w:document>",
+        super::W
+    );
+    archive
+        .add("word/document.xml", doc_xml.into_bytes())
+        .expect("add document.xml");
+    for (path, bytes) in extra_parts {
+        archive.add(path, bytes.clone()).expect("add extra part");
+    }
+    archive.to_bytes().expect("serialize archive")
+}
+
+#[test]
+fn complex_script_in_headers_and_footers_emits_fidelity_warning_without_crashing_or_restyling_latin(
+) {
+    let header_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:hdr xmlns:w=\"{}\"><w:p><w:r><w:rPr><w:bCs/><w:rFonts w:cs=\"Traditional Arabic\"/></w:rPr>\
+         <w:t>\u{627}\u{644}\u{639}\u{631}\u{628}\u{64a}\u{629}</w:t></w:r></w:p></w:hdr>",
+        super::W
+    );
+    let footer_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:ftr xmlns:w=\"{}\"><w:p><w:r><w:rPr><w:iCs/><w:szCs w:val=\"36\"/></w:rPr>\
+         <w:t>\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}</w:t></w:r></w:p></w:ftr>",
+        super::W
+    );
+
+    let header_only = build_archive_with_parts(
+        &[("word/header1.xml", header_xml.as_bytes().to_vec())],
+        "<w:p><w:r><w:t>Latin body text</w:t></w:r></w:p>",
+    );
+    let header_warnings = inspect_docx_unsupported(&header_only).expect("inspect header fixture");
+    let header_joined = header_warnings.join(" | ").to_lowercase();
+    assert!(
+        header_joined.contains("complex-script"),
+        "{header_warnings:?}"
+    );
+    assert!(header_joined.contains("headers"), "{header_warnings:?}");
+    assert!(header_joined.contains("w:bcs"), "{header_warnings:?}");
+    assert!(header_joined.contains("w:cs"), "{header_warnings:?}");
+    let imported = import_docx(&header_only).expect("import body alongside header part");
+    assert_eq!(imported.blocks[0].text.as_str(), "Latin body text");
+    assert!(
+        imported.blocks[0]
+            .runs
+            .iter()
+            .all(
+                |run| run.style.weight.numeric() < FontWeight::Bold.numeric() && !run.style.italic
+            ),
+        "header CS formatting must not restyle Latin body runs: {:?}",
+        imported.blocks[0].runs
+    );
+
+    let footer_only = build_archive_with_parts(
+        &[("word/footer1.xml", footer_xml.as_bytes().to_vec())],
+        "<w:p><w:r><w:t>Latin body text</w:t></w:r></w:p>",
+    );
+    let footer_warnings = inspect_docx_unsupported(&footer_only).expect("inspect footer fixture");
+    let footer_joined = footer_warnings.join(" | ").to_lowercase();
+    assert!(
+        footer_joined.contains("complex-script"),
+        "{footer_warnings:?}"
+    );
+    assert!(footer_joined.contains("footers"), "{footer_warnings:?}");
+    assert!(footer_joined.contains("w:ics"), "{footer_warnings:?}");
+    assert!(footer_joined.contains("w:szcs"), "{footer_warnings:?}");
+
+    // Referenced header/footer parts with unsupported CS elements still inspect
+    // cleanly and never panic during import.
+    let rels_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <Relationships xmlns=\"{PKG_REL_NS}\">\
+         <Relationship Id=\"rIdHeader1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/>\
+         <Relationship Id=\"rIdFooter1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>\
+         </Relationships>"
+    );
+    let referenced = build_archive_with_parts(
+        &[
+            ("word/_rels/document.xml.rels", rels_xml.into_bytes()),
+            ("word/header1.xml", header_xml.into_bytes()),
+            ("word/footer1.xml", footer_xml.into_bytes()),
+        ],
+        "<w:p><w:r><w:t>Latin body text</w:t></w:r></w:p>\
+         <w:sectPr><w:headerReference w:type=\"default\" r:id=\"rIdHeader1\"/>\
+         <w:footerReference w:type=\"default\" r:id=\"rIdFooter1\"/></w:sectPr>",
+    );
+    let ref_warnings = inspect_docx_unsupported(&referenced).expect("inspect referenced parts");
+    let ref_joined = ref_warnings.join(" | ").to_lowercase();
+    assert!(ref_joined.contains("headers"), "{ref_warnings:?}");
+    assert!(ref_joined.contains("footers"), "{ref_warnings:?}");
+    let _ = import_docx(&referenced);
+}
+
+#[test]
+fn complex_script_in_footnotes_emits_warning_and_imports_without_restyling_latin() {
+    let rels_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <Relationships xmlns=\"{PKG_REL_NS}\">\
+         <Relationship Id=\"rIdNotes\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes\" Target=\"footnotes.xml\"/>\
+         </Relationships>"
+    );
+    let footnotes_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:footnotes xmlns:w=\"{}\">\
+         <w:footnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>\
+         <w:footnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>\
+         <w:footnote w:id=\"1\"><w:p><w:r><w:footnoteRef/></w:r>\
+         <w:r><w:rPr><w:bCs/><w:iCs/><w:szCs w:val=\"28\"/><w:rFonts w:cs=\"Tahoma\"/></w:rPr>\
+         <w:t>\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}</w:t></w:r></w:p></w:footnote>\
+         </w:footnotes>",
+        super::W
+    );
+    let bytes = build_archive_with_parts(
+        &[
+            ("word/_rels/document.xml.rels", rels_xml.into_bytes()),
+            ("word/footnotes.xml", footnotes_xml.into_bytes()),
+        ],
+        "<w:p><w:r><w:t>Latin anchor</w:t></w:r><w:r><w:footnoteReference w:id=\"1\"/></w:r></w:p>",
+    );
+
+    let warnings = inspect_docx_unsupported(&bytes).expect("inspect footnotes fixture");
+    let joined = warnings.join(" | ").to_lowercase();
+    assert!(joined.contains("complex-script"), "{warnings:?}");
+    assert!(joined.contains("footnotes"), "{warnings:?}");
+    for axis in ["w:bcs", "w:ics", "w:szcs", "w:cs"] {
+        assert!(joined.contains(axis), "missing {axis}: {warnings:?}");
+    }
+
+    let imported = import_docx(&bytes).expect("import footnotes fixture");
+    assert_eq!(imported.footnotes.len(), 1);
+    assert!(imported.footnotes[0]
+        .body
+        .contains("\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}"));
+    assert!(
+        imported.blocks[0]
+            .runs
+            .iter()
+            .all(
+                |run| run.style.weight.numeric() < FontWeight::Bold.numeric() && !run.style.italic
+            ),
+        "footnote CS formatting must not restyle Latin body text: {:?}",
+        imported.blocks[0].runs
+    );
+}
+
+#[test]
+fn complex_script_scanner_ignores_matching_axes_and_handles_invalid_or_oversized_parts() {
+    let matching_header = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:hdr xmlns:w=\"{}\"><w:p><w:r><w:rPr>\
+         <w:b/><w:bCs/><w:i/><w:iCs/><w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>\
+         <w:rFonts w:ascii=\"Arial\" w:cs=\"Arial\"/>\
+         </w:rPr><w:t>Same</w:t></w:r></w:p></w:hdr>",
+        super::W
+    );
+    let oversized = vec![b' '; 2 * 1024 * 1024 + 16];
+    let bytes = build_archive_with_parts(
+        &[
+            ("word/header1.xml", matching_header.into_bytes()),
+            ("word/footer1.xml", vec![0xff, 0xfe, 0xfd]),
+            ("word/footnotes.xml", oversized),
+        ],
+        "<w:p><w:r><w:t>Plain body</w:t></w:r></w:p>",
+    );
+    let warnings = inspect_docx_unsupported(&bytes).expect("inspect edge-case parts");
+    assert!(
+        !warnings.iter().any(|w| w.contains("Complex-script")),
+        "matching CS axes or skipped invalid/oversized parts must not crash or warn falsely: {warnings:?}"
+    );
+}

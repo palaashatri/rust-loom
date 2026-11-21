@@ -1,3 +1,5 @@
+import { LoomColorSwatch } from "foundation.slint";
+
 // Pointer gestures on the grid that the controller owns: selecting by press and
 // drag, whole row and column selection, resizing from a header edge and the
 // name box. A global keeps them out of the window's own callback list.
@@ -52,7 +54,17 @@ export global CellInk {
     // The selected cell: its text colour as a palette slot (-1 automatic) and wrap.
     in property <int> selected-slot: -1;
     in-out property <bool> selected-wrap: false;
+    in-out property <[LoomColorSwatch]> swatches: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> selected-hex: "";
+    in-out property <color> selected-color: #1D1D1F;
+    in-out property <string> selected-label: "Automatic";
+    in-out property <bool> selected-mixed: false;
+    in-out property <string> hex-input: "";
+    in-out property <string> hex-error: "";
     callback color-requested(int);
+    callback color-hex-requested(string);
+    callback automatic-requested();
     callback wrap-toggled();
     public pure function paint(value: int, fallback: color) -> color {
         value < 0 ? fallback : rgb(Math.floor(value / 65536), Math.mod(Math.floor(value / 256), 256), Math.mod(value, 256))

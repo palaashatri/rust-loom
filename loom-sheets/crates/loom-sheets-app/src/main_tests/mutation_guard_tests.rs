@@ -50,8 +50,15 @@ fn table() -> Vec<(&'static str, Action)> {
             app.global::<SheetInspectorActions>()
                 .invoke_arrange_object(0)
         }),
+        a("automatic_requested", |app| {
+            app.global::<CellInk>().invoke_automatic_requested()
+        }),
         a("clear_selected_cells", |app| {
             app.invoke_clear_selected_cells()
+        }),
+        a("color_hex_requested", |app| {
+            app.global::<CellInk>()
+                .invoke_color_hex_requested("#1565C0".into())
         }),
         a("color_requested", |app| {
             app.global::<CellInk>().invoke_color_requested(1)

@@ -77,6 +77,9 @@ pub(crate) fn inline_advances_for_block(
     block_id: u64,
     font_size_pt: f32,
 ) -> Vec<InlineAdvance> {
+    if !doc.footnotes.iter().any(|note| note.block_id == block_id) {
+        return Vec::new();
+    }
     doc.numbered_footnotes()
         .into_iter()
         .filter(|(_, note)| note.block_id == block_id)
@@ -96,6 +99,9 @@ pub(crate) fn inline_advances_for_table_cell(
     column: usize,
     font_size_pt: f32,
 ) -> Vec<InlineAdvance> {
+    if !doc.footnotes.iter().any(|note| note.block_id == block_id) {
+        return Vec::new();
+    }
     let Some(cell_range) = crate::TableTextMap::new(table).cell_range(row, column) else {
         return Vec::new();
     };

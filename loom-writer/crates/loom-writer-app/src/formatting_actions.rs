@@ -5,13 +5,16 @@ use std::rc::Rc;
 
 use loom_command::{CommandInvocation, CommandSpec, InvocationSource};
 use loom_text::ParagraphDirection;
+use loom_ui::color_palette::{
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+};
 use loom_writer_core::{TextSelection, WriterDocument};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::document_formatting::{formatting_state_for_selection, DocumentSelection};
 use crate::{
     apply_with_history, font_picker, inline_formatting, paragraph_alignment, table_actions,
-    typing_style, GuiState, HistoryKind, WriterApp, WriterFormatState,
+    typing_style, GuiState, HistoryKind, LoomColorSwatch, WriterApp, WriterFormatState,
 };
 
 pub(crate) fn set_selection_strikethrough(
@@ -40,6 +43,43 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     wire_script_toggle(app, state, false);
     wire_color_dialog(app, state);
     wire_strikethrough(app, state);
+    wire_list_marker(app, state);
+}
+
+fn wire_list_marker(app: &WriterApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.global::<WriterFormatState>()
+        .on_select_list_marker(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let list_style = app.get_list_style_index();
+            let marker = match (list_style, index) {
+                (1, 0) => loom_text::ListMarkerStyle::Disc,
+                (1, 1) => loom_text::ListMarkerStyle::Circle,
+                (1, 2) => loom_text::ListMarkerStyle::Square,
+                (1, 3) => loom_text::ListMarkerStyle::Dash,
+                (2, 0) => loom_text::ListMarkerStyle::Decimal,
+                (2, 1) => loom_text::ListMarkerStyle::LowerAlpha,
+                (2, 2) => loom_text::ListMarkerStyle::UpperAlpha,
+                (2, 3) => loom_text::ListMarkerStyle::LowerRoman,
+                (2, 4) => loom_text::ListMarkerStyle::UpperRoman,
+                _ => return,
+            };
+            let selection = crate::selection_from_app(&app);
+            let mut next = state.current.borrow().clone();
+            crate::document_formatting::set_selection_list_marker(
+                &mut next,
+                DocumentSelection::range(selection.anchor, selection.focus),
+                marker,
+            );
+            next.set_selection(selection);
+            if next != *state.current.borrow()
+                && !apply_with_history(&app, &state, next, HistoryKind::DocumentAction)
+            {
+                return;
+            }
+            announce(&app, "List marker style updated".to_string());
+        });
 }
 
 fn wire_strikethrough(app: &WriterApp, state: &Rc<GuiState>) {
@@ -49,6 +89,19 @@ fn wire_strikethrough(app: &WriterApp, state: &Rc<GuiState>) {
         let Some(app) = app_ref.upgrade() else { return };
         let enabled = app.get_is_strikethrough();
         let selection = crate::selection_from_app(&app);
+        if selection.is_collapsed() && table_actions::get_table_cell_selection_range().is_none() {
+            let now_on = typing_style::toggle(
+                selection.focus,
+                typing_style::InlineStyle::Strikethrough,
+                enabled,
+            );
+            app.set_is_strikethrough(now_on);
+            app.set_status_right(SharedString::from(typing_style::announcement(
+                typing_style::InlineStyle::Strikethrough,
+                now_on,
+            )));
+            return;
+        }
         if selection.is_collapsed() {
             app.set_status_right("Select text to apply strikethrough".into());
             return;
@@ -260,6 +313,15 @@ fn toggle_script(app: &WriterApp, state: &GuiState, superscript: bool) {
 
 fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
     let global = app.global::<WriterFormatState>();
+    let swatches: Vec<LoomColorSwatch> = OFFICE_SWATCHES
+        .iter()
+        .map(|swatch| LoomColorSwatch {
+            name: SharedString::from(swatch.name),
+            hex: SharedString::from(swatch.hex),
+            swatch: color_from_rgb(swatch.rgb),
+        })
+        .collect();
+    global.set_color_swatches(ModelRc::new(VecModel::from(swatches)));
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -276,11 +338,14 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             );
             let global = app.global::<WriterFormatState>();
             global.set_color_error(SharedString::new());
-            global.set_color_input(SharedString::from(
-                inline
-                    .foreground_color
-                    .unwrap_or_else(|| "#000000FF".to_string()),
-            ));
+            let initial_input = inline
+                .foreground_color
+                .as_deref()
+                .and_then(parse_hex_rgb)
+                .map(format_hex_rgb)
+                .unwrap_or_default();
+            global.set_color_input(SharedString::from(initial_input));
+            global.set_color_palette_open(false);
             global.set_color_dialog_open(true);
         });
     }
@@ -289,7 +354,24 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         global.on_apply_foreground_color(move || {
             let Some(app) = app_ref.upgrade() else { return };
-            apply_foreground_color(&app, &state);
+            let input = app.global::<WriterFormatState>().get_color_input();
+            apply_foreground_color_input(&app, &state, input.as_str());
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        global.on_select_foreground_color(move |hex| {
+            let Some(app) = app_ref.upgrade() else { return };
+            apply_foreground_color_input(&app, &state, hex.as_str());
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        global.on_reset_foreground_color(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            apply_foreground_color_value(&app, &state, None);
         });
     }
     {
@@ -298,6 +380,7 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             if let Some(app) = app_ref.upgrade() {
                 let global = app.global::<WriterFormatState>();
                 global.set_color_dialog_open(false);
+                global.set_color_palette_open(false);
                 global.set_color_error(SharedString::new());
             }
         });
@@ -313,26 +396,37 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
     }
 }
 
-fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
+fn apply_foreground_color_input(app: &WriterApp, state: &GuiState, input: &str) {
     if !command_allowed(app, state, "writer.style.color") {
         return;
     }
     let global = app.global::<WriterFormatState>();
-    let Some(color) = parse_foreground_color(global.get_color_input().as_str()) else {
+    let Some(color) = parse_foreground_color(input) else {
         let message = "Enter #RRGGBB or #RRGGBBAA using hexadecimal digits";
         global.set_color_error(SharedString::from(message));
         app.set_status_right(SharedString::from(message));
         return;
     };
+    apply_foreground_color_value(app, state, Some(&color));
+}
 
+fn apply_foreground_color_value(app: &WriterApp, state: &GuiState, color: Option<&str>) {
+    if !command_allowed(app, state, "writer.style.color") {
+        return;
+    }
+    let global = app.global::<WriterFormatState>();
     let selection = state.current.borrow().selection();
     if selection.is_collapsed() && table_actions::get_table_cell_selection_range().is_none() {
-        typing_style::set_foreground_color(selection.focus, &color);
-        global.set_foreground_color(SharedString::from(color));
-        global.set_foreground_color_mixed(false);
+        typing_style::set_foreground_color(selection.focus, color);
+        sync_foreground_color_display(&global, color, false);
         global.set_color_dialog_open(false);
+        global.set_color_palette_open(false);
         global.set_color_error(SharedString::new());
-        announce(app, "Foreground color set for new text".to_string());
+        let message = match color {
+            Some(_) => "Foreground color set for new text".to_string(),
+            None => "Text color set to Automatic for new text".to_string(),
+        };
+        announce(app, message);
         return;
     }
 
@@ -340,12 +434,12 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
     inline_formatting::set_selection_foreground_color(
         &mut next,
         DocumentSelection::range(selection.anchor, selection.focus),
-        &color,
+        color,
     );
     table_actions::table_format_actions::set_selection_foreground_color(
         &mut next,
         selection.clone(),
-        &color,
+        color,
     );
     next.set_selection(selection.clone());
     if next != *state.current.borrow()
@@ -354,15 +448,40 @@ fn apply_foreground_color(app: &WriterApp, state: &GuiState) {
         return;
     }
     global.set_color_dialog_open(false);
+    global.set_color_palette_open(false);
     global.set_color_error(SharedString::new());
+    let base_message = match color {
+        Some(hex) => format!("Foreground color {hex} applied to selected text"),
+        None => "Text color reset to Automatic".to_string(),
+    };
     announce(
         app,
         with_skipped_items(
-            format!("Foreground color {color} applied to selected text"),
+            base_message,
             unsupported_selection_items(&state.current.borrow(), &selection),
         ),
     );
     sync_menu(app, state);
+}
+
+fn sync_foreground_color_display(global: &WriterFormatState<'_>, color: Option<&str>, mixed: bool) {
+    global.set_foreground_color(SharedString::from(color.unwrap_or_default()));
+    global.set_foreground_color_mixed(mixed);
+    if mixed {
+        global.set_foreground_color_value(SharedString::new());
+        global.set_foreground_color_label(SharedString::from("Mixed"));
+    } else if let Some(rgb) = color.and_then(parse_hex_rgb) {
+        let hex = format_hex_rgb(rgb);
+        let label = swatch_name_for_rgb(rgb)
+            .map(str::to_owned)
+            .unwrap_or_else(|| hex.clone());
+        global.set_foreground_color_value(SharedString::from(hex));
+        global.set_foreground_color_swatch(color_from_rgb(rgb));
+        global.set_foreground_color_label(SharedString::from(label));
+    } else {
+        global.set_foreground_color_value(SharedString::new());
+        global.set_foreground_color_label(SharedString::from("Automatic"));
+    }
 }
 
 fn parse_foreground_color(input: &str) -> Option<String> {
@@ -414,6 +533,9 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
         if let Some(value) = pending.strikethrough {
             formatting.strikethrough = value;
         }
+        if let Some(size_pt) = pending.font_size {
+            formatting.font_size_pt = size_pt;
+        }
     }
     let heading_level = inspector_heading_level(document, &selection);
     let (text_alignment, logical_alignment) =
@@ -429,7 +551,7 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
             inline.subscript_mixed = false;
         }
         if let Some(value) = pending.color {
-            inline.foreground_color = Some(value);
+            inline.foreground_color = value;
             inline.foreground_color_mixed = false;
         }
     }
@@ -444,6 +566,11 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
     app.set_font_size_value(SharedString::from(formatting.font_size_pt.to_string()));
     app.set_line_spacing_index(formatting.line_spacing_index);
     app.set_list_style_index(formatting.list_style_index);
+    global.set_list_marker_index(list_marker_index_for_selection(
+        document,
+        &selection,
+        formatting.list_style_index,
+    ));
     app.set_heading_level(heading_level);
     app.set_text_alignment(text_alignment);
 
@@ -464,15 +591,44 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
     global.set_superscript_mixed(inline.superscript_mixed);
     global.set_subscript_selected(inline.subscript);
     global.set_subscript_mixed(inline.subscript_mixed);
-    global.set_foreground_color(SharedString::from(
-        inline.foreground_color.unwrap_or_default(),
-    ));
-    global.set_foreground_color_mixed(inline.foreground_color_mixed);
+    sync_foreground_color_display(
+        &global,
+        inline.foreground_color.as_deref(),
+        inline.foreground_color_mixed,
+    );
     global.set_justify_available(paragraph_alignment::selection_can_be_justified(
         document,
         selection.clone(),
     ));
     table_actions::update_table_selection_properties(app, document, selection.anchor);
+}
+
+fn list_marker_index_for_selection(
+    document: &WriterDocument,
+    selection: &TextSelection,
+    list_style_index: i32,
+) -> i32 {
+    let indices = loom_writer_core::selected_block_indices(document, selection.clone());
+    let Some(&first) = indices.first() else {
+        return 0;
+    };
+    let marker = document.blocks[first].style.list_marker;
+    match list_style_index {
+        1 => match marker {
+            loom_text::ListMarkerStyle::Circle => 1,
+            loom_text::ListMarkerStyle::Square => 2,
+            loom_text::ListMarkerStyle::Dash => 3,
+            _ => 0,
+        },
+        2 => match marker {
+            loom_text::ListMarkerStyle::LowerAlpha => 1,
+            loom_text::ListMarkerStyle::UpperAlpha => 2,
+            loom_text::ListMarkerStyle::LowerRoman => 3,
+            loom_text::ListMarkerStyle::UpperRoman => 4,
+            _ => 0,
+        },
+        _ => 0,
+    }
 }
 
 fn inspector_heading_level(document: &WriterDocument, selection: &TextSelection) -> i32 {
@@ -544,6 +700,7 @@ pub(crate) fn sync_registry_enablement(
     let inline_enabled = inline_formatting::can_format_selection(document, selection.clone())
         || table_actions::table_format_actions::can_format_selection(document, selection);
     for id in [
+        "format.strikethrough",
         "writer.style.color",
         "writer.style.superscript",
         "writer.style.subscript",
@@ -573,6 +730,12 @@ pub(crate) fn command_specs() -> Vec<CommandSpec> {
             77,
         ),
         (
+            "format.strikethrough",
+            "Strikethrough",
+            "Toggle strikethrough on selected text",
+            33,
+        ),
+        (
             "writer.style.color",
             "Text Color",
             "Choose foreground color for selected text",
@@ -593,12 +756,17 @@ pub(crate) fn command_specs() -> Vec<CommandSpec> {
     ]
     .into_iter()
     .map(|(id, label, description, order)| {
-        CommandSpec::new(id, label)
+        let mut spec = CommandSpec::new(id, label)
             .with_undo_label(label)
             .with_description(description)
             .with_category("format")
             .with_order(order)
-            .with_enabled(false)
+            .with_enabled(false);
+        let shortcut = crate::command_dispatch::shortcut_for_id(id);
+        if !shortcut.is_empty() {
+            spec = spec.with_shortcut(shortcut);
+        }
+        spec
     })
     .collect()
 }
