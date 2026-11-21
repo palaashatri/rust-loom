@@ -149,8 +149,7 @@ pub(crate) fn restore(snapshot: Snapshot) {
     PENDING.with(|pending| *pending.borrow_mut() = snapshot);
 }
 
-/// Forget the pending style, whatever its caret. Tests start from a clean slate.
-#[cfg(test)]
+/// Forget the pending style, whatever its caret.
 pub(crate) fn clear() {
     PENDING.with(|pending| *pending.borrow_mut() = None);
 }

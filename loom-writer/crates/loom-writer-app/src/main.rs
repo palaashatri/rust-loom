@@ -1236,6 +1236,7 @@ pub(crate) fn replace_opened_document(
     document: WriterDocument,
 ) {
     table_actions::clear_table_cell_selection_range();
+    typing_style::clear();
     *state.last_saved.borrow_mut() = document.clone();
     *state.current.borrow_mut() = document;
     *state.save_path.borrow_mut() = Some(path);
@@ -1629,6 +1630,7 @@ fn project_selection_event(
     }
     if table_actions::get_table_cell_selection_range().is_some() {
         table_actions::clear_table_cell_selection_range();
+        typing_style::clear();
     }
 
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
@@ -1961,6 +1963,7 @@ fn apply_typing_transaction(
     }
 
     table_actions::clear_table_cell_selection_range();
+    typing_style::clear();
     let previous = state.current.replace(next);
     let after = state.current.borrow().clone();
     state
@@ -2052,6 +2055,7 @@ fn apply_with_history_using_edits(
     if before == next {
         if clear_table_range_before_projection {
             table_actions::clear_table_cell_selection_range();
+            typing_style::clear();
             apply_document_with_viewport(app, &before, *state.viewport.borrow());
         }
         return true;
@@ -2071,6 +2075,7 @@ fn apply_with_history_using_edits(
         .record(previous, after, kind, history_now_ms(state));
     if clear_table_range_before_projection {
         table_actions::clear_table_cell_selection_range();
+        typing_style::clear();
     }
     apply_state(app, state);
     true
@@ -2699,8 +2704,10 @@ fn wire_writer_shared_callbacks(
                             return;
                         }
                         table_actions::clear_table_cell_selection_range();
+                        typing_style::clear();
                     } else {
                         table_actions::clear_table_cell_selection_range();
+                        typing_style::clear();
                         state
                             .current
                             .borrow_mut()

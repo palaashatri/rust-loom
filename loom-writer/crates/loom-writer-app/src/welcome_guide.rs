@@ -42,6 +42,12 @@ pub(crate) fn open(app: &WriterApp) {
     let guide = app.global::<WelcomeGuideState>();
     let mod_key = format!("{}+", app.get_shortcut_modifier());
     guide.set_mod_key(SharedString::from(mod_key));
+    let guide = app.global::<WelcomeGuideState>();
+    guide.set_mod_key(if cfg!(target_os = "macos") {
+        "Cmd".into()
+    } else {
+        "Ctrl".into()
+    });
     guide.set_step(0);
     guide.set_open(true);
     let toggled_focus = !guide.get_focus_request();

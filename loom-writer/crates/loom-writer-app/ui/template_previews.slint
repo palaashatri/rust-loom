@@ -51,6 +51,7 @@ component MiniTableGrid inherits Rectangle {
                 MiniRule { horizontal-stretch: 2; bar-color: #9ca3af; bar-h: 2px; }
                 MiniRule { horizontal-stretch: 1; bar-color: #cbd5e1; bar-h: 2px; }
                 if root.cols >= 3 : MiniRule { horizontal-stretch: 1; bar-color: r == 2 ? root.header-bg : #cbd5e1; bar-h: 2px; }
+                if root.cols >= 4 : MiniRule { horizontal-stretch: 1; bar-color: r == 2 ? root.header-bg : #cbd5e1; bar-h: 2px; }
             }
         }
     }

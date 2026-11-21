@@ -50,6 +50,8 @@ component StepBullet inherits Rectangle {
 
 export component WelcomeGuideModal inherits Rectangle {
     in property <bool> open: WelcomeGuideState.open;
+    in property <int> step-watch: WelcomeGuideState.step;
+    changed step-watch => { lesson-scroll.viewport-y = 0px; }
     property <bool> guide-open: root.open;
     property <bool> focus-req: WelcomeGuideState.focus-request;
 
@@ -185,6 +187,14 @@ export component WelcomeGuideModal inherits Rectangle {
                 if (Theme.rtl) { root.step-prev(); } else if (root.clamped-step() < 6) { root.step-next(); }
                 return accept;
             }
+            if ((event.text == Key.Tab && event.modifiers.shift) || event.text == Key.Backtab) {
+                if (close-btn.has-focus) { next-btn.grab-focus(); }
+                else if (next-btn.has-focus) {
+                    if (root.clamped-step() > 0) { prev-btn.grab-focus(); } else { try-btn.grab-focus(); }
+                } else if (prev-btn.has-focus) { try-btn.grab-focus(); }
+                else { close-btn.grab-focus(); }
+                return accept;
+            }
             if (event.text == Key.Tab) {
                 if (close-btn.has-focus) { try-btn.grab-focus(); }
                 else if (try-btn.has-focus) {
@@ -193,12 +203,16 @@ export component WelcomeGuideModal inherits Rectangle {
                 else { close-btn.grab-focus(); }
                 return accept;
             }
-            if (event.text == Key.Backtab) {
-                if (close-btn.has-focus) { next-btn.grab-focus(); }
-                else if (next-btn.has-focus) {
-                    if (root.clamped-step() > 0) { prev-btn.grab-focus(); } else { try-btn.grab-focus(); }
-                } else if (prev-btn.has-focus) { try-btn.grab-focus(); }
-                else { close-btn.grab-focus(); }
+            if (event.text == Key.DownArrow || event.text == Key.PageDown) {
+                let min-y = min(0px, lesson-scroll.height - lesson-scroll.viewport-height);
+                let step-y = event.text == Key.PageDown ? max(48px, lesson-scroll.height * 0.8) : 36px;
+                lesson-scroll.viewport-y = clamp(lesson-scroll.viewport-y - step-y, min-y, 0px);
+                return accept;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.PageUp) {
+                let min-y = min(0px, lesson-scroll.height - lesson-scroll.viewport-height);
+                let step-y = event.text == Key.PageUp ? max(48px, lesson-scroll.height * 0.8) : 36px;
+                lesson-scroll.viewport-y = clamp(lesson-scroll.viewport-y + step-y, min-y, 0px);
                 return accept;
             }
             return reject;

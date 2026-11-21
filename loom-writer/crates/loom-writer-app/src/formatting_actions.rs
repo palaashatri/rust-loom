@@ -386,8 +386,17 @@ fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
             };
             let initial_input = initial_color
                 .as_deref()
-                .and_then(parse_hex_rgb)
-                .map(format_hex_rgb)
+                .and_then(|raw| {
+                    let trimmed = raw.trim();
+                    if trimmed.len() == 9
+                        && trimmed.starts_with('#')
+                        && !trimmed[7..9].eq_ignore_ascii_case("FF")
+                    {
+                        Some(trimmed.to_ascii_uppercase())
+                    } else {
+                        parse_hex_rgb(trimmed).map(format_hex_rgb)
+                    }
+                })
                 .unwrap_or_default();
             global.set_color_input(SharedString::from(initial_input));
             global.set_color_palette_open(false);

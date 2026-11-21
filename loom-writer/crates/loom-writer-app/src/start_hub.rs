@@ -258,9 +258,9 @@ where
             if needle.is_empty() {
                 return true;
             }
-            entry.name.to_ascii_lowercase().contains(&needle)
-                || entry.path.to_ascii_lowercase().contains(&needle)
-                || entry.kind.to_ascii_lowercase().contains(&needle)
+            entry.name.to_lowercase().contains(&needle)
+                || entry.path.to_lowercase().contains(&needle)
+                || entry.kind.to_lowercase().contains(&needle)
         })
         .cloned()
         .collect();
@@ -268,8 +268,8 @@ where
     if tab == 1 {
         filtered.sort_by(|a, b| {
             a.name
-                .to_ascii_lowercase()
-                .cmp(&b.name.to_ascii_lowercase())
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
                 .then_with(|| a.path.cmp(&b.path))
         });
     }

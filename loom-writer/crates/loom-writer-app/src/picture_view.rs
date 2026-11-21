@@ -238,6 +238,12 @@ pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart], selected: Option
         shown.selected = selected;
         if let Some(error) = &shown.first_error {
             app.set_status_right(SharedString::from(format!("Picture unavailable: {error}")));
+        } else if app
+            .get_status_right()
+            .as_str()
+            .starts_with("Picture unavailable:")
+        {
+            app.set_status_right(SharedString::new());
         }
         show(app, &mut shown);
     });
