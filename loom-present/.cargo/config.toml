@@ -3,3 +3,6 @@
 # startup. Match the 32 MiB stack the CI matrix already links with.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/STACK:33554432"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:33554432"]
