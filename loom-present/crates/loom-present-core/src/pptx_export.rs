@@ -163,6 +163,85 @@ fn text_body(content: &str, spec: &TextSpec) -> String {
     xml
 }
 
+fn run_font_xml(family: Option<&str>, heading: bool) -> String {
+    let face = family.unwrap_or(if heading { "+mj-lt" } else { "+mn-lt" });
+    let e = esc(face);
+    format!("<a:latin typeface=\"{e}\"/><a:ea typeface=\"{e}\"/><a:cs typeface=\"{e}\"/>")
+}
+
+fn text_body_runs(runs: &[crate::StyledTextRun], base: &TextSpec) -> String {
+    let algn = base.algn;
+    let mut xml = String::from(
+        "<p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr><a:lstStyle/>",
+    );
+    // Split runs across newlines into paragraphs.
+    let mut paragraphs: Vec<Vec<(String, &crate::StyledTextRun)>> = vec![Vec::new()];
+    for run in runs {
+        let parts: Vec<&str> = run.text.split('\n').collect();
+        for (idx, part) in parts.iter().enumerate() {
+            if idx > 0 {
+                paragraphs.push(Vec::new());
+            }
+            if !part.is_empty() {
+                paragraphs
+                    .last_mut()
+                    .expect("non-empty paragraphs")
+                    .push(((*part).to_string(), run));
+            }
+        }
+    }
+    for para in paragraphs {
+        xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\"/>"));
+        if para.is_empty() {
+            let font = run_font_xml(base.font_family.as_deref(), base.heading_font);
+            xml.push_str(&format!(
+                "<a:endParaRPr lang=\"en-US\" sz=\"{}\">{font}</a:endParaRPr>",
+                base.size
+            ));
+        } else {
+            for (text, run) in para {
+                let sz = run
+                    .font_size_pt
+                    .map(|pt| (f64::from(pt) * 100.0).round() as i64)
+                    .unwrap_or(base.size);
+                let bold = run.bold.unwrap_or(base.bold);
+                let italic = run.italic || base.italic;
+                let color = run
+                    .color
+                    .as_deref()
+                    .map(|c| hex_color(c, &base.color))
+                    .unwrap_or_else(|| base.color.clone());
+                let ff = run
+                    .font_family
+                    .as_deref()
+                    .and_then(|f| crate::normalize_font_family(f).ok())
+                    .or_else(|| base.font_family.clone());
+                let font = run_font_xml(ff.as_deref(), base.heading_font);
+                let mut rpr = format!("sz=\"{sz}\"");
+                if bold {
+                    rpr.push_str(" b=\"1\"");
+                }
+                if italic {
+                    rpr.push_str(" i=\"1\"");
+                }
+                if run.underline {
+                    rpr.push_str(" u=\"sng\"");
+                }
+                if run.strikethrough {
+                    rpr.push_str(" strike=\"sngStrike\"");
+                }
+                xml.push_str(&format!(
+                    "<a:r><a:rPr lang=\"en-US\" {rpr}><a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill>{font}</a:rPr><a:t>{}</a:t></a:r>",
+                    esc(&text)
+                ));
+            }
+        }
+        xml.push_str("</a:p>");
+    }
+    xml.push_str("</p:txBody>");
+    xml
+}
+
 fn xfrm(x: f32, y: f32, width: f32, height: f32, rotation_deg: f32) -> String {
     let rot =
         (f64::from(normalize_angle_degrees(rotation_deg)) * 60_000.0).round() as i64 % 21_600_000;
@@ -265,6 +344,58 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
                 font_family: None,
             },
         ),
+        ElementType::ShapeRoundedRect => (
+            "roundRect",
+            Some(RECT_FILL),
+            TextSpec {
+                size: size_hundredths(14.0),
+                bold: false,
+                color: INK.to_string(),
+                algn: "ctr",
+                italic: false,
+                heading_font: false,
+                font_family: None,
+            },
+        ),
+        ElementType::ShapeArrowRight => (
+            "rightArrow",
+            Some(RECT_FILL),
+            TextSpec {
+                size: size_hundredths(14.0),
+                bold: false,
+                color: INK.to_string(),
+                algn: "ctr",
+                italic: false,
+                heading_font: false,
+                font_family: None,
+            },
+        ),
+        ElementType::ShapeLine => (
+            "line",
+            None,
+            TextSpec {
+                size: size_hundredths(14.0),
+                bold: false,
+                color: INK.to_string(),
+                algn: "l",
+                italic: false,
+                heading_font: false,
+                font_family: None,
+            },
+        ),
+        ElementType::ShapeCallout => (
+            "wedgeRoundRectCallout",
+            Some(RECT_FILL),
+            TextSpec {
+                size: size_hundredths(14.0),
+                bold: false,
+                color: INK.to_string(),
+                algn: "ctr",
+                italic: false,
+                heading_font: false,
+                font_family: None,
+            },
+        ),
         // Pictures, tables, and charts are written by their own shape emitters.
         ElementType::Picture | ElementType::Table | ElementType::Chart => return String::new(),
         ElementType::StatCard => (
@@ -328,7 +459,11 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
     };
     format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr><p:spPr>{xf}<a:prstGeom prst=\"{geometry}\"><a:avLst/></a:prstGeom>{fill_xml}<a:ln><a:noFill/></a:ln></p:spPr>{}</p:sp>",
-        text_body(&element.content, &text)
+        if element.runs.is_empty() {
+            text_body(&element.content, &text)
+        } else {
+            text_body_runs(&element.runs, &text)
+        }
     )
 }
 

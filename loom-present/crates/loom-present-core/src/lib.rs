@@ -5,15 +5,30 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+pub mod arrange;
 mod element_style;
+pub mod find_replace;
 mod pdf_export;
 mod pictures;
 mod pptx_export;
 mod pptx_titles;
+pub mod print_layout;
+pub mod rich_text;
 mod session_history;
 mod slide_order;
 mod tables;
+pub mod templates;
+pub use arrange::{AlignMode, DistributeAxis};
+pub use find_replace::{find_matches, replace_all, replace_match, TextMatch};
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
+pub use print_layout::{
+    export_pdf_with_options, preview_print_pages, PaperSize, PrintLayout, PrintOptions,
+    PrintOrientation, PrintPagePreview,
+};
+pub use rich_text::{StyledTextRun, TextRangeStyleChange};
+pub use templates::{
+    apply_theme_preset, document_from_template, template_catalog, SlideTheme, TemplateDescriptor,
+};
 pub mod pptx_import;
 pub use pptx_export::export_pptx;
 pub use pptx_import::{import_pptx, inspect_pptx_unsupported};
@@ -37,6 +52,10 @@ pub enum ElementType {
     BodyText,
     ShapeRectangle,
     ShapeCircle,
+    ShapeRoundedRect,
+    ShapeArrowRight,
+    ShapeLine,
+    ShapeCallout,
     StatCard,
     /// An embedded raster picture; `content` is the id of an [`ImageAsset`].
     Picture,
@@ -73,6 +92,9 @@ pub struct SlideElement {
     /// Text and fill overrides; empty for an element that was never styled.
     #[serde(default, skip_serializing_if = "ElementStyle::is_default")]
     pub style: ElementStyle,
+    /// Optional per-run rich text formatting; when empty, `content` + `style` apply.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<StyledTextRun>,
 }
 
 impl SlideElement {
@@ -341,6 +363,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
                 self.add_element(SlideElement {
                     id: "sub-1".into(),
@@ -354,6 +377,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
             SlideLayoutPreset::TitleAndContent => {
@@ -370,6 +394,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
                 self.add_element(SlideElement {
                     id: "body-1".into(),
@@ -383,6 +408,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
             SlideLayoutPreset::TwoColumn => {
@@ -399,6 +425,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
                 self.add_element(SlideElement {
                     id: "col-1".into(),
@@ -412,6 +439,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
                 self.add_element(SlideElement {
                     id: "col-2".into(),
@@ -425,6 +453,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
             SlideLayoutPreset::Quote => {
@@ -441,6 +470,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
             SlideLayoutPreset::BigStat => {
@@ -457,6 +487,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
                 self.add_element(SlideElement {
                     id: "label-1".into(),
@@ -470,6 +501,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
         }
@@ -1146,6 +1178,7 @@ impl PresentationDocument {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides.push(cover);
         doc
@@ -1386,6 +1419,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                     action: None,
 
                     style: Default::default(),
+                    runs: Vec::new(),
                 });
             }
         } else {
@@ -1404,6 +1438,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                 action: None,
 
                 style: Default::default(),
+                runs: Vec::new(),
             });
             slides.push(slide);
         }
@@ -2401,6 +2436,10 @@ fn element_type_marker(element_type: &ElementType) -> &'static str {
         ElementType::BodyText => "body-text",
         ElementType::ShapeRectangle => "shape-rectangle",
         ElementType::ShapeCircle => "shape-circle",
+        ElementType::ShapeRoundedRect => "shape-rounded-rect",
+        ElementType::ShapeArrowRight => "shape-arrow-right",
+        ElementType::ShapeLine => "shape-line",
+        ElementType::ShapeCallout => "shape-callout",
         ElementType::StatCard => "stat-card",
         ElementType::Picture => "picture",
         ElementType::Table => "table",
@@ -2560,6 +2599,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         }));
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
         assert!(session.undo());
@@ -2583,6 +2623,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2596,6 +2637,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         let session = PresentationSession::new(doc);
@@ -2621,6 +2663,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         };
         let mut session = PresentationSession::new(doc);
         assert_eq!(session.hit_test(210.0, 205.0), None);
@@ -2644,6 +2687,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2657,6 +2701,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2722,6 +2767,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2831,6 +2877,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2897,6 +2944,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -2910,6 +2958,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         assert_eq!(slide.elements.len(), 2);
@@ -2948,6 +2997,7 @@ mod tests {
                 action: None,
 
                 style: Default::default(),
+                runs: Vec::new(),
             }
         };
         // Centers: e1=(50,50) e2=(525,425) e3=(950,750) e4=(1850,1850)
@@ -3061,6 +3111,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -3074,6 +3125,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
 
         let bbox = slide.elements_bounding_box(&["e1", "e2"]).unwrap();
@@ -3546,6 +3598,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         };
         fit_element_to_box(&mut elem, 0.0, 0.0, 600.0, 600.0).expect("fit failed");
         assert_eq!(elem.x, 0.0);
@@ -3568,6 +3621,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         };
         let mut slide = Slide::new("slide-grid", "Grid", "blank");
         for name in ["a", "b", "c", "d"] {
@@ -3723,6 +3777,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         };
         let shape = |id: &str, ty: ElementType, content: &str| SlideElement {
             id: id.into(),
@@ -3736,6 +3791,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         };
 
         let mut deck = Vec::new();
@@ -3813,6 +3869,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-body".into(),
@@ -3826,6 +3883,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-stat".into(),
@@ -3839,6 +3897,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides[1].speaker_notes = "Walk through the chart slowly.".into();
 

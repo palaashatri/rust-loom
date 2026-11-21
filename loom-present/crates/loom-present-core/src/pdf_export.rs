@@ -48,6 +48,16 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     };
     for slide in &doc.slides {
         let page = pdf.add_page(PAGE_WIDTH, PAGE_HEIGHT);
+        if let Some(bg_rgb) = parse_rgb(&slide.bg_color) {
+            pdf.draw_rect(
+                page,
+                0.0,
+                0.0,
+                PAGE_WIDTH,
+                PAGE_HEIGHT,
+                PathStyle::filled(bg_rgb),
+            );
+        }
         let has_title = slide
             .elements
             .iter()
@@ -75,7 +85,7 @@ fn draw_element(
 ) {
     let transform = element_transform(elem);
     match elem.element_type {
-        ElementType::ShapeRectangle | ElementType::ShapeCircle | ElementType::StatCard => {
+        ElementType::ShapeRectangle | ElementType::ShapeRoundedRect | ElementType::StatCard => {
             let rgb = element_fill(elem).unwrap_or(if elem.element_type == ElementType::StatCard {
                 STAT_RGB
             } else {
@@ -83,6 +93,69 @@ fn draw_element(
             });
             let (w, h) = (elem.width, elem.height);
             pdf.draw_rect_with_transform(page, (0.0, 0.0, w, h), PathStyle::filled(rgb), transform);
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeCircle => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (rx, ry) = (elem.width * 0.5, elem.height * 0.5);
+            let slices = 36usize;
+            for i in 0..slices {
+                let y0 = (i as f32 / slices as f32) * elem.height;
+                let y1 = ((i + 1) as f32 / slices as f32) * elem.height;
+                let ym = (y0 + y1) * 0.5;
+                let dy = (ym - ry) / ry.max(1.0);
+                let half_w = rx * (1.0 - dy * dy).max(0.0).sqrt();
+                pdf.draw_rect_with_transform(
+                    page,
+                    (rx - half_w, y0, half_w * 2.0, (y1 - y0).max(0.5)),
+                    PathStyle::filled(rgb),
+                    transform,
+                );
+            }
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeArrowRight => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, h * 0.25, w * 0.65, h * 0.5),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            pdf.draw_rect_with_transform(
+                page,
+                (w * 0.65, 0.0, w * 0.35, h),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeLine => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, h * 0.5 - 1.0, w, 2.0),
+                PathStyle::filled(rgb),
+                transform,
+            );
+        }
+        ElementType::ShapeCallout => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, 0.0, w, h * 0.8),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            pdf.draw_rect_with_transform(
+                page,
+                (w * 0.25, h * 0.8, w * 0.15, h * 0.2),
+                PathStyle::filled(rgb),
+                transform,
+            );
             draw_text_box(pdf, page, transform, elem);
         }
         ElementType::Title | ElementType::Subtitle | ElementType::BodyText => {
@@ -210,6 +283,50 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
     let width = (elem.width - 2.0 * SPACE_LG_PX * UNITS_PER_EDITOR_PX).max(1.0);
     let height = (elem.height - 2.0 * SPACE_SM_PX * UNITS_PER_EDITOR_PX).max(1.0);
     let line_height = style.size_pt * LINE_EM;
+
+    if !elem.runs.is_empty() {
+        let _ = align;
+        let mut x_cursor = left;
+        let baseline = top + ASCENT_EM * style.size_pt;
+        for run in &elem.runs {
+            let mut run_style = style.clone();
+            if let Some(pt) = run.font_size_pt {
+                run_style.size_pt = pt * UNITS_PER_EDITOR_PX;
+            }
+            if let Some(b) = run.bold {
+                run_style.bold = b;
+            }
+            run_style.italic = run.italic || style.italic;
+            if let Some(rgb) = run.color.as_deref().and_then(parse_rgb) {
+                run_style.fill_rgb = rgb;
+            }
+            let run_w = text_width_pt(&run.text, &run_style);
+            pdf.draw_text_with_transform(
+                page, x_cursor, baseline, &run.text, &run_style, transform,
+            );
+            let line_t = (run_style.size_pt * 0.06).max(0.5);
+            if run.underline {
+                let uy = baseline + run_style.size_pt * 0.12;
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x_cursor, uy, run_w, line_t),
+                    PathStyle::filled(run_style.fill_rgb),
+                    transform,
+                );
+            }
+            if run.strikethrough {
+                let sy = baseline - run_style.size_pt * 0.28;
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x_cursor, sy, run_w, line_t),
+                    PathStyle::filled(run_style.fill_rgb),
+                    transform,
+                );
+            }
+            x_cursor += run_w;
+        }
+        return;
+    }
 
     let mut lines = wrap_paragraphs(&elem.content, &style, width);
     let fits = ((height / line_height).floor() as usize).max(1);
@@ -395,27 +512,31 @@ fn draw_pie_chart(
     let cx = elem.width * 0.31;
     let cy = elem.height * 0.55;
     let r = (elem.width * 0.22).min(elem.height * 0.32).max(12.0);
-    let d = (r / 3.8).max(3.0);
-    for ring in 1..=5usize {
-        let rad = (ring as f32 - 0.3) / 5.0 * r;
-        let steps = (ring * 12).max(16);
-        for step in 0..steps {
-            let turn = (step as f64 + 0.5) / steps as f64;
-            let mut acc = 0.0;
-            let mut idx = cat_count.saturating_sub(1);
-            for (ci, v) in values.iter().copied().enumerate() {
-                acc += v;
-                if turn * total <= acc {
-                    idx = ci;
-                    break;
-                }
-            }
-            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
-            let x = cx + rad * theta.cos() - d / 2.0;
-            let y = cy + rad * theta.sin() - d / 2.0;
-            let color = CHART_COLORS[idx % CHART_COLORS.len()];
-            pdf.draw_rect_with_transform(page, (x, y, d, d), PathStyle::filled(color), transform);
+    let mut start_angle = -std::f32::consts::FRAC_PI_2;
+    for (ci, v) in values.iter().copied().enumerate() {
+        if v <= 0.0 {
+            continue;
         }
+        let sweep = (v / total) as f32 * std::f32::consts::TAU;
+        let end_angle = start_angle + sweep;
+        let steps = ((sweep.to_degrees() / 3.0).ceil() as usize).max(2);
+        let color = CHART_COLORS[ci % CHART_COLORS.len()];
+        for s in 0..steps {
+            let a = start_angle + sweep * ((s as f32 + 0.5) / steps as f32);
+            for ring in 1..=16usize {
+                let rad = (ring as f32 / 16.0) * r;
+                let dot = (r / 14.0).max(1.5);
+                let x = cx + rad * a.cos() - dot * 0.5;
+                let y = cy + rad * a.sin() - dot * 0.5;
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, y, dot, dot),
+                    PathStyle::filled(color),
+                    transform,
+                );
+            }
+        }
+        start_angle = end_angle;
     }
     let label_style = TextStyle {
         size_pt: 9.5 * UNITS_PER_EDITOR_PX,

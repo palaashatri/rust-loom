@@ -111,6 +111,7 @@ fn test_sheets_range_pastes_as_present_table_and_exports_pptx_and_reimports() {
         action: None,
 
         style: Default::default(),
+        runs: Vec::new(),
     });
     slide.add_element(table_elem);
     doc.slides.clear();
@@ -204,6 +205,7 @@ fn test_sheets_chart_pastes_as_present_chart_and_exports_pptx_and_reimports() {
         action: None,
 
         style: Default::default(),
+        runs: Vec::new(),
     });
     slide.add_element(chart_elem);
     doc.slides.clear();

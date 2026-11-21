@@ -13,10 +13,35 @@ use crate::{ElementStyle, ElementType, PresentationDocument, Slide, SlideElement
 const EMU_PER_UNIT: f32 = 12_192.0;
 const PPTX_SLIDE_PART_PREFIX: &str = "ppt/slides/slide";
 
+const MAX_SLIDE_XML_BYTES: usize = 32 * 1024 * 1024;
+const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
 /// Imports a `.pptx` presentation package archive into a complete [`PresentationDocument`].
 pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
+    if pptx_bytes.starts_with(&OLE2_MAGIC) {
+        return Err(
+            "This presentation is encrypted or password-protected (OLE2 container); remove the password before importing."
+                .to_string(),
+        );
+    }
     let archive = PackageArchive::from_bytes(pptx_bytes)
-        .map_err(|err| format!("unreadable pptx archive: {err}"))?;
+        .map_err(|err| format!("unreadable pptx archive (corrupt or invalid ZIP): {err}"))?;
+
+    if archive.get("ppt/presentation.xml").is_none() {
+        return Err("pptx archive is missing ppt/presentation.xml".to_string());
+    }
+
+    for path in archive.paths() {
+        if path.ends_with(".xml") {
+            if let Some(bytes) = archive.get(path) {
+                if bytes.len() > MAX_SLIDE_XML_BYTES {
+                    return Err(format!(
+                        "pptx XML part '{path}' exceeds maximum supported size ({MAX_SLIDE_XML_BYTES} bytes)"
+                    ));
+                }
+            }
+        }
+    }
 
     let mut slide_parts: Vec<(u64, String)> = Vec::new();
     for path in archive.paths() {
@@ -342,7 +367,15 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
                 ElementType::BodyText
             } else if sp_xml.contains("prst=\"ellipse\"") {
                 ElementType::ShapeCircle
-            } else if sp_xml.contains("prst=\"rect\"") || sp_xml.contains("prst=\"roundRect\"") {
+            } else if sp_xml.contains("prst=\"roundRect\"") {
+                ElementType::ShapeRoundedRect
+            } else if sp_xml.contains("prst=\"rightArrow\"") {
+                ElementType::ShapeArrowRight
+            } else if sp_xml.contains("prst=\"line\"") {
+                ElementType::ShapeLine
+            } else if sp_xml.contains("prst=\"wedgeRoundRectCallout\"") {
+                ElementType::ShapeCallout
+            } else if sp_xml.contains("prst=\"rect\"") {
                 if sp_xml.contains("name=\"Stat") || sp_xml.contains("stat-card") {
                     ElementType::StatCard
                 } else {
@@ -364,6 +397,7 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
         let id = extract_attr(sp_xml, "name").unwrap_or_else(|| format!("shape-{elem_counter}"));
         elem_counter += 1;
         let style = parse_shape_style(sp_xml, &element_type);
+        let runs = parse_shape_runs(sp_xml);
 
         elements.push(SlideElement {
             id,
@@ -376,6 +410,7 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
             rotation_deg,
             action: None,
             style,
+            runs,
         });
     }
     elements
@@ -513,6 +548,90 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
     style
 }
 
+fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
+    let mut runs = Vec::new();
+    let mut p_cursor = 0usize;
+    let mut first_para = true;
+    while let Some(p_start_rel) = sp_xml[p_cursor..].find("<a:p>") {
+        let p_start = p_cursor + p_start_rel;
+        let Some(p_end_rel) = sp_xml[p_start..].find("</a:p>") else {
+            break;
+        };
+        let p_xml = &sp_xml[p_start..p_start + p_end_rel];
+        p_cursor = p_start + p_end_rel + "</a:p>".len();
+
+        if !first_para {
+            runs.push(crate::StyledTextRun::plain("\n"));
+        }
+        first_para = false;
+
+        let mut r_cursor = 0usize;
+        while let Some(r_start_rel) = p_xml[r_cursor..].find("<a:r>") {
+            let r_start = r_cursor + r_start_rel;
+            let Some(r_end_rel) = p_xml[r_start..].find("</a:r>") else {
+                break;
+            };
+            let r_xml = &p_xml[r_start..r_start + r_end_rel];
+            r_cursor = r_start + r_end_rel + "</a:r>".len();
+
+            let Some(t_start) = r_xml.find("<a:t>") else {
+                continue;
+            };
+            let Some(t_end) = r_xml[t_start..].find("</a:t>") else {
+                continue;
+            };
+            let raw_text = &r_xml[t_start + "<a:t>".len()..t_start + t_end];
+            let text = xml_unescape(raw_text);
+            if text.is_empty() {
+                continue;
+            }
+
+            let rpr_xml = find_tag_start(r_xml, "a:rPr")
+                .and_then(|pos| {
+                    let slice = &r_xml[pos..];
+                    slice
+                        .find("</a:rPr>")
+                        .or_else(|| slice.find("/>"))
+                        .map(|end| &slice[..end])
+                })
+                .unwrap_or("");
+
+            let font_size_pt = extract_attr(rpr_xml, "sz")
+                .and_then(|v| v.parse::<f32>().ok())
+                .map(|h| h / 100.0);
+            let bold = extract_attr(rpr_xml, "b").map(|v| v == "1" || v == "true");
+            let italic = extract_attr(rpr_xml, "i").is_some_and(|v| v == "1" || v == "true");
+            let underline = extract_attr(rpr_xml, "u").is_some_and(|v| v != "none");
+            let strikethrough = extract_attr(rpr_xml, "strike").is_some_and(|v| v != "noStrike");
+            let color = extract_attr(rpr_xml, "val")
+                .filter(|v| v.len() == 6 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+                .map(|v| format!("#{}", v.to_ascii_uppercase()));
+            let font_family = extract_attr(rpr_xml, "typeface")
+                .and_then(|raw| crate::normalize_font_family(&raw).ok());
+
+            runs.push(crate::StyledTextRun {
+                text,
+                font_family,
+                font_size_pt,
+                bold,
+                italic,
+                underline,
+                strikethrough,
+                color,
+            });
+        }
+    }
+    let normalized = crate::rich_text::normalize_runs(runs);
+    if normalized.len() <= 1
+        && normalized
+            .first()
+            .map_or(true, |r| !r.underline && !r.strikethrough)
+    {
+        return Vec::new();
+    }
+    normalized
+}
+
 #[cfg(test)]
 pub(crate) fn parse_shape_style_for_tests(sp_xml: &str, kind: &ElementType) -> ElementStyle {
     parse_shape_style(sp_xml, kind)
@@ -604,6 +723,7 @@ fn parse_slide_pictures(
                 action: None,
 
                 style: Default::default(),
+                runs: Vec::new(),
             });
         }
     }
@@ -701,6 +821,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         s1.add_element(SlideElement {
             id: "body-1".to_string(),
@@ -714,6 +835,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides.push(s1);
 
@@ -814,6 +936,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides.push(s);
 

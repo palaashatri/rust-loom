@@ -22,6 +22,7 @@ fn titled_slide(id: &str, title: &str) -> Slide {
         action: None,
 
         style: Default::default(),
+        runs: Vec::new(),
     });
     slide.speaker_notes = format!("notes for {title}");
     slide

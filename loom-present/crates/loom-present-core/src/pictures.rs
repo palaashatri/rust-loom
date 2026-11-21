@@ -191,6 +191,7 @@ impl PresentationSession {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)

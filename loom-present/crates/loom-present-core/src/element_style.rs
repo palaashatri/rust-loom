@@ -33,6 +33,10 @@ pub struct ElementStyle {
     pub bold: Option<bool>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub italic: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strikethrough: bool,
     /// Text colour as `#RRGGBB`; `None` follows the element type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -289,6 +293,7 @@ mod tests {
             rotation_deg: 0.0,
             action: None,
             style,
+            runs: Vec::new(),
         }
     }
 
@@ -298,6 +303,8 @@ mod tests {
             font_size_pt: Some(40.0),
             bold: Some(false),
             italic: true,
+            underline: false,
+            strikethrough: false,
             color: Some("#1565C0".into()),
             fill: Some("#E65100".into()),
             align: Some(TextAlign::Right),
