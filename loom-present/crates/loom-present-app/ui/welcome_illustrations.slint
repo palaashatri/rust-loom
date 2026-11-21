@@ -1,0 +1,303 @@
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+component SlideLine inherits Rectangle {
+    in property <color> line-color: #d4d4de;
+    in property <length> bar-height: 4px;
+    height: root.bar-height;
+    border-radius: root.bar-height / 2;
+    background: root.line-color;
+}
+
+component KeycapBadge inherits Rectangle {
+    in property <string> keys;
+    width: max(46px, cap-text.preferred-width + 16px);
+    height: 26px;
+    border-radius: 6px;
+    background: Theme.palette().surface-raised;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    drop-shadow-blur: 6px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    Rectangle {
+        x: 1px; y: parent.height - 3px; width: parent.width - 2px; height: 2px;
+        border-radius: 2px; background: Theme.palette().border;
+    }
+    cap-text := Text {
+        text: root.keys; font-family: Theme.ui-font-family; font-size: 11px; font-weight: 700;
+        color: Theme.palette().ink; horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+component FormatPill inherits Rectangle {
+    in property <string> label;
+    in property <color> fill-color;
+    in property <color> stroke-color;
+    in property <color> text-color;
+    width: max(44px, lbl.preferred-width + 14px);
+    height: 21px;
+    border-radius: 10.5px;
+    background: Theme.active-theme == "high-contrast" ? #ffffff : root.fill-color;
+    border-width: 1px;
+    border-color: Theme.active-theme == "high-contrast" ? #000000 : root.stroke-color;
+
+    lbl := Text {
+        text: root.label; font-family: Theme.ui-font-family; font-size: 10px; font-weight: 700;
+        color: Theme.active-theme == "high-contrast" ? #000000 : root.text-color;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+export component WelcomeIllustrationStage inherits Rectangle {
+    in property <int> step: 0;
+    in property <string> mod-key: "Ctrl+";
+
+    height: 158px;
+    border-radius: Theme.tokens.metrics.radius-large;
+    background: Theme.palette().surface-sunken;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    clip: true;
+
+    // Soft coral-tinted ambient glow
+    Rectangle {
+        x: -36px; y: -42px; width: 170px; height: 170px; border-radius: 85px;
+        background: Theme.palette().selection-soft; opacity: 0.48;
+    }
+    Rectangle {
+        x: parent.width - 120px; y: parent.height - 96px; width: 150px; height: 150px; border-radius: 75px;
+        background: Theme.palette().selection-soft; opacity: 0.35;
+    }
+
+    // Step 0: Welcome to Loom Present
+    if root.step == 0 : Rectangle {
+        width: 100%; height: 100%;
+
+        // Background stacked slide
+        Rectangle {
+            x: parent.width / 2 - 128px; y: 18px; width: 186px; height: 112px; border-radius: 8px;
+            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border-strong;
+            opacity: 0.72;
+        }
+        // Main 16:9 slide card
+        Rectangle {
+            x: parent.width / 2 - 108px; y: 26px; width: 196px; height: 114px; border-radius: 8px;
+            background: #ffffff; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 14px; drop-shadow-offset-y: 4px; drop-shadow-color: Theme.palette().shadow;
+
+            // Coral title accent bar
+            Rectangle { x: 14px; y: 14px; width: 32px; height: 4px; border-radius: 2px; background: Theme.palette().accent; }
+            SlideLine { x: 14px; y: 24px; width: 122px; bar-height: 7px; line-color: #1f2328; }
+            SlideLine { x: 14px; y: 36px; width: 88px; bar-height: 4px; line-color: #6b7280; }
+
+            // Two content blocks on slide
+            Rectangle {
+                x: 14px; y: 52px; width: 80px; height: 46px; border-radius: 5px;
+                background: #fff5f3; border-width: 1px; border-color: #f3c4ba;
+                SlideLine { x: 8px; y: 10px; width: 46px; bar-height: 4px; line-color: #d9534f; }
+                SlideLine { x: 8px; y: 20px; width: 62px; bar-height: 3px; line-color: #cbd5e1; }
+                SlideLine { x: 8px; y: 28px; width: 52px; bar-height: 3px; line-color: #cbd5e1; }
+            }
+            Rectangle {
+                x: 102px; y: 52px; width: 80px; height: 46px; border-radius: 5px;
+                background: #f8fafc; border-width: 1px; border-color: #e2e8f0;
+                Rectangle { x: 12px; y: 24px; width: 10px; height: 14px; border-radius: 2px; background: #e86f52; }
+                Rectangle { x: 26px; y: 16px; width: 10px; height: 22px; border-radius: 2px; background: #d9534f; }
+                Rectangle { x: 40px; y: 20px; width: 10px; height: 18px; border-radius: 2px; background: #f3a697; }
+                Rectangle { x: 54px; y: 12px; width: 10px; height: 26px; border-radius: 2px; background: #b83b36; }
+            }
+        }
+
+        FormatPill { x: parent.width / 2 + 78px; y: 32px; label: ".loomdeck"; fill-color: #fdecea; stroke-color: #f3b5ad; text-color: #b83b36; }
+        FormatPill { x: parent.width / 2 + 88px; y: 62px; label: ".pptx"; fill-color: #fff4e5; stroke-color: #f4c790; text-color: #b45309; }
+        FormatPill { x: parent.width / 2 + 70px; y: 92px; label: "12 Themes"; fill-color: #eef2ff; stroke-color: #c7d2fe; text-color: #3730a3; }
+    }
+
+    // Step 1: Slide Layouts & Master Themes
+    if root.step == 1 : Rectangle {
+        width: 100%; height: 100%;
+
+        // 4 miniature layout cards
+        for idx in [0, 1, 2, 3]: Rectangle {
+            x: parent.width / 2 - 154px + idx * 80px;
+            y: idx == 1 ? 26px : 34px;
+            width: 70px;
+            height: 92px;
+            border-radius: 6px;
+            background: idx == 3 ? #1f2430 : #ffffff;
+            border-width: idx == 1 ? 2px : 1px;
+            border-color: idx == 1 ? Theme.palette().accent : Theme.palette().border-strong;
+            drop-shadow-blur: idx == 1 ? 10px : 4px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            Rectangle {
+                x: 8px; y: 10px; width: 54px; height: 10px; border-radius: 2px;
+                background: idx == 3 ? #e86f52 : (idx == 1 ? Theme.palette().accent : #e2e8f0);
+            }
+            Rectangle {
+                x: 8px; y: 28px; width: idx == 2 ? 25px : 54px; height: 42px; border-radius: 3px;
+                background: idx == 3 ? #2d3446 : #f8fafc;
+            }
+            if idx == 2 : Rectangle {
+                x: 37px; y: 28px; width: 25px; height: 42px; border-radius: 3px;
+                background: #fdecea;
+            }
+            SlideLine { x: 8px; y: 78px; width: 38px; bar-height: 3px; line-color: idx == 3 ? #64748b : #cbd5e1; }
+        }
+    }
+
+    // Step 2: Rich Objects, Tables & Charts
+    if root.step == 2 : Rectangle {
+        width: 100%; height: 100%;
+
+        Rectangle {
+            x: parent.width / 2 - 138px; y: 20px; width: 276px; height: 118px; border-radius: 8px;
+            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow;
+
+            // Table block
+            Rectangle {
+                x: 14px; y: 16px; width: 118px; height: 86px; border-radius: 4px;
+                background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border;
+                Rectangle { x: 0px; y: 0px; width: 118px; height: 20px; background: Theme.palette().selection-soft; }
+                Rectangle { x: 0px; y: 20px; width: 118px; height: 1px; background: Theme.palette().border; }
+                Rectangle { x: 0px; y: 42px; width: 118px; height: 1px; background: Theme.palette().border; }
+                Rectangle { x: 0px; y: 64px; width: 118px; height: 1px; background: Theme.palette().border; }
+                Rectangle { x: 42px; y: 0px; width: 1px; height: 86px; background: Theme.palette().border; }
+                Rectangle { x: 80px; y: 0px; width: 1px; height: 86px; background: Theme.palette().border; }
+            }
+
+            // Chart + Shape block
+            Rectangle {
+                x: 144px; y: 16px; width: 118px; height: 86px; border-radius: 4px;
+                background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border;
+
+                Rectangle { x: 16px; y: 48px; width: 16px; height: 26px; border-radius: 2px; background: #f3a697; }
+                Rectangle { x: 38px; y: 32px; width: 16px; height: 42px; border-radius: 2px; background: Theme.palette().accent; }
+                Rectangle { x: 60px; y: 40px; width: 16px; height: 34px; border-radius: 2px; background: #e86f52; }
+                Rectangle { x: 82px; y: 22px; width: 16px; height: 52px; border-radius: 2px; background: #b83b36; }
+            }
+        }
+    }
+
+    // Step 3: Speaker Notes & Slide Sorter
+    if root.step == 3 : Rectangle {
+        width: 100%; height: 100%;
+
+        Rectangle {
+            x: parent.width / 2 - 140px; y: 18px; width: 280px; height: 122px; border-radius: 8px;
+            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow;
+
+            // Left thumbnail strip
+            Rectangle {
+                x: 8px; y: 8px; width: 54px; height: 106px; border-radius: 4px;
+                background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border;
+                Rectangle { x: 6px; y: 8px; width: 42px; height: 24px; border-radius: 3px; background: #ffffff; border-width: 2px; border-color: Theme.palette().accent; }
+                Rectangle { x: 6px; y: 38px; width: 42px; height: 24px; border-radius: 3px; background: #ffffff; border-width: 1px; border-color: Theme.palette().border; }
+                Rectangle { x: 6px; y: 68px; width: 42px; height: 24px; border-radius: 3px; background: #ffffff; border-width: 1px; border-color: Theme.palette().border; }
+            }
+
+            // Main slide + notes pane below
+            Rectangle {
+                x: 70px; y: 8px; width: 202px; height: 68px; border-radius: 4px;
+                background: #ffffff; border-width: 1px; border-color: Theme.palette().border;
+                SlideLine { x: 12px; y: 12px; width: 96px; bar-height: 6px; line-color: #1f2328; }
+                SlideLine { x: 12px; y: 24px; width: 150px; bar-height: 3px; line-color: #94a3b8; }
+                SlideLine { x: 12px; y: 32px; width: 132px; bar-height: 3px; line-color: #94a3b8; }
+            }
+            Rectangle {
+                x: 70px; y: 82px; width: 202px; height: 32px; border-radius: 4px;
+                background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border;
+                SlideLine { x: 10px; y: 9px; width: 130px; bar-height: 3px; line-color: Theme.palette().accent; }
+                SlideLine { x: 10px; y: 18px; width: 105px; bar-height: 3px; line-color: Theme.palette().ink-secondary; }
+            }
+        }
+    }
+
+    // Step 4: Presenter View & Rehearsal
+    if root.step == 4 : Rectangle {
+        width: 100%; height: 100%;
+
+        Rectangle {
+            x: parent.width / 2 - 144px; y: 18px; width: 288px; height: 122px; border-radius: 8px;
+            background: #1a1d26; border-width: 1px; border-color: #323846;
+            drop-shadow-blur: 12px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow;
+
+            // Current slide
+            Rectangle {
+                x: 12px; y: 22px; width: 146px; height: 86px; border-radius: 5px;
+                background: #ffffff;
+                Rectangle { x: 10px; y: 12px; width: 28px; height: 4px; border-radius: 2px; background: Theme.palette().accent; }
+                SlideLine { x: 10px; y: 22px; width: 96px; bar-height: 6px; line-color: #1f2328; }
+                SlideLine { x: 10px; y: 34px; width: 112px; bar-height: 3px; line-color: #94a3b8; }
+            }
+
+            // Timer + Next slide
+            Rectangle {
+                x: 170px; y: 14px; width: 106px; height: 22px; border-radius: 4px;
+                background: #252a36;
+                Text {
+                    text: "04:12"; color: #f8fafc; font-family: Theme.ui-font-family; font-size: 11px; font-weight: 700;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                x: 170px; y: 42px; width: 106px; height: 52px; border-radius: 4px;
+                background: #2b3140; border-width: 1px; border-color: #3f475c;
+                SlideLine { x: 10px; y: 12px; width: 64px; bar-height: 4px; line-color: #cbd5e1; }
+                SlideLine { x: 10px; y: 22px; width: 78px; bar-height: 3px; line-color: #64748b; }
+            }
+        }
+    }
+
+    // Step 5: Print Preview, Handouts & Export
+    if root.step == 5 : Rectangle {
+        width: 100%; height: 100%;
+
+        Rectangle {
+            x: parent.width / 2 - 96px; y: 16px; width: 118px; height: 126px; border-radius: 6px;
+            background: #ffffff; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow;
+
+            // 2x2 handout grid
+            Rectangle { x: 12px; y: 16px; width: 42px; height: 28px; border-radius: 3px; background: #f8fafc; border-width: 1px; border-color: #cbd5e1; }
+            Rectangle { x: 64px; y: 16px; width: 42px; height: 28px; border-radius: 3px; background: #f8fafc; border-width: 1px; border-color: #cbd5e1; }
+            Rectangle { x: 12px; y: 54px; width: 42px; height: 28px; border-radius: 3px; background: #f8fafc; border-width: 1px; border-color: #cbd5e1; }
+            Rectangle { x: 64px; y: 54px; width: 42px; height: 28px; border-radius: 3px; background: #f8fafc; border-width: 1px; border-color: #cbd5e1; }
+            SlideLine { x: 42px; y: 102px; width: 34px; bar-height: 3px; line-color: #94a3b8; }
+        }
+
+        FormatPill { x: parent.width / 2 + 44px; y: 36px; label: "PDF"; fill-color: #fdecea; stroke-color: #f3b5ad; text-color: #b83b36; }
+        FormatPill { x: parent.width / 2 + 44px; y: 66px; label: "PPTX"; fill-color: #fff4e5; stroke-color: #f4c790; text-color: #b45309; }
+        FormatPill { x: parent.width / 2 + 44px; y: 96px; label: "Handouts"; fill-color: #eef2ff; stroke-color: #c7d2fe; text-color: #3730a3; }
+    }
+
+    // Step 6: Command Palette & Shortcuts
+    if root.step >= 6 : Rectangle {
+        width: 100%; height: 100%;
+
+        Rectangle {
+            x: parent.width / 2 - 126px; y: 20px; width: 252px; height: 84px; border-radius: 8px;
+            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow;
+
+            Rectangle {
+                x: 10px; y: 10px; width: 232px; height: 26px; border-radius: 5px;
+                background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().accent;
+                Icon { x: 8px; y: 6px; icon: "search"; tint: Theme.palette().accent; size: 14px; }
+                SlideLine { x: 28px; y: 11px; width: 98px; bar-height: 4px; line-color: Theme.palette().ink-secondary; }
+            }
+            Rectangle { x: 10px; y: 44px; width: 232px; height: 16px; border-radius: 4px; background: Theme.palette().selection-soft; }
+            SlideLine { x: 18px; y: 50px; width: 84px; bar-height: 4px; line-color: Theme.palette().accent; }
+            SlideLine { x: 18px; y: 68px; width: 112px; bar-height: 4px; line-color: Theme.palette().ink-secondary; }
+        }
+
+        KeycapBadge { x: parent.width / 2 - 108px; y: 116px; keys: root.mod-key + "K"; }
+        KeycapBadge { x: parent.width / 2 - 24px; y: 116px; keys: "F5"; }
+        KeycapBadge { x: parent.width / 2 + 46px; y: 116px; keys: "F1"; }
+    }
+}
