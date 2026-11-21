@@ -47,7 +47,7 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
 }
 
 fn wire_list_marker(app: &WriterApp, state: &Rc<GuiState>) {
-    let state = state.clone();
+    let marker_state = state.clone();
     let app_ref = app.as_weak();
     app.global::<WriterFormatState>()
         .on_select_list_marker(move |index| {
@@ -66,19 +66,54 @@ fn wire_list_marker(app: &WriterApp, state: &Rc<GuiState>) {
                 _ => return,
             };
             let selection = crate::selection_from_app(&app);
-            let mut next = state.current.borrow().clone();
+            let mut next = marker_state.current.borrow().clone();
             crate::document_formatting::set_selection_list_marker(
                 &mut next,
                 DocumentSelection::range(selection.anchor, selection.focus),
                 marker,
             );
             next.set_selection(selection);
+            if next != *marker_state.current.borrow()
+                && !apply_with_history(&app, &marker_state, next, HistoryKind::DocumentAction)
+            {
+                return;
+            }
+            announce(&app, "List marker style updated".to_string());
+        });
+
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.global::<WriterFormatState>()
+        .on_apply_list_preset(move |list_style, marker_idx| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let marker = match (list_style, marker_idx) {
+                (1, 0) => loom_text::ListMarkerStyle::Disc,
+                (1, 1) => loom_text::ListMarkerStyle::Circle,
+                (1, 2) => loom_text::ListMarkerStyle::Square,
+                (1, 3) => loom_text::ListMarkerStyle::Dash,
+                (2, 0) => loom_text::ListMarkerStyle::Decimal,
+                (2, 1) => loom_text::ListMarkerStyle::LowerAlpha,
+                (2, 2) => loom_text::ListMarkerStyle::UpperAlpha,
+                (2, 3) => loom_text::ListMarkerStyle::LowerRoman,
+                (2, 4) => loom_text::ListMarkerStyle::UpperRoman,
+                _ => loom_text::ListMarkerStyle::Default,
+            };
+            let selection = crate::selection_from_app(&app);
+            let range = DocumentSelection::range(selection.anchor, selection.focus);
+            let mut next = state.current.borrow().clone();
+            crate::document_formatting::set_selection_list_style(
+                &mut next,
+                range.clone(),
+                list_style,
+            );
+            crate::document_formatting::set_selection_list_marker(&mut next, range, marker);
+            next.set_selection(selection);
             if next != *state.current.borrow()
                 && !apply_with_history(&app, &state, next, HistoryKind::DocumentAction)
             {
                 return;
             }
-            announce(&app, "List marker style updated".to_string());
+            announce(&app, "List style updated".to_string());
         });
 }
 

@@ -204,8 +204,33 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "paragraph.h2" => app.invoke_select_heading(2),
         "paragraph.h3" => app.invoke_select_heading(3),
         "list.none" => app.invoke_select_list_style(0),
-        "list.bulleted" => app.invoke_select_list_style(1),
-        "list.numbered" => app.invoke_select_list_style(2),
+        "list.bulleted" | "list.bullet.disc" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(1, 0),
+        "list.bullet.circle" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(1, 1),
+        "list.bullet.square" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(1, 2),
+        "list.bullet.dash" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(1, 3),
+        "list.numbered" | "list.number.decimal" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(2, 0),
+        "list.number.lower_alpha" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(2, 1),
+        "list.number.upper_alpha" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(2, 2),
+        "list.number.lower_roman" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(2, 3),
+        "list.number.upper_roman" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_apply_list_preset(2, 4),
         "view.zoom_in" => toolbar_commands::zoom_in(app),
         "view.zoom_out" => toolbar_commands::zoom_out(app),
         "view.zoom_actual" => toolbar_commands::zoom_actual(app),

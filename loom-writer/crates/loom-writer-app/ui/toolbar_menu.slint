@@ -104,8 +104,15 @@ export component WriterToolbarMenu inherits Rectangle {
         ]
         : root.kind == 6 ? [
             { id: "list.none", label: "No List", shortcut: "", checked: root.list-style-index == 0, checkable: true, enabled: true },
-            { id: "list.bulleted", label: "Bulleted List", shortcut: root.primary-mod + "+Shift+8", checked: root.list-style-index == 1, checkable: true, enabled: true },
-            { id: "list.numbered", label: "Numbered List", shortcut: root.primary-mod + "+Shift+7", checked: root.list-style-index == 2, checkable: true, enabled: true },
+            { id: "list.bullet.disc", label: "Bulleted List", shortcut: root.primary-mod + "+Shift+8", checked: root.list-style-index == 1 && WriterFormatState.list-marker-index == 0, checkable: true, enabled: true },
+            { id: "list.bullet.circle", label: "Bulleted: Circle (\u{25e6})", shortcut: "", checked: root.list-style-index == 1 && WriterFormatState.list-marker-index == 1, checkable: true, enabled: true },
+            { id: "list.bullet.square", label: "Bulleted: Square (\u{25aa})", shortcut: "", checked: root.list-style-index == 1 && WriterFormatState.list-marker-index == 2, checkable: true, enabled: true },
+            { id: "list.bullet.dash", label: "Bulleted: Dash (\u{2013})", shortcut: "", checked: root.list-style-index == 1 && WriterFormatState.list-marker-index == 3, checkable: true, enabled: true },
+            { id: "list.number.decimal", label: "Numbered List", shortcut: root.primary-mod + "+Shift+7", checked: root.list-style-index == 2 && WriterFormatState.list-marker-index == 0, checkable: true, enabled: true },
+            { id: "list.number.lower_alpha", label: "Numbered: a, b, c", shortcut: "", checked: root.list-style-index == 2 && WriterFormatState.list-marker-index == 1, checkable: true, enabled: true },
+            { id: "list.number.upper_alpha", label: "Numbered: A, B, C", shortcut: "", checked: root.list-style-index == 2 && WriterFormatState.list-marker-index == 2, checkable: true, enabled: true },
+            { id: "list.number.lower_roman", label: "Numbered: i, ii, iii", shortcut: "", checked: root.list-style-index == 2 && WriterFormatState.list-marker-index == 3, checkable: true, enabled: true },
+            { id: "list.number.upper_roman", label: "Numbered: I, II, III", shortcut: "", checked: root.list-style-index == 2 && WriterFormatState.list-marker-index == 4, checkable: true, enabled: true },
         ]
         : root.kind == 7 ? [
             { id: "file.print_preview", label: "Print Preview\u{2026}", shortcut: root.primary-mod + "+P", checked: false, checkable: false, enabled: true },
