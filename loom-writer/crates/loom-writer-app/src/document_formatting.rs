@@ -755,11 +755,49 @@ pub fn set_selection_list_style(
     };
     for block_index in selected_block_indices(document, selection) {
         let block = &mut document.blocks[block_index];
+        if block.kind == loom_writer_core::TABLE_BLOCK_KIND || block.is_image() || block.is_chart()
+        {
+            continue;
+        }
         block.kind = kind.to_string();
         // A paragraph draws no list level, so unlisting one forgets its level;
         // listing it again starts at the top level instead of the old depth.
         if kind == "paragraph" {
             block.style.list_level = 0;
+            block.style.list_marker = loom_text::ListMarkerStyle::Default;
+        } else if (kind == "list-bulleted"
+            && matches!(
+                block.style.list_marker,
+                loom_text::ListMarkerStyle::Decimal
+                    | loom_text::ListMarkerStyle::LowerAlpha
+                    | loom_text::ListMarkerStyle::UpperAlpha
+                    | loom_text::ListMarkerStyle::LowerRoman
+                    | loom_text::ListMarkerStyle::UpperRoman
+            ))
+            || (kind == "list-numbered"
+                && matches!(
+                    block.style.list_marker,
+                    loom_text::ListMarkerStyle::Disc
+                        | loom_text::ListMarkerStyle::Circle
+                        | loom_text::ListMarkerStyle::Square
+                        | loom_text::ListMarkerStyle::Dash
+                ))
+        {
+            block.style.list_marker = loom_text::ListMarkerStyle::Default;
+        }
+    }
+}
+
+/// Applies a bullet or numbering marker style to selected list blocks.
+pub fn set_selection_list_marker(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    marker: loom_text::ListMarkerStyle,
+) {
+    for block_index in selected_block_indices(document, selection) {
+        let block = &mut document.blocks[block_index];
+        if matches!(block.kind.as_str(), "list-bulleted" | "list-numbered") {
+            block.style.list_marker = marker;
         }
     }
 }

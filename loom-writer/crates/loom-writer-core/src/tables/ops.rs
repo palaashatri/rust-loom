@@ -594,6 +594,56 @@ impl WriterDocument {
         )
     }
 
+    /// Finds the table block index and id covering `offset`, including cell
+    /// separators and block edges.
+    fn table_block_at_offset(&self, offset: usize) -> Option<(usize, u64)> {
+        if let Some(loc) = self.table_cell_at_offset(offset) {
+            return Some((loc.block_index, loc.block_id));
+        }
+        let mut block_start = 0usize;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let block_len = block.text.len_bytes();
+            if block.kind == TABLE_BLOCK_KIND
+                && offset >= block_start
+                && offset <= block_start + block_len
+            {
+                return Some((index, block.id));
+            }
+            block_start += block_len + 1;
+        }
+        None
+    }
+
+    /// Deletes the entire table block containing `offset`, dropping any
+    /// footnotes anchored in that table, orphaning comments anchored to it, and
+    /// ensuring the document retains at least one paragraph block.
+    pub fn delete_table_at_offset(&mut self, offset: usize) -> Result<usize, String> {
+        let (index, block_id) = self
+            .table_block_at_offset(offset)
+            .ok_or_else(|| "Offset is not in a table".to_string())?;
+        self.footnotes.retain(|note| note.block_id != block_id);
+        for comment in &mut self.comments {
+            if comment.block_id == block_id && !comment.orphaned {
+                comment.orphaned = true;
+                comment.start = 0;
+                comment.end = 0;
+            }
+        }
+        self.blocks.remove(index);
+        if self.blocks.is_empty() {
+            self.blocks
+                .push(RichBlock::new(self.next_id(), "paragraph", ""));
+        }
+        let new_caret = if index < self.blocks.len() {
+            self.table_block_start(index)
+        } else {
+            let last = self.blocks.len() - 1;
+            self.table_block_start(last) + self.blocks[last].text.len_bytes()
+        };
+        self.set_selection(TextSelection::caret(new_caret));
+        Ok(new_caret)
+    }
+
     /// Inserts a column into the table at the given offset, to the left or right of current column.
     pub fn insert_table_column_at_offset(
         &mut self,

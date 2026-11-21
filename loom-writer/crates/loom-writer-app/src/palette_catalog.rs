@@ -26,6 +26,26 @@ pub(crate) fn ranked_matches<'a>(
         .into_iter()
         .map(|(spec, score)| (score + alias_bonus(spec.id.as_str(), &query), spec))
         .collect();
+    if crate::command_dispatch::is_shortcut_query(&query) {
+        let existing: std::collections::HashSet<&str> =
+            matches.iter().map(|(_, spec)| spec.id.as_str()).collect();
+        for spec in registry.commands() {
+            if existing.contains(spec.id.as_str()) {
+                continue;
+            }
+            let platform = crate::command_dispatch::shortcut_for_id(spec.id.as_str());
+            let effective = if !platform.is_empty() {
+                platform
+            } else {
+                spec.default_shortcut.as_deref().unwrap_or("")
+            };
+            if crate::command_dispatch::shortcut_matches_query(effective, &query)
+                || (spec.id.as_str() == "help.welcome" && query == "f1")
+            {
+                matches.push((25, spec));
+            }
+        }
+    }
     matches.sort_by(|a, b| {
         b.0.cmp(&a.0)
             .then(a.1.order.cmp(&b.1.order))
@@ -74,6 +94,7 @@ pub(crate) enum PaletteAction {
     InsertTableColRight,
     DeleteTableRow,
     DeleteTableColumn,
+    DeleteTable,
     MergeTableCells,
     SplitTableCell,
     InsertChart,
@@ -102,6 +123,7 @@ pub(crate) fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) ->
         PaletteAction::InsertTableColRight => dispatch_command(app, "table.insert_col_right"),
         PaletteAction::DeleteTableRow => dispatch_command(app, "table.delete_row"),
         PaletteAction::DeleteTableColumn => dispatch_command(app, "table.delete_column"),
+        PaletteAction::DeleteTable => dispatch_command(app, "table.delete_table"),
         PaletteAction::MergeTableCells => dispatch_command(app, "table.merge_cells"),
         PaletteAction::SplitTableCell => dispatch_command(app, "table.split_cell"),
         PaletteAction::InsertChart => dispatch_command(app, "writer.chart.insert"),
@@ -132,13 +154,22 @@ pub(crate) struct PaletteCommand {
 }
 
 pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
+    use crate::command_dispatch::shortcut_for_id;
+    let cmd_entry = |id: &'static str, label: &'static str| PaletteCommand {
+        action: PaletteAction::Command(id),
+        id,
+        label,
+        shortcut: shortcut_for_id(id),
+    };
     vec![
         PaletteCommand {
             action: PaletteAction::NewDoc,
             id: "writer.new",
             label: "New Document",
-            shortcut: "Ctrl+N",
+            shortcut: shortcut_for_id("writer.new"),
         },
+        cmd_entry("file.start_hub", "Open Start Hub…"),
+        cmd_entry("file.templates", "Browse Templates…"),
         PaletteCommand {
             action: PaletteAction::NewFromSample,
             id: "writer.new-sample",
@@ -149,31 +180,32 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::OpenDoc,
             id: "writer.open",
             label: "Open Document",
-            shortcut: "Ctrl+O",
+            shortcut: shortcut_for_id("writer.open"),
         },
         PaletteCommand {
             action: PaletteAction::SaveDoc,
             id: "writer.save",
             label: "Save Document",
-            shortcut: "Ctrl+S",
+            shortcut: shortcut_for_id("writer.save"),
         },
         PaletteCommand {
             action: PaletteAction::SaveAsDoc,
             id: "writer.save-as",
             label: "Save Document As",
-            shortcut: "Ctrl+Shift+S",
+            shortcut: shortcut_for_id("writer.save-as"),
         },
+        cmd_entry("file.print_preview", "Print Preview…"),
         PaletteCommand {
             action: PaletteAction::ExportPdf,
             id: "writer.export-pdf",
             label: "Export PDF",
-            shortcut: "Ctrl+E",
+            shortcut: shortcut_for_id("writer.export-pdf"),
         },
         PaletteCommand {
             action: PaletteAction::ExportDocx,
             id: "writer.export-docx",
             label: "Export Word Document (.docx)",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.export-docx"),
         },
         PaletteCommand {
             action: PaletteAction::ExportMarkdown,
@@ -185,32 +217,48 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::Undo,
             id: "writer.undo",
             label: "Undo",
-            shortcut: "Ctrl+Z",
+            shortcut: shortcut_for_id("writer.undo"),
         },
         PaletteCommand {
             action: PaletteAction::Redo,
             id: "writer.redo",
             label: "Redo",
-            shortcut: "Ctrl+Shift+Z",
+            shortcut: shortcut_for_id("writer.redo"),
         },
+        cmd_entry("edit.find", "Find…"),
+        cmd_entry("edit.replace", "Find & Replace…"),
+        cmd_entry("help.welcome", "Open Welcome Guide"),
+        cmd_entry("help.shortcuts", "Keyboard Shortcuts"),
+        cmd_entry("view.inspector", "Toggle Format Inspector"),
+        cmd_entry("view.navigator", "Toggle Outline Navigator"),
+        cmd_entry("view.zoom_in", "Zoom In"),
+        cmd_entry("view.zoom_out", "Zoom Out"),
+        cmd_entry("view.zoom_actual", "Actual Size (100%)"),
+        cmd_entry("view.zoom_fit_width", "Fit Page Width"),
+        cmd_entry("view.zoom_fit_page", "Fit Whole Page"),
+        cmd_entry("review.word_count", "Word Count & Statistics…"),
+        cmd_entry("writer.review.open", "Open Tracked Changes…"),
+        cmd_entry("insert.header_footer", "Headers & Footers…"),
+        cmd_entry("insert.comment", "Insert Comment"),
         PaletteCommand {
             action: PaletteAction::ToggleBold,
             id: "writer.style.bold-all",
             label: "Document Style: Bold",
-            shortcut: "Ctrl+B",
+            shortcut: shortcut_for_id("writer.style.bold-all"),
         },
         PaletteCommand {
             action: PaletteAction::ToggleItalic,
             id: "writer.style.italic-all",
             label: "Document Style: Italic",
-            shortcut: "Ctrl+I",
+            shortcut: shortcut_for_id("writer.style.italic-all"),
         },
         PaletteCommand {
             action: PaletteAction::ToggleUnderline,
             id: "writer.style.underline-all",
             label: "Document Style: Underline",
-            shortcut: "Ctrl+U",
+            shortcut: shortcut_for_id("writer.style.underline-all"),
         },
+        cmd_entry("format.strikethrough", "Strikethrough"),
         PaletteCommand {
             action: PaletteAction::Command("writer.direction.auto"),
             id: "writer.direction.auto",
@@ -251,19 +299,19 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::Command("writer.style.superscript"),
             id: "writer.style.superscript",
             label: "Superscript",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.superscript"),
         },
         PaletteCommand {
             action: PaletteAction::Command("writer.style.subscript"),
             id: "writer.style.subscript",
             label: "Subscript",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.subscript"),
         },
         PaletteCommand {
             action: PaletteAction::Command("writer.footnotes"),
             id: "writer.footnotes",
             label: "Footnotes…",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.footnotes"),
         },
         PaletteCommand {
             action: PaletteAction::InsertTable,
@@ -275,31 +323,31 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::InsertTableRowAbove,
             id: "table.insert_row_above",
             label: "Table: Insert Row Above",
-            shortcut: "Ctrl+Alt+Up",
+            shortcut: shortcut_for_id("table.insert_row_above"),
         },
         PaletteCommand {
             action: PaletteAction::InsertTableRowBelow,
             id: "table.insert_row_below",
             label: "Table: Insert Row Below",
-            shortcut: "Ctrl+Alt+Down",
+            shortcut: shortcut_for_id("table.insert_row_below"),
         },
         PaletteCommand {
             action: PaletteAction::InsertTableColLeft,
             id: "table.insert_col_left",
             label: "Table: Insert Column Left",
-            shortcut: "Ctrl+Alt+Left",
+            shortcut: shortcut_for_id("table.insert_col_left"),
         },
         PaletteCommand {
             action: PaletteAction::InsertTableColRight,
             id: "table.insert_col_right",
             label: "Table: Insert Column Right",
-            shortcut: "Ctrl+Alt+Right",
+            shortcut: shortcut_for_id("table.insert_col_right"),
         },
         PaletteCommand {
             action: PaletteAction::DeleteTableRow,
             id: "table.delete_row",
             label: "Table: Delete Row",
-            shortcut: "Ctrl+Alt+Backspace",
+            shortcut: shortcut_for_id("table.delete_row"),
         },
         PaletteCommand {
             action: PaletteAction::DeleteTableColumn,
@@ -308,16 +356,22 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             shortcut: "",
         },
         PaletteCommand {
+            action: PaletteAction::DeleteTable,
+            id: "table.delete_table",
+            label: "Table: Delete Table",
+            shortcut: shortcut_for_id("table.delete_table"),
+        },
+        PaletteCommand {
             action: PaletteAction::MergeTableCells,
             id: "table.merge_cells",
             label: "Table: Merge Cells",
-            shortcut: "Ctrl+Alt+M",
+            shortcut: shortcut_for_id("table.merge_cells"),
         },
         PaletteCommand {
             action: PaletteAction::SplitTableCell,
             id: "table.split_cell",
             label: "Table: Split Cell",
-            shortcut: "Ctrl+Alt+S",
+            shortcut: shortcut_for_id("table.split_cell"),
         },
         PaletteCommand {
             action: PaletteAction::InsertPicture,
@@ -335,73 +389,86 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             action: PaletteAction::SetHeading(1),
             id: "writer.style.heading-1-all",
             label: "All Paragraphs: Heading 1",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.heading-1-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(2),
             id: "writer.style.heading-2-all",
             label: "All Paragraphs: Heading 2",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.heading-2-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(3),
             id: "writer.style.heading-3-all",
             label: "All Paragraphs: Heading 3",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.heading-3-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(0),
             id: "writer.style.body-all",
             label: "All Paragraphs: Body Text",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.style.body-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(0),
             id: "writer.align.left-all",
             label: "Align All Left",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.align.left-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(1),
             id: "writer.align.center-all",
             label: "Align All Center",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.align.center-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(2),
             id: "writer.align.right-all",
             label: "Align All Right",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.align.right-all"),
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(3),
             id: "writer.align.justify-all",
             label: "Align All Justify",
-            shortcut: "",
+            shortcut: shortcut_for_id("writer.align.justify-all"),
         },
+        cmd_entry("edit.cut", "Cut"),
+        cmd_entry("edit.copy", "Copy"),
+        cmd_entry("edit.paste", "Paste"),
+        cmd_entry("list.none", "List: None"),
+        cmd_entry("list.bulleted", "List: Bulleted"),
+        cmd_entry("list.bullet.circle", "List: Bulleted (Circle ◦)"),
+        cmd_entry("list.bullet.square", "List: Bulleted (Square ▪)"),
+        cmd_entry("list.bullet.dash", "List: Bulleted (Dash –)"),
+        cmd_entry("list.numbered", "List: Numbered"),
+        cmd_entry("list.number.lower_alpha", "List: Numbered (a, b, c)"),
+        cmd_entry("list.number.upper_alpha", "List: Numbered (A, B, C)"),
+        cmd_entry("list.number.lower_roman", "List: Numbered (i, ii, iii)"),
+        cmd_entry("list.number.upper_roman", "List: Numbered (I, II, III)"),
         PaletteCommand {
             action: PaletteAction::Command("insert.page_break"),
             id: "insert.page_break",
             label: "Insert Page Break",
-            shortcut: "Ctrl+Enter",
+            shortcut: shortcut_for_id("insert.page_break"),
         },
         PaletteCommand {
             action: PaletteAction::Command("insert.line_break"),
             id: "insert.line_break",
             label: "Insert Line Break",
-            shortcut: "Shift+Enter",
+            shortcut: shortcut_for_id("insert.line_break"),
         },
         PaletteCommand {
             action: PaletteAction::Command("list.level.increase"),
             id: "list.level.increase",
             label: "Increase List Level",
-            shortcut: "Tab",
+            shortcut: shortcut_for_id("list.level.increase"),
         },
         PaletteCommand {
             action: PaletteAction::Command("list.level.decrease"),
             id: "list.level.decrease",
             label: "Decrease List Level",
-            shortcut: "Shift+Tab",
+            shortcut: shortcut_for_id("list.level.decrease"),
         },
     ]
     .into_iter()

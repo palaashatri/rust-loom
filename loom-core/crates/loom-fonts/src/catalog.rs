@@ -18,6 +18,13 @@ use std::sync::{Arc, Mutex};
 /// The family always appended to a fallback chain.
 const LAST_RESORT_FAMILY: &str = "inter";
 
+/// True when a family name is a platform-private system family (such as
+/// macOS `.SF NS Text` or `.Al Bayan PUA`) that should stay resolvable for
+/// imported documents while remaining hidden from font pickers.
+pub fn is_hidden_system_family(family: &str) -> bool {
+    family.trim_start().starts_with('.')
+}
+
 /// Default budget for font bytes held in memory (CJK fonts run to 20 MiB).
 const DEFAULT_LOAD_BUDGET: usize = 192 << 20;
 
@@ -229,9 +236,20 @@ impl FontCatalog {
     }
 
     /// Family names (typographic), sorted case-insensitively, without
-    /// duplicates. This is the font picker's list.
+    /// duplicates. Includes platform-private `.`-prefixed system families so
+    /// existing callers and document lookup remain compatible.
     pub fn families(&self) -> &[String] {
         &self.families
+    }
+
+    /// Family names for font pickers, excluding platform-private `.`-prefixed
+    /// system families while keeping the catalogue's sorted order.
+    pub fn picker_families(&self) -> Vec<String> {
+        self.families
+            .iter()
+            .filter(|family| !is_hidden_system_family(family))
+            .cloned()
+            .collect()
     }
 
     /// True when `family` names any installed or bundled face.
@@ -560,5 +578,16 @@ mod tests {
             read_limited(Cursor::new(&data[..101]), 100, 100),
             Err(FontError::TooLarge)
         );
+    }
+
+    #[test]
+    fn hidden_system_family_detection_checks_leading_dot_after_whitespace() {
+        assert!(is_hidden_system_family(".SF NS Text"));
+        assert!(is_hidden_system_family(".ADT Slab Numeric"));
+        assert!(is_hidden_system_family("  .Al Bayan PUA"));
+        assert!(!is_hidden_system_family("Inter"));
+        assert!(!is_hidden_system_family("Mr. DeHaviland"));
+        assert!(!is_hidden_system_family(""));
+        assert!(!is_hidden_system_family("   "));
     }
 }

@@ -1,3 +1,5 @@
+import { LoomColorSwatch } from "foundation.slint";
+
 /// Capability state shared by Writer's alignment controls.
 export global WriterFormatState {
     // 0 left, 1 center, 2 right, 3 justify; -1 when Start/End is active.
@@ -16,16 +18,30 @@ export global WriterFormatState {
     in-out property <bool> subscript-mixed: false;
     in-out property <string> foreground-color: "";
     in-out property <bool> foreground-color-mixed: false;
+    // The shared 48-color palette, filled from `loom_ui::color_palette`.
+    in-out property <[LoomColorSwatch]> color-swatches: [];
+    in-out property <bool> color-palette-open: false;
+    // Selected color as `#RRGGBB`, empty for Automatic or a mixed selection.
+    in-out property <string> foreground-color-value: "";
+    // The swatch drawn in the color well; meaningful when the value is not empty.
+    in-out property <color> foreground-color-swatch: #000000;
+    // Swatch name, `#RRGGBB`, "Automatic" or "Mixed".
+    in-out property <string> foreground-color-label: "Automatic";
     in-out property <bool> color-dialog-open: false;
     in-out property <string> color-input: "";
     in-out property <string> color-error: "";
+    in-out property <int> list-marker-index: 0;
 
     callback select-direction(int);
     callback select-logical-alignment(int);
     callback toggle-superscript;
     callback toggle-subscript;
     callback open-foreground-color;
+    callback select-foreground-color(string);
+    callback reset-foreground-color;
     callback apply-foreground-color;
     callback cancel-foreground-color;
     callback clear-foreground-color-error;
+    callback select-list-marker(int);
+    callback apply-list-preset(int, int);
 }

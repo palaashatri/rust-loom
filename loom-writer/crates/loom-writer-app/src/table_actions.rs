@@ -112,6 +112,7 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
         "insert-col-right" => next.insert_table_column_at_offset(caret, true),
         "delete-row" => next.delete_table_row_at_offset(caret),
         "delete-col" => next.delete_table_column_at_offset(caret),
+        "delete-table" => next.delete_table_at_offset(caret),
         "merge-cells" => {
             if let Some(range) = get_table_cell_selection_range() {
                 let min_r = range.start_row.min(range.end_row);
@@ -156,6 +157,9 @@ pub(crate) fn table_action(app: &WriterApp, state: &GuiState, action: &str) {
     };
     match result {
         Ok(new_caret) => {
+            if action == "delete-table" {
+                clear_table_cell_selection_range();
+            }
             next.set_selection(TextSelection::caret(new_caret));
             if !crate::apply_table_action_with_history(
                 app,
@@ -182,6 +186,7 @@ fn table_action_status(action: &str) -> &'static str {
         "insert-col-right" => "Inserted a column to the right",
         "delete-row" => "Deleted the row",
         "delete-col" => "Deleted the column",
+        "delete-table" => "Deleted the table",
         "merge-cells" => "Merged the selected cells",
         "split-cell" => "Split the cell",
         _ => "Table updated",
@@ -586,6 +591,13 @@ pub(crate) fn table_command_specs() -> Vec<loom_command::CommandSpec> {
             .with_order(37)
             .with_shortcut("Ctrl+Alt+S")
             .with_enabled(false),
+        CommandSpec::new("table.delete_table", "Delete Table")
+            .with_undo_label("Delete Table")
+            .with_description("Delete the entire current table")
+            .with_category("table")
+            .with_order(38)
+            .with_shortcut("Ctrl+Alt+Shift+Backspace")
+            .with_enabled(false),
     ]
 }
 
@@ -619,6 +631,7 @@ pub(crate) fn sync_table_registry_enablement(
         "table.delete_col",
         "table.merge_cells",
         "table.split_cell",
+        "table.delete_table",
     ] {
         registry.set_enabled(&CommandId::new(id), enabled);
     }
@@ -633,6 +646,42 @@ pub(crate) fn handle_table_key(
     ctrl: bool,
     alt: bool,
 ) -> bool {
+    let matches_key = |k: slint::platform::Key, name: &str| -> bool {
+        let s: slint::SharedString = k.into();
+        key == s.as_str() || key == name
+    };
+
+    let is_arrow = matches_key(slint::platform::Key::RightArrow, "Right")
+        || matches_key(slint::platform::Key::LeftArrow, "Left")
+        || matches_key(slint::platform::Key::DownArrow, "Down")
+        || matches_key(slint::platform::Key::UpArrow, "Up");
+
+    // A collapsed caret-navigation key leaves the virtual cell range and
+    // continues through the editor's normal navigation path. This includes
+    // page and word/line navigation, not only the four plain arrows.
+    let navigates_caret = is_arrow
+        || matches_key(slint::platform::Key::PageUp, "PageUp")
+        || matches_key(slint::platform::Key::PageDown, "PageDown")
+        || matches_key(slint::platform::Key::Home, "Home")
+        || matches_key(slint::platform::Key::End, "End");
+
+    let is_delete_key = matches_key(slint::platform::Key::Backspace, "Backspace")
+        || matches_key(slint::platform::Key::Delete, "Delete");
+
+    // Fast path for plain character typing so keystrokes do not build
+    // TableTextMap / WriterTable snapshots when no table shortcut applies.
+    let might_handle = (navigates_caret
+        && !shift
+        && !alt
+        && get_table_cell_selection_range().is_some())
+        || (is_delete_key && !ctrl && !alt && get_table_cell_selection_range().is_some())
+        || (ctrl && !alt && !shift && table_format_actions::Emphasis::from_shortcut(key).is_some())
+        || (ctrl && alt)
+        || (shift && !ctrl && !alt && is_arrow);
+    if !might_handle {
+        return false;
+    }
+
     let caret = state.current.borrow().selection().anchor;
     let doc = state.current.borrow();
     let Some(loc) = doc.table_cell_at_offset(caret) else {
@@ -642,27 +691,6 @@ pub(crate) fn handle_table_key(
         return false;
     };
     drop(doc);
-
-    let matches_key = |k: slint::platform::Key, name: &str| -> bool {
-        let s: slint::SharedString = k.into();
-        key == s.as_str() || key == name
-    };
-
-    // A collapsed caret-navigation key leaves the virtual cell range and
-    // continues through the editor's normal navigation path. This includes
-    // page and word/line navigation, not only the four plain arrows.
-    let navigates_caret = [
-        (slint::platform::Key::RightArrow, "Right"),
-        (slint::platform::Key::LeftArrow, "Left"),
-        (slint::platform::Key::DownArrow, "Down"),
-        (slint::platform::Key::UpArrow, "Up"),
-        (slint::platform::Key::PageUp, "PageUp"),
-        (slint::platform::Key::PageDown, "PageDown"),
-        (slint::platform::Key::Home, "Home"),
-        (slint::platform::Key::End, "End"),
-    ]
-    .into_iter()
-    .any(|(key_code, name)| matches_key(key_code, name));
     if !shift && !alt && navigates_caret && get_table_cell_selection_range().is_some() {
         clear_table_cell_selection_range();
         let doc = state.current.borrow();
@@ -682,6 +710,29 @@ pub(crate) fn handle_table_key(
         }
     }
 
+    // Backspace or Delete when the entire table is cell-range selected deletes the table.
+    if !ctrl && !alt && is_delete_key {
+        if let Some(range) = get_table_cell_selection_range() {
+            let rows = table.rows.len();
+            let cols = table.columns();
+            let min_r = range.start_row.min(range.end_row);
+            let max_r = range.start_row.max(range.end_row);
+            let min_c = range.start_col.min(range.end_col);
+            let max_c = range.start_col.max(range.end_col);
+            if range.block_id == loc.block_id
+                && rows > 0
+                && cols > 0
+                && min_r == 0
+                && max_r + 1 == rows
+                && min_c == 0
+                && max_c + 1 == cols
+            {
+                table_action(app, state, "delete-table");
+                return true;
+            }
+        }
+    }
+
     // Ctrl+Alt shortcuts
     if ctrl && alt {
         let action = if matches_key(slint::platform::Key::UpArrow, "Up") {
@@ -692,6 +743,8 @@ pub(crate) fn handle_table_key(
             "insert-col-left"
         } else if matches_key(slint::platform::Key::RightArrow, "Right") {
             "insert-col-right"
+        } else if shift && matches_key(slint::platform::Key::Backspace, "Backspace") {
+            "delete-table"
         } else if matches_key(slint::platform::Key::Backspace, "Backspace") {
             "delete-row"
         } else if matches_key(slint::platform::Key::Delete, "Delete") {

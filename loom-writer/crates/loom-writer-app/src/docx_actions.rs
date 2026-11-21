@@ -155,6 +155,7 @@ pub(crate) fn apply_pending_docx_import(
     if let Some(pending) = pending {
         replace_opened_document(app, state, pending.path.clone(), pending.document);
         sync_writer_menu_if_present(menu_service, app, state);
+        crate::start_hub::record_recent_document(&pending.path);
         app.set_status_left(SharedString::from(format!(
             "Opened {}",
             pending.path.display()
@@ -218,9 +219,14 @@ pub fn continue_docx_import(
 
 /// Inserts a chart block from the system clipboard into the current document.
 pub fn insert_chart_from_clipboard(app: &WriterApp, state: &GuiState) -> bool {
-    let Ok(clipboard) = loom_clipboard::read_clipboard() else {
-        app.set_status_left("Clipboard unavailable".into());
-        return false;
+    let clipboard = match loom_clipboard::read_clipboard() {
+        Ok(clipboard) => clipboard,
+        Err(error) => {
+            app.set_status_left(SharedString::from(format!(
+                "Clipboard unavailable: {error}"
+            )));
+            return false;
+        }
     };
     let Some(chart) = clipboard.to_chart() else {
         app.set_status_left("Clipboard does not contain a chart".into());
@@ -286,6 +292,23 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
+    struct MockClipboardGuard;
+
+    impl MockClipboardGuard {
+        fn new() -> Self {
+            loom_clipboard::set_mock_clipboard_enabled(true);
+            loom_clipboard::set_mock_clipboard_fails(false);
+            Self
+        }
+    }
+
+    impl Drop for MockClipboardGuard {
+        fn drop(&mut self) {
+            loom_clipboard::set_mock_clipboard_fails(false);
+            loom_clipboard::set_mock_clipboard_enabled(false);
+        }
+    }
+
     #[test]
     fn inspection_failure_stops_before_import() {
         let import_called = Cell::new(false);
@@ -307,6 +330,34 @@ mod tests {
         assert!(
             !import_called.get(),
             "import must not run after inspection fails"
+        );
+    }
+
+    #[test]
+    fn insert_chart_reports_clipboard_error_detail_without_mutating_document() {
+        let _clipboard = MockClipboardGuard::new();
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+        let document = crate::actions_tests::text_document("Chart baseline");
+        let (app, state) = crate::actions_tests::test_state(document, dialogs);
+        let before = state.current.borrow().clone();
+        let undo_before = state.history.borrow().undo_len();
+        let redo_before = state.history.borrow().redo_len();
+
+        loom_clipboard::set_mock_clipboard_fails(true);
+        let inserted = insert_chart_from_clipboard(&app, &state);
+
+        assert!(!inserted);
+        assert_eq!(
+            app.get_status_left().as_str(),
+            "Clipboard unavailable: Clipboard is unavailable"
+        );
+        assert_eq!(*state.current.borrow(), before);
+        assert_eq!(
+            (
+                state.history.borrow().undo_len(),
+                state.history.borrow().redo_len()
+            ),
+            (undo_before, redo_before)
         );
     }
 }

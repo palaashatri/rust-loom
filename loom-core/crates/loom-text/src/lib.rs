@@ -102,6 +102,23 @@ pub enum LineBreakRule {
     Char,
 }
 
+/// Visual marker style for a bulleted or numbered list item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListMarkerStyle {
+    /// Level-based default (`•`/`◦`/`▪` for bullets, `1.` for numbered).
+    #[default]
+    Default,
+    Disc,
+    Circle,
+    Square,
+    Dash,
+    Decimal,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+}
+
 /// Paragraph style value object (immutable).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphStyle {
@@ -126,6 +143,8 @@ pub struct ParagraphStyle {
     /// Nesting level of a list item, 0 for the top level. Writer keeps it at 0
     /// for other paragraphs and omits it from files when it is 0.
     pub list_level: u8,
+    /// Visual marker style for list items; `Default` omits from serialized files.
+    pub list_marker: ListMarkerStyle,
 }
 
 impl Default for ParagraphStyle {
@@ -141,6 +160,7 @@ impl Default for ParagraphStyle {
             first_line_indent: 0.0,
             break_rule: LineBreakRule::Word,
             list_level: 0,
+            list_marker: ListMarkerStyle::Default,
         }
     }
 }

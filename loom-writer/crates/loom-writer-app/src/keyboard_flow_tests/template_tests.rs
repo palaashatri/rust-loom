@@ -23,7 +23,7 @@ fn template_chooser_is_keyboard_complete_and_traps_tab() {
     );
     assert_eq!(s.app.get_template_selected().as_str(), "blank");
 
-    // Blank Black is now a distinct stable choice between Blank and Report.
+    // Blank Black is a distinct stable choice between Blank and Report.
     press(&s.app, Key::RightArrow);
     assert_eq!(s.app.get_template_selected().as_str(), "blank-black");
     press(&s.app, Key::RightArrow);
@@ -47,12 +47,30 @@ fn template_chooser_is_keyboard_complete_and_traps_tab() {
         "report",
         "Reports selects the report template"
     );
-    press(&s.app, Key::UpArrow);
-    press(&s.app, Key::UpArrow);
+    for _ in 0..4 {
+        press(&s.app, Key::DownArrow);
+    }
+    assert_eq!(s.app.get_template_category(), 6);
+    assert_eq!(
+        s.app.get_template_selected().as_str(),
+        "study-notes",
+        "Personal category selects its first template"
+    );
+    press(&s.app, Key::DownArrow);
+    assert_eq!(
+        s.app.get_template_category(),
+        6,
+        "Down stops at the last category"
+    );
+    for _ in 0..6 {
+        press(&s.app, Key::UpArrow);
+    }
     assert_eq!(s.app.get_template_category(), 0);
 
-    // Tab cycles chooser -> Cancel -> Create Document -> chooser, both ways.
+    // Tab cycles chooser -> Open File… -> Cancel -> Create Document -> chooser, both ways.
     let chooser = focus_weak(&s.app);
+    tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Open File…");
     tab(&s.app);
     assert_eq!(focus_name(&s.app), "Cancel");
     tab(&s.app);
@@ -65,6 +83,16 @@ fn template_chooser_is_keyboard_complete_and_traps_tab() {
     shift_tab(&s.app);
     assert_eq!(focus_name(&s.app), "Create Document");
     shift_tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Cancel");
+    shift_tab(&s.app);
+    assert_eq!(focus_name(&s.app), "Open File…");
+    shift_tab(&s.app);
+    assert!(
+        same_focus(&focus_weak(&s.app), &chooser),
+        "Shift+Tab wrapped back to the chooser"
+    );
+    tab(&s.app);
+    tab(&s.app);
     assert_eq!(focus_name(&s.app), "Cancel");
     press(&s.app, Key::Return);
     assert_eq!(*log.borrow(), ["cancel"], "Enter on Cancel cancels");
@@ -201,15 +229,18 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
         assert_eq!(generated.title, descriptor.document_title);
         let expected_page = loom_writer_core::PageSetup {
             appearance: descriptor.appearance,
+            orientation: descriptor.orientation,
             ..Default::default()
         };
         assert_eq!(generated.page, expected_page);
+        let non_table_blocks: Vec<_> = generated
+            .blocks
+            .iter()
+            .filter(|block| block.kind != loom_writer_core::TABLE_BLOCK_KIND)
+            .map(|block| (block.kind.as_str(), block.text.as_str()))
+            .collect();
         assert_eq!(
-            generated
-                .blocks
-                .iter()
-                .map(|block| (block.kind.as_str(), block.text.as_str()))
-                .collect::<Vec<_>>(),
+            non_table_blocks,
             descriptor
                 .blocks
                 .iter()
@@ -217,25 +248,34 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
                 .collect::<Vec<_>>(),
             "generated content must match the catalog data rendered in the preview"
         );
+        assert_eq!(
+            generated
+                .blocks
+                .iter()
+                .any(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND),
+            descriptor.has_table
+        );
 
+        let page_style = generated.page.page_style();
         let flow = generated
-            .flow(&generated.page.page_style(), PageViewport::default())
+            .flow(&page_style, PageViewport::default())
             .expect("every offered template has valid page geometry");
         let mut previous_block_y = f32::NEG_INFINITY;
         let mut document_x: Option<f32> = None;
-        for block_index in 0..generated.blocks.len() {
+        for (block_index, block) in generated.blocks.iter().enumerate() {
             let line = flow
                 .lines()
                 .iter()
                 .find(|line| line.block_index == block_index)
                 .unwrap_or_else(|| panic!("generated block {block_index} has layout geometry"));
+            let indent_offset = block.text_start_pt(&page_style);
             if let Some(x) = document_x {
                 assert!(
-                    (line.bounds.x - x).abs() < 1.0,
-                    "document uses one text column"
+                    (line.bounds.x - indent_offset - x).abs() < 1.0,
+                    "document uses one text column (plus list marker indent)"
                 );
             } else {
-                document_x = Some(line.bounds.x);
+                document_x = Some(line.bounds.x - indent_offset);
             }
             assert!(
                 line.bounds.y > previous_block_y,
@@ -266,19 +306,19 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
         );
         assert_eq!(
             s.app.get_page_width_pt(),
-            generated.page.page_style().width_pt,
+            page_style.width_pt,
             "the actual page width matches the catalog document"
         );
         assert_eq!(
             s.app.get_page_height_pt(),
-            generated.page.page_style().height_pt,
+            page_style.height_pt,
             "the actual page height matches the catalog document"
         );
 
-        let expected_blocks: Vec<_> = descriptor
+        let expected_blocks: Vec<_> = generated
             .blocks
             .iter()
-            .map(|block| (block.kind.as_str(), block.text))
+            .map(|block| (block.kind.as_str(), block.text.as_str()))
             .collect();
         let native_path = &native_paths[template_index];
         s.app.invoke_save_doc();
@@ -309,7 +349,7 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
                 .map(|block| (block.kind.as_str(), block.text.as_str()))
                 .collect::<Vec<_>>(),
             expected_blocks,
-            "{} package preserves the preview's substantive blocks and heading structure",
+            "{} package preserves the template's substantive blocks and heading structure",
             descriptor.stable_id
         );
 
@@ -371,10 +411,7 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
             let readable_pdf =
                 loom_pdf::inspect::readable_content(&pdf_bytes).expect("inspect PDF text style");
             for block in descriptor.blocks {
-                let size = generated
-                    .page
-                    .page_style()
-                    .font_size_for_kind(block.kind.as_str());
+                let size = page_style.font_size_for_kind(block.kind.as_str());
                 let font_size_operator = format!(" {size:.2} Tf");
                 assert!(
                     readable_pdf.contains(&font_size_operator),
@@ -406,7 +443,7 @@ fn template_catalog_drives_accessible_cards_preview_blocks_and_document_flow() {
                     .map(|block| (block.kind.as_str(), block.text.as_str()))
                     .collect::<Vec<_>>(),
                 expected_blocks,
-                "{} DOCX preserves ordered text and paragraph heading styles",
+                "{} DOCX preserves ordered text, tables, and paragraph heading styles",
                 descriptor.stable_id
             );
         }
@@ -433,13 +470,18 @@ fn template_cards_and_create_button_dispatch_stable_ids_by_pointer() {
     });
 
     ctrl(&s.app, "n");
-    for (name, id) in [
-        ("Blank", "blank"),
-        ("Executive Report", "report"),
-        ("Business Letter", "letter"),
-        ("Curriculum Vitae", "cv"),
-        ("Newsletter", "newsletter"),
+    for (category, name, id) in [
+        (0, "Blank", "blank"),
+        (0, "Executive Report", "report"),
+        (1, "Blank Landscape", "blank-landscape"),
+        (3, "Business Letter", "letter"),
+        (3, "Internal Memorandum", "company-memo"),
+        (4, "Curriculum Vitae", "cv"),
+        (6, "Travel Journal", "travel-journal"),
+        (5, "Newsletter", "newsletter"),
     ] {
+        s.app.set_template_category(category);
+        render(&s.app);
         let card = ElementHandle::find_by_accessible_label(&s.app, name)
             .find(|element| element.size().width > 0.0 && element.size().height > 0.0)
             .unwrap_or_else(|| panic!("visible {name} template card exists"));
@@ -479,23 +521,19 @@ fn compact_double_scale_template_navigation_keeps_selected_cards_reachable() {
             .find(|element| element.size().width > 0.0 && element.size().height > 0.0)
             .expect("Create Document remains visible");
         let footer_top = create.absolute_position().y;
-        for (label, id) in [
-            ("Blank Black", "blank-black"),
-            ("Executive Report", "report"),
-            ("Business Letter", "letter"),
-            ("Curriculum Vitae", "cv"),
-            ("Newsletter", "newsletter"),
-        ] {
+        for descriptor in templates::TEMPLATE_CATALOG.iter().skip(1) {
             press(&s.app, if rtl { Key::LeftArrow } else { Key::RightArrow });
-            assert_eq!(s.app.get_template_selected().as_str(), id);
+            assert_eq!(s.app.get_template_selected().as_str(), descriptor.stable_id);
             let _ = snapshot_component(&s.app, 1024.0, 720.0, 1.0).expect("render compact chooser");
-            let card = ElementHandle::find_by_accessible_label(&s.app, label)
+            let card = ElementHandle::find_by_accessible_label(&s.app, descriptor.display_name)
                 .find(|element| {
                     element.accessible_role() == Some(AccessibleRole::Button)
                         && element.size().width > 0.0
                         && element.size().height > 0.0
                 })
-                .unwrap_or_else(|| panic!("selected {label} card remains visible"));
+                .unwrap_or_else(|| {
+                    panic!("selected {} card remains visible", descriptor.display_name)
+                });
             let origin = card.absolute_position();
             let size = card.size();
             assert!(
@@ -503,7 +541,8 @@ fn compact_double_scale_template_navigation_keeps_selected_cards_reachable() {
                     && origin.y >= 0.0
                     && origin.x + size.width <= 1024.0
                     && origin.y + size.height <= footer_top,
-                "selected {label} stays inside the chooser viewport in rtl={rtl}: ({}, {}, {}, {})",
+                "selected {} stays inside the chooser viewport in rtl={rtl}: ({}, {}, {}, {})",
+                descriptor.display_name,
                 origin.x,
                 origin.y,
                 size.width,
@@ -512,7 +551,7 @@ fn compact_double_scale_template_navigation_keeps_selected_cards_reachable() {
         }
 
         let backward = if rtl { Key::RightArrow } else { Key::LeftArrow };
-        for _ in 0..4 {
+        for _ in 0..(templates::TEMPLATE_CATALOG.len() - 2) {
             press(&s.app, backward);
         }
         assert_eq!(s.app.get_template_selected().as_str(), "blank-black");
@@ -586,6 +625,8 @@ fn newsletter_template_saves_reopens_and_exports_seeded_pdf_text() {
     let s = launched_with(text_document("Original document"), dialogs);
 
     ctrl(&s.app, "n");
+    s.app.set_template_category(5);
+    render(&s.app);
     let newsletter_card = ElementHandle::find_by_accessible_label(&s.app, "Newsletter")
         .find(|element| element.size().width > 0.0 && element.size().height > 0.0)
         .expect("Newsletter card is visible");

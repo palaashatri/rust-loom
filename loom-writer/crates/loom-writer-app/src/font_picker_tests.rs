@@ -115,7 +115,7 @@ fn typing_filters_and_offers_an_unknown_name() {
 }
 
 #[test]
-fn the_window_keeps_the_highlight_in_view_and_a_section_with_its_heading() {
+fn layout_publishes_all_rows_with_section_headings() {
     let resolve = resolver(&INSTALLED);
     let installed: Vec<String> = (0..40).map(|n| format!("Family {n:02}")).collect();
     let rows = build_rows(
@@ -135,33 +135,70 @@ fn the_window_keeps_the_highlight_in_view_and_a_section_with_its_heading() {
         .count();
     assert_eq!(headings, 2);
     assert_eq!(lines.len(), rows.len() + 2);
-    // The highlight on the first font of a section brings its heading along.
+    assert!(
+        lines.len() > 40,
+        "all installed rows are published without truncation"
+    );
     let first_all = rows
         .iter()
         .position(|r| r.section == Section::AllFonts)
         .unwrap();
-    let first = scrolled(&lines, first_all, 0, WINDOW_LINES);
     let heading_at = lines
         .iter()
         .position(|l| matches!(l, Line::Heading("All fonts")))
         .unwrap();
-    assert!(first <= heading_at && heading_at < first + WINDOW_LINES);
-    // Moving down scrolls by the minimum, keeping the highlight on screen.
-    let mut first = 0;
-    for selected in 0..rows.len() {
-        let next = scrolled(&lines, selected, first, WINDOW_LINES);
-        assert!(next >= first, "the list never jumps back while moving down");
-        assert!(next - first <= 3, "it scrolls a line or two at a time");
-        let at = lines
-            .iter()
-            .position(|l| matches!(l, Line::Item(i) if *i == selected))
-            .unwrap();
-        assert!(
-            at >= next && at < next + WINDOW_LINES,
-            "{selected} is visible"
-        );
-        first = next;
-    }
+    assert!(matches!(lines[heading_at + 1], Line::Item(i) if i == first_all));
+}
+
+#[test]
+fn hidden_dot_system_fonts_are_filtered_and_more_than_nine_installed_fonts_are_published() {
+    let _fonts = test_fonts::install(&[
+        (".ADT Slab Numeric", 100),
+        (".Al Bayan PUA", 100),
+        (".SF NS Text", 100),
+        ("Alpha Sans", 100),
+        ("Beta Serif", 100),
+        ("Gamma Mono", 100),
+        ("Delta Display", 100),
+        ("Epsilon Sans", 100),
+        ("Zeta Serif", 100),
+        ("Eta Sans", 100),
+        ("Theta Mono", 100),
+        ("Iota Sans", 100),
+        ("Kappa Serif", 100),
+        ("Lambda Sans", 100),
+        ("Mu Display", 100),
+    ]);
+    let (app, _state) = session("Hello world");
+    let picker = app.global::<FontPicker>();
+    picker.invoke_open_requested();
+
+    let published = lines(&app);
+    let font_labels: Vec<String> = published
+        .iter()
+        .filter(|line| !line.heading)
+        .map(|line| line.label.to_string())
+        .collect();
+    assert!(
+        font_labels.len() > 12,
+        "all installed fonts are published without 9-row truncation; got {}",
+        font_labels.len()
+    );
+    assert!(
+        !font_labels.iter().any(|label| label.starts_with('.')),
+        "hidden dot-prefixed system fonts must not appear in All fonts: {font_labels:?}"
+    );
+    assert!(font_labels.contains(&"Alpha Sans".to_string()));
+    assert!(font_labels.contains(&"Mu Display".to_string()));
+    assert_eq!(picker.get_match_count() as usize, font_labels.len());
+
+    // Moving down updates selected_line so the Flickable keeps the selection visible.
+    let initial_line = picker.get_selected_line();
+    picker.invoke_move(10);
+    assert!(
+        picker.get_selected_line() > initial_line,
+        "selected-line advances when moving down"
+    );
 }
 
 #[test]

@@ -78,6 +78,7 @@ pub(super) fn make_test_state(
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
         registry: Arc::new(Mutex::new(registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
     (app, state)
 }
@@ -554,6 +555,10 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
                 comment: None,
                 table: false,
                 sample: false,
+                welcome_guide: false,
+                start_hub: false,
+                print_preview: false,
+                word_count: false,
             };
             let error = run_gui_with_dialogs(
                 &args,

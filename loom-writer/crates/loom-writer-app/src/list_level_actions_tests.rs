@@ -123,7 +123,10 @@ fn the_palette_offers_each_structure_command_with_its_shortcut() {
             .map(|row| row.shortcut)
             .unwrap_or("missing")
     };
-    assert_eq!(shortcut("insert.page_break"), "Ctrl+Enter");
+    assert_eq!(
+        shortcut("insert.page_break"),
+        crate::command_dispatch::shortcut_for_id("insert.page_break")
+    );
     assert_eq!(shortcut("insert.line_break"), "Shift+Enter");
     assert_eq!(shortcut("list.level.increase"), "Tab");
     assert_eq!(shortcut("list.level.decrease"), "Shift+Tab");

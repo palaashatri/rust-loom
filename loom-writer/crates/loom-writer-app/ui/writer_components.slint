@@ -100,6 +100,7 @@ export component WriterPageCanvas inherits Rectangle {
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     public function focus-document() { document-editor.focus-editor(); }
+    public function select-all() { document-editor.select-all(); }
 
     background: Theme.palette().canvas;
     horizontal-stretch: 1;
@@ -157,9 +158,9 @@ export component WriterPageCanvas inherits Rectangle {
                 border-width: 1px;
                 border-color: Theme.palette().border;
                 background: root.page-appearance == "black" ? #000000 : #FFFFFF;
-                // A tight shadow: it must not reach the sheet above across the gap.
-                drop-shadow-blur: 8px;
-                drop-shadow-offset-y: 1px;
+                // Crisp, soft paper elevation on each document page sheet.
+                drop-shadow-blur: 18px;
+                drop-shadow-offset-y: 4px;
                 drop-shadow-color: Theme.palette().shadow;
                 accessible-role: none;
             }

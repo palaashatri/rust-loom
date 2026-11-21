@@ -34,6 +34,7 @@ pub(super) fn test_state(
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
         registry: Arc::new(Mutex::new(registry)),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     });
     (app, state)
 }
@@ -143,6 +144,7 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
         registry: Arc::new(Mutex::new(build_writer_registry())),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     };
     let request = writer_open_request(&state);
     assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
@@ -867,6 +869,7 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
         registry: Arc::new(Mutex::new(build_writer_registry())),
         menu_service: RefCell::new(None),
+        last_projected_view_width: Cell::new(0.0),
     };
     let menu = NativeMenuBar::new();
     let bar = build_standard_menu_bar(

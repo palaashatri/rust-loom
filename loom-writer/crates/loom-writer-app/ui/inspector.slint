@@ -207,6 +207,7 @@ export component WriterInspector inherits LoomPanel {
             Rectangle {
                 vertical-stretch: 1;
             inspector-scroll := Flickable {
+                interactive: false;
                 width: parent.width;
                 height: parent.height;
                 viewport-width: self.width;

@@ -26,7 +26,7 @@ export component WriterPaletteHost inherits FocusScope {
     focus-on-click: false;
     focus-on-tab-navigation: false;
     capture-key-pressed(event) => {
-        if (root.open && event.modifiers.control && (event.text == "a" || event.text == "A")) {
+        if (root.open && (event.modifiers.control || event.modifiers.meta) && !event.modifiers.alt && (event.text == "a" || event.text == "A")) {
             root.query-selected = true;
             return accept;
         }

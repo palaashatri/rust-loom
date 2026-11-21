@@ -68,6 +68,10 @@ export component FindBarOverlay inherits Rectangle {
             let target = LocalMenu.target(event);
             if (target >= 0) { FindBar.menu-requested(target); return accept; }
             if (event.text == Key.Return && event.modifiers.shift) { FindBar.find-previous(); return accept; }
+            if ((event.modifiers.control || event.modifiers.meta) && !event.modifiers.shift && !event.modifiers.alt && (event.text == "h" || event.text == "H")) {
+                FindBar.open-requested(true);
+                return accept;
+            }
             return reject;
         }
         // Escape closes the bar wherever focus is inside it.

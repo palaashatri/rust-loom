@@ -25,8 +25,6 @@ use crate::font_store::{self, FontStore};
 use crate::inline_formatting::is_text_paragraph;
 use crate::{apply_with_history, typing_style, FontPicker, FontPickerLine, GuiState, WriterApp};
 
-/// Lines of the list shown at once (headings count).
-pub(crate) const WINDOW_LINES: usize = 9;
 /// Longest name a typed row accepts, in characters.
 const MAX_TYPED_CHARS: usize = 128;
 
@@ -180,37 +178,12 @@ fn layout(rows: &[Row]) -> Vec<Line> {
     lines
 }
 
-/// The first line of a window of `size` lines that keeps `selected` in view,
-/// moving `first` as little as possible (and showing the heading above the
-/// first font of a section).
-fn scrolled(lines: &[Line], selected: usize, first: usize, size: usize) -> usize {
-    let Some(at) = lines
-        .iter()
-        .position(|line| matches!(line, Line::Item(index) if *index == selected))
-    else {
-        return 0;
-    };
-    let top = if at > 0 && matches!(lines[at - 1], Line::Heading(_)) {
-        at - 1
-    } else {
-        at
-    };
-    let mut first = first.min(lines.len().saturating_sub(size));
-    if top < first {
-        first = top;
-    } else if at >= first + size {
-        first = at + 1 - size;
-    }
-    first
-}
-
 #[derive(Default)]
 struct PickerState {
     open: bool,
     query: String,
     rows: Vec<Row>,
     selected: usize,
-    first: usize,
     recents: Vec<String>,
     store: Option<FontStore>,
     loading: bool,
@@ -222,7 +195,7 @@ thread_local! {
 }
 
 fn rebuild(document: &WriterDocument) {
-    let installed: Vec<String> = fonts::font_catalog().families().to_vec();
+    let installed: Vec<String> = fonts::font_catalog().picker_families();
     let used = fonts::document_families(document);
     PICKER.with(|picker| {
         let mut picker = picker.borrow_mut();
@@ -248,20 +221,21 @@ fn select_current(family: &str) {
             .iter()
             .position(|row| key(&row.value) == key(family))
             .unwrap_or(0);
-        picker.first = 0;
     });
 }
 
-/// Send the list's state to the window.
+/// Send the list's state to the window: every filtered line, so the window
+/// scrolls the whole list, and the position of the highlighted line so it can
+/// keep that line in view.
 fn publish(app: &WriterApp) {
     PICKER.with(|picker| {
-        let mut picker = picker.borrow_mut();
+        let picker = picker.borrow();
         let lines = layout(&picker.rows);
-        picker.first = scrolled(&lines, picker.selected, picker.first, WINDOW_LINES);
+        let selected_line = lines
+            .iter()
+            .position(|line| matches!(line, Line::Item(index) if *index == picker.selected));
         let shown: Vec<FontPickerLine> = lines
             .iter()
-            .skip(picker.first)
-            .take(WINDOW_LINES)
             .map(|line| match line {
                 Line::Heading(text) => FontPickerLine {
                     index: -1,
@@ -289,6 +263,11 @@ fn publish(app: &WriterApp) {
         } else {
             picker.selected as i32
         });
+        // A highlighted font after a heading shows that heading too.
+        let heading_above = selected_line
+            .filter(|at| *at > 0 && matches!(lines[at - 1], Line::Heading(_)))
+            .map_or(0, |_| 1);
+        global.set_selected_line(selected_line.map_or(-1, |at| (at - heading_above) as i32));
         global.set_match_count(picker.rows.len() as i32);
         global.set_loading(picker.loading);
         global.set_open(picker.open);
@@ -411,7 +390,6 @@ fn open(app: &WriterApp, state: &GuiState, query: &str) {
         PICKER.with(|picker| {
             let mut picker = picker.borrow_mut();
             picker.selected = 0;
-            picker.first = 0;
         });
     }
     app.global::<FontPicker>().set_query(query.into());
@@ -523,7 +501,6 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
                 let mut picker = picker.borrow_mut();
                 picker.query = text.to_string();
                 picker.selected = 0;
-                picker.first = 0;
             });
             rebuild(&state.current.borrow());
             publish(&app);

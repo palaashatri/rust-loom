@@ -1,0 +1,351 @@
+import { Theme } from "theme.slint";
+
+export struct WriterTemplatePreviewBlock {
+    kind: string,
+    text: string,
+}
+
+export struct WriterTemplateDescriptor {
+    stable-id: string,
+    display-name: string,
+    category: int,
+    preview-kind: string,
+    appearance: string,
+    orientation: string,
+    has-table: bool,
+    preview-blocks: [WriterTemplatePreviewBlock],
+}
+
+component MiniRule inherits Rectangle {
+    in property <color> bar-color: #cbd5e1;
+    in property <length> bar-h: 3px;
+    height: root.bar-h;
+    border-radius: root.bar-h / 2;
+    background: root.bar-color;
+}
+
+component MiniTableGrid inherits Rectangle {
+    in property <color> header-bg: #6241ad;
+    in property <color> stripe-bg: #f5f3ff;
+    in property <color> line-color: #ddd6fe;
+    in property <int> cols: 3;
+
+    height: 44px; border-radius: 3px; border-width: 0.75px; border-color: root.line-color; clip: true;
+
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 12px; background: root.header-bg;
+            HorizontalLayout {
+                padding: 3px; spacing: 4px;
+                for c in root.cols : MiniRule { horizontal-stretch: 1; bar-color: #ffffff; bar-h: 2.5px; }
+            }
+        }
+        for r in [0, 1, 2] : Rectangle {
+            height: 10.5px; background: r == 1 ? root.stripe-bg : #ffffff;
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 0.5px; background: root.line-color; }
+            Rectangle { x: parent.width * 0.42; y: 0px; width: 0.5px; height: parent.height; background: root.line-color; }
+            if root.cols >= 3 : Rectangle { x: parent.width * 0.72; y: 0px; width: 0.5px; height: parent.height; background: root.line-color; }
+            HorizontalLayout {
+                padding-left: 4px; padding-right: 4px; spacing: 6px; cross-axis-alignment: center;
+                MiniRule { horizontal-stretch: 2; bar-color: #9ca3af; bar-h: 2px; }
+                MiniRule { horizontal-stretch: 1; bar-color: #cbd5e1; bar-h: 2px; }
+                if root.cols >= 3 : MiniRule { horizontal-stretch: 1; bar-color: r == 2 ? root.header-bg : #cbd5e1; bar-h: 2px; }
+                if root.cols >= 4 : MiniRule { horizontal-stretch: 1; bar-color: r == 2 ? root.header-bg : #cbd5e1; bar-h: 2px; }
+            }
+        }
+    }
+}
+
+component MiniLandscapeArt inherits Rectangle {
+    in property <color> sky-color: #e0f2fe;
+    in property <color> sun-color: #f59e0b;
+    in property <color> back-peak: #38bdf8;
+    in property <color> front-peak: #0284c7;
+
+    border-radius: 3px; background: root.sky-color; clip: true;
+    Rectangle { x: parent.width - 22px; y: 6px; width: 9px; height: 9px; border-radius: 4.5px; background: root.sun-color; }
+    Path {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        viewbox-x: 0; viewbox-y: 0; viewbox-width: 118; viewbox-height: 42;
+        fill: root.back-peak; commands: "M0 32 L28 14 L56 28 L86 11 L118 30 L118 42 L0 42 Z";
+    }
+    Path {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        viewbox-x: 0; viewbox-y: 0; viewbox-width: 118; viewbox-height: 42;
+        fill: root.front-peak; commands: "M0 36 L42 18 L78 35 L102 22 L118 34 L118 42 L0 42 Z";
+    }
+}
+
+/// Pure decorative editorial page artwork keyed on `preview-kind`.
+/// Shared by both `WriterTemplatePreview` and Start Hub Quick Start cards.
+export component WriterTemplateBackdrop inherits Rectangle {
+    in property <string> preview-kind: "blank";
+    in property <string> appearance: "white";
+    in property <bool> has-table: false;
+
+    clip: true;
+    background: root.appearance == "black" ? #000000 : Theme.palette().paper;
+
+    if root.preview-kind == "blank" || root.preview-kind == "blank-black" || root.preview-kind == "blank-landscape" : Rectangle {
+        property <color> tick: root.appearance == "black" ? #3f3f46 : #d4d4dc;
+        Rectangle { x: 11px; y: 11px; width: 6px; height: 1px; background: parent.tick; }
+        Rectangle { x: 11px; y: 11px; width: 1px; height: 6px; background: parent.tick; }
+        Rectangle { x: parent.width - 17px; y: 11px; width: 6px; height: 1px; background: parent.tick; }
+        Rectangle { x: parent.width - 12px; y: 11px; width: 1px; height: 6px; background: parent.tick; }
+        Rectangle { x: 11px; y: parent.height - 12px; width: 6px; height: 1px; background: parent.tick; }
+        Rectangle { x: 11px; y: parent.height - 17px; width: 1px; height: 6px; background: parent.tick; }
+        Rectangle { x: parent.width - 17px; y: parent.height - 12px; width: 6px; height: 1px; background: parent.tick; }
+        Rectangle { x: parent.width - 12px; y: parent.height - 17px; width: 1px; height: 6px; background: parent.tick; }
+        Rectangle { x: 16px; y: 20px; width: 1.5px; height: 11px; background: root.appearance == "black" ? #bba7f4 : #6241ad; }
+        Rectangle { x: 20px; y: 24px; width: 42px; height: 2px; border-radius: 1px; background: root.appearance == "black" ? #27272a : #f0f0f5; }
+    }
+
+    if root.preview-kind == "report" : Rectangle {
+        property <length> chart-h: parent.height * 0.25;
+        property <length> bar-w: max(6px, parent.width * 0.10);
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #6241ad; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: parent.height * 0.16; background: #f5f3ff; }
+        Rectangle { x: 6px; y: 4px + parent.height * 0.16; width: parent.width - 12px; height: 1px; background: #ddd6fe; }
+        Rectangle {
+            x: 6px; y: parent.height - parent.chart-h - 6px; width: parent.width - 12px; height: parent.chart-h;
+            border-radius: 3px; background: #faf9fe; border-width: 0.75px; border-color: #e4dff7;
+            HorizontalLayout {
+                padding: 4px; spacing: max(3px, parent.width * 0.04); alignment: center; cross-axis-alignment: end;
+                Rectangle { width: bar-w; height: parent.height * 0.35; border-radius: 1.5px; background: #c4b5fd; }
+                Rectangle { width: bar-w; height: parent.height * 0.55; border-radius: 1.5px; background: #8b5cf6; }
+                Rectangle { width: bar-w; height: parent.height * 0.72; border-radius: 1.5px; background: #6241ad; }
+                Rectangle { width: bar-w; height: parent.height * 0.48; border-radius: 1.5px; background: #0ea5e9; }
+                Rectangle { width: bar-w; height: parent.height * 0.78; border-radius: 1.5px; background: #10b981; }
+            }
+        }
+    }
+
+    if root.preview-kind == "project-proposal" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #4f46e5; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 28px; background: #eef2ff; }
+        Rectangle { x: 8px; y: parent.height - 12px; width: parent.width - 16px; height: 0.5px; background: #e2e8f0; }
+        MiniRule { x: 8px; y: parent.height - 8px; width: 48px; bar-color: #94a3b8; bar-h: 2px; }
+    }
+
+    if root.preview-kind == "meeting-notes" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #0284c7; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 27px; background: #f0f9ff; }
+        Rectangle { x: 5px; y: 38px; width: 2px; height: 62px; border-radius: 1px; background: #7dd3fc; }
+    }
+
+    if root.preview-kind == "invoice-doc" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #0f766e; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 28px; background: #f0fdfa; }
+        Rectangle {
+            x: parent.width - 38px; y: 10px; width: 30px; height: 12px; border-radius: 6px; background: #ccfbf1;
+            Text { text: "$3,300"; font-size: 6px; font-weight: 700; color: #0f766e; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+
+    if root.preview-kind == "letter" : Rectangle {
+        property <length> seal: max(10px, parent.width * 0.12);
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 3px; background: #334155; }
+        Rectangle {
+            x: parent.width - parent.seal - 7px; y: 7px; width: parent.seal; height: parent.seal;
+            border-radius: parent.seal / 2; background: #efeaf9; border-width: 1px; border-color: #6241ad;
+            Text { text: "L"; font-size: max(6px, parent.width * 0.5); font-weight: 700; color: #6241ad; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Rectangle { x: 7px; y: max(22px, parent.height * 0.18); width: parent.width - 14px; height: 0.75px; background: #cbd5e1; }
+        Rectangle { x: 7px; y: parent.height - 16px; width: parent.width * 0.34; height: 1px; background: #64748b; }
+        MiniRule { x: 7px; y: parent.height - 11px; width: parent.width * 0.42; bar-color: #cbd5e1; bar-h: 2px; }
+    }
+
+    if root.preview-kind == "cover-letter" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 5px; background: #1e293b; }
+        Rectangle { x: 0px; y: 5px; width: parent.width; height: 29px; background: #f8fafc; }
+        Rectangle { x: 8px; y: 34px; width: parent.width - 16px; height: 1px; background: #cbd5e1; }
+        Rectangle { x: 8px; y: parent.height - 18px; width: 38px; height: 1px; background: #475569; }
+    }
+
+    if root.preview-kind == "company-memo" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #4338ca; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 28px; background: #f1f5f9; }
+        Rectangle { x: 8px; y: 33px; width: parent.width - 16px; height: 1px; background: #94a3b8; }
+        Rectangle { x: 8px; y: parent.height - 22px; width: parent.width - 16px; height: 12px; border-radius: 2px; background: #f8fafc; }
+    }
+
+    if root.preview-kind == "press-release" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #be123c; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 26px; background: #fff1f2; }
+        Text { x: 0px; y: parent.height - 14px; width: parent.width; text: "###"; font-size: 7px; font-weight: 700; color: #be123c; horizontal-alignment: center; }
+    }
+
+    if root.preview-kind == "cv" : Rectangle {
+        property <length> sb-w: max(22px, parent.width * 0.27);
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #6241ad; }
+        Rectangle {
+            x: parent.width - parent.sb-w; y: 4px; width: parent.sb-w; height: parent.height - 4px; background: #f5f3ff;
+            Rectangle { x: 0px; y: 0px; width: 0.75px; height: parent.height; background: #e9d5ff; }
+            Rectangle {
+                x: (parent.width - self.width) / 2; y: 8px; width: max(10px, parent.width * 0.5); height: self.width;
+                border-radius: self.width / 2; background: #ddd6fe; border-width: 1px; border-color: #6241ad;
+            }
+            MiniRule { x: 4px; y: parent.height * 0.25; width: parent.width - 8px; bar-color: #6241ad; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.31; width: (parent.width - 8px) * 0.85; bar-color: #a78bfa; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.36; width: parent.width - 8px; bar-color: #c4b5fd; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.41; width: (parent.width - 8px) * 0.65; bar-color: #c4b5fd; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.52; width: (parent.width - 8px) * 0.9; bar-color: #6241ad; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.58; width: parent.width - 8px; bar-color: #c4b5fd; bar-h: 2px; }
+            MiniRule { x: 4px; y: parent.height * 0.63; width: (parent.width - 8px) * 0.75; bar-color: #c4b5fd; bar-h: 2px; }
+        }
+    }
+
+    if root.preview-kind == "academic-essay" : Rectangle {
+        Text { x: 8px; y: 5px; width: parent.width - 16px; text: "Essay Title  \u{2022}  Page 1"; font-size: 5.5px; color: #64748b; horizontal-alignment: right; }
+        Rectangle { x: 8px; y: 13px; width: parent.width - 16px; height: 0.5px; background: #cbd5e1; }
+        Rectangle { x: 8px; y: parent.height - 25px; width: 34px; height: 1px; background: #6241ad; }
+        MiniRule { x: 8px; y: parent.height - 20px; width: 78px; bar-color: #94a3b8; bar-h: 2px; }
+        MiniRule { x: 8px; y: parent.height - 15px; width: 58px; bar-color: #cbd5e1; bar-h: 2px; }
+    }
+
+    if root.preview-kind == "research-paper" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 3px; background: #1d4ed8; }
+        Rectangle { x: 8px; y: 24px; width: parent.width - 16px; height: 16px; border-radius: 2px; background: #eff6ff; }
+        Rectangle { x: 8px; y: parent.height - 24px; width: 32px; height: 1px; background: #1d4ed8; }
+        MiniRule { x: 8px; y: parent.height - 19px; width: 74px; bar-color: #94a3b8; bar-h: 2px; }
+        Text { x: 0px; y: parent.height - 11px; width: parent.width; text: "1 / 1"; font-size: 5.5px; color: #64748b; horizontal-alignment: center; }
+    }
+
+    if root.preview-kind == "newsletter" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #0284c7; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 18px; background: #e0f2fe; }
+        HorizontalLayout {
+            x: 8px; y: parent.height - 40px; width: parent.width - 16px; height: 32px; spacing: 5px;
+            for col in [0, 1] : Rectangle {
+                horizontal-stretch: 1; border-radius: 3px;
+                background: col == 0 ? #f0f9ff : #f8fafc; border-width: 0.5px; border-color: #bae6fd;
+                VerticalLayout {
+                    padding: 4px; spacing: 3px;
+                    Rectangle { height: 12px; border-radius: 2px; background: col == 0 ? #38bdf8 : #7dd3fc; }
+                    MiniRule { width: 90%; bar-color: #64748b; bar-h: 2px; }
+                    MiniRule { width: 65%; bar-color: #cbd5e1; bar-h: 2px; }
+                }
+            }
+        }
+    }
+
+    if root.preview-kind == "book-chapter" : Rectangle {
+        Rectangle { x: 24px; y: 12px; width: parent.width - 48px; height: 0.75px; background: #cbd5e1; }
+        Text { x: 0px; y: 4px; width: parent.width; text: "CHAPTER I"; font-size: 5.5px; font-weight: 700; color: #64748b; horizontal-alignment: center; }
+        Text { x: 0px; y: parent.height - 13px; width: parent.width; text: "1"; font-size: 6px; font-weight: 600; color: #64748b; horizontal-alignment: center; }
+    }
+
+    if root.preview-kind == "study-notes" : Rectangle {
+        Rectangle { x: 11px; y: 0px; width: 1px; height: parent.height; background: #fda4af; }
+        for r in [0, 1, 2, 3, 4, 5, 6] : Rectangle {
+            x: 0px; y: 34px + r * 18px; width: parent.width; height: 0.5px; background: #e2e8f0;
+        }
+    }
+
+    if root.preview-kind == "travel-journal" : Rectangle {
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 4px; background: #d97706; }
+        Rectangle { x: 0px; y: 4px; width: parent.width; height: 26px; background: #fef3c7; }
+        MiniLandscapeArt {
+            x: 8px; y: parent.height - 48px; width: parent.width - 16px; height: 40px;
+            sky-color: #fef3c7; sun-color: #f59e0b; back-peak: #0d9488; front-peak: #0f766e;
+        }
+    }
+}
+
+/// Pure miniature paper artwork thumbnail for Start Hub Quick Start cards.
+export component StartHubTemplateThumb inherits Rectangle {
+    in property <string> preview-kind: "blank";
+
+    width: 72px; height: 94px; border-radius: 4px; background: Theme.palette().paper;
+    border-width: 1px; border-color: Theme.palette().border-strong;
+    drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow; clip: true;
+
+    WriterTemplateBackdrop { width: 100%; height: 100%; preview-kind: root.preview-kind; appearance: "white"; has-table: false; }
+
+    if root.preview-kind == "report" : VerticalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 8px; spacing: 3px;
+        MiniRule { width: 66%; bar-color: #6241ad; bar-h: 3.5px; }
+        MiniRule { width: 48%; bar-color: #9ca3af; bar-h: 2px; }
+        Rectangle { height: 3px; background: transparent; }
+        MiniRule { width: 42%; bar-color: #1d1d1f; bar-h: 2.5px; }
+        MiniRule { width: 88%; bar-color: #cbd5e1; bar-h: 2px; }
+    }
+    if root.preview-kind == "letter" : VerticalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 8px; spacing: 3px;
+        MiniRule { width: 40%; bar-color: #334155; bar-h: 2.5px; }
+        MiniRule { width: 28%; bar-color: #94a3b8; bar-h: 2px; }
+        Rectangle { height: 8px; background: transparent; }
+        MiniRule { width: 52%; bar-color: #1d1d1f; bar-h: 2.5px; }
+        MiniRule { width: 92%; bar-color: #cbd5e1; bar-h: 2px; }
+        MiniRule { width: 80%; bar-color: #cbd5e1; bar-h: 2px; }
+    }
+    if root.preview-kind == "cv" : VerticalLayout {
+        padding-left: 7px; padding-right: 32px; padding-top: 8px; spacing: 3px;
+        MiniRule { width: 78%; bar-color: #1d1d1f; bar-h: 3.5px; }
+        MiniRule { width: 90%; bar-color: #9ca3af; bar-h: 2px; }
+        Rectangle { height: 4px; background: transparent; }
+        MiniRule { width: 64%; bar-color: #6241ad; bar-h: 2.5px; }
+        MiniRule { width: 94%; bar-color: #cbd5e1; bar-h: 2px; }
+        Rectangle { height: 3px; background: transparent; }
+        MiniRule { width: 58%; bar-color: #6241ad; bar-h: 2.5px; }
+        MiniRule { width: 86%; bar-color: #cbd5e1; bar-h: 2px; }
+    }
+}
+
+/// Renders the full publication-quality miniature page preview for Template Chooser
+/// while keeping every `preview-blocks` element strictly ordered in one column inside
+/// the accessible preview groupbox.
+export component WriterTemplatePreview inherits Rectangle {
+    in property <WriterTemplateDescriptor> descriptor;
+
+    property <bool> is-black: root.descriptor.appearance == "black";
+    property <bool> is-cv: root.descriptor.preview-kind == "cv";
+    property <bool> is-notebook: root.descriptor.preview-kind == "study-notes";
+    property <bool> has-top-inset: root.descriptor.preview-kind == "academic-essay" || root.descriptor.preview-kind == "book-chapter";
+    property <length> pad-left: root.is-notebook ? 16px : 8px;
+    property <length> pad-right: root.is-cv ? 40px : 8px;
+    property <length> pad-top: root.has-top-inset ? 16px : 8px;
+
+    clip: true;
+
+    WriterTemplateBackdrop {
+        width: 100%; height: 100%;
+        preview-kind: root.descriptor.preview-kind;
+        appearance: root.descriptor.appearance;
+        has-table: root.descriptor.has-table;
+    }
+
+    if root.descriptor.preview-blocks.length > 0 : VerticalLayout {
+        x: root.pad-left; y: root.pad-top;
+        width: max(20px, parent.width - root.pad-left - root.pad-right);
+        height: self.preferred-height;
+        alignment: start;
+        spacing: 2.5px;
+
+        for block[idx] in root.descriptor.preview-blocks : Text {
+            text: (block.kind == "list-bulleted" ? "\u{2022} " : block.kind == "list-numbered" ? (idx - 2) + ". " : "") + block.text;
+            accessible-label: block.text;
+            font-family: Theme.document-font-family;
+            font-size: block.kind == "heading1" ? 8.5px : (block.kind == "heading2" || block.kind == "heading3") ? 7.5px : 6.5px;
+            font-weight: (block.kind == "heading1" || block.kind == "heading2" || block.kind == "heading3") ? 700 : 400;
+            color: root.is-black ? #ffffff
+                : block.kind == "heading1" && (root.descriptor.preview-kind == "report" || root.descriptor.preview-kind == "cv") ? #4c2d91
+                : block.kind == "heading1" && root.descriptor.preview-kind == "press-release" ? #9f1239
+                : block.kind == "heading1" && root.descriptor.preview-kind == "invoice-doc" ? #0f766e
+                : (block.kind == "paragraph" || block.kind == "list-bulleted" || block.kind == "list-numbered")
+                    ? Theme.palette().paper-muted : Theme.palette().paper-ink;
+            wrap: word-wrap; horizontal-stretch: 1; vertical-stretch: 0;
+        }
+
+        if root.descriptor.has-table : MiniTableGrid {
+            header-bg: root.descriptor.preview-kind == "invoice-doc" ? #0f766e
+                : root.descriptor.preview-kind == "meeting-notes" ? #0284c7 : #4f46e5;
+            stripe-bg: root.descriptor.preview-kind == "invoice-doc" ? #f0fdfa
+                : root.descriptor.preview-kind == "meeting-notes" ? #f0f9ff : #eef2ff;
+            line-color: root.descriptor.preview-kind == "invoice-doc" ? #99f6e4
+                : root.descriptor.preview-kind == "meeting-notes" ? #bae6fd : #c7d2fe;
+            cols: root.descriptor.preview-kind == "invoice-doc" ? 4 : 3;
+        }
+    }
+}

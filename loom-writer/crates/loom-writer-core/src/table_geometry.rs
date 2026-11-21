@@ -1,6 +1,7 @@
 //! Shared shaped measurements for typed table rows.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Range;
 
@@ -126,6 +127,28 @@ pub fn shape_table_cell_geometry_with_footnotes(
     )
 }
 
+const CELL_CACHE_LIMIT: usize = 128;
+
+#[derive(Clone, PartialEq)]
+struct CellShapeKey {
+    kind: String,
+    text: String,
+    runs: Vec<loom_text::StyleRun>,
+    style: loom_text::ParagraphStyle,
+    base_size_bits: u32,
+    width_bits: u32,
+    font_epoch: u64,
+    advances: Vec<(usize, u32)>,
+}
+
+thread_local! {
+    /// Bounded LRU cache so pagination, projection, glyph painting, and caret
+    /// measurement share one cell-shaping pass per edit instead of reshaping
+    /// the active cell repeatedly.
+    static CELL_CACHE: RefCell<VecDeque<(CellShapeKey, Result<TableCellGeometry, TableGeometryError>)>> =
+        const { RefCell::new(VecDeque::new()) };
+}
+
 fn shape_table_cell_geometry_with_advances(
     block: &crate::RichBlock,
     base_size_pt: f32,
@@ -138,18 +161,52 @@ fn shape_table_cell_geometry_with_advances(
     if !base_size_pt.is_finite() || base_size_pt <= 0.0 {
         return Err(TableGeometryError::InvalidFontSize);
     }
-    let base_pitch = line_pitch(&block.runs, base_size_pt) * TABLE_CELL_LINE_PITCH_EM;
-    if !base_pitch.is_finite() || base_pitch <= 0.0 {
-        return Err(TableGeometryError::InvalidLineMetrics);
+    let key = CellShapeKey {
+        kind: block.kind.clone(),
+        text: block.text.as_str().to_owned(),
+        runs: block.runs.clone(),
+        style: block.style.clone(),
+        base_size_bits: base_size_pt.to_bits(),
+        width_bits: available_width_pt.to_bits(),
+        font_epoch: crate::fonts::font_epoch(),
+        advances: inline_advances
+            .iter()
+            .map(|advance| (advance.offset, advance.width_pt.to_bits()))
+            .collect(),
+    };
+    if let Some(cached) = CELL_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let pos = cache.iter().position(|(k, _)| *k == key)?;
+        let entry = cache.remove(pos)?;
+        let result = entry.1.clone();
+        cache.push_front(entry);
+        Some(result)
+    }) {
+        return cached;
     }
-    let shaped_lines = shape_wrapped_block_lines_with_inline_advances(
-        block,
-        base_size_pt,
-        available_width_pt,
-        inline_advances,
-    )
-    .ok_or(TableGeometryError::CouldNotShapeText)?;
-    table_cell_geometry_from_lines(block, base_pitch, shaped_lines)
+
+    let result = (|| {
+        let base_pitch = line_pitch(&block.runs, base_size_pt) * TABLE_CELL_LINE_PITCH_EM;
+        if !base_pitch.is_finite() || base_pitch <= 0.0 {
+            return Err(TableGeometryError::InvalidLineMetrics);
+        }
+        let shaped_lines = shape_wrapped_block_lines_with_inline_advances(
+            block,
+            base_size_pt,
+            available_width_pt,
+            inline_advances,
+        )
+        .ok_or(TableGeometryError::CouldNotShapeText)?;
+        table_cell_geometry_from_lines(block, base_pitch, shaped_lines)
+    })();
+    CELL_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.push_front((key, result.clone()));
+        while cache.len() > CELL_CACHE_LIMIT {
+            cache.pop_back();
+        }
+    });
+    result
 }
 
 fn table_cell_geometry_from_lines(
@@ -294,6 +351,13 @@ pub fn measure_table_row_geometry_with_footnotes(
     }
     if !base_size_pt.is_finite() || base_size_pt <= 0.0 {
         return Err(TableGeometryError::InvalidFontSize);
+    }
+    if !doc
+        .footnotes
+        .iter()
+        .any(|note| note.block_id == table_block_id)
+    {
+        return measure_table_row_geometry(table, available_width_pt, base_size_pt);
     }
     measure_uncached_with_cell_shape(
         table,

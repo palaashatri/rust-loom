@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 /// The character style that typed text takes at one caret. `None` keeps the
 /// style the text already has.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PendingStyle {
     /// UTF-8 byte offset of the caret the style was set at.
     pub(crate) caret: usize,
@@ -19,9 +19,11 @@ pub(crate) struct PendingStyle {
     pub(crate) strikethrough: Option<bool>,
     pub(crate) superscript: Option<bool>,
     pub(crate) subscript: Option<bool>,
-    pub(crate) color: Option<String>,
+    /// `Some(None)` is Automatic: the next text drops any explicit color.
+    pub(crate) color: Option<Option<String>>,
     /// The font family as the document stores it (empty: the document font).
     pub(crate) family: Option<String>,
+    pub(crate) font_size: Option<f32>,
 }
 
 impl PendingStyle {
@@ -35,6 +37,7 @@ impl PendingStyle {
             && self.subscript.is_none()
             && self.color.is_none()
             && self.family.is_none()
+            && self.font_size.is_none()
     }
 }
 
@@ -47,6 +50,7 @@ pub(crate) enum InlineStyle {
     Bold,
     Italic,
     Underline,
+    Strikethrough,
 }
 
 impl InlineStyle {
@@ -55,6 +59,7 @@ impl InlineStyle {
             Self::Bold => "Bold",
             Self::Italic => "Italic",
             Self::Underline => "Underline",
+            Self::Strikethrough => "Strikethrough",
         }
     }
 }
@@ -81,9 +86,17 @@ pub(crate) fn set_family(caret: usize, family: &str) {
     store(pending);
 }
 
-pub(crate) fn set_foreground_color(caret: usize, color: &str) {
+/// Make the text typed next at `caret` take `size_pt`.
+pub(crate) fn set_font_size(caret: usize, size_pt: f32) {
     let mut pending = at(caret);
-    pending.color = Some(color.to_owned());
+    pending.font_size = Some(size_pt);
+    store(pending);
+}
+
+/// Make the text typed next at `caret` take `color`, or Automatic for `None`.
+pub(crate) fn set_foreground_color(caret: usize, color: Option<&str>) {
+    let mut pending = at(caret);
+    pending.color = Some(color.map(str::to_owned));
     store(pending);
 }
 
@@ -136,8 +149,7 @@ pub(crate) fn restore(snapshot: Snapshot) {
     PENDING.with(|pending| *pending.borrow_mut() = snapshot);
 }
 
-/// Forget the pending style, whatever its caret. Tests start from a clean slate.
-#[cfg(test)]
+/// Forget the pending style, whatever its caret.
 pub(crate) fn clear() {
     PENDING.with(|pending| *pending.borrow_mut() = None);
 }
@@ -161,6 +173,7 @@ pub(crate) fn toggle(caret: usize, style: InlineStyle, enabled_at_caret: bool) -
         InlineStyle::Bold => &mut pending.bold,
         InlineStyle::Italic => &mut pending.italic,
         InlineStyle::Underline => &mut pending.underline,
+        InlineStyle::Strikethrough => &mut pending.strikethrough,
     };
     let now_on = !slot.unwrap_or(enabled_at_caret);
     *slot = Some(now_on);
@@ -188,6 +201,17 @@ mod tests {
         assert!(!toggle(3, InlineStyle::Italic, false));
         assert!(at(3).italic == Some(false));
         assert!(at(3).bold.is_none(), "other styles are untouched");
+    }
+
+    #[test]
+    fn a_pending_color_can_be_reset_to_automatic() {
+        clear();
+        set_foreground_color(2, Some("#1565C0FF"));
+        assert_eq!(at(2).color, Some(Some("#1565C0FF".to_owned())));
+        set_foreground_color(2, None);
+        assert_eq!(at(2).color, Some(None), "Automatic is pending, not absent");
+        assert!(!at(2).is_empty());
+        assert_eq!(at(3).color, None, "another caret has nothing pending");
     }
 
     #[test]

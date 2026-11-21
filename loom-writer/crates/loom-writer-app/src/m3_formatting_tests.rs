@@ -371,8 +371,8 @@ fn foreground_color_input_applies_canonical_color_and_refuses_invalid_text() {
     render_format_inspector(&app);
 
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#a1b2c3");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#a1b2c3");
+    invoke_button(&app, "Apply");
     assert_eq!(
         style_at(&state.current.borrow(), 2).color.as_deref(),
         Some("#A1B2C3FF"),
@@ -398,8 +398,8 @@ fn foreground_color_input_applies_canonical_color_and_refuses_invalid_text() {
     let undo_count = state.history.borrow().undo_len();
     let writes_before_invalid = recovery_write_count();
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#GG00FF");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#GG00FF");
+    invoke_button(&app, "Apply");
     assert_eq!(
         *state.current.borrow(),
         before_invalid,
@@ -615,8 +615,8 @@ fn foreground_color_at_a_collapsed_caret_styles_only_new_text() {
     render_format_inspector(&app);
 
     invoke_button(&app, "Text Color");
-    replace_accessible_text_input(&app, "Foreground color", "#336699");
-    invoke_button(&app, "Apply Color");
+    replace_accessible_text_input(&app, "Text color hex", "#336699");
+    invoke_button(&app, "Apply");
     assert_eq!(state.current.borrow().editor_text(), "plain");
     assert_eq!(state.history.borrow().undo_len(), 0);
 
@@ -637,6 +637,61 @@ fn foreground_color_at_a_collapsed_caret_styles_only_new_text() {
     assert_eq!(
         style_at(&state.current.borrow(), 4).color.as_deref(),
         Some("#000000FF")
+    );
+    typing_style::clear();
+}
+
+#[test]
+fn palette_swatch_selection_and_automatic_reset_round_trip_with_undo() {
+    typing_style::clear();
+    let mut document = text_document("palette text");
+    document.set_selection(TextSelection::range(0, 7));
+    let (app, state) = session(document);
+    render_format_inspector(&app);
+
+    let global = app.global::<WriterFormatState>();
+    assert_eq!(global.get_color_swatches().row_count(), 48);
+    assert_eq!(global.get_foreground_color_label().as_str(), "Black");
+
+    // Pick Royal Blue (#1565C0) from the inline 48-color palette.
+    invoke_button(&app, "Text Color");
+    assert!(global.get_color_palette_open());
+    invoke_button(&app, "Text color Royal Blue (#1565C0)");
+    assert!(!global.get_color_palette_open());
+    assert_eq!(
+        style_at(&state.current.borrow(), 2).color.as_deref(),
+        Some("#1565C0FF")
+    );
+    assert_eq!(global.get_foreground_color_value().as_str(), "#1565C0");
+    assert_eq!(global.get_foreground_color_label().as_str(), "Royal Blue");
+
+    // Reset to Automatic via the palette's Automatic row.
+    invoke_button(&app, "Text Color");
+    invoke_button(&app, "Text color Automatic");
+    assert!(!global.get_color_palette_open());
+    assert_eq!(style_at(&state.current.borrow(), 2).color, None);
+    assert_eq!(global.get_foreground_color_value().as_str(), "");
+    assert_eq!(global.get_foreground_color_label().as_str(), "Automatic");
+
+    // Undo restores Royal Blue; Redo restores Automatic.
+    app.invoke_undo();
+    assert_eq!(
+        style_at(&state.current.borrow(), 2).color.as_deref(),
+        Some("#1565C0FF")
+    );
+    app.invoke_redo();
+    assert_eq!(style_at(&state.current.borrow(), 2).color, None);
+
+    // Collapsed-caret Automatic reset drops explicit color on newly typed text.
+    app.invoke_undo();
+    app.invoke_selection_changed(7, 7);
+    global.invoke_reset_foreground_color();
+    assert_eq!(global.get_foreground_color_label().as_str(), "Automatic");
+    app.invoke_document_edited("paletteX text".into(), 8, 8);
+    assert_eq!(
+        style_at(&state.current.borrow(), 7).color,
+        None,
+        "new text typed after Automatic reset has no explicit color"
     );
     typing_style::clear();
 }
@@ -849,4 +904,96 @@ fn native_color_paste_preserves_valid_rgb_and_rgba_runs() {
             Some(color)
         );
     }
+}
+
+#[test]
+fn collapsed_caret_font_size_steppers_and_typed_value_style_new_text() {
+    typing_style::clear();
+    let mut document = text_document("plain");
+    document.set_selection(TextSelection::caret(5));
+    let (app, state) = session(document);
+
+    app.invoke_increase_font_size();
+    assert_eq!(app.get_font_size_value().as_str(), "12");
+    app.invoke_decrease_font_size();
+    assert_eq!(app.get_font_size_value().as_str(), "11");
+    assert!(app.invoke_apply_font_size("72".into()));
+    assert_eq!(app.get_font_size_value().as_str(), "72");
+    assert_eq!(app.get_font_size_pt(), 72);
+
+    app.invoke_document_edited("plainX".into(), 6, 6);
+    assert_eq!(style_at(&state.current.borrow(), 5).font_size, 72.0);
+    assert_ne!(style_at(&state.current.borrow(), 4).font_size, 72.0);
+    typing_style::clear();
+}
+
+#[test]
+fn collapsed_caret_emphasis_toggles_off_and_updates_ui_immediately() {
+    typing_style::clear();
+    let mut document = text_document("plain");
+    document.set_selection(TextSelection::caret(5));
+    let (app, state) = session(document);
+
+    app.invoke_toggle_bold();
+    app.invoke_toggle_italic();
+    app.invoke_toggle_underline();
+    app.invoke_toggle_strikethrough();
+    assert!(app.get_is_bold());
+    assert!(app.get_is_italic());
+    assert!(app.get_is_underline());
+    assert!(app.get_is_strikethrough());
+
+    app.invoke_document_edited("plainA".into(), 6, 6);
+    let styled = style_at(&state.current.borrow(), 5);
+    assert_eq!(styled.weight, loom_text::FontWeight::Bold);
+    assert!(styled.italic);
+    assert!(styled.underline);
+    assert!(styled.strikethrough);
+
+    app.invoke_toggle_bold();
+    app.invoke_toggle_italic();
+    app.invoke_toggle_underline();
+    app.invoke_toggle_strikethrough();
+    assert!(!app.get_is_bold());
+    assert!(!app.get_is_italic());
+    assert!(!app.get_is_underline());
+    assert!(!app.get_is_strikethrough());
+
+    app.invoke_document_edited("plainAB".into(), 7, 7);
+    let unstyled = style_at(&state.current.borrow(), 6);
+    assert_ne!(unstyled.weight, loom_text::FontWeight::Bold);
+    assert!(!unstyled.italic);
+    assert!(!unstyled.underline);
+    assert!(!unstyled.strikethrough);
+    typing_style::clear();
+}
+
+#[test]
+fn list_marker_styles_render_persist_and_undo_cleanly() {
+    let mut document = text_document("first\nsecond");
+    document.set_selection(TextSelection::range(0, 12));
+    let (app, state) = session(document);
+
+    app.invoke_select_list_style(1);
+    app.global::<WriterFormatState>()
+        .invoke_select_list_marker(2);
+    assert_eq!(state.current.borrow().blocks[0].list_marker(1), "\u{25aa}");
+
+    app.invoke_select_list_style(2);
+    app.global::<WriterFormatState>()
+        .invoke_select_list_marker(1);
+    assert_eq!(state.current.borrow().blocks[0].list_marker(1), "a.");
+    assert_eq!(state.current.borrow().blocks[1].list_marker(2), "b.");
+
+    app.global::<WriterFormatState>()
+        .invoke_select_list_marker(3);
+    assert_eq!(state.current.borrow().blocks[1].list_marker(2), "ii.");
+
+    let reloaded = save_reload(&state.current.borrow());
+    assert_eq!(reloaded.blocks[1].list_marker(2), "ii.");
+
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().blocks[1].list_marker(2), "b.");
+    app.invoke_redo();
+    assert_eq!(state.current.borrow().blocks[1].list_marker(2), "ii.");
 }

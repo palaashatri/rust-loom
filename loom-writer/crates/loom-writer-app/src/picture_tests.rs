@@ -318,3 +318,179 @@ fn typing_at_the_end_of_a_picture_line_is_refused_and_the_picture_keeps_its_text
         app.get_status_left()
     );
 }
+
+fn png_with_corrupt_image_data() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    image::RgbaImage::from_pixel(120, 80, image::Rgba([40, 80, 120, 255]))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode PNG fixture");
+    let idat = bytes
+        .windows(4)
+        .position(|chunk| chunk == b"IDAT")
+        .expect("PNG has IDAT chunk");
+    bytes[idat + 4] ^= 0xff;
+    bytes
+}
+
+#[test]
+fn corrupted_picture_surfaces_accessible_error_label_and_visible_fallback() {
+    picture_view::reset_cache_for_tests(picture_view::default_cache_budget_bytes());
+    let broken =
+        loom_writer_core::InlineImage::from_bytes("broken.png", png_with_corrupt_image_data())
+            .expect("valid PNG header passes initial insertion validation");
+    assert!(broken.preview_rgba(1600).is_err());
+
+    let mut doc = WriterDocument::new("broken-pic", "Broken picture");
+    doc.replace_paragraphs("Above the picture");
+    doc.insert_image_block(usize::MAX, broken)
+        .expect("insert broken picture block");
+
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(doc, dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    apply_state(&app, &state);
+    let _ = loom_test_support::capture::snapshot_component(&app, 1280.0, 800.0, 1.0)
+        .expect("render document with corrupted picture fallback");
+
+    let shown = app.global::<PageImages>().get_items();
+    assert_eq!(slint::Model::row_count(&shown), 1);
+    let item = slint::Model::row_data(&shown, 0).unwrap();
+    assert_eq!(
+        item.source.size().width,
+        0,
+        "failed decode emits empty image"
+    );
+    assert!(
+        item.label.contains("broken.png") && item.label.contains("image unavailable"),
+        "accessible label reports unreadable picture: {}",
+        item.label
+    );
+    assert!(
+        app.get_status_right().contains("Picture unavailable:"),
+        "status surfaces the decode failure: {}",
+        app.get_status_right()
+    );
+
+    let fallback_node =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, item.label.as_str())
+            .find(|element| {
+                element.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Image)
+            })
+            .expect("fallback rectangle exposes accessible image role and error label");
+    assert!(
+        fallback_node.size().width > 10.0 && fallback_node.size().height > 10.0,
+        "fallback placeholder keeps a visible bounding box"
+    );
+}
+
+#[test]
+fn oversized_picture_is_refused_with_accessible_error_label_and_fallback() {
+    picture_view::reset_cache_for_tests(picture_view::default_cache_budget_bytes());
+    let mut bytes = Vec::new();
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    let oversized = loom_writer_core::InlineImage {
+        name: "huge.png".into(),
+        format: loom_writer_core::ImageFormat::Png,
+        width_px: 10_000,
+        height_px: 10_000,
+        width_pt: 240.0,
+        height_pt: 180.0,
+        bytes: std::sync::Arc::new(bytes),
+    };
+
+    let mut doc = WriterDocument::new("oversized-pic", "Oversized picture");
+    doc.insert_image_block(0, oversized)
+        .expect("insert oversized picture block");
+
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(doc, dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    apply_state(&app, &state);
+    let _ = loom_test_support::capture::snapshot_component(&app, 1280.0, 800.0, 1.0)
+        .expect("render oversized picture fallback");
+
+    let shown = app.global::<PageImages>().get_items();
+    let item = slint::Model::row_data(&shown, 0).unwrap();
+    assert_eq!(item.source.size().width, 0);
+    assert!(
+        item.label.contains("huge.png") && item.label.contains("pixel limit"),
+        "accessible label reports pixel limit refusal: {}",
+        item.label
+    );
+    assert!(
+        app.get_status_right().contains("Picture unavailable:")
+            && app.get_status_right().contains("pixel limit"),
+        "status reports pixel limit refusal: {}",
+        app.get_status_right()
+    );
+}
+
+#[test]
+fn decoded_picture_cache_enforces_byte_budget_by_evicting_oldest_entries() {
+    assert_eq!(
+        picture_view::default_cache_budget_bytes(),
+        32 * 1024 * 1024,
+        "default decoded RGBA budget must be 32 MiB"
+    );
+
+    // Budget fits exactly two 64x64 RGBA images (2 * 64 * 64 * 4 = 32768 bytes).
+    let two_images_budget = 2 * 64 * 64 * 4;
+    picture_view::reset_cache_for_tests(two_images_budget);
+
+    let make_image = |tag: &str| {
+        let path = png_file(tag, 64, 64);
+        loom_writer_core::InlineImage::from_bytes(
+            &format!("{tag}.png"),
+            std::fs::read(path).unwrap(),
+        )
+        .unwrap()
+    };
+    let img_a = make_image("cache-a");
+    let img_b = make_image("cache-b");
+    let img_c = make_image("cache-c");
+
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, _state) = test_state(WriterDocument::new("cache", "Cache"), dialogs);
+
+    let mut doc_ab = WriterDocument::new("cache-ab", "Cache AB");
+    doc_ab.insert_image_block(0, img_a.clone()).unwrap();
+    doc_ab
+        .insert_image_block(usize::MAX, img_b.clone())
+        .unwrap();
+    apply_document(&app, &doc_ab);
+    assert_eq!(picture_view::cached_entries_for_tests(), 2);
+    assert_eq!(picture_view::cached_bytes_for_tests(), two_images_budget);
+
+    // Touch img_a so img_b becomes the oldest (least recently used) entry.
+    let mut doc_a = WriterDocument::new("cache-a", "Cache A");
+    doc_a.insert_image_block(0, img_a.clone()).unwrap();
+    apply_document(&app, &doc_a);
+
+    // Adding img_c must evict img_b while retaining img_a and img_c within budget.
+    let mut doc_c = WriterDocument::new("cache-c", "Cache C");
+    doc_c.insert_image_block(0, img_c.clone()).unwrap();
+    apply_document(&app, &doc_c);
+
+    assert_eq!(picture_view::cached_entries_for_tests(), 2);
+    assert_eq!(picture_view::cached_bytes_for_tests(), two_images_budget);
+    assert!(
+        picture_view::is_cached_for_tests(&img_a),
+        "recently accessed entry stays cached"
+    );
+    assert!(
+        !picture_view::is_cached_for_tests(&img_b),
+        "oldest unused entry was evicted"
+    );
+    assert!(
+        picture_view::is_cached_for_tests(&img_c),
+        "newly decoded entry is cached"
+    );
+}

@@ -1,0 +1,496 @@
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+component DocLine inherits Rectangle {
+    in property <color> line-color: #d4d4de;
+    in property <length> bar-height: 4px;
+    height: root.bar-height;
+    border-radius: root.bar-height / 2;
+    background: root.line-color;
+}
+
+component KeycapBadge inherits Rectangle {
+    in property <string> keys;
+    width: max(46px, cap-text.preferred-width + 16px);
+    height: 26px;
+    border-radius: 6px;
+    background: Theme.palette().surface-raised;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    drop-shadow-blur: 6px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    Rectangle {
+        x: 1px; y: parent.height - 3px; width: parent.width - 2px; height: 2px;
+        border-radius: 2px; background: Theme.palette().border;
+    }
+    cap-text := Text {
+        text: root.keys; font-family: Theme.ui-font-family; font-size: 11px; font-weight: 700;
+        color: Theme.palette().ink; horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+component FormatPill inherits Rectangle {
+    in property <string> label;
+    in property <color> fill-color;
+    in property <color> stroke-color;
+    in property <color> text-color;
+    width: max(44px, lbl.preferred-width + 14px);
+    height: 21px;
+    border-radius: 10.5px;
+    background: Theme.active-theme == "high-contrast" ? #ffffff : root.fill-color;
+    border-width: 1px;
+    border-color: Theme.active-theme == "high-contrast" ? #000000 : root.stroke-color;
+
+    lbl := Text {
+        text: root.label; font-family: Theme.ui-font-family; font-size: 10px; font-weight: 700;
+        color: Theme.active-theme == "high-contrast" ? #000000 : root.text-color;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+component PaperSheet inherits Rectangle {
+    background: Theme.palette().paper;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.active-theme == "high-contrast" ? #000000 : #d8d8e2;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: Theme.palette().shadow;
+    clip: true;
+}
+
+component SceneWelcome inherits Rectangle {
+    in property <bool> compact: false;
+    property <length> sheet-h: root.compact ? 114px : 206px;
+
+    if !root.compact : Rectangle {
+        x: (parent.width - 172px) / 2 + 12px;
+        y: (parent.height - 204px) / 2 - 14px;
+        width: 172px; height: 204px; border-radius: 7px;
+        background: Theme.active-theme == "high-contrast" ? Theme.palette().surface : #f4f2fb;
+        border-width: 1px; border-color: Theme.palette().border-strong;
+    }
+
+    PaperSheet {
+        x: (parent.width - self.width) / 2 - (root.compact ? 0px : 4px);
+        y: (parent.height - self.height) / 2 - (root.compact ? 0px : 8px);
+        width: 176px;
+        height: root.sheet-h;
+
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: root.compact ? 26px : 36px;
+                background: #6241ad;
+                Rectangle { x: 12px; y: 8px; width: 68px; height: 5px; border-radius: 2.5px; background: #ffffff; }
+                Rectangle { x: 12px; y: 17px; width: 44px; height: 3.5px; border-radius: 2px; background: #d8ccf7; }
+                Rectangle {
+                    x: parent.width - 28px; y: 6px; width: 16px; height: 16px; border-radius: 4px; background: #7b5ac7;
+                    Icon { x: 3px; y: 3px; size: 10px; icon: "document"; tint: #ffffff; }
+                }
+            }
+            VerticalLayout {
+                padding: 12px; spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px; cross-axis-alignment: center;
+                    Rectangle {
+                        width: 28px; height: 28px; border-radius: 5px; background: #efeaf9;
+                        border-width: 1px; border-color: #c4b5fd;
+                        Text {
+                            text: "L"; font-family: Theme.document-font-family; font-size: 18px; font-weight: 700;
+                            color: #6241ad; horizontal-alignment: center; vertical-alignment: center;
+                        }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1; spacing: 5px;
+                        DocLine { line-color: Theme.palette().paper-ink; bar-height: 5px; }
+                        DocLine { width: 88%; line-color: #9ca3af; }
+                        DocLine { width: 70%; line-color: #cbd5e1; }
+                    }
+                }
+                if !root.compact : Rectangle { height: 1px; background: Theme.palette().paper-line; }
+                if !root.compact : VerticalLayout {
+                    spacing: 6px;
+                    DocLine { width: 96%; line-color: #cbd5e1; }
+                    DocLine { width: 100%; line-color: #d8dce4; }
+                    DocLine { width: 82%; line-color: #d8dce4; }
+                }
+                if !root.compact : Rectangle {
+                    height: 36px; border-radius: 4px; background: #f6f4fc;
+                    Rectangle { x: 0px; y: 0px; width: 3px; height: parent.height; background: #6241ad; }
+                    VerticalLayout {
+                        padding-left: 10px; padding-right: 8px; alignment: center; spacing: 5px;
+                        DocLine { width: 72%; line-color: #6241ad; bar-height: 4px; }
+                        DocLine { width: 92%; line-color: #b4a7d6; bar-height: 3px; }
+                    }
+                }
+            }
+        }
+    }
+
+    if !root.compact : HorizontalLayout {
+        x: 0px; y: parent.height - 34px; width: parent.width; height: 22px; alignment: center; spacing: 6px;
+        FormatPill { label: ".loomdoc"; fill-color: #efeaf9; stroke-color: #c4b5fd; text-color: #6241ad; }
+        FormatPill { label: ".docx"; fill-color: #dbeafe; stroke-color: #93c5fd; text-color: #1d4ed8; }
+        FormatPill { label: "18 templates"; fill-color: #ffffff; stroke-color: #d1d5db; text-color: #374151; }
+    }
+}
+
+component SceneTypography inherits Rectangle {
+    in property <bool> compact: false;
+    PaperSheet {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 186px;
+        height: root.compact ? 116px : 212px;
+
+        VerticalLayout {
+            padding: 12px; spacing: 9px;
+            HorizontalLayout {
+                spacing: 10px; cross-axis-alignment: center;
+                Rectangle {
+                    width: 58px; height: 50px; border-radius: 6px; background: #f5f3ff;
+                    border-width: 1px; border-color: #ddd6fe;
+                    Text {
+                        text: "Aa"; font-family: Theme.document-font-family; font-size: 28px; font-weight: 700;
+                        color: #1d1d1f; horizontal-alignment: center; vertical-alignment: center;
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1; spacing: 5px;
+                    FormatPill { label: "Inter \u{2022} H1"; fill-color: #efeaf9; stroke-color: #c4b5fd; text-color: #6241ad; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for glyph in ["B", "I", "U"] : Rectangle {
+                            width: 22px; height: 20px; border-radius: 4px;
+                            background: glyph == "B" ? #6241ad : #f3f4f6;
+                            Text {
+                                text: glyph; font-size: 10px; font-weight: glyph == "B" ? 700 : 600;
+                                font-italic: glyph == "I"; color: glyph == "B" ? #ffffff : #374151;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.palette().paper-line; }
+            HorizontalLayout {
+                spacing: 7px; alignment: center;
+                for swatch in [#1d1d1f, #6241ad, #0284c7, #0f766e, #b45309, #be123c] : Rectangle {
+                    width: 18px; height: 18px; border-radius: 9px; background: swatch;
+                    border-width: swatch == #6241ad ? 2px : 1px;
+                    border-color: swatch == #6241ad ? #c4b5fd : #e5e7eb;
+                }
+            }
+            if !root.compact : Rectangle { height: 1px; background: Theme.palette().paper-line; }
+            if !root.compact : VerticalLayout {
+                spacing: 6px;
+                DocLine { width: 72%; line-color: #1d1d1f; bar-height: 5px; }
+                Rectangle {
+                    width: 112px; height: 12px; border-radius: 3px; background: #fef08a;
+                    DocLine { x: 4px; y: 4px; width: 96px; line-color: #374151; bar-height: 4px; }
+                }
+                DocLine { width: 92%; line-color: #cbd5e1; }
+                DocLine { width: 78%; line-color: #cbd5e1; }
+            }
+            if !root.compact : HorizontalLayout {
+                alignment: space-between;
+                FormatPill { label: "x\u{00B2} / x\u{2082}"; fill-color: #f3f4f6; stroke-color: #d1d5db; text-color: #374151; }
+                FormatPill { label: "LTR \u{2194} RTL"; fill-color: #e0f2fe; stroke-color: #93c5fd; text-color: #0369a1; }
+            }
+        }
+    }
+}
+
+component SceneMediaTable inherits Rectangle {
+    in property <bool> compact: false;
+    PaperSheet {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 186px;
+        height: root.compact ? 116px : 214px;
+
+        VerticalLayout {
+            padding: 12px; spacing: 8px;
+            if !root.compact : DocLine { width: 62%; line-color: #1d1d1f; bar-height: 5px; }
+            Rectangle {
+                height: root.compact ? 42px : 70px;
+                border-radius: 5px; background: #e0e7ff; border-width: 1px; border-color: #c7d2fe; clip: true;
+                Rectangle { x: 0px; y: parent.height * 0.5; width: parent.width; height: 12px; background: #c7d2fe; }
+                Rectangle { x: 118px; y: 10px; width: 12px; height: 12px; border-radius: 6px; background: #fbbf24; }
+                Path {
+                    x: 0px; y: 0px; width: parent.width; height: parent.height;
+                    viewbox-x: 0; viewbox-y: 0; viewbox-width: 162; viewbox-height: 70;
+                    fill: #818cf8; commands: "M0 54 L38 22 L76 46 L112 18 L162 52 L162 70 L0 70 Z";
+                }
+                Path {
+                    x: 0px; y: 0px; width: parent.width; height: parent.height;
+                    viewbox-x: 0; viewbox-y: 0; viewbox-width: 162; viewbox-height: 70;
+                    fill: #4f46e5; commands: "M0 60 L54 30 L102 58 L138 36 L162 56 L162 70 L0 70 Z";
+                }
+            }
+            if !root.compact : DocLine { width: 88%; line-color: #cbd5e1; }
+            Rectangle {
+                height: root.compact ? 42px : 66px;
+                border-radius: 4px; border-width: 1px; border-color: #c4b5fd; clip: true;
+                VerticalLayout {
+                    spacing: 0px;
+                    Rectangle {
+                        height: root.compact ? 14px : 20px; background: #6241ad;
+                        HorizontalLayout {
+                            padding: 4px; spacing: 8px;
+                            DocLine { horizontal-stretch: 1; line-color: #ffffff; bar-height: 3.5px; }
+                            DocLine { horizontal-stretch: 1; line-color: #e9d5ff; bar-height: 3.5px; }
+                            DocLine { horizontal-stretch: 1; line-color: #e9d5ff; bar-height: 3.5px; }
+                        }
+                    }
+                    for row-idx in [0, 1] : Rectangle {
+                        height: root.compact ? 14px : 22px;
+                        background: row-idx == 1 ? #f5f3ff : #ffffff;
+                        Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: #ddd6fe; }
+                        Rectangle { x: parent.width * 0.36; y: 0px; width: 1px; height: parent.height; background: #ddd6fe; }
+                        Rectangle { x: parent.width * 0.68; y: 0px; width: 1px; height: parent.height; background: #ddd6fe; }
+                        HorizontalLayout {
+                            padding: 5px; spacing: 10px;
+                            DocLine { horizontal-stretch: 1; line-color: #6b7280; bar-height: 3px; }
+                            DocLine { horizontal-stretch: 1; line-color: #9ca3af; bar-height: 3px; }
+                            DocLine { horizontal-stretch: 1; line-color: #6241ad; bar-height: 3px; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component SceneHeadersFootnotes inherits Rectangle {
+    in property <bool> compact: false;
+    PaperSheet {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 184px;
+        height: root.compact ? 116px : 216px;
+
+        VerticalLayout {
+            padding: 12px; spacing: root.compact ? 5px : 8px;
+            HorizontalLayout {
+                alignment: space-between;
+                Text { text: "ANNUAL REPORT"; font-size: 7px; font-weight: 700; color: #6241ad; }
+                Text { text: "DRAFT"; font-size: 7px; font-weight: 600; color: #9ca3af; }
+            }
+            Rectangle { height: 1px; background: #d8d4e8; }
+            VerticalLayout {
+                spacing: 5px;
+                if !root.compact : DocLine { width: 64%; line-color: #1d1d1f; bar-height: 5px; }
+                HorizontalLayout {
+                    spacing: 3px; cross-axis-alignment: center;
+                    DocLine { width: 112px; line-color: #6b7280; }
+                    Rectangle {
+                        width: 12px; height: 12px; border-radius: 6px;
+                        background: #efeaf9; border-width: 1px; border-color: #6241ad;
+                        Text { text: "1"; font-size: 7px; font-weight: 700; color: #6241ad; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                if !root.compact : DocLine { width: 96%; line-color: #cbd5e1; }
+                if !root.compact : DocLine { width: 88%; line-color: #cbd5e1; }
+                if !root.compact : DocLine { width: 76%; line-color: #cbd5e1; }
+            }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+            Rectangle { width: 52px; height: 1.5px; background: #6241ad; }
+            HorizontalLayout {
+                spacing: 5px; cross-axis-alignment: start;
+                Text { text: "1"; font-size: 8px; font-weight: 700; color: #6241ad; }
+                VerticalLayout {
+                    horizontal-stretch: 1; spacing: 4px;
+                    DocLine { width: 92%; line-color: #9ca3af; bar-height: 3px; }
+                    if !root.compact : DocLine { width: 68%; line-color: #cbd5e1; bar-height: 3px; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.palette().paper-line; }
+            HorizontalLayout {
+                alignment: space-between; cross-axis-alignment: center;
+                DocLine { width: 48px; line-color: #cbd5e1; bar-height: 3px; }
+                Rectangle {
+                    width: 34px; height: 14px; border-radius: 7px; background: #efeaf9;
+                    Text { text: "1 / 2"; font-size: 8px; font-weight: 700; color: #6241ad; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
+component SceneReviewChanges inherits Rectangle {
+    in property <bool> compact: false;
+    PaperSheet {
+        x: Theme.rtl ? (parent.width - self.width) / 2 + 18px : (parent.width - self.width) / 2 - 18px;
+        y: (parent.height - self.height) / 2 - (root.compact ? 0px : 6px);
+        width: 162px;
+        height: root.compact ? 114px : 200px;
+
+        VerticalLayout {
+            padding: 12px; spacing: 7px;
+            if !root.compact : DocLine { width: 68%; line-color: #1d1d1f; bar-height: 5px; }
+            DocLine { width: 92%; line-color: #cbd5e1; }
+            Rectangle {
+                width: 118px; height: 14px; border-radius: 3px; background: #dcfce7;
+                DocLine { x: 5px; y: 4px; width: 106px; line-color: #15803d; bar-height: 4px; }
+                Rectangle { x: 4px; y: 11px; width: 108px; height: 1.5px; background: #16a34a; }
+            }
+            Rectangle {
+                width: 96px; height: 14px; border-radius: 3px; background: #fee2e2;
+                DocLine { x: 5px; y: 5px; width: 84px; line-color: #ef4444; bar-height: 3px; }
+                Rectangle { x: 4px; y: 6.5px; width: 88px; height: 1.5px; background: #b91c1c; }
+            }
+            if !root.compact : Rectangle {
+                width: 124px; height: 14px; border-radius: 3px; background: #efeaf9;
+                DocLine { x: 5px; y: 5px; width: 112px; line-color: #6241ad; bar-height: 4px; }
+            }
+            if !root.compact : DocLine { width: 84%; line-color: #cbd5e1; }
+        }
+    }
+
+    Rectangle {
+        x: Theme.rtl ? 16px : parent.width - self.width - 16px;
+        y: parent.height - self.height - (root.compact ? 12px : 26px);
+        width: 128px; height: 80px; border-radius: 8px;
+        background: Theme.palette().surface-raised;
+        border-width: 1px; border-color: Theme.palette().accent;
+        drop-shadow-blur: 14px; drop-shadow-offset-y: 5px; drop-shadow-color: Theme.palette().shadow;
+
+        VerticalLayout {
+            padding: 9px; spacing: 5px;
+            HorizontalLayout {
+                spacing: 6px; cross-axis-alignment: center;
+                Rectangle {
+                    width: 16px; height: 16px; border-radius: 8px; background: Theme.palette().accent;
+                    Text { text: "A"; font-size: 8px; font-weight: 700; color: Theme.palette().accent-ink; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text { text: "Review Note"; font-size: 9px; font-weight: 700; color: Theme.palette().ink; }
+            }
+            DocLine { width: 92%; line-color: Theme.palette().border-strong; bar-height: 3px; }
+            DocLine { width: 72%; line-color: Theme.palette().border-strong; bar-height: 3px; }
+            HorizontalLayout {
+                alignment: end;
+                FormatPill { label: "\u{2713} Accept"; fill-color: #dcfce7; stroke-color: #86efac; text-color: #15803d; }
+            }
+        }
+    }
+}
+
+component ScenePrintExport inherits Rectangle {
+    in property <bool> compact: false;
+    VerticalLayout {
+        padding: 12px; spacing: root.compact ? 8px : 14px; alignment: center;
+        Rectangle {
+            width: 204px; height: root.compact ? 90px : 146px; border-radius: 8px;
+            background: Theme.active-theme == "high-contrast" ? #000000 : #1e1e26;
+            border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 14px; drop-shadow-offset-y: 4px; drop-shadow-color: Theme.palette().shadow;
+
+            HorizontalLayout {
+                padding: root.compact ? 8px : 14px; spacing: 8px; alignment: center; cross-axis-alignment: center;
+                for page-num in ["1", "2"] : Rectangle {
+                    width: 78px; height: root.compact ? 70px : 112px; border-radius: 3px;
+                    background: #ffffff; border-width: 1px; border-color: #d1d5db; clip: true;
+                    VerticalLayout {
+                        padding: 7px; spacing: 4px;
+                        Rectangle { height: 5px; border-radius: 2px; background: page-num == "1" ? #6241ad : #94a3b8; }
+                        DocLine { width: 84%; line-color: #d1d5db; bar-height: 3px; }
+                        DocLine { width: 92%; line-color: #e5e7eb; bar-height: 3px; }
+                        if !root.compact : Rectangle { height: 26px; border-radius: 3px; background: page-num == "1" ? #ede9fe : #f3f4f6; }
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+                        Text { text: page-num; font-size: 7px; font-weight: 700; color: #6b7280; horizontal-alignment: center; }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center; spacing: 8px;
+            FormatPill { label: "PDF"; fill-color: #fee2e2; stroke-color: #fca5a5; text-color: #b91c1c; }
+            FormatPill { label: "DOCX"; fill-color: #dbeafe; stroke-color: #93c5fd; text-color: #1d4ed8; }
+            FormatPill { label: "MD"; fill-color: #efeaf9; stroke-color: #c4b5fd; text-color: #6241ad; }
+        }
+    }
+}
+
+component SceneCommandPalette inherits Rectangle {
+    in property <string> mod-key: "Ctrl+";
+    in property <bool> compact: false;
+    VerticalLayout {
+        padding: 12px; spacing: root.compact ? 8px : 14px; alignment: center;
+        Rectangle {
+            width: 204px; height: root.compact ? 86px : 142px; border-radius: 8px;
+            background: Theme.palette().surface-raised; border-width: 1px; border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 18px; drop-shadow-offset-y: 6px; drop-shadow-color: Theme.palette().shadow; clip: true;
+
+            VerticalLayout {
+                padding: 8px; spacing: 5px;
+                Rectangle {
+                    height: 24px; border-radius: 5px; background: Theme.palette().surface;
+                    border-width: 1.5px; border-color: Theme.palette().accent;
+                    HorizontalLayout {
+                        padding-left: 8px; padding-right: 8px; spacing: 6px; cross-axis-alignment: center;
+                        Icon { size: 11px; icon: "search"; tint: Theme.palette().accent; }
+                        Text { text: "Export PDF"; font-size: 10px; font-weight: 600; color: Theme.palette().ink; }
+                        Rectangle { width: 1.5px; height: 12px; background: Theme.palette().accent; }
+                    }
+                }
+                Rectangle {
+                    height: 26px; border-radius: 5px; background: Theme.palette().selection-soft;
+                    Rectangle {
+                        x: Theme.rtl ? parent.width - 3px : 0px; y: 4px; width: 3px; height: parent.height - 8px;
+                        border-radius: 1.5px; background: Theme.palette().accent;
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 8px; alignment: space-between; cross-axis-alignment: center;
+                        Text { text: "Export as PDF\u{2026}"; font-size: 10px; font-weight: 600; color: Theme.palette().ink; }
+                        Text { text: "E"; font-size: 9px; font-weight: 700; color: Theme.palette().accent; }
+                    }
+                }
+                if !root.compact : Rectangle {
+                    height: 22px;
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 8px; alignment: space-between; cross-axis-alignment: center;
+                        Text { text: "Tracked Changes"; font-size: 10px; color: Theme.palette().ink-secondary; }
+                        Text { text: "T"; font-size: 9px; color: Theme.palette().ink-secondary; }
+                    }
+                }
+                if !root.compact : Rectangle {
+                    height: 22px;
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 8px; alignment: space-between; cross-axis-alignment: center;
+                        Text { text: "Appearance Theme"; font-size: 10px; color: Theme.palette().ink-secondary; }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center; spacing: 10px;
+            KeycapBadge { keys: root.mod-key == "Cmd+" ? "\u{2318}K" : "Ctrl+K"; }
+            KeycapBadge { keys: root.mod-key == "Cmd+" ? "\u{2318}S" : "Ctrl+S"; }
+        }
+    }
+}
+
+export component WelcomeIllustrationStage inherits Rectangle {
+    in property <int> step: 0;
+    in property <string> mod-key: "Ctrl+";
+    in property <bool> compact: false;
+
+    background: Theme.active-theme == "high-contrast" ? Theme.palette().surface-raised : Theme.palette().selection-soft;
+    clip: true;
+
+    if Theme.active-theme != "high-contrast" : Rectangle {
+        x: parent.width - 96px; y: -36px; width: 140px; height: 140px;
+        border-radius: 70px; background: Theme.palette().accent; opacity: 0.08;
+    }
+    if root.step == 0 : SceneWelcome { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 1 : SceneTypography { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 2 : SceneMediaTable { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 3 : SceneHeadersFootnotes { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 4 : SceneReviewChanges { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 5 : ScenePrintExport { width: 100%; height: 100%; compact: root.compact; }
+    if root.step == 6 : SceneCommandPalette { width: 100%; height: 100%; mod-key: root.mod-key; compact: root.compact; }
+}
