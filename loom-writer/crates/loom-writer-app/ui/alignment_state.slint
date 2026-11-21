@@ -30,6 +30,7 @@ export global WriterFormatState {
     in-out property <bool> color-dialog-open: false;
     in-out property <string> color-input: "";
     in-out property <string> color-error: "";
+    in-out property <int> list-marker-index: 0;
 
     callback select-direction(int);
     callback select-logical-alignment(int);
@@ -41,4 +42,5 @@ export global WriterFormatState {
     callback apply-foreground-color;
     callback cancel-foreground-color;
     callback clear-foreground-color-error;
+    callback select-list-marker(int);
 }

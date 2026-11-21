@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 /// The character style that typed text takes at one caret. `None` keeps the
 /// style the text already has.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PendingStyle {
     /// UTF-8 byte offset of the caret the style was set at.
     pub(crate) caret: usize,
@@ -23,6 +23,7 @@ pub(crate) struct PendingStyle {
     pub(crate) color: Option<Option<String>>,
     /// The font family as the document stores it (empty: the document font).
     pub(crate) family: Option<String>,
+    pub(crate) font_size: Option<f32>,
 }
 
 impl PendingStyle {
@@ -36,6 +37,7 @@ impl PendingStyle {
             && self.subscript.is_none()
             && self.color.is_none()
             && self.family.is_none()
+            && self.font_size.is_none()
     }
 }
 
@@ -48,6 +50,7 @@ pub(crate) enum InlineStyle {
     Bold,
     Italic,
     Underline,
+    Strikethrough,
 }
 
 impl InlineStyle {
@@ -56,6 +59,7 @@ impl InlineStyle {
             Self::Bold => "Bold",
             Self::Italic => "Italic",
             Self::Underline => "Underline",
+            Self::Strikethrough => "Strikethrough",
         }
     }
 }
@@ -79,6 +83,13 @@ pub(crate) fn at(caret: usize) -> PendingStyle {
 pub(crate) fn set_family(caret: usize, family: &str) {
     let mut pending = at(caret);
     pending.family = Some(family.to_owned());
+    store(pending);
+}
+
+/// Make the text typed next at `caret` take `size_pt`.
+pub(crate) fn set_font_size(caret: usize, size_pt: f32) {
+    let mut pending = at(caret);
+    pending.font_size = Some(size_pt);
     store(pending);
 }
 
@@ -163,6 +174,7 @@ pub(crate) fn toggle(caret: usize, style: InlineStyle, enabled_at_caret: bool) -
         InlineStyle::Bold => &mut pending.bold,
         InlineStyle::Italic => &mut pending.italic,
         InlineStyle::Underline => &mut pending.underline,
+        InlineStyle::Strikethrough => &mut pending.strikethrough,
     };
     let now_on = !slot.unwrap_or(enabled_at_caret);
     *slot = Some(now_on);

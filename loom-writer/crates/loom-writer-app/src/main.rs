@@ -1836,6 +1836,14 @@ fn apply_pending_typing_style(
             family,
         );
     }
+    if let Some(size_pt) = style.font_size {
+        document_formatting::set_selection_font_size(document, text_range.clone(), size_pt);
+        table_actions::table_format_actions::set_selection_font_size(
+            document,
+            table_range.clone(),
+            size_pt,
+        );
+    }
     if let Some(on) = style.bold {
         set_selection_bold(document, text_range.clone(), on);
         table_actions::table_format_actions::set_selection_emphasis(
@@ -2782,6 +2790,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Bold,
                         app.get_is_bold(),
                     );
+                    app.set_is_bold(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Bold,
                         now_on,
@@ -2846,6 +2855,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Underline,
                         app.get_is_underline(),
                     );
+                    app.set_is_underline(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Underline,
                         now_on,
@@ -2903,6 +2913,7 @@ fn wire_writer_shared_callbacks(
                         typing_style::InlineStyle::Italic,
                         app.get_is_italic(),
                     );
+                    app.set_is_italic(now_on);
                     app.set_status_right(SharedString::from(typing_style::announcement(
                         typing_style::InlineStyle::Italic,
                         now_on,

@@ -43,6 +43,43 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
     wire_script_toggle(app, state, false);
     wire_color_dialog(app, state);
     wire_strikethrough(app, state);
+    wire_list_marker(app, state);
+}
+
+fn wire_list_marker(app: &WriterApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.global::<WriterFormatState>()
+        .on_select_list_marker(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let list_style = app.get_list_style_index();
+            let marker = match (list_style, index) {
+                (1, 0) => loom_text::ListMarkerStyle::Disc,
+                (1, 1) => loom_text::ListMarkerStyle::Circle,
+                (1, 2) => loom_text::ListMarkerStyle::Square,
+                (1, 3) => loom_text::ListMarkerStyle::Dash,
+                (2, 0) => loom_text::ListMarkerStyle::Decimal,
+                (2, 1) => loom_text::ListMarkerStyle::LowerAlpha,
+                (2, 2) => loom_text::ListMarkerStyle::UpperAlpha,
+                (2, 3) => loom_text::ListMarkerStyle::LowerRoman,
+                (2, 4) => loom_text::ListMarkerStyle::UpperRoman,
+                _ => return,
+            };
+            let selection = crate::selection_from_app(&app);
+            let mut next = state.current.borrow().clone();
+            crate::document_formatting::set_selection_list_marker(
+                &mut next,
+                DocumentSelection::range(selection.anchor, selection.focus),
+                marker,
+            );
+            next.set_selection(selection);
+            if next != *state.current.borrow()
+                && !apply_with_history(&app, &state, next, HistoryKind::DocumentAction)
+            {
+                return;
+            }
+            announce(&app, "List marker style updated".to_string());
+        });
 }
 
 fn wire_strikethrough(app: &WriterApp, state: &Rc<GuiState>) {
@@ -52,6 +89,19 @@ fn wire_strikethrough(app: &WriterApp, state: &Rc<GuiState>) {
         let Some(app) = app_ref.upgrade() else { return };
         let enabled = app.get_is_strikethrough();
         let selection = crate::selection_from_app(&app);
+        if selection.is_collapsed() && table_actions::get_table_cell_selection_range().is_none() {
+            let now_on = typing_style::toggle(
+                selection.focus,
+                typing_style::InlineStyle::Strikethrough,
+                enabled,
+            );
+            app.set_is_strikethrough(now_on);
+            app.set_status_right(SharedString::from(typing_style::announcement(
+                typing_style::InlineStyle::Strikethrough,
+                now_on,
+            )));
+            return;
+        }
         if selection.is_collapsed() {
             app.set_status_right("Select text to apply strikethrough".into());
             return;
@@ -483,6 +533,9 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
         if let Some(value) = pending.strikethrough {
             formatting.strikethrough = value;
         }
+        if let Some(size_pt) = pending.font_size {
+            formatting.font_size_pt = size_pt;
+        }
     }
     let heading_level = inspector_heading_level(document, &selection);
     let (text_alignment, logical_alignment) =
@@ -513,6 +566,11 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
     app.set_font_size_value(SharedString::from(formatting.font_size_pt.to_string()));
     app.set_line_spacing_index(formatting.line_spacing_index);
     app.set_list_style_index(formatting.list_style_index);
+    global.set_list_marker_index(list_marker_index_for_selection(
+        document,
+        &selection,
+        formatting.list_style_index,
+    ));
     app.set_heading_level(heading_level);
     app.set_text_alignment(text_alignment);
 
@@ -543,6 +601,34 @@ pub(crate) fn project_document_controls(app: &WriterApp, document: &WriterDocume
         selection.clone(),
     ));
     table_actions::update_table_selection_properties(app, document, selection.anchor);
+}
+
+fn list_marker_index_for_selection(
+    document: &WriterDocument,
+    selection: &TextSelection,
+    list_style_index: i32,
+) -> i32 {
+    let indices = loom_writer_core::selected_block_indices(document, selection.clone());
+    let Some(&first) = indices.first() else {
+        return 0;
+    };
+    let marker = document.blocks[first].style.list_marker;
+    match list_style_index {
+        1 => match marker {
+            loom_text::ListMarkerStyle::Circle => 1,
+            loom_text::ListMarkerStyle::Square => 2,
+            loom_text::ListMarkerStyle::Dash => 3,
+            _ => 0,
+        },
+        2 => match marker {
+            loom_text::ListMarkerStyle::LowerAlpha => 1,
+            loom_text::ListMarkerStyle::UpperAlpha => 2,
+            loom_text::ListMarkerStyle::LowerRoman => 3,
+            loom_text::ListMarkerStyle::UpperRoman => 4,
+            _ => 0,
+        },
+        _ => 0,
+    }
 }
 
 fn inspector_heading_level(document: &WriterDocument, selection: &TextSelection) -> i32 {

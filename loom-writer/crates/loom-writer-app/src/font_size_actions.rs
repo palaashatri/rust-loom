@@ -77,8 +77,18 @@ fn parse_font_size_pt(text: &str) -> Option<f32> {
 }
 
 fn apply_selected_font_size(app: &WriterApp, state: &GuiState, size_pt: f32) {
+    let selection = crate::selection_from_app(app);
+    if selection.is_collapsed() && crate::table_actions::get_table_cell_selection_range().is_none()
+    {
+        crate::typing_style::set_font_size(selection.focus, size_pt);
+        app.set_font_size_pt(size_pt.round() as i32);
+        app.set_font_size_value(SharedString::from(size_pt.to_string()));
+        app.set_status_right(SharedString::from(format!(
+            "Font size {size_pt} pt for new text"
+        )));
+        return;
+    }
     let mut next = state.current.borrow().clone();
-    let selection = next.selection();
     set_selection_font_size(
         &mut next,
         DocumentSelection::range(selection.anchor, selection.focus),

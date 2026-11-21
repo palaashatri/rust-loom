@@ -140,6 +140,12 @@ pub(crate) fn paragraph_style_json(style: &loom_text::ParagraphStyle) -> String 
         out.push_str(",\"list_level\":");
         out.push_str(&style.list_level.to_string());
     }
+    if style.list_marker != loom_text::ListMarkerStyle::Default {
+        out.push_str(",\"list_marker\":");
+        out.push_str(&pkg_json::escape(super::list_levels::list_marker_as_str(
+            style.list_marker,
+        )));
+    }
     out.push('}');
     out
 }
@@ -169,6 +175,9 @@ pub(crate) fn parse_paragraph_style(
             }
             "list_level" => {
                 style.list_level = super::list_levels::parse_list_level(&json_value_text(value));
+            }
+            "list_marker" => {
+                style.list_marker = super::list_levels::parse_list_marker(&json_value_text(value));
             }
             _ => {}
         }

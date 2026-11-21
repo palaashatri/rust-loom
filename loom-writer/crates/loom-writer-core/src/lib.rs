@@ -4659,6 +4659,7 @@ mod tests {
             first_line_indent: -2.0,
             break_rule: loom_text::LineBreakRule::Char,
             list_level: 0,
+            list_marker: loom_text::ListMarkerStyle::Default,
         };
         block.runs = vec![
             loom_text::StyleRun {

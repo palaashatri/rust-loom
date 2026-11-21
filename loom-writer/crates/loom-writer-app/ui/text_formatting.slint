@@ -373,11 +373,24 @@ export component WriterFormatTab inherits VerticalLayout {
         VerticalLayout {
             padding-left: Theme.tokens.space.xl;
             padding-right: Theme.tokens.space.xl;
+            spacing: Theme.tokens.space.xs;
         LoomSegmentedControl {
             items: ["None", "Bulleted", "Numbered"];
             current <=> root.list-style-index;
             label: "List Style";
             selected(idx) => { root.select-list-style(idx); }
+        }
+        if root.list-style-index == 1 : LoomSegmentedControl {
+            items: ["•", "◦", "▪", "–"];
+            current <=> WriterFormatState.list-marker-index;
+            label: "Bullet Style";
+            selected(idx) => { WriterFormatState.select-list-marker(idx); }
+        }
+        if root.list-style-index == 2 : LoomSegmentedControl {
+            items: ["1.", "a.", "A.", "i.", "I."];
+            current <=> WriterFormatState.list-marker-index;
+            label: "Numbering Style";
+            selected(idx) => { WriterFormatState.select-list-marker(idx); }
         }
         }
 

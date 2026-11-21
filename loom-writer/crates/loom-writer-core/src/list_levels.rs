@@ -65,16 +65,105 @@ impl RichBlock {
     }
 
     /// The marker drawn beside the block: a bullet glyph for its level, or
-    /// `number.` for a numbered item. Empty for other blocks.
+    /// `number.` / `a.` / `i.` etc. for a numbered item. Empty for other blocks.
     pub fn list_marker(&self, number: usize) -> String {
         match self.kind.as_str() {
-            "list-bulleted" => {
-                let level = usize::from(self.effective_list_level());
-                BULLET_GLYPHS[level % BULLET_GLYPHS.len()].to_string()
-            }
-            "list-numbered" => format!("{number}."),
+            "list-bulleted" => match self.style.list_marker {
+                loom_text::ListMarkerStyle::Disc => "\u{2022}".to_string(),
+                loom_text::ListMarkerStyle::Circle => "\u{25e6}".to_string(),
+                loom_text::ListMarkerStyle::Square => "\u{25aa}".to_string(),
+                loom_text::ListMarkerStyle::Dash => "\u{2013}".to_string(),
+                _ => {
+                    let level = usize::from(self.effective_list_level());
+                    BULLET_GLYPHS[level % BULLET_GLYPHS.len()].to_string()
+                }
+            },
+            "list-numbered" => match self.style.list_marker {
+                loom_text::ListMarkerStyle::LowerAlpha => format!("{}.", to_alpha(number, false)),
+                loom_text::ListMarkerStyle::UpperAlpha => format!("{}.", to_alpha(number, true)),
+                loom_text::ListMarkerStyle::LowerRoman => format!("{}.", to_roman(number, false)),
+                loom_text::ListMarkerStyle::UpperRoman => format!("{}.", to_roman(number, true)),
+                _ => format!("{number}."),
+            },
             _ => String::new(),
         }
+    }
+}
+
+pub(crate) fn list_marker_as_str(marker: loom_text::ListMarkerStyle) -> &'static str {
+    match marker {
+        loom_text::ListMarkerStyle::Default => "default",
+        loom_text::ListMarkerStyle::Disc => "disc",
+        loom_text::ListMarkerStyle::Circle => "circle",
+        loom_text::ListMarkerStyle::Square => "square",
+        loom_text::ListMarkerStyle::Dash => "dash",
+        loom_text::ListMarkerStyle::Decimal => "decimal",
+        loom_text::ListMarkerStyle::LowerAlpha => "lower-alpha",
+        loom_text::ListMarkerStyle::UpperAlpha => "upper-alpha",
+        loom_text::ListMarkerStyle::LowerRoman => "lower-roman",
+        loom_text::ListMarkerStyle::UpperRoman => "upper-roman",
+    }
+}
+
+pub(crate) fn parse_list_marker(text: &str) -> loom_text::ListMarkerStyle {
+    match text.trim() {
+        "disc" => loom_text::ListMarkerStyle::Disc,
+        "circle" => loom_text::ListMarkerStyle::Circle,
+        "square" => loom_text::ListMarkerStyle::Square,
+        "dash" => loom_text::ListMarkerStyle::Dash,
+        "decimal" => loom_text::ListMarkerStyle::Decimal,
+        "lower-alpha" => loom_text::ListMarkerStyle::LowerAlpha,
+        "upper-alpha" => loom_text::ListMarkerStyle::UpperAlpha,
+        "lower-roman" => loom_text::ListMarkerStyle::LowerRoman,
+        "upper-roman" => loom_text::ListMarkerStyle::UpperRoman,
+        _ => loom_text::ListMarkerStyle::Default,
+    }
+}
+
+fn to_alpha(mut n: usize, upper: bool) -> String {
+    if n == 0 {
+        return "0".to_string();
+    }
+    let base = if upper { b'A' } else { b'a' };
+    let mut chars = Vec::new();
+    while n > 0 {
+        n -= 1;
+        chars.push((base + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    chars.into_iter().rev().collect()
+}
+
+fn to_roman(mut n: usize, upper: bool) -> String {
+    if n == 0 || n >= 4000 {
+        return n.to_string();
+    }
+    const TABLE: [(usize, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for (val, sym) in TABLE {
+        while n >= val {
+            out.push_str(sym);
+            n -= val;
+        }
+    }
+    if upper {
+        out
+    } else {
+        out.to_ascii_lowercase()
     }
 }
 
