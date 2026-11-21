@@ -44,6 +44,11 @@ fn part(fx: f32, fy: f32, fw: f32, fh: f32) -> ObjectPart {
         family: SharedString::default(),
         ink: 0,
         round: false,
+        underline: false,
+        strikethrough: false,
+        has_image: false,
+        img: slint::Image::default(),
+        shape_kind: SharedString::default(),
     }
 }
 
@@ -301,32 +306,56 @@ fn pie_chart_parts(
         }
         Color::from_argb_encoded(SERIES[ci % SERIES.len()])
     };
-    let (w, h) = (width.max(1.0), height.max(1.0));
-    let (cx, cy) = (0.31f32, 0.55f32);
-    let r_px = (w * 0.23).min(h * 0.34).max(12.0);
-    let dot_d = (r_px / 3.8).max(4.0);
-    out.push(dot_part(cx, cy, dot_d, w, h, slice_fill(0)));
-    for ring in 1..=6usize {
-        let rad = (ring as f32 - 0.3) / 6.0 * r_px;
-        let steps = (ring * 12).max(16);
-        for step in 0..steps {
-            let turn = (step as f64 + 0.5) / steps as f64;
-            let target = turn * total;
-            let mut acc = 0.0;
-            let mut slice_idx = categories.saturating_sub(1);
-            for (ci, v) in values.iter().copied().enumerate() {
-                acc += v;
-                if target <= acc {
-                    slice_idx = ci;
-                    break;
+    let size_px = 160u32;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(size_px, size_px);
+    let pixels = buf.make_mut_slice();
+    let center = size_px as f32 * 0.5;
+    let radius = center - 3.0;
+    let aa_offsets = [(-0.25f32, -0.25f32), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)];
+    for py in 0..size_px {
+        for px in 0..size_px {
+            let mut r_acc = 0u32;
+            let mut g_acc = 0u32;
+            let mut b_acc = 0u32;
+            let mut a_acc = 0u32;
+            for (ox, oy) in aa_offsets {
+                let dx = (px as f32 + 0.5 + ox) - center;
+                let dy = (py as f32 + 0.5 + oy) - center;
+                if dx * dx + dy * dy <= radius * radius {
+                    let mut angle = dy.atan2(dx) + std::f32::consts::FRAC_PI_2;
+                    if angle < 0.0 {
+                        angle += std::f32::consts::TAU;
+                    }
+                    let target = (angle as f64 / std::f64::consts::TAU) * total;
+                    let mut acc = 0.0;
+                    let mut slice_idx = categories.saturating_sub(1);
+                    for (ci, v) in values.iter().copied().enumerate() {
+                        acc += v;
+                        if target <= acc {
+                            slice_idx = ci;
+                            break;
+                        }
+                    }
+                    let c = slice_fill(slice_idx);
+                    r_acc += c.red() as u32;
+                    g_acc += c.green() as u32;
+                    b_acc += c.blue() as u32;
+                    a_acc += 255;
                 }
             }
-            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
-            let x = cx + rad * theta.cos() / w;
-            let y = cy + rad * theta.sin() / h;
-            out.push(dot_part(x, y, dot_d, w, h, slice_fill(slice_idx)));
+            let idx = (py * size_px + px) as usize;
+            pixels[idx] = slint::Rgba8Pixel {
+                r: (r_acc / 4) as u8,
+                g: (g_acc / 4) as u8,
+                b: (b_acc / 4) as u8,
+                a: (a_acc / 4) as u8,
+            };
         }
     }
+    let mut pie = part(0.06, 0.20, 0.48, 0.72);
+    pie.has_image = true;
+    pie.img = slint::Image::from_rgba8(buf);
+    out.push(pie);
     let row_step = (0.66 / categories.max(1) as f32).min(0.13);
     for (ci, v) in values.iter().copied().enumerate() {
         let ry = 0.22 + ci as f32 * row_step;
@@ -509,6 +538,7 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
             label.wrap = true;
             out.push(label);
         }
+        return out;
     } else {
         let bar_w = group_w * 0.8 / chart.series.len() as f32;
         for (si, series) in chart.series.iter().enumerate() {
@@ -624,15 +654,15 @@ mod tests {
             "pie charts must not fall back to columns"
         );
         assert!(
-            parts.iter().filter(|p| p.round).count() > 20,
-            "pie chart disc should be drawn with round sector dots"
+            parts.iter().any(|p| p.has_image),
+            "pie chart disc should be drawn as an anti-aliased raster image"
         );
         assert!(parts.iter().any(|p| p.text.contains("R&D (50%)")));
         assert!(parts.iter().any(|p| p.text.contains("Sales (30%)")));
         assert!(parts.iter().any(|p| p.text.contains("Ops (20%)")));
         let mut slice_colors: Vec<u32> = parts
             .iter()
-            .filter(|p| p.round && p.has_bg)
+            .filter(|p| p.has_bg && p.fw < 0.1)
             .map(|p| p.bg.as_argb_encoded())
             .collect();
         slice_colors.sort_unstable();

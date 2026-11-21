@@ -1,0 +1,127 @@
+import { LoomSectionHeader } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ElementInk } from "object_part.slint";
+
+component LayoutCard inherits Rectangle {
+    in property <string> layout-id;
+    in property <string> label;
+    in property <bool> active: false;
+    callback pick();
+
+    height: 54px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: root.active ? 2px : 1px;
+    border-color: root.active ? Theme.palette().accent
+        : touch.has-hover ? Theme.palette().border-strong
+        : Theme.palette().border;
+    background: touch.has-hover ? Theme.palette().selection-soft : Theme.palette().surface;
+    accessible-role: button;
+    accessible-label: root.label + " layout";
+    accessible-action-default => { root.pick(); }
+
+    touch := TouchArea { clicked => { root.pick(); } }
+
+    VerticalLayout {
+        padding: 4px;
+        spacing: 2px;
+        // Miniature wireframe preview
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            border-radius: 2px;
+            background: Theme.palette().surface-sunken;
+
+            if root.layout-id == "title" : VerticalLayout {
+                alignment: center;
+                padding: 4px;
+                spacing: 3px;
+                Rectangle { height: 6px; width: 70%; background: Theme.palette().ink-secondary; border-radius: 1px; }
+                Rectangle { height: 3px; width: 50%; background: Theme.palette().border-strong; border-radius: 1px; }
+            }
+            if root.layout-id == "content" : VerticalLayout {
+                padding: 4px;
+                spacing: 3px;
+                Rectangle { height: 5px; width: 60%; background: Theme.palette().ink-secondary; border-radius: 1px; }
+                Rectangle { vertical-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+            }
+            if root.layout-id == "two-col" : VerticalLayout {
+                padding: 4px;
+                spacing: 3px;
+                Rectangle { height: 5px; width: 60%; background: Theme.palette().ink-secondary; border-radius: 1px; }
+                HorizontalLayout {
+                    vertical-stretch: 1;
+                    spacing: 3px;
+                    Rectangle { horizontal-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+                    Rectangle { horizontal-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+                }
+            }
+            if root.layout-id == "image" : HorizontalLayout {
+                padding: 4px;
+                spacing: 3px;
+                Rectangle { horizontal-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+                Rectangle { horizontal-stretch: 1; background: Theme.palette().accent; opacity: 0.4; border-radius: 1px; }
+            }
+            if root.layout-id == "section" : VerticalLayout {
+                alignment: center;
+                padding: 4px;
+                Rectangle { height: 7px; width: 65%; x: 4px; background: Theme.palette().accent; border-radius: 1px; }
+            }
+            if root.layout-id == "comparison" : HorizontalLayout {
+                padding: 4px;
+                spacing: 3px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Rectangle { height: 4px; background: Theme.palette().ink-secondary; border-radius: 1px; }
+                    Rectangle { vertical-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Rectangle { height: 4px; background: Theme.palette().ink-secondary; border-radius: 1px; }
+                    Rectangle { vertical-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
+                }
+            }
+            if root.layout-id == "big-number" : VerticalLayout {
+                alignment: center;
+                padding: 4px;
+                spacing: 2px;
+                Rectangle { height: 10px; width: 45%; background: Theme.palette().accent; border-radius: 2px; }
+                Rectangle { height: 3px; width: 60%; background: Theme.palette().border-strong; border-radius: 1px; }
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.type.caption;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+export component PresentLayoutPicker inherits VerticalLayout {
+    spacing: Theme.tokens.space.xs;
+    LoomSectionHeader { title: "Slide Layout"; }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LayoutCard { layout-id: "title"; label: "Title"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("title"); } }
+        LayoutCard { layout-id: "content"; label: "Content"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("content"); } }
+    }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LayoutCard { layout-id: "two-col"; label: "2 Col"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("two-col"); } }
+        LayoutCard { layout-id: "image"; label: "Image"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("image"); } }
+    }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LayoutCard { layout-id: "section"; label: "Section"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("section"); } }
+        LayoutCard { layout-id: "comparison"; label: "Compare"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("comparison"); } }
+    }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LayoutCard { layout-id: "big-number"; label: "Big #"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("big-number"); } }
+        LayoutCard { layout-id: "blank"; label: "Blank"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("blank"); } }
+    }
+}

@@ -1,0 +1,63 @@
+import {
+    LoomSectionHeader, LoomSegmentedControl, LoomColorWell, LoomColorPalette,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ElementInk } from "object_part.slint";
+
+export component PresentDocumentSection inherits VerticalLayout {
+    in property <int> deck-theme-index: 0;
+    callback deck-theme-selected(int);
+
+    spacing: Theme.tokens.space.sm;
+
+    LoomSectionHeader { title: "Deck Theme"; }
+    LoomSegmentedControl {
+        items: ["Paper", "Slate", "Warm"];
+        current: root.deck-theme-index;
+        selected(idx) => { root.deck-theme-selected(idx); }
+    }
+
+    LoomSectionHeader { title: "Slide Background"; }
+    LoomColorWell {
+        width: parent.width;
+        label: "Background";
+        accessible-name: "Slide Background";
+        current-color: ElementInk.bg-color-swatch;
+        is-automatic: ElementInk.bg-color-automatic;
+        is-mixed: ElementInk.bg-color-mixed;
+        color-label: ElementInk.bg-color-label;
+        open: ElementInk.active-palette == "bg";
+        toggled => { ElementInk.color-toggled("bg"); }
+    }
+
+    if ElementInk.active-palette == "bg" : LoomColorPalette {
+        width: parent.width;
+        swatches: ElementInk.color-swatches;
+        selected-hex: ElementInk.bg-color-hex;
+        is-automatic: ElementInk.bg-color-automatic;
+        is-mixed: ElementInk.bg-color-mixed;
+        automatic-label: "Theme paper";
+        kind-label: "Slide background";
+        hex-input <=> ElementInk.hex-input;
+        hex-error: ElementInk.hex-error;
+        select-color(hex) => { ElementInk.color-picked("bg", hex); }
+        select-automatic => { ElementInk.color-picked("bg", ""); }
+        hex-edited(val) => { ElementInk.hex-edited(val); }
+        hex-submitted(val) => { ElementInk.hex-submitted("bg", val); }
+        close-requested => { ElementInk.color-toggled("bg"); }
+    }
+
+    LoomSectionHeader { title: "Aspect Ratio"; }
+    LoomSegmentedControl {
+        items: ["16:9", "4:3"];
+        current: ElementInk.aspect-ratio == "4:3" ? 1 : 0;
+        selected(idx) => { ElementInk.aspect-requested(idx == 1 ? "4:3" : "16:9"); }
+    }
+
+    if ElementInk.deck-stats != "" : Text {
+        text: ElementInk.deck-stats;
+        font-size: Theme.type.caption;
+        color: Theme.palette().ink-secondary;
+        wrap: word-wrap;
+    }
+}
