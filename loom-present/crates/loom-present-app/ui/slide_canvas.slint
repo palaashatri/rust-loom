@@ -116,7 +116,7 @@ export component PresentSlideCanvas inherits Rectangle {
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
-            background: DocumentInk.paper;
+            background: ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch;
             drop-shadow-blur: root.miniature ? 0px : 16px;
             drop-shadow-offset-y: root.miniature ? 0px : 6px;
             drop-shadow-color: root.miniature ? transparent : Theme.palette().shadow;
@@ -345,7 +345,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     y: ObjectParts.active-cells[idx].fy * parent.height;
                     width: ObjectParts.active-cells[idx].fw * parent.width;
                     height: ObjectParts.active-cells[idx].fh * parent.height;
-                    background: DocumentInk.paper;
+                    background: ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch;
                     accessible-role: none;
                 }
 
