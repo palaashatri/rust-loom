@@ -207,11 +207,11 @@ fn formatting_headings_alignment_lists_zoom_and_dialogs_respond_to_shortcuts() {
     app.global::<WriterFootnoteState>().invoke_cancel();
 
     // Undo / Ctrl+Y redo
-    let edited_blocks = state.current.borrow().blocks[0].text.clone();
+    let edited_block = state.current.borrow().blocks[0].clone();
     app.invoke_undo();
-    assert_ne!(state.current.borrow().blocks[0].text, edited_blocks);
+    assert_ne!(state.current.borrow().blocks[0], edited_block);
     app.invoke_shortcut_pressed("y".into(), false, false);
-    assert_eq!(state.current.borrow().blocks[0].text, edited_blocks);
+    assert_eq!(state.current.borrow().blocks[0], edited_block);
 
     // Find & Find+Replace
     send_chord(&app, &[m], "f");

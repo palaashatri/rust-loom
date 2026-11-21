@@ -799,6 +799,55 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             "format",
             82,
         ),
+        (
+            "list.bullet.circle",
+            "List: Bulleted (Circle ◦)",
+            "Format paragraphs as a circle-bulleted list",
+            "format",
+            83,
+        ),
+        (
+            "list.bullet.square",
+            "List: Bulleted (Square ▪)",
+            "Format paragraphs as a square-bulleted list",
+            "format",
+            84,
+        ),
+        (
+            "list.bullet.dash",
+            "List: Bulleted (Dash –)",
+            "Format paragraphs as a dash-bulleted list",
+            "format",
+            85,
+        ),
+        (
+            "list.number.lower_alpha",
+            "List: Numbered (a, b, c)",
+            "Format paragraphs as a lowercase-lettered list",
+            "format",
+            86,
+        ),
+        (
+            "list.number.upper_alpha",
+            "List: Numbered (A, B, C)",
+            "Format paragraphs as an uppercase-lettered list",
+            "format",
+            87,
+        ),
+        (
+            "list.number.lower_roman",
+            "List: Numbered (i, ii, iii)",
+            "Format paragraphs as a lowercase-Roman list",
+            "format",
+            88,
+        ),
+        (
+            "list.number.upper_roman",
+            "List: Numbered (I, II, III)",
+            "Format paragraphs as an uppercase-Roman list",
+            "format",
+            89,
+        ),
         ("paragraph.h1", "Heading 1", "Apply heading 1", "format", 42),
         ("paragraph.h2", "Heading 2", "Apply heading 2", "format", 52),
         ("paragraph.h3", "Heading 3", "Apply heading 3", "format", 62),
@@ -1032,7 +1081,14 @@ fn sync_writer_registry_enablement(
         "review.word_count",
         "list.none",
         "list.bulleted",
+        "list.bullet.circle",
+        "list.bullet.square",
+        "list.bullet.dash",
         "list.numbered",
+        "list.number.lower_alpha",
+        "list.number.upper_alpha",
+        "list.number.lower_roman",
+        "list.number.upper_roman",
         local_menu::QUIT_COMMAND_ID,
     ] {
         registry.set_enabled(&CommandId::new(id), true);
@@ -1630,7 +1686,6 @@ fn project_selection_event(
     }
     if table_actions::get_table_cell_selection_range().is_some() {
         table_actions::clear_table_cell_selection_range();
-        typing_style::clear();
     }
 
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
@@ -1963,7 +2018,6 @@ fn apply_typing_transaction(
     }
 
     table_actions::clear_table_cell_selection_range();
-    typing_style::clear();
     let previous = state.current.replace(next);
     let after = state.current.borrow().clone();
     state
@@ -2055,7 +2109,6 @@ fn apply_with_history_using_edits(
     if before == next {
         if clear_table_range_before_projection {
             table_actions::clear_table_cell_selection_range();
-            typing_style::clear();
             apply_document_with_viewport(app, &before, *state.viewport.borrow());
         }
         return true;
@@ -2075,7 +2128,6 @@ fn apply_with_history_using_edits(
         .record(previous, after, kind, history_now_ms(state));
     if clear_table_range_before_projection {
         table_actions::clear_table_cell_selection_range();
-        typing_style::clear();
     }
     apply_state(app, state);
     true
@@ -2704,10 +2756,8 @@ fn wire_writer_shared_callbacks(
                             return;
                         }
                         table_actions::clear_table_cell_selection_range();
-                        typing_style::clear();
                     } else {
                         table_actions::clear_table_cell_selection_range();
-                        typing_style::clear();
                         state
                             .current
                             .borrow_mut()

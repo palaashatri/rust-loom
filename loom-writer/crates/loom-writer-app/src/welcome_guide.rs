@@ -40,14 +40,12 @@ pub(crate) fn should_show_on_first_run() -> bool {
 /// Opens the 7-step Loom Writer Welcome Guide at Step 1 and syncs platform shortcut labels.
 pub(crate) fn open(app: &WriterApp) {
     let guide = app.global::<WelcomeGuideState>();
-    let mod_key = format!("{}+", app.get_shortcut_modifier());
-    guide.set_mod_key(SharedString::from(mod_key));
-    let guide = app.global::<WelcomeGuideState>();
-    guide.set_mod_key(if cfg!(target_os = "macos") {
-        "Cmd".into()
+    let mod_key = if cfg!(target_os = "macos") {
+        "Cmd+"
     } else {
-        "Ctrl".into()
-    });
+        "Ctrl+"
+    };
+    guide.set_mod_key(SharedString::from(mod_key));
     guide.set_step(0);
     guide.set_open(true);
     let toggled_focus = !guide.get_focus_request();
