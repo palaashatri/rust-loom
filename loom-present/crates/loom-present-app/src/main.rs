@@ -1033,12 +1033,8 @@ fn wire_responsive_layout_with_state(app: &PresentApp, state: Rc<GuiState>) {
 
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
-    #[cfg(target_os = "windows")]
-    windows_platform::init_backend_if_needed()?;
 
     let app = PresentApp::new().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "windows")]
-    windows_platform::install_alt_modifier_guard(&app);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
@@ -1426,12 +1422,8 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let out_dir = Path::new(out_dir);
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
-    #[cfg(target_os = "windows")]
-    windows_platform::init_backend_if_needed()?;
 
     let app = PresentApp::new().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "windows")]
-    windows_platform::install_alt_modifier_guard(&app);
     appearance::apply_ui_font(&app, true);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);

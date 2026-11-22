@@ -67,7 +67,7 @@ fn peak_working_set_mb() -> f64 {
     #[cfg(target_os = "windows")]
     {
         let pid = std::process::id();
-        return std::process::Command::new("powershell")
+        std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
@@ -77,7 +77,7 @@ fn peak_working_set_mb() -> f64 {
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .and_then(|s| s.trim().parse::<f64>().ok())
-            .map_or(f64::NAN, |b| b / 1048576.0);
+            .map_or(f64::NAN, |b| b / 1048576.0)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
