@@ -53,7 +53,7 @@ directions = ["ltr", "rtl"]
 [application_status]
 sheets = "IN_PROGRESS"
 writer = "IN_PROGRESS"
-present = "IN_PROGRESS"
+present = "ACCEPTED"
 photo = "LOCKED"
 motion = "LOCKED"
 video = "LOCKED"
