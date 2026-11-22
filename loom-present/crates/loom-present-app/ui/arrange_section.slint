@@ -2,70 +2,55 @@ import { LoomSectionHeader, LoomButton, LoomTextField } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { ElementInk } from "object_part.slint";
 
-component GeoField inherits HorizontalLayout {
-    in property <string> label;
-    in property <string> value;
-    callback committed(string);
-    spacing: Theme.tokens.space.xs;
-    Text {
-        text: root.label;
-        width: 22px;
-        font-size: Theme.type.caption;
-        color: Theme.palette().ink-secondary;
-        vertical-alignment: center;
-    }
-    LoomTextField {
-        horizontal-stretch: 1;
-        value: root.value;
-        accepted(v) => { root.committed(v); }
-    }
-}
-
 export component PresentArrangeSection inherits VerticalLayout {
-    spacing: Theme.tokens.space.sm;
+    in property <int> selection-count: 1;
+    spacing: 2px;
 
     LoomSectionHeader { title: "Order"; }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LoomButton { label: "Front"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("front"); } }
-        LoomButton { label: "Fwd"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("forward"); } }
-        LoomButton { label: "Bwd"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("backward"); } }
-        LoomButton { label: "Back"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("back"); } }
+        for slot in 4 : VerticalLayout {
+            property <int> k: Theme.rtl ? 3 - slot : slot;
+            horizontal-stretch: 1;
+            if k == 0 : LoomButton { label: "Front"; variant: "ghost"; clicked => { ElementInk.arrange-requested("front"); } }
+            if k == 1 : LoomButton { label: "Fwd"; variant: "ghost"; clicked => { ElementInk.arrange-requested("forward"); } }
+            if k == 2 : LoomButton { label: "Bwd"; variant: "ghost"; clicked => { ElementInk.arrange-requested("backward"); } }
+            if k == 3 : LoomButton { label: "Back"; variant: "ghost"; clicked => { ElementInk.arrange-requested("back"); } }
+        }
     }
 
     LoomSectionHeader { title: "Align"; }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LoomButton { label: "Left"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-left"); } }
-        LoomButton { label: "Center"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-center"); } }
-        LoomButton { label: "Right"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-right"); } }
+        for slot in 3 : VerticalLayout {
+            property <int> k: Theme.rtl ? 2 - slot : slot;
+            horizontal-stretch: 1;
+            if k == 0 : LoomButton { label: "Left"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-left"); } }
+            if k == 1 : LoomButton { label: "Center"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-center"); } }
+            if k == 2 : LoomButton { label: "Right"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-right"); } }
+        }
     }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LoomButton { label: "Top"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-top"); } }
-        LoomButton { label: "Middle"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-middle"); } }
-        LoomButton { label: "Bottom"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("align-bottom"); } }
+        for slot in 3 : VerticalLayout {
+            property <int> k: Theme.rtl ? 2 - slot : slot;
+            horizontal-stretch: 1;
+            if k == 0 : LoomButton { label: "Top"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-top"); } }
+            if k == 1 : LoomButton { label: "Middle"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-middle"); } }
+            if k == 2 : LoomButton { label: "Bottom"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-bottom"); } }
+        }
     }
 
     LoomSectionHeader { title: "Distribute & Rotate"; }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LoomButton { label: "Dist H"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("dist-h"); } }
-        LoomButton { label: "Dist V"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("dist-v"); } }
-        LoomButton { label: "-90°"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("rot-ccw"); } }
-        LoomButton { label: "+90°"; variant: "ghost"; horizontal-stretch: 1; clicked => { ElementInk.arrange-requested("rot-cw"); } }
+        for slot in 4 : VerticalLayout {
+            property <int> k: Theme.rtl ? 3 - slot : slot;
+            horizontal-stretch: 1;
+            if k == 0 : LoomButton { label: "Dist H"; variant: "ghost"; clicked => { ElementInk.arrange-requested("dist-h"); } }
+            if k == 1 : LoomButton { label: "Dist V"; variant: "ghost"; clicked => { ElementInk.arrange-requested("dist-v"); } }
+            if k == 2 : LoomButton { label: "-90°"; variant: "ghost"; clicked => { ElementInk.arrange-requested("rot-ccw"); } }
+            if k == 3 : LoomButton { label: "+90°"; variant: "ghost"; clicked => { ElementInk.arrange-requested("rot-cw"); } }
+        }
     }
-
-    LoomSectionHeader { title: "Position & Size"; }
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
-        GeoField { label: "X"; value: ElementInk.x-text; horizontal-stretch: 1; committed(v) => { ElementInk.geometry-requested("x", v); } }
-        GeoField { label: "Y"; value: ElementInk.y-text; horizontal-stretch: 1; committed(v) => { ElementInk.geometry-requested("y", v); } }
-    }
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
-        GeoField { label: "W"; value: ElementInk.w-text; horizontal-stretch: 1; committed(v) => { ElementInk.geometry-requested("w", v); } }
-        GeoField { label: "H"; value: ElementInk.h-text; horizontal-stretch: 1; committed(v) => { ElementInk.geometry-requested("h", v); } }
-    }
-    GeoField { label: "Rot"; value: ElementInk.rot-text; committed(v) => { ElementInk.geometry-requested("rot", v); } }
 }

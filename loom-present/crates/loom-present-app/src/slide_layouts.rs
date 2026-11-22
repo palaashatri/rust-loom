@@ -170,9 +170,44 @@ pub(crate) const TEMPLATE_NAMES: [&str; 4] = [
     "Image and Text",
 ];
 
+pub(crate) const ALL_TEMPLATE_IDS: [&str; 12] = [
+    "blank",
+    "title-content",
+    "two-columns",
+    "image-text",
+    "executive-pitch",
+    "quarterly-review",
+    "product-launch",
+    "data-report",
+    "editorial-portfolio",
+    "academic-lecture",
+    "workshop-deck",
+    "minimal-keynote",
+];
+
+pub(crate) fn template_name(choice: i32) -> &'static str {
+    match choice {
+        0..=3 => TEMPLATE_NAMES[choice as usize],
+        4 => "Executive Pitch",
+        5 => "Quarterly Review",
+        6 => "Product Launch",
+        7 => "Data Report",
+        8 => "Editorial Portfolio",
+        9 => "Academic Lecture",
+        10 => "Workshop Deck",
+        11 => "Minimal Keynote",
+        _ => TEMPLATE_NAMES[0],
+    }
+}
+
 /// The deck a template creates, built on `blank` (the app's empty one-slide
 /// deck). An unknown index gives the blank deck.
 pub(crate) fn template_session(blank: PresentationSession, choice: i32) -> PresentationSession {
+    if (4..=11).contains(&choice) {
+        let id = ALL_TEMPLATE_IDS[choice as usize];
+        let doc = loom_present_core::templates::document_from_template(id, "Untitled Presentation");
+        return PresentationSession::new(doc);
+    }
     let mut session = blank;
     match choice {
         1 => {

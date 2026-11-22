@@ -64,7 +64,12 @@ fn type_defaults(kind: &ElementType) -> Option<(f32, bool, i32, bool)> {
         ElementType::Subtitle => Some((16.0, false, 2, false)),
         ElementType::BodyText => Some((16.0, false, 1, false)),
         ElementType::StatCard => Some((22.86, true, 1, true)),
-        ElementType::ShapeRectangle | ElementType::ShapeCircle => Some((16.0, false, 3, false)),
+        ElementType::ShapeRectangle
+        | ElementType::ShapeCircle
+        | ElementType::ShapeRoundedRect
+        | ElementType::ShapeArrowRight
+        | ElementType::ShapeLine
+        | ElementType::ShapeCallout => Some((16.0, false, 3, false)),
         _ => None,
     }
 }
@@ -105,6 +110,8 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
     text.fs = style.size_or(size_pt) / POINTS_PER_UNIT;
     text.bold = style.bold.unwrap_or(bold);
     text.italic = style.italic;
+    text.underline = style.underline;
+    text.strikethrough = style.strikethrough;
     text.wrap = true;
     text.pad = true;
     text.align = match style.align {
@@ -130,25 +137,119 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
     Some(text)
 }
 
+fn shape_kind_tag(kind: &ElementType) -> Option<&'static str> {
+    match kind {
+        ElementType::ShapeRoundedRect => Some("rounded-rect"),
+        ElementType::ShapeArrowRight => Some("arrow-right"),
+        ElementType::ShapeLine => Some("line"),
+        ElementType::ShapeCallout => Some("callout"),
+        _ => None,
+    }
+}
+
+fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
+    let Some((size_pt, bold, ink, centred)) = type_defaults(&element.element_type) else {
+        return Vec::new();
+    };
+    let style = &element.style;
+    let mut lines: Vec<Vec<(String, &loom_present_core::StyledTextRun)>> = vec![Vec::new()];
+    for run in &element.runs {
+        if run.text.is_empty() {
+            continue;
+        }
+        for (idx, seg) in run.text.split('\n').enumerate() {
+            if idx > 0 {
+                lines.push(Vec::new());
+            }
+            if !seg.is_empty() {
+                lines.last_mut().unwrap().push((seg.to_string(), run));
+            }
+        }
+    }
+    let line_count = lines.len().max(1) as f32;
+    let line_h = 0.8 / line_count;
+    let mut out = Vec::new();
+    for (line_idx, line) in lines.into_iter().enumerate() {
+        let total_chars: usize = line
+            .iter()
+            .map(|(t, _)| t.chars().count())
+            .sum::<usize>()
+            .max(1);
+        let mut x_cursor = 0.04f32;
+        let max_w = 0.92f32;
+        let fy = 0.1 + (line_idx as f32) * line_h;
+        for (seg, run) in line {
+            let frac = ((seg.chars().count() as f32 / total_chars as f32) * max_w)
+                .clamp(0.05, (1.0 - x_cursor).max(0.05));
+            let mut p = part(x_cursor, fy, frac, line_h);
+            p.text = SharedString::from(seg);
+            p.fs = run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT;
+            p.bold = run.bold.unwrap_or_else(|| style.bold.unwrap_or(bold));
+            p.italic = run.italic || style.italic;
+            p.underline = run.underline || style.underline;
+            p.strikethrough = run.strikethrough || style.strikethrough;
+            p.align = match style.align {
+                Some(TextAlign::Left) => 0,
+                Some(TextAlign::Center) => 1,
+                Some(TextAlign::Right) => 2,
+                None => i32::from(centred),
+            };
+            match run.color.as_deref().or(style.color.as_deref()) {
+                Some(hex) => {
+                    p.fg = color(hex);
+                    p.ink = 0;
+                }
+                None => p.ink = ink,
+            }
+            if let Some(family) = run
+                .font_family
+                .as_deref()
+                .or(style.font_family.as_deref())
+                .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+            {
+                p.family = SharedString::from(family);
+            }
+            out.push(p);
+            x_cursor = (x_cursor + frac).min(0.96);
+        }
+    }
+    out
+}
+
 /// Fill and text of a text object or shape whose style overrides its type's
 /// look; nothing for an element that was never styled, which the canvas draws
 /// itself.
 fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
-    if element.style.is_default() {
+    let custom_shape = shape_kind_tag(&element.element_type);
+    if element.style.is_default() && element.runs.is_empty() && custom_shape.is_none() {
         return Vec::new();
     }
-    let Some(text) = styled_text_part(element) else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    if let Some(hex) = element.style.fill.as_deref() {
+    if let Some(tag) = custom_shape {
+        let mut fill = part(0.0, 0.0, 1.0, 1.0);
+        fill.has_bg = true;
+        fill.shape_kind = SharedString::from(tag);
+        let default_hex = if element.element_type == ElementType::ShapeLine {
+            "#1f2328"
+        } else {
+            "#d6e0f5"
+        };
+        fill.bg = color(element.style.fill.as_deref().unwrap_or(default_hex));
+        out.push(fill);
+    } else if let Some(hex) = element.style.fill.as_deref() {
         let mut fill = part(0.0, 0.0, 1.0, 1.0);
         fill.has_bg = true;
         fill.bg = color(hex);
         fill.round = element.element_type == ElementType::ShapeCircle;
         out.push(fill);
     }
-    out.push(text);
+    if !element.runs.is_empty() {
+        out.extend(rich_run_parts(element));
+    } else if let Some(text) = styled_text_part(element) {
+        if !element.content.is_empty() {
+            out.push(text);
+        }
+    }
     out
 }
 
@@ -286,8 +387,8 @@ fn dot_part(x: f32, y: f32, d: f32, w: f32, h: f32, fill: Color) -> ObjectPart {
 fn pie_chart_parts(
     chart: &Chart,
     categories: usize,
-    width: f32,
-    height: f32,
+    _width: f32,
+    _height: f32,
     out: &mut Vec<ObjectPart>,
 ) {
     let series = &chart.series[0];

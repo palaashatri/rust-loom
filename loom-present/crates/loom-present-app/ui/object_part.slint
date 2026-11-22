@@ -132,6 +132,7 @@ export global ElementInk {
     callback layout-picked(string);
     in-out property <string> aspect-ratio: "16:9";
     callback aspect-requested(string);
+    callback theme-preset-requested(int);
     in-out property <string> deck-stats: "";
 }
 
@@ -169,6 +170,57 @@ export component ObjectPartView inherits Rectangle {
         vertical-alignment: center;
         wrap: root.part.wrap ? word-wrap : no-wrap;
         overflow: elide;
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "rounded-rect" : Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: min(self.width, self.height) * 0.22;
+        background: root.part.bg;
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "line" : Rectangle {
+        x: 0px;
+        y: (parent.height - max(2px, parent.height * 0.14)) / 2;
+        width: parent.width;
+        height: max(2px, parent.height * 0.14);
+        background: root.part.bg;
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "arrow-right" : Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fill: root.part.bg;
+        MoveTo { x: 0; y: 32; }
+        LineTo { x: 65; y: 32; }
+        LineTo { x: 65; y: 12; }
+        LineTo { x: 100; y: 50; }
+        LineTo { x: 65; y: 88; }
+        LineTo { x: 65; y: 68; }
+        LineTo { x: 0; y: 68; }
+        Close {}
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "callout" : Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fill: root.part.bg;
+        MoveTo { x: 6; y: 6; }
+        LineTo { x: 94; y: 6; }
+        LineTo { x: 94; y: 74; }
+        LineTo { x: 38; y: 74; }
+        LineTo { x: 20; y: 96; }
+        LineTo { x: 24; y: 74; }
+        LineTo { x: 6; y: 74; }
+        Close {}
         accessible-role: none;
     }
 

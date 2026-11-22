@@ -238,10 +238,6 @@ pub(crate) fn build_present_menu_bar() -> loom_desktop::MenuBar {
         ],
     );
     crate::file_menu::group(&mut menu_bar);
-    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
+    menu_bar.disable_items_except(SUPPORTED_COMMANDS);
     menu_bar
 }
-
-use command_dispatch::{
-    dispatch_command, dispatch_scheduled_menu_action, is_present_menu_command, schedule_menu_action,
-};

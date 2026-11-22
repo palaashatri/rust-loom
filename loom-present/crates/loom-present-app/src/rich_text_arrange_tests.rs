@@ -3,6 +3,7 @@ use crate::command_dispatch::dispatch_command;
 
 #[test]
 fn rich_text_and_arrange_commands_dispatch_without_panicking() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     for id in [
         "format.bold",

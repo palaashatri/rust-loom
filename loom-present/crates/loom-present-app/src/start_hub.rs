@@ -44,9 +44,8 @@ pub(crate) fn relative_time_label(modified: SystemTime, now: SystemTime) -> Stri
 }
 
 fn load_recent_paths_at(path: &Path) -> Vec<PathBuf> {
-    settings_file::read(path, RECENT_DECKS_KEY)
-        .unwrap_or_default()
-        .lines()
+    let raw = settings_file::read(path, RECENT_DECKS_KEY).unwrap_or_default();
+    raw.split('|')
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(PathBuf::from)
@@ -59,7 +58,7 @@ fn save_recent_paths_at(path: &Path, entries: &[PathBuf]) -> io::Result<()> {
         .take(MAX_RECENTS)
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("|");
     settings_file::write(path, RECENT_DECKS_KEY, &encoded)
 }
 
@@ -123,11 +122,13 @@ pub(crate) fn open(app: &PresentApp) {
     app.set_status_left("Opened Start Hub".into());
 }
 
+pub(crate) type HubStringCb = Rc<dyn Fn(&PresentApp, &str)>;
+
 pub(crate) struct StartHubCallbacks {
     pub on_open_file: Rc<dyn Fn(&PresentApp)>,
     pub on_new_presentation: Rc<dyn Fn(&PresentApp)>,
-    pub on_open_template: Rc<dyn Fn(&PresentApp, &str)>,
-    pub on_open_deck: Rc<dyn Fn(&PresentApp, &str)>,
+    pub on_open_template: HubStringCb,
+    pub on_open_deck: HubStringCb,
 }
 
 pub(crate) fn wire(app: &PresentApp, callbacks: StartHubCallbacks) {

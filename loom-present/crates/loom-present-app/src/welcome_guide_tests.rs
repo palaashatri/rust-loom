@@ -3,6 +3,7 @@ use crate::{welcome_guide, WelcomeGuideState};
 
 #[test]
 fn welcome_guide_opens_and_closes_cleanly() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     assert!(!app.global::<WelcomeGuideState>().get_open());
     welcome_guide::open(&app);
@@ -18,8 +19,8 @@ fn welcome_guide_opens_and_closes_cleanly() {
 fn welcome_guide_platform_mod_key_matches_os() {
     let key = welcome_guide::platform_mod_key();
     if cfg!(target_os = "macos") {
-        assert_eq!(key, "⌘");
+        assert_eq!(key, "Cmd+");
     } else {
-        assert_eq!(key, "Ctrl");
+        assert_eq!(key, "Ctrl+");
     }
 }

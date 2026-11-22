@@ -15,7 +15,7 @@ pub(crate) fn matching(commands: Vec<PaletteCommand>, query: &str) -> Vec<Palett
     let mut scored: Vec<(u32, PaletteCommand)> = commands
         .into_iter()
         .filter_map(|command| {
-            let score = match_score(query, command.label, command.id, "");
+            let score = match_score(query, command.label, command.id, command.shortcut);
             (score > 0).then_some((score, command))
         })
         .collect();

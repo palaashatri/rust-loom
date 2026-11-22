@@ -25,7 +25,7 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         );
     }
     let archive = PackageArchive::from_bytes(pptx_bytes)
-        .map_err(|err| format!("unreadable pptx archive (corrupt or invalid ZIP): {err}"))?;
+        .map_err(|err| format!("unreadable pptx archive: {err}"))?;
 
     if archive.get("ppt/presentation.xml").is_none() {
         return Err("pptx archive is missing ppt/presentation.xml".to_string());

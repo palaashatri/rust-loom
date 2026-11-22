@@ -38,6 +38,7 @@ fn command_dispatch_recognizes_all_present_menu_commands() {
 
 #[test]
 fn command_dispatch_shortcuts_open_modals() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     assert!(dispatch_shortcut(&app, "k", false, true, false));
     assert!(app.get_palette_open());

@@ -59,8 +59,10 @@ fn close_without_refocus(app: &PresentApp) {
     mark_seen();
 }
 
+pub(crate) type TryActionCb = Rc<dyn Fn(&PresentApp, &str)>;
+
 /// Connects Welcome Guide close and interactive Try callbacks to Present application handlers.
-pub(crate) fn wire(app: &PresentApp, on_try_action: Rc<dyn Fn(&PresentApp, &str)>) {
+pub(crate) fn wire(app: &PresentApp, on_try_action: TryActionCb) {
     let weak = app.as_weak();
     app.global::<WelcomeGuideState>().on_close_guide(move || {
         let Some(app) = weak.upgrade() else {

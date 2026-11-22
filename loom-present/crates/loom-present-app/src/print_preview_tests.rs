@@ -31,6 +31,7 @@ fn print_preview_layout_and_page_counts() {
 
 #[test]
 fn print_preview_opens_with_slide_count_and_title() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     print_preview::open(&app, 4, "Q4 Review", "Speaker notes");
     let state = app.global::<PrintPreviewState>();

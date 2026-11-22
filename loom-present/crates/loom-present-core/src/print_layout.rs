@@ -113,6 +113,7 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
 
     let pages = preview_print_pages(doc, options);
     let mut pdf = PdfDocument::new();
+    pdf.set_font_fallback(crate::pdf_export::shared_font_fallback());
     let title_style = TextStyle {
         size_pt: 12.0,
         bold: true,

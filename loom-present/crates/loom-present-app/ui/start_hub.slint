@@ -1,6 +1,7 @@
 import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { SlideTemplatePreview } from "template_previews.slint";
 
 export struct StartHubDeckEntry {
     name: string,
@@ -24,10 +25,10 @@ export global StartHubState {
     in-out property <[StartHubDeckEntry]> recent-decks: [];
     in-out property <[StartHubDeckEntry]> disk-decks: [];
     in-out property <[StartHubTemplateEntry]> quick-templates: [
-        { id: "blank", name: "Blank Deck", category: "Basic" },
-        { id: "coral-keynote", name: "Coral Keynote", category: "Business" },
-        { id: "editorial-grid", name: "Editorial Grid", category: "Editorial" },
-        { id: "midnight-pitch", name: "Midnight Pitch", category: "Dark" },
+        { id: "blank", name: "Blank", category: "Basic" },
+        { id: "executive-pitch", name: "Executive Pitch", category: "Business" },
+        { id: "editorial-portfolio", name: "Editorial Portfolio", category: "Editorial" },
+        { id: "minimal-keynote", name: "Minimal Keynote", category: "Editorial" },
     ];
     callback close-hub();
     callback open-file();
@@ -262,22 +263,11 @@ export component StartHubModal inherits Rectangle {
                                 HorizontalLayout {
                                     padding: Theme.tokens.space.sm;
                                     spacing: Theme.tokens.space.sm;
-                                    Rectangle {
+                                    SlideTemplatePreview {
                                         width: 48px;
                                         height: 34px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 3px;
-                                        background: tpl.id == "midnight-pitch" ? #1f2430 : #ffffff;
-                                        border-width: 1px;
-                                        border-color: Theme.palette().border-strong;
-                                        Rectangle {
-                                            x: 6px; y: 8px; width: 18px; height: 3px; border-radius: 1.5px;
-                                            background: Theme.palette().accent;
-                                        }
-                                        Rectangle {
-                                            x: 6px; y: 15px; width: 32px; height: 4px; border-radius: 2px;
-                                            background: tpl.id == "midnight-pitch" ? #f8fafc : #1f2328;
-                                        }
+                                        template-id: tpl.id;
                                     }
                                     VerticalLayout {
                                         alignment: center;

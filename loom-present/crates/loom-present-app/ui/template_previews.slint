@@ -10,28 +10,28 @@ export component SlideTemplatePreview inherits Rectangle {
     clip: true;
 
     pure function is-dark() -> bool {
-        root.template-id == "midnight-pitch" || root.template-id == "obsidian-tech"
+        root.template-id == "executive-pitch" || root.template-id == "minimal-keynote"
     }
 
     pure function bg-color() -> color {
-        if root.template-id == "midnight-pitch" { return #181c28; }
-        if root.template-id == "obsidian-tech" { return #111827; }
-        if root.template-id == "editorial-grid" { return #faf7f2; }
-        if root.template-id == "warm-keynote" { return #fff8f5; }
-        if root.template-id == "campus-lecture" { return #f4f7fb; }
+        if root.template-id == "executive-pitch" { return #0f172a; }
+        if root.template-id == "minimal-keynote" { return #18181b; }
+        if root.template-id == "editorial-portfolio" { return #faf5f0; }
+        if root.template-id == "product-launch" { return #fff7ed; }
+        if root.template-id == "academic-lecture" { return #f4f7fb; }
+        if root.template-id == "workshop-deck" { return #f0fdf4; }
         return #ffffff;
     }
 
     pure function accent-color() -> color {
-        if root.template-id == "coral-keynote" || root.template-id == "warm-keynote" { return #d9534f; }
-        if root.template-id == "midnight-pitch" { return #f97316; }
-        if root.template-id == "obsidian-tech" { return #38bdf8; }
-        if root.template-id == "editorial-grid" { return #92400e; }
-        if root.template-id == "campus-lecture" { return #1d4ed8; }
-        if root.template-id == "board-brief" { return #0f766e; }
+        if root.template-id == "executive-pitch" { return #38bdf8; }
         if root.template-id == "quarterly-review" { return #4338ca; }
-        if root.template-id == "science-lab" { return #047857; }
-        if root.template-id == "magazine-spread" { return #be123c; }
+        if root.template-id == "product-launch" { return #ea580c; }
+        if root.template-id == "data-report" { return #0f766e; }
+        if root.template-id == "editorial-portfolio" { return #9a3412; }
+        if root.template-id == "academic-lecture" { return #1d4ed8; }
+        if root.template-id == "workshop-deck" { return #15803d; }
+        if root.template-id == "minimal-keynote" { return #a1a1aa; }
         return #334155;
     }
 
@@ -70,7 +70,7 @@ export component SlideTemplatePreview inherits Rectangle {
     }
 
     // Two-column or chart visual
-    if root.template-id == "quarterly-review" || root.template-id == "board-brief" : Rectangle {
+    if root.template-id == "quarterly-review" || root.template-id == "data-report" : Rectangle {
         x: 12px;
         y: 48px;
         width: parent.width - 24px;
@@ -86,7 +86,7 @@ export component SlideTemplatePreview inherits Rectangle {
         Rectangle { x: 58px; y: parent.height - 32px; width: 10px; height: 24px; border-radius: 2px; background: root.accent-color(); }
     }
 
-    if root.template-id != "quarterly-review" && root.template-id != "board-brief" && root.template-id != "blank" : Rectangle {
+    if root.template-id != "quarterly-review" && root.template-id != "data-report" && root.template-id != "blank" : Rectangle {
         x: 12px;
         y: 48px;
         width: (parent.width - 30px) / 2;
@@ -95,7 +95,7 @@ export component SlideTemplatePreview inherits Rectangle {
         background: root.is-dark() ? #252b3b : #f1f5f9;
     }
 
-    if root.template-id != "quarterly-review" && root.template-id != "board-brief" && root.template-id != "blank" : Rectangle {
+    if root.template-id != "quarterly-review" && root.template-id != "data-report" && root.template-id != "blank" : Rectangle {
         x: 18px + (parent.width - 30px) / 2;
         y: 48px;
         width: (parent.width - 30px) / 2;

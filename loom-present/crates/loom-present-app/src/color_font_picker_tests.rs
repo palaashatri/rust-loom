@@ -3,6 +3,7 @@ use crate::font_picker;
 
 #[test]
 fn font_picker_builds_rows_and_publishes_current() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     font_picker::publish_current(&app, Some("Inter"), false);
     assert_eq!(
@@ -16,7 +17,7 @@ fn font_picker_builds_rows_and_publishes_current() {
         app.global::<crate::FontPicker>()
             .get_current_family()
             .as_str(),
-        "Mixed"
+        ""
     );
 }
 

@@ -14,6 +14,7 @@ export component PresentShortcutScope inherits FocusScope {
     callback next-slide();
     callback prev-slide();
     callback focus-editor();
+    callback cycle-region(int, bool);
     callback start-editing() -> bool;
     callback window-key-unhandled(string);
 
@@ -52,6 +53,28 @@ export component PresentShortcutScope inherits FocusScope {
         if (event.text == Key.Escape) {
             root.focus-editor();
             return accept;
+        }
+        if (event.text == Key.F6) {
+            root.cycle-region(1, event.modifiers.shift);
+            return accept;
+        }
+        if (event.text == Key.F5) {
+            if (event.modifiers.shift) {
+                root.open-presenter();
+            } else {
+                root.toggle-preview-mode();
+            }
+            return accept;
+        }
+        if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.alt) {
+            if (event.text == Key.UpArrow) {
+                root.dispatch-shortcut("UpArrow", false, true, true);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.dispatch-shortcut("DownArrow", false, true, true);
+                return accept;
+            }
         }
         let primary = event.modifiers.control || event.modifiers.meta;
         if (root.dispatch-shortcut(event.text, event.modifiers.shift, primary, event.modifiers.alt)) {

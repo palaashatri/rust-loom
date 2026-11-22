@@ -9,6 +9,16 @@ import { PresentArrangeSection } from "arrange_section.slint";
 import { PresentLayoutPicker } from "layout_picker.slint";
 import { PresentDocumentSection } from "document_section.slint";
 
+component InspectorHeading inherits Text {
+    in property <string> title: "";
+    text: root.title;
+    font-size: Theme.type.caption;
+    font-weight: 700;
+    color: Theme.palette().ink-secondary;
+    horizontal-alignment: Theme.rtl ? right : left;
+    horizontal-stretch: 1;
+}
+
 export component PresentInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     in property <bool> compact: false;
@@ -60,6 +70,8 @@ export component PresentInspector inherits LoomPanel {
     FocusScope {
         width: 100%;
         height: 100%;
+        focus-on-tab-navigation: false;
+        focus-on-click: false;
         key-pressed(event) => {
             if (event.text == Key.F6) {
                 root.region-key(event.modifiers.shift);
@@ -69,95 +81,202 @@ export component PresentInspector inherits LoomPanel {
         }
 
         VerticalLayout {
-            padding: Theme.tokens.space.md;
-            spacing: Theme.tokens.space.sm;
+            padding: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
 
-            tabs := LoomSegmentedControl {
-                items: ["Format", "Animate", "Document"];
-                current: root.inspector-tab;
-                selected(idx) => { root.inspector-tab = idx; }
-            }
-
-            Rectangle {
+            scroller := Flickable {
                 vertical-stretch: 1;
-                clip: true;
+                min-height: 0px;
+                viewport-width: self.width;
+                viewport-height: max(self.height, content-col.preferred-height);
+                interactive: true;
 
-                scroller := Flickable {
-                    width: parent.width - 10px;
-                    x: Theme.rtl ? 10px : 0px;
-                    height: parent.height;
-                    viewport-height: content-col.preferred-height;
-                    interactive: true;
+                content-col := VerticalLayout {
+                    width: scroller.viewport-width;
+                    height: max(scroller.height, self.preferred-height);
+                    spacing: 2px;
 
-                    content-col := VerticalLayout {
-                        width: scroller.width;
-                        spacing: Theme.tokens.space.md;
-
-                        if root.inspector-tab == 0 : VerticalLayout {
-                            spacing: Theme.tokens.space.md;
-                            if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
-                            if root.is-table : PresentTableInspector {
-                                current-style-id: root.table-style-id;
-                                header-row: root.table-header-row;
-                                banded-rows: root.table-banded-rows;
-                                first-column: root.table-first-column;
-                                set-table-style(id) => { root.set-table-style(id); }
-                                toggle-table-option(opt) => { root.toggle-table-option(opt); }
-                                table-action(act) => { root.table-action(act); }
-                            }
-                            if root.selection-count > 0 : PresentArrangeSection { }
-                            if root.selection-count == 0 : PresentLayoutPicker { }
+                    if root.inspector-tab == 0 : VerticalLayout {
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { layout-template-control.grab-focus(); }
                         }
-
-                        if root.inspector-tab == 1 : VerticalLayout {
-                            spacing: Theme.tokens.space.sm;
-                            LoomSectionHeader { title: "Slide Transition"; }
-                            LoomSegmentedControl {
-                                items: ["None", "Fade", "Slide"];
-                                current: root.transition-index;
-                                selected(idx) => { root.set-transition(idx); }
+                        spacing: Theme.tokens.space.xs;
+                        InspectorHeading { title: "Slide Layout"; }
+                        layout-template-control := LoomSegmentedControl {
+                            items: ["Title", "Content", "2 Col", "Image"];
+                            current <=> root.active-template-index;
+                            label: "Layout Template";
+                            selected(idx) => { root.apply-template(idx); }
+                        }
+                        if root.selection-count == 0 : Text {
+                            text: "Select an object to edit its position and style.";
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            font-size: Theme.type.body;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        if root.selection-count > 1 && root.content-editable : Text {
+                            text: "Select one object to edit its text content.";
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 && root.content-editable : Rectangle {
+                            height: Theme.scaled-control-height;
+                            border-radius: Theme.tokens.metrics.radius-small;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+                            background: Theme.palette().surface-raised;
+                            clip: true;
+                            HorizontalLayout {
+                                padding-left: Theme.tokens.space.sm;
+                                padding-right: Theme.tokens.space.sm;
+                                TextInput {
+                                    min-width: 0px;
+                                    horizontal-stretch: 1;
+                                    text: root.active-element-content;
+                                    font-size: Theme.type.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: Theme.rtl ? right : left;
+                                    single-line: true;
+                                    accessible-label: "Selected element text";
+                                    edited => { root.update-element-content(self.text); }
+                                }
                             }
                         }
+                        if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
+                        if root.is-table : PresentTableInspector {
+                            current-style-id: root.table-style-id;
+                            header-row: root.table-header-row;
+                            banded-rows: root.table-banded-rows;
+                            first-column: root.table-first-column;
+                            set-table-style(id) => { root.set-table-style(id); }
+                            toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                            table-action(act) => { root.table-action(act); }
+                        }
+                        if root.selection-count > 0 : PresentArrangeSection {
+                            selection-count: root.selection-count;
+                        }
+                        if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
+                        if root.selection-count > 1 : Text {
+                            text: "Select one object to edit its geometry.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 : Text {
+                            text: "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 : HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            for slot in 2 : VerticalLayout {
+                                property <int> k: Theme.rtl ? 1 - slot : slot;
+                                horizontal-stretch: 1;
+                                if k == 0 : LoomTextField {
+                                    label: "X position";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.x-text;
+                                    accepted(v) => { ElementInk.geometry-requested("x", v); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                                if k == 1 : LoomTextField {
+                                    label: "Y position";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.y-text;
+                                    accepted(v) => { ElementInk.geometry-requested("y", v); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                            }
+                        }
+                        if root.selection-count == 1 : HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            for slot in 2 : VerticalLayout {
+                                property <int> k: Theme.rtl ? 1 - slot : slot;
+                                horizontal-stretch: 1;
+                                if k == 0 : LoomTextField {
+                                    label: "Width";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.w-text;
+                                    accepted(v) => { ElementInk.geometry-requested("w", v); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                                if k == 1 : LoomTextField {
+                                    label: "Height";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.h-text;
+                                    accepted(v) => { ElementInk.geometry-requested("h", v); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                            }
+                        }
+                        if root.selection-count == 1 : LoomTextField {
+                            label: "Rotation";
+                            field-min-width: 96px;
+                            value <=> ElementInk.rot-text;
+                            accepted(v) => { ElementInk.geometry-requested("rot", v); }
+                            changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                        }
+                        if root.selection-count == 0 : PresentLayoutPicker { }
+                    }
 
-                        if root.inspector-tab == 2 : VerticalLayout {
-                            spacing: Theme.tokens.space.md;
-                            PresentDocumentSection {
-                                deck-theme-selected(idx) => { root.open-theme-chooser(); }
-                            }
-                            LoomButton {
-                                label: "Choose Theme…";
-                                variant: "secondary";
-                                clicked => { root.open-theme-chooser(); }
-                            }
-                            Text {
-                                text: root.slide-count-text;
-                                font-size: Theme.type.caption;
-                                color: Theme.palette().ink-secondary;
-                            }
+                    if root.inspector-tab == 1 : VerticalLayout {
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { transition-type-control.grab-focus(); }
+                        }
+                        spacing: Theme.tokens.space.sm;
+                        LoomSectionHeader { title: "Slide Transition"; }
+                        transition-type-control := LoomSegmentedControl {
+                            items: ["None", "Dissolve", "Push"];
+                            current <=> root.transition-index;
+                            label: "Transition Type";
+                            selected(idx) => { root.set-transition(idx); }
+                        }
+                        if root.transition-index == 3 : Text {
+                            text: "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                     }
-                }
 
-                // Visible compact-inspector scroll cue/scrollbar when content overflows
-                if scroller.viewport-height > scroller.height : Rectangle {
-                    x: Theme.rtl ? 2px : parent.width - 7px;
-                    y: 0px;
-                    width: 5px;
-                    height: parent.height;
-                    border-radius: 3px;
-                    background: Theme.palette().surface-sunken;
-
-                    property <length> max-scroll: max(1px, scroller.viewport-height - scroller.height);
-                    property <length> thumb-h: max(24px, parent.height * (scroller.height / scroller.viewport-height));
-                    property <length> thumb-y: (parent.height - thumb-h) * (-scroller.viewport-y / max-scroll);
-
-                    Rectangle {
-                        x: 0px;
-                        y: clamp(parent.thumb-y, 0px, parent.height - parent.thumb-h);
-                        width: parent.width;
-                        height: parent.thumb-h;
-                        border-radius: 3px;
-                        background: Theme.palette().ink-secondary;
+                    if root.inspector-tab == 2 : VerticalLayout {
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { new-presentation-template.grab-focus(); }
+                        }
+                        spacing: Theme.tokens.space.md;
+                        PresentDocumentSection {
+                            deck-theme-selected(idx) => { ElementInk.theme-preset-requested(idx); }
+                        }
+                        new-presentation-template := LoomButton {
+                            icon: "format";
+                            label: "New from Template...";
+                            variant: "secondary";
+                            clicked => { root.open-theme-chooser(); }
+                        }
+                        Text {
+                            text: root.slide-count-text;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                        }
                     }
                 }
             }

@@ -3,6 +3,7 @@ use crate::{find_replace_ui, FindReplaceState};
 
 #[test]
 fn find_replace_opens_and_updates_match_counts() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     assert!(!app.global::<FindReplaceState>().get_open());
     find_replace_ui::open(&app);

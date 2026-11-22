@@ -5,15 +5,16 @@ use std::time::{Duration, SystemTime};
 
 #[test]
 fn start_hub_opens_and_formats_badges() {
+    set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     assert!(!app.global::<StartHubState>().get_open());
     start_hub::open(&app);
     assert!(app.global::<StartHubState>().get_open());
     assert_eq!(
         start_hub::format_badge(Path::new("deck.loomdeck")),
-        "LOOMDECK"
+        ".loomdeck"
     );
-    assert_eq!(start_hub::format_badge(Path::new("deck.pptx")), "PPTX");
+    assert_eq!(start_hub::format_badge(Path::new("deck.pptx")), ".pptx");
 }
 
 #[test]

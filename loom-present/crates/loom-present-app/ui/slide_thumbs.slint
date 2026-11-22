@@ -16,6 +16,8 @@ export struct ThumbRows {
     types: [int],
     images: [image],
     parts: [[ObjectPart]],
+    has-bg-color: bool,
+    bg-color: color,
 }
 
 /// A miniature slide: the editor's own slide canvas at thumbnail size, drawn
@@ -43,6 +45,8 @@ export component MiniSlide inherits Rectangle {
         element-types: root.rows.types;
         element-images: root.rows.images;
         element-parts: root.rows.parts;
+        has-slide-bg: root.rows.has-bg-color;
+        slide-bg: root.rows.bg-color;
     }
 }
 

@@ -4,12 +4,15 @@ use slint::ComponentHandle;
 
 use crate::{FindReplaceState, PresentApp};
 
+pub(crate) type QueryChangedCb = Rc<dyn Fn(&PresentApp, &str, bool, bool)>;
+pub(crate) type ReplaceTextCb = Rc<dyn Fn(&PresentApp, &str)>;
+
 pub(crate) struct FindReplaceCallbacks {
-    pub on_query_changed: Rc<dyn Fn(&PresentApp, &str, bool, bool)>,
+    pub on_query_changed: QueryChangedCb,
     pub on_find_prev: Rc<dyn Fn(&PresentApp)>,
     pub on_find_next: Rc<dyn Fn(&PresentApp)>,
-    pub on_replace_one: Rc<dyn Fn(&PresentApp, &str)>,
-    pub on_replace_all: Rc<dyn Fn(&PresentApp, &str)>,
+    pub on_replace_one: ReplaceTextCb,
+    pub on_replace_all: ReplaceTextCb,
 }
 
 pub(crate) fn open(app: &PresentApp) {

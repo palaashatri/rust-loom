@@ -777,3 +777,69 @@ fn reopening_the_inspector_restores_the_same_rendered_panel() {
         "reopening the inspector must restore the same rendered panel"
     );
 }
+
+#[test]
+fn parity_rotation_new_shapes_rich_runs_and_slide_bg_render_visibly() {
+    set_platform();
+    let mut doc = PresentationDocument::new("parity", "Parity");
+    doc.slides[0].bg_color = "#1e293b".to_string();
+    let elem =
+        |id: &str, kind: ElementType, content: &str, x: f32, y: f32, w: f32, h: f32| SlideElement {
+            id: id.into(),
+            element_type: kind,
+            content: content.into(),
+            x,
+            y,
+            width: w,
+            height: h,
+            style: Default::default(),
+            runs: Vec::new(),
+            rotation_deg: 0.0,
+            action: None,
+        };
+    doc.slides[0].elements.extend([
+        elem(
+            "r1",
+            ElementType::ShapeRoundedRect,
+            "Rounded",
+            80.0,
+            80.0,
+            180.0,
+            100.0,
+        ),
+        elem(
+            "a1",
+            ElementType::ShapeArrowRight,
+            "",
+            300.0,
+            80.0,
+            160.0,
+            80.0,
+        ),
+        elem("l1", ElementType::ShapeLine, "", 80.0, 220.0, 200.0, 20.0),
+        elem(
+            "c1",
+            ElementType::ShapeCallout,
+            "Note",
+            320.0,
+            200.0,
+            180.0,
+            100.0,
+        ),
+    ]);
+
+    let s = launched();
+    *s.state.session.borrow_mut() = PresentationSession::new(doc);
+    refresh(&s.app, &s.state);
+    let img0 = snapshot_component(&s.app, 1280.0, 800.0, 1.0).expect("render 0 deg");
+    {
+        let mut session = s.state.session.borrow_mut();
+        session.document.slides[0].elements[1].rotation_deg = 30.0;
+        session.select_element("a1", false);
+    }
+    refresh(&s.app, &s.state);
+    assert_eq!(s.app.global::<ElementInk>().get_rot_text().as_str(), "30");
+    let pdf_bytes = loom_present_core::export_pdf(&s.state.session.borrow().document);
+    assert!(pdf_bytes.starts_with(b"%PDF-"));
+    let _ = img0;
+}

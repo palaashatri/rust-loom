@@ -3,9 +3,12 @@
 //! every object keeps its place. Text sits in the editor's own text box, at the
 //! editor's sizes, wrapped to that box and centred the way the editor centres it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
+use loom_pdf::{
+    text_width_pt, FallbackFont, FontFallback, PageIndex, PathStyle, PdfDocument, TextStyle,
+};
 
 use crate::{
     normalize_angle_degrees, pictures, ElementType, PresentationDocument, SlideElement,
@@ -37,9 +40,67 @@ const ASCENT_EM: f32 = 0.97;
 const SHAPE_RGB: (f32, f32, f32) = (0.84, 0.88, 0.96);
 const STAT_RGB: (f32, f32, f32) = (0.16, 0.36, 0.72);
 
+struct CatalogFontFallback {
+    catalog: OnceLock<loom_fonts::FontCatalog>,
+    cache: Mutex<HashMap<loom_fonts::FaceId, Option<FallbackFont>>>,
+}
+
+impl std::fmt::Debug for CatalogFontFallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CatalogFontFallback").finish()
+    }
+}
+
+impl CatalogFontFallback {
+    fn shared() -> Arc<Self> {
+        static INSTANCE: OnceLock<Arc<CatalogFontFallback>> = OnceLock::new();
+        Arc::clone(INSTANCE.get_or_init(|| {
+            Arc::new(Self {
+                catalog: OnceLock::new(),
+                cache: Mutex::new(HashMap::new()),
+            })
+        }))
+    }
+}
+
+pub(crate) fn shared_font_fallback() -> Arc<dyn FontFallback> {
+    CatalogFontFallback::shared()
+}
+
+impl FontFallback for CatalogFontFallback {
+    fn font_for(&self, ch: char, bold: bool, italic: bool) -> Option<FallbackFont> {
+        let catalog = self.catalog.get_or_init(loom_fonts::FontCatalog::system);
+        let weight = if bold { 700 } else { 400 };
+        let font_ref = catalog.resolve("sans-serif", weight, italic).ok()?;
+        let face_id = catalog.face_for_char(&font_ref, ch);
+        if let Ok(guard) = self.cache.lock() {
+            if let Some(cached) = guard.get(&face_id) {
+                return *cached;
+            }
+        }
+        let loaded = catalog.load(face_id).ok()?;
+        let entry = if loaded.collection_index() != 0 {
+            None
+        } else {
+            let family_name = catalog
+                .face(face_id)
+                .map(|f| f.family.as_str())
+                .unwrap_or("Fallback");
+            let name: &'static str = Box::leak(family_name.to_string().into_boxed_str());
+            let data: &'static [u8] = Box::leak(loaded.bytes().to_vec().into_boxed_slice());
+            Some(FallbackFont { name, data })
+        };
+        if let Ok(mut guard) = self.cache.lock() {
+            guard.insert(face_id, entry);
+        }
+        entry
+    }
+}
+
 /// Renders the deck to a PDF; see the module documentation for what matches the editor.
 pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     let mut pdf = PdfDocument::new();
+    pdf.set_font_fallback(CatalogFontFallback::shared());
     let mut pdf_images: BTreeMap<String, usize> = Default::default();
     let style_title = TextStyle {
         size_pt: 18.0,
@@ -285,46 +346,20 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
     let line_height = style.size_pt * LINE_EM;
 
     if !elem.runs.is_empty() {
-        let _ = align;
-        let mut x_cursor = left;
-        let baseline = top + ASCENT_EM * style.size_pt;
-        for run in &elem.runs {
-            let mut run_style = style.clone();
-            if let Some(pt) = run.font_size_pt {
-                run_style.size_pt = pt * UNITS_PER_EDITOR_PX;
-            }
-            if let Some(b) = run.bold {
-                run_style.bold = b;
-            }
-            run_style.italic = run.italic || style.italic;
-            if let Some(rgb) = run.color.as_deref().and_then(parse_rgb) {
-                run_style.fill_rgb = rgb;
-            }
-            let run_w = text_width_pt(&run.text, &run_style);
-            pdf.draw_text_with_transform(
-                page, x_cursor, baseline, &run.text, &run_style, transform,
-            );
-            let line_t = (run_style.size_pt * 0.06).max(0.5);
-            if run.underline {
-                let uy = baseline + run_style.size_pt * 0.12;
-                pdf.draw_rect_with_transform(
-                    page,
-                    (x_cursor, uy, run_w, line_t),
-                    PathStyle::filled(run_style.fill_rgb),
-                    transform,
-                );
-            }
-            if run.strikethrough {
-                let sy = baseline - run_style.size_pt * 0.28;
-                pdf.draw_rect_with_transform(
-                    page,
-                    (x_cursor, sy, run_w, line_t),
-                    PathStyle::filled(run_style.fill_rgb),
-                    transform,
-                );
-            }
-            x_cursor += run_w;
-        }
+        draw_rich_runs_box(
+            pdf,
+            page,
+            transform,
+            elem,
+            &style,
+            align,
+            TextBoxRect {
+                left,
+                top,
+                width,
+                height,
+            },
+        );
         return;
     }
 
@@ -342,13 +377,143 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
         if line.is_empty() {
             continue;
         }
+        let line_w = text_width_pt(line, &style);
         let x = match align {
-            1 => left + (width - text_width_pt(line, &style)) / 2.0,
-            2 => left + width - text_width_pt(line, &style),
+            1 => left + (width - line_w) / 2.0,
+            2 => left + width - line_w,
             _ => left,
         };
         let baseline = first_top + index as f32 * line_height + ASCENT_EM * style.size_pt;
         pdf.draw_text_with_transform(page, x, baseline, line, &style, transform);
+        let line_t = (style.size_pt * 0.06).max(0.5);
+        if elem.style.underline {
+            pdf.draw_rect_with_transform(
+                page,
+                (x, baseline + style.size_pt * 0.12, line_w, line_t),
+                PathStyle::filled(style.fill_rgb),
+                transform,
+            );
+        }
+        if elem.style.strikethrough {
+            pdf.draw_rect_with_transform(
+                page,
+                (x, baseline - style.size_pt * 0.28, line_w, line_t),
+                PathStyle::filled(style.fill_rgb),
+                transform,
+            );
+        }
+    }
+}
+
+struct TextBoxRect {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+fn draw_rich_runs_box(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    transform: [f32; 6],
+    elem: &SlideElement,
+    base_style: &TextStyle,
+    align: u8,
+    rect: TextBoxRect,
+) {
+    let TextBoxRect {
+        left,
+        top,
+        width,
+        height,
+    } = rect;
+    #[derive(Clone)]
+    struct StyledWord {
+        text: String,
+        style: TextStyle,
+        underline: bool,
+        strikethrough: bool,
+        width_pt: f32,
+    }
+
+    let mut lines: Vec<Vec<StyledWord>> = vec![Vec::new()];
+    let mut cur_w = 0.0f32;
+    for run in &elem.runs {
+        let mut run_style = base_style.clone();
+        if let Some(pt) = run.font_size_pt {
+            run_style.size_pt = pt / POINTS_PER_UNIT;
+        }
+        if let Some(b) = run.bold {
+            run_style.bold = b;
+        }
+        run_style.italic = run.italic || base_style.italic;
+        if let Some(rgb) = run.color.as_deref().and_then(parse_rgb) {
+            run_style.fill_rgb = rgb;
+        }
+        let underline = run.underline || elem.style.underline;
+        let strikethrough = run.strikethrough || elem.style.strikethrough;
+
+        let paragraphs: Vec<&str> = run.text.split('\n').collect();
+        for (p_idx, para) in paragraphs.iter().enumerate() {
+            if p_idx > 0 {
+                lines.push(Vec::new());
+                cur_w = 0.0;
+            }
+            for token in para.split_inclusive(' ') {
+                let w = text_width_pt(token, &run_style);
+                if cur_w > 0.0 && cur_w + w > width {
+                    lines.push(Vec::new());
+                    cur_w = 0.0;
+                }
+                lines.last_mut().unwrap().push(StyledWord {
+                    text: token.to_string(),
+                    style: run_style.clone(),
+                    underline,
+                    strikethrough,
+                    width_pt: w,
+                });
+                cur_w += w;
+            }
+        }
+    }
+
+    let line_height = base_style.size_pt * LINE_EM;
+    let fits = ((height / line_height).floor() as usize).max(1);
+    if lines.len() > fits {
+        lines.truncate(fits);
+    }
+    let block = lines.len() as f32 * line_height;
+    let first_top = top + (height - block) / 2.0;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let total_w: f32 = line.iter().map(|w| w.width_pt).sum();
+        let mut x = match align {
+            1 => left + (width - total_w) / 2.0,
+            2 => left + width - total_w,
+            _ => left,
+        };
+        let baseline = first_top + idx as f32 * line_height + ASCENT_EM * base_style.size_pt;
+        for seg in line {
+            pdf.draw_text_with_transform(page, x, baseline, &seg.text, &seg.style, transform);
+            let line_t = (seg.style.size_pt * 0.06).max(0.5);
+            if seg.underline {
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, baseline + seg.style.size_pt * 0.12, seg.width_pt, line_t),
+                    PathStyle::filled(seg.style.fill_rgb),
+                    transform,
+                );
+            }
+            if seg.strikethrough {
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, baseline - seg.style.size_pt * 0.28, seg.width_pt, line_t),
+                    PathStyle::filled(seg.style.fill_rgb),
+                    transform,
+                );
+            }
+            x += seg.width_pt;
+        }
     }
 }
 
@@ -807,6 +972,45 @@ mod tests {
         assert!(
             content.contains("(Q1)") && content.contains("(Q2)") && content.contains("(Q3)"),
             "line chart PDF export must include category labels, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn pdf_export_renders_multiline_rich_runs_with_underline_and_strikethrough() {
+        let mut doc = PresentationDocument::new("rich", "Rich Runs");
+        let elem = SlideElement {
+            id: "r1".into(),
+            element_type: ElementType::BodyText,
+            content: "Line1\nLine2".into(),
+            x: 80.0,
+            y: 120.0,
+            width: 400.0,
+            height: 120.0,
+            style: Default::default(),
+            runs: vec![
+                crate::StyledTextRun {
+                    text: "Line1\n".into(),
+                    bold: Some(true),
+                    underline: true,
+                    ..Default::default()
+                },
+                crate::StyledTextRun {
+                    text: "Line2".into(),
+                    italic: true,
+                    strikethrough: true,
+                    color: Some("#cc0000".into()),
+                    ..Default::default()
+                },
+            ],
+            rotation_deg: 0.0,
+            action: None,
+        };
+        doc.slides[0].elements.push(elem);
+        let pdf_bytes = export_pdf(&doc);
+        let text = loom_pdf::inspect::page_text(&pdf_bytes).expect("page_text");
+        assert!(
+            text[0].contains("Line1") && text[0].contains("Line2"),
+            "{text:?}"
         );
     }
 }

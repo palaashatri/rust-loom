@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { SlideSelectionHandles } from "slide_handles.slint";
 
 import { ObjectPart, ObjectPartView, ElementInk, DocumentInk } from "object_part.slint";
 export { ObjectPart, ElementInk }
@@ -28,6 +29,8 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <[float]> element-widths: [];
     in property <[float]> element-heights: [];
     in property <[float]> element-rotations: [];
+    in property <bool> has-slide-bg: false;
+    in property <color> slide-bg: DocumentInk.paper;
     in property <[int]> element-types: [];
     in property <[image]> element-images: [];
     in property <[[ObjectPart]]> element-parts: ObjectParts.main;
@@ -116,7 +119,7 @@ export component PresentSlideCanvas inherits Rectangle {
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
-            background: ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch;
+            background: root.has-slide-bg ? root.slide-bg : (ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch);
             drop-shadow-blur: root.miniature ? 0px : 16px;
             drop-shadow-offset-y: root.miniature ? 0px : 6px;
             drop-shadow-color: root.miniature ? transparent : Theme.palette().shadow;
@@ -345,7 +348,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     y: ObjectParts.active-cells[idx].fy * parent.height;
                     width: ObjectParts.active-cells[idx].fw * parent.width;
                     height: ObjectParts.active-cells[idx].fh * parent.height;
-                    background: ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch;
+                    background: root.has-slide-bg ? root.slide-bg : (ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch);
                     accessible-role: none;
                 }
 
@@ -404,75 +407,14 @@ export component PresentSlideCanvas inherits Rectangle {
                     }
                 }
 
-                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
-                    x: -5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
-                    TouchArea {
-                        width: 100%; height: 100%;
-                        property <length> press-abs-x;
-                        property <length> press-abs-y;
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y; root.handle-pressed(idx, "nw", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "nw"); }
-                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "nw"); }
-                        }
-                        moved => { if self.pressed { root.handle-moved(idx, "nw", (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / slide.width, (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / slide.height); } }
-                    }
-                }
-                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
-                    x: parent.width - 5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
-                    TouchArea {
-                        width: 100%; height: 100%;
-                        property <length> press-abs-x;
-                        property <length> press-abs-y;
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y; root.handle-pressed(idx, "ne", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "ne"); }
-                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "ne"); }
-                        }
-                        moved => { if self.pressed { root.handle-moved(idx, "ne", (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / slide.width, (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / slide.height); } }
-                    }
-                }
-                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
-                    x: -5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
-                    TouchArea {
-                        width: 100%; height: 100%;
-                        property <length> press-abs-x;
-                        property <length> press-abs-y;
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y; root.handle-pressed(idx, "sw", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "sw"); }
-                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "sw"); }
-                        }
-                        moved => { if self.pressed { root.handle-moved(idx, "sw", (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / slide.width, (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / slide.height); } }
-                    }
-                }
-                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
-                    x: parent.width - 5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
-                    TouchArea {
-                        width: 100%; height: 100%;
-                        property <length> press-abs-x;
-                        property <length> press-abs-y;
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y; root.handle-pressed(idx, "se", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "se"); }
-                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "se"); }
-                        }
-                        moved => { if self.pressed { root.handle-moved(idx, "se", (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / slide.width, (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / slide.height); } }
-                    }
-                }
-                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
-                    x: parent.width / 2 - 5px; y: -30px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().accent;
-                    TouchArea {
-                        width: 100%; height: 100%;
-                        property <length> press-abs-x;
-                        property <length> press-abs-y;
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); self.press-abs-x = self.absolute-position.x + self.mouse-x; self.press-abs-y = self.absolute-position.y + self.mouse-y; root.handle-pressed(idx, "rotate", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "rotate"); }
-                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "rotate"); }
-                        }
-                        moved => { if self.pressed { root.handle-moved(idx, "rotate", (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / slide.width, (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / slide.height); } }
-                    }
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : SlideSelectionHandles {
+                    slide-width: slide.width;
+                    slide-height: slide.height;
+                    focus-slide => { slide-focus.focus(); }
+                    handle-pressed(h, s) => { root.handle-pressed(idx, h, s); }
+                    handle-moved(h, dx, dy) => { root.handle-moved(idx, h, dx, dy); }
+                    handle-released(h) => { root.handle-released(idx, h); }
+                    handle-cancelled(h) => { root.handle-cancelled(idx, h); }
                 }
             }
         }

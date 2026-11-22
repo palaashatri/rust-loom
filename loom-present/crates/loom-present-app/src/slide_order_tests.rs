@@ -111,7 +111,7 @@ fn move_commands_are_enabled_only_where_the_slide_can_move() {
     let slide_menu: Vec<(String, String)> = app
         .get_local_menu_items()
         .iter()
-        .filter(|item| item.menu_index == 3 && !item.separator)
+        .filter(|item| item.menu_index == 4 && !item.separator)
         .map(|item| (item.label.to_string(), item.shortcut.to_string()))
         .collect();
     let (up, down) = if cfg!(target_os = "macos") {

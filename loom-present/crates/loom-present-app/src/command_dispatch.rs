@@ -1,8 +1,8 @@
 //! Centralized command and keyboard-shortcut dispatch for Loom Present.
 
 use crate::{
-    appearance, find_replace_ui, print_preview, set_status, slide_order, start_hub, view_state,
-    welcome_guide, window_chrome, PresentApp,
+    appearance, element_style_ui, find_replace_ui, set_status, slide_order, start_hub, view_state,
+    welcome_guide, window_chrome, ElementInk, PresentApp,
 };
 use loom_desktop::{CommandAction, DesktopError};
 use slint::ComponentHandle;
@@ -16,7 +16,7 @@ pub(crate) const PRIMARY_MOD: &str = if cfg!(target_os = "macos") {
 
 /// Return the human-readable shortcut hint for a command ID, or `""` if none.
 pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
-    if cfg!(target_os = "macos") {
+    if PRIMARY_MOD == "Cmd" {
         match id {
             "app.palette" => "Cmd+K",
             "help.welcome_guide" => "Cmd+Shift+/",
@@ -104,10 +104,15 @@ pub(crate) fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "file.new" => app.invoke_new_deck(),
         "file.new_sample" => app.invoke_new_sample_deck(),
         "file.start_hub" => start_hub::open(app),
+        "file.templates" => {
+            app.set_theme_selected(0);
+            app.set_theme_category(0);
+            app.set_theme_chooser_open(true);
+        }
         "file.open" => app.invoke_open_deck(),
         "file.save" => app.invoke_save_deck(),
         "file.save_as" => app.invoke_save_as_deck(),
-        "file.print_preview" => print_preview::open(app, 1, "", ""),
+        "file.print_preview" => app.invoke_open_print_preview(),
         "file.export_pdf" => app.invoke_export_pdf(),
         "file.export_pptx" => app.invoke_export_pptx(),
         "edit.undo" => app.invoke_undo(),
@@ -115,11 +120,16 @@ pub(crate) fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "edit.cut" => app.invoke_cut(),
         "edit.copy" => app.invoke_copy(),
         "edit.paste" => app.invoke_paste(),
-        "edit.duplicate" => app.invoke_copy(),
-        "edit.select_all" => app.invoke_select_element(0),
+        "edit.duplicate" => app.invoke_duplicate_selection(),
+        "edit.select_all" => app.invoke_select_all_elements(),
         "edit.find" | "edit.replace" => find_replace_ui::open(app),
         "insert.text_box" => app.invoke_add_text(),
-        "insert.shape_rect" | "insert.shape_circle" => app.invoke_add_shape(),
+        "insert.shape_rect" => app.invoke_add_shape(),
+        "insert.shape_circle" => app.invoke_add_shape_kind("circle".into()),
+        "insert.shape_rounded_rect" => app.invoke_add_shape_kind("rounded-rect".into()),
+        "insert.shape_arrow" => app.invoke_add_shape_kind("arrow".into()),
+        "insert.shape_line" => app.invoke_add_shape_kind("line".into()),
+        "insert.shape_callout" => app.invoke_add_shape_kind("callout".into()),
         "insert.table" | "slide.insert_table" => app.invoke_add_table(),
         "insert.chart" | "slide.insert_chart" => app.invoke_add_chart(),
         "insert.image" | "slide.insert_image" => app.invoke_add_picture(),
@@ -134,28 +144,36 @@ pub(crate) fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "slide.delete" => app.invoke_delete_slide(),
         "slide.prev" => app.invoke_prev_slide(),
         "slide.next" => app.invoke_next_slide(),
-        "format.bold"
-        | "format.italic"
-        | "format.underline"
-        | "format.strikethrough"
-        | "format.font_increase"
-        | "format.font_decrease"
-        | "arrange.bring_front"
-        | "arrange.bring_forward"
-        | "arrange.send_backward"
-        | "arrange.send_back" => set_status(app, format!("Applied {id}")),
+        "format.bold" => element_style_ui::request(app, "bold", 0),
+        "format.italic" => element_style_ui::request(app, "italic", 0),
+        "format.underline" => element_style_ui::request(app, "underline", 0),
+        "format.strikethrough" => element_style_ui::request(app, "strikethrough", 0),
+        "format.font_increase" => element_style_ui::request(app, "size", 1),
+        "format.font_decrease" => element_style_ui::request(app, "size", -1),
+        "arrange.bring_front" => app
+            .global::<ElementInk>()
+            .invoke_arrange_requested("front".into()),
+        "arrange.bring_forward" => app
+            .global::<ElementInk>()
+            .invoke_arrange_requested("forward".into()),
+        "arrange.send_backward" => app
+            .global::<ElementInk>()
+            .invoke_arrange_requested("backward".into()),
+        "arrange.send_back" => app
+            .global::<ElementInk>()
+            .invoke_arrange_requested("back".into()),
         "view.inspector" => app.invoke_toggle_inspector(),
         "view.preview" => app.invoke_toggle_preview_mode(),
         "view.presenter" => app.invoke_open_presenter(),
         "view.zoom_in" => {
-            let z = (app.get_zoom_index() + 1).min(4);
-            app.set_zoom_index(z);
-        }
-        "view.zoom_out" => {
             let z = (app.get_zoom_index() - 1).max(0);
             app.set_zoom_index(z);
         }
-        "view.zoom_reset" => app.set_zoom_index(1),
+        "view.zoom_out" => {
+            let z = (app.get_zoom_index() + 1).min(2);
+            app.set_zoom_index(z);
+        }
+        "view.zoom_reset" => app.set_zoom_index(0),
         "help.welcome_guide" => welcome_guide::open(app),
         "app.palette" => app.invoke_open_palette(),
         id if view_state::dispatch(app, id) => {}
@@ -265,6 +283,7 @@ pub(crate) fn is_present_menu_command(id: &str) -> bool {
             "file.new"
                 | "file.new_sample"
                 | "file.start_hub"
+                | "file.templates"
                 | "file.open"
                 | "file.save"
                 | "file.save_as"
@@ -283,6 +302,10 @@ pub(crate) fn is_present_menu_command(id: &str) -> bool {
                 | "insert.text_box"
                 | "insert.shape_rect"
                 | "insert.shape_circle"
+                | "insert.shape_rounded_rect"
+                | "insert.shape_arrow"
+                | "insert.shape_line"
+                | "insert.shape_callout"
                 | "insert.table"
                 | "insert.chart"
                 | "insert.image"

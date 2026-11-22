@@ -5,6 +5,12 @@
 )]
 
 #[cfg(test)]
+use command_dispatch::{dispatch_command, dispatch_scheduled_menu_action, is_present_menu_command};
+#[cfg(test)]
+use local_menu::build_present_menu_bar;
+#[cfg(test)]
+use loom_desktop::{DesktopError, MenuItem};
+#[cfg(test)]
 use menu_models::menu_projection;
 use menu_models::sync_menu_state;
 use model_sync::synced;
@@ -13,8 +19,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    build_standard_menu_bar, CommandAction, DesktopError, FileDialogService, FileFilter, Menu,
-    MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs, NativeMenuBar,
+    CommandAction, FileDialogService, FileFilter, MenuBarService, NativeFileDialogs, NativeMenuBar,
     OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
@@ -1248,9 +1253,7 @@ fn replace_with_template(app: &PresentApp, state: &GuiState, choice: i32) {
     *state.save_path.borrow_mut() = None;
     state.selected_element.set(0);
     refresh(app, state);
-    let name = slide_layouts::TEMPLATE_NAMES
-        .get(choice.max(0) as usize)
-        .unwrap_or(&slide_layouts::TEMPLATE_NAMES[0]);
+    let name = slide_layouts::template_name(choice);
     set_status(
         app,
         format!("Created unsaved presentation from the {name} template"),
@@ -1863,7 +1866,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let app_ref = app.as_weak();
     menu_service
         .register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
-            schedule_menu_action(&app_ref, action)
+            command_dispatch::schedule_menu_action(&app_ref, action)
         }))
         .map_err(|error| error.to_string())?;
 
@@ -2008,11 +2011,13 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 }
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
+    command_dispatch::wire_shortcuts(app);
     view_state::wire(app, state);
     slide_order::wire(app, state);
     deck_guard::wire(app, state);
     table_actions::wire(app, state);
     element_style_ui::wire(app, state);
+    modal_wiring::wire(app, state);
     recovery_deferred::wire_callbacks(app, state);
     {
         let state = state.clone();
@@ -3104,6 +3109,7 @@ mod command_dispatch;
 mod deck_guard;
 mod find_replace_ui;
 mod font_picker;
+mod modal_wiring;
 mod print_preview;
 mod start_hub;
 mod welcome_guide;

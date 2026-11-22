@@ -273,11 +273,11 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
         .find(|t| t.id == template_id)
         .unwrap_or_else(|| template_catalog().into_iter().next().unwrap());
     let mut doc = PresentationDocument::new(format!("deck-{template_id}"), title);
-    let mut slide = Slide::new("slide-1", title, "16:9");
-    slide.bg_color = desc.theme.background.clone();
+    let mut slide1 = Slide::new("slide-1", title, "16:9");
+    slide1.bg_color = desc.theme.background.clone();
 
     if template_id != "blank" {
-        slide.elements.push(make_elem(
+        slide1.elements.push(make_elem(
             "title-1",
             ElementType::Title,
             title,
@@ -288,7 +288,7 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
                 ..Default::default()
             },
         ));
-        slide.elements.push(make_elem(
+        slide1.elements.push(make_elem(
             "body-1",
             ElementType::BodyText,
             "Click to add content",
@@ -300,7 +300,68 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
             },
         ));
     }
-    doc.slides = vec![slide];
+
+    if matches!(
+        template_id,
+        "executive-pitch"
+            | "quarterly-review"
+            | "product-launch"
+            | "data-report"
+            | "editorial-portfolio"
+            | "academic-lecture"
+            | "workshop-deck"
+            | "minimal-keynote"
+    ) {
+        slide1.elements.push(make_elem(
+            "accent-bar-1",
+            ElementType::ShapeRectangle,
+            "",
+            (60.0, 32.0, 96.0, 8.0),
+            ElementStyle {
+                fill: Some(desc.theme.accent.clone()),
+                ..Default::default()
+            },
+        ));
+        let mut slide2 = Slide::new("slide-2", "Key Highlights", "16:9");
+        slide2.bg_color = desc.theme.background.clone();
+        slide2.elements.push(make_elem(
+            "title-2",
+            ElementType::Title,
+            "Key Highlights",
+            (60.0, 40.0, 880.0, 72.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.heading_font.clone()),
+                ..Default::default()
+            },
+        ));
+        slide2.elements.push(make_elem(
+            "stat-2",
+            ElementType::StatCard,
+            "98% Ready",
+            (60.0, 140.0, 260.0, 140.0),
+            ElementStyle {
+                fill: Some(desc.theme.accent.clone()),
+                color: Some("#ffffff".to_string()),
+                font_family: Some(desc.theme.heading_font.clone()),
+                ..Default::default()
+            },
+        ));
+        slide2.elements.push(make_elem(
+            "body-2",
+            ElementType::BodyText,
+            "Summarize key metrics, milestones, and takeaways.",
+            (350.0, 140.0, 590.0, 320.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.body_font.clone()),
+                ..Default::default()
+            },
+        ));
+        doc.slides = vec![slide1, slide2];
+    } else {
+        doc.slides = vec![slide1];
+    }
     doc
 }
 
