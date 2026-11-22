@@ -349,6 +349,8 @@ export component PresentApp inherits Window {
     }
 
     app-focus := PresentShortcutScope {
+        width: 100%;
+        height: 100%;
         modal-blocking: root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open || root.view-menu-open || root.zoom-menu-open || WelcomeGuideState.open || StartHubState.open || PrintPreviewState.open || FindReplaceState.open || root.insert-table-dialog-open || root.pptx-import-warning-open || root.save-changes-open;
         is-preview-mode: root.is-preview-mode;
         selection-count: slide-canvas.selection-count;
@@ -364,6 +366,8 @@ export component PresentApp inherits Window {
         window-key-unhandled(text) => { root.window-key-unhandled(text); }
 
         VerticalLayout {
+            width: 100%;
+            height: 100%;
             spacing: 0px;
             padding: 0px;
 

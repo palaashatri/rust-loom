@@ -19,6 +19,8 @@ export component PresentShortcutScope inherits FocusScope {
     callback window-key-unhandled(string);
 
     focus-on-tab-navigation: false;
+    width: 100%;
+    height: 100%;
 
     capture-key-pressed(event) => {
         if (root.modal-blocking) {

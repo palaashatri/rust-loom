@@ -13,6 +13,7 @@ export component PresentDocumentSection inherits VerticalLayout {
     LoomSectionHeader { title: "Deck Information"; }
     LoomSegmentedControl {
         items: ["Paper", "Slate", "Warm"];
+        label: "Deck Theme";
         current: root.deck-theme-index;
         selected(idx) => { root.deck-theme-selected(idx); }
     }
@@ -50,6 +51,7 @@ export component PresentDocumentSection inherits VerticalLayout {
     LoomSectionHeader { title: "Aspect Ratio"; }
     LoomSegmentedControl {
         items: ["16:9", "4:3"];
+        label: "Slide Aspect Ratio";
         current: ElementInk.aspect-ratio == "4:3" ? 1 : 0;
         selected(idx) => { ElementInk.aspect-requested(idx == 1 ? "4:3" : "16:9"); }
     }

@@ -42,6 +42,10 @@ export component FindReplaceModal inherits Rectangle {
         }
     }
 
+    init => {
+        query-input.focus();
+    }
+
     changed focus-req => {
         if root.modal-open {
             query-input.focus();

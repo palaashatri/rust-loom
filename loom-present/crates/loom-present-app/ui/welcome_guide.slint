@@ -170,6 +170,10 @@ export component WelcomeGuideModal inherits Rectangle {
         }
     }
 
+    init => {
+        key-handler.focus();
+    }
+
     changed focus-req => {
         if root.guide-open {
             key-handler.focus();

@@ -220,23 +220,26 @@ pub(crate) fn build_present_menu_bar() -> loom_desktop::MenuBar {
                     loom_desktop::MenuItem::action("arrange.send_back", "Send to Back"),
                 ],
             ),
-            loom_desktop::Menu::new(
-                "Help",
-                vec![
-                    loom_desktop::MenuItem::action_with_shortcut(
-                        "help.welcome_guide",
-                        "Welcome Guide",
-                        loom_desktop::MenuShortcut::primary_shift("/"),
-                    ),
-                    loom_desktop::MenuItem::action_with_shortcut(
-                        "app.palette",
-                        "Command Palette...",
-                        loom_desktop::MenuShortcut::primary("K"),
-                    ),
-                ],
-            ),
         ],
     );
+    if let Some(help) = menu_bar.menus.iter_mut().find(|m| m.title == "Help") {
+        help.items.insert(
+            0,
+            loom_desktop::MenuItem::action_with_shortcut(
+                "help.welcome_guide",
+                "Welcome Guide",
+                loom_desktop::MenuShortcut::primary_shift("/"),
+            ),
+        );
+        help.items.insert(
+            1,
+            loom_desktop::MenuItem::action_with_shortcut(
+                "app.palette",
+                "Command Palette...",
+                loom_desktop::MenuShortcut::primary("K"),
+            ),
+        );
+    }
     crate::file_menu::group(&mut menu_bar);
     menu_bar.disable_items_except(SUPPORTED_COMMANDS);
     menu_bar

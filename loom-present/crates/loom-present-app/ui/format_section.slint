@@ -3,7 +3,7 @@ import {
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { ElementInk } from "object_part.slint";
-import { FontPicker, PresentFontField, PresentFontPicker } from "font_picker.slint";
+import { FontPicker, PresentFontPicker } from "font_picker.slint";
 
 component StyleSwatch inherits Rectangle {
     in property <color> swatch-color: transparent;
@@ -66,7 +66,20 @@ component StyleSwatchRow inherits HorizontalLayout {
 export component PresentFormatSection inherits VerticalLayout {
     spacing: 2px;
 
-    LoomSectionHeader { title: "Text & Style"; }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        for slot in 2 : VerticalLayout {
+            property <int> k: Theme.rtl ? 1 - slot : slot;
+            horizontal-stretch: k == 0 ? 1 : 0;
+            if k == 0 : LoomSectionHeader { title: "Text & Style"; }
+            if k == 1 : LoomButton {
+                label: "Fonts";
+                variant: "ghost";
+                accessible-name: "Browse fonts";
+                clicked => { FontPicker.open = !FontPicker.open; }
+            }
+        }
+    }
 
     LoomTextField {
         label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
@@ -79,10 +92,6 @@ export component PresentFormatSection inherits VerticalLayout {
         value <=> ElementInk.font-family;
         accepted(text) => { ElementInk.font-requested(text); }
         cancelled => { ElementInk.font-cancelled(); }
-    }
-
-    PresentFontField {
-        width: parent.width;
     }
 
     if FontPicker.open : PresentFontPicker {
@@ -153,6 +162,7 @@ export component PresentFormatSection inherits VerticalLayout {
 
     LoomSegmentedControl {
         items: ["L", "C", "R"];
+        label: "Text alignment";
         current: ElementInk.align-mixed ? -1 : ElementInk.align;
         selected(idx) => { ElementInk.requested("align", idx); }
     }

@@ -83,26 +83,26 @@ export component PresentModals inherits Rectangle {
         cancel => { root.insert-table-dialog-open = false; }
     }
 
-    FindReplaceModal {
+    if FindReplaceState.open : FindReplaceModal {
         x: root.width - self.width - 20px;
         y: 52px;
     }
 
-    PrintPreviewModal {
+    if PrintPreviewState.open : PrintPreviewModal {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
     }
 
-    StartHubModal {
+    if StartHubState.open : StartHubModal {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
     }
 
-    WelcomeGuideModal {
+    if WelcomeGuideState.open : WelcomeGuideModal {
         x: 0px;
         y: 0px;
         width: root.width;

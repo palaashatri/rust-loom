@@ -835,7 +835,7 @@ fn parity_rotation_new_shapes_rich_runs_and_slide_bg_render_visibly() {
     {
         let mut session = s.state.session.borrow_mut();
         session.document.slides[0].elements[1].rotation_deg = 30.0;
-        session.select_element("a1", false);
+        session.select_element("r1", false);
     }
     refresh(&s.app, &s.state);
     assert_eq!(s.app.global::<ElementInk>().get_rot_text().as_str(), "30");

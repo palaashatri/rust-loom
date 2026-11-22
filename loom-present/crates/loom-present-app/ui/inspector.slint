@@ -81,12 +81,15 @@ export component PresentInspector inherits LoomPanel {
         }
 
         VerticalLayout {
+            width: parent.width;
+            height: parent.height;
             padding: Theme.tokens.space.sm;
             spacing: Theme.tokens.space.xs;
 
             scroller := Flickable {
                 vertical-stretch: 1;
                 min-height: 0px;
+                max-height: 100000px;
                 viewport-width: self.width;
                 viewport-height: max(self.height, content-col.preferred-height);
                 interactive: true;
@@ -115,6 +118,16 @@ export component PresentInspector inherits LoomPanel {
                             horizontal-alignment: Theme.rtl ? right : left;
                             font-size: Theme.type.body;
                             color: Theme.palette().ink-secondary;
+                        }
+                        if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
+                        if root.selection-count > 1 : Text {
+                            text: root.selection-count + " objects selected";
+                            font-size: Theme.type.body;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
                         }
                         if root.selection-count > 1 && root.content-editable : Text {
                             text: "Select one object to edit its text content.";
@@ -163,6 +176,7 @@ export component PresentInspector inherits LoomPanel {
                             selection-count: root.selection-count;
                         }
                         if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
+                        if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
                         if root.selection-count > 1 : Text {
                             text: "Select one object to edit its geometry.";
                             font-size: Theme.type.caption;

@@ -117,6 +117,10 @@ export component StartHubModal inherits Rectangle {
         }
     }
 
+    init => {
+        key-handler.focus();
+    }
+
     changed focus-req => {
         if root.hub-open {
             key-handler.focus();

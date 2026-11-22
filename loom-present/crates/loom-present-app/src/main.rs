@@ -1853,6 +1853,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
+    app.set_local_menu_visible(!cfg!(target_os = "macos"));
     local_menu::wire_action(&app, menu_service.clone());
     // A choice from any surface refreshes the menu check marks and the
     // presenter window.
