@@ -97,9 +97,11 @@ export component PresentInspector inherits LoomPanel {
                 content-col := VerticalLayout {
                     width: scroller.viewport-width;
                     height: max(scroller.height, self.preferred-height);
+                    alignment: start;
                     spacing: 2px;
 
                     if root.inspector-tab == 0 : VerticalLayout {
+                        alignment: start;
                         property <int> focus-request-tick: root.focus-request;
                         changed focus-request-tick => {
                             if (focus-request-tick > 0) { layout-template-control.grab-focus(); }
@@ -204,6 +206,7 @@ export component PresentInspector inherits LoomPanel {
                                 horizontal-stretch: 1;
                                 if k == 0 : LoomTextField {
                                     label: "X position";
+                                    placeholder: "X";
                                     field-min-width: 96px;
                                     value <=> ElementInk.x-text;
                                     accepted(v) => { ElementInk.geometry-requested("x", v); }
@@ -211,6 +214,7 @@ export component PresentInspector inherits LoomPanel {
                                 }
                                 if k == 1 : LoomTextField {
                                     label: "Y position";
+                                    placeholder: "Y";
                                     field-min-width: 96px;
                                     value <=> ElementInk.y-text;
                                     accepted(v) => { ElementInk.geometry-requested("y", v); }
@@ -225,6 +229,7 @@ export component PresentInspector inherits LoomPanel {
                                 horizontal-stretch: 1;
                                 if k == 0 : LoomTextField {
                                     label: "Width";
+                                    placeholder: "W";
                                     field-min-width: 96px;
                                     value <=> ElementInk.w-text;
                                     accepted(v) => { ElementInk.geometry-requested("w", v); }
@@ -232,6 +237,7 @@ export component PresentInspector inherits LoomPanel {
                                 }
                                 if k == 1 : LoomTextField {
                                     label: "Height";
+                                    placeholder: "H";
                                     field-min-width: 96px;
                                     value <=> ElementInk.h-text;
                                     accepted(v) => { ElementInk.geometry-requested("h", v); }
@@ -241,6 +247,7 @@ export component PresentInspector inherits LoomPanel {
                         }
                         if root.selection-count == 1 : LoomTextField {
                             label: "Rotation";
+                            placeholder: "0°";
                             field-min-width: 96px;
                             value <=> ElementInk.rot-text;
                             accepted(v) => { ElementInk.geometry-requested("rot", v); }
@@ -250,6 +257,7 @@ export component PresentInspector inherits LoomPanel {
                     }
 
                     if root.inspector-tab == 1 : VerticalLayout {
+                        alignment: start;
                         property <int> focus-request-tick: root.focus-request;
                         changed focus-request-tick => {
                             if (focus-request-tick > 0) { transition-type-control.grab-focus(); }
@@ -272,6 +280,7 @@ export component PresentInspector inherits LoomPanel {
                     }
 
                     if root.inspector-tab == 2 : VerticalLayout {
+                        alignment: start;
                         property <int> focus-request-tick: root.focus-request;
                         changed focus-request-tick => {
                             if (focus-request-tick > 0) { new-presentation-template.grab-focus(); }
