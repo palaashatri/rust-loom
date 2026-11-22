@@ -10,18 +10,54 @@ use crate::object_parts::{color, look};
 use crate::{refresh, set_status, ElementInk, GuiState, LoomColorSwatch, PresentApp};
 
 const OFFICE_SWATCHES: [(&str, &str); 48] = [
-    ("#FFFFFF", "White"), ("#000000", "Black"), ("#E7E6E6", "Light Gray"), ("#44546A", "Slate"),
-    ("#4472C4", "Blue"), ("#ED7D31", "Orange"), ("#A5A5A5", "Gray"), ("#FFC000", "Gold"),
-    ("#F2F2F2", "White 5%"), ("#7F7F7F", "Gray 50%"), ("#D0CECE", "Light Gray 10%"), ("#D6DCE4", "Slate 80%"),
-    ("#D9E2F3", "Blue 80%"), ("#FCE4D6", "Orange 80%"), ("#EDEDED", "Gray 80%"), ("#FFF2CC", "Gold 80%"),
-    ("#D8D8D8", "White 15%"), ("#595959", "Gray 35%"), ("#AEABAB", "Light Gray 25%"), ("#ADB9CA", "Slate 60%"),
-    ("#B4C6E7", "Blue 60%"), ("#F8CBAD", "Orange 60%"), ("#DBDBDB", "Gray 60%"), ("#FFE699", "Gold 60%"),
-    ("#BFBFBF", "White 25%"), ("#3F3F3F", "Gray 25%"), ("#757070", "Light Gray 50%"), ("#8497B0", "Slate 40%"),
-    ("#8EA9DB", "Blue 40%"), ("#F4B084", "Orange 40%"), ("#C9C9C9", "Gray 40%"), ("#FFD966", "Gold 40%"),
-    ("#A5A5A5", "White 35%"), ("#262626", "Gray 15%"), ("#3A3838", "Light Gray 75%"), ("#333F4F", "Slate 25%"),
-    ("#305496", "Blue 25%"), ("#C65911", "Orange 25%"), ("#7B7B7B", "Gray 25%"), ("#BF8F00", "Gold 25%"),
-    ("#7F7F7F", "White 50%"), ("#0C0C0C", "Gray 5%"), ("#161616", "Light Gray 90%"), ("#222B35", "Slate 50%"),
-    ("#203764", "Blue 50%"), ("#833C0C", "Orange 50%"), ("#525252", "Gray 50%"), ("#806000", "Gold 50%"),
+    ("#FFFFFF", "White"),
+    ("#000000", "Black"),
+    ("#E7E6E6", "Light Gray"),
+    ("#44546A", "Slate"),
+    ("#4472C4", "Blue"),
+    ("#ED7D31", "Orange"),
+    ("#A5A5A5", "Gray"),
+    ("#FFC000", "Gold"),
+    ("#F2F2F2", "White 5%"),
+    ("#7F7F7F", "Gray 50%"),
+    ("#D0CECE", "Light Gray 10%"),
+    ("#D6DCE4", "Slate 80%"),
+    ("#D9E2F3", "Blue 80%"),
+    ("#FCE4D6", "Orange 80%"),
+    ("#EDEDED", "Gray 80%"),
+    ("#FFF2CC", "Gold 80%"),
+    ("#D8D8D8", "White 15%"),
+    ("#595959", "Gray 35%"),
+    ("#AEABAB", "Light Gray 25%"),
+    ("#ADB9CA", "Slate 60%"),
+    ("#B4C6E7", "Blue 60%"),
+    ("#F8CBAD", "Orange 60%"),
+    ("#DBDBDB", "Gray 60%"),
+    ("#FFE699", "Gold 60%"),
+    ("#BFBFBF", "White 25%"),
+    ("#3F3F3F", "Gray 25%"),
+    ("#757070", "Light Gray 50%"),
+    ("#8497B0", "Slate 40%"),
+    ("#8EA9DB", "Blue 40%"),
+    ("#F4B084", "Orange 40%"),
+    ("#C9C9C9", "Gray 40%"),
+    ("#FFD966", "Gold 40%"),
+    ("#A5A5A5", "White 35%"),
+    ("#262626", "Gray 15%"),
+    ("#3A3838", "Light Gray 75%"),
+    ("#333F4F", "Slate 25%"),
+    ("#305496", "Blue 25%"),
+    ("#C65911", "Orange 25%"),
+    ("#7B7B7B", "Gray 25%"),
+    ("#BF8F00", "Gold 25%"),
+    ("#7F7F7F", "White 50%"),
+    ("#0C0C0C", "Gray 5%"),
+    ("#161616", "Light Gray 90%"),
+    ("#222B35", "Slate 50%"),
+    ("#203764", "Blue 50%"),
+    ("#833C0C", "Orange 50%"),
+    ("#525252", "Gray 50%"),
+    ("#806000", "Gold 50%"),
 ];
 
 fn slot_of(hex: Option<&str>) -> i32 {
@@ -351,7 +387,11 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         let (state, app_ref) = (state.clone(), app.as_weak());
         ink.on_color_picked(move |kind, hex| {
             let Some(app) = app_ref.upgrade() else { return };
-            let hex_val = if hex.is_empty() { None } else { Some(hex.to_string()) };
+            let hex_val = if hex.is_empty() {
+                None
+            } else {
+                Some(hex.to_string())
+            };
             let mut session = state.session.borrow_mut();
             let changed = match kind.as_str() {
                 "text" => {
@@ -394,9 +434,11 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
             let trimmed = val.trim().trim_start_matches('#');
             if trimmed.len() == 6 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
                 let normalized = format!("#{}", trimmed.to_ascii_uppercase());
-                app.global::<ElementInk>().invoke_color_picked(kind, normalized.into());
+                app.global::<ElementInk>()
+                    .invoke_color_picked(kind, normalized.into());
             } else {
-                app.global::<ElementInk>().set_hex_error("Enter #RRGGBB".into());
+                app.global::<ElementInk>()
+                    .set_hex_error("Enter #RRGGBB".into());
             }
         });
     }

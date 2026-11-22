@@ -225,6 +225,7 @@ fn text_element(
     height: f32,
 ) -> SlideElement {
     SlideElement {
+        runs: Vec::new(),
         id: id.into(),
         element_type: kind,
         content: content.into(),
@@ -475,6 +476,10 @@ pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
         ElementType::Picture => 6,
         ElementType::Table => 7,
         ElementType::Chart => 8,
+        ElementType::ShapeRoundedRect => 9,
+        ElementType::ShapeArrowRight => 10,
+        ElementType::ShapeLine => 11,
+        ElementType::ShapeCallout => 12,
     }
 }
 
@@ -661,6 +666,10 @@ fn element_type_name(kind: &ElementType) -> &'static str {
         ElementType::Picture => "Picture",
         ElementType::Table => "Table",
         ElementType::Chart => "Chart",
+        ElementType::ShapeRoundedRect => "Rounded rectangle",
+        ElementType::ShapeArrowRight => "Arrow",
+        ElementType::ShapeLine => "Line",
+        ElementType::ShapeCallout => "Callout",
     }
 }
 
@@ -1019,7 +1028,12 @@ fn wire_responsive_layout_with_state(app: &PresentApp, state: Rc<GuiState>) {
 
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
+    #[cfg(target_os = "windows")]
+    windows_platform::init_backend_if_needed()?;
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    windows_platform::install_alt_modifier_guard(&app);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
@@ -1409,7 +1423,12 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let out_dir = Path::new(out_dir);
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
+    #[cfg(target_os = "windows")]
+    windows_platform::init_backend_if_needed()?;
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    windows_platform::install_alt_modifier_guard(&app);
     appearance::apply_ui_font(&app, true);
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
@@ -1749,7 +1768,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
     }
 
+    #[cfg(target_os = "windows")]
+    windows_platform::init_backend_if_needed()?;
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    windows_platform::install_alt_modifier_guard(&app);
     window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
@@ -1810,10 +1834,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     });
 
     wire_app_callbacks(&app, &state);
+    command_dispatch::wire_shortcuts(&app);
     wire_responsive_layout_with_state(&app, state.clone());
     wire_close_guard(&app, &state);
 
-    let menu_bar = build_present_menu_bar();
+    if !args.palette
+        && !args.theme_chooser
+        && args.open.is_none()
+        && welcome_guide::should_show_on_first_run()
+    {
+        welcome_guide::open(&app);
+    }
+
+    let menu_bar = local_menu::build_present_menu_bar();
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
@@ -1902,175 +1935,6 @@ fn focus_editor_at_launch(app: &PresentApp) {
         || app.get_pptx_import_warning_open())
     {
         app.invoke_focus_editor();
-    }
-}
-
-fn build_present_menu_bar() -> MenuBar {
-    let mut menu_bar = build_standard_menu_bar(
-        "Loom Present",
-        vec![
-            MenuItem::action_with_shortcut(
-                "file.export_pdf",
-                "Export to PDF...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.new_sample", "New from Sample Deck"),
-            MenuItem::action("file.export_pptx", "Export to PowerPoint..."),
-        ],
-        vec![],
-        vec![
-            MenuItem::check("view.navigator", "Navigator", true),
-            MenuItem::check("view.notes", "Speaker Notes", false),
-            MenuItem::check("view.inspector", "Format Inspector", false),
-        ]
-        .into_iter()
-        .chain(loom_desktop::appearance::menu_items())
-        .chain(loom_desktop::window_frame::menu_items())
-        .collect(),
-        vec![Menu::new(
-            "Slide",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "slide.new",
-                    "New Slide",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("slide.insert_table", "Insert Table..."),
-                MenuItem::action("slide.insert_chart", "Paste Chart from Sheets..."),
-                MenuItem::action("slide.insert_image", "Insert Image..."),
-                MenuItem::action("slide.duplicate", "Duplicate Slide"),
-                MenuItem::action("slide.delete", "Delete Slide"),
-                MenuItem::Separator,
-                MenuItem::action_with_shortcut(
-                    slide_order::MOVE_UP,
-                    "Move Slide Up",
-                    MenuShortcut::primary_alt("Up"),
-                ),
-                MenuItem::action_with_shortcut(
-                    slide_order::MOVE_DOWN,
-                    "Move Slide Down",
-                    MenuShortcut::primary_alt("Down"),
-                ),
-                MenuItem::Separator,
-                MenuItem::action("slide.prev", "Previous Slide"),
-                MenuItem::action("slide.next", "Next Slide"),
-            ],
-        )],
-    );
-    file_menu::group(&mut menu_bar);
-    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
-    menu_bar
-}
-
-fn dispatch_command(app: &PresentApp, id: &str) -> bool {
-    if app.get_pptx_import_warning_open() {
-        return is_present_menu_command(id);
-    }
-    match id {
-        "file.new" => app.invoke_new_deck(),
-        "file.new_sample" => app.invoke_new_sample_deck(),
-        "slide.insert_table" => app.invoke_add_table(),
-        "slide.insert_chart" => app.invoke_add_chart(),
-        "slide.insert_image" => app.invoke_add_picture(),
-        "table.delete_row" | "slide.delete_table_row" => {
-            app.invoke_table_action("delete-row".into())
-        }
-        "table.delete_column" | "slide.delete_table_column" => {
-            app.invoke_table_action("delete-col".into())
-        }
-        "file.open" => app.invoke_open_deck(),
-        "file.save" => app.invoke_save_deck(),
-        "file.save_as" => app.invoke_save_as_deck(),
-        "file.export_pdf" => app.invoke_export_pdf(),
-        "file.export_pptx" => app.invoke_export_pptx(),
-        "edit.undo" => app.invoke_undo(),
-        "edit.redo" => app.invoke_redo(),
-        "edit.cut" => app.invoke_cut(),
-        "edit.copy" => app.invoke_copy(),
-        "edit.paste" => app.invoke_paste(),
-        "slide.new" => app.invoke_add_slide(),
-        "slide.duplicate" => app.invoke_duplicate_slide(),
-        "slide.delete" => app.invoke_delete_slide(),
-        "slide.prev" => app.invoke_prev_slide(),
-        "slide.next" => app.invoke_next_slide(),
-        "view.inspector" => app.invoke_toggle_inspector(),
-        id if view_state::dispatch(app, id) => {}
-        id if appearance::dispatch(app, id) => {}
-        id if window_chrome::dispatch(app, id) => {}
-        id if slide_order::dispatch(app, id) => {}
-        "app.palette" => app.invoke_open_palette(),
-        _ => return false,
-    }
-    true
-}
-
-fn is_present_menu_command(id: &str) -> bool {
-    slide_order::is_command(id)
-        || matches!(
-            id,
-            "file.new"
-                | "file.new_sample"
-                | "slide.insert_table"
-                | "slide.insert_chart"
-                | "slide.insert_image"
-                | "table.delete_row"
-                | "table.delete_column"
-                | "slide.delete_table_row"
-                | "slide.delete_table_column"
-                | "file.open"
-                | "file.save"
-                | "file.save_as"
-                | "file.export_pdf"
-                | "file.export_pptx"
-                | "edit.undo"
-                | "edit.redo"
-                | "edit.cut"
-                | "edit.copy"
-                | "edit.paste"
-                | "slide.new"
-                | "slide.duplicate"
-                | "slide.delete"
-                | "slide.prev"
-                | "slide.next"
-                | "view.inspector"
-                | "view.navigator"
-                | "view.notes"
-                | "view.appearance.system"
-                | "view.appearance.light"
-                | "view.appearance.dark"
-                | "view.appearance.high_contrast"
-                | "view.window-frame.system"
-                | "view.window-frame.loom"
-                | "app.palette"
-        )
-}
-
-fn schedule_menu_action(
-    app_ref: &slint::Weak<PresentApp>,
-    action: CommandAction,
-) -> Result<(), DesktopError> {
-    if !is_present_menu_command(&action.id) {
-        return Err(DesktopError::InvalidRequest(format!(
-            "unsupported Present menu command {}",
-            action.id
-        )));
-    }
-    let id = action.id;
-    let error_id = id.clone();
-    app_ref
-        .upgrade_in_event_loop(move |app| {
-            dispatch_scheduled_menu_action(&app, &id);
-        })
-        .map_err(|error| {
-            DesktopError::InvalidRequest(format!(
-                "failed to schedule Present menu command {error_id}: {error}"
-            ))
-        })
-}
-
-fn dispatch_scheduled_menu_action(app: &PresentApp, id: &str) {
-    if !dispatch_command(app, id) {
-        set_status(app, format!("Unsupported menu command: {id}"));
     }
 }
 
@@ -3236,7 +3100,15 @@ mod appearance;
 #[cfg(test)]
 mod appearance_tests;
 mod clipboard_actions;
+mod command_dispatch;
 mod deck_guard;
+mod find_replace_ui;
+mod font_picker;
+mod print_preview;
+mod start_hub;
+mod welcome_guide;
+#[cfg(target_os = "windows")]
+mod windows_platform;
 use deck_guard::{deck_is_dirty, request_deck_replacement};
 mod element_names;
 #[cfg(test)]
@@ -3300,7 +3172,13 @@ mod ui_font_tests;
 #[cfg(test)]
 mod accessibility_tests;
 #[cfg(test)]
+mod color_font_picker_tests;
+#[cfg(test)]
+mod command_dispatch_tests;
+#[cfg(test)]
 mod deck_guard_tests;
+#[cfg(test)]
+mod find_replace_tests;
 #[cfg(test)]
 mod import_warning_tests;
 #[cfg(test)]
@@ -3308,6 +3186,14 @@ mod layout_bounds_tests;
 #[cfg(test)]
 mod miniature_tests;
 #[cfg(test)]
+mod print_preview_tests;
+#[cfg(test)]
+mod rich_text_arrange_tests;
+#[cfg(test)]
+mod start_hub_tests;
+#[cfg(test)]
 mod table_tests;
 #[cfg(test)]
 mod visual_defect_tests;
+#[cfg(test)]
+mod welcome_guide_tests;

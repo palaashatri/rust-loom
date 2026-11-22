@@ -165,6 +165,7 @@ fn shift_marquee_adds_to_existing_domain_selection() {
             .expect("slide")
             .elements
             .push(SlideElement {
+                runs: Vec::new(),
                 id: "elem-2".into(),
                 element_type: ElementType::ShapeRectangle,
                 content: "Second".into(),
@@ -1327,6 +1328,7 @@ fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
         for (index, slide) in session.document.slides.iter_mut().enumerate() {
             if slide.elements.is_empty() {
                 slide.add_element(SlideElement {
+                    runs: Vec::new(),
                     id: format!("e{index}"),
                     element_type: ElementType::BodyText,
                     content: String::new(),

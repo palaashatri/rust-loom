@@ -218,8 +218,9 @@ mod tests {
 
     #[test]
     fn recent_decks_persist_and_deduplicate() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let settings = dir.path().join("settings.conf");
+        let dir = std::env::temp_dir().join(format!("loom-start-hub-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let settings = dir.join("settings.conf");
         let first = Path::new("/tmp/a.loomdeck");
         let second = Path::new("/tmp/b.pptx");
         record_recent_at(&settings, first).expect("record first");

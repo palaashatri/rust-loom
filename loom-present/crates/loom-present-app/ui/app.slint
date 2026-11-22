@@ -6,18 +6,18 @@ import {
 } from "present_components.slint";
 import { PresentActionToolbar, PresentToolbarMenu } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
-import { PresentThemeChooser } from "theme_chooser.slint";
+import { PresentModals, WelcomeGuideState, StartHubState, PrintPreviewState, FindReplaceState } from "present_modals.slint";
+import { PresentShortcutScope } from "shortcut_scope.slint";
 import {
     LoomButton, LoomIconButton, LoomTitleBar, LoomWindowResizeEdges,
     LocalMenu, LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
-import { PptxImportWarningDialog } from "pptx_import_warning.slint";
-import { InsertTableDialog } from "insert_table_dialog.slint";
 import { RecoveryFailureNotice } from "recovery_failure_notice.slint";
-import { SaveChangesDialog } from "save_changes_dialog.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenu, LocalMenuEntry } from "foundation.slint";
+export { WelcomeGuideState, StartHubState, PrintPreviewState, FindReplaceState }
+export { FontPicker, FontPickerLine } from "font_picker.slint";
 export { PresenterWindow, ThumbRows, ObjectPart, ObjectParts, ElementInk } from "presenter.slint";
 
 export component PresentApp inherits Window {
@@ -228,6 +228,7 @@ export component PresentApp inherits Window {
     callback new-deck;
     /// A key the window did not use. Rust explains a typed letter instead of dropping it.
     callback window-key-unhandled(string);
+    callback dispatch-shortcut(string, bool, bool, bool) -> bool;
     callback open-deck;
     callback save-deck;
     callback save-as-deck;
@@ -343,68 +344,19 @@ export component PresentApp inherits Window {
         if (!root.theme-chooser-open) { root.focus-editor(); }
     }
 
-    app-focus := FocusScope {
-        focus-on-tab-navigation: false;
-        capture-key-pressed(event) => {
-            if (root.open-menu-for-key(event)) { return accept; }
-            return reject;
-        }
-        key-pressed(event) => {
-            if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open || root.view-menu-open || root.zoom-menu-open) { return reject; }
-            if (root.is-preview-mode) {
-                if (event.text == Key.Escape) { root.toggle-preview-mode(); }
-                else if (event.text == "p" || event.text == "P") { root.open-presenter(); }
-                else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == Key.Return || event.text == " ") { root.next-slide(); }
-                else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.prev-slide(); }
-                return accept;
-            }
-            if (event.text == Key.Escape) { root.focus-editor(); return accept; }
-            if (event.text == Key.F6) { root.cycle-region(1, event.modifiers.shift); return accept; }
-            if (event.text == Key.F5) { root.toggle-preview-mode(); return accept; }
-            if ((event.modifiers.control || event.modifiers.meta) && event.modifiers.alt) {
-                if (event.text == Key.UpArrow) { root.move-slide-up(); return accept; }
-                if (event.text == Key.DownArrow) { root.move-slide-down(); return accept; }
-            }
-            if (event.modifiers.control || event.modifiers.meta) {
-                if (event.text == Key.K || event.text == "k") {
-                    root.open-palette();
-                    return accept;
-                }
-                if (event.text == "n" || event.text == "N") {
-                    if (event.modifiers.shift) { root.add-slide(); } else { root.new-deck(); }
-                    return accept;
-                }
-                if (event.text == "o" || event.text == "O") {
-                    root.open-deck();
-                    return accept;
-                }
-                if (event.text == "s" || event.text == "S") {
-                    if (event.modifiers.shift) { root.save-as-deck(); } else { root.save-deck(); }
-                    return accept;
-                }
-                if (event.text == "e" || event.text == "E") {
-                    root.export-pdf();
-                    return accept;
-                }
-                if (event.text == "c" || event.text == "C") { root.copy(); return accept; }
-                if (event.text == "x" || event.text == "X") { root.cut(); return accept; }
-                if (event.text == "v" || event.text == "V") { root.paste(); return accept; }
-                if (event.text == "z" || event.text == "Z") {
-                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                    return accept;
-                }
-                if (event.text == "y" || event.text == "Y") {
-                    root.redo();
-                    return accept;
-                }
-            }
-            if ((event.text == Key.Return || event.text == Key.F2) && !event.modifiers.control && !event.modifiers.meta && slide-canvas.selection-count == 1) {
-                root.focus-editor();
-                if (slide-canvas.start-editing()) { return accept; }
-            }
-            root.window-key-unhandled(event.text);
-            return reject;
-        }
+    app-focus := PresentShortcutScope {
+        modal-blocking: root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open || root.view-menu-open || root.zoom-menu-open || WelcomeGuideState.open || StartHubState.open || PrintPreviewState.open || FindReplaceState.open || root.insert-table-dialog-open || root.pptx-import-warning-open || root.save-changes-open;
+        is-preview-mode: root.is-preview-mode;
+        selection-count: slide-canvas.selection-count;
+        open-menu-for-key(event) => { root.open-menu-for-key(event) }
+        dispatch-shortcut(key, shift, primary, alt) => { root.dispatch-shortcut(key, shift, primary, alt) }
+        toggle-preview-mode => { root.toggle-preview-mode(); }
+        open-presenter => { root.open-presenter(); }
+        next-slide => { root.next-slide(); }
+        prev-slide => { root.prev-slide(); }
+        focus-editor => { root.focus-editor(); }
+        start-editing => { slide-canvas.start-editing() }
+        window-key-unhandled(text) => { root.window-key-unhandled(text); }
 
         VerticalLayout {
             spacing: 0px;
@@ -729,14 +681,33 @@ export component PresentApp inherits Window {
         }
     }
 
-    if root.theme-chooser-open : PresentThemeChooser {
-        refocus-tick: root.theme-refocus-tick;
-        open <=> root.theme-chooser-open;
+    PresentModals {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        theme-chooser-open <=> root.theme-chooser-open;
+        theme-refocus-tick: root.theme-refocus-tick;
         theme-selected <=> root.theme-selected;
         theme-category <=> root.theme-category;
         choose-theme-category(cat) => { root.choose-theme-category(cat); }
         cancel-theme => { root.cancel-theme(); }
         create-theme(idx) => { root.create-theme(idx); }
+        save-changes-open: root.save-changes-open;
+        save-changes-document: root.save-changes-document;
+        save-changes-closing: root.save-changes-closing;
+        rtl: root.rtl;
+        save-changes-save => { root.save-changes-save(); }
+        save-changes-discard => { root.save-changes-discard(); }
+        save-changes-cancel => { root.save-changes-cancel(); }
+        pptx-import-warning-open: root.pptx-import-warning-open;
+        pptx-import-warning-message: root.pptx-import-warning-message;
+        pptx-import-cancel => { root.pptx-import-cancel(); }
+        pptx-import-continue => { root.pptx-import-continue(); }
+        insert-table-dialog-open <=> root.insert-table-dialog-open;
+        insert-table-dialog-rows <=> root.insert-table-dialog-rows;
+        insert-table-dialog-cols <=> root.insert-table-dialog-cols;
+        insert-table-size(r, c) => { root.insert-table-size(r, c); }
     }
 
     menu-keys := FocusScope {
@@ -789,36 +760,7 @@ export component PresentApp inherits Window {
         close-requested => { root.palette-open = false; root.palette-close(); }
     }
 
-    SaveChangesDialog {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        open: root.save-changes-open;
-        document-name: root.save-changes-document;
-        closing: root.save-changes-closing;
-        rtl: root.rtl;
-        save => { root.save-changes-save(); }
-        discard => { root.save-changes-discard(); }
-        cancel => { root.save-changes-cancel(); }
-    }
-    PptxImportWarningDialog {
-        width: root.width;
-        height: root.height;
-        open: root.pptx-import-warning-open;
-        warning-message: root.pptx-import-warning-message;
-        import-cancel => { root.pptx-import-cancel(); }
-        import-continue => { root.pptx-import-continue(); }
-    }
 
-    InsertTableDialog {
-        x: 0px; y: 0px; width: root.width; height: root.height;
-        open: root.insert-table-dialog-open;
-        rows <=> root.insert-table-dialog-rows;
-        cols <=> root.insert-table-dialog-cols;
-        insert(r, c) => { root.insert-table-dialog-open = false; root.insert-table-size(r, c); }
-        cancel => { root.insert-table-dialog-open = false; }
-    }
 
     changed pptx-import-warning-open => { if (!root.pptx-import-warning-open) { root.focus-editor(); } }
     changed save-changes-open => {

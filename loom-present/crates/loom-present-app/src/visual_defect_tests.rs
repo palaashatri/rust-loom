@@ -630,6 +630,7 @@ fn high_contrast_keeps_slide_artwork_colours_and_recolours_only_chrome() {
         .active_slide_mut()
     {
         slide.add_element(loom_present_core::SlideElement {
+            runs: Vec::new(),
             id: "contrast-shape".into(),
             element_type: loom_present_core::ElementType::ShapeRectangle,
             content: "Deck shape".into(),

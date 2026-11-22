@@ -149,6 +149,7 @@ fn picture_state() -> Rc<GuiState> {
         .active_slide_mut()
         .expect("slide")
         .add_element(SlideElement {
+            runs: Vec::new(),
             id: "pic".into(),
             element_type: ElementType::Picture,
             content: id,

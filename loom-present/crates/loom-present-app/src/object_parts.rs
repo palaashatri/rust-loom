@@ -311,7 +311,12 @@ fn pie_chart_parts(
     let pixels = buf.make_mut_slice();
     let center = size_px as f32 * 0.5;
     let radius = center - 3.0;
-    let aa_offsets = [(-0.25f32, -0.25f32), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)];
+    let aa_offsets = [
+        (-0.25f32, -0.25f32),
+        (0.25, -0.25),
+        (-0.25, 0.25),
+        (0.25, 0.25),
+    ];
     for py in 0..size_px {
         for px in 0..size_px {
             let mut r_acc = 0u32;
@@ -718,6 +723,7 @@ mod tests {
     #[test]
     fn a_styled_text_object_carries_its_family_into_the_canvas_and_edit_surface() {
         let element = SlideElement {
+            runs: Vec::new(),
             id: "family".into(),
             element_type: ElementType::BodyText,
             content: "Words".into(),
@@ -746,6 +752,7 @@ mod tests {
     #[test]
     fn an_unstyled_text_object_leaves_the_family_empty_so_the_theme_applies() {
         let element = SlideElement {
+            runs: Vec::new(),
             id: "plain".into(),
             element_type: ElementType::BodyText,
             content: "Words".into(),

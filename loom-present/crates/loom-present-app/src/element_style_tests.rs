@@ -172,6 +172,7 @@ fn a_circle_fills_as_an_ellipse_and_a_picture_offers_no_text_controls() {
             200.0,
         ),
         SlideElement {
+            runs: Vec::new(),
             id: "p".into(),
             element_type: ElementType::Picture,
             content: "asset".into(),

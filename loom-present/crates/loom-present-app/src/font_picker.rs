@@ -210,10 +210,7 @@ pub(crate) fn publish_current(app: &PresentApp, family: Option<&str>, mixed: boo
     }
 }
 
-pub(crate) fn wire(
-    app: &PresentApp,
-    on_choose: impl Fn(&str) + 'static,
-) {
+pub(crate) fn wire(app: &PresentApp, on_choose: impl Fn(&str) + 'static) {
     let state = Rc::new(RefCell::new(PickerState::default()));
     let on_choose = Rc::new(on_choose);
 

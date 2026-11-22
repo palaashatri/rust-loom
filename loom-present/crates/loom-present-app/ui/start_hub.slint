@@ -65,7 +65,7 @@ component TabPill inherits FocusScope {
             text: root.label;
             color: root.active ? Theme.palette().accent : Theme.palette().ink;
             font-family: Theme.ui-font-family;
-            font-size: Theme.type.label;
+            font-size: Theme.type.caption;
             font-weight: root.active ? 700 : 500;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -75,7 +75,7 @@ component TabPill inherits FocusScope {
     ta := TouchArea {
         accessible-role: tab;
         accessible-label: root.label;
-        accessible-selected: root.active;
+
         clicked => { root.activated(); }
     }
 }
@@ -285,7 +285,7 @@ export component StartHubModal inherits Rectangle {
                                             text: tpl.name;
                                             color: Theme.palette().ink;
                                             font-family: Theme.ui-font-family;
-                                            font-size: Theme.type.label;
+                                            font-size: Theme.type.caption;
                                             font-weight: 600;
                                             overflow: elide;
                                         }

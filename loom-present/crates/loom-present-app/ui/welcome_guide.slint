@@ -198,32 +198,6 @@ export component WelcomeGuideModal inherits Rectangle {
                 if Theme.rtl { root.step-next(); } else { root.step-prev(); }
                 return accept;
             }
-            if event.text == Key.Tab {
-                if event.modifiers.shift {
-                    if close-btn.has-focus {
-                        next-btn.focus();
-                    } else if try-btn.has-focus {
-                        close-btn.focus();
-                    } else if prev-btn.has-focus {
-                        try-btn.focus();
-                    } else if next-btn.has-focus {
-                        if root.clamped-step() > 0 { prev-btn.focus(); } else { try-btn.focus(); }
-                    } else {
-                        next-btn.focus();
-                    }
-                } else {
-                    if close-btn.has-focus {
-                        try-btn.focus();
-                    } else if try-btn.has-focus {
-                        if root.clamped-step() > 0 { prev-btn.focus(); } else { next-btn.focus(); }
-                    } else if prev-btn.has-focus {
-                        next-btn.focus();
-                    } else {
-                        close-btn.focus();
-                    }
-                }
-                return accept;
-            }
             return reject;
         }
 
@@ -272,7 +246,7 @@ export component WelcomeGuideModal inherits Rectangle {
                         text: "Loom Present Guide  \u{2022}  Step " + (root.clamped-step() + 1) + " of 7";
                         color: Theme.palette().ink-secondary;
                         font-family: Theme.ui-font-family;
-                        font-size: Theme.type.label;
+                        font-size: Theme.type.caption;
                         font-weight: 600;
                         horizontal-alignment: Theme.rtl ? right : left;
                         overflow: elide;

@@ -1,0 +1,73 @@
+// Shortcut scope for PresentApp: centralizes global keyboard shortcuts,
+// preview-mode navigation, and the single blocking-modal guard that prevents
+// macOS Cmd/Meta chord leaks and Windows/Linux Alt+Space space insertion.
+
+export component PresentShortcutScope inherits FocusScope {
+    in property <bool> modal-blocking: false;
+    in property <bool> is-preview-mode: false;
+    in property <int> selection-count: 0;
+
+    callback open-menu-for-key(KeyEvent) -> bool;
+    callback dispatch-shortcut(string, bool, bool, bool) -> bool;
+    callback toggle-preview-mode();
+    callback open-presenter();
+    callback next-slide();
+    callback prev-slide();
+    callback focus-editor();
+    callback start-editing() -> bool;
+    callback window-key-unhandled(string);
+
+    focus-on-tab-navigation: false;
+
+    capture-key-pressed(event) => {
+        if (root.modal-blocking) {
+            return reject;
+        }
+        if (root.open-menu-for-key(event)) {
+            return accept;
+        }
+        return reject;
+    }
+
+    key-pressed(event) => {
+        if (root.modal-blocking) {
+            return reject;
+        }
+        if (root.is-preview-mode) {
+            if (event.text == Key.Escape) {
+                root.toggle-preview-mode();
+            } else if (event.text == "p" || event.text == "P") {
+                root.open-presenter();
+            } else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == Key.Return || event.text == " ") {
+                root.next-slide();
+            } else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) {
+                root.prev-slide();
+            }
+            return accept;
+        }
+        // Swallow Alt+Space so Windows/Linux system-menu chords never insert a space.
+        if (event.modifiers.alt && event.text == " ") {
+            return accept;
+        }
+        if (event.text == Key.Escape) {
+            root.focus-editor();
+            return accept;
+        }
+        let primary = event.modifiers.control || event.modifiers.meta;
+        if (root.dispatch-shortcut(event.text, event.modifiers.shift, primary, event.modifiers.alt)) {
+            return accept;
+        }
+        // Prevent unhandled Cmd/Ctrl chords (e.g. macOS Cmd+A) from leaking into editors.
+        if (primary) {
+            return accept;
+        }
+        if ((event.text == Key.Return || event.text == Key.F2) && !primary && root.selection-count == 1) {
+            root.focus-editor();
+            if (root.start-editing()) {
+                return accept;
+            }
+        }
+        root.window-key-unhandled(event.text);
+        return reject;
+    }
+}
