@@ -423,7 +423,11 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
         "size" => {
             let next = ElementStyle::stepped_size(size, value);
             (
-                session.restyle_elements(&ids, |style| style.font_size_pt = Some(next)),
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.font_size_pt = Some(next),
+                    |run| run.font_size_pt = Some(next),
+                ),
                 format!("Text size {next:.0} pt"),
             )
         }
@@ -503,7 +507,11 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
         "color" => {
             let hex = slot.map(|hex| (*hex).to_string());
             (
-                session.restyle_elements(&ids, |style| style.color = hex.clone()),
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.color = hex.clone(),
+                    |run| run.color = hex.clone(),
+                ),
                 if slot.is_some() {
                     "Text colour set"
                 } else {
@@ -570,7 +578,19 @@ pub(crate) fn apply_font_with_reset(
         .unwrap_or_default();
     let mixed = selected
         .split_first()
-        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1));
+        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1))
+        || session.document.active_slide().is_some_and(|slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|e| session.selected_elements.contains(&e.id) && e.runs.len() > 1)
+                .any(|e| {
+                    let first_rf = e.runs[0].font_family.as_deref();
+                    e.runs[1..]
+                        .iter()
+                        .any(|r| r.font_family.as_deref() != first_rf)
+                })
+        });
     if family.is_none() && mixed && !allow_mixed_reset {
         return Ok(None);
     }
@@ -578,7 +598,11 @@ pub(crate) fn apply_font_with_reset(
     if ids.is_empty() {
         return Ok(None);
     }
-    let changed = session.restyle_elements(&ids, |style| style.font_family = family.clone());
+    let changed = session.restyle_elements_and_runs(
+        &ids,
+        |style| style.font_family = family.clone(),
+        |run| run.font_family = family.clone(),
+    );
     Ok(changed.then(|| match family {
         Some(family) => format!("Font family {family}"),
         None => "Font family follows the theme".to_string(),
@@ -713,7 +737,11 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
             let changed = match kind.as_str() {
                 "text" => {
                     let ids: Vec<String> = session.selected_elements.clone();
-                    session.restyle_elements(&ids, |s| s.color = hex_val.clone())
+                    session.restyle_elements_and_runs(
+                        &ids,
+                        |s| s.color = hex_val.clone(),
+                        |r| r.color = hex_val.clone(),
+                    )
                 }
                 "fill" => {
                     let ids: Vec<String> = session.selected_elements.clone();

@@ -247,11 +247,13 @@ impl PresentationSession {
         if ids.len() < 2 {
             return false;
         }
-        self.checkpoint();
-        let Some(slide) = self.document.slides.get_mut(self.document.active_index) else {
+        let idx = self.document.active_index;
+        let Some(original) = self.document.slides.get(idx) else {
             return false;
         };
-        match mode {
+        let mut trial = original.clone();
+        let slide = &mut trial;
+        let ok = match mode {
             AlignMode::Right => slide.align_right(&ids),
             AlignMode::Bottom => slide.align_bottom(&ids),
             AlignMode::Middle => slide.align_middle(&ids),
@@ -300,7 +302,13 @@ impl PresentationSession {
                 }
                 true
             }
+        };
+        if !ok || trial.elements == original.elements {
+            return false;
         }
+        self.checkpoint();
+        self.document.slides[idx] = trial;
+        true
     }
 
     /// Distributes selected elements evenly along `axis` (1 undo step).
@@ -309,10 +317,12 @@ impl PresentationSession {
         if ids.len() < 3 {
             return false;
         }
-        self.checkpoint();
-        let Some(slide) = self.document.slides.get_mut(self.document.active_index) else {
+        let idx = self.document.active_index;
+        let Some(original) = self.document.slides.get(idx) else {
             return false;
         };
+        let mut trial = original.clone();
+        let slide = &mut trial;
         let mut indices: Vec<usize> = slide
             .elements
             .iter()
@@ -360,6 +370,11 @@ impl PresentationSession {
                 }
             }
         }
+        if trial.elements == original.elements {
+            return false;
+        }
+        self.checkpoint();
+        self.document.slides[idx] = trial;
         true
     }
 
@@ -369,14 +384,21 @@ impl PresentationSession {
         if ids.is_empty() || delta_deg.abs() <= f32::EPSILON {
             return false;
         }
-        self.checkpoint();
-        if let Some(slide) = self.document.slides.get_mut(self.document.active_index) {
-            for elem in &mut slide.elements {
-                if ids.contains(&elem.id) {
-                    elem.rotation_deg = (elem.rotation_deg + delta_deg).rem_euclid(360.0);
-                }
+        let idx = self.document.active_index;
+        let Some(original) = self.document.slides.get(idx) else {
+            return false;
+        };
+        let mut trial = original.clone();
+        for elem in &mut trial.elements {
+            if ids.contains(&elem.id) {
+                elem.rotation_deg = (elem.rotation_deg + delta_deg).rem_euclid(360.0);
             }
         }
+        if trial.elements == original.elements {
+            return false;
+        }
+        self.checkpoint();
+        self.document.slides[idx] = trial;
         true
     }
 
@@ -386,14 +408,18 @@ impl PresentationSession {
         if ids.is_empty() {
             return Vec::new();
         }
-        self.checkpoint();
-        let Some(slide) = self.document.slides.get_mut(self.document.active_index) else {
+        let idx = self.document.active_index;
+        let Some(original) = self.document.slides.get(idx) else {
             return Vec::new();
         };
-        let new_ids = slide.duplicate_elements(&ids);
-        if !new_ids.is_empty() {
-            self.selected_elements = new_ids.clone();
+        let mut trial = original.clone();
+        let new_ids = trial.duplicate_elements(&ids);
+        if new_ids.is_empty() {
+            return Vec::new();
         }
+        self.checkpoint();
+        self.document.slides[idx] = trial;
+        self.selected_elements = new_ids.clone();
         new_ids
     }
 
@@ -415,7 +441,27 @@ impl PresentationSession {
 
     /// Sets the deck's widescreen (16:9) vs standard (4:3) aspect ratio metadata (1 undo step).
     pub fn set_aspect_ratio_wide(&mut self, wide: bool) {
+        if self.document.aspect_ratio_wide == wide {
+            return;
+        }
         self.checkpoint();
         self.document.aspect_ratio_wide = wide;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{PresentationDocument, PresentationSession};
+
+    #[test]
+    fn noop_arrange_and_aspect_ratio_skip_checkpoint() {
+        let doc = PresentationDocument::new("d", "t");
+        let mut session = PresentationSession::new(doc);
+        session.set_aspect_ratio_wide(true);
+        assert!(!session.can_undo());
+        assert!(!session.rotate_selected_by(90.0));
+        assert!(!session.can_undo());
+        assert!(session.duplicate_selected().is_empty());
+        assert!(!session.can_undo());
     }
 }

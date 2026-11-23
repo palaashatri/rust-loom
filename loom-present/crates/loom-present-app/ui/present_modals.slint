@@ -44,7 +44,7 @@ export component PresentModals inherits Rectangle {
     property <bool> sh-open: StartHubState.open;
     changed sh-open => { if (!self.sh-open) { root.restore-editor-focus(); } }
     property <bool> wg-open: WelcomeGuideState.open;
-    changed wg-open => { if (!self.wg-open) { root.restore-editor-focus(); } }
+    changed wg-open => { if (!self.wg-open && !root.theme-chooser-open && !PrintPreviewState.open && !FindReplaceState.open && !StartHubState.open) { root.restore-editor-focus(); } }
 
     background: transparent;
 

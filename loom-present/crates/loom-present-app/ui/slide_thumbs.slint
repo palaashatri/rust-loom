@@ -25,12 +25,14 @@ export struct ThumbRows {
 export component MiniSlide inherits Rectangle {
     in property <ThumbRows> rows;
     in property <string> description;
-    height: self.width * 0.5625;
+    in property <bool> aspect-ratio-wide: true;
+    height: self.width * (root.aspect-ratio-wide ? 0.5625 : 0.75);
     accessible-role: image;
     accessible-label: root.description;
     PresentSlideCanvas {
         width: 100%;
         height: 100%;
+        aspect-ratio-wide: root.aspect-ratio-wide;
         editing-enabled: false;
         fit-screen: true;
         miniature: true;

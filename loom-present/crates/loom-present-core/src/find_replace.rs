@@ -88,25 +88,25 @@ fn find_text_ranges(text: &str, query: &str, case_sensitive: bool) -> Vec<(usize
         }
         return ranges;
     }
-    let query_chars: Vec<char> = query.to_lowercase().chars().collect();
+    let query_chars: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
     if query_chars.is_empty() {
         return ranges;
     }
     let mut lowered_chars: Vec<char> = Vec::new();
-    let mut char_to_orig_start: Vec<usize> = Vec::new();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
     for (orig_start, ch) in text.char_indices() {
+        let orig_end = orig_start + ch.len_utf8();
         for lc in ch.to_lowercase() {
             lowered_chars.push(lc);
-            char_to_orig_start.push(orig_start);
+            spans.push((orig_start, orig_end));
         }
     }
-    char_to_orig_start.push(text.len());
     let mut i = 0usize;
     while i + query_chars.len() <= lowered_chars.len() {
         if lowered_chars[i..i + query_chars.len()] == query_chars[..] {
-            let start = char_to_orig_start[i];
-            let end = char_to_orig_start[i + query_chars.len()];
-            if text.is_char_boundary(start) && text.is_char_boundary(end) {
+            let start = spans[i].0;
+            let end = spans[i + query_chars.len() - 1].1;
+            if start >= ranges.last().map_or(0, |r| r.1) {
                 ranges.push((start, end));
             }
             i += query_chars.len();
@@ -157,7 +157,8 @@ pub fn replace_match(
         return Err("Match range is no longer valid".to_string());
     }
     session.checkpoint();
-    let elem_mut = session.document.slides[m.slide_index]
+    let slide = &mut session.document.slides[m.slide_index];
+    let elem_mut = slide
         .elements
         .iter_mut()
         .find(|e| e.id == m.element_id)
@@ -168,6 +169,9 @@ pub fn replace_match(
         m.byte_end,
         replacement,
     );
+    if elem_mut.element_type == crate::ElementType::Title {
+        slide.title = elem_mut.content.clone();
+    }
     Ok(())
 }
 
@@ -220,6 +224,9 @@ pub fn replace_all_with_notes(
                         m.byte_end,
                         replacement,
                     );
+                    if elem.element_type == crate::ElementType::Title {
+                        slide.title = elem.content.clone();
+                    }
                 }
             }
         }
@@ -293,5 +300,19 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, "Hi ");
         assert_eq!(runs[1].color.as_deref(), Some("#FF0000"));
+    }
+
+    #[test]
+    fn unicode_spans_and_title_sync_on_replace() {
+        let mut doc = PresentationDocument::new("d", "OldTitle");
+        doc.slides[0].elements[0].content = "İ Xİ ΟΣ".to_string();
+        let mut session = PresentationSession::new(doc);
+        assert_eq!(find_matches(&session.document, "i", false).len(), 2);
+        assert_eq!(find_matches(&session.document, "xi", false).len(), 1);
+        assert_eq!(find_matches(&session.document, "ΟΣ", false).len(), 1);
+
+        let m = find_matches(&session.document, "İ", true);
+        replace_match(&mut session, &m[0], "New").expect("replace title");
+        assert_eq!(session.document.slides[0].title, "New Xİ ΟΣ");
     }
 }

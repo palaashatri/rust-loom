@@ -183,26 +183,23 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                 app.invoke_create_theme(idx);
             }),
             on_open_deck: Rc::new(move |app, path| {
-                if app.get_deck_dirty() {
-                    set_status(app, "Save or discard current changes before opening");
-                    app.global::<StartHubState>().set_open(false);
-                    app.invoke_open_deck();
-                    return;
-                }
                 let p = PathBuf::from(path);
                 if !p.exists() {
                     set_status(app, format!("File not found: {}", p.display()));
                     return;
                 }
-                match crate::load_session(&p) {
-                    Ok(loaded) => {
-                        app.global::<StartHubState>().set_open(false);
-                        start_hub::record_recent(&p);
-                        crate::replace_opened_deck(app, &sh_state, p, loaded);
-                    }
-                    Err(err) => {
-                        set_status(app, format!("Failed to open deck: {err}"));
-                    }
+                if crate::deck_guard::deck_is_dirty(&sh_state) {
+                    crate::PENDING_RECENT_PATH.with(|slot| *slot.borrow_mut() = Some(p));
+                    app.global::<StartHubState>().set_open(false);
+                    let _ = crate::request_deck_replacement(
+                        app,
+                        &sh_state,
+                        crate::PendingReplacement::OpenRecentDeck,
+                    );
+                    return;
+                }
+                if crate::open_deck_at_path(app, &sh_state, p) {
+                    app.global::<StartHubState>().set_open(false);
                 }
             }),
         },
@@ -360,9 +357,31 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                         s.get_include_notes(),
                     );
                     let total = found.len();
+                    let min_byte = target.byte_start + replacement.len();
+                    let next_idx = found
+                        .iter()
+                        .position(|m| {
+                            m.slide_index > target.slide_index
+                                || (m.slide_index == target.slide_index
+                                    && m.element_id == target.element_id
+                                    && m.is_notes == target.is_notes
+                                    && m.byte_start >= min_byte)
+                        })
+                        .unwrap_or(0);
+                    if let Some(next_m) = found.get(next_idx) {
+                        let mut session = fr_rep_one_state.session.borrow_mut();
+                        session.document.select_slide(next_m.slide_index);
+                        if !next_m.is_notes {
+                            session.select_element(&next_m.element_id, false);
+                        }
+                    }
                     *fr_rep_one_matches.borrow_mut() = found;
-                    *fr_rep_one_cursor.borrow_mut() = 0;
-                    find_replace_ui::update_match_counts(app, if total > 0 { 1 } else { 0 }, total);
+                    *fr_rep_one_cursor.borrow_mut() = next_idx;
+                    find_replace_ui::update_match_counts(
+                        app,
+                        if total > 0 { next_idx + 1 } else { 0 },
+                        total,
+                    );
                     refresh(app, &fr_rep_one_state);
                 }
             }),
@@ -432,6 +451,7 @@ fn sync_print_preview(app: &PresentApp, doc: &loom_present_core::PresentationDoc
     let pages = preview_print_pages(doc, &options);
     let total = pages.len().max(1) as i32;
     let preview = app.global::<PrintPreviewState>();
+    preview.set_aspect_ratio_wide(doc.aspect_ratio_wide);
     preview.set_total_pages(total);
     let cur = preview.get_current_page().clamp(1, total);
     preview.set_current_page(cur);

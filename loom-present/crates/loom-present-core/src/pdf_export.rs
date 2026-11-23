@@ -124,14 +124,20 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
         bold: true,
         ..Default::default()
     };
+    let page_w = if doc.aspect_ratio_wide {
+        PAGE_WIDTH
+    } else {
+        720.0
+    };
+    let sx = page_w / PAGE_WIDTH;
     for slide in &doc.slides {
-        let page = pdf.add_page(PAGE_WIDTH, PAGE_HEIGHT);
+        let page = pdf.add_page(page_w, PAGE_HEIGHT);
         if let Some(bg_rgb) = parse_rgb(&slide.bg_color) {
             pdf.draw_rect(
                 page,
                 0.0,
                 0.0,
-                PAGE_WIDTH,
+                page_w,
                 PAGE_HEIGHT,
                 PathStyle::filled(bg_rgb),
             );
@@ -142,12 +148,19 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
             .any(|element| element.element_type == ElementType::Title);
         if !has_title {
             // Legacy slides may have no title element; keep their title at the top left.
-            let title_x = 40.0 * POINTS_PER_UNIT;
+            let title_x = 40.0 * POINTS_PER_UNIT * sx;
             let title_y = (SLIDE_HEIGHT - 70.0) * POINTS_PER_UNIT;
             pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
         }
         for elem in &slide.elements {
-            draw_element(&mut pdf, page, doc, elem, &mut pdf_images);
+            if doc.aspect_ratio_wide {
+                draw_element(&mut pdf, page, doc, elem, &mut pdf_images);
+            } else {
+                let mut scaled = elem.clone();
+                scaled.x *= sx;
+                scaled.width *= sx;
+                draw_element(&mut pdf, page, doc, &scaled, &mut pdf_images);
+            }
         }
     }
     pdf.serialize()
@@ -166,11 +179,38 @@ pub(crate) fn draw_slide_into_rect(
     let (rx, ry, rw, rh) = rect;
     let bg = parse_rgb(&slide.bg_color).unwrap_or((1.0, 1.0, 1.0));
     pdf.draw_rect(page, rx, ry, rw, rh, PathStyle::filled(bg));
-    let scale = (rw / PAGE_WIDTH).min(rh / PAGE_HEIGHT);
-    let ox = rx + (rw - PAGE_WIDTH * scale) / 2.0;
+    let page_w = if doc.aspect_ratio_wide {
+        PAGE_WIDTH
+    } else {
+        720.0
+    };
+    let sx = page_w / PAGE_WIDTH;
+    let scale = (rw / page_w).min(rh / PAGE_HEIGHT);
+    let ox = rx + (rw - page_w * scale) / 2.0;
     let oy = ry + (rh - PAGE_HEIGHT * scale) / 2.0;
+    let has_title = slide
+        .elements
+        .iter()
+        .any(|element| element.element_type == ElementType::Title);
+    if !has_title && !slide.title.trim().is_empty() {
+        let style_title = TextStyle {
+            size_pt: 18.0 * scale,
+            bold: true,
+            ..Default::default()
+        };
+        let title_x = ox + 40.0 * POINTS_PER_UNIT * sx * scale;
+        let title_y = oy + (SLIDE_HEIGHT - 70.0) * POINTS_PER_UNIT * scale;
+        pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
+    }
     for elem in &slide.elements {
-        let base = element_transform(elem);
+        let base = if doc.aspect_ratio_wide {
+            element_transform(elem)
+        } else {
+            let mut s = elem.clone();
+            s.x *= sx;
+            s.width *= sx;
+            element_transform(&s)
+        };
         let scaled = [
             base[0] * scale,
             base[1] * scale,
@@ -637,7 +677,7 @@ fn draw_rich_runs_box(
 
 /// Every paragraph of `text`, wrapped to `width`. A blank paragraph keeps one empty
 /// line, so the space between paragraphs survives.
-fn wrap_paragraphs(text: &str, style: &TextStyle, width: f32) -> Vec<String> {
+pub(crate) fn wrap_paragraphs(text: &str, style: &TextStyle, width: f32) -> Vec<String> {
     text.split('\n')
         .flat_map(|paragraph| wrap_paragraph(paragraph.trim_end_matches('\r'), style, width))
         .collect()

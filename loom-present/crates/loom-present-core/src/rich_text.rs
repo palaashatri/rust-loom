@@ -322,6 +322,34 @@ pub fn replace_range_preserving_runs(
     elem.set_runs(out);
 }
 
+/// Replaces `elem.content` with `new_text` while preserving `elem.runs`
+/// styling for the unchanged common prefix and suffix.
+pub fn replace_content_preserving_runs(elem: &mut crate::SlideElement, new_text: &str) {
+    if elem.content == new_text {
+        return;
+    }
+    let old = elem.content.clone();
+    let prefix = old
+        .char_indices()
+        .zip(new_text.chars())
+        .take_while(|((_, a), b)| a == b)
+        .last()
+        .map_or(0, |((i, a), _)| i + a.len_utf8());
+    let suffix: usize = old[prefix..]
+        .chars()
+        .rev()
+        .zip(new_text[prefix..].chars().rev())
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| a.len_utf8())
+        .sum();
+    replace_range_preserving_runs(
+        elem,
+        prefix,
+        old.len() - suffix,
+        &new_text[prefix..new_text.len() - suffix],
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +371,36 @@ mod tests {
             },
         );
         assert_eq!(updated[0].underline, Some(false));
+    }
+
+    #[test]
+    fn replace_content_preserving_runs_keeps_tail_style() {
+        let mut elem = crate::SlideElement {
+            id: "e1".to_string(),
+            element_type: crate::ElementType::BodyText,
+            content: "Hello world".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 40.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: vec![
+                StyledTextRun {
+                    text: "Hello ".to_string(),
+                    bold: Some(true),
+                    ..Default::default()
+                },
+                StyledTextRun {
+                    text: "world".to_string(),
+                    color: Some("#FF0000".to_string()),
+                    ..Default::default()
+                },
+            ],
+        };
+        replace_content_preserving_runs(&mut elem, "Hello world!");
+        assert_eq!(elem.content, "Hello world!");
+        assert_eq!(elem.runs[1].color.as_deref(), Some("#FF0000"));
     }
 }

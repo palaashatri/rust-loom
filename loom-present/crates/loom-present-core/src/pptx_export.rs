@@ -506,7 +506,7 @@ fn picture_shape(id: u32, element: &SlideElement, rid: &str, alt: &str) -> Strin
 
 /// Title placeholder for slides that carry a title but no `Title` element, matching the
 /// PDF exporter's top-left fallback.
-fn fallback_title_shape(id: u32, slide: &Slide, background: &str) -> String {
+fn fallback_title_shape(id: u32, slide: &Slide, background: &str, sx: f32, sy: f32) -> String {
     let spec = TextSpec {
         size: size_hundredths(20.0),
         bold: true,
@@ -518,7 +518,7 @@ fn fallback_title_shape(id: u32, slide: &Slide, background: &str) -> String {
     };
     format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Slide title\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>{}</p:sp>",
-        xfrm(40.0, 20.0, 920.0, 60.0, 0.0),
+        xfrm(40.0 * sx, 20.0 * sy, 920.0 * sx, 60.0 * sy, 0.0),
         text_body(&slide.title, &spec, false, false)
     )
 }
@@ -548,14 +548,30 @@ fn slide_xml(
         .elements
         .iter()
         .any(|element| element.element_type == ElementType::Title);
+    let (sx, sy) = if document.aspect_ratio_wide {
+        (1.0_f32, 1.0_f32)
+    } else {
+        (720.0 / SLIDE_WIDTH, 540.0 / SLIDE_HEIGHT)
+    };
     let mut shapes = String::new();
     let mut next_id = 2u32;
     if !has_title && !slide.title.trim().is_empty() {
-        shapes.push_str(&fallback_title_shape(next_id, slide, &background));
+        shapes.push_str(&fallback_title_shape(next_id, slide, &background, sx, sy));
         next_id += 1;
     }
     let mut placeholder_used = false;
-    for element in &slide.elements {
+    for raw_element in &slide.elements {
+        let mut scaled_owned;
+        let element = if document.aspect_ratio_wide {
+            raw_element
+        } else {
+            scaled_owned = raw_element.clone();
+            scaled_owned.x *= sx;
+            scaled_owned.y *= sy;
+            scaled_owned.width *= sx;
+            scaled_owned.height *= sy;
+            &scaled_owned
+        };
         let title_ph = element.element_type == ElementType::Title && !placeholder_used;
         placeholder_used |= title_ph;
         if element.element_type == ElementType::Picture {

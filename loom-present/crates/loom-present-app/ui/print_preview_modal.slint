@@ -13,6 +13,7 @@ export global PrintPreviewState {
     in-out property <int> total-pages: 1;
     in-out property <string> current-slide-title: "Slide 1";
     in-out property <string> current-slide-notes: "";
+    in-out property <bool> aspect-ratio-wide: true;
     in-out property <[ThumbRows]> page-slides: [];
     in-out property <bool> focus-request: false;
     callback close-preview();
@@ -303,7 +304,10 @@ export component PrintPreviewModal inherits Rectangle {
                                 width: parent.width - 32px;
                                 height: parent.height - 40px;
                                 if PrintPreviewState.page-slides.length > 0 : MiniSlide {
-                                    width: parent.width;
+                                    width: min(parent.width, parent.height / (PrintPreviewState.aspect-ratio-wide ? 0.5625 : 0.75));
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    aspect-ratio-wide: PrintPreviewState.aspect-ratio-wide;
                                     rows: PrintPreviewState.page-slides[0];
                                     description: PrintPreviewState.current-slide-title;
                                 }
@@ -322,6 +326,7 @@ export component PrintPreviewModal inherits Rectangle {
                                 spacing: 10px;
                                 if PrintPreviewState.page-slides.length > 0 : MiniSlide {
                                     width: parent.width - 32px;
+                                    aspect-ratio-wide: PrintPreviewState.aspect-ratio-wide;
                                     rows: PrintPreviewState.page-slides[0];
                                     description: PrintPreviewState.current-slide-title;
                                 }
@@ -347,15 +352,17 @@ export component PrintPreviewModal inherits Rectangle {
                                 y: 14px;
                                 width: parent.width - 28px;
                                 height: parent.height - 38px;
-                                property <int> cols: PrintPreviewState.layout-index == 1 ? 1 : 2;
-                                property <int> rows-count: PrintPreviewState.layout-index == 3 ? 3 : 2;
+                                property <int> slide-count: max(1, PrintPreviewState.page-slides.length);
+                                property <int> cols: self.slide-count <= 2 ? 1 : 2;
+                                property <int> rows-count: ceil(self.slide-count / self.cols);
                                 property <length> cell-w: (self.width - (self.cols - 1) * 8px) / self.cols;
                                 property <length> cell-h: (self.height - (self.rows-count - 1) * 8px) / self.rows-count;
 
                                 for slide-row[i] in PrintPreviewState.page-slides : MiniSlide {
                                     x: mod(i, parent.cols) * (parent.cell-w + 8px);
                                     y: floor(i / parent.cols) * (parent.cell-h + 8px);
-                                    width: min(parent.cell-w, parent.cell-h / 0.5625);
+                                    width: min(parent.cell-w, parent.cell-h / (PrintPreviewState.aspect-ratio-wide ? 0.5625 : 0.75));
+                                    aspect-ratio-wide: PrintPreviewState.aspect-ratio-wide;
                                     rows: slide-row;
                                     description: "Handout slide " + (i + 1);
                                 }

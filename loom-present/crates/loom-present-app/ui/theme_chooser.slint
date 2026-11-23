@@ -371,7 +371,7 @@ export component PresentThemeChooser inherits Rectangle {
                                 { idx: 10, slot: theme-grid.slot-10, id: "workshop-deck", name: "Workshop Deck" },
                                 { idx: 11, slot: theme-grid.slot-11, id: "minimal-keynote", name: "Minimal Keynote" },
                             ] : Rectangle {
-                                visible: root.theme-visible(item.idx) && (theme-grid.y-of(item.slot) + grid-scroll.viewport-y + theme-grid.card-height <= grid-scroll.height + 1px) && (theme-grid.y-of(item.slot) + grid-scroll.viewport-y >= -1px);
+                                visible: root.theme-visible(item.idx);
                                 x: theme-grid.x-of(item.slot);
                                 y: theme-grid.y-of(item.slot);
                                 width: theme-grid.card-width;

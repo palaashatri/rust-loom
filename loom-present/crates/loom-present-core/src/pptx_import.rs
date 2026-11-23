@@ -73,6 +73,8 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         .unwrap_or_else(|| "Imported Presentation".to_string());
 
     let mut doc = PresentationDocument::new("imported-deck", title);
+    let mut inv_sx = 1.0_f32;
+    let mut inv_sy = 1.0_f32;
     if let Some(pres_bytes) = archive.get("ppt/presentation.xml") {
         let pres_xml = String::from_utf8_lossy(pres_bytes);
         if let Some(pos) = find_tag_start(&pres_xml, "p:sldSz") {
@@ -81,11 +83,15 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
                 .map_or(pres_xml.len(), |e| pos + e);
             let tag = &pres_xml[pos..tag_end];
             if let (Some(cx), Some(cy)) = (
-                extract_attr(tag, "cx").and_then(|v| v.parse::<u64>().ok()),
-                extract_attr(tag, "cy").and_then(|v| v.parse::<u64>().ok()),
+                extract_attr(tag, "cx").and_then(|v| v.parse::<i64>().ok()),
+                extract_attr(tag, "cy").and_then(|v| v.parse::<i64>().ok()),
             ) {
                 if cx > 0 && cy > 0 {
                     doc.aspect_ratio_wide = (cx as f64 / cy as f64) > 1.5;
+                    if !doc.aspect_ratio_wide {
+                        inv_sx = crate::SLIDE_WIDTH / emu_to_units(cx).max(1.0);
+                        inv_sy = crate::SLIDE_HEIGHT / emu_to_units(cy).max(1.0);
+                    }
                 }
             }
         }
@@ -130,6 +136,16 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         doc.slides.push(slide);
     }
 
+    if !doc.aspect_ratio_wide {
+        for slide in &mut doc.slides {
+            for elem in &mut slide.elements {
+                elem.x *= inv_sx;
+                elem.y *= inv_sy;
+                elem.width *= inv_sx;
+                elem.height *= inv_sy;
+            }
+        }
+    }
     Ok(doc)
 }
 
@@ -569,6 +585,18 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
                     .is_some_and(|d| fill.trim_start_matches('#').eq_ignore_ascii_case(d));
                 if !is_default {
                     style.fill = Some(fill);
+                }
+            }
+        } else if *kind == ElementType::ShapeLine {
+            if let Some(ln_pos) = props.find("<a:ln") {
+                let ln_end = props[ln_pos..]
+                    .find("</a:ln>")
+                    .map_or(props.len(), |e| ln_pos + e);
+                let ln_xml = &props[ln_pos..ln_end];
+                if let Some(fill_pos) = ln_xml.find("<a:solidFill>") {
+                    if let Some(stroke) = first_srgb(&ln_xml[fill_pos..]) {
+                        style.fill = Some(stroke);
+                    }
                 }
             }
         }
@@ -1077,5 +1105,33 @@ mod tests {
         let runs = parse_shape_runs(sp);
         let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(joined, "A 1 B");
+
+        // Line stroke color survives export/import
+        let mut doc2 = PresentationDocument::new("d2", "LineColor");
+        doc2.slides[0].elements.push(SlideElement {
+            id: "l-red".to_string(),
+            element_type: ElementType::ShapeLine,
+            content: String::new(),
+            x: 100.0,
+            y: 100.0,
+            width: 300.0,
+            height: 4.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle {
+                fill: Some("#FF0000".to_string()),
+                ..Default::default()
+            },
+            runs: Vec::new(),
+        });
+        let s2 = crate::PresentationSession::new(doc2);
+        let b2 = crate::pptx_export::export_pptx(&s2).expect("export2");
+        let imp2 = import_pptx(&b2).expect("import2");
+        let line = imp2.slides[0]
+            .elements
+            .iter()
+            .find(|e| e.element_type == ElementType::ShapeLine)
+            .expect("line");
+        assert_eq!(line.style.fill.as_deref(), Some("#FF0000"));
     }
 }

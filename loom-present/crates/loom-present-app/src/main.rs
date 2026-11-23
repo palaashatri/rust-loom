@@ -434,8 +434,13 @@ enum PendingReplacement {
     /// A new deck from the template chooser; the number is the card picked.
     NewFromTemplate(i32),
     OpenDeck,
+    OpenRecentDeck,
     /// Closing the window with unsaved changes.
     CloseWindow,
+}
+
+thread_local! {
+    pub(crate) static PENDING_RECENT_PATH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 struct GuiState {
@@ -1153,7 +1158,8 @@ fn replace_opened_deck(
     *state.last_saved.borrow_mut() = session.document.clone();
     *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
     *state.session.borrow_mut() = session;
-    *state.save_path.borrow_mut() = Some(path);
+    *state.save_path.borrow_mut() = Some(path.clone());
+    start_hub::record_recent(&path);
     state.selected_element.set(0);
     refresh(app, state);
 }
@@ -1363,6 +1369,7 @@ fn save_current_deck(
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
+    start_hub::record_recent(&path);
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
     file_title::sync(app, state);
@@ -1923,6 +1930,23 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
+pub(crate) fn open_deck_at_path(app: &PresentApp, state: &GuiState, path: PathBuf) -> bool {
+    match load_session(&path) {
+        Ok(loaded) => {
+            if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+                return false;
+            }
+            replace_opened_deck(app, state, path.clone(), loaded);
+            set_status(app, format!("Opened {}", path.display()));
+            true
+        }
+        Err(error) => {
+            set_status(app, format!("Failed to open deck: {error}"));
+            false
+        }
+    }
+}
+
 /// The slide editor takes keyboard focus once the window exists, unless a
 /// startup overlay owns it, so arrows, Delete and Ctrl+Z work without a click.
 fn focus_editor_at_launch(app: &PresentApp) {
@@ -1994,6 +2018,11 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
             replace_with_template(app, state, choice)
         }
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
+        Some(PendingReplacement::OpenRecentDeck) => {
+            if let Some(path) = PENDING_RECENT_PATH.with(|slot| slot.borrow_mut().take()) {
+                let _ = open_deck_at_path(app, state, path);
+            }
+        }
         Some(PendingReplacement::CloseWindow) => {
             if close_blocked_by_pending_import_recovery(app) {
                 return;
@@ -2364,8 +2393,10 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                                     element.set_chart(&chart);
                                 }
                             } else {
-                                element.content = content.as_str().to_string();
-                                element.sync_runs_from_content();
+                                loom_present_core::rich_text::replace_content_preserving_runs(
+                                    element,
+                                    content.as_str(),
+                                );
                             }
                             element.element_type == ElementType::Title
                         } else {

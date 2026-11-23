@@ -142,12 +142,17 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
                         PathStyle::stroked((0.6, 0.6, 0.6), 1.0),
                     );
                     if !slide.speaker_notes.is_empty() {
+                        let notes_w = (usable_w - 24.0).max(1.0);
                         let mut ny = slide_y - 20.0;
-                        for line in slide.speaker_notes.lines() {
+                        for line in crate::pdf_export::wrap_paragraphs(
+                            &slide.speaker_notes,
+                            &notes_style,
+                            notes_w,
+                        ) {
                             if ny < margin + 12.0 {
                                 break;
                             }
-                            pdf.draw_text(page, margin + 12.0, ny, line, &notes_style);
+                            pdf.draw_text(page, margin + 12.0, ny, &line, &notes_style);
                             ny -= 14.0;
                         }
                     }
@@ -242,5 +247,23 @@ mod tests {
         let text_handout = loom_pdf::inspect::page_text(&pdf_handout).expect("handout text");
         assert!(!text_handout[0].contains("Page 1"));
         assert!(text_handout[0].contains("HandoutBodyMarker"));
+
+        // Legacy title without Title element + wrapped speaker notes
+        let mut legacy = PresentationDocument::new("l", "LegacyDeckTitle");
+        legacy.slides[0].elements.clear();
+        legacy.slides[0].title = "LegacyOnlyTitle".to_string();
+        legacy.slides[0].speaker_notes = "word ".repeat(40);
+        let pdf_notes = export_pdf_with_options(
+            &legacy,
+            &PrintOptions {
+                layout: PrintLayout::NotesPage,
+                paper_size: PaperSize::Letter,
+                orientation: PrintOrientation::Portrait,
+                include_slide_numbers: false,
+            },
+        );
+        let text_notes = loom_pdf::inspect::page_text(&pdf_notes).expect("notes text");
+        assert!(text_notes[0].contains("LegacyOnlyTitle"));
+        assert!(text_notes[0].contains("word"));
     }
 }
