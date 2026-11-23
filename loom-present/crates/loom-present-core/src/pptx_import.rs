@@ -639,10 +639,13 @@ fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
             r_cursor = tag_start + end_rel + close_tag.len();
 
             if is_fld {
-                if let (Some(ts), Some(te)) = (r_xml.find("<a:t>"), r_xml.find("</a:t>")) {
-                    let text = xml_unescape(&r_xml[ts + "<a:t>".len()..te]);
-                    if !text.is_empty() {
-                        runs.push(crate::StyledTextRun::plain(text));
+                if let Some(ts) = r_xml.find("<a:t>") {
+                    let after_open = ts + "<a:t>".len();
+                    if let Some(te_rel) = r_xml[after_open..].find("</a:t>") {
+                        let text = xml_unescape(&r_xml[after_open..after_open + te_rel]);
+                        if !text.is_empty() {
+                            runs.push(crate::StyledTextRun::plain(text));
+                        }
                     }
                 }
                 continue;
@@ -1105,6 +1108,10 @@ mod tests {
         let runs = parse_shape_runs(sp);
         let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(joined, "A 1 B");
+
+        // Malformed <a:fld> with inverted tags does not panic
+        let malformed_fld = "<p:sp><p:txBody><a:p><a:fld></a:t><a:t>X</a:fld></p:txBody></p:sp>";
+        assert!(parse_shape_runs(malformed_fld).is_empty());
 
         // Line stroke color survives export/import
         let mut doc2 = PresentationDocument::new("d2", "LineColor");

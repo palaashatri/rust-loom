@@ -213,19 +213,7 @@ pub(crate) fn publish(
         .document
         .active_slide()
         .map(|slide| {
-            let families: Vec<Option<String>> = slide
-                .elements
-                .iter()
-                .filter(|candidate| session.selected_elements.contains(&candidate.id))
-                .filter(|candidate| look(candidate).is_some())
-                .map(|candidate| {
-                    candidate
-                        .style
-                        .font_family
-                        .as_deref()
-                        .and_then(|name| loom_present_core::normalize_font_family(name).ok())
-                })
-                .collect();
+            let (_, families) = selection_font_families(slide, &session.selected_elements);
             match families.split_first() {
                 Some((first, rest)) => {
                     let mixed = rest.iter().any(|family| family != first);
@@ -537,6 +525,38 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
     changed.then_some(words)
 }
 
+fn selection_font_families(
+    slide: &loom_present_core::Slide,
+    selected_ids: &[String],
+) -> (Vec<String>, Vec<Option<String>>) {
+    let mut ids = Vec::new();
+    let mut families = Vec::new();
+    for element in &slide.elements {
+        if !selected_ids.contains(&element.id) || look(element).is_none() {
+            continue;
+        }
+        ids.push(element.id.clone());
+        let elem_family = element
+            .style
+            .font_family
+            .as_deref()
+            .and_then(|name| loom_present_core::normalize_font_family(name).ok());
+        if element.runs.is_empty() {
+            families.push(elem_family);
+        } else {
+            for run in &element.runs {
+                let run_family = run
+                    .font_family
+                    .as_deref()
+                    .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+                    .or_else(|| elem_family.clone());
+                families.push(run_family);
+            }
+        }
+    }
+    (ids, families)
+}
+
 /// Apply a font family name, or the theme's face when the field is empty, to
 /// every selected text object and shape as one undo step. In a mixed selection
 /// the field is empty because the objects disagree; submitting that empty field
@@ -556,45 +576,17 @@ pub(crate) fn apply_font_with_reset(
         Some(loom_present_core::normalize_font_family(text)?)
     };
     let mut session = state.session.borrow_mut();
-    let selected: Vec<(String, Option<String>)> = session
+    let (ids, families) = session
         .document
         .active_slide()
-        .map(|slide| {
-            slide
-                .elements
-                .iter()
-                .filter(|element| session.selected_elements.contains(&element.id))
-                .filter(|element| look(element).is_some())
-                .map(|element| {
-                    let family = element
-                        .style
-                        .font_family
-                        .as_deref()
-                        .and_then(|name| loom_present_core::normalize_font_family(name).ok());
-                    (element.id.clone(), family)
-                })
-                .collect()
-        })
+        .map(|slide| selection_font_families(slide, &session.selected_elements))
         .unwrap_or_default();
-    let mixed = selected
+    let mixed = families
         .split_first()
-        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1))
-        || session.document.active_slide().is_some_and(|slide| {
-            slide
-                .elements
-                .iter()
-                .filter(|e| session.selected_elements.contains(&e.id) && e.runs.len() > 1)
-                .any(|e| {
-                    let first_rf = e.runs[0].font_family.as_deref();
-                    e.runs[1..]
-                        .iter()
-                        .any(|r| r.font_family.as_deref() != first_rf)
-                })
-        });
+        .is_some_and(|(first, rest)| rest.iter().any(|candidate| candidate != first));
     if family.is_none() && mixed && !allow_mixed_reset {
         return Ok(None);
     }
-    let ids: Vec<String> = selected.into_iter().map(|(id, _)| id).collect();
     if ids.is_empty() {
         return Ok(None);
     }

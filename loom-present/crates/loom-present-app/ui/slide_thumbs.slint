@@ -71,6 +71,7 @@ component PresentSlideThumbnail inherits Rectangle {
     changed want-focus => { if (root.want-focus == root.index) { thumb-focus.focus(); } }
     /// Bumped by the controller to move focus to the active slide's thumbnail.
     in property <int> focus-tick: 0;
+    in property <bool> aspect-ratio-wide: true;
     changed focus-tick => { if (root.active) { thumb-focus.focus(); } }
 
     // The strip fixes every row to one height (see `PresentSlideStrip`) so it
@@ -118,6 +119,7 @@ component PresentSlideThumbnail inherits Rectangle {
             horizontal-stretch: 1;
             rows: root.rows;
             description: root.title;
+            aspect-ratio-wide: root.aspect-ratio-wide;
         }
         if Theme.rtl : Text {
             text: (root.index + 1) + "";
@@ -157,9 +159,10 @@ export component PresentSlideStrip inherits FocusScope {
     callback region-key(bool);
     /// Bumped by F6 to move keyboard focus to the active slide's thumbnail.
     in property <int> focus-active-tick: 0;
+    in property <bool> aspect-ratio-wide: true;
 
     // Every row has one height, so row `n` sits at `n * pitch` without measuring.
-    property <length> row-height: (strip-flick.width - 24px - 3 * Theme.tokens.space.sm) * 0.5625 + 2 * Theme.tokens.space.sm;
+    property <length> row-height: (strip-flick.width - 24px - 3 * Theme.tokens.space.sm) * (root.aspect-ratio-wide ? 0.5625 : 0.75) + 2 * Theme.tokens.space.sm;
     property <length> pitch: max(root.row-height + Theme.tokens.space.sm, 1px);
     // Two rows of margin above and four below the visible ones.
     property <int> first-row: max(0, floor(-strip-flick.viewport-y / root.pitch) - 2);
@@ -290,6 +293,7 @@ export component PresentSlideStrip inherits FocusScope {
                 dragged: root.dragging && self.slide == root.drag-from;
                 want-focus: root.focus-target;
                 focus-tick: root.focus-active-tick;
+                aspect-ratio-wide: root.aspect-ratio-wide;
                 clicked => { root.select-slide(self.slide); }
                 move-requested(delta) => {
                     let to = self.slide + delta;

@@ -1282,53 +1282,7 @@ fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
 fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
-            if pptx_import::is_pptx_path(&path) {
-                match pptx_import::prepare(&path) {
-                    Ok(candidate) if !candidate.warnings.is_empty() => {
-                        app.set_pptx_import_warning_message(
-                            pptx_import::warning_message(&candidate.warnings).into(),
-                        );
-                        table_actions::PENDING_PPTX_IMPORT.with(|slot| {
-                            *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
-                                path: candidate.path,
-                                session: candidate.session,
-                                warnings: candidate.warnings,
-                                kept: None,
-                                preserved_path: None,
-                                cancel_must_checkpoint_visible_session: false,
-                            });
-                        });
-                        recovery_deferred::hold_for_import_warning();
-                        app.set_pptx_import_warning_open(true);
-                        set_status(
-                            app,
-                            "Review the PowerPoint import warning before replacing this deck",
-                        );
-                    }
-                    Ok(candidate) => {
-                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
-                            replace_opened_deck(
-                                app,
-                                state,
-                                candidate.path.clone(),
-                                candidate.session,
-                            );
-                            set_status(app, format!("Opened {}", candidate.path.display()));
-                        }
-                    }
-                    Err(error) => set_status(app, format!("Open failed: {error}")),
-                }
-            } else {
-                match load_session(&path) {
-                    Ok(session) => {
-                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
-                            replace_opened_deck(app, state, path.clone(), session);
-                            set_status(app, format!("Opened {}", path.display()));
-                        }
-                    }
-                    Err(error) => set_status(app, format!("Open failed: {error}")),
-                }
-            }
+            let _ = open_deck_at_path(app, state, path);
         }
         Ok(None) => set_status(app, "Open cancelled"),
         Err(error) => set_status(app, format!("Open dialog failed: {error}")),
@@ -1930,19 +1884,67 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
-pub(crate) fn open_deck_at_path(app: &PresentApp, state: &GuiState, path: PathBuf) -> bool {
+pub(crate) enum OpenPathOutcome {
+    Opened,
+    AwaitingImportConfirmation,
+    Failed,
+}
+
+pub(crate) fn open_deck_at_path(
+    app: &PresentApp,
+    state: &GuiState,
+    path: PathBuf,
+) -> OpenPathOutcome {
+    if pptx_import::is_pptx_path(&path) {
+        return match pptx_import::prepare(&path) {
+            Ok(candidate) if !candidate.warnings.is_empty() => {
+                app.set_pptx_import_warning_message(
+                    pptx_import::warning_message(&candidate.warnings).into(),
+                );
+                table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+                    *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
+                        path: candidate.path,
+                        session: candidate.session,
+                        warnings: candidate.warnings,
+                        kept: None,
+                        preserved_path: None,
+                        cancel_must_checkpoint_visible_session: false,
+                    });
+                });
+                recovery_deferred::hold_for_import_warning();
+                app.set_pptx_import_warning_open(true);
+                set_status(
+                    app,
+                    "Review the PowerPoint import warning before replacing this deck",
+                );
+                OpenPathOutcome::AwaitingImportConfirmation
+            }
+            Ok(candidate) => {
+                if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+                    return OpenPathOutcome::Failed;
+                }
+                replace_opened_deck(app, state, candidate.path.clone(), candidate.session);
+                set_status(app, format!("Opened {}", candidate.path.display()));
+                OpenPathOutcome::Opened
+            }
+            Err(error) => {
+                set_status(app, format!("Open failed: {error}"));
+                OpenPathOutcome::Failed
+            }
+        };
+    }
     match load_session(&path) {
         Ok(loaded) => {
             if !recovery_replacement::clear_recovery_before_replacement(app, state) {
-                return false;
+                return OpenPathOutcome::Failed;
             }
             replace_opened_deck(app, state, path.clone(), loaded);
             set_status(app, format!("Opened {}", path.display()));
-            true
+            OpenPathOutcome::Opened
         }
         Err(error) => {
-            set_status(app, format!("Failed to open deck: {error}"));
-            false
+            set_status(app, format!("Open failed: {error}"));
+            OpenPathOutcome::Failed
         }
     }
 }

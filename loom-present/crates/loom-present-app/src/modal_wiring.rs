@@ -198,7 +198,10 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                     );
                     return;
                 }
-                if crate::open_deck_at_path(app, &sh_state, p) {
+                if !matches!(
+                    crate::open_deck_at_path(app, &sh_state, p),
+                    crate::OpenPathOutcome::Failed
+                ) {
                     app.global::<StartHubState>().set_open(false);
                 }
             }),
@@ -357,17 +360,15 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                         s.get_include_notes(),
                     );
                     let total = found.len();
-                    let min_byte = target.byte_start + replacement.len();
-                    let next_idx = found
-                        .iter()
-                        .position(|m| {
-                            m.slide_index > target.slide_index
-                                || (m.slide_index == target.slide_index
-                                    && m.element_id == target.element_id
-                                    && m.is_notes == target.is_notes
-                                    && m.byte_start >= min_byte)
-                        })
-                        .unwrap_or(0);
+                    let next_idx = {
+                        let session = fr_rep_one_state.session.borrow();
+                        find_successor_after_replace(
+                            &session.document,
+                            &found,
+                            &target,
+                            replacement.len(),
+                        )
+                    };
                     if let Some(next_m) = found.get(next_idx) {
                         let mut session = fr_rep_one_state.session.borrow_mut();
                         session.document.select_slide(next_m.slide_index);
@@ -473,5 +474,83 @@ fn sync_print_preview(app: &PresentApp, doc: &loom_present_core::PresentationDoc
                 first_slide.speaker_notes.as_str(),
             ));
         }
+    }
+}
+
+fn match_doc_rank(
+    doc: &loom_present_core::PresentationDocument,
+    m: &TextMatch,
+) -> (usize, u8, usize, usize) {
+    let elem_idx = if m.is_notes {
+        usize::MAX
+    } else {
+        doc.slides
+            .get(m.slide_index)
+            .and_then(|s| s.elements.iter().position(|e| e.id == m.element_id))
+            .unwrap_or(usize::MAX)
+    };
+    (m.slide_index, u8::from(m.is_notes), elem_idx, m.byte_start)
+}
+
+fn find_successor_after_replace(
+    doc: &loom_present_core::PresentationDocument,
+    found: &[TextMatch],
+    target: &TextMatch,
+    replacement_len: usize,
+) -> usize {
+    let mut target_rank = match_doc_rank(doc, target);
+    target_rank.3 = target.byte_start.saturating_add(replacement_len);
+    found
+        .iter()
+        .position(|m| match_doc_rank(doc, m) >= target_rank)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_successor_after_replace;
+    use loom_present_core::find_replace::find_matches_with_notes;
+    use loom_present_core::{ElementStyle, ElementType, PresentationDocument, Slide, SlideElement};
+
+    #[test]
+    fn replace_one_successor_follows_slide_element_notes_offset_order() {
+        let mut doc = PresentationDocument::new("fr-order", "FR");
+        doc.slides.clear();
+        let make_box = |id: &str, text: &str| SlideElement {
+            id: id.into(),
+            element_type: ElementType::BodyText,
+            content: text.into(),
+            x: 40.0,
+            y: 40.0,
+            width: 400.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle::default(),
+            runs: Vec::new(),
+        };
+        let mut s0 = Slide::new("s0", "S0", "blank");
+        s0.elements
+            .extend([make_box("e1", "foo and foo"), make_box("e2", "next foo")]);
+        s0.speaker_notes = "note foo".into();
+        let mut s1 = Slide::new("s1", "S1", "blank");
+        s1.elements.push(make_box("e3", "later foo"));
+        doc.slides.extend([s0, s1]);
+
+        let matches = find_matches_with_notes(&doc, "foo", true, true);
+        assert_eq!(matches.len(), 5);
+        // After replacing second match in e1 (matches[1]), next is e2 on same slide (not s1).
+        doc.slides[0].elements[0].content = "foo and bar".into();
+        let post = find_matches_with_notes(&doc, "foo", true, true);
+        let idx = find_successor_after_replace(&doc, &post, &matches[1], "bar".len());
+        assert_eq!(post[idx].element_id, "e2");
+        assert_eq!(post[idx].slide_index, 0);
+
+        // After replacing e2 match (matches[2]), next is speaker notes on same slide (not s1).
+        doc.slides[0].elements[1].content = "next bar".into();
+        let post2 = find_matches_with_notes(&doc, "foo", true, true);
+        let idx2 = find_successor_after_replace(&doc, &post2, &matches[2], "bar".len());
+        assert!(post2[idx2].is_notes);
+        assert_eq!(post2[idx2].slide_index, 0);
     }
 }

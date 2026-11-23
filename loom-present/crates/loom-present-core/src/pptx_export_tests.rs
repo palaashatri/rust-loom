@@ -527,3 +527,37 @@ fn interop_writes_a_sample_deck_when_asked() {
     std::fs::write(&path, bytes).unwrap();
     println!("wrote {}", path.display());
 }
+
+#[test]
+fn rich_title_run_with_explicit_false_bold_round_trips() {
+    let mut doc = crate::PresentationDocument::new("title-bold", "Title bold");
+    let title = doc.slides[0]
+        .elements
+        .iter_mut()
+        .find(|e| e.element_type == crate::ElementType::Title)
+        .expect("default title element");
+    title.content = "AB".into();
+    title.runs = vec![
+        crate::StyledTextRun {
+            text: "A".into(),
+            bold: Some(true),
+            ..Default::default()
+        },
+        crate::StyledTextRun {
+            text: "B".into(),
+            bold: Some(false),
+            ..Default::default()
+        },
+    ];
+    let session = crate::PresentationSession::new(doc);
+    let bytes = export_pptx(&session).expect("export");
+    let reimported = crate::pptx_import::import_pptx(&bytes).expect("import");
+    let re_title = reimported.slides[0]
+        .elements
+        .iter()
+        .find(|e| e.element_type == crate::ElementType::Title)
+        .expect("reimported title");
+    assert_eq!(re_title.runs.len(), 2);
+    assert_eq!(re_title.runs[0].bold, Some(true));
+    assert_eq!(re_title.runs[1].bold, Some(false));
+}

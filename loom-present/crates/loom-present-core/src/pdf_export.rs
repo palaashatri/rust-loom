@@ -203,14 +203,14 @@ pub(crate) fn draw_slide_into_rect(
         pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
     }
     for elem in &slide.elements {
-        let base = if doc.aspect_ratio_wide {
-            element_transform(elem)
-        } else {
+        let drawn_owned = (!doc.aspect_ratio_wide).then(|| {
             let mut s = elem.clone();
             s.x *= sx;
             s.width *= sx;
-            element_transform(&s)
-        };
+            s
+        });
+        let drawn = drawn_owned.as_ref().unwrap_or(elem);
+        let base = element_transform(drawn);
         let scaled = [
             base[0] * scale,
             base[1] * scale,
@@ -219,7 +219,7 @@ pub(crate) fn draw_slide_into_rect(
             ox + base[4] * scale,
             oy + base[5] * scale,
         ];
-        draw_element_with_transform(pdf, page, doc, elem, scaled, pdf_images);
+        draw_element_with_transform(pdf, page, doc, drawn, scaled, pdf_images);
     }
 }
 
@@ -1169,6 +1169,49 @@ mod tests {
         assert!(
             text[0].contains("Line1") && text[0].contains("Line2"),
             "{text:?}"
+        );
+    }
+
+    #[test]
+    fn draw_slide_into_rect_scales_4_3_element_width() {
+        let mut doc = PresentationDocument::new("r43", "Ratio 4:3");
+        doc.aspect_ratio_wide = false;
+        doc.slides[0].elements.push(SlideElement {
+            id: "box-right".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: String::new(),
+            x: 800.0,
+            y: 100.0,
+            width: 200.0,
+            height: 100.0,
+            style: crate::ElementStyle {
+                fill: Some("#112233".into()),
+                ..Default::default()
+            },
+            runs: Vec::new(),
+            rotation_deg: 0.0,
+            action: None,
+        });
+        let mut pdf = PdfDocument::new();
+        let page = pdf.add_page(720.0, PAGE_HEIGHT);
+        let mut imgs = BTreeMap::new();
+        draw_slide_into_rect(
+            &mut pdf,
+            page,
+            &doc,
+            &doc.slides[0],
+            (0.0, 0.0, 720.0, PAGE_HEIGHT),
+            &mut imgs,
+        );
+        let bytes = pdf.serialize();
+        let content = loom_pdf::inspect::readable_content(&bytes).expect("readable PDF");
+        // In 4:3 (page_w = 720.0, scale = 1.0, sx = 0.75), x=800 -> 576 pt origin via `cm`,
+        // and rectangle width in slide units scales from 200.00 down to 150.00.
+        assert!(
+            content.contains("576.00000 444.00000 cm")
+                && content.contains("150.00 100.00 re f")
+                && !content.contains("200.00 100.00 re f"),
+            "expected scaled 150.00 rect width inside 720 pt page:\n{content}"
         );
     }
 }

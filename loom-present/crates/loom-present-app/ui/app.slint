@@ -466,6 +466,7 @@ export component PresentApp inherits Window {
                 }
 
                 if !root.rtl && !root.is-preview-mode && root.show-navigator : strip-ltr := PresentSlideStrip {
+                    aspect-ratio-wide: root.aspect-ratio-wide;
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;
@@ -582,6 +583,7 @@ export component PresentApp inherits Window {
                 }
 
                 if root.rtl && !root.is-preview-mode && root.show-navigator : strip-rtl := PresentSlideStrip {
+                    aspect-ratio-wide: root.aspect-ratio-wide;
                     titles: root.slide-titles;
                     thumbs: root.slide-thumbs;
                     active-index: root.active-slide-index;

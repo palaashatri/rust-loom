@@ -91,11 +91,13 @@ mod tests {
     fn welcome_guide_seen_persists_via_settings_file() {
         let dir =
             std::env::temp_dir().join(format!("loom-welcome-guide-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("settings.conf");
         assert!(should_show_at(&path));
         mark_seen_at(&path).expect("mark_seen_at");
         assert!(!should_show_at(&path));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

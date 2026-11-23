@@ -228,10 +228,7 @@ fn text_body_runs(
                     .and_then(|f| crate::normalize_font_family(f).ok())
                     .or_else(|| base.font_family.clone());
                 let font = run_font_xml(ff.as_deref(), base.heading_font);
-                let mut rpr = format!("sz=\"{sz}\"");
-                if bold {
-                    rpr.push_str(" b=\"1\"");
-                }
+                let mut rpr = format!("sz=\"{sz}\" b=\"{}\"", u8::from(bold));
                 if italic {
                     rpr.push_str(" i=\"1\"");
                 }

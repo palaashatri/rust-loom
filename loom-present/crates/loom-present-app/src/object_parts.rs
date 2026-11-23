@@ -147,23 +147,112 @@ fn shape_kind_tag(kind: &ElementType) -> Option<&'static str> {
     }
 }
 
+fn wrap_paragraph_spans(para: &str, max_chars: usize) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut line_start = 0usize;
+    let mut line_end = 0usize;
+    let mut line_chars = 0usize;
+    let mut has_word = false;
+    let mut idx = 0usize;
+    while idx < para.len() {
+        let ws_start = idx;
+        while let Some(ch) = para[idx..].chars().next() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            idx += ch.len_utf8();
+        }
+        let word_start = idx;
+        if word_start == para.len() {
+            line_end = para.len();
+            break;
+        }
+        let mut word_chars = 0usize;
+        while let Some(ch) = para[idx..].chars().next() {
+            if ch.is_whitespace() {
+                break;
+            }
+            word_chars += 1;
+            idx += ch.len_utf8();
+        }
+        let word_end = idx;
+        let ws_chars = para[ws_start..word_start].chars().count();
+        if has_word && line_chars + ws_chars + word_chars > max_chars {
+            spans.push((line_start, line_end));
+            line_start = word_start;
+            line_end = word_end;
+            line_chars = word_chars;
+        } else {
+            line_end = word_end;
+            line_chars += ws_chars + word_chars;
+        }
+        has_word = true;
+    }
+    if spans.is_empty() || line_end > line_start {
+        spans.push((line_start, line_end));
+    }
+    spans
+}
+
+struct RichParagraph<'a> {
+    text: String,
+    max_fs: Option<f32>,
+    pieces: Vec<(usize, usize, &'a loom_present_core::StyledTextRun)>,
+}
+
 fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
     let Some((size_pt, bold, ink, centred)) = type_defaults(&element.element_type) else {
         return Vec::new();
     };
     let style = &element.style;
-    let mut lines: Vec<Vec<(String, &loom_present_core::StyledTextRun)>> = vec![Vec::new()];
+    let default_fs = style.size_or(size_pt) / POINTS_PER_UNIT;
+    let mut paragraphs = vec![RichParagraph {
+        text: String::new(),
+        max_fs: None,
+        pieces: Vec::new(),
+    }];
     for run in &element.runs {
         if run.text.is_empty() {
             continue;
         }
+        let run_fs = run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT;
         for (idx, seg) in run.text.split('\n').enumerate() {
             if idx > 0 {
-                lines.push(Vec::new());
+                paragraphs.push(RichParagraph {
+                    text: String::new(),
+                    max_fs: None,
+                    pieces: Vec::new(),
+                });
             }
             if !seg.is_empty() {
-                lines.last_mut().unwrap().push((seg.to_string(), run));
+                let para = paragraphs.last_mut().unwrap();
+                para.max_fs = Some(para.max_fs.map_or(run_fs, |cur| cur.max(run_fs)));
+                let start = para.text.len();
+                para.text.push_str(seg);
+                let end = para.text.len();
+                para.pieces.push((start, end, run));
             }
+        }
+    }
+    let mut lines: Vec<Vec<(String, &loom_present_core::StyledTextRun)>> = Vec::new();
+    for para in paragraphs {
+        if para.text.is_empty() {
+            lines.push(Vec::new());
+            continue;
+        }
+        let ref_fs = para.max_fs.unwrap_or(default_fs);
+        let max_chars =
+            (((element.width - 24.0).max(40.0) / (ref_fs * 0.56).max(6.0)) as usize).max(1);
+        for (line_start, line_end) in wrap_paragraph_spans(&para.text, max_chars) {
+            let mut line_parts = Vec::new();
+            for &(p_start, p_end, run) in &para.pieces {
+                let ov_start = p_start.max(line_start);
+                let ov_end = p_end.min(line_end);
+                if ov_start < ov_end {
+                    line_parts.push((para.text[ov_start..ov_end].to_string(), run));
+                }
+            }
+            lines.push(line_parts);
         }
     }
     let line_count = lines.len().max(1) as f32;
@@ -251,21 +340,11 @@ fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
                 let max_chars = (((element.width - 24.0).max(40.0) / (text.fs * 0.56).max(6.0))
                     as usize)
                     .max(1);
-                let mut lines: Vec<String> = Vec::new();
+                let mut lines: Vec<&str> = Vec::new();
                 for para in element.content.split('\n') {
-                    let mut cur = String::new();
-                    for word in para.split_whitespace() {
-                        if !cur.is_empty()
-                            && cur.chars().count() + 1 + word.chars().count() > max_chars
-                        {
-                            lines.push(std::mem::take(&mut cur));
-                        }
-                        if !cur.is_empty() {
-                            cur.push(' ');
-                        }
-                        cur.push_str(word);
+                    for (start, end) in wrap_paragraph_spans(para, max_chars) {
+                        lines.push(&para[start..end]);
                     }
-                    lines.push(cur);
                 }
                 if lines.len() > 1 {
                     let n = lines.len() as f32;
@@ -968,5 +1047,70 @@ mod tests {
             }),
             "all-zero charts retain a finite zero axis"
         );
+    }
+
+    #[test]
+    fn decorated_plain_text_preserves_multiple_spaces_and_tabs() {
+        let mut elem = SlideElement {
+            id: "deco-ws".into(),
+            element_type: ElementType::BodyText,
+            content: "A  B\nC\tD".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 500.0,
+            height: 120.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: Vec::new(),
+        };
+        elem.style.underline = true;
+        let parts = parts_for(&elem);
+        let texts: Vec<&str> = parts.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, vec!["A  B", "C\tD"]);
+    }
+
+    #[test]
+    fn rich_run_parts_word_wrap_paragraphs_across_run_boundaries() {
+        let elem = SlideElement {
+            id: "rich-wrap".into(),
+            element_type: ElementType::BodyText,
+            content: "Alpha Beta Gamma Delta Epsilon".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 140.0,
+            height: 200.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: vec![
+                loom_present_core::StyledTextRun {
+                    text: "Alpha Beta ".into(),
+                    bold: Some(true),
+                    ..Default::default()
+                },
+                loom_present_core::StyledTextRun {
+                    text: "Gamma Delta Epsilon".into(),
+                    italic: Some(true),
+                    ..Default::default()
+                },
+            ],
+        };
+        let parts = parts_for(&elem);
+        assert!(
+            parts.len() > 2,
+            "expected wrapped segments across multiple lines, got {parts:?}"
+        );
+        let distinct_rows: std::collections::BTreeSet<i32> = parts
+            .iter()
+            .map(|p| (p.fy * 1000.0).round() as i32)
+            .collect();
+        assert!(
+            distinct_rows.len() > 1,
+            "rich runs must wrap onto multiple vertical rows: {parts:?}"
+        );
+        assert!(parts.iter().all(|p| !p.wrap));
+        let combined: String = parts.iter().map(|p| p.text.as_str()).collect();
+        assert!(combined.contains("Epsilon"), "lost tail: {combined}");
     }
 }
