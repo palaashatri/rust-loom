@@ -611,9 +611,11 @@ fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
             r_cursor = tag_start + end_rel + close_tag.len();
 
             if is_fld {
-                let text = parse_txbody_text(r_xml);
-                if !text.is_empty() {
-                    runs.push(crate::StyledTextRun::plain(text));
+                if let (Some(ts), Some(te)) = (r_xml.find("<a:t>"), r_xml.find("</a:t>")) {
+                    let text = xml_unescape(&r_xml[ts + "<a:t>".len()..te]);
+                    if !text.is_empty() {
+                        runs.push(crate::StyledTextRun::plain(text));
+                    }
                 }
                 continue;
             }
@@ -1019,5 +1021,61 @@ mod tests {
             subtitle.y >= title.y + title.height,
             "the subtitle sits below the title, not on it"
         );
+    }
+
+    #[test]
+    fn roundtrip_line_decorations_fld_and_aspect_ratio() {
+        let mut doc = PresentationDocument::new("d", "Deck");
+        doc.aspect_ratio_wide = false;
+        doc.slides[0].elements.push(SlideElement {
+            id: "line-1".to_string(),
+            element_type: ElementType::ShapeLine,
+            content: String::new(),
+            x: 50.0,
+            y: 50.0,
+            width: 200.0,
+            height: 4.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle::default(),
+            runs: Vec::new(),
+        });
+        doc.slides[0].elements.push(SlideElement {
+            id: "deco-1".to_string(),
+            element_type: ElementType::BodyText,
+            content: "Decorated".to_string(),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 40.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle {
+                underline: true,
+                strikethrough: true,
+                ..Default::default()
+            },
+            runs: Vec::new(),
+        });
+        let session = crate::PresentationSession::new(doc);
+        let bytes = crate::pptx_export::export_pptx(&session).expect("export");
+        let imported = import_pptx(&bytes).expect("import");
+        assert!(!imported.aspect_ratio_wide);
+        assert!(imported.slides[0]
+            .elements
+            .iter()
+            .any(|e| e.element_type == ElementType::ShapeLine));
+        let deco = imported.slides[0]
+            .elements
+            .iter()
+            .find(|e| e.content == "Decorated")
+            .expect("deco");
+        assert!(deco.style.underline && deco.style.strikethrough);
+
+        // <a:fld> in document order between two styled <a:r> runs
+        let sp = "<p:sp><p:txBody><a:p><a:r><a:rPr b=\"1\"/><a:t>A </a:t></a:r><a:fld><a:t>1</a:t></a:fld><a:r><a:rPr i=\"1\"/><a:t> B</a:t></a:r></a:p></p:txBody></p:sp>";
+        let runs = parse_shape_runs(sp);
+        let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(joined, "A 1 B");
     }
 }

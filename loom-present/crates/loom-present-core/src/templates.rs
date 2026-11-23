@@ -478,3 +478,36 @@ pub fn apply_theme_preset(session: &mut PresentationSession, theme_id: &str) -> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_layouts_are_distinct_and_theme_rebases_runs() {
+        let blank = document_from_template("blank", "B");
+        assert!(blank.slides[0].elements.is_empty());
+
+        let cols = document_from_template("two-columns", "C");
+        assert_eq!(cols.slides[0].elements.len(), 3);
+
+        let img = document_from_template("image-text", "I");
+        assert!(img.slides[0]
+            .elements
+            .iter()
+            .any(|e| e.element_type == ElementType::ShapeRoundedRect));
+
+        let mut doc = document_from_template("title-content", "T");
+        doc.slides[0].elements[1].set_runs(vec![crate::StyledTextRun {
+            text: "Run".to_string(),
+            color: Some("#000000".to_string()),
+            font_family: Some("Arial".to_string()),
+            ..Default::default()
+        }]);
+        let mut session = PresentationSession::new(doc);
+        apply_theme_preset(&mut session, "executive-pitch").expect("theme");
+        let run = &session.document.slides[0].elements[1].runs[0];
+        assert_eq!(run.color.as_deref(), Some("#F8FAFC"));
+        assert_eq!(run.font_family.as_deref(), Some("Inter"));
+    }
+}

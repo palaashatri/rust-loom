@@ -200,3 +200,47 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
 
     pdf.serialize()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_layout_honors_paper_size_numbers_and_handout_content() {
+        let mut doc = PresentationDocument::new("d", "Title");
+        doc.slides[0].elements.push(crate::SlideElement {
+            id: "b1".to_string(),
+            element_type: crate::ElementType::BodyText,
+            content: "HandoutBodyMarker".to_string(),
+            x: 80.0,
+            y: 180.0,
+            width: 400.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: Vec::new(),
+        });
+        let opts_num = PrintOptions {
+            layout: PrintLayout::SingleSlide,
+            paper_size: PaperSize::Letter,
+            orientation: PrintOrientation::Landscape,
+            include_slide_numbers: true,
+        };
+        let pdf_num = export_pdf_with_options(&doc, &opts_num);
+        let text_num = loom_pdf::inspect::page_text(&pdf_num).expect("page_text");
+        assert!(text_num[0].contains("Page 1"));
+        assert!(text_num[0].contains("HandoutBodyMarker"));
+
+        let opts_handout = PrintOptions {
+            layout: PrintLayout::Handout2,
+            paper_size: PaperSize::Letter,
+            orientation: PrintOrientation::Portrait,
+            include_slide_numbers: false,
+        };
+        let pdf_handout = export_pdf_with_options(&doc, &opts_handout);
+        let text_handout = loom_pdf::inspect::page_text(&pdf_handout).expect("handout text");
+        assert!(!text_handout[0].contains("Page 1"));
+        assert!(text_handout[0].contains("HandoutBodyMarker"));
+    }
+}

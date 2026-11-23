@@ -20,6 +20,10 @@ pub(crate) fn open(app: &PresentApp) {
     state.set_open(true);
     let toggled = !state.get_focus_request();
     state.set_focus_request(toggled);
+    let q = state.get_query();
+    if !q.is_empty() {
+        state.invoke_query_changed(q);
+    }
 }
 
 pub(crate) fn update_match_counts(app: &PresentApp, current: usize, total: usize) {

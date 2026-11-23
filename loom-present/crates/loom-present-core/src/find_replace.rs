@@ -261,4 +261,37 @@ mod tests {
             "Speaker note about beta and alpha"
         );
     }
+
+    #[test]
+    fn case_insensitive_turkish_i_and_rich_run_preservation() {
+        let mut doc = PresentationDocument::new("d", "t");
+        doc.slides[0].elements[0].content = "İab".to_string();
+        let mut session = PresentationSession::new(doc);
+        let matches = find_matches(&session.document, "a", false);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_text, "a");
+        replace_match(&mut session, &matches[0], "X").expect("replace");
+        assert_eq!(session.document.slides[0].elements[0].content, "İXb");
+
+        // Rich run preservation
+        let elem = &mut session.document.slides[0].elements[0];
+        elem.set_runs(vec![
+            crate::StyledTextRun {
+                text: "Hello ".to_string(),
+                bold: Some(true),
+                ..Default::default()
+            },
+            crate::StyledTextRun {
+                text: "world".to_string(),
+                color: Some("#FF0000".to_string()),
+                ..Default::default()
+            },
+        ]);
+        let m = find_matches(&session.document, "Hello", true);
+        replace_match(&mut session, &m[0], "Hi").expect("replace rich");
+        let runs = &session.document.slides[0].elements[0].runs;
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "Hi ");
+        assert_eq!(runs[1].color.as_deref(), Some("#FF0000"));
+    }
 }

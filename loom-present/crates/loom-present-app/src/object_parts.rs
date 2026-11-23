@@ -247,7 +247,43 @@ fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
         out.extend(rich_run_parts(element));
     } else if let Some(text) = styled_text_part(element) {
         if !element.content.is_empty() {
-            out.push(text);
+            if element.style.underline || element.style.strikethrough {
+                let max_chars = (((element.width - 24.0).max(40.0) / (text.fs * 0.56).max(6.0))
+                    as usize)
+                    .max(1);
+                let mut lines: Vec<String> = Vec::new();
+                for para in element.content.split('\n') {
+                    let mut cur = String::new();
+                    for word in para.split_whitespace() {
+                        if !cur.is_empty()
+                            && cur.chars().count() + 1 + word.chars().count() > max_chars
+                        {
+                            lines.push(std::mem::take(&mut cur));
+                        }
+                        if !cur.is_empty() {
+                            cur.push(' ');
+                        }
+                        cur.push_str(word);
+                    }
+                    lines.push(cur);
+                }
+                if lines.len() > 1 {
+                    let n = lines.len() as f32;
+                    let lh = 0.84 / n;
+                    for (i, line) in lines.into_iter().enumerate() {
+                        let mut p = text.clone();
+                        p.fy = 0.08 + i as f32 * lh;
+                        p.fh = lh;
+                        p.wrap = false;
+                        p.text = SharedString::from(line);
+                        out.push(p);
+                    }
+                } else {
+                    out.push(text);
+                }
+            } else {
+                out.push(text);
+            }
         }
     }
     out

@@ -321,3 +321,27 @@ pub fn replace_range_preserving_runs(
     }
     elem.set_runs(out);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_false_range_style_overrides_element_style() {
+        let style = crate::ElementStyle {
+            underline: true,
+            ..Default::default()
+        };
+        let base = vec![StyledTextRun::from_element_style("hello", &style)];
+        let updated = apply_style_to_range(
+            &base,
+            0,
+            5,
+            &TextRangeStyleChange {
+                underline: Some(false),
+                ..Default::default()
+            },
+        );
+        assert_eq!(updated[0].underline, Some(false));
+    }
+}
