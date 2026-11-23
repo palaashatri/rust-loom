@@ -190,15 +190,41 @@ export component PresentFontPicker inherits Rectangle {
         }
     }
 
-    VerticalLayout {
-        padding: Theme.tokens.space.xs;
-        spacing: Theme.tokens.space.xs;
-
-        search := LoomTextField {
-            value: FontPicker.query;
-            placeholder: "Search fonts…";
-            edited(val) => { FontPicker.query-edited(val); }
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                FontPicker.move(1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                FontPicker.move(-1);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                FontPicker.choose(FontPicker.selected);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                FontPicker.close-requested();
+                return accept;
+            }
+            return reject;
         }
+
+        VerticalLayout {
+            padding: Theme.tokens.space.xs;
+            spacing: Theme.tokens.space.xs;
+
+            search := LoomTextField {
+                value: FontPicker.query;
+                placeholder: "Search fonts…";
+                focus-request: FontPicker.search-focus-tick;
+                edited(val) => { FontPicker.query-edited(val); }
+                accepted(_) => { FontPicker.choose(FontPicker.selected); }
+                cancelled => { FontPicker.close-requested(); }
+            }
 
         // search focus handled by LoomTextField
 
@@ -275,6 +301,9 @@ export component PresentFontPicker inherits Rectangle {
                     }
 
                     if !line.heading : row-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: line.label;
+                        accessible-action-default => { FontPicker.choose(line.index); }
                         clicked => { FontPicker.choose(line.index); }
                     }
                 }
@@ -325,4 +354,5 @@ export component PresentFontPicker inherits Rectangle {
             }
         }
     }
+}
 }

@@ -38,27 +38,14 @@ pub fn find_matches_with_notes(
     if query.is_empty() {
         return Vec::new();
     }
-    let needle = if case_sensitive {
-        query.to_string()
-    } else {
-        query.to_lowercase()
-    };
     let mut matches = Vec::new();
     for (slide_index, slide) in doc.slides.iter().enumerate() {
         for elem in &slide.elements {
             if !is_searchable_text(&elem.element_type) || elem.content.is_empty() {
                 continue;
             }
-            let haystack = if case_sensitive {
-                elem.content.clone()
-            } else {
-                elem.content.to_lowercase()
-            };
-            let mut offset = 0usize;
-            while let Some(pos) = haystack[offset..].find(&needle) {
-                let start = offset + pos;
-                let end = start + needle.len();
-                let matched_text = elem.content.get(start..end).unwrap_or("").to_string();
+            for (start, end) in find_text_ranges(&elem.content, query, case_sensitive) {
+                let matched_text = elem.content[start..end].to_string();
                 matches.push(TextMatch {
                     slide_index,
                     element_id: elem.id.clone(),
@@ -67,24 +54,11 @@ pub fn find_matches_with_notes(
                     matched_text,
                     is_notes: false,
                 });
-                offset = end.max(offset + 1);
             }
         }
         if include_notes && !slide.speaker_notes.is_empty() {
-            let haystack = if case_sensitive {
-                slide.speaker_notes.clone()
-            } else {
-                slide.speaker_notes.to_lowercase()
-            };
-            let mut offset = 0usize;
-            while let Some(pos) = haystack[offset..].find(&needle) {
-                let start = offset + pos;
-                let end = start + needle.len();
-                let matched_text = slide
-                    .speaker_notes
-                    .get(start..end)
-                    .unwrap_or("")
-                    .to_string();
+            for (start, end) in find_text_ranges(&slide.speaker_notes, query, case_sensitive) {
+                let matched_text = slide.speaker_notes[start..end].to_string();
                 matches.push(TextMatch {
                     slide_index,
                     element_id: "__notes__".to_string(),
@@ -93,11 +67,54 @@ pub fn find_matches_with_notes(
                     matched_text,
                     is_notes: true,
                 });
-                offset = end.max(offset + 1);
             }
         }
     }
     matches
+}
+
+fn find_text_ranges(text: &str, query: &str, case_sensitive: bool) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    if query.is_empty() {
+        return ranges;
+    }
+    if case_sensitive {
+        let mut offset = 0usize;
+        while let Some(pos) = text[offset..].find(query) {
+            let start = offset + pos;
+            let end = start + query.len();
+            ranges.push((start, end));
+            offset = end;
+        }
+        return ranges;
+    }
+    let query_chars: Vec<char> = query.to_lowercase().chars().collect();
+    if query_chars.is_empty() {
+        return ranges;
+    }
+    let mut lowered_chars: Vec<char> = Vec::new();
+    let mut char_to_orig_start: Vec<usize> = Vec::new();
+    for (orig_start, ch) in text.char_indices() {
+        for lc in ch.to_lowercase() {
+            lowered_chars.push(lc);
+            char_to_orig_start.push(orig_start);
+        }
+    }
+    char_to_orig_start.push(text.len());
+    let mut i = 0usize;
+    while i + query_chars.len() <= lowered_chars.len() {
+        if lowered_chars[i..i + query_chars.len()] == query_chars[..] {
+            let start = char_to_orig_start[i];
+            let end = char_to_orig_start[i + query_chars.len()];
+            if text.is_char_boundary(start) && text.is_char_boundary(end) {
+                ranges.push((start, end));
+            }
+            i += query_chars.len();
+        } else {
+            i += 1;
+        }
+    }
+    ranges
 }
 
 /// Replaces a single [`TextMatch`] with `replacement` as a single undoable step.
@@ -112,9 +129,11 @@ pub fn replace_match(
         .get(m.slide_index)
         .ok_or_else(|| "Slide index out of range".to_string())?;
     if m.is_notes {
-        if m.byte_end > slide.speaker_notes.len()
+        if m.byte_start > m.byte_end
+            || m.byte_end > slide.speaker_notes.len()
             || !slide.speaker_notes.is_char_boundary(m.byte_start)
             || !slide.speaker_notes.is_char_boundary(m.byte_end)
+            || slide.speaker_notes[m.byte_start..m.byte_end] != m.matched_text
         {
             return Err("Match range is no longer valid".to_string());
         }
@@ -129,9 +148,11 @@ pub fn replace_match(
         .iter()
         .find(|e| e.id == m.element_id)
         .ok_or_else(|| format!("Element '{}' not found", m.element_id))?;
-    if m.byte_end > elem.content.len()
+    if m.byte_start > m.byte_end
+        || m.byte_end > elem.content.len()
         || !elem.content.is_char_boundary(m.byte_start)
         || !elem.content.is_char_boundary(m.byte_end)
+        || elem.content[m.byte_start..m.byte_end] != m.matched_text
     {
         return Err("Match range is no longer valid".to_string());
     }
@@ -141,10 +162,12 @@ pub fn replace_match(
         .iter_mut()
         .find(|e| e.id == m.element_id)
         .expect("verified element");
-    elem_mut
-        .content
-        .replace_range(m.byte_start..m.byte_end, replacement);
-    elem_mut.sync_runs_from_content();
+    crate::rich_text::replace_range_preserving_runs(
+        elem_mut,
+        m.byte_start,
+        m.byte_end,
+        replacement,
+    );
     Ok(())
 }
 
@@ -191,9 +214,12 @@ pub fn replace_all_with_notes(
                     && elem.content.is_char_boundary(m.byte_start)
                     && elem.content.is_char_boundary(m.byte_end)
                 {
-                    elem.content
-                        .replace_range(m.byte_start..m.byte_end, replacement);
-                    elem.sync_runs_from_content();
+                    crate::rich_text::replace_range_preserving_runs(
+                        elem,
+                        m.byte_start,
+                        m.byte_end,
+                        replacement,
+                    );
                 }
             }
         }

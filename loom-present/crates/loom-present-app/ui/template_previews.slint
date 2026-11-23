@@ -10,29 +10,28 @@ export component SlideTemplatePreview inherits Rectangle {
     clip: true;
 
     pure function is-dark() -> bool {
-        root.template-id == "executive-pitch" || root.template-id == "minimal-keynote"
+        root.template-id == "executive-pitch" || root.template-id == "product-launch"
     }
 
     pure function bg-color() -> color {
         if root.template-id == "executive-pitch" { return #0f172a; }
-        if root.template-id == "minimal-keynote" { return #18181b; }
-        if root.template-id == "editorial-portfolio" { return #faf5f0; }
-        if root.template-id == "product-launch" { return #fff7ed; }
-        if root.template-id == "academic-lecture" { return #f4f7fb; }
-        if root.template-id == "workshop-deck" { return #f0fdf4; }
+        if root.template-id == "product-launch" { return #18181b; }
+        if root.template-id == "data-report" { return #f8fafc; }
+        if root.template-id == "editorial-portfolio" { return #faf7f2; }
+        if root.template-id == "workshop-deck" { return #fffbeb; }
         return #ffffff;
     }
 
     pure function accent-color() -> color {
-        if root.template-id == "executive-pitch" { return #38bdf8; }
-        if root.template-id == "quarterly-review" { return #4338ca; }
-        if root.template-id == "product-launch" { return #ea580c; }
-        if root.template-id == "data-report" { return #0f766e; }
-        if root.template-id == "editorial-portfolio" { return #9a3412; }
-        if root.template-id == "academic-lecture" { return #1d4ed8; }
-        if root.template-id == "workshop-deck" { return #15803d; }
-        if root.template-id == "minimal-keynote" { return #a1a1aa; }
-        return #334155;
+        if root.template-id == "executive-pitch" { return #f59e0b; }
+        if root.template-id == "quarterly-review" { return #1d4ed8; }
+        if root.template-id == "product-launch" { return #8b5cf6; }
+        if root.template-id == "data-report" { return #0d9488; }
+        if root.template-id == "editorial-portfolio" { return #c2410c; }
+        if root.template-id == "academic-lecture" { return #15803d; }
+        if root.template-id == "workshop-deck" { return #4f46e5; }
+        if root.template-id == "minimal-keynote" { return #18181b; }
+        return #2b579a;
     }
 
     background: root.bg-color();

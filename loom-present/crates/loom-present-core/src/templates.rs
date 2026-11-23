@@ -276,7 +276,7 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
     let mut slide1 = Slide::new("slide-1", title, "16:9");
     slide1.bg_color = desc.theme.background.clone();
 
-    if template_id != "blank" {
+    if desc.id != "blank" && desc.id != "two-columns" && desc.id != "image-text" {
         slide1.elements.push(make_elem(
             "title-1",
             ElementType::Title,
@@ -302,7 +302,7 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
     }
 
     if matches!(
-        template_id,
+        desc.id,
         "executive-pitch"
             | "quarterly-review"
             | "product-launch"
@@ -359,6 +359,77 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
             },
         ));
         doc.slides = vec![slide1, slide2];
+    } else if desc.id == "two-columns" {
+        slide1.elements.clear();
+        slide1.elements.push(make_elem(
+            "title-1",
+            ElementType::Title,
+            title,
+            (60.0, 48.0, 880.0, 80.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.heading_font.clone()),
+                ..Default::default()
+            },
+        ));
+        slide1.elements.push(make_elem(
+            "col-left-1",
+            ElementType::BodyText,
+            "Left column content",
+            (60.0, 150.0, 420.0, 340.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.body_font.clone()),
+                ..Default::default()
+            },
+        ));
+        slide1.elements.push(make_elem(
+            "col-right-1",
+            ElementType::BodyText,
+            "Right column content",
+            (520.0, 150.0, 420.0, 340.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.body_font.clone()),
+                ..Default::default()
+            },
+        ));
+        doc.slides = vec![slide1];
+    } else if desc.id == "image-text" {
+        slide1.elements.clear();
+        slide1.elements.push(make_elem(
+            "title-1",
+            ElementType::Title,
+            title,
+            (60.0, 48.0, 880.0, 80.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.heading_font.clone()),
+                ..Default::default()
+            },
+        ));
+        slide1.elements.push(make_elem(
+            "media-frame-1",
+            ElementType::ShapeRoundedRect,
+            "Image Placeholder",
+            (60.0, 150.0, 420.0, 340.0),
+            ElementStyle {
+                fill: Some(desc.theme.accent.clone()),
+                ..Default::default()
+            },
+        ));
+        slide1.elements.push(make_elem(
+            "body-1",
+            ElementType::BodyText,
+            "Supporting narrative and key takeaways.",
+            (520.0, 150.0, 420.0, 340.0),
+            ElementStyle {
+                color: Some(desc.theme.ink.clone()),
+                font_family: Some(desc.theme.body_font.clone()),
+                ..Default::default()
+            },
+        ));
+        doc.slides = vec![slide1];
     } else {
         doc.slides = vec![slide1];
     }
@@ -379,10 +450,18 @@ pub fn apply_theme_preset(session: &mut PresentationSession, theme_id: &str) -> 
                 ElementType::Title | ElementType::Subtitle => {
                     elem.style.color = Some(desc.theme.ink.clone());
                     elem.style.font_family = Some(desc.theme.heading_font.clone());
+                    for run in &mut elem.runs {
+                        run.color = Some(desc.theme.ink.clone());
+                        run.font_family = Some(desc.theme.heading_font.clone());
+                    }
                 }
                 ElementType::BodyText => {
                     elem.style.color = Some(desc.theme.ink.clone());
                     elem.style.font_family = Some(desc.theme.body_font.clone());
+                    for run in &mut elem.runs {
+                        run.color = Some(desc.theme.ink.clone());
+                        run.font_family = Some(desc.theme.body_font.clone());
+                    }
                 }
                 ElementType::ShapeRectangle
                 | ElementType::ShapeCircle

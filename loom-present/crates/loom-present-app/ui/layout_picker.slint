@@ -10,8 +10,9 @@ component LayoutCard inherits Rectangle {
 
     height: 54px;
     border-radius: Theme.tokens.metrics.radius-small;
-    border-width: root.active ? 2px : 1px;
-    border-color: root.active ? Theme.palette().accent
+    border-width: root.active || scope.has-focus ? 2px : 1px;
+    border-color: scope.has-focus ? Theme.palette().focus
+        : root.active ? Theme.palette().accent
         : touch.has-hover ? Theme.palette().border-strong
         : Theme.palette().border;
     background: touch.has-hover ? Theme.palette().selection-soft : Theme.palette().surface;
@@ -19,7 +20,18 @@ component LayoutCard inherits Rectangle {
     accessible-label: root.label + " layout";
     accessible-action-default => { root.pick(); }
 
-    touch := TouchArea { clicked => { root.pick(); } }
+    scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.pick();
+                return accept;
+            }
+            return reject;
+        }
+        touch := TouchArea { clicked => { root.pick(); } }
+    }
 
     VerticalLayout {
         padding: 4px;
@@ -31,7 +43,7 @@ component LayoutCard inherits Rectangle {
             border-radius: 2px;
             background: Theme.palette().surface-sunken;
 
-            if root.layout-id == "title" : VerticalLayout {
+            if root.layout-id == "cover" : VerticalLayout {
                 alignment: center;
                 padding: 4px;
                 spacing: 3px;
@@ -44,7 +56,7 @@ component LayoutCard inherits Rectangle {
                 Rectangle { height: 5px; width: 60%; background: Theme.palette().ink-secondary; border-radius: 1px; }
                 Rectangle { vertical-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
             }
-            if root.layout-id == "two-col" : VerticalLayout {
+            if root.layout-id == "two-column" : VerticalLayout {
                 padding: 4px;
                 spacing: 3px;
                 Rectangle { height: 5px; width: 60%; background: Theme.palette().ink-secondary; border-radius: 1px; }
@@ -55,7 +67,7 @@ component LayoutCard inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
                 }
             }
-            if root.layout-id == "image" : HorizontalLayout {
+            if root.layout-id == "image-text" : HorizontalLayout {
                 padding: 4px;
                 spacing: 3px;
                 Rectangle { horizontal-stretch: 1; background: Theme.palette().border-strong; border-radius: 1px; }
@@ -106,22 +118,22 @@ export component PresentLayoutPicker inherits VerticalLayout {
 
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LayoutCard { layout-id: "title"; label: "Title"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("title"); } }
-        LayoutCard { layout-id: "content"; label: "Content"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("content"); } }
+        LayoutCard { layout-id: "cover"; label: "Title"; active: ElementInk.active-layout == "cover"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("cover"); } }
+        LayoutCard { layout-id: "content"; label: "Content"; active: ElementInk.active-layout == "content"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("content"); } }
     }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LayoutCard { layout-id: "two-col"; label: "2 Col"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("two-col"); } }
-        LayoutCard { layout-id: "image"; label: "Image"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("image"); } }
+        LayoutCard { layout-id: "two-column"; label: "2 Col"; active: ElementInk.active-layout == "two-column"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("two-column"); } }
+        LayoutCard { layout-id: "image-text"; label: "Image"; active: ElementInk.active-layout == "image-text"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("image-text"); } }
     }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LayoutCard { layout-id: "section"; label: "Section"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("section"); } }
-        LayoutCard { layout-id: "comparison"; label: "Compare"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("comparison"); } }
+        LayoutCard { layout-id: "section"; label: "Section"; active: ElementInk.active-layout == "section"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("section"); } }
+        LayoutCard { layout-id: "comparison"; label: "Compare"; active: ElementInk.active-layout == "comparison"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("comparison"); } }
     }
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        LayoutCard { layout-id: "big-number"; label: "Big #"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("big-number"); } }
-        LayoutCard { layout-id: "blank"; label: "Blank"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("blank"); } }
+        LayoutCard { layout-id: "big-number"; label: "Big #"; active: ElementInk.active-layout == "big-number"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("big-number"); } }
+        LayoutCard { layout-id: "blank"; label: "Blank"; active: ElementInk.active-layout == "blank"; horizontal-stretch: 1; pick => { ElementInk.layout-picked("blank"); } }
     }
 }

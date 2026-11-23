@@ -116,7 +116,7 @@ struct TextSpec {
     font_family: Option<String>,
 }
 
-fn text_body(content: &str, spec: &TextSpec) -> String {
+fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: bool) -> String {
     let algn = spec.algn;
     let font = match &spec.font_family {
         Some(family) => {
@@ -129,10 +129,16 @@ fn text_body(content: &str, spec: &TextSpec) -> String {
         None => String::new(),
     };
     let rpr = format!(
-        "sz=\"{}\" b=\"{}\"{} dirty=\"0\"",
+        "sz=\"{}\" b=\"{}\"{}{}{} dirty=\"0\"",
         spec.size,
         u8::from(spec.bold),
-        if spec.italic { " i=\"1\"" } else { "" }
+        if spec.italic { " i=\"1\"" } else { "" },
+        if underline { " u=\"sng\"" } else { "" },
+        if strikethrough {
+            " strike=\"sngStrike\""
+        } else {
+            ""
+        }
     );
     let mut xml = String::from(
         "<p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr><a:lstStyle/>",
@@ -169,7 +175,12 @@ fn run_font_xml(family: Option<&str>, heading: bool) -> String {
     format!("<a:latin typeface=\"{e}\"/><a:ea typeface=\"{e}\"/><a:cs typeface=\"{e}\"/>")
 }
 
-fn text_body_runs(runs: &[crate::StyledTextRun], base: &TextSpec) -> String {
+fn text_body_runs(
+    runs: &[crate::StyledTextRun],
+    base: &TextSpec,
+    base_underline: bool,
+    base_strikethrough: bool,
+) -> String {
     let algn = base.algn;
     let mut xml = String::from(
         "<p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr><a:lstStyle/>",
@@ -205,7 +216,7 @@ fn text_body_runs(runs: &[crate::StyledTextRun], base: &TextSpec) -> String {
                     .map(|pt| (f64::from(pt) * 100.0).round() as i64)
                     .unwrap_or(base.size);
                 let bold = run.bold.unwrap_or(base.bold);
-                let italic = run.italic || base.italic;
+                let italic = run.italic.unwrap_or(base.italic);
                 let color = run
                     .color
                     .as_deref()
@@ -224,10 +235,10 @@ fn text_body_runs(runs: &[crate::StyledTextRun], base: &TextSpec) -> String {
                 if italic {
                     rpr.push_str(" i=\"1\"");
                 }
-                if run.underline {
+                if run.underline.unwrap_or(base_underline) {
                     rpr.push_str(" u=\"sng\"");
                 }
-                if run.strikethrough {
+                if run.strikethrough.unwrap_or(base_strikethrough) {
                     rpr.push_str(" strike=\"sngStrike\"");
                 }
                 xml.push_str(&format!(
@@ -447,22 +458,32 @@ fn element_shape(id: u32, element: &SlideElement, background: &str, title_ph: bo
         Some(color) => format!("<a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill>"),
         None => "<a:noFill/>".to_string(),
     };
+    let is_line = element.element_type == ElementType::ShapeLine;
     let (c_nv_sp_pr, nv_pr) = if title_ph {
         (
             "<p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>",
             "<p:nvPr><p:ph type=\"title\"/></p:nvPr>",
         )
-    } else if fill.is_some() {
+    } else if fill.is_some() || is_line {
         ("<p:cNvSpPr/>", "<p:nvPr/>")
     } else {
         ("<p:cNvSpPr txBox=\"1\"/>", "<p:nvPr/>")
     };
+    let ln_xml = if is_line {
+        let stroke = fill
+            .as_deref()
+            .map(|c| hex_color(c, &text.color))
+            .unwrap_or_else(|| hex_color(&text.color, "2563EB"));
+        format!("<a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"{stroke}\"/></a:solidFill></a:ln>")
+    } else {
+        "<a:ln><a:noFill/></a:ln>".to_string()
+    };
     format!(
-        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr><p:spPr>{xf}<a:prstGeom prst=\"{geometry}\"><a:avLst/></a:prstGeom>{fill_xml}<a:ln><a:noFill/></a:ln></p:spPr>{}</p:sp>",
+        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr><p:spPr>{xf}<a:prstGeom prst=\"{geometry}\"><a:avLst/></a:prstGeom>{fill_xml}{ln_xml}</p:spPr>{}</p:sp>",
         if element.runs.is_empty() {
-            text_body(&element.content, &text)
+            text_body(&element.content, &text, style.underline, style.strikethrough)
         } else {
-            text_body_runs(&element.runs, &text)
+            text_body_runs(&element.runs, &text, style.underline, style.strikethrough)
         }
     )
 }
@@ -498,7 +519,7 @@ fn fallback_title_shape(id: u32, slide: &Slide, background: &str) -> String {
     format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Slide title\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>{}</p:sp>",
         xfrm(40.0, 20.0, 920.0, 60.0, 0.0),
-        text_body(&slide.title, &spec)
+        text_body(&slide.title, &spec, false, false)
     )
 }
 
@@ -583,7 +604,7 @@ fn notes_slide_xml(notes: &str) -> String {
         heading_font: false,
         font_family: None,
     };
-    let body = text_body(notes, &spec).replace(
+    let body = text_body(notes, &spec, false, false).replace(
         "<a:bodyPr wrap=\"square\" rtlCol=\"0\" anchor=\"ctr\"><a:noAutofit/></a:bodyPr>",
         "<a:bodyPr/>",
     );
@@ -706,10 +727,15 @@ pub fn export_pptx(session: &PresentationSession) -> Result<Vec<u8>, String> {
     } else {
         format!("<p:sldIdLst>{slide_list}</p:sldIdLst>")
     };
+    let (sld_w, sld_h) = if document.aspect_ratio_wide {
+        (SLIDE_WIDTH, SLIDE_HEIGHT)
+    } else {
+        (720.0, 540.0)
+    };
     let presentation = format!(
         "{XML_DECL}<p:presentation {NS} saveSubsetFonts=\"1\"><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst><p:notesMasterIdLst><p:notesMasterId r:id=\"rId2\"/></p:notesMasterIdLst>{slide_list}<p:sldSz cx=\"{}\" cy=\"{}\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>",
-        emu(SLIDE_WIDTH),
-        emu(SLIDE_HEIGHT)
+        emu(sld_w),
+        emu(sld_h)
     );
     add(
         "ppt/presentation.xml",

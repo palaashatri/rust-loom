@@ -131,6 +131,50 @@ impl ElementStyle {
 impl PresentationSession {
     /// Changes the style of the given elements on the active slide as one
     /// undoable step. Returns false, with no history entry, when nothing changed.
+    pub fn restyle_elements_and_runs(
+        &mut self,
+        element_ids: &[String],
+        change_style: impl Fn(&mut ElementStyle),
+        change_run: impl Fn(&mut crate::StyledTextRun),
+    ) -> bool {
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        let changes = slide
+            .elements
+            .iter()
+            .filter(|element| element_ids.contains(&element.id))
+            .any(|element| {
+                let mut next_style = element.style.clone();
+                change_style(&mut next_style);
+                if next_style != element.style {
+                    return true;
+                }
+                element.runs.iter().any(|run| {
+                    let mut next_run = run.clone();
+                    change_run(&mut next_run);
+                    next_run != *run
+                })
+            });
+        if !changes {
+            return false;
+        }
+        self.checkpoint();
+        if let Some(slide) = self.document.active_slide_mut() {
+            for element in slide
+                .elements
+                .iter_mut()
+                .filter(|element| element_ids.contains(&element.id))
+            {
+                change_style(&mut element.style);
+                for run in &mut element.runs {
+                    change_run(run);
+                }
+            }
+        }
+        true
+    }
+
     pub fn restyle_elements(
         &mut self,
         element_ids: &[String],

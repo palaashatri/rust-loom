@@ -348,7 +348,7 @@ export component PresentSlideCanvas inherits Rectangle {
                     y: ObjectParts.active-cells[idx].fy * parent.height;
                     width: ObjectParts.active-cells[idx].fw * parent.width;
                     height: ObjectParts.active-cells[idx].fh * parent.height;
-                    background: root.has-slide-bg ? root.slide-bg : (ElementInk.bg-color-automatic ? DocumentInk.paper : ElementInk.bg-color-swatch);
+                    background: ObjectParts.active-cells[idx].has-bg ? ObjectParts.active-cells[idx].bg : DocumentInk.paper;
                     accessible-role: none;
                 }
 

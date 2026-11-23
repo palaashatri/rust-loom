@@ -903,6 +903,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_height_text("—".into());
             app.set_element_rotation_text("—".into());
         }
+        element_style_ui::publish_document(app, &session);
         app.set_transition_index(match session.transition_for(&slide.id) {
             TransitionKind::None => 0,
             TransitionKind::Dissolve => 1,
@@ -1928,7 +1929,9 @@ fn focus_editor_at_launch(app: &PresentApp) {
     if !(app.get_theme_chooser_open()
         || app.get_palette_open()
         || app.get_save_changes_open()
-        || app.get_pptx_import_warning_open())
+        || app.get_pptx_import_warning_open()
+        || app.global::<WelcomeGuideState>().get_open()
+        || app.global::<StartHubState>().get_open())
     {
         app.invoke_focus_editor();
     }
@@ -2362,6 +2365,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                                 }
                             } else {
                                 element.content = content.as_str().to_string();
+                                element.sync_runs_from_content();
                             }
                             element.element_type == ElementType::Title
                         } else {

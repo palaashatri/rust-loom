@@ -35,6 +35,16 @@ export component PresentModals inherits Rectangle {
     in-out property <int> insert-table-dialog-rows: 3;
     in-out property <int> insert-table-dialog-cols: 3;
     callback insert-table-size(int, int);
+    callback restore-editor-focus();
+
+    property <bool> fr-open: FindReplaceState.open;
+    changed fr-open => { if (!self.fr-open) { root.restore-editor-focus(); } }
+    property <bool> pp-open: PrintPreviewState.open;
+    changed pp-open => { if (!self.pp-open) { root.restore-editor-focus(); } }
+    property <bool> sh-open: StartHubState.open;
+    changed sh-open => { if (!self.sh-open) { root.restore-editor-focus(); } }
+    property <bool> wg-open: WelcomeGuideState.open;
+    changed wg-open => { if (!self.wg-open) { root.restore-editor-focus(); } }
 
     background: transparent;
 

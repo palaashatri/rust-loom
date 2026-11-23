@@ -86,7 +86,24 @@ impl FontFallback for CatalogFontFallback {
                 .face(face_id)
                 .map(|f| f.family.as_str())
                 .unwrap_or("Fallback");
-            let name: &'static str = Box::leak(family_name.to_string().into_boxed_str());
+            let sanitized: String = family_name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect();
+            let base = sanitized.trim_matches('-');
+            let base = if base.is_empty() { "Fallback" } else { base };
+            let id_clean: String = format!("{face_id:?}")
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let unique_name = format!("{base}-{id_clean}");
+            let name: &'static str = Box::leak(unique_name.into_boxed_str());
             let data: &'static [u8] = Box::leak(loaded.bytes().to_vec().into_boxed_slice());
             Some(FallbackFont { name, data })
         };
@@ -136,6 +153,36 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
+/// Renders a single slide scaled and positioned into `rect = (x, y, w, h)` in PDF points
+/// (where `y` is the bottom-left corner in PDF user space).
+pub(crate) fn draw_slide_into_rect(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    doc: &PresentationDocument,
+    slide: &crate::Slide,
+    rect: (f32, f32, f32, f32),
+    pdf_images: &mut BTreeMap<String, usize>,
+) {
+    let (rx, ry, rw, rh) = rect;
+    let bg = parse_rgb(&slide.bg_color).unwrap_or((1.0, 1.0, 1.0));
+    pdf.draw_rect(page, rx, ry, rw, rh, PathStyle::filled(bg));
+    let scale = (rw / PAGE_WIDTH).min(rh / PAGE_HEIGHT);
+    let ox = rx + (rw - PAGE_WIDTH * scale) / 2.0;
+    let oy = ry + (rh - PAGE_HEIGHT * scale) / 2.0;
+    for elem in &slide.elements {
+        let base = element_transform(elem);
+        let scaled = [
+            base[0] * scale,
+            base[1] * scale,
+            base[2] * scale,
+            base[3] * scale,
+            ox + base[4] * scale,
+            oy + base[5] * scale,
+        ];
+        draw_element_with_transform(pdf, page, doc, elem, scaled, pdf_images);
+    }
+}
+
 /// Draws one object: its shape or picture, then its text in the editor's box.
 fn draw_element(
     pdf: &mut PdfDocument,
@@ -145,6 +192,17 @@ fn draw_element(
     pdf_images: &mut BTreeMap<String, usize>,
 ) {
     let transform = element_transform(elem);
+    draw_element_with_transform(pdf, page, doc, elem, transform, pdf_images);
+}
+
+fn draw_element_with_transform(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    doc: &PresentationDocument,
+    elem: &SlideElement,
+    transform: [f32; 6],
+    pdf_images: &mut BTreeMap<String, usize>,
+) {
     match elem.element_type {
         ElementType::ShapeRectangle | ElementType::ShapeRoundedRect | ElementType::StatCard => {
             let rgb = element_fill(elem).unwrap_or(if elem.element_type == ElementType::StatCard {
@@ -280,9 +338,9 @@ fn element_transform(elem: &SlideElement) -> [f32; 6] {
 }
 
 /// `#RRGGBB` as RGB in 0..=1.
-fn parse_rgb(hex: &str) -> Option<(f32, f32, f32)> {
+pub(crate) fn parse_rgb(hex: &str) -> Option<(f32, f32, f32)> {
     let hex = hex.trim().trim_start_matches('#');
-    if hex.len() != 6 {
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let channel = |range: std::ops::Range<usize>| {
@@ -446,12 +504,12 @@ fn draw_rich_runs_box(
         if let Some(b) = run.bold {
             run_style.bold = b;
         }
-        run_style.italic = run.italic || base_style.italic;
+        run_style.italic = run.italic.unwrap_or(base_style.italic);
         if let Some(rgb) = run.color.as_deref().and_then(parse_rgb) {
             run_style.fill_rgb = rgb;
         }
-        let underline = run.underline || elem.style.underline;
-        let strikethrough = run.strikethrough || elem.style.strikethrough;
+        let underline = run.underline.unwrap_or(elem.style.underline);
+        let strikethrough = run.strikethrough.unwrap_or(elem.style.strikethrough);
 
         let paragraphs: Vec<&str> = run.text.split('\n').collect();
         for (p_idx, para) in paragraphs.iter().enumerate() {
@@ -461,6 +519,45 @@ fn draw_rich_runs_box(
             }
             for token in para.split_inclusive(' ') {
                 let w = text_width_pt(token, &run_style);
+                if w > width {
+                    let mut chunk = String::new();
+                    for ch in token.chars() {
+                        let mut next = chunk.clone();
+                        next.push(ch);
+                        if !chunk.is_empty() && text_width_pt(&next, &run_style) > width {
+                            let cw = text_width_pt(&chunk, &run_style);
+                            if cur_w > 0.0 && cur_w + cw > width {
+                                lines.push(Vec::new());
+                                cur_w = 0.0;
+                            }
+                            lines.last_mut().unwrap().push(StyledWord {
+                                text: std::mem::take(&mut chunk),
+                                style: run_style.clone(),
+                                underline,
+                                strikethrough,
+                                width_pt: cw,
+                            });
+                            cur_w += cw;
+                        }
+                        chunk.push(ch);
+                    }
+                    if !chunk.is_empty() {
+                        let cw = text_width_pt(&chunk, &run_style);
+                        if cur_w > 0.0 && cur_w + cw > width {
+                            lines.push(Vec::new());
+                            cur_w = 0.0;
+                        }
+                        lines.last_mut().unwrap().push(StyledWord {
+                            text: chunk,
+                            style: run_style.clone(),
+                            underline,
+                            strikethrough,
+                            width_pt: cw,
+                        });
+                        cur_w += cw;
+                    }
+                    continue;
+                }
                 if cur_w > 0.0 && cur_w + w > width {
                     lines.push(Vec::new());
                     cur_w = 0.0;
@@ -477,13 +574,33 @@ fn draw_rich_runs_box(
         }
     }
 
-    let line_height = base_style.size_pt * LINE_EM;
-    let fits = ((height / line_height).floor() as usize).max(1);
-    if lines.len() > fits {
-        lines.truncate(fits);
+    let line_sizes: Vec<f32> = lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|w| w.style.size_pt)
+                .fold(0.0f32, f32::max)
+                .max(if line.is_empty() {
+                    base_style.size_pt
+                } else {
+                    1.0
+                })
+        })
+        .collect();
+    let line_heights: Vec<f32> = line_sizes.iter().map(|s| s * LINE_EM).collect();
+    let mut fit_count = 0usize;
+    let mut used_h = 0.0f32;
+    for lh in &line_heights {
+        if fit_count > 0 && used_h + lh > height {
+            break;
+        }
+        used_h += lh;
+        fit_count += 1;
     }
-    let block = lines.len() as f32 * line_height;
-    let first_top = top + (height - block) / 2.0;
+    let fit_count = fit_count.max(1).min(lines.len());
+    lines.truncate(fit_count);
+    let block: f32 = line_heights[..fit_count].iter().sum();
+    let mut y_top = top + (height - block) / 2.0;
 
     for (idx, line) in lines.iter().enumerate() {
         let total_w: f32 = line.iter().map(|w| w.width_pt).sum();
@@ -492,7 +609,8 @@ fn draw_rich_runs_box(
             2 => left + width - total_w,
             _ => left,
         };
-        let baseline = first_top + idx as f32 * line_height + ASCENT_EM * base_style.size_pt;
+        let baseline = y_top + ASCENT_EM * line_sizes[idx];
+        y_top += line_heights[idx];
         for seg in line {
             pdf.draw_text_with_transform(page, x, baseline, &seg.text, &seg.style, transform);
             let line_t = (seg.style.size_pt * 0.06).max(0.5);
@@ -991,13 +1109,13 @@ mod tests {
                 crate::StyledTextRun {
                     text: "Line1\n".into(),
                     bold: Some(true),
-                    underline: true,
+                    underline: Some(true),
                     ..Default::default()
                 },
                 crate::StyledTextRun {
                     text: "Line2".into(),
-                    italic: true,
-                    strikethrough: true,
+                    italic: Some(true),
+                    strikethrough: Some(true),
                     color: Some("#cc0000".into()),
                     ..Default::default()
                 },

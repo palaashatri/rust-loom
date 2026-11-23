@@ -76,7 +76,7 @@ export component PresentFormatSection inherits VerticalLayout {
                 label: "Fonts";
                 variant: "ghost";
                 accessible-name: "Browse fonts";
-                clicked => { FontPicker.open = !FontPicker.open; }
+                clicked => { if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); } }
             }
         }
     }

@@ -413,14 +413,9 @@ impl PresentationSession {
         true
     }
 
-    /// Sets the deck's widescreen (16:9) vs standard (4:3) layout metadata (1 undo step).
+    /// Sets the deck's widescreen (16:9) vs standard (4:3) aspect ratio metadata (1 undo step).
     pub fn set_aspect_ratio_wide(&mut self, wide: bool) {
         self.checkpoint();
-        let target_layout = if wide { "16:9" } else { "4:3" };
-        for slide in &mut self.document.slides {
-            if slide.layout.is_empty() || slide.layout == "16:9" || slide.layout == "4:3" {
-                slide.layout = target_layout.to_string();
-            }
-        }
+        self.document.aspect_ratio_wide = wide;
     }
 }

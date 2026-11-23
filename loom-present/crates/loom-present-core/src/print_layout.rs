@@ -104,21 +104,10 @@ pub fn preview_print_pages(
 
 /// Exports `doc` to PDF using the specified [`PrintOptions`] (handouts, notes pages, paper size).
 pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOptions) -> Vec<u8> {
-    if options.layout == PrintLayout::SingleSlide
-        && options.paper_size == PaperSize::Letter
-        && options.orientation == PrintOrientation::Landscape
-    {
-        return crate::pdf_export::export_pdf(doc);
-    }
-
     let pages = preview_print_pages(doc, options);
     let mut pdf = PdfDocument::new();
     pdf.set_font_fallback(crate::pdf_export::shared_font_fallback());
-    let title_style = TextStyle {
-        size_pt: 12.0,
-        bold: true,
-        ..Default::default()
-    };
+    let mut pdf_images = std::collections::BTreeMap::new();
     let notes_style = TextStyle {
         size_pt: 10.0,
         ..Default::default()
@@ -135,29 +124,32 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
                 if let Some(&si) = preview.slide_indices.first() {
                     let slide = &doc.slides[si];
                     let slide_h = usable_h * 0.55;
+                    let slide_y = preview.height_pt - margin - slide_h;
+                    crate::pdf_export::draw_slide_into_rect(
+                        &mut pdf,
+                        page,
+                        doc,
+                        slide,
+                        (margin, slide_y, usable_w, slide_h),
+                        &mut pdf_images,
+                    );
                     pdf.draw_rect(
                         page,
                         margin,
-                        margin,
+                        slide_y,
                         usable_w,
                         slide_h,
                         PathStyle::stroked((0.6, 0.6, 0.6), 1.0),
                     );
-                    pdf.draw_text(
-                        page,
-                        margin + 12.0,
-                        margin + 24.0,
-                        &slide.title,
-                        &title_style,
-                    );
                     if !slide.speaker_notes.is_empty() {
-                        pdf.draw_text(
-                            page,
-                            margin + 12.0,
-                            margin + slide_h + 24.0,
-                            &slide.speaker_notes,
-                            &notes_style,
-                        );
+                        let mut ny = slide_y - 20.0;
+                        for line in slide.speaker_notes.lines() {
+                            if ny < margin + 12.0 {
+                                break;
+                            }
+                            pdf.draw_text(page, margin + 12.0, ny, line, &notes_style);
+                            ny -= 14.0;
+                        }
                     }
                 }
             }
@@ -171,9 +163,18 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
                     let col = slot % cols;
                     let row = slot / cols;
                     let x = margin + col as f32 * cell_w + 6.0;
-                    let y = margin + row as f32 * cell_h + 6.0;
+                    let y = preview.height_pt - margin - (row + 1) as f32 * cell_h + 6.0;
                     let w = (cell_w - 12.0).max(1.0);
                     let h = (cell_h - 12.0).max(1.0);
+                    let slide = &doc.slides[si];
+                    crate::pdf_export::draw_slide_into_rect(
+                        &mut pdf,
+                        page,
+                        doc,
+                        slide,
+                        (x, y, w, h),
+                        &mut pdf_images,
+                    );
                     pdf.draw_rect(
                         page,
                         x,
@@ -182,8 +183,6 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
                         h,
                         PathStyle::stroked((0.65, 0.65, 0.65), 1.0),
                     );
-                    let slide = &doc.slides[si];
-                    pdf.draw_text(page, x + 10.0, y + 20.0, &slide.title, &title_style);
                 }
             }
         }
@@ -191,8 +190,8 @@ pub fn export_pdf_with_options(doc: &PresentationDocument, options: &PrintOption
         if options.include_slide_numbers {
             pdf.draw_text(
                 page,
-                preview.width_pt - margin - 30.0,
-                preview.height_pt - 18.0,
+                preview.width_pt - margin - 42.0,
+                18.0,
                 &format!("Page {}", preview.page_number),
                 &notes_style,
             );

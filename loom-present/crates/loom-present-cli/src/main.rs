@@ -319,10 +319,26 @@ fn cmd_replace(
             count += note_hits;
         }
         for element in &mut slide.elements {
-            let elem_hits = element.content.matches(find).count();
-            if elem_hits > 0 {
-                element.content = element.content.replace(find, replace);
-                count += elem_hits;
+            if matches!(
+                element.element_type,
+                loom_present_core::ElementType::Picture
+                    | loom_present_core::ElementType::Table
+                    | loom_present_core::ElementType::Chart
+            ) {
+                continue;
+            }
+            let ranges: Vec<(usize, usize)> = element
+                .content
+                .match_indices(find)
+                .map(|(start, m)| (start, start + m.len()))
+                .collect();
+            if !ranges.is_empty() {
+                count += ranges.len();
+                for (start, end) in ranges.into_iter().rev() {
+                    loom_present_core::rich_text::replace_range_preserving_runs(
+                        element, start, end, replace,
+                    );
+                }
             }
         }
     }

@@ -73,6 +73,23 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         .unwrap_or_else(|| "Imported Presentation".to_string());
 
     let mut doc = PresentationDocument::new("imported-deck", title);
+    if let Some(pres_bytes) = archive.get("ppt/presentation.xml") {
+        let pres_xml = String::from_utf8_lossy(pres_bytes);
+        if let Some(pos) = find_tag_start(&pres_xml, "p:sldSz") {
+            let tag_end = pres_xml[pos..]
+                .find('>')
+                .map_or(pres_xml.len(), |e| pos + e);
+            let tag = &pres_xml[pos..tag_end];
+            if let (Some(cx), Some(cy)) = (
+                extract_attr(tag, "cx").and_then(|v| v.parse::<u64>().ok()),
+                extract_attr(tag, "cy").and_then(|v| v.parse::<u64>().ok()),
+            ) {
+                if cx > 0 && cy > 0 {
+                    doc.aspect_ratio_wide = (cx as f64 / cy as f64) > 1.5;
+                }
+            }
+        }
+    }
     doc.slides.clear();
 
     for (index, (slide_num, path)) in slide_parts.iter().enumerate() {
@@ -363,6 +380,8 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
                 ElementType::Title
             } else if sp_xml.contains("type=\"subTitle\"") {
                 ElementType::Subtitle
+            } else if sp_xml.contains("prst=\"line\"") {
+                ElementType::ShapeLine
             } else if sp_xml.contains("txBox=\"1\"") || sp_xml.contains("type=\"body\"") {
                 ElementType::BodyText
             } else if sp_xml.contains("prst=\"ellipse\"") {
@@ -371,8 +390,6 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
                 ElementType::ShapeRoundedRect
             } else if sp_xml.contains("prst=\"rightArrow\"") {
                 ElementType::ShapeArrowRight
-            } else if sp_xml.contains("prst=\"line\"") {
-                ElementType::ShapeLine
             } else if sp_xml.contains("prst=\"wedgeRoundRectCallout\"") {
                 ElementType::ShapeCallout
             } else if sp_xml.contains("prst=\"rect\"") {
@@ -396,8 +413,17 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
         };
         let id = extract_attr(sp_xml, "name").unwrap_or_else(|| format!("shape-{elem_counter}"));
         elem_counter += 1;
-        let style = parse_shape_style(sp_xml, &element_type);
+        let mut style = parse_shape_style(sp_xml, &element_type);
         let runs = parse_shape_runs(sp_xml);
+        if runs.len() > 1 {
+            style.font_size_pt = None;
+            style.bold = None;
+            style.italic = false;
+            style.underline = false;
+            style.strikethrough = false;
+            style.color = None;
+            style.font_family = None;
+        }
 
         elements.push(SlideElement {
             id,
@@ -498,6 +524,8 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
             }
         }
         style.italic = matches!(extract_attr(tag, "i").as_deref(), Some("1" | "true"));
+        style.underline = extract_attr(tag, "u").is_some_and(|v| v != "none");
+        style.strikethrough = extract_attr(tag, "strike").is_some_and(|v| v != "noStrike");
         if let Some(color) = first_srgb(&sp_xml[pos..end]) {
             if !default_inks
                 .iter()
@@ -566,13 +594,29 @@ fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
         first_para = false;
 
         let mut r_cursor = 0usize;
-        while let Some(r_start_rel) = p_xml[r_cursor..].find("<a:r>") {
-            let r_start = r_cursor + r_start_rel;
-            let Some(r_end_rel) = p_xml[r_start..].find("</a:r>") else {
+        loop {
+            let next_r = p_xml[r_cursor..].find("<a:r>").map(|p| r_cursor + p);
+            let next_fld = find_tag_start(&p_xml[r_cursor..], "a:fld").map(|p| r_cursor + p);
+            let (is_fld, tag_start) = match (next_r, next_fld) {
+                (Some(r), Some(f)) if f < r => (true, f),
+                (Some(r), _) => (false, r),
+                (None, Some(f)) => (true, f),
+                (None, None) => break,
+            };
+            let close_tag = if is_fld { "</a:fld>" } else { "</a:r>" };
+            let Some(end_rel) = p_xml[tag_start..].find(close_tag) else {
                 break;
             };
-            let r_xml = &p_xml[r_start..r_start + r_end_rel];
-            r_cursor = r_start + r_end_rel + "</a:r>".len();
+            let r_xml = &p_xml[tag_start..tag_start + end_rel];
+            r_cursor = tag_start + end_rel + close_tag.len();
+
+            if is_fld {
+                let text = parse_txbody_text(r_xml);
+                if !text.is_empty() {
+                    runs.push(crate::StyledTextRun::plain(text));
+                }
+                continue;
+            }
 
             let Some(t_start) = r_xml.find("<a:t>") else {
                 continue;
@@ -600,9 +644,9 @@ fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
                 .and_then(|v| v.parse::<f32>().ok())
                 .map(|h| h / 100.0);
             let bold = extract_attr(rpr_xml, "b").map(|v| v == "1" || v == "true");
-            let italic = extract_attr(rpr_xml, "i").is_some_and(|v| v == "1" || v == "true");
-            let underline = extract_attr(rpr_xml, "u").is_some_and(|v| v != "none");
-            let strikethrough = extract_attr(rpr_xml, "strike").is_some_and(|v| v != "noStrike");
+            let italic = extract_attr(rpr_xml, "i").map(|v| v == "1" || v == "true");
+            let underline = extract_attr(rpr_xml, "u").map(|v| v != "none");
+            let strikethrough = extract_attr(rpr_xml, "strike").map(|v| v != "noStrike");
             let color = extract_attr(rpr_xml, "val")
                 .filter(|v| v.len() == 6 && v.bytes().all(|b| b.is_ascii_hexdigit()))
                 .map(|v| format!("#{}", v.to_ascii_uppercase()));
@@ -622,10 +666,14 @@ fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
         }
     }
     let normalized = crate::rich_text::normalize_runs(runs);
+    let joined: String = normalized.iter().map(|r| r.text.as_str()).collect();
+    if joined.trim_end_matches('\n') != parse_txbody_text(sp_xml).trim_end_matches('\n') {
+        return Vec::new();
+    }
     if normalized.len() <= 1
-        && normalized
-            .first()
-            .map_or(true, |r| !r.underline && !r.strikethrough)
+        && normalized.first().map_or(true, |r| {
+            !r.underline.unwrap_or(false) && !r.strikethrough.unwrap_or(false)
+        })
     {
         return Vec::new();
     }

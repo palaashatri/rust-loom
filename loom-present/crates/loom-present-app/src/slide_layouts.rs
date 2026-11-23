@@ -87,6 +87,19 @@ fn spots(layout: &str) -> Vec<Spot> {
             title,
             spot(ElementType::BodyText, "body", 500.0, 190.0, 400.0, 260.0),
         ],
+        "section" => vec![spot(ElementType::Title, "title", 80.0, 210.0, 840.0, 120.0)],
+        "comparison" => vec![
+            title,
+            spot(ElementType::Subtitle, "subtitle", 80.0, 175.0, 390.0, 40.0),
+            spot(ElementType::Subtitle, "subtitle", 510.0, 175.0, 390.0, 40.0),
+            spot(ElementType::BodyText, "body", 80.0, 225.0, 390.0, 235.0),
+            spot(ElementType::BodyText, "body", 510.0, 225.0, 390.0, 235.0),
+        ],
+        "big-number" => vec![
+            spot(ElementType::StatCard, "stat", 180.0, 120.0, 640.0, 200.0),
+            spot(ElementType::Subtitle, "subtitle", 180.0, 340.0, 640.0, 70.0),
+        ],
+        "blank" => Vec::new(),
         _ => vec![
             title,
             spot(ElementType::BodyText, "body", 82.0, 190.0, 760.0, 170.0),

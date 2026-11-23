@@ -167,11 +167,15 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
                 .map(|e| ModelRc::new(VecModel::from(crate::object_parts::parts_for(e))))
                 .collect::<Vec<_>>(),
         )),
-        has_bg_color: slide
-            .map(|s| !s.bg_color.is_empty() && !s.bg_color.eq_ignore_ascii_case("#ffffff"))
-            .unwrap_or(false),
+        has_bg_color: slide.is_some(),
         bg_color: slide
-            .map(|s| crate::object_parts::color(&s.bg_color))
+            .map(|s| {
+                if s.bg_color.trim().is_empty() {
+                    crate::object_parts::color("#ffffff")
+                } else {
+                    crate::object_parts::color(&s.bg_color)
+                }
+            })
             .unwrap_or_else(|| slint::Color::from_argb_encoded(0xFFFF_FFFF)),
     }
 }

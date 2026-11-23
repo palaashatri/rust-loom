@@ -210,6 +210,7 @@ export component PresentInspector inherits LoomPanel {
                                     field-min-width: 96px;
                                     value <=> ElementInk.x-text;
                                     accepted(v) => { ElementInk.geometry-requested("x", v); }
+                                    cancelled => { ElementInk.geometry-requested("x", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                                 if k == 1 : LoomTextField {
@@ -218,6 +219,7 @@ export component PresentInspector inherits LoomPanel {
                                     field-min-width: 96px;
                                     value <=> ElementInk.y-text;
                                     accepted(v) => { ElementInk.geometry-requested("y", v); }
+                                    cancelled => { ElementInk.geometry-requested("y", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                             }
@@ -233,6 +235,7 @@ export component PresentInspector inherits LoomPanel {
                                     field-min-width: 96px;
                                     value <=> ElementInk.w-text;
                                     accepted(v) => { ElementInk.geometry-requested("w", v); }
+                                    cancelled => { ElementInk.geometry-requested("w", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                                 if k == 1 : LoomTextField {
@@ -241,6 +244,7 @@ export component PresentInspector inherits LoomPanel {
                                     field-min-width: 96px;
                                     value <=> ElementInk.h-text;
                                     accepted(v) => { ElementInk.geometry-requested("h", v); }
+                                    cancelled => { ElementInk.geometry-requested("h", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                             }
@@ -251,6 +255,7 @@ export component PresentInspector inherits LoomPanel {
                             field-min-width: 96px;
                             value <=> ElementInk.rot-text;
                             accepted(v) => { ElementInk.geometry-requested("rot", v); }
+                            cancelled => { ElementInk.geometry-requested("rot", ""); }
                             changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                         }
                         if root.selection-count == 0 : PresentLayoutPicker { }
@@ -287,6 +292,7 @@ export component PresentInspector inherits LoomPanel {
                         }
                         spacing: Theme.tokens.space.md;
                         PresentDocumentSection {
+                            deck-theme-index: ElementInk.deck-theme-index;
                             deck-theme-selected(idx) => { ElementInk.theme-preset-requested(idx); }
                         }
                         new-presentation-template := LoomButton {

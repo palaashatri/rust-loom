@@ -128,14 +128,14 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_open_print_preview(move || {
             let Some(app) = app_ref.upgrade() else { return };
             let session = state.session.borrow();
-            let count = session.document.slides.len();
-            let (title, notes) = session
-                .document
+            let doc = &session.document;
+            let count = doc.slides.len();
+            let (title, notes) = doc
                 .active_slide()
                 .map(|s| (s.title.clone(), s.speaker_notes.clone()))
                 .unwrap_or_default();
-            drop(session);
             print_preview::open(&app, count, &title, &notes);
+            sync_print_preview(&app, doc);
         });
     }
 
@@ -145,7 +145,7 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         app,
         Rc::new(move |app, action| {
             match action {
-                "templates" => {
+                "templates" | "themes" => {
                     app.set_theme_selected(0);
                     app.set_theme_category(0);
                     app.set_theme_chooser_open(true);
@@ -154,6 +154,8 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                 "format-inspector" => app.invoke_show_inspector_tab(0),
                 "insert-table" => app.invoke_add_table(),
                 "add-shape" => app.invoke_add_shape(),
+                "speaker-notes" => app.set_show_notes_drawer(true),
+                "print-preview" => app.invoke_open_print_preview(),
                 "presenter-view" => app.invoke_open_presenter(),
                 "palette" => app.invoke_open_palette(),
                 _ => app.invoke_focus_editor(),
@@ -188,13 +190,18 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                     return;
                 }
                 let p = PathBuf::from(path);
-                if p.exists() {
-                    if let Ok(loaded) = crate::load_session(&p) {
-                        *sh_state.session.borrow_mut() = loaded;
-                        *sh_state.save_path.borrow_mut() = Some(p.clone());
-                        start_hub::record_recent(&p);
+                if !p.exists() {
+                    set_status(app, format!("File not found: {}", p.display()));
+                    return;
+                }
+                match crate::load_session(&p) {
+                    Ok(loaded) => {
                         app.global::<StartHubState>().set_open(false);
-                        refresh(app, &sh_state);
+                        start_hub::record_recent(&p);
+                        crate::replace_opened_deck(app, &sh_state, p, loaded);
+                    }
+                    Err(err) => {
+                        set_status(app, format!("Failed to open deck: {err}"));
                     }
                 }
             }),
@@ -227,15 +234,8 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
             }
         }),
         Rc::new(move |app| {
-            let options = build_print_options(app);
             let session = pp_refresh_state.session.borrow();
-            let pages = preview_print_pages(&session.document, &options);
-            let total = pages.len().max(1) as i32;
-            let preview = app.global::<PrintPreviewState>();
-            preview.set_total_pages(total);
-            if preview.get_current_page() > total {
-                preview.set_current_page(total);
-            }
+            sync_print_preview(app, &session.document);
         }),
     );
 
@@ -267,14 +267,25 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         app,
         find_replace_ui::FindReplaceCallbacks {
             on_query_changed: Rc::new(move |app, query, case_sensitive, include_notes| {
-                let session = fr_query_state.session.borrow();
-                let found = loom_present_core::find_replace::find_matches_with_notes(
-                    &session.document,
-                    query,
-                    case_sensitive,
-                    include_notes,
-                );
+                let found = {
+                    let session = fr_query_state.session.borrow();
+                    loom_present_core::find_replace::find_matches_with_notes(
+                        &session.document,
+                        query,
+                        case_sensitive,
+                        include_notes,
+                    )
+                };
                 let total = found.len();
+                if let Some(first) = found.first() {
+                    let mut session = fr_query_state.session.borrow_mut();
+                    session.document.select_slide(first.slide_index);
+                    if !first.is_notes {
+                        session.select_element(&first.element_id, false);
+                    }
+                    drop(session);
+                    refresh(app, &fr_query_state);
+                }
                 *fr_query_matches.borrow_mut() = found;
                 *fr_query_cursor.borrow_mut() = 0;
                 find_replace_ui::update_match_counts(app, if total > 0 { 1 } else { 0 }, total);
@@ -316,19 +327,32 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                 refresh(app, &fr_next_state);
             }),
             on_replace_one: Rc::new(move |app, replacement| {
-                let list = fr_rep_one_matches.borrow().clone();
-                if list.is_empty() {
+                let s = app.global::<FindReplaceState>();
+                let fresh = loom_present_core::find_replace::find_matches_with_notes(
+                    &fr_rep_one_state.session.borrow().document,
+                    s.get_query().as_str(),
+                    s.get_case_sensitive(),
+                    s.get_include_notes(),
+                );
+                if fresh.is_empty() {
+                    fr_rep_one_matches.borrow_mut().clear();
+                    *fr_rep_one_cursor.borrow_mut() = 0;
+                    find_replace_ui::update_match_counts(app, 0, 0);
                     return;
                 }
-                let cur = (*fr_rep_one_cursor.borrow()).min(list.len() - 1);
-                let m = &list[cur];
+                let cached = fr_rep_one_matches.borrow().clone();
+                let cur = *fr_rep_one_cursor.borrow();
+                let target = cached
+                    .get(cur)
+                    .filter(|m| fresh.contains(m))
+                    .cloned()
+                    .unwrap_or_else(|| fresh[cur.min(fresh.len() - 1)].clone());
                 let replaced = loom_present_core::find_replace::replace_match(
                     &mut fr_rep_one_state.session.borrow_mut(),
-                    m,
+                    &target,
                     replacement,
                 );
                 if replaced.is_ok() {
-                    let s = app.global::<FindReplaceState>();
                     let found = loom_present_core::find_replace::find_matches_with_notes(
                         &fr_rep_one_state.session.borrow().document,
                         s.get_query().as_str(),
@@ -351,9 +375,16 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                     s.get_case_sensitive(),
                     s.get_include_notes(),
                 );
-                fr_rep_all_matches.borrow_mut().clear();
+                let remaining = loom_present_core::find_replace::find_matches_with_notes(
+                    &fr_rep_all_state.session.borrow().document,
+                    s.get_query().as_str(),
+                    s.get_case_sensitive(),
+                    s.get_include_notes(),
+                );
+                let total = remaining.len();
+                *fr_rep_all_matches.borrow_mut() = remaining;
                 *fr_rep_all_cursor.borrow_mut() = 0;
-                find_replace_ui::update_match_counts(app, 0, 0);
+                find_replace_ui::update_match_counts(app, if total > 0 { 1 } else { 0 }, total);
                 refresh(app, &fr_rep_all_state);
                 set_status(app, format!("Replaced {count} occurrence(s)"));
             }),
@@ -361,16 +392,66 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
     );
 
     // Font Picker
+    let fp_deck_state = state.clone();
     let fp_state = state.clone();
     let fp_app = app.as_weak();
-    font_picker::wire(app, move |family| {
-        let Some(app) = fp_app.upgrade() else { return };
-        let msg = match element_style_ui::apply_font(&fp_state, family) {
-            Ok(Some(words)) => words,
-            Ok(None) => return,
-            Err(err) => err,
-        };
-        refresh(&app, &fp_state);
-        set_status(&app, &msg);
-    });
+    font_picker::wire(
+        app,
+        move || {
+            let session = fp_deck_state.session.borrow();
+            let mut families = Vec::new();
+            for slide in &session.document.slides {
+                for elem in &slide.elements {
+                    if let Some(ff) = &elem.style.font_family {
+                        families.push(ff.clone());
+                    }
+                    for run in &elem.runs {
+                        if let Some(ff) = &run.font_family {
+                            families.push(ff.clone());
+                        }
+                    }
+                }
+            }
+            families
+        },
+        move |family, is_reset| {
+            let Some(app) = fp_app.upgrade() else { return };
+            let msg = match element_style_ui::apply_font_with_reset(&fp_state, family, is_reset) {
+                Ok(Some(words)) => words,
+                Ok(None) => return,
+                Err(err) => err,
+            };
+            refresh(&app, &fp_state);
+            set_status(&app, &msg);
+        },
+    );
+}
+
+fn sync_print_preview(app: &PresentApp, doc: &loom_present_core::PresentationDocument) {
+    let options = build_print_options(app);
+    let pages = preview_print_pages(doc, &options);
+    let total = pages.len().max(1) as i32;
+    let preview = app.global::<PrintPreviewState>();
+    preview.set_total_pages(total);
+    let cur = preview.get_current_page().clamp(1, total);
+    preview.set_current_page(cur);
+    if let Some(page) = pages.get((cur - 1) as usize) {
+        let rows: Vec<crate::ThumbRows> = page
+            .slide_indices
+            .iter()
+            .filter_map(|&si| doc.slides.get(si))
+            .map(|slide| crate::picture_view::rows_for(doc, Some(slide)))
+            .collect();
+        preview.set_page_slides(slint::ModelRc::new(slint::VecModel::from(rows)));
+        if let Some(first_slide) = page
+            .slide_indices
+            .first()
+            .and_then(|&si| doc.slides.get(si))
+        {
+            preview.set_current_slide_title(slint::SharedString::from(first_slide.title.as_str()));
+            preview.set_current_slide_notes(slint::SharedString::from(
+                first_slide.speaker_notes.as_str(),
+            ));
+        }
+    }
 }

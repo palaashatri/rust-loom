@@ -43,12 +43,55 @@ pub(crate) fn relative_time_label(modified: SystemTime, now: SystemTime) -> Stri
     }
 }
 
+fn encode_recent_entry(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '%' => out.push_str("%25"),
+            '|' => out.push_str("%7C"),
+            '\n' => out.push_str("%0A"),
+            '\r' => out.push_str("%0D"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn decode_recent_entry(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            let a = chars.next();
+            let b = chars.next();
+            match (a, b) {
+                (Some('2'), Some('5')) => out.push('%'),
+                (Some('7'), Some('C' | 'c')) => out.push('|'),
+                (Some('0'), Some('A' | 'a')) => out.push('\n'),
+                (Some('0'), Some('D' | 'd')) => out.push('\r'),
+                _ => {
+                    out.push('%');
+                    if let Some(c) = a {
+                        out.push(c);
+                    }
+                    if let Some(c) = b {
+                        out.push(c);
+                    }
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn load_recent_paths_at(path: &Path) -> Vec<PathBuf> {
     let raw = settings_file::read(path, RECENT_DECKS_KEY).unwrap_or_default();
     raw.split('|')
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(PathBuf::from)
+        .map(|line| PathBuf::from(decode_recent_entry(line)))
         .collect()
 }
 
@@ -56,7 +99,7 @@ fn save_recent_paths_at(path: &Path, entries: &[PathBuf]) -> io::Result<()> {
     let encoded = entries
         .iter()
         .take(MAX_RECENTS)
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| encode_recent_entry(&p.to_string_lossy()))
         .collect::<Vec<_>>()
         .join("|");
     settings_file::write(path, RECENT_DECKS_KEY, &encoded)
@@ -172,7 +215,6 @@ pub(crate) fn wire(app: &PresentApp, callbacks: StartHubCallbacks) {
     let on_open_deck = Rc::clone(&callbacks.on_open_deck);
     hub.on_open_deck(move |path| {
         if let Some(app) = weak.upgrade() {
-            app.global::<StartHubState>().set_open(false);
             on_open_deck(&app, path.as_str());
         }
     });
@@ -189,6 +231,18 @@ pub(crate) fn wire(app: &PresentApp, callbacks: StartHubCallbacks) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn recent_paths_round_trip_with_pipe_character() {
+        let dir = std::env::temp_dir().join(format!("loom-start-hub-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let settings = dir.join("settings.txt");
+        let p = PathBuf::from("/tmp/Q1|Q2.loomdeck");
+        save_recent_paths_at(&settings, std::slice::from_ref(&p)).expect("save");
+        let loaded = load_recent_paths_at(&settings);
+        assert_eq!(loaded, vec![p]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn format_badge_distinguishes_loomdeck_and_pptx() {

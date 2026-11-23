@@ -1,10 +1,6 @@
 use crate::{PresentationSession, SlideElement};
 use serde::{Deserialize, Serialize};
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 /// A contiguous run of text within a [`SlideElement`] with its own formatting.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StyledTextRun {
@@ -15,12 +11,12 @@ pub struct StyledTextRun {
     pub font_size_pt: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bold: Option<bool>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub italic: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub underline: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub strikethrough: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub italic: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub underline: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strikethrough: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
 }
@@ -41,9 +37,9 @@ impl StyledTextRun {
             font_family: style.font_family.clone(),
             font_size_pt: style.font_size_pt,
             bold: style.bold,
-            italic: style.italic,
-            underline: style.underline,
-            strikethrough: style.strikethrough,
+            italic: Some(style.italic),
+            underline: Some(style.underline),
+            strikethrough: Some(style.strikethrough),
             color: style.color.clone(),
         }
     }
@@ -84,13 +80,13 @@ impl TextRangeStyleChange {
             run.bold = b;
         }
         if let Some(i) = self.italic {
-            run.italic = i;
+            run.italic = Some(i);
         }
         if let Some(u) = self.underline {
-            run.underline = u;
+            run.underline = Some(u);
         }
         if let Some(s) = self.strikethrough {
-            run.strikethrough = s;
+            run.strikethrough = Some(s);
         }
         if let Some(ref c) = self.color {
             run.color = c.clone();
@@ -258,4 +254,70 @@ impl PresentationSession {
         }
         Ok(())
     }
+}
+
+/// Replaces `byte_start..byte_end` in `elem.content` while preserving `elem.runs`
+/// styling for text outside the replaced span and inheriting the start run's style
+/// for the replacement text.
+pub fn replace_range_preserving_runs(
+    elem: &mut crate::SlideElement,
+    byte_start: usize,
+    byte_end: usize,
+    replacement: &str,
+) {
+    if byte_start > byte_end || byte_end > elem.content.len() {
+        return;
+    }
+    if elem.runs.is_empty() {
+        let mut new_content = elem.content.clone();
+        new_content.replace_range(byte_start..byte_end, replacement);
+        elem.content = new_content;
+        return;
+    }
+    let runs = elem.effective_runs();
+    let mut out: Vec<StyledTextRun> = Vec::with_capacity(runs.len() + 1);
+    let mut cursor = 0usize;
+    let mut inserted = false;
+    for run in runs {
+        let len = run.text.len();
+        let run_start = cursor;
+        let run_end = cursor + len;
+        cursor = run_end;
+        if run_end <= byte_start || run_start >= byte_end {
+            if !inserted && run_start >= byte_start {
+                if !replacement.is_empty() {
+                    let mut rep = run.clone();
+                    rep.text = replacement.to_string();
+                    out.push(rep);
+                }
+                inserted = true;
+            }
+            out.push(run);
+            continue;
+        }
+        let prefix_end = byte_start.saturating_sub(run_start).min(len);
+        let suffix_start = byte_end.saturating_sub(run_start).min(len);
+        if prefix_end > 0 {
+            let mut prefix = run.clone();
+            prefix.text = run.text[..prefix_end].to_string();
+            out.push(prefix);
+        }
+        if !inserted {
+            if !replacement.is_empty() {
+                let mut rep = run.clone();
+                rep.text = replacement.to_string();
+                out.push(rep);
+            }
+            inserted = true;
+        }
+        if suffix_start < len {
+            let mut suffix = run.clone();
+            suffix.text = run.text[suffix_start..].to_string();
+            out.push(suffix);
+        }
+    }
+    if !inserted && !replacement.is_empty() {
+        out.push(StyledTextRun::plain(replacement));
+    }
+    elem.set_runs(out);
 }

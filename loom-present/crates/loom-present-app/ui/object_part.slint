@@ -133,6 +133,8 @@ export global ElementInk {
     in-out property <string> aspect-ratio: "16:9";
     callback aspect-requested(string);
     callback theme-preset-requested(int);
+    in-out property <int> deck-theme-index: 0;
+    in-out property <string> active-layout: "content";
     in-out property <string> deck-stats: "";
 }
 
@@ -143,35 +145,12 @@ export component ObjectPartView inherits Rectangle {
     in property <length> slide-height;
     in property <float> text-scale: 1.0;
 
-    background: root.part.has-bg ? root.part.bg : transparent;
+    background: root.part.has-bg && root.part.shape-kind == "" ? root.part.bg : transparent;
     border-radius: root.part.round ? self.width / 2 : 0px;
     border-width: root.part.has-border ? 1px : 0px;
     border-color: #d0d0d0;
     clip: true;
     accessible-role: none;
-
-    Text {
-        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
-        y: root.part.pad ? Theme.tokens.space.xs * root.text-scale : 0px;
-        width: root.part.pad ? max(1px, parent.width - Theme.tokens.space.lg * 2 * root.text-scale)
-            : max(1px, parent.width - 8px);
-        height: root.part.pad ? max(1px, parent.height - Theme.tokens.space.sm * 2 * root.text-scale)
-            : parent.height;
-        text: root.part.text;
-        font-family: root.part.family == "" ? Theme.document-font-family : root.part.family;
-        font-size: root.part.fs * root.slide-height / 562.5;
-        font-weight: root.part.bold ? 700 : 400;
-        font-italic: root.part.italic;
-        color: root.part.ink == 1 ? DocumentInk.ink
-            : root.part.ink == 2 ? DocumentInk.muted
-            : root.part.ink == 3 ? DocumentInk.ink
-            : root.part.fg;
-        horizontal-alignment: root.part.align == 1 ? center : root.part.align == 2 ? right : left;
-        vertical-alignment: center;
-        wrap: root.part.wrap ? word-wrap : no-wrap;
-        overflow: elide;
-        accessible-role: none;
-    }
 
     if root.part.shape-kind == "rounded-rect" : Rectangle {
         width: 100%;
@@ -224,6 +203,29 @@ export component ObjectPartView inherits Rectangle {
         accessible-role: none;
     }
 
+    txt := Text {
+        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
+        y: root.part.pad ? Theme.tokens.space.xs * root.text-scale : 0px;
+        width: root.part.pad ? max(1px, parent.width - Theme.tokens.space.lg * 2 * root.text-scale)
+            : max(1px, parent.width - 8px);
+        height: root.part.pad ? max(1px, parent.height - Theme.tokens.space.sm * 2 * root.text-scale)
+            : parent.height;
+        text: root.part.text;
+        font-family: root.part.family == "" ? Theme.document-font-family : root.part.family;
+        font-size: root.part.fs * root.slide-height / 562.5;
+        font-weight: root.part.bold ? 700 : 400;
+        font-italic: root.part.italic;
+        color: root.part.ink == 1 ? DocumentInk.ink
+            : root.part.ink == 2 ? DocumentInk.muted
+            : root.part.ink == 3 ? DocumentInk.ink
+            : root.part.fg;
+        horizontal-alignment: root.part.align == 1 ? center : root.part.align == 2 ? right : left;
+        vertical-alignment: center;
+        wrap: root.part.wrap ? word-wrap : no-wrap;
+        overflow: elide;
+        accessible-role: none;
+    }
+
     if root.part.has-image : Image {
         width: parent.width;
         height: parent.height;
@@ -232,10 +234,14 @@ export component ObjectPartView inherits Rectangle {
         accessible-role: none;
     }
 
+    property <length> deco-w: min(txt.width, txt.preferred-width);
+    property <length> deco-x: root.part.align == 1 ? txt.x + (txt.width - self.deco-w) / 2
+        : root.part.align == 2 ? txt.x + txt.width - self.deco-w : txt.x;
+
     if root.part.underline && root.part.text != "" : Rectangle {
-        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
-        y: parent.height * 0.5 + (root.part.fs * root.slide-height / 562.5) * 0.55;
-        width: max(0px, parent.width - (root.part.pad ? Theme.tokens.space.sm * 2 * root.text-scale : 8px));
+        x: root.deco-x;
+        y: txt.y + txt.height * 0.5 + (root.part.fs * root.slide-height / 562.5) * 0.55;
+        width: max(0px, root.deco-w);
         height: max(1px, 1.2 * root.slide-height / 562.5);
         background: root.part.ink == 1 ? DocumentInk.ink
             : root.part.ink == 2 ? DocumentInk.muted
@@ -244,9 +250,9 @@ export component ObjectPartView inherits Rectangle {
     }
 
     if root.part.strikethrough && root.part.text != "" : Rectangle {
-        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
-        y: parent.height * 0.5;
-        width: max(0px, parent.width - (root.part.pad ? Theme.tokens.space.sm * 2 * root.text-scale : 8px));
+        x: root.deco-x;
+        y: txt.y + txt.height * 0.5;
+        width: max(0px, root.deco-w);
         height: max(1px, 1.2 * root.slide-height / 562.5);
         background: root.part.ink == 1 ? DocumentInk.ink
             : root.part.ink == 2 ? DocumentInk.muted

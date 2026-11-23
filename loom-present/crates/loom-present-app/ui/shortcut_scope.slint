@@ -26,6 +26,9 @@ export component PresentShortcutScope inherits FocusScope {
         if (root.modal-blocking) {
             return reject;
         }
+        if (event.modifiers.alt && event.text == " ") {
+            return accept;
+        }
         if (root.open-menu-for-key(event)) {
             return accept;
         }
@@ -45,6 +48,8 @@ export component PresentShortcutScope inherits FocusScope {
                 root.next-slide();
             } else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) {
                 root.prev-slide();
+            } else if (event.text == Key.F5) {
+                root.toggle-preview-mode();
             }
             return accept;
         }

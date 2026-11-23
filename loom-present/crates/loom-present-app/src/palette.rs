@@ -107,7 +107,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::DuplicateSlide,
             id: "present.duplicate-slide",
             label: "Duplicate Slide",
-            shortcut: crate::command_dispatch::shortcut_for_id("edit.duplicate"),
+            shortcut: crate::command_dispatch::shortcut_for_id("slide.duplicate"),
         },
         PaletteCommand {
             action: PaletteAction::DeleteSlide,
@@ -205,7 +205,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::DuplicateSelection,
             id: "present.duplicate-selection",
             label: "Duplicate Selection",
-            shortcut: crate::command_dispatch::shortcut_for_id("edit.duplicate"),
+            shortcut: crate::command_dispatch::shortcut_for_id("slide.duplicate"),
         },
         PaletteCommand {
             action: PaletteAction::SelectAll,

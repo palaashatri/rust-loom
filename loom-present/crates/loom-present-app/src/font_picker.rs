@@ -210,16 +210,23 @@ pub(crate) fn publish_current(app: &PresentApp, family: Option<&str>, mixed: boo
     }
 }
 
-pub(crate) fn wire(app: &PresentApp, on_choose: impl Fn(&str) + 'static) {
+pub(crate) fn wire(
+    app: &PresentApp,
+    in_deck_families: impl Fn() -> Vec<String> + 'static,
+    on_choose: impl Fn(&str, bool) + 'static,
+) {
     let state = Rc::new(RefCell::new(PickerState::default()));
+    let in_deck_families = Rc::new(in_deck_families);
     let on_choose = Rc::new(on_choose);
 
     {
         let weak = app.as_weak();
         let state = Rc::clone(&state);
+        let in_deck = Rc::clone(&in_deck_families);
         app.global::<FontPicker>().on_open_requested(move || {
             let Some(app) = weak.upgrade() else { return };
             let mut st = state.borrow_mut();
+            st.in_deck = in_deck();
             st.rebuild("");
             let picker = app.global::<FontPicker>();
             picker.set_query(SharedString::default());
@@ -245,9 +252,11 @@ pub(crate) fn wire(app: &PresentApp, on_choose: impl Fn(&str) + 'static) {
     {
         let weak = app.as_weak();
         let state = Rc::clone(&state);
+        let in_deck = Rc::clone(&in_deck_families);
         app.global::<FontPicker>().on_query_edited(move |q| {
             let Some(app) = weak.upgrade() else { return };
             let mut st = state.borrow_mut();
+            st.in_deck = in_deck();
             st.rebuild(q.as_str());
             let picker = app.global::<FontPicker>();
             picker.set_query(q);
@@ -282,15 +291,17 @@ pub(crate) fn wire(app: &PresentApp, on_choose: impl Fn(&str) + 'static) {
         let on_choose = Rc::clone(&on_choose);
         app.global::<FontPicker>().on_choose(move |idx| {
             let Some(app) = weak.upgrade() else { return };
-            let value = {
+            let chosen = {
                 let st = state.borrow();
-                st.rows.get(idx as usize).map(|r| r.value.clone())
+                st.rows
+                    .get(idx as usize)
+                    .map(|r| (r.value.clone(), r.section == Section::Theme))
             };
-            if let Some(val) = value {
+            if let Some((val, is_reset)) = chosen {
                 let picker = app.global::<FontPicker>();
                 picker.set_open(false);
                 picker.set_field_focus_tick(picker.get_field_focus_tick() + 1);
-                on_choose(&val);
+                on_choose(&val, is_reset);
             }
         });
     }
@@ -298,9 +309,11 @@ pub(crate) fn wire(app: &PresentApp, on_choose: impl Fn(&str) + 'static) {
     {
         let weak = app.as_weak();
         let state = Rc::clone(&state);
+        let in_deck = Rc::clone(&in_deck_families);
         app.global::<FontPicker>().on_type_ahead(move |text| {
             let Some(app) = weak.upgrade() else { return };
             let mut st = state.borrow_mut();
+            st.in_deck = in_deck();
             st.rebuild(text.as_str());
             let picker = app.global::<FontPicker>();
             picker.set_query(text);

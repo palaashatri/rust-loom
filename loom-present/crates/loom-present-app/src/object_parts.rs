@@ -179,15 +179,15 @@ fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
         let max_w = 0.92f32;
         let fy = 0.1 + (line_idx as f32) * line_h;
         for (seg, run) in line {
-            let frac = ((seg.chars().count() as f32 / total_chars as f32) * max_w)
-                .clamp(0.05, (1.0 - x_cursor).max(0.05));
+            let remaining = (0.96 - x_cursor).max(0.0);
+            let frac = ((seg.chars().count() as f32 / total_chars as f32) * max_w).min(remaining);
             let mut p = part(x_cursor, fy, frac, line_h);
             p.text = SharedString::from(seg);
             p.fs = run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT;
             p.bold = run.bold.unwrap_or_else(|| style.bold.unwrap_or(bold));
-            p.italic = run.italic || style.italic;
-            p.underline = run.underline || style.underline;
-            p.strikethrough = run.strikethrough || style.strikethrough;
+            p.italic = run.italic.unwrap_or(style.italic);
+            p.underline = run.underline.unwrap_or(style.underline);
+            p.strikethrough = run.strikethrough.unwrap_or(style.strikethrough);
             p.align = match style.align {
                 Some(TextAlign::Left) => 0,
                 Some(TextAlign::Center) => 1,
@@ -303,6 +303,21 @@ pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
     let w: f32 = widths.iter().skip(c0).take(cs).sum();
     let h: f32 = heights.iter().skip(r0).take(rs).sum();
     let mut cell = part(x / total_w, y / total_h, w / total_w, h / total_h);
+    let style =
+        TableStyleCatalog::get(&table.style_id).unwrap_or_else(TableStyleCatalog::default_style);
+    let options = TableStyleOptions {
+        header_row: table.header_row,
+        total_row: table.total_row,
+        first_column: table.first_column,
+        last_column: table.last_column,
+        banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
+    };
+    let resolved = style.resolve_cell(r0, c0, rows, cols, &options, table.cell(r0, c0));
+    if let Some(bg) = &resolved.background_color {
+        cell.has_bg = true;
+        cell.bg = color(bg);
+    }
     cell.text = SharedString::from(table.cell_text(r0, c0).unwrap_or_default());
     cell.fs = loom_present_core::table_text_size(&table).map_or_else(
         || (heights[r0] * 0.42).clamp(9.0, 30.0),

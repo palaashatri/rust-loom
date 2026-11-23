@@ -68,23 +68,27 @@ pub(crate) fn wire(
     });
 
     let weak = app.as_weak();
+    let refresh_prev = Rc::clone(&on_refresh);
     preview.on_prev_page(move || {
         if let Some(app) = weak.upgrade() {
             let p = app.global::<PrintPreviewState>();
             let cur = p.get_current_page();
             if cur > 1 {
                 p.set_current_page(cur - 1);
+                refresh_prev(&app);
             }
         }
     });
 
     let weak = app.as_weak();
+    let refresh_next = Rc::clone(&on_refresh);
     preview.on_next_page(move || {
         if let Some(app) = weak.upgrade() {
             let p = app.global::<PrintPreviewState>();
             let cur = p.get_current_page();
             if cur < p.get_total_pages() {
                 p.set_current_page(cur + 1);
+                refresh_next(&app);
             }
         }
     });

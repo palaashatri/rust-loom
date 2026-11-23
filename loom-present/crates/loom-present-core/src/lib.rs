@@ -1149,9 +1149,15 @@ pub struct PresentationDocument {
     pub theme: String,
     pub slides: Vec<Slide>,
     pub active_index: usize,
+    #[serde(default = "default_aspect_ratio_wide")]
+    pub aspect_ratio_wide: bool,
     /// Embedded picture data keyed by asset id; stored as package parts, not in the JSON.
     #[serde(skip)]
     pub assets: std::collections::BTreeMap<String, ImageAsset>,
+}
+
+fn default_aspect_ratio_wide() -> bool {
+    true
 }
 
 impl PresentationDocument {
@@ -1163,6 +1169,7 @@ impl PresentationDocument {
             theme: "Modern Clean".to_string(),
             slides: Vec::new(),
             active_index: 0,
+            aspect_ratio_wide: true,
             assets: Default::default(),
         };
         let mut cover = Slide::new("slide-1", "Title Slide", "cover");
@@ -1659,7 +1666,13 @@ impl PresentationSession {
         self.checkpoint();
         let slide = self.document.active_slide_mut().expect("checked above");
         if element.id.trim().is_empty() || slide.elements.iter().any(|item| item.id == element.id) {
-            element.id = format!("{}-element-{}", slide.id, slide.elements.len() + 1);
+            let mut n = slide.elements.len() + 1;
+            let mut candidate = format!("{}-element-{}", slide.id, n);
+            while slide.elements.iter().any(|item| item.id == candidate) {
+                n += 1;
+                candidate = format!("{}-element-{}", slide.id, n);
+            }
+            element.id = candidate;
         }
         slide.elements.push(element);
         true
@@ -2375,7 +2388,11 @@ pub fn audit_accessibility(slides: &[Slide]) -> Vec<AccessibilityFinding> {
         for element in &slide.elements {
             let is_visual = matches!(
                 element.element_type,
-                ElementType::ShapeRectangle | ElementType::ShapeCircle
+                ElementType::ShapeRectangle
+                    | ElementType::ShapeRoundedRect
+                    | ElementType::ShapeCircle
+                    | ElementType::ShapeArrowRight
+                    | ElementType::ShapeCallout
             );
             if is_visual && element.content.trim().is_empty() {
                 findings.push(AccessibilityFinding {

@@ -178,7 +178,7 @@ export component PresentApp inherits Window {
 
     /// A new active slide takes keyboard focus, unless a menu or dialog has it.
     public function focus-slide-after-change() {
-        if (!root.palette-open && !root.theme-chooser-open && !root.save-changes-open && !root.view-menu-open && !root.zoom-menu-open && !root.toolbar-overflow-open && root.local-menu-open-index < 0) {
+        if (!root.palette-open && !root.theme-chooser-open && !root.save-changes-open && !root.view-menu-open && !root.zoom-menu-open && !root.toolbar-overflow-open && root.local-menu-open-index < 0 && !FindReplaceState.open && !PrintPreviewState.open && !StartHubState.open && !WelcomeGuideState.open) {
             root.focus-editor();
         }
     }
@@ -718,6 +718,7 @@ export component PresentApp inherits Window {
         insert-table-dialog-rows <=> root.insert-table-dialog-rows;
         insert-table-dialog-cols <=> root.insert-table-dialog-cols;
         insert-table-size(r, c) => { root.insert-table-size(r, c); }
+        restore-editor-focus => { root.focus-editor(); }
     }
 
     menu-keys := FocusScope {

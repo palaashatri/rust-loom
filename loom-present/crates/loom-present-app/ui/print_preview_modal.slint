@@ -1,6 +1,7 @@
 import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { MiniSlide, ThumbRows } from "slide_thumbs.slint";
 
 export global PrintPreviewState {
     in-out property <bool> open: false;
@@ -12,6 +13,7 @@ export global PrintPreviewState {
     in-out property <int> total-pages: 1;
     in-out property <string> current-slide-title: "Slide 1";
     in-out property <string> current-slide-notes: "";
+    in-out property <[ThumbRows]> page-slides: [];
     in-out property <bool> focus-request: false;
     callback close-preview();
     callback export-pdf();
@@ -276,9 +278,15 @@ export component PrintPreviewModal inherits Rectangle {
                         horizontal-stretch: 1;
                         background: Theme.palette().surface-sunken;
 
+                        property <float> base-w: PrintPreviewState.paper-size-index == 1 ? 595.0 : 612.0;
+                        property <float> base-h: PrintPreviewState.paper-size-index == 1 ? 842.0 : (PrintPreviewState.paper-size-index == 2 ? 1008.0 : 792.0);
+                        property <float> page-w-pt: PrintPreviewState.landscape ? self.base-h : self.base-w;
+                        property <float> page-h-pt: PrintPreviewState.landscape ? self.base-w : self.base-h;
+                        property <float> scale-fit: min((self.width - 48px) / 1px / self.page-w-pt, (self.height - 48px) / 1px / self.page-h-pt);
+
                         Rectangle {
-                            width: PrintPreviewState.landscape ? min(440px, parent.width - 48px) : min(320px, parent.width - 48px);
-                            height: PrintPreviewState.landscape ? self.width * 0.72 : self.width * 1.28;
+                            width: max(120px, parent.page-w-pt * parent.scale-fit * 1px);
+                            height: max(120px, parent.page-h-pt * parent.scale-fit * 1px);
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             border-radius: 6px;
@@ -289,10 +297,17 @@ export component PrintPreviewModal inherits Rectangle {
                             drop-shadow-offset-y: 4px;
                             drop-shadow-color: Theme.palette().shadow;
 
-                            VerticalLayout {
-                                padding: 20px;
-                                spacing: 10px;
-                                Text {
+                            if PrintPreviewState.layout-index == 0 : Rectangle {
+                                x: 16px;
+                                y: 16px;
+                                width: parent.width - 32px;
+                                height: parent.height - 40px;
+                                if PrintPreviewState.page-slides.length > 0 : MiniSlide {
+                                    width: parent.width;
+                                    rows: PrintPreviewState.page-slides[0];
+                                    description: PrintPreviewState.current-slide-title;
+                                }
+                                if PrintPreviewState.page-slides.length == 0 : Text {
                                     text: PrintPreviewState.current-slide-title;
                                     color: #1f2328;
                                     font-family: Theme.ui-font-family;
@@ -300,12 +315,49 @@ export component PrintPreviewModal inherits Rectangle {
                                     font-weight: 700;
                                     wrap: word-wrap;
                                 }
-                                if PrintPreviewState.layout-index == 4 && PrintPreviewState.current-slide-notes != "" : Text {
+                            }
+
+                            if PrintPreviewState.layout-index == 4 : VerticalLayout {
+                                padding: 16px;
+                                spacing: 10px;
+                                if PrintPreviewState.page-slides.length > 0 : MiniSlide {
+                                    width: parent.width - 32px;
+                                    rows: PrintPreviewState.page-slides[0];
+                                    description: PrintPreviewState.current-slide-title;
+                                }
+                                if PrintPreviewState.page-slides.length == 0 : Text {
+                                    text: PrintPreviewState.current-slide-title;
+                                    color: #1f2328;
+                                    font-family: Theme.ui-font-family;
+                                    font-size: Theme.type.title;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                }
+                                if PrintPreviewState.current-slide-notes != "" : Text {
                                     text: PrintPreviewState.current-slide-notes;
                                     color: #475569;
                                     font-family: Theme.ui-font-family;
                                     font-size: Theme.type.body;
                                     wrap: word-wrap;
+                                }
+                            }
+
+                            if PrintPreviewState.layout-index >= 1 && PrintPreviewState.layout-index <= 3 : Rectangle {
+                                x: 14px;
+                                y: 14px;
+                                width: parent.width - 28px;
+                                height: parent.height - 38px;
+                                property <int> cols: PrintPreviewState.layout-index == 1 ? 1 : 2;
+                                property <int> rows-count: PrintPreviewState.layout-index == 3 ? 3 : 2;
+                                property <length> cell-w: (self.width - (self.cols - 1) * 8px) / self.cols;
+                                property <length> cell-h: (self.height - (self.rows-count - 1) * 8px) / self.rows-count;
+
+                                for slide-row[i] in PrintPreviewState.page-slides : MiniSlide {
+                                    x: mod(i, parent.cols) * (parent.cell-w + 8px);
+                                    y: floor(i / parent.cols) * (parent.cell-h + 8px);
+                                    width: min(parent.cell-w, parent.cell-h / 0.5625);
+                                    rows: slide-row;
+                                    description: "Handout slide " + (i + 1);
                                 }
                             }
 
