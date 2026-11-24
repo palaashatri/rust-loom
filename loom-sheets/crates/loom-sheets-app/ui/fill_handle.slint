@@ -1,0 +1,59 @@
+import { Theme } from "../../../../loom-core/ui/theme.slint";
+
+/// Interactive 6x6px bottom-right selection corner handle + dashed drag preview rect.
+export component FillHandleOverlay inherits Rectangle {
+    in property <bool> visible-handle: false;
+    in property <length> corner-x: 0px;
+    in property <length> corner-y: 0px;
+    in property <bool> dragging: false;
+    in property <length> preview-x: 0px;
+    in property <length> preview-y: 0px;
+    in property <length> preview-w: 0px;
+    in property <length> preview-h: 0px;
+
+    callback drag-started(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended(length, length);
+    callback double-clicked();
+
+    background: transparent;
+
+    if dragging && preview-w > 0px && preview-h > 0px: Rectangle {
+        x: preview-x;
+        y: preview-y;
+        width: preview-w;
+        height: preview-h;
+        background: Theme.accent.with-alpha(0.08);
+        border-width: 1.5px;
+        border-color: Theme.accent;
+    }
+
+    if visible-handle: Rectangle {
+        x: corner-x - 3px;
+        y: corner-y - 3px;
+        width: 6px;
+        height: 6px;
+        background: Theme.accent;
+        border-width: 1px;
+        border-color: #ffffff;
+
+        TouchArea {
+            mouse-cursor: crosshair;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    root.drag-started(self.absolute-position.x + event.position.x, self.absolute-position.y + event.position.y);
+                } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                    root.drag-ended(self.absolute-position.x + event.position.x, self.absolute-position.y + event.position.y);
+                }
+            }
+            moved => {
+                if self.pressed {
+                    root.drag-moved(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+            double-clicked => {
+                root.double-clicked();
+            }
+        }
+    }
+}

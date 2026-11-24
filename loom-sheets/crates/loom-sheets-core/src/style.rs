@@ -192,6 +192,18 @@ impl BorderPreset {
 }
 
 /// Visual and numerical formatting style applied to a worksheet cell.
+/// Vertical alignment within a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum VerticalAlign {
+    /// Align to the top edge of the cell.
+    Top,
+    /// Center vertically.
+    Middle,
+    /// Align to the bottom edge of the cell (default).
+    #[default]
+    Bottom,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CellStyle {
     /// Bold text weight.
@@ -217,6 +229,10 @@ pub struct CellStyle {
     /// Wrap long text onto further lines inside the cell instead of cutting it
     /// off or spilling it into empty neighbours.
     pub wrap: bool,
+    /// Vertical alignment within the cell.
+    pub vertical_align: VerticalAlign,
+    /// Indentation level (0..=15).
+    pub indent: u8,
 }
 
 impl StoredValue for CellStyle {
@@ -241,6 +257,8 @@ impl CellStyle {
             font_size: None,
             text_color: None,
             wrap: false,
+            vertical_align: VerticalAlign::Bottom,
+            indent: 0,
         }
     }
 
@@ -257,6 +275,8 @@ impl CellStyle {
             && self.font_size.is_none()
             && self.text_color.is_none()
             && !self.wrap
+            && self.vertical_align == VerticalAlign::Bottom
+            && self.indent == 0
     }
 
     /// Formats a raw or evaluated string value for display in the grid.

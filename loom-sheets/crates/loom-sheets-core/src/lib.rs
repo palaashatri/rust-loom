@@ -14,10 +14,12 @@ pub use charts::{
     ChartKind, ChartPlacement, ChartSeries, ChartSpec, ChartUpdatePolicy, SheetChart,
 };
 
+pub mod autofill;
 pub mod banded;
 pub mod conditional_format;
 pub mod data_tools;
 pub mod dates;
+pub mod format_custom;
 mod formula;
 pub mod functions;
 pub(crate) mod functions_date;
@@ -41,6 +43,7 @@ pub mod row_order;
 pub mod sheet_tables;
 pub mod style;
 mod style_fit;
+pub mod visibility;
 pub mod workbook;
 pub mod xlsx;
 pub use banded::{BandedMap, StoredValue};
@@ -517,8 +520,10 @@ pub struct Sheet {
     pub objects: Vec<SheetObject>,
     /// Non-destructive column AutoFilter state.
     pub auto_filter: AutoFilterState,
-    /// Row indexes hidden by AutoFilter.
+    /// Row indexes hidden by AutoFilter or manual hide.
     pub hidden_rows: BTreeSet<u32>,
+    /// Column indexes hidden manually.
+    pub hidden_cols: BTreeSet<u32>,
     /// Named ranges keyed by uppercase identifier.
     pub named_ranges: BTreeMap<String, CellRange>,
     /// Cell data validation rules.
@@ -547,6 +552,7 @@ impl Sheet {
             objects: Vec::new(),
             auto_filter: AutoFilterState::default(),
             hidden_rows: BTreeSet::new(),
+            hidden_cols: BTreeSet::new(),
             named_ranges: BTreeMap::new(),
             validations: Vec::new(),
             merged_ranges: Vec::new(),
@@ -4101,39 +4107,7 @@ fn parse_cell_coordinate(raw: &str) -> Option<(u32, u32)> {
     Some(((col - 1) as u32, (row - 1) as u32))
 }
 
-/// Unescapes the five predefined XML entities in a single left-to-right pass,
-/// so `&amp;lt;` correctly decodes to the literal `&lt;`. Unknown escapes pass
-/// through unchanged.
-fn xml_unescape(text: &str) -> String {
-    const ENTITIES: [(&str, &str); 5] = [
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&quot;", "\""),
-        ("&apos;", "'"),
-        ("&amp;", "&"),
-    ];
-    if !text.contains('&') {
-        return text.to_string();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(pos) = rest.find('&') {
-        out.push_str(&rest[..pos]);
-        let tail = &rest[pos..];
-        match ENTITIES.iter().find(|(name, _)| tail.starts_with(name)) {
-            Some((name, replacement)) => {
-                out.push_str(replacement);
-                rest = &tail[name.len()..];
-            }
-            None => {
-                out.push('&');
-                rest = &tail[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+use number_text::xml_unescape;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

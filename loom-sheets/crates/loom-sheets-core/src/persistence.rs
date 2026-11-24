@@ -570,6 +570,7 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             font_size: style.font,
             text_color: parse_text_color(style.color.as_deref())?,
             wrap: style.wrap,
+            ..Default::default()
         };
         if sheet.styles.insert(reference, value).is_some() {
             return Err(format!("duplicate style reference {:?}", style.reference));
@@ -871,6 +872,7 @@ mod tests {
                 font_size: None,
                 text_color: None,
                 wrap: false,
+                ..Default::default()
             },
         );
         sheet.set_cell_style(
@@ -887,6 +889,7 @@ mod tests {
                 font_size: Some(18),
                 text_color: Some(0x00C0_3A2B),
                 wrap: true,
+                ..Default::default()
             },
         );
         let json = sheet_to_json(&sheet);
