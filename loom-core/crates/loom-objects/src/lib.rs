@@ -5,15 +5,18 @@
 
 pub mod chart;
 pub mod chart_ooxml;
+pub mod hyperlink;
 pub mod image;
 pub mod markdown;
 pub mod ooxml;
 pub mod shape;
 pub mod styles;
 pub mod table;
+pub mod wrap;
 
 pub use chart::{Chart, ChartAxis, ChartDataSnapshot, ChartSeries, ChartStyle, ChartType};
 pub use chart_ooxml::{c_chart_xml_to_chart, chart_to_c_chart_xml};
+pub use hyperlink::{normalize_safe_url, Hyperlink, HyperlinkError, HyperlinkTarget};
 pub use image::{Image, ImageFormat};
 pub use markdown::{markdown_to_table, table_to_markdown};
 pub use ooxml::{table_to_docx_wtbl, table_to_pptx_atbl};
@@ -26,6 +29,10 @@ pub use table::{
     Border, BorderStyle, CellBorders, CellContent, CellPadding, CellStyleOverride, HorizontalAlign,
     Table, TableCell, TableColumn, TableRow, TextRun, VerticalAlign, DEFAULT_COLUMN_WIDTH_PT,
     DEFAULT_ROW_HEIGHT_PT, TABLE_SCHEMA_VERSION,
+};
+pub use wrap::{
+    HorizontalAnchor, ImageWrap, ImageWrapMode, VerticalAnchor, WrapHorizontalAlign, WrapMargins,
+    WrapSide,
 };
 
 #[cfg(test)]
