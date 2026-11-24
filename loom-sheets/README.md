@@ -2,13 +2,31 @@
 
 Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workbooks with formulas and charts on your own computer. Nothing is uploaded and no account is needed. Native workbooks are open `.loomtable` packages; it also imports and exports CSV and XLSX.
 
-**Platforms verified (2026-11-14):** macOS (`aarch64-apple-darwin`), Linux (`aarch64-unknown-linux-gnu` X11/Xvfb), and Windows (`x86_64-pc-windows-msvc` running live on Windows 11 ARM64).
+**Platforms verified (2026-11-24):** macOS (`aarch64-apple-darwin`), Linux (`aarch64-unknown-linux-gnu` X11/Xvfb), and Windows (`x86_64-pc-windows-msvc` running live on Windows 11 ARM64).
 
-**Status: `ACCEPTED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Writer and Present).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-14 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#sheets-completion--gate-114-verification--2026-11-14). This README lists what has evidence behind it and its disclosed boundaries.
+**Status: `ACCEPTANCE_BLOCKED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Gate 2 human visual sign-off).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-24 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#pr-28-audit-remediation--macos-visualfunctional-parity-audit--2026-11-24). This README lists what has evidence behind it and its disclosed boundaries.
 
 Evidence tags used below:
 
-- **[tests]** covered by an automated test that passes. On 2026-11-14, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 22 suites (`1109 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`492 passed; 0 failed; 1 ignored`).
+- **[tests]** covered by an automated test that passes. On 2026-11-24, `cargo test --manifest-path loom-sheets/Cargo.toml --workspace --locked` passed across 21 suites (`1,214 passed; 0 failed; 2 ignored`) and `loom-core` passed across 38 suites (`500 passed; 0 failed; 1 ignored`).
+
+## Visual feature tour
+
+| Feature | Preview |
+|---|---|
+| **Start Hub & Recents** | ![Loom Sheets Start Hub](docs/screenshots/start-hub.png) |
+| **Template Chooser** (11 templates across 5 categories) | ![Loom Sheets Template Chooser](docs/screenshots/template-chooser.png) |
+| **Interactive Welcome Guide** | ![Loom Sheets Welcome Guide](docs/screenshots/welcome-guide.png) |
+| **Multi-Sheet Grid, Formulas & Status Summary** | ![Loom Sheets Grid and Formulas](docs/screenshots/grid-formulas.png) |
+| **Cell Formatting & Inspector** (48-color palette, borders, currency/decimals) | ![Loom Sheets Cell Formatting](docs/screenshots/cell-formatting.png) |
+| **Charts & Worksheet Objects** | ![Loom Sheets Charts and Objects](docs/screenshots/charts-and-objects.png) |
+| **Organize & Table Inspector** | ![Loom Sheets Tables and Organize](docs/screenshots/tables-and-organize.png) |
+| **Conditional Formatting** | ![Loom Sheets Conditional Formatting](docs/screenshots/conditional-formatting.png) |
+| **Pivot Summary Builder** | ![Loom Sheets Pivot Builder](docs/screenshots/pivot-builder.png) |
+| **Find & Replace / Data Tools** | ![Loom Sheets Data Tools](docs/screenshots/data-tools.png) |
+| **Command Palette (`Cmd+K`)** | ![Loom Sheets Command Palette](docs/screenshots/command-palette.png) |
+| **Print Preview & Page Setup** | ![Loom Sheets Print Preview](docs/screenshots/print-preview.png) |
+| **High-Contrast Appearance** | ![Loom Sheets High Contrast](docs/screenshots/theme-high-contrast.png) |
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu). Linux checks are older builds unless stated.
 

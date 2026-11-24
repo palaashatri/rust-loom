@@ -4,15 +4,23 @@ Loom is an original, local-first creative software suite built with Rust and Sli
 
 The v1 scope on `main` is three desktop applications. Their acceptance status is in the [current-truth section](docs/workflow/current.md#current-truth).
 
-- [**Loom Writer**](loom-writer/README.md) — Document composition with Apple Pages-class interface polish.
-- [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with Apple Numbers-class multi-sheet workbooks.
-- [**Loom Present**](loom-present/README.md) — Presentation design with Apple Keynote-class theme chooser and presenter sessions.
+- [**Loom Writer**](loom-writer/README.md) — Document composition with structured inspectors, rich typography, tables, and DOCX/PDF/Markdown export.
+- [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with multi-sheet workbooks, 2,000+ Excel-compatible formulas, charts, and XLSX/CSV/PDF export.
+- [**Loom Present**](loom-present/README.md) — Presentation design with categorized theme chooser, slide navigator, speaker notes, presenter view, and PPTX/PDF export.
+
+## Visual showcase
+
+| Application | Light Theme | Dark Theme |
+|---|---|---|
+| [**Loom Sheets**](loom-sheets/README.md) | ![Loom Sheets Light](docs/screenshots/loom-sheets-light.png) | ![Loom Sheets Dark](docs/screenshots/loom-sheets-dark.png) |
+| [**Loom Writer**](loom-writer/README.md) | ![Loom Writer Light](docs/screenshots/loom-writer-light.png) | ![Loom Writer Dark](docs/screenshots/loom-writer-dark.png) |
+| [**Loom Present**](loom-present/README.md) | ![Loom Present Light](docs/screenshots/loom-present-light.png) | ![Loom Present Dark](docs/screenshots/loom-present-dark.png) |
 
 Shared workspaces provide package formats, document and text engines, recovery, native desktop adapters (file dialogs, macOS & Linux global menu bars), UI components, and interoperability foundations for these applications. The other five applications (Photo, Motion, Video, Studio, Encode) are locked and kept on the `apps/later` branch.
 
 ## Current status
 
-Loom is in active productisation toward Apple Creator Studio-class depth and polish.
+Loom is in active productisation toward full-featured v1 desktop depth and polish.
 The current honest product-parity estimate and application boundaries are kept in the [current-truth section](docs/workflow/current.md#current-truth).
 
 The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are routed by [`AGENTS.md`](AGENTS.md) to focused files in [docs](docs/README.md).
@@ -23,7 +31,7 @@ The engineering constitution, project references, architecture contracts, eviden
 - [Linux desktop input skill](.agents/skills/linux-desktop-input/SKILL.md) — guarded mouse and keyboard interaction for Linux desktop QA when native computer-use controls are unavailable.
 
 The 23→100 implementation programme is underway:
-- **Loom Writer**, **Loom Sheets**, and **Loom Present** have undergone Apple-class UI overhauls with structured inspectors, categorized template/theme choosers, and full desktop chrome.
+- **Loom Writer**, **Loom Sheets**, and **Loom Present** have undergone full UI overhauls with structured inspectors, categorized template/theme choosers, and native desktop chrome.
 - **Native Desktop Services**: Shared native file dialogs and platform global menu bar reflection (`MenuBarService`) supporting macOS AppKit `NSMenu` and Linux DBusMenu (`com.canonical.dbusmenu`).
 - All current work integrates on:
 
