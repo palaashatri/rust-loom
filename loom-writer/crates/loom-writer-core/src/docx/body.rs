@@ -23,8 +23,8 @@ use crate::{
 /// The body part plus what the numbering part needs to know about it.
 pub(super) struct Body {
     pub xml: String,
-    /// How many separate numbered lists the body contains.
-    pub numbered_lists: usize,
+    /// Numbered list runs in order, each with its `ListMarkerStyle`.
+    pub numbered_lists: Vec<loom_text::ListMarkerStyle>,
     /// The chart parts embedded in the body.
     pub charts: Vec<(usize, String)>,
     /// The pictures embedded in the body, in order.
@@ -158,8 +158,8 @@ pub(super) fn build(
         xml.push_str("<w:background w:color=\"000000\"/>");
     }
     xml.push_str("<w:body>");
-    let mut numbered_lists = 0usize;
-    let mut previous_numbered = false;
+    let mut numbered_lists: Vec<loom_text::ListMarkerStyle> = Vec::new();
+    let mut previous_numbered_marker: Option<loom_text::ListMarkerStyle> = None;
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut images: Vec<BodyImage> = Vec::new();
     let paragraph_format_ids: Vec<u64> = doc
@@ -188,7 +188,7 @@ pub(super) fn build(
             if index + 1 == doc.blocks.len() || followed_by_table {
                 xml.push_str("<w:p/>");
             }
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         if let Some(image) = block.image.as_ref().filter(|_| block.is_image()) {
@@ -204,7 +204,7 @@ pub(super) fn build(
                 mime: image.format.mime(),
                 bytes: image.bytes.clone(),
             });
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         if block.kind == crate::CHART_BLOCK_KIND {
@@ -215,7 +215,7 @@ pub(super) fn build(
                     .map_err(|error| format!("chart {}: {error}", chart.id))?;
                 charts.push((chart_idx, chart_xml));
                 xml.push_str(&chart_xml_paragraph(&rid, chart_idx, block));
-                previous_numbered = false;
+                previous_numbered_marker = None;
                 continue;
             }
         }
@@ -225,27 +225,29 @@ pub(super) fn build(
                 && revision.anchor.block_id == block.id
         }) {
             xml.push_str(&deleted_paragraph_mark_xml(block, revision));
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         let list = ListKind::of(block.kind.as_str());
         let num_id = match list {
-            Some(ListKind::Bullet) => Some(1),
+            Some(ListKind::Bullet) => {
+                Some(super::numbering::bullet_num_id(block.style.list_marker))
+            }
             Some(ListKind::Numbered) => {
-                if !previous_numbered {
-                    numbered_lists += 1;
+                if previous_numbered_marker != Some(block.style.list_marker) {
+                    numbered_lists.push(block.style.list_marker);
                 }
-                Some(1 + numbered_lists)
+                Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
             }
             None => None,
         };
         // A numbered run goes on through its deeper items, so Word keeps the
-        // top-level count as Writer does. A top-level bullet or any other block
-        // ends the run.
-        previous_numbered = match list {
-            Some(ListKind::Numbered) => true,
-            Some(ListKind::Bullet) => previous_numbered && block.effective_list_level() > 0,
-            None => false,
+        // top-level count as Writer does. A top-level bullet, a different
+        // ordered marker style, or any other block ends the run.
+        previous_numbered_marker = match list {
+            Some(ListKind::Numbered) => Some(block.style.list_marker),
+            Some(ListKind::Bullet) if block.effective_list_level() > 0 => previous_numbered_marker,
+            _ => None,
         };
         xml.push_str("<w:p>");
         let paragraph_marks =
