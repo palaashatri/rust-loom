@@ -3164,6 +3164,7 @@ mod picture_view;
 mod pptx_import;
 mod presenter;
 mod presenter_thumbs;
+mod presenter_tools;
 #[cfg(test)]
 mod recovery_close_tests;
 mod recovery_deferred;

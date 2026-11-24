@@ -1,6 +1,25 @@
 import { Theme } from "theme.slint";
 import { LoomButton } from "foundation.slint";
 
+component EffectStepRow inherits HorizontalLayout {
+    in property <string> label-text: "";
+    callback dec();
+    callback inc();
+    spacing: Theme.tokens.space.xs;
+    if Theme.rtl : LoomButton { label: "+"; clicked => { root.inc(); } }
+    if Theme.rtl : LoomButton { label: "-"; clicked => { root.dec(); } }
+    Text {
+        text: root.label-text;
+        font-size: Theme.type.caption;
+        color: Theme.palette().ink;
+        vertical-alignment: center;
+        horizontal-alignment: Theme.rtl ? right : left;
+        horizontal-stretch: 1;
+    }
+    if !Theme.rtl : LoomButton { label: "-"; clicked => { root.dec(); } }
+    if !Theme.rtl : LoomButton { label: "+"; clicked => { root.inc(); } }
+}
+
 export component StyleEffectsPanel inherits VerticalLayout {
     in property <bool> has-selection: false;
     in property <int> opacity-pct: 100;
@@ -24,44 +43,43 @@ export component StyleEffectsPanel inherits VerticalLayout {
         text: "Effects";
         font-size: Theme.type.caption;
         font-weight: 600;
-        color: Theme.palette().text-muted;
+        color: Theme.palette().ink-secondary;
+        horizontal-alignment: Theme.rtl ? right : left;
+    }
+
+    EffectStepRow {
+        label-text: "Opacity " + root.opacity-pct + "%";
+        dec => { root.set-opacity(Math.max(10, root.opacity-pct - 10)); }
+        inc => { root.set-opacity(Math.min(100, root.opacity-pct + 10)); }
+    }
+
+    EffectStepRow {
+        label-text: "Radius " + root.corner-radius-px + "px";
+        dec => { root.set-corner-radius(Math.max(0, root.corner-radius-px - 4)); }
+        inc => { root.set-corner-radius(Math.min(48, root.corner-radius-px + 4)); }
+    }
+
+    EffectStepRow {
+        label-text: "Stroke " + root.stroke-width-px + "px (" + (root.stroke-dash == 0 ? "Solid" : (root.stroke-dash == 1 ? "Dash" : "Dot")) + ")";
+        dec => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); }
+        inc => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); }
     }
 
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
-        Text { text: "Opacity " + root.opacity-pct + "%"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
-        LoomButton { label: "-"; clicked => { root.set-opacity(Math.max(10, root.opacity-pct - 10)); } }
-        LoomButton { label: "+"; clicked => { root.set-opacity(Math.min(100, root.opacity-pct + 10)); } }
-    }
-
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
-        Text { text: "Radius " + root.corner-radius-px + "px"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
-        LoomButton { label: "-"; clicked => { root.set-corner-radius(Math.max(0, root.corner-radius-px - 4)); } }
-        LoomButton { label: "+"; clicked => { root.set-corner-radius(Math.min(48, root.corner-radius-px + 4)); } }
-    }
-
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
-        Text { text: "Stroke " + root.stroke-width-px + "px"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
-        LoomButton { label: "-"; clicked => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); } }
-        LoomButton { label: "+"; clicked => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); } }
-        LoomButton {
-            label: root.stroke-dash == 0 ? "Solid" : (root.stroke-dash == 1 ? "Dash" : "Dot");
-            clicked => { root.cycle-stroke-dash(); }
+        if Theme.rtl : LoomButton {
+            label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
+            variant: root.has-gradient ? "primary" : "secondary";
+            clicked => { root.toggle-gradient(); }
         }
-    }
-
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
         LoomButton {
             label: root.has-shadow ? "Shadow: On" : "Shadow: Off";
-            primary: root.has-shadow;
+            variant: root.has-shadow ? "primary" : "secondary";
             clicked => { root.toggle-shadow(); }
         }
-        LoomButton {
+        if !Theme.rtl : LoomButton {
             label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
-            primary: root.has-gradient;
+            variant: root.has-gradient ? "primary" : "secondary";
             clicked => { root.toggle-gradient(); }
         }
     }

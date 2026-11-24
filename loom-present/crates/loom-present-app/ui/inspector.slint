@@ -8,6 +8,8 @@ import { PresentFormatSection } from "format_section.slint";
 import { PresentArrangeSection } from "arrange_section.slint";
 import { PresentLayoutPicker } from "layout_picker.slint";
 import { PresentDocumentSection } from "document_section.slint";
+import { StyleEffectsPanel } from "style_effects_panel.slint";
+import { AnimationInspector } from "animation_inspector.slint";
 
 component InspectorHeading inherits Text {
     in property <string> title: "";
@@ -174,6 +176,9 @@ export component PresentInspector inherits LoomPanel {
                         }
                         if root.selection-count > 0 && ElementInk.available : Rectangle { height: 1px; background: Theme.palette().border; }
                         if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
+                        if root.selection-count > 0 : StyleEffectsPanel {
+                            has-selection: root.selection-count > 0;
+                        }
                         if root.is-table : PresentTableInspector {
                             current-style-id: root.table-style-id;
                             header-row: root.table-header-row;
@@ -313,6 +318,9 @@ export component PresentInspector inherits LoomPanel {
                         PresentDocumentSection {
                             deck-theme-index: ElementInk.deck-theme-index;
                             deck-theme-selected(idx) => { ElementInk.theme-preset-requested(idx); }
+                        }
+                        AnimationInspector {
+                            has-selection: root.selection-count > 0;
                         }
                         new-presentation-template := LoomButton {
                             icon: "format";

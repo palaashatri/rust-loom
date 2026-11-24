@@ -12,22 +12,22 @@ export component PresenterToolBar inherits HorizontalLayout {
 
     LoomButton {
         label: "Pen";
-        primary: root.active-tool == 0;
+        variant: root.active-tool == 0 ? "primary" : "secondary";
         clicked => { root.select-tool(0); }
     }
     LoomButton {
         label: "Highlight";
-        primary: root.active-tool == 1;
+        variant: root.active-tool == 1 ? "primary" : "secondary";
         clicked => { root.select-tool(1); }
     }
     LoomButton {
         label: "Laser";
-        primary: root.active-tool == 2;
+        variant: root.active-tool == 2 ? "primary" : "secondary";
         clicked => { root.select-tool(2); }
     }
     LoomButton {
         label: "Eraser";
-        primary: root.active-tool == 3;
+        variant: root.active-tool == 3 ? "primary" : "secondary";
         clicked => { root.select-tool(3); }
     }
     LoomButton {
