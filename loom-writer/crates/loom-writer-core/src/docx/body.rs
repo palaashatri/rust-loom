@@ -293,7 +293,7 @@ pub(super) fn build(
     })
 }
 
-/// A paragraph holding one inline picture of `w` by `h` points.
+/// A paragraph holding one inline or floating/wrapped picture of `w` by `h` points.
 fn picture_paragraph(
     block: &RichBlock,
     image: &crate::InlineImage,
@@ -304,9 +304,75 @@ fn picture_paragraph(
     let (cx, cy) = ((w * 12_700.0).round() as i64, (h * 12_700.0).round() as i64);
     let name = xml::attr(&image.name);
     let alignment = paragraph_properties(block, None, &[], None);
+    let id = 1000 + index;
+    let graphic = format!(
+        "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic>"
+    );
+
+    if let Some(wrap) = image
+        .wrap
+        .filter(|w| w.mode != loom_objects::ImageWrapMode::Inline)
+    {
+        let emu = |pt: f32| (pt.max(0.0) * 12_700.0).round() as i64;
+        let behind = if wrap.mode == loom_objects::ImageWrapMode::BehindText {
+            "1"
+        } else {
+            "0"
+        };
+        let h_rel = match wrap.horizontal_anchor {
+            loom_objects::HorizontalAnchor::Column => "column",
+            loom_objects::HorizontalAnchor::Margin => "margin",
+            loom_objects::HorizontalAnchor::Page => "page",
+        };
+        let v_rel = match wrap.vertical_anchor {
+            loom_objects::VerticalAnchor::Paragraph => "paragraph",
+            loom_objects::VerticalAnchor::Margin => "margin",
+            loom_objects::VerticalAnchor::Page => "page",
+        };
+        let pos_h = match wrap.horizontal_align {
+            loom_objects::WrapHorizontalAlign::Left => "<wp:align>left</wp:align>".to_string(),
+            loom_objects::WrapHorizontalAlign::Center => "<wp:align>center</wp:align>".to_string(),
+            loom_objects::WrapHorizontalAlign::Right => "<wp:align>right</wp:align>".to_string(),
+            loom_objects::WrapHorizontalAlign::OffsetPt(pt) => {
+                format!(
+                    "<wp:posOffset>{}</wp:posOffset>",
+                    (pt * 12_700.0).round() as i64
+                )
+            }
+        };
+        let pos_v = format!(
+            "<wp:posOffset>{}</wp:posOffset>",
+            (image.wrap_y_offset_pt * 12_700.0).round() as i64
+        );
+        let side_attr = match wrap.side {
+            loom_objects::WrapSide::Both => "bothSides",
+            loom_objects::WrapSide::LeftOnly => "left",
+            loom_objects::WrapSide::RightOnly => "right",
+            loom_objects::WrapSide::Largest => "largest",
+        };
+        let wrap_xml = match wrap.mode {
+            loom_objects::ImageWrapMode::Square => {
+                format!("<wp:wrapSquare wrapText=\"{side_attr}\"/>")
+            }
+            loom_objects::ImageWrapMode::Tight => {
+                format!("<wp:wrapTight wrapText=\"{side_attr}\"/>")
+            }
+            loom_objects::ImageWrapMode::TopAndBottom => "<wp:wrapTopAndBottom/>".to_string(),
+            loom_objects::ImageWrapMode::BehindText
+            | loom_objects::ImageWrapMode::InFrontOfText
+            | loom_objects::ImageWrapMode::Inline => "<wp:wrapNone/>".to_string(),
+        };
+        return format!(
+            "<w:p>{alignment}<w:r><w:drawing><wp:anchor distT=\"{dt}\" distB=\"{db}\" distL=\"{dl}\" distR=\"{dr}\" simplePos=\"0\" relativeHeight=\"251658240\" behindDoc=\"{behind}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:simplePos x=\"0\" y=\"0\"/>\n         <wp:positionH relativeFrom=\"{h_rel}\">{pos_h}</wp:positionH>\n         <wp:positionV relativeFrom=\"{v_rel}\">{pos_v}</wp:positionV>\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         {graphic}\n         {wrap_xml}</wp:anchor></w:drawing></w:r></w:p>",
+            dt = emu(wrap.margins.top_pt),
+            db = emu(wrap.margins.bottom_pt),
+            dl = emu(wrap.margins.left_pt),
+            dr = emu(wrap.margins.right_pt),
+        );
+    }
+
     format!(
-        "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\n         <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\n         <pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\"/><pic:cNvPicPr/></pic:nvPicPr>\n         <pic:blipFill><a:blip xmlns:r=\"{R_NS}\" r:embed=\"rIdImg{index}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\n         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\n         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
-        id = 1000 + index
+        "<w:p>{alignment}<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         {graphic}</wp:inline></w:drawing></w:r></w:p>"
     )
 }
 

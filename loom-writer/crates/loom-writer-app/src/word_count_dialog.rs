@@ -201,6 +201,8 @@ mod tests {
             width_pt: 48.0,
             height_pt: 48.0,
             bytes: Arc::new(img_bytes),
+            wrap: None,
+            wrap_y_offset_pt: 0.0,
         });
         doc.push(img_block);
 

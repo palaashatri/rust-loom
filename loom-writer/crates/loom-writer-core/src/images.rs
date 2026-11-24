@@ -64,6 +64,10 @@ pub struct InlineImage {
     pub width_pt: f32,
     pub height_pt: f32,
     pub bytes: Arc<Vec<u8>>,
+    /// Text-wrapping and anchoring configuration (`None` = inline).
+    pub wrap: Option<loom_objects::ImageWrap>,
+    /// Vertical offset in points relative to the vertical anchor.
+    pub wrap_y_offset_pt: f32,
 }
 
 impl InlineImage {
@@ -107,6 +111,8 @@ impl InlineImage {
             width_pt: width_px as f32 * POINTS_PER_PIXEL,
             height_pt: height_px as f32 * POINTS_PER_PIXEL,
             bytes: Arc::new(bytes),
+            wrap: None,
+            wrap_y_offset_pt: 0.0,
         })
     }
 
@@ -279,24 +285,42 @@ pub(crate) fn picture_text(n: u32) -> String {
     format!("{OBJECT_CHAR}{marker}")
 }
 
-/// `{"name":..,"wpt":..,"hpt":..,"data":"<base64>"}`: how a picture is saved.
+/// `{"name":..,"wpt":..,"hpt":..,"data":"<base64>",...}`: how a picture is saved.
 pub(crate) fn image_json(image: &InlineImage) -> String {
-    format!(
-        "{{\"name\":{},\"wpt\":{},\"hpt\":{},\"data\":\"{}\"}}",
+    let mut out = format!(
+        "{{\"name\":{},\"wpt\":{},\"hpt\":{},\"data\":\"{}\"",
         crate::pkg_json::escape(&image.name),
         image.width_pt,
         image.height_pt,
         base64_encode(&image.bytes)
-    )
+    );
+    if let Some(wrap) = &image.wrap {
+        out.push_str(&format!(
+            ",\"wrap_mode\":\"{}\"",
+            match wrap.mode {
+                loom_objects::ImageWrapMode::Inline => "inline",
+                loom_objects::ImageWrapMode::Square => "square",
+                loom_objects::ImageWrapMode::Tight => "tight",
+                loom_objects::ImageWrapMode::TopAndBottom => "top_and_bottom",
+                loom_objects::ImageWrapMode::BehindText => "behind_text",
+                loom_objects::ImageWrapMode::InFrontOfText => "in_front_of_text",
+            }
+        ));
+    }
+    if image.wrap_y_offset_pt.abs() > 0.001 {
+        out.push_str(&format!(",\"ypt\":{}", image.wrap_y_offset_pt));
+    }
+    out.push('}');
+    out
 }
 
-/// Reads a picture written by [`image_json`]; `None` when the bytes are not an
-/// acceptable PNG or JPEG.
-pub(crate) fn image_from_fields(
+pub(crate) fn image_from_fields_with_wrap(
     name: &str,
     width_pt: Option<f32>,
     height_pt: Option<f32>,
     data: &str,
+    wrap: Option<loom_objects::ImageWrap>,
+    wrap_y_offset_pt: f32,
 ) -> Option<InlineImage> {
     let bytes = base64_decode(data)?;
     let mut image = InlineImage::from_bytes(name, bytes).ok()?;
@@ -305,6 +329,10 @@ pub(crate) fn image_from_fields(
             image.width_pt = w;
             image.height_pt = h;
         }
+    }
+    image.wrap = wrap;
+    if wrap_y_offset_pt.is_finite() {
+        image.wrap_y_offset_pt = wrap_y_offset_pt;
     }
     Some(image)
 }

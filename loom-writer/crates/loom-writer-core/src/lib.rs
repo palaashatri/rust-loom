@@ -30,6 +30,8 @@ pub mod fonts;
 mod header_footer;
 #[cfg(test)]
 mod header_footer_tests;
+pub mod hyperlinks;
+pub mod image_wrap;
 mod images;
 mod layout;
 mod list_levels;
@@ -1921,18 +1923,22 @@ fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>),
 
 fn parse_image(raw: &str) -> Result<Option<InlineImage>, WriterError> {
     let fields = ContentParser::new(raw).parse()?;
-    let (mut name, mut data) = (String::new(), String::new());
-    let (mut width, mut height) = (None, None);
-    for (key, value) in &fields {
-        match key.as_str() {
-            "name" => name = json_value_text(value),
-            "data" => data = json_value_text(value),
-            "wpt" => width = json_value_text(value).parse().ok(),
-            "hpt" => height = json_value_text(value).parse().ok(),
+    let (mut name, mut data, mut w, mut h, mut wrap, mut y) =
+        (String::new(), String::new(), None, None, None, 0.0f32);
+    for (k, v) in &fields {
+        match k.as_str() {
+            "name" => name = json_value_text(v),
+            "data" => data = json_value_text(v),
+            "wpt" => w = json_value_text(v).parse().ok(),
+            "hpt" => h = json_value_text(v).parse().ok(),
+            "wrap_mode" => wrap = image_wrap::parse_wrap_mode_str(&json_value_text(v)),
+            "ypt" => y = json_value_text(v).parse().unwrap_or(0.0),
             _ => {}
         }
     }
-    Ok(images::image_from_fields(&name, width, height, &data))
+    Ok(images::image_from_fields_with_wrap(
+        &name, w, h, &data, wrap, y,
+    ))
 }
 
 fn parse_runs(raw: &str) -> Result<Vec<loom_text::StyleRun>, WriterError> {

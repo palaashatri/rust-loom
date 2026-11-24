@@ -265,6 +265,8 @@ fn history_charges_picture_name_and_shared_picture_bytes() {
         width_pt: 1.0,
         height_pt: 1.0,
         bytes: Arc::new(vec![7; 16 * 1024]),
+        wrap: None,
+        wrap_y_offset_pt: 0.0,
     });
     let mut larger = original.clone();
     let extra = increase_string_capacity(&mut larger.blocks[0].image.as_mut().unwrap().name);

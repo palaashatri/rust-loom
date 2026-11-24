@@ -717,6 +717,8 @@ mod tests {
             width_pt: 0.75,
             height_pt: 0.75,
             bytes: Arc::new(vec![1, 2, 3]),
+            wrap: None,
+            wrap_y_offset_pt: 0.0,
         });
         source.blocks.push(image);
         let mut chart = RichBlock::new(4, "chart", "chart marker");

@@ -72,16 +72,7 @@ struct TableGeometry {
     row_heights: Vec<f32>,
 }
 
-/// One picture to draw: where it sits and what it shows.
-#[derive(Clone)]
-pub(crate) struct PageImagePart {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub label: String,
-    pub image: loom_writer_core::InlineImage,
-}
+pub(crate) use crate::image_projection::{ImageZOrder, PageImagePart};
 
 /// Layout viewport in page points: width and height stay the page's so the
 /// projection is independent of shell width; zoom and scroll are controller
@@ -530,6 +521,7 @@ fn project_inner(
                 height,
                 label: format!("Picture: {}", picture.name),
                 image: picture.clone(),
+                z_order: ImageZOrder::from_image(picture),
             });
             continue;
         }

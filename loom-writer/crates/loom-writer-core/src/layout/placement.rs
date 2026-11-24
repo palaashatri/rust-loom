@@ -135,11 +135,12 @@ impl Placer {
                     global_start: segment.block_start + line.start,
                     page: self.page,
                     bounds: PageRect {
-                        x: 0.0,
+                        x: line.x_offset_pt,
                         y: 0.0,
                         width: segment.fixed_width.unwrap_or(line.advance_pt),
                         height,
                     },
+                    x_offset_pt: line.x_offset_pt,
                     shaped_line: line.shaped_line.clone(),
                 });
                 self.used += height;

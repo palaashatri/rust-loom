@@ -1,0 +1,95 @@
+import { LoomTheme, LoomDialog, LoomButton } from "loom-ui";
+
+export component HyperlinkDialog inherits LoomDialog {
+    in-out property <string> url-text: "";
+    in-out property <string> tooltip-text: "";
+    in property <string> error-text: "";
+
+    callback apply-link(string, string);
+    callback remove-link();
+    callback cancel();
+
+    title: "Insert Hyperlink";
+    width: 400px;
+
+    VerticalLayout {
+        spacing: 10px;
+        padding: 12px;
+
+        Text {
+            text: "URL or Bookmark";
+            color: LoomTheme.text-primary;
+            font-size: 12px;
+        }
+
+        Rectangle {
+            height: 30px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: LoomTheme.border-subtle;
+            background: LoomTheme.surface-input;
+            TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                vertical-alignment: center;
+                text <=> root.url-text;
+                color: LoomTheme.text-primary;
+                accessible-role: text-input;
+                accessible-label: "Hyperlink URL";
+            }
+        }
+
+        Text {
+            text: "Tooltip (optional)";
+            color: LoomTheme.text-primary;
+            font-size: 12px;
+        }
+
+        Rectangle {
+            height: 30px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: LoomTheme.border-subtle;
+            background: LoomTheme.surface-input;
+            TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                vertical-alignment: center;
+                text <=> root.tooltip-text;
+                color: LoomTheme.text-primary;
+                accessible-role: text-input;
+                accessible-label: "Hyperlink Tooltip";
+            }
+        }
+
+        if root.error-text != "" : Text {
+            text: root.error-text;
+            color: LoomTheme.danger;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            LoomButton {
+                text: "Remove";
+                accessible-label: "Remove hyperlink";
+                clicked => { root.remove-link(); }
+            }
+            LoomButton {
+                text: "Cancel";
+                accessible-label: "Cancel hyperlink dialog";
+                clicked => { root.cancel(); }
+            }
+            LoomButton {
+                text: "Apply";
+                primary: true;
+                accessible-label: "Apply hyperlink";
+                clicked => { root.apply-link(root.url-text, root.tooltip-text); }
+            }
+        }
+    }
+}
