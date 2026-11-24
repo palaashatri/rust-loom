@@ -561,4 +561,3 @@ fn rich_title_run_with_explicit_false_bold_round_trips() {
     assert_eq!(re_title.runs[0].bold, Some(true));
     assert_eq!(re_title.runs[1].bold, Some(false));
 }
-

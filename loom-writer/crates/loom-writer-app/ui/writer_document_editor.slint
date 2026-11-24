@@ -271,7 +271,9 @@ export component WriterDocumentEditor inherits Rectangle {
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             accessible-role: none;
-            property <color> ink: block.has-color ? block.color
+            property <color> ink: Theme.active-theme == "high-contrast" && block.table-cell
+                ? Theme.palette().paper-ink
+                : block.has-color ? block.color
                 : root.page-appearance == "black" ? #FFFFFF : #000000;
             for tile in block.glyph-tiles : Image {
                 x: tile.x * root.page-zoom;
@@ -301,7 +303,9 @@ export component WriterDocumentEditor inherits Rectangle {
                 font-size: segment.size * 1px * root.page-zoom;
                 font-weight: segment.weight;
                 font-italic: segment.italic;
-                color: segment.has-color ? segment.color : parent.ink;
+                color: Theme.active-theme == "high-contrast" && block.table-cell
+                    ? Theme.palette().paper-ink
+                    : segment.has-color ? segment.color : parent.ink;
                 wrap: block.positioned ? TextWrap.no-wrap : TextWrap.word-wrap;
                 horizontal-alignment: !block.positioned && block.alignment == 1
                     ? TextHorizontalAlignment.center

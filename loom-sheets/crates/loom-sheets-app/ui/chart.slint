@@ -192,8 +192,13 @@ export component SheetChart inherits Rectangle {
             }
 
             Rectangle {
-                background: Theme.palette().surface;
+                background: Theme.active-theme == "light" ? transparent : Theme.palette().surface-raised;
+                border-radius: Theme.tokens.metrics.radius-small;
+                border-width: Theme.active-theme == "light" ? 0px : 1px;
+                border-color: Theme.active-theme == "light" ? transparent : Theme.palette().border;
                 HorizontalLayout {
+                    padding: Theme.active-theme == "light" ? 0px : 2px;
+                    spacing: 2px;
                     LoomButton {
                         variant: "ghost";
                         label: root.kind-label();
@@ -442,18 +447,26 @@ export component SheetChart inherits Rectangle {
                         drop-shadow-color: Theme.palette().shadow;
                     }
 
-                    bar-value-text := Text {
-                        x: 0px;
-                        width: parent.width;
+                    Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        width: min(parent.width, bar-value-text.preferred-width + 6px);
                         height: bar-column.value-label-height;
                         y: max(0px, bar-column.bar-shape-y - self.height - 2px * max(1.0, root.text-scale));
-                        text: idx < root.values-display.length ? root.values-display[idx] : "";
-                        font-size: Theme.tokens.typography.micro * root.text-scale;
-                        font-weight: 600;
-                        color: Theme.palette().paper-ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        background: Doc.well;
+                        border-radius: 2px;
+                        bar-value-text := Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: idx < root.values-display.length ? root.values-display[idx] : "";
+                            font-size: Theme.tokens.typography.micro * root.text-scale;
+                            font-weight: 600;
+                            color: Theme.palette().paper-ink;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
                     }
 
                     bar-category-text := Text {

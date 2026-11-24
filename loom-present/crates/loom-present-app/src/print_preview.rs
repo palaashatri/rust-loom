@@ -40,6 +40,9 @@ pub(crate) fn total_pages_for(slide_count: usize, layout: PrintLayout) -> usize 
 }
 
 pub(crate) fn open(app: &PresentApp, slide_count: usize, title: &str, notes: &str) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::FindReplaceState>().set_open(false);
     let preview = app.global::<PrintPreviewState>();
     let layout = PrintLayout::from_index(preview.get_layout_index());
     let total = total_pages_for(slide_count, layout) as i32;

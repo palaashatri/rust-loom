@@ -15,6 +15,7 @@ export global DataToolsState {
     // Find & Replace
     in-out property <bool> find-open: false;
     in-out property <bool> find-replace-mode: false;
+    in-out property <int> find-focus-tick: 0;
     in-out property <string> find-query: "";
     in-out property <string> replace-text: "";
     in-out property <bool> find-match-case: false;
@@ -129,6 +130,8 @@ export component DataToolsOverlay inherits Rectangle {
                 LoomTextField {
                     label: "Find";
                     placeholder: "Search text or value...";
+                    focus-request: DataToolsState.find-focus-tick;
+                    init => { self.focus-input(); }
                     value <=> DataToolsState.find-query;
                     edited(v) => { DataToolsState.find-query = v; }
                     accepted(_) => { DataToolsState.find-next(); }

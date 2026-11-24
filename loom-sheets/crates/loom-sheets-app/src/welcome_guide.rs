@@ -27,6 +27,7 @@ fn mark_seen_at(path: &Path) {
 
 /// Opens the Welcome Guide at Step 1 and moves keyboard focus into it.
 pub(crate) fn open(app: &SheetsApp) {
+    app.global::<crate::StartHubState>().set_open(false);
     app.set_welcome_step(0);
     app.set_welcome_open(true);
     app.invoke_focus_welcome();

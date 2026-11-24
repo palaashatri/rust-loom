@@ -16,6 +16,9 @@ pub(crate) struct FindReplaceCallbacks {
 }
 
 pub(crate) fn open(app: &PresentApp) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
     let state = app.global::<FindReplaceState>();
     state.set_open(true);
     let toggled = !state.get_focus_request();

@@ -156,6 +156,9 @@ pub(crate) fn refresh_recents(app: &PresentApp, query: &str) {
 }
 
 pub(crate) fn open(app: &PresentApp) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
+    app.global::<crate::FindReplaceState>().set_open(false);
     let hub = app.global::<StartHubState>();
     hub.set_search_query("".into());
     refresh_recents(app, "");
