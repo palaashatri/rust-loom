@@ -1,0 +1,106 @@
+import { Theme } from "theme.slint";
+
+export component SlideTemplatePreview inherits Rectangle {
+    in property <string> template-id: "blank";
+    in property <bool> selected: false;
+
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.palette().accent : Theme.palette().border-strong;
+    clip: true;
+
+    pure function is-dark() -> bool {
+        root.template-id == "executive-pitch" || root.template-id == "product-launch"
+    }
+
+    pure function bg-color() -> color {
+        if root.template-id == "executive-pitch" { return #0f172a; }
+        if root.template-id == "product-launch" { return #18181b; }
+        if root.template-id == "data-report" { return #f8fafc; }
+        if root.template-id == "editorial-portfolio" { return #faf7f2; }
+        if root.template-id == "workshop-deck" { return #fffbeb; }
+        return #ffffff;
+    }
+
+    pure function accent-color() -> color {
+        if root.template-id == "executive-pitch" { return #f59e0b; }
+        if root.template-id == "quarterly-review" { return #1d4ed8; }
+        if root.template-id == "product-launch" { return #8b5cf6; }
+        if root.template-id == "data-report" { return #0d9488; }
+        if root.template-id == "editorial-portfolio" { return #c2410c; }
+        if root.template-id == "academic-lecture" { return #15803d; }
+        if root.template-id == "workshop-deck" { return #4f46e5; }
+        if root.template-id == "minimal-keynote" { return #18181b; }
+        return #2b579a;
+    }
+
+    background: root.bg-color();
+
+    // Top accent bar for most themes
+    if root.template-id != "blank" : Rectangle {
+        x: 12px;
+        y: 12px;
+        width: 28px;
+        height: 4px;
+        border-radius: 2px;
+        background: root.accent-color();
+    }
+
+    // Title line
+    Rectangle {
+        x: 12px;
+        y: root.template-id == "blank" ? 16px : 22px;
+        width: parent.width * 0.58;
+        height: 7px;
+        border-radius: 3.5px;
+        background: root.is-dark() ? #f8fafc : #1f2328;
+        opacity: root.template-id == "blank" ? 0.25 : 1.0;
+    }
+
+    // Subtitle line
+    Rectangle {
+        x: 12px;
+        y: root.template-id == "blank" ? 28px : 34px;
+        width: parent.width * 0.42;
+        height: 4px;
+        border-radius: 2px;
+        background: root.is-dark() ? #94a3b8 : #64748b;
+        opacity: root.template-id == "blank" ? 0.25 : 0.85;
+    }
+
+    // Two-column or chart visual
+    if root.template-id == "quarterly-review" || root.template-id == "data-report" : Rectangle {
+        x: 12px;
+        y: 48px;
+        width: parent.width - 24px;
+        height: parent.height - 60px;
+        border-radius: 4px;
+        background: root.is-dark() ? #1f2937 : #f8fafc;
+        border-width: 1px;
+        border-color: root.is-dark() ? #374151 : #e2e8f0;
+
+        Rectangle { x: 10px; y: parent.height - 20px; width: 10px; height: 12px; border-radius: 2px; background: root.accent-color(); opacity: 0.55; }
+        Rectangle { x: 26px; y: parent.height - 28px; width: 10px; height: 20px; border-radius: 2px; background: root.accent-color(); }
+        Rectangle { x: 42px; y: parent.height - 24px; width: 10px; height: 16px; border-radius: 2px; background: root.accent-color(); opacity: 0.75; }
+        Rectangle { x: 58px; y: parent.height - 32px; width: 10px; height: 24px; border-radius: 2px; background: root.accent-color(); }
+    }
+
+    if root.template-id != "quarterly-review" && root.template-id != "data-report" && root.template-id != "blank" : Rectangle {
+        x: 12px;
+        y: 48px;
+        width: (parent.width - 30px) / 2;
+        height: parent.height - 60px;
+        border-radius: 4px;
+        background: root.is-dark() ? #252b3b : #f1f5f9;
+    }
+
+    if root.template-id != "quarterly-review" && root.template-id != "data-report" && root.template-id != "blank" : Rectangle {
+        x: 18px + (parent.width - 30px) / 2;
+        y: 48px;
+        width: (parent.width - 30px) / 2;
+        height: parent.height - 60px;
+        border-radius: 4px;
+        background: root.accent-color();
+        opacity: 0.18;
+    }
+}

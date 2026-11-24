@@ -19,6 +19,8 @@ export component PresenterWindow inherits Window {
     in property <string> position-text: "Slide 1 of 1";
     in property <string> slide-title: "";
     in property <string> notes: "";
+    in-out property <int> screen-overlay: 0; // 0: none, 1: blackout (B), 2: whiteout (W)
+    in-out property <length> notes-font-size: Theme.type.body;
     in property <string> next-title: "";
     in property <string> elapsed: "00:00";
     in property <bool> timer-running: true;
@@ -114,9 +116,9 @@ export component PresenterWindow inherits Window {
                         }
                         Text {
                             text: root.notes == "" ? "No notes for this slide." : root.notes;
+                            font-size: root.notes-font-size;
                             font-family: Theme.document-font-family;
                             wrap: word-wrap;
-                            font-size: Theme.type.body-large * 1.25;
                             color: root.notes == "" ? Theme.palette().ink-secondary : Theme.palette().ink;
                             vertical-stretch: 1;
                             accessible-role: AccessibleRole.text;

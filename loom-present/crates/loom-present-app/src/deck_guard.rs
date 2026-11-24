@@ -49,6 +49,7 @@ pub(crate) fn content_matches(left: &PresentationDocument, right: &PresentationD
         && left.title == right.title
         && left.author == right.author
         && left.theme == right.theme
+        && left.aspect_ratio_wide == right.aspect_ratio_wide
         && left.slides.len() == right.slides.len()
         && left.slides.iter().zip(&right.slides).all(|(left, right)| {
             left.id == right.id

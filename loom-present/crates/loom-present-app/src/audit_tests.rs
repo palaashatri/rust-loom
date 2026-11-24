@@ -13,6 +13,7 @@ fn test_audit_doc() -> PresentationDocument {
     slide1.speaker_notes = "Welcome to the Loom Present deep audit.".into();
     slide1.elements.clear();
     slide1.elements.push(SlideElement {
+        runs: Vec::new(),
         id: "title-1".into(),
         element_type: ElementType::Title,
         content: "Loom Present".into(),
@@ -26,6 +27,7 @@ fn test_audit_doc() -> PresentationDocument {
         style: Default::default(),
     });
     slide1.elements.push(SlideElement {
+        runs: Vec::new(),
         id: "subtitle-1".into(),
         element_type: ElementType::Subtitle,
         content: "High performance native presentations".into(),
@@ -44,6 +46,7 @@ fn test_audit_doc() -> PresentationDocument {
     let slide2 = doc.slides.get_mut(1).expect("slide 2");
     slide2.speaker_notes = "Discussing modular UI and vector graphics.".into();
     slide2.elements.push(SlideElement {
+        runs: Vec::new(),
         id: "rect-1".into(),
         element_type: ElementType::ShapeRectangle,
         content: "Slint UI Layer".into(),
@@ -57,6 +60,7 @@ fn test_audit_doc() -> PresentationDocument {
         style: Default::default(),
     });
     slide2.elements.push(SlideElement {
+        runs: Vec::new(),
         id: "rect-2".into(),
         element_type: ElementType::ShapeRectangle,
         content: "Core Engine".into(),
@@ -282,7 +286,7 @@ fn test_deep_audit_macos_global_menu_bar_command_projection() {
 
     // Disabled guard check: dispatching unhandled command fails
     let err = menu
-        .dispatch_action_from("edit.select_all", CommandSource::Menu)
+        .dispatch_action_from("view.zoom_actual", CommandSource::Menu)
         .expect_err("disabled");
     assert!(err.to_string().contains("disabled"));
 }

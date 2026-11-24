@@ -13,7 +13,7 @@ Start with the root [agent entrypoint](../AGENTS.md). The owner requested this s
 | GOV findings, including the bounded app-accent decision | [Governance debt](workflow/governance-debt.md) |
 | Approved Writer M1–M7 scope | [Writer scope](workflow/writer.md) |
 | Previously recorded capabilities worth preserving | [Capability inventory](workflow/capabilities.md); earlier results are not fresh acceptance |
-| Oct27 Pages/Numbers/Keynote comparison, menu findings and icon verification | [Comparative audit](audits/uiux-2026-10-27.md) |
+| Oct27 Pages/Numbers/Keynote comparison, menu findings, icon verification, and dated Sheets/Writer/Present Gate 1–14 completion records | [Comparative audit](audits/uiux-2026-10-27.md) |
 
 There is one live readiness ledger, in `workflow/current.md`. A card/audit owns its findings; do not copy status tables between files. Dates, test failures, retractions and native-versus-renderer limits remain part of the evidence. Historical desktop permissions and model-routing choices apply only to their original runs. No migration or old green report grants application acceptance.
 

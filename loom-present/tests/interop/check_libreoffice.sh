@@ -41,6 +41,21 @@ if [ -s out/present.odp ]; then
   check "ODP keeps a table" "$(printf '%s' "$content" | grep -q '<table:table'; echo $?)" ""
   check "ODP keeps table cells" "$(printf '%s' "$content" | grep -q 'Header 1'; echo $?)" ""
   check "ODP carries the chart object" "$([ "$(unzip -l out/present.odp | grep -c 'Object [0-9]*/content.xml')" -ge 1 ]; echo $?)" ""
+  timeout 180 "$soffice" "$profile" --headless --convert-to pptx --outdir out-rt out/present.odp >/dev/null 2>&1
+  check "ODP converts back to PPTX" "$([ -s out-rt/present.pptx ]; echo $?)" "no round-trip PPTX written"
+  if [ -s out-rt/present.pptx ]; then
+    rt_list="$(unzip -l out-rt/present.pptx)"
+    rt_slides="$(printf '%s' "$rt_list" | grep -c 'ppt/slides/slide[0-9]*\.xml')"
+    check "round-trip PPTX has 4 slides" "$([ "$rt_slides" -eq 4 ]; echo $?)" "slides: $rt_slides"
+    rt_all="$(unzip -p out-rt/present.pptx 'ppt/slides/slide*.xml')"
+    check "round-trip PPTX keeps title text" "$(printf '%s' "$rt_all" | grep -qF 'Q3 &amp; Q4 Plan'; echo $?)" ""
+    check "round-trip PPTX keeps Results text" "$(printf '%s' "$rt_all" | grep -qF 'Results'; echo $?)" ""
+    rt_notes="$(unzip -p out-rt/present.pptx 'ppt/notesSlides/notesSlide*.xml' 2>/dev/null || true)"
+    check "round-trip PPTX keeps speaker notes" "$(printf '%s' "$rt_notes" | grep -qF 'Open warmly. Mention the budget.'; echo $?)" ""
+    check "round-trip PPTX keeps table" "$(printf '%s' "$rt_all" | grep -q '<a:tbl'; echo $?)" ""
+    check "round-trip PPTX keeps picture" "$([ "$(printf '%s' "$rt_list" | grep -c 'ppt/media/')" -ge 1 ]; echo $?)" ""
+    check "round-trip PPTX keeps chart" "$([ "$(printf '%s' "$rt_list" | grep -c 'ppt/charts/chart[0-9]*\.xml')" -ge 1 ]; echo $?)" ""
+  fi
 fi
 timeout 180 "$soffice" "$profile" --headless --convert-to pdf --outdir out present.pptx >/dev/null 2>&1
 check "pptx converts to PDF" "$([ -s out/present.pdf ]; echo $?)" "no PDF written"

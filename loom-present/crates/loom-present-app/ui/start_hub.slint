@@ -1,0 +1,457 @@
+import { LoomButton } from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+import { SlideTemplatePreview } from "template_previews.slint";
+
+export struct StartHubDeckEntry {
+    name: string,
+    path: string,
+    folder: string,
+    format: string,
+    modified-label: string,
+}
+
+export struct StartHubTemplateEntry {
+    id: string,
+    name: string,
+    category: string,
+}
+
+export global StartHubState {
+    in-out property <bool> open: false;
+    in-out property <int> active-tab: 0; // 0 = Recents, 1 = Decks on Disk
+    in-out property <string> search-query: "";
+    in-out property <bool> focus-request: false;
+    in-out property <[StartHubDeckEntry]> recent-decks: [];
+    in-out property <[StartHubDeckEntry]> disk-decks: [];
+    in-out property <[StartHubTemplateEntry]> quick-templates: [
+        { id: "blank", name: "Blank", category: "Basic" },
+        { id: "executive-pitch", name: "Executive Pitch", category: "Business" },
+        { id: "editorial-portfolio", name: "Editorial Portfolio", category: "Editorial" },
+        { id: "minimal-keynote", name: "Minimal Keynote", category: "Editorial" },
+    ];
+    callback close-hub();
+    callback open-file();
+    callback new-presentation();
+    callback open-template(string);
+    callback open-deck(string);
+    callback search-changed(string);
+}
+
+component TabPill inherits FocusScope {
+    in property <string> label;
+    in property <bool> active: false;
+    callback activated();
+
+    height: 32px;
+    width: max(108px, tab-text.preferred-width + Theme.tokens.space.xl);
+
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == " " {
+            root.activated();
+            return accept;
+        }
+        return reject;
+    }
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: Theme.tokens.metrics.radius-small;
+        background: root.active ? Theme.palette().selection-soft : (ta.has-hover ? Theme.palette().surface-raised : transparent);
+        border-width: root.has-focus ? 2px : (root.active ? 1px : 0px);
+        border-color: root.has-focus ? Theme.palette().focus : Theme.palette().accent;
+
+        tab-text := Text {
+            text: root.label;
+            color: root.active ? Theme.palette().accent : Theme.palette().ink;
+            font-family: Theme.ui-font-family;
+            font-size: Theme.type.caption;
+            font-weight: root.active ? 700 : 500;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        accessible-role: tab;
+        accessible-label: root.label;
+
+        clicked => { root.activated(); }
+    }
+}
+
+component FormatBadge inherits Rectangle {
+    in property <string> format;
+    width: max(56px, fmt-lbl.preferred-width + 12px);
+    height: 22px;
+    border-radius: 11px;
+    background: root.format == ".pptx" ? #fff4e5 : Theme.palette().selection-soft;
+    border-width: 1px;
+    border-color: root.format == ".pptx" ? #f4c790 : Theme.palette().accent;
+
+    fmt-lbl := Text {
+        text: root.format;
+        color: root.format == ".pptx" ? #b45309 : Theme.palette().accent;
+        font-family: Theme.ui-font-family;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component StartHubModal inherits Rectangle {
+    in property <bool> open: StartHubState.open;
+    property <bool> hub-open: root.open;
+    property <bool> focus-req: StartHubState.focus-request;
+
+    width: 100%;
+    height: 100%;
+    visible: root.open;
+    background: Theme.palette().scrim;
+
+    changed hub-open => {
+        if root.hub-open {
+            key-handler.focus();
+        }
+    }
+
+    init => {
+        key-handler.focus();
+    }
+
+    changed focus-req => {
+        if root.hub-open {
+            key-handler.focus();
+        }
+    }
+
+    TouchArea { width: 100%; height: 100%; }
+
+    key-handler := FocusScope {
+        width: min(880px, max(480px, parent.width - Theme.tokens.space.xl * 2));
+        height: min(640px, max(440px, parent.height - Theme.tokens.space.xl * 2));
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        enabled: root.open;
+
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                StartHubState.close-hub();
+                return accept;
+            }
+            return reject;
+        }
+
+        card := Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: Theme.tokens.metrics.radius-large;
+            background: Theme.palette().surface;
+            border-width: 1px;
+            border-color: Theme.palette().border-strong;
+            drop-shadow-blur: 28px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+
+                // Branded coral header
+                Rectangle {
+                    height: 68px;
+                    background: Theme.palette().chrome;
+
+                    Rectangle {
+                        x: Theme.rtl ? parent.width - 34px - Theme.tokens.space.xl : Theme.tokens.space.xl;
+                        y: (parent.height - self.height) / 2;
+                        width: 34px;
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.palette().accent;
+                        Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            icon: "present";
+                            tint: Theme.palette().accent-ink;
+                            size: 18px;
+                        }
+                    }
+
+                    VerticalLayout {
+                        x: Theme.rtl ? Theme.tokens.space.xl + 260px : Theme.tokens.space.xl + 46px;
+                        y: (parent.height - self.preferred-height) / 2;
+                        width: max(120px, parent.width - Theme.tokens.space.xl * 2 - 310px);
+                        spacing: 2px;
+                        Text {
+                            text: "Loom Present";
+                            color: Theme.palette().ink;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.title;
+                            font-weight: 700;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+                        Text {
+                            text: "Start a new deck or reopen a recent presentation";
+                            color: Theme.palette().ink-secondary;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.caption;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            overflow: elide;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        x: Theme.rtl ? Theme.tokens.space.lg : parent.width - self.preferred-width - Theme.tokens.space.lg;
+                        y: (parent.height - self.preferred-height) / 2;
+                        spacing: Theme.tokens.space.sm;
+
+                        LoomButton {
+                            label: "Open File...";
+                            icon: "folder-open";
+                            variant: "secondary";
+                            accessible-name: "Open Presentation File";
+                            clicked => { StartHubState.open-file(); }
+                        }
+                        LoomButton {
+                            label: "New Presentation";
+                            icon: "plus";
+                            variant: "primary";
+                            accessible-name: "New Presentation from Template Chooser";
+                            clicked => { StartHubState.new-presentation(); }
+                        }
+                        LoomButton {
+                            width: 32px;
+                            height: 32px;
+                            icon: "close";
+                            variant: "ghost";
+                            accessible-name: "Close Start Hub";
+                            clicked => { StartHubState.close-hub(); }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.palette().border; }
+
+                // Quick Start miniature template strip
+                Rectangle {
+                    height: 112px;
+                    background: Theme.palette().surface-sunken;
+
+                    VerticalLayout {
+                        padding: Theme.tokens.space.lg;
+                        spacing: Theme.tokens.space.sm;
+
+                        Text {
+                            text: "Quick Start";
+                            color: Theme.palette().ink-secondary;
+                            font-family: Theme.ui-font-family;
+                            font-size: Theme.type.caption;
+                            font-weight: 700;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                        }
+
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.md;
+                            for tpl in StartHubState.quick-templates: Rectangle {
+                                horizontal-stretch: 1;
+                                height: 60px;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                background: tpl-ta.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: tpl-ta.has-hover ? Theme.palette().accent : Theme.palette().border;
+
+                                HorizontalLayout {
+                                    padding: Theme.tokens.space.sm;
+                                    spacing: Theme.tokens.space.sm;
+                                    SlideTemplatePreview {
+                                        width: 48px;
+                                        height: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        template-id: tpl.id;
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: tpl.name;
+                                            color: Theme.palette().ink;
+                                            font-family: Theme.ui-font-family;
+                                            font-size: Theme.type.caption;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: tpl.category;
+                                            color: Theme.palette().ink-secondary;
+                                            font-family: Theme.ui-font-family;
+                                            font-size: Theme.type.caption;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+
+                                tpl-ta := TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: "New " + tpl.name;
+                                    clicked => { StartHubState.open-template(tpl.id); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.palette().border; }
+
+                // Tabs + live search bar
+                Rectangle {
+                    height: 52px;
+                    background: Theme.palette().surface;
+
+                    HorizontalLayout {
+                        padding-left: Theme.tokens.space.xl;
+                        padding-right: Theme.tokens.space.xl;
+                        spacing: Theme.tokens.space.md;
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.sm;
+                            y: (parent.height - self.preferred-height) / 2;
+                            TabPill {
+                                label: "Recents";
+                                active: StartHubState.active-tab == 0;
+                                activated => { StartHubState.active-tab = 0; }
+                            }
+                            TabPill {
+                                label: "Decks on Disk";
+                                active: StartHubState.active-tab == 1;
+                                activated => { StartHubState.active-tab = 1; }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 240px;
+                            height: 32px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: Theme.tokens.metrics.radius-small;
+                            background: Theme.palette().surface-raised;
+                            border-width: search-input.has-focus ? 2px : 1px;
+                            border-color: search-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+
+                            Icon {
+                                x: Theme.rtl ? parent.width - 24px : 8px;
+                                y: (parent.height - self.height) / 2;
+                                icon: "search";
+                                tint: Theme.palette().ink-secondary;
+                                size: 14px;
+                            }
+
+                            if StartHubState.search-query == "" : Text {
+                                x: Theme.rtl ? 8px : 28px;
+                                width: parent.width - 36px;
+                                height: 100%;
+                                text: "Filter decks...";
+                                color: Theme.palette().ink-disabled;
+                                font-family: Theme.ui-font-family;
+                                font-size: Theme.type.body;
+                                vertical-alignment: center;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                            }
+
+                            search-input := TextInput {
+                                x: Theme.rtl ? 8px : 28px;
+                                width: parent.width - 36px;
+                                height: 100%;
+                                text <=> StartHubState.search-query;
+                                color: Theme.palette().ink;
+                                font-family: Theme.ui-font-family;
+                                font-size: Theme.type.body;
+                                vertical-alignment: center;
+                                horizontal-alignment: Theme.rtl ? right : left;
+                                single-line: true;
+                                accessible-label: "Filter presentations";
+                                edited => { StartHubState.search-changed(self.text); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.palette().border; }
+
+                // Deck list
+                Flickable {
+                    vertical-stretch: 1;
+                    interactive: true;
+                    viewport-width: self.width;
+                    viewport-height: list-col.preferred-height + Theme.tokens.space.lg * 2;
+
+                    list-col := VerticalLayout {
+                        x: Theme.tokens.space.xl;
+                        y: Theme.tokens.space.md;
+                        width: parent.width - Theme.tokens.space.xl * 2;
+                        spacing: Theme.tokens.space.xs;
+
+                        for entry in (StartHubState.active-tab == 0 ? StartHubState.recent-decks : StartHubState.disk-decks): Rectangle {
+                            height: 54px;
+                            border-radius: Theme.tokens.metrics.radius-small;
+                            background: row-ta.has-hover ? Theme.palette().surface-raised : transparent;
+                            border-width: 1px;
+                            border-color: row-ta.has-hover ? Theme.palette().border : transparent;
+
+                            HorizontalLayout {
+                                padding-left: Theme.tokens.space.md;
+                                padding-right: Theme.tokens.space.md;
+                                spacing: Theme.tokens.space.md;
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    Text {
+                                        text: entry.name;
+                                        color: Theme.palette().ink;
+                                        font-family: Theme.ui-font-family;
+                                        font-size: Theme.type.body;
+                                        font-weight: 600;
+                                        overflow: elide;
+                                        horizontal-alignment: Theme.rtl ? right : left;
+                                    }
+                                    Text {
+                                        text: entry.folder;
+                                        color: Theme.palette().ink-secondary;
+                                        font-family: Theme.ui-font-family;
+                                        font-size: Theme.type.caption;
+                                        overflow: elide;
+                                        horizontal-alignment: Theme.rtl ? right : left;
+                                    }
+                                }
+
+                                FormatBadge {
+                                    y: (parent.height - self.height) / 2;
+                                    format: entry.format;
+                                }
+
+                                Text {
+                                    width: 96px;
+                                    text: entry.modified-label;
+                                    color: Theme.palette().ink-secondary;
+                                    font-family: Theme.ui-font-family;
+                                    font-size: Theme.type.caption;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: Theme.rtl ? left : right;
+                                }
+                            }
+
+                            row-ta := TouchArea {
+                                accessible-role: button;
+                                accessible-label: "Open " + entry.name;
+                                clicked => { StartHubState.open-deck(entry.path); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

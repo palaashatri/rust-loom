@@ -1,0 +1,358 @@
+import { LoomTextField } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// One line of the font list: a section heading or a font. Every filtered line
+/// is sent; the list scrolls inside an isolated Flickable.
+export struct FontPickerLine {
+    /// Position among the fonts; -1 for a heading.
+    index: int,
+    /// The font name, or the heading text.
+    label: string,
+    /// "Not installed", "In use" and so on; empty for none.
+    tag: string,
+    /// The family the name is previewed in; empty keeps the window's face.
+    family: string,
+    heading: bool,
+}
+
+/// State shared by the font field in the inspector and the controller.
+export global FontPicker {
+    in-out property <bool> open: false;
+    in-out property <string> query: "";
+    in-out property <[FontPickerLine]> lines: [];
+    in-out property <int> selected: -1;
+    in-out property <int> selected-line: -1;
+    in-out property <int> match-count: 0;
+    /// What the closed field shows: a family name, "Theme font", or "Mixed".
+    in-out property <string> current: "Theme font";
+    in-out property <string> current-note: "";
+    in-out property <string> current-family: "";
+    in-out property <bool> loading: false;
+    in-out property <int> search-focus-tick: 0;
+    in-out property <int> field-focus-tick: 0;
+    callback open-requested;
+    callback close-requested;
+    callback query-edited(string);
+    callback move(int);
+    callback choose(int);
+    callback type-ahead(string);
+}
+
+/// The closed font field: the family of the selection, which opens the list.
+/// Enter, Space and Down open it; typing a letter opens it filtered.
+export component PresentFontField inherits Rectangle {
+    height: max(24px, Theme.scaled-control-height);
+    clip: true;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: field-focus.has-focus ? 2px : 1px;
+    border-color: field-focus.has-focus ? Theme.palette().focus
+        : FontPicker.open ? Theme.palette().accent
+        : touch.has-hover ? Theme.palette().border-strong
+        : Theme.palette().border;
+    background: FontPicker.open ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().selection-soft
+        : Theme.palette().surface;
+    accessible-role: none;
+
+    in property <int> focus-tick: FontPicker.field-focus-tick;
+    changed focus-tick => { field-focus.focus(); }
+    public function focus-field() { field-focus.focus(); }
+
+    field-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        accessible-role: combobox;
+        accessible-label: "Font family";
+        accessible-value: FontPicker.current + (FontPicker.current-note != "" ? ", " + FontPicker.current-note : "");
+        accessible-expandable: true;
+        accessible-expanded: FontPicker.open;
+        accessible-action-default => {
+            if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); }
+        }
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) { return reject; }
+            if (event.text == Key.Return || event.text == " " || event.text == Key.DownArrow) {
+                FontPicker.open-requested();
+                return accept;
+            }
+            if (event.text == Key.Escape && FontPicker.open) {
+                FontPicker.close-requested();
+                return accept;
+            }
+            if (event.text == Key.Escape || event.text == Key.Tab || event.text == Key.Backtab
+                || event.text == Key.F6 || event.text == Key.UpArrow || event.text == "") {
+                return reject;
+            }
+            FontPicker.type-ahead(event.text);
+            return accept;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            field-focus.focus();
+            if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); }
+        }
+    }
+
+    // Centered chevron + name/note; RTL flips leading/trailing.
+    if !Theme.rtl : HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        Text {
+            min-width: 0px;
+            horizontal-stretch: 1;
+            text: FontPicker.current;
+            font-family: FontPicker.current-family == "" ? Theme.ui-font-family : FontPicker.current-family;
+            font-size: Theme.type.body;
+            color: FontPicker.current == "Mixed" ? Theme.palette().ink-secondary : Theme.palette().ink;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        if FontPicker.current-note != "" : Text {
+            text: FontPicker.current-note;
+            font-size: Theme.type.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: FontPicker.open ? "▴" : "▾";
+                font-size: 12px;
+                color: Theme.palette().ink-secondary;
+            }
+        }
+    }
+
+    if Theme.rtl : HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: FontPicker.open ? "▴" : "▾";
+                font-size: 12px;
+                color: Theme.palette().ink-secondary;
+            }
+        }
+        if FontPicker.current-note != "" : Text {
+            text: FontPicker.current-note;
+            font-size: Theme.type.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        Text {
+            min-width: 0px;
+            horizontal-stretch: 1;
+            text: FontPicker.current;
+            font-family: FontPicker.current-family == "" ? Theme.ui-font-family : FontPicker.current-family;
+            font-size: Theme.type.body;
+            color: FontPicker.current == "Mixed" ? Theme.palette().ink-secondary : Theme.palette().ink;
+            horizontal-alignment: right;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}
+
+/// Scrollable font picker dropdown with search, isolated Flickable, draggable scrollbar,
+/// keyboard navigation, RTL support, "Theme font" reset, and "Mixed" state.
+export component PresentFontPicker inherits Rectangle {
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    background: Theme.palette().surface-raised;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    clip: true;
+
+    private property <length> row-h: max(26px, Theme.scaled-control-height);
+    private property <int> selected-line: FontPicker.selected-line;
+    changed selected-line => {
+        if (root.selected-line >= 0) {
+            let y-top = root.selected-line * root.row-h;
+            let y-bot = y-top + root.row-h;
+            if (y-top < -list-flick.viewport-y) {
+                list-flick.viewport-y = -y-top;
+            } else if (y-bot > -list-flick.viewport-y + list-flick.height) {
+                list-flick.viewport-y = -(y-bot - list-flick.height);
+            }
+        }
+    }
+
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                FontPicker.move(1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                FontPicker.move(-1);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                FontPicker.choose(FontPicker.selected);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                FontPicker.close-requested();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: Theme.tokens.space.xs;
+            spacing: Theme.tokens.space.xs;
+
+            search := LoomTextField {
+                value: FontPicker.query;
+                placeholder: "Search fonts…";
+                focus-request: FontPicker.search-focus-tick;
+                edited(val) => { FontPicker.query-edited(val); }
+                accepted(_) => { FontPicker.choose(FontPicker.selected); }
+                cancelled => { FontPicker.close-requested(); }
+            }
+
+        // search focus handled by LoomTextField
+
+        if FontPicker.loading : Text {
+            text: "Scanning fonts…";
+            font-size: Theme.type.caption;
+            color: Theme.palette().ink-secondary;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            height: min(240px, max(root.row-h, FontPicker.lines.length * root.row-h));
+            clip: true;
+
+            list-flick := Flickable {
+                width: parent.width - 10px;
+                x: Theme.rtl ? 10px : 0px;
+                height: parent.height;
+                viewport-height: FontPicker.lines.length * root.row-h;
+                interactive: true;
+
+                for line[idx] in FontPicker.lines : Rectangle {
+                    y: idx * root.row-h;
+                    width: list-flick.width;
+                    height: root.row-h;
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    background: line.heading ? transparent
+                        : (line.index == FontPicker.selected) ? Theme.palette().selection-soft
+                        : transparent;
+
+                    if line.heading : Text {
+                        x: Theme.tokens.space.sm;
+                        width: parent.width - Theme.tokens.space.sm * 2;
+                        height: parent.height;
+                        text: line.label;
+                        font-size: Theme.type.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        vertical-alignment: center;
+                    }
+
+                    if !line.heading : HorizontalLayout {
+                        padding-left: Theme.tokens.space.sm;
+                        padding-right: Theme.tokens.space.sm;
+                        spacing: Theme.tokens.space.xs;
+                        if !Theme.rtl : Text {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            text: line.label;
+                            font-family: line.family == "" ? Theme.ui-font-family : line.family;
+                            font-size: Theme.type.body;
+                            color: Theme.palette().ink;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        if line.tag != "" : Text {
+                            text: line.tag;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            vertical-alignment: center;
+                        }
+                        if Theme.rtl : Text {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            text: line.label;
+                            font-family: line.family == "" ? Theme.ui-font-family : line.family;
+                            font-size: Theme.type.body;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: right;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if !line.heading : row-touch := TouchArea {
+                        accessible-role: button;
+                        accessible-label: line.label;
+                        accessible-action-default => { FontPicker.choose(line.index); }
+                        clicked => { FontPicker.choose(line.index); }
+                    }
+                }
+            }
+
+            // Draggable scrollbar
+            if list-flick.viewport-height > list-flick.height : Rectangle {
+                x: Theme.rtl ? 2px : parent.width - 8px;
+                y: 0px;
+                width: 6px;
+                height: parent.height;
+                border-radius: 3px;
+                background: Theme.palette().surface-sunken;
+
+                property <length> max-scroll: max(1px, list-flick.viewport-height - list-flick.height);
+                property <length> thumb-h: max(20px, parent.height * (list-flick.height / list-flick.viewport-height));
+                property <length> thumb-y: (parent.height - thumb-h) * (-list-flick.viewport-y / max-scroll);
+
+                Rectangle {
+                    x: 0px;
+                    y: clamp(parent.thumb-y, 0px, parent.height - parent.thumb-h);
+                    width: parent.width;
+                    height: parent.thumb-h;
+                    border-radius: 3px;
+                    background: sb-touch.pressed ? Theme.palette().accent
+                        : sb-touch.has-hover ? Theme.palette().border-strong
+                        : Theme.palette().ink-secondary;
+                }
+
+                sb-touch := TouchArea {
+                    property <length> drag-start-y;
+                    property <length> drag-start-vp;
+                    pointer-event(ev) => {
+                        if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down) {
+                            self.drag-start-y = self.mouse-y;
+                            self.drag-start-vp = list-flick.viewport-y;
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            let track = max(1px, parent.height - parent.thumb-h);
+                            let delta = self.mouse-y - self.drag-start-y;
+                            let next-vp = self.drag-start-vp - (delta / track) * parent.max-scroll;
+                            list-flick.viewport-y = clamp(next-vp, -parent.max-scroll, 0px);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+}

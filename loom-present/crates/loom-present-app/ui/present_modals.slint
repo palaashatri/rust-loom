@@ -1,0 +1,121 @@
+import { PresentThemeChooser } from "theme_chooser.slint";
+import { PptxImportWarningDialog } from "pptx_import_warning.slint";
+import { InsertTableDialog } from "insert_table_dialog.slint";
+import { SaveChangesDialog } from "save_changes_dialog.slint";
+import { WelcomeGuideModal, WelcomeGuideState } from "welcome_guide.slint";
+import { StartHubModal, StartHubState } from "start_hub.slint";
+import { PrintPreviewModal, PrintPreviewState } from "print_preview_modal.slint";
+import { FindReplaceModal, FindReplaceState } from "find_replace_modal.slint";
+
+export { WelcomeGuideState, StartHubState, PrintPreviewState, FindReplaceState }
+
+export component PresentModals inherits Rectangle {
+    in-out property <bool> theme-chooser-open: false;
+    in property <int> theme-refocus-tick: 0;
+    in-out property <int> theme-selected: 0;
+    in-out property <int> theme-category: 0;
+    callback choose-theme-category(int);
+    callback cancel-theme();
+    callback create-theme(int);
+
+    in property <bool> save-changes-open: false;
+    in property <string> save-changes-document: "";
+    in property <bool> save-changes-closing: false;
+    in property <bool> rtl: false;
+    callback save-changes-save();
+    callback save-changes-discard();
+    callback save-changes-cancel();
+
+    in property <bool> pptx-import-warning-open: false;
+    in property <string> pptx-import-warning-message: "";
+    callback pptx-import-cancel();
+    callback pptx-import-continue();
+
+    in-out property <bool> insert-table-dialog-open: false;
+    in-out property <int> insert-table-dialog-rows: 3;
+    in-out property <int> insert-table-dialog-cols: 3;
+    callback insert-table-size(int, int);
+    callback restore-editor-focus();
+
+    property <bool> fr-open: FindReplaceState.open;
+    changed fr-open => { if (!self.fr-open) { root.restore-editor-focus(); } }
+    property <bool> pp-open: PrintPreviewState.open;
+    changed pp-open => { if (!self.pp-open) { root.restore-editor-focus(); } }
+    property <bool> sh-open: StartHubState.open;
+    changed sh-open => { if (!self.sh-open) { root.restore-editor-focus(); } }
+    property <bool> wg-open: WelcomeGuideState.open;
+    changed wg-open => { if (!self.wg-open && !root.theme-chooser-open && !PrintPreviewState.open && !FindReplaceState.open && !StartHubState.open) { root.restore-editor-focus(); } }
+
+    background: transparent;
+
+    if root.theme-chooser-open : PresentThemeChooser {
+        refocus-tick: root.theme-refocus-tick;
+        open <=> root.theme-chooser-open;
+        theme-selected <=> root.theme-selected;
+        theme-category <=> root.theme-category;
+        choose-theme-category(cat) => { root.choose-theme-category(cat); }
+        cancel-theme => { root.cancel-theme(); }
+        create-theme(idx) => { root.create-theme(idx); }
+    }
+
+    SaveChangesDialog {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        open: root.save-changes-open;
+        document-name: root.save-changes-document;
+        closing: root.save-changes-closing;
+        rtl: root.rtl;
+        save => { root.save-changes-save(); }
+        discard => { root.save-changes-discard(); }
+        cancel => { root.save-changes-cancel(); }
+    }
+
+    PptxImportWarningDialog {
+        width: root.width;
+        height: root.height;
+        open: root.pptx-import-warning-open;
+        warning-message: root.pptx-import-warning-message;
+        import-cancel => { root.pptx-import-cancel(); }
+        import-continue => { root.pptx-import-continue(); }
+    }
+
+    InsertTableDialog {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        open: root.insert-table-dialog-open;
+        rows <=> root.insert-table-dialog-rows;
+        cols <=> root.insert-table-dialog-cols;
+        insert(r, c) => { root.insert-table-dialog-open = false; root.insert-table-size(r, c); }
+        cancel => { root.insert-table-dialog-open = false; }
+    }
+
+    if FindReplaceState.open : FindReplaceModal {
+        x: root.width - self.width - 20px;
+        y: 52px;
+    }
+
+    if PrintPreviewState.open : PrintPreviewModal {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+    }
+
+    if StartHubState.open : StartHubModal {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+    }
+
+    if WelcomeGuideState.open : WelcomeGuideModal {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+    }
+}

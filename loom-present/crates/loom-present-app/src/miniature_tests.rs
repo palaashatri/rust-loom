@@ -366,3 +366,38 @@ fn a_thumbnail_at_two_times_text_is_one_frame_on_the_slide_edge() {
         y0 - frame_top
     );
 }
+
+#[test]
+fn slide_strip_thumbnails_and_rows_follow_4_3_aspect_ratio() {
+    let s = launched();
+    render(&s.app);
+    let count = s.state.session.borrow().document.slides.len();
+    let row_wide = thumbnail(&s.app, 0, count).size();
+    let mini_wide = thumbnail(&s.app, 0, count)
+        .query_descendants()
+        .match_type_name("MiniSlide")
+        .find_first()
+        .expect("wide mini")
+        .size();
+
+    s.state.session.borrow_mut().set_aspect_ratio_wide(false);
+    refresh(&s.app, &s.state);
+    render(&s.app);
+    let row_4_3 = thumbnail(&s.app, 0, count).size();
+    let mini_4_3 = thumbnail(&s.app, 0, count)
+        .query_descendants()
+        .match_type_name("MiniSlide")
+        .find_first()
+        .expect("4:3 mini")
+        .size();
+
+    assert!(
+        (mini_4_3.height / mini_4_3.width - 0.75).abs() < 0.02,
+        "expected 4:3 MiniSlide ratio ~0.75, got {:?}",
+        mini_4_3
+    );
+    assert!(
+        mini_4_3.height > mini_wide.height + 10.0 && row_4_3.height > row_wide.height + 10.0,
+        "4:3 thumbnail/row must grow vertically vs 16:9: wide=({mini_wide:?},{row_wide:?}) 4:3=({mini_4_3:?},{row_4_3:?})"
+    );
+}

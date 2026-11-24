@@ -29,18 +29,60 @@ fn stats(mut v: Vec<f64>) -> (f64, f64, f64) {
 }
 
 fn peak_working_set_mb() -> f64 {
-    let pid = std::process::id();
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!("(Get-Process -Id {pid}).PeakWorkingSet64"),
-        ])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .map_or(f64::NAN, |b| b / 1048576.0)
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("VmHWM:") {
+                    if let Some(kb_str) = rest.split_whitespace().next() {
+                        if let Ok(kb) = kb_str.parse::<f64>() {
+                            return kb / 1024.0;
+                        }
+                    }
+                }
+            }
+        }
+        f64::NAN
+    }
+    #[cfg(target_os = "macos")]
+    {
+        #[repr(C)]
+        struct Rusage {
+            _utime: [i64; 2],
+            _stime: [i64; 2],
+            ru_maxrss: i64,
+            _rest: [i64; 13],
+        }
+        unsafe extern "C" {
+            fn getrusage(who: i32, usage: *mut Rusage) -> i32;
+        }
+        const RUSAGE_SELF: i32 = 0;
+        let mut usage: Rusage = unsafe { std::mem::zeroed() };
+        if unsafe { getrusage(RUSAGE_SELF, &mut usage) } == 0 {
+            // macOS ru_maxrss is in bytes.
+            return usage.ru_maxrss as f64 / 1048576.0;
+        }
+        f64::NAN
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let pid = std::process::id();
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-Process -Id {pid}).PeakWorkingSet64"),
+            ])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .map_or(f64::NAN, |b| b / 1048576.0)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        f64::NAN
+    }
 }
 
 fn png(seed: u8) -> Vec<u8> {
@@ -90,6 +132,7 @@ pub(super) fn build_session(slides: usize) -> PresentationSession {
         }
         for (p, asset) in assets.iter().enumerate() {
             slide.add_element(SlideElement {
+                runs: Vec::new(),
                 id: format!("s{n}-p{p}"),
                 element_type: ElementType::Picture,
                 content: asset.id.clone(),

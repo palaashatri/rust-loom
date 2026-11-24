@@ -184,6 +184,13 @@ class GovernanceTests(unittest.TestCase):
             count=1,
             flags=re.MULTILINE,
         )
+        updated = re.sub(
+            r"^\| 3 \| Present \| [A-Z_]+ \| [A-Z_]+ \|",
+            "| 3 | Present | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
+            updated,
+            count=1,
+            flags=re.MULTILINE,
+        )
         self.write_truth(updated)
         self.set_sheets_capability_status("ACCEPTANCE_BLOCKED")
 

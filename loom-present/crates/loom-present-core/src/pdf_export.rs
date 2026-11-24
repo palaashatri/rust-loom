@@ -3,9 +3,12 @@
 //! every object keeps its place. Text sits in the editor's own text box, at the
 //! editor's sizes, wrapped to that box and centred the way the editor centres it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use loom_pdf::{text_width_pt, PageIndex, PathStyle, PdfDocument, TextStyle};
+use loom_pdf::{
+    text_width_pt, FallbackFont, FontFallback, PageIndex, PathStyle, PdfDocument, TextStyle,
+};
 
 use crate::{
     normalize_angle_degrees, pictures, ElementType, PresentationDocument, SlideElement,
@@ -37,32 +40,187 @@ const ASCENT_EM: f32 = 0.97;
 const SHAPE_RGB: (f32, f32, f32) = (0.84, 0.88, 0.96);
 const STAT_RGB: (f32, f32, f32) = (0.16, 0.36, 0.72);
 
+struct CatalogFontFallback {
+    catalog: OnceLock<loom_fonts::FontCatalog>,
+    cache: Mutex<HashMap<loom_fonts::FaceId, Option<FallbackFont>>>,
+}
+
+impl std::fmt::Debug for CatalogFontFallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CatalogFontFallback").finish()
+    }
+}
+
+impl CatalogFontFallback {
+    fn shared() -> Arc<Self> {
+        static INSTANCE: OnceLock<Arc<CatalogFontFallback>> = OnceLock::new();
+        Arc::clone(INSTANCE.get_or_init(|| {
+            Arc::new(Self {
+                catalog: OnceLock::new(),
+                cache: Mutex::new(HashMap::new()),
+            })
+        }))
+    }
+}
+
+pub(crate) fn shared_font_fallback() -> Arc<dyn FontFallback> {
+    CatalogFontFallback::shared()
+}
+
+impl FontFallback for CatalogFontFallback {
+    fn font_for(&self, ch: char, bold: bool, italic: bool) -> Option<FallbackFont> {
+        let catalog = self.catalog.get_or_init(loom_fonts::FontCatalog::system);
+        let weight = if bold { 700 } else { 400 };
+        let font_ref = catalog.resolve("sans-serif", weight, italic).ok()?;
+        let face_id = catalog.face_for_char(&font_ref, ch);
+        if let Ok(guard) = self.cache.lock() {
+            if let Some(cached) = guard.get(&face_id) {
+                return *cached;
+            }
+        }
+        let loaded = catalog.load(face_id).ok()?;
+        let entry = if loaded.collection_index() != 0 {
+            None
+        } else {
+            let family_name = catalog
+                .face(face_id)
+                .map(|f| f.family.as_str())
+                .unwrap_or("Fallback");
+            let sanitized: String = family_name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect();
+            let base = sanitized.trim_matches('-');
+            let base = if base.is_empty() { "Fallback" } else { base };
+            let id_clean: String = format!("{face_id:?}")
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let unique_name = format!("{base}-{id_clean}");
+            let name: &'static str = Box::leak(unique_name.into_boxed_str());
+            let data: &'static [u8] = Box::leak(loaded.bytes().to_vec().into_boxed_slice());
+            Some(FallbackFont { name, data })
+        };
+        if let Ok(mut guard) = self.cache.lock() {
+            guard.insert(face_id, entry);
+        }
+        entry
+    }
+}
+
 /// Renders the deck to a PDF; see the module documentation for what matches the editor.
 pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     let mut pdf = PdfDocument::new();
+    pdf.set_font_fallback(CatalogFontFallback::shared());
     let mut pdf_images: BTreeMap<String, usize> = Default::default();
     let style_title = TextStyle {
         size_pt: 18.0,
         bold: true,
         ..Default::default()
     };
+    let page_w = if doc.aspect_ratio_wide {
+        PAGE_WIDTH
+    } else {
+        720.0
+    };
+    let sx = page_w / PAGE_WIDTH;
     for slide in &doc.slides {
-        let page = pdf.add_page(PAGE_WIDTH, PAGE_HEIGHT);
+        let page = pdf.add_page(page_w, PAGE_HEIGHT);
+        if let Some(bg_rgb) = parse_rgb(&slide.bg_color) {
+            pdf.draw_rect(
+                page,
+                0.0,
+                0.0,
+                page_w,
+                PAGE_HEIGHT,
+                PathStyle::filled(bg_rgb),
+            );
+        }
         let has_title = slide
             .elements
             .iter()
             .any(|element| element.element_type == ElementType::Title);
         if !has_title {
             // Legacy slides may have no title element; keep their title at the top left.
-            let title_x = 40.0 * POINTS_PER_UNIT;
+            let title_x = 40.0 * POINTS_PER_UNIT * sx;
             let title_y = (SLIDE_HEIGHT - 70.0) * POINTS_PER_UNIT;
             pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
         }
         for elem in &slide.elements {
-            draw_element(&mut pdf, page, doc, elem, &mut pdf_images);
+            if doc.aspect_ratio_wide {
+                draw_element(&mut pdf, page, doc, elem, &mut pdf_images);
+            } else {
+                let mut scaled = elem.clone();
+                scaled.x *= sx;
+                scaled.width *= sx;
+                draw_element(&mut pdf, page, doc, &scaled, &mut pdf_images);
+            }
         }
     }
     pdf.serialize()
+}
+
+/// Renders a single slide scaled and positioned into `rect = (x, y, w, h)` in PDF points
+/// (where `y` is the bottom-left corner in PDF user space).
+pub(crate) fn draw_slide_into_rect(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    doc: &PresentationDocument,
+    slide: &crate::Slide,
+    rect: (f32, f32, f32, f32),
+    pdf_images: &mut BTreeMap<String, usize>,
+) {
+    let (rx, ry, rw, rh) = rect;
+    let bg = parse_rgb(&slide.bg_color).unwrap_or((1.0, 1.0, 1.0));
+    pdf.draw_rect(page, rx, ry, rw, rh, PathStyle::filled(bg));
+    let page_w = if doc.aspect_ratio_wide {
+        PAGE_WIDTH
+    } else {
+        720.0
+    };
+    let sx = page_w / PAGE_WIDTH;
+    let scale = (rw / page_w).min(rh / PAGE_HEIGHT);
+    let ox = rx + (rw - page_w * scale) / 2.0;
+    let oy = ry + (rh - PAGE_HEIGHT * scale) / 2.0;
+    let has_title = slide
+        .elements
+        .iter()
+        .any(|element| element.element_type == ElementType::Title);
+    if !has_title && !slide.title.trim().is_empty() {
+        let style_title = TextStyle {
+            size_pt: 18.0 * scale,
+            bold: true,
+            ..Default::default()
+        };
+        let title_x = ox + 40.0 * POINTS_PER_UNIT * sx * scale;
+        let title_y = oy + (SLIDE_HEIGHT - 70.0) * POINTS_PER_UNIT * scale;
+        pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
+    }
+    for elem in &slide.elements {
+        let drawn_owned = (!doc.aspect_ratio_wide).then(|| {
+            let mut s = elem.clone();
+            s.x *= sx;
+            s.width *= sx;
+            s
+        });
+        let drawn = drawn_owned.as_ref().unwrap_or(elem);
+        let base = element_transform(drawn);
+        let scaled = [
+            base[0] * scale,
+            base[1] * scale,
+            base[2] * scale,
+            base[3] * scale,
+            ox + base[4] * scale,
+            oy + base[5] * scale,
+        ];
+        draw_element_with_transform(pdf, page, doc, drawn, scaled, pdf_images);
+    }
 }
 
 /// Draws one object: its shape or picture, then its text in the editor's box.
@@ -74,8 +232,19 @@ fn draw_element(
     pdf_images: &mut BTreeMap<String, usize>,
 ) {
     let transform = element_transform(elem);
+    draw_element_with_transform(pdf, page, doc, elem, transform, pdf_images);
+}
+
+fn draw_element_with_transform(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    doc: &PresentationDocument,
+    elem: &SlideElement,
+    transform: [f32; 6],
+    pdf_images: &mut BTreeMap<String, usize>,
+) {
     match elem.element_type {
-        ElementType::ShapeRectangle | ElementType::ShapeCircle | ElementType::StatCard => {
+        ElementType::ShapeRectangle | ElementType::ShapeRoundedRect | ElementType::StatCard => {
             let rgb = element_fill(elem).unwrap_or(if elem.element_type == ElementType::StatCard {
                 STAT_RGB
             } else {
@@ -83,6 +252,69 @@ fn draw_element(
             });
             let (w, h) = (elem.width, elem.height);
             pdf.draw_rect_with_transform(page, (0.0, 0.0, w, h), PathStyle::filled(rgb), transform);
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeCircle => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (rx, ry) = (elem.width * 0.5, elem.height * 0.5);
+            let slices = 36usize;
+            for i in 0..slices {
+                let y0 = (i as f32 / slices as f32) * elem.height;
+                let y1 = ((i + 1) as f32 / slices as f32) * elem.height;
+                let ym = (y0 + y1) * 0.5;
+                let dy = (ym - ry) / ry.max(1.0);
+                let half_w = rx * (1.0 - dy * dy).max(0.0).sqrt();
+                pdf.draw_rect_with_transform(
+                    page,
+                    (rx - half_w, y0, half_w * 2.0, (y1 - y0).max(0.5)),
+                    PathStyle::filled(rgb),
+                    transform,
+                );
+            }
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeArrowRight => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, h * 0.25, w * 0.65, h * 0.5),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            pdf.draw_rect_with_transform(
+                page,
+                (w * 0.65, 0.0, w * 0.35, h),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            draw_text_box(pdf, page, transform, elem);
+        }
+        ElementType::ShapeLine => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, h * 0.5 - 1.0, w, 2.0),
+                PathStyle::filled(rgb),
+                transform,
+            );
+        }
+        ElementType::ShapeCallout => {
+            let rgb = element_fill(elem).unwrap_or(SHAPE_RGB);
+            let (w, h) = (elem.width, elem.height);
+            pdf.draw_rect_with_transform(
+                page,
+                (0.0, 0.0, w, h * 0.8),
+                PathStyle::filled(rgb),
+                transform,
+            );
+            pdf.draw_rect_with_transform(
+                page,
+                (w * 0.25, h * 0.8, w * 0.15, h * 0.2),
+                PathStyle::filled(rgb),
+                transform,
+            );
             draw_text_box(pdf, page, transform, elem);
         }
         ElementType::Title | ElementType::Subtitle | ElementType::BodyText => {
@@ -146,9 +378,9 @@ fn element_transform(elem: &SlideElement) -> [f32; 6] {
 }
 
 /// `#RRGGBB` as RGB in 0..=1.
-fn parse_rgb(hex: &str) -> Option<(f32, f32, f32)> {
+pub(crate) fn parse_rgb(hex: &str) -> Option<(f32, f32, f32)> {
     let hex = hex.trim().trim_start_matches('#');
-    if hex.len() != 6 {
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let channel = |range: std::ops::Range<usize>| {
@@ -211,6 +443,24 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
     let height = (elem.height - 2.0 * SPACE_SM_PX * UNITS_PER_EDITOR_PX).max(1.0);
     let line_height = style.size_pt * LINE_EM;
 
+    if !elem.runs.is_empty() {
+        draw_rich_runs_box(
+            pdf,
+            page,
+            transform,
+            elem,
+            &style,
+            align,
+            TextBoxRect {
+                left,
+                top,
+                width,
+                height,
+            },
+        );
+        return;
+    }
+
     let mut lines = wrap_paragraphs(&elem.content, &style, width);
     let fits = ((height / line_height).floor() as usize).max(1);
     if lines.len() > fits {
@@ -225,19 +475,209 @@ fn draw_text_box(pdf: &mut PdfDocument, page: PageIndex, transform: [f32; 6], el
         if line.is_empty() {
             continue;
         }
+        let line_w = text_width_pt(line, &style);
         let x = match align {
-            1 => left + (width - text_width_pt(line, &style)) / 2.0,
-            2 => left + width - text_width_pt(line, &style),
+            1 => left + (width - line_w) / 2.0,
+            2 => left + width - line_w,
             _ => left,
         };
         let baseline = first_top + index as f32 * line_height + ASCENT_EM * style.size_pt;
         pdf.draw_text_with_transform(page, x, baseline, line, &style, transform);
+        let line_t = (style.size_pt * 0.06).max(0.5);
+        if elem.style.underline {
+            pdf.draw_rect_with_transform(
+                page,
+                (x, baseline + style.size_pt * 0.12, line_w, line_t),
+                PathStyle::filled(style.fill_rgb),
+                transform,
+            );
+        }
+        if elem.style.strikethrough {
+            pdf.draw_rect_with_transform(
+                page,
+                (x, baseline - style.size_pt * 0.28, line_w, line_t),
+                PathStyle::filled(style.fill_rgb),
+                transform,
+            );
+        }
+    }
+}
+
+struct TextBoxRect {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+fn draw_rich_runs_box(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    transform: [f32; 6],
+    elem: &SlideElement,
+    base_style: &TextStyle,
+    align: u8,
+    rect: TextBoxRect,
+) {
+    let TextBoxRect {
+        left,
+        top,
+        width,
+        height,
+    } = rect;
+    #[derive(Clone)]
+    struct StyledWord {
+        text: String,
+        style: TextStyle,
+        underline: bool,
+        strikethrough: bool,
+        width_pt: f32,
+    }
+
+    let mut lines: Vec<Vec<StyledWord>> = vec![Vec::new()];
+    let mut cur_w = 0.0f32;
+    for run in &elem.runs {
+        let mut run_style = base_style.clone();
+        if let Some(pt) = run.font_size_pt {
+            run_style.size_pt = pt / POINTS_PER_UNIT;
+        }
+        if let Some(b) = run.bold {
+            run_style.bold = b;
+        }
+        run_style.italic = run.italic.unwrap_or(base_style.italic);
+        if let Some(rgb) = run.color.as_deref().and_then(parse_rgb) {
+            run_style.fill_rgb = rgb;
+        }
+        let underline = run.underline.unwrap_or(elem.style.underline);
+        let strikethrough = run.strikethrough.unwrap_or(elem.style.strikethrough);
+
+        let paragraphs: Vec<&str> = run.text.split('\n').collect();
+        for (p_idx, para) in paragraphs.iter().enumerate() {
+            if p_idx > 0 {
+                lines.push(Vec::new());
+                cur_w = 0.0;
+            }
+            for token in para.split_inclusive(' ') {
+                let w = text_width_pt(token, &run_style);
+                if w > width {
+                    let mut chunk = String::new();
+                    for ch in token.chars() {
+                        let mut next = chunk.clone();
+                        next.push(ch);
+                        if !chunk.is_empty() && text_width_pt(&next, &run_style) > width {
+                            let cw = text_width_pt(&chunk, &run_style);
+                            if cur_w > 0.0 && cur_w + cw > width {
+                                lines.push(Vec::new());
+                                cur_w = 0.0;
+                            }
+                            lines.last_mut().unwrap().push(StyledWord {
+                                text: std::mem::take(&mut chunk),
+                                style: run_style.clone(),
+                                underline,
+                                strikethrough,
+                                width_pt: cw,
+                            });
+                            cur_w += cw;
+                        }
+                        chunk.push(ch);
+                    }
+                    if !chunk.is_empty() {
+                        let cw = text_width_pt(&chunk, &run_style);
+                        if cur_w > 0.0 && cur_w + cw > width {
+                            lines.push(Vec::new());
+                            cur_w = 0.0;
+                        }
+                        lines.last_mut().unwrap().push(StyledWord {
+                            text: chunk,
+                            style: run_style.clone(),
+                            underline,
+                            strikethrough,
+                            width_pt: cw,
+                        });
+                        cur_w += cw;
+                    }
+                    continue;
+                }
+                if cur_w > 0.0 && cur_w + w > width {
+                    lines.push(Vec::new());
+                    cur_w = 0.0;
+                }
+                lines.last_mut().unwrap().push(StyledWord {
+                    text: token.to_string(),
+                    style: run_style.clone(),
+                    underline,
+                    strikethrough,
+                    width_pt: w,
+                });
+                cur_w += w;
+            }
+        }
+    }
+
+    let line_sizes: Vec<f32> = lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|w| w.style.size_pt)
+                .fold(0.0f32, f32::max)
+                .max(if line.is_empty() {
+                    base_style.size_pt
+                } else {
+                    1.0
+                })
+        })
+        .collect();
+    let line_heights: Vec<f32> = line_sizes.iter().map(|s| s * LINE_EM).collect();
+    let mut fit_count = 0usize;
+    let mut used_h = 0.0f32;
+    for lh in &line_heights {
+        if fit_count > 0 && used_h + lh > height {
+            break;
+        }
+        used_h += lh;
+        fit_count += 1;
+    }
+    let fit_count = fit_count.max(1).min(lines.len());
+    lines.truncate(fit_count);
+    let block: f32 = line_heights[..fit_count].iter().sum();
+    let mut y_top = top + (height - block) / 2.0;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let total_w: f32 = line.iter().map(|w| w.width_pt).sum();
+        let mut x = match align {
+            1 => left + (width - total_w) / 2.0,
+            2 => left + width - total_w,
+            _ => left,
+        };
+        let baseline = y_top + ASCENT_EM * line_sizes[idx];
+        y_top += line_heights[idx];
+        for seg in line {
+            pdf.draw_text_with_transform(page, x, baseline, &seg.text, &seg.style, transform);
+            let line_t = (seg.style.size_pt * 0.06).max(0.5);
+            if seg.underline {
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, baseline + seg.style.size_pt * 0.12, seg.width_pt, line_t),
+                    PathStyle::filled(seg.style.fill_rgb),
+                    transform,
+                );
+            }
+            if seg.strikethrough {
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, baseline - seg.style.size_pt * 0.28, seg.width_pt, line_t),
+                    PathStyle::filled(seg.style.fill_rgb),
+                    transform,
+                );
+            }
+            x += seg.width_pt;
+        }
     }
 }
 
 /// Every paragraph of `text`, wrapped to `width`. A blank paragraph keeps one empty
 /// line, so the space between paragraphs survives.
-fn wrap_paragraphs(text: &str, style: &TextStyle, width: f32) -> Vec<String> {
+pub(crate) fn wrap_paragraphs(text: &str, style: &TextStyle, width: f32) -> Vec<String> {
     text.split('\n')
         .flat_map(|paragraph| wrap_paragraph(paragraph.trim_end_matches('\r'), style, width))
         .collect()
@@ -395,27 +835,31 @@ fn draw_pie_chart(
     let cx = elem.width * 0.31;
     let cy = elem.height * 0.55;
     let r = (elem.width * 0.22).min(elem.height * 0.32).max(12.0);
-    let d = (r / 3.8).max(3.0);
-    for ring in 1..=5usize {
-        let rad = (ring as f32 - 0.3) / 5.0 * r;
-        let steps = (ring * 12).max(16);
-        for step in 0..steps {
-            let turn = (step as f64 + 0.5) / steps as f64;
-            let mut acc = 0.0;
-            let mut idx = cat_count.saturating_sub(1);
-            for (ci, v) in values.iter().copied().enumerate() {
-                acc += v;
-                if turn * total <= acc {
-                    idx = ci;
-                    break;
-                }
-            }
-            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
-            let x = cx + rad * theta.cos() - d / 2.0;
-            let y = cy + rad * theta.sin() - d / 2.0;
-            let color = CHART_COLORS[idx % CHART_COLORS.len()];
-            pdf.draw_rect_with_transform(page, (x, y, d, d), PathStyle::filled(color), transform);
+    let mut start_angle = -std::f32::consts::FRAC_PI_2;
+    for (ci, v) in values.iter().copied().enumerate() {
+        if v <= 0.0 {
+            continue;
         }
+        let sweep = (v / total) as f32 * std::f32::consts::TAU;
+        let end_angle = start_angle + sweep;
+        let steps = ((sweep.to_degrees() / 3.0).ceil() as usize).max(2);
+        let color = CHART_COLORS[ci % CHART_COLORS.len()];
+        for s in 0..steps {
+            let a = start_angle + sweep * ((s as f32 + 0.5) / steps as f32);
+            for ring in 1..=16usize {
+                let rad = (ring as f32 / 16.0) * r;
+                let dot = (r / 14.0).max(1.5);
+                let x = cx + rad * a.cos() - dot * 0.5;
+                let y = cy + rad * a.sin() - dot * 0.5;
+                pdf.draw_rect_with_transform(
+                    page,
+                    (x, y, dot, dot),
+                    PathStyle::filled(color),
+                    transform,
+                );
+            }
+        }
+        start_angle = end_angle;
     }
     let label_style = TextStyle {
         size_pt: 9.5 * UNITS_PER_EDITOR_PX,
@@ -686,6 +1130,88 @@ mod tests {
         assert!(
             content.contains("(Q1)") && content.contains("(Q2)") && content.contains("(Q3)"),
             "line chart PDF export must include category labels, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn pdf_export_renders_multiline_rich_runs_with_underline_and_strikethrough() {
+        let mut doc = PresentationDocument::new("rich", "Rich Runs");
+        let elem = SlideElement {
+            id: "r1".into(),
+            element_type: ElementType::BodyText,
+            content: "Line1\nLine2".into(),
+            x: 80.0,
+            y: 120.0,
+            width: 400.0,
+            height: 120.0,
+            style: Default::default(),
+            runs: vec![
+                crate::StyledTextRun {
+                    text: "Line1\n".into(),
+                    bold: Some(true),
+                    underline: Some(true),
+                    ..Default::default()
+                },
+                crate::StyledTextRun {
+                    text: "Line2".into(),
+                    italic: Some(true),
+                    strikethrough: Some(true),
+                    color: Some("#cc0000".into()),
+                    ..Default::default()
+                },
+            ],
+            rotation_deg: 0.0,
+            action: None,
+        };
+        doc.slides[0].elements.push(elem);
+        let pdf_bytes = export_pdf(&doc);
+        let text = loom_pdf::inspect::page_text(&pdf_bytes).expect("page_text");
+        assert!(
+            text[0].contains("Line1") && text[0].contains("Line2"),
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn draw_slide_into_rect_scales_4_3_element_width() {
+        let mut doc = PresentationDocument::new("r43", "Ratio 4:3");
+        doc.aspect_ratio_wide = false;
+        doc.slides[0].elements.push(SlideElement {
+            id: "box-right".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: String::new(),
+            x: 800.0,
+            y: 100.0,
+            width: 200.0,
+            height: 100.0,
+            style: crate::ElementStyle {
+                fill: Some("#112233".into()),
+                ..Default::default()
+            },
+            runs: Vec::new(),
+            rotation_deg: 0.0,
+            action: None,
+        });
+        let mut pdf = PdfDocument::new();
+        let page = pdf.add_page(720.0, PAGE_HEIGHT);
+        let mut imgs = BTreeMap::new();
+        draw_slide_into_rect(
+            &mut pdf,
+            page,
+            &doc,
+            &doc.slides[0],
+            (0.0, 0.0, 720.0, PAGE_HEIGHT),
+            &mut imgs,
+        );
+        let bytes = pdf.serialize();
+        let content = loom_pdf::inspect::readable_content(&bytes).expect("readable PDF");
+        // In 4:3 (page_w = 720.0, scale = 1.0, sx = 0.75), x=800 -> 576 pt origin via `cm`,
+        // and rectangle width in slide units scales from 200.00 down to 150.00.
+        assert!(
+            content.contains("576.00000 444.00000 cm")
+                && content.contains("150.00 100.00 re f")
+                && !content.contains("200.00 100.00 re f"),
+            "expected scaled 150.00 rect width inside 720 pt page:\n{content}"
         );
     }
 }

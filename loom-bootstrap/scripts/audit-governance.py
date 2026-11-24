@@ -123,13 +123,13 @@ else:
         if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
             fail("office-v1 existing foundation consumer list changed")
         for app in APPS:
-            if app == "sheets":
+            if app in ("sheets", "present"):
                 if workflow.get("application_status", {}).get(app) not in (
                     "IN_PROGRESS",
                     "ACCEPTED",
                 ):
-                    fail("sheets status must be IN_PROGRESS or ACCEPTED in office-v1 phase")
-            elif app in ("writer", "present"):
+                    fail(f"{app} status must be IN_PROGRESS or ACCEPTED in office-v1 phase")
+            elif app == "writer":
                 if workflow.get("application_status", {}).get(app) != "IN_PROGRESS":
                     fail(f"{app} status must be IN_PROGRESS in office-v1 phase")
             elif workflow.get("application_status", {}).get(app) != "LOCKED":
@@ -347,7 +347,7 @@ if phase in ("audit-repair", "office-v1"):
         expected_quality = (
             "ACCEPTED"
             if phase == "office-v1"
-            and name.lower() == "sheets"
+            and name.lower() in ("sheets", "present")
             and expected_schedule == "ACCEPTED"
             else "ACCEPTANCE_BLOCKED"
         )

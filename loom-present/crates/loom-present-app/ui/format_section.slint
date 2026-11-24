@@ -1,0 +1,241 @@
+import {
+    LoomSectionHeader, LoomSegmentedControl, LoomButton, LoomColorWell, LoomColorPalette, LoomTextField,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ElementInk } from "object_part.slint";
+import { FontPicker, PresentFontPicker } from "font_picker.slint";
+
+component StyleSwatch inherits Rectangle {
+    in property <color> swatch-color: transparent;
+    in property <bool> selected: false;
+    in property <bool> focus-target: false;
+    in property <int> slot: 0;
+    in property <string> swatch-label: "";
+    callback pick();
+    callback move-focus(int, int);
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: root.swatch-color;
+    border-width: focus.has-focus ? 2px : root.selected ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().ink : Theme.palette().border;
+    accessible-role: button;
+    accessible-label: root.swatch-label;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.pick(); }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.pick(); return accept; }
+            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                let direction = event.text == Key.LeftArrow ? -1 : 1;
+                root.move-focus(root.slot, direction);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    changed focus-target => { if (root.focus-target) { focus.focus(); } }
+    TouchArea { clicked => { focus.focus(); root.move-focus(root.slot, 0); root.pick(); } }
+}
+
+component StyleSwatchRow inherits HorizontalLayout {
+    in property <int> chosen: -1;
+    in property <string> kind-name: "Text colour";
+    in-out property <int> focus-slot: -1;
+    callback pick(int);
+    spacing: Theme.tokens.space.xs;
+    alignment: Theme.rtl ? end : start;
+    property <[string]> colour-names: ["Red", "Orange", "Green", "Blue", "Purple", "Gray", "Black"];
+    for slot in 8 : StyleSwatch {
+        property <int> k: Theme.rtl ? 7 - slot : slot;
+        swatch-color: k == 7 ? transparent : (k < ElementInk.palette.length ? ElementInk.palette[k] : transparent);
+        selected: root.chosen == (k == 7 ? -1 : k);
+        focus-target: root.focus-slot == k;
+        slot: k;
+        swatch-label: k == 7
+            ? (root.kind-name == "Fill" ? "Remove fill" : "Automatic text colour")
+            : root.kind-name + " " + root.colour-names[k];
+        pick => { root.pick(k); }
+        move-focus(from, direction) => {
+            let target = from + direction;
+            root.focus-slot = target < 0 ? 7 : target > 7 ? 0 : target;
+        }
+    }
+}
+
+export component PresentFormatSection inherits VerticalLayout {
+    spacing: 2px;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        for slot in 2 : VerticalLayout {
+            property <int> k: Theme.rtl ? 1 - slot : slot;
+            horizontal-stretch: k == 0 ? 1 : 0;
+            if k == 0 : LoomSectionHeader { title: "Text & Style"; }
+            if k == 1 : LoomButton {
+                label: "Fonts";
+                variant: "ghost";
+                accessible-name: "Browse fonts";
+                clicked => { if (FontPicker.open) { FontPicker.close-requested(); } else { FontPicker.open-requested(); } }
+            }
+        }
+    }
+
+    LoomTextField {
+        label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
+        title: ElementInk.font-family-mixed ? "Font family (mixed)" : "Font family";
+        description: ElementInk.font-family-mixed
+            ? "The selected objects use different font families. Type one to apply it to all of them."
+            : "Type a font family such as Inter or Aptos. Leave empty to follow the theme.";
+        placeholder: ElementInk.font-family-mixed ? "Mixed - type to apply" : "Theme font";
+        field-min-width: 120px;
+        value <=> ElementInk.font-family;
+        accepted(text) => { ElementInk.font-requested(text); }
+        cancelled => { ElementInk.font-cancelled(); }
+    }
+
+    if FontPicker.open : PresentFontPicker {
+        width: parent.width;
+    }
+
+    // Font size stepper
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        alignment: Theme.rtl ? end : start;
+        for slot in 3 : VerticalLayout {
+            property <int> k: Theme.rtl ? 2 - slot : slot;
+            if k == 0 : LoomButton {
+                label: "A-";
+                variant: "ghost";
+                accessible-name: "Decrease text size";
+                clicked => { ElementInk.requested("size", -1); }
+            }
+            if k == 1 : Text {
+                text: ElementInk.size-mixed ? "Mixed" : ElementInk.size-label;
+                min-width: 52px;
+                font-size: Theme.type.body;
+                color: ElementInk.size-mixed ? Theme.palette().ink-secondary : Theme.palette().ink;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if k == 2 : LoomButton {
+                label: "A+";
+                variant: "ghost";
+                accessible-name: "Increase text size";
+                clicked => { ElementInk.requested("size", 1); }
+            }
+        }
+    }
+
+    // B / I / U / S toggles with mixed-value markers
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        alignment: Theme.rtl ? end : start;
+        for slot in 4 : VerticalLayout {
+            property <int> k: Theme.rtl ? 3 - slot : slot;
+            if k == 0 : LoomButton {
+                label: ElementInk.bold-mixed ? "B·" : "B";
+                variant: ElementInk.bold && !ElementInk.bold-mixed ? "primary" : "ghost";
+                accessible-name: ElementInk.bold-mixed ? "Bold, mixed" : ElementInk.bold ? "Bold, on" : "Bold, off";
+                clicked => { ElementInk.requested("bold", 0); }
+            }
+            if k == 1 : LoomButton {
+                label: ElementInk.italic-mixed ? "I·" : "I";
+                variant: ElementInk.italic && !ElementInk.italic-mixed ? "primary" : "ghost";
+                accessible-name: ElementInk.italic-mixed ? "Italic, mixed" : ElementInk.italic ? "Italic, on" : "Italic, off";
+                clicked => { ElementInk.requested("italic", 0); }
+            }
+            if k == 2 : LoomButton {
+                label: ElementInk.underline-mixed ? "U·" : "U";
+                variant: ElementInk.underline && !ElementInk.underline-mixed ? "primary" : "ghost";
+                accessible-name: ElementInk.underline-mixed ? "Underline, mixed" : ElementInk.underline ? "Underline, on" : "Underline, off";
+                clicked => { ElementInk.requested("underline", 0); }
+            }
+            if k == 3 : LoomButton {
+                label: ElementInk.strikethrough-mixed ? "S·" : "S";
+                variant: ElementInk.strikethrough && !ElementInk.strikethrough-mixed ? "primary" : "ghost";
+                accessible-name: ElementInk.strikethrough-mixed ? "Strikethrough, mixed" : ElementInk.strikethrough ? "Strikethrough, on" : "Strikethrough, off";
+                clicked => { ElementInk.requested("strikethrough", 0); }
+            }
+        }
+    }
+
+    LoomSegmentedControl {
+        items: ["L", "C", "R"];
+        label: "Text alignment";
+        current: ElementInk.align-mixed ? -1 : ElementInk.align;
+        selected(idx) => { ElementInk.requested("align", idx); }
+    }
+
+    StyleSwatchRow {
+        chosen: ElementInk.color-slot;
+        kind-name: "Text colour";
+        pick(slot) => { ElementInk.requested("color", slot); }
+    }
+
+    // Text Color (48-color palette)
+    LoomColorWell {
+        width: parent.width;
+        label: "Text Color";
+        accessible-name: "Text Color";
+        current-color: ElementInk.text-color-swatch;
+        is-automatic: ElementInk.text-color-automatic;
+        is-mixed: ElementInk.text-color-mixed;
+        color-label: ElementInk.text-color-label;
+        open: ElementInk.active-palette == "text";
+        toggled => { ElementInk.color-toggled("text"); }
+    }
+
+    if ElementInk.active-palette == "text" : LoomColorPalette {
+        width: parent.width;
+        swatches: ElementInk.color-swatches;
+        selected-hex: ElementInk.text-color-hex;
+        is-automatic: ElementInk.text-color-automatic;
+        is-mixed: ElementInk.text-color-mixed;
+        automatic-label: "Automatic";
+        kind-label: "Text color";
+        hex-input <=> ElementInk.hex-input;
+        hex-error: ElementInk.hex-error;
+        select-color(hex) => { ElementInk.color-picked("text", hex); }
+        select-automatic => { ElementInk.color-picked("text", ""); }
+        hex-edited(val) => { ElementInk.hex-edited(val); }
+        hex-submitted(val) => { ElementInk.hex-submitted("text", val); }
+        close-requested => { ElementInk.color-toggled("text"); }
+    }
+
+    StyleSwatchRow {
+        chosen: ElementInk.fill-slot;
+        kind-name: "Fill";
+        pick(slot) => { ElementInk.requested("fill", slot); }
+    }
+
+    // Shape Fill (48-color palette)
+    LoomColorWell {
+        width: parent.width;
+        label: "Shape Fill";
+        accessible-name: "Shape Fill";
+        current-color: ElementInk.fill-color-swatch;
+        is-automatic: ElementInk.fill-color-automatic;
+        is-mixed: ElementInk.fill-color-mixed;
+        color-label: ElementInk.fill-color-label;
+        open: ElementInk.active-palette == "fill";
+        toggled => { ElementInk.color-toggled("fill"); }
+    }
+
+    if ElementInk.active-palette == "fill" : LoomColorPalette {
+        width: parent.width;
+        swatches: ElementInk.color-swatches;
+        selected-hex: ElementInk.fill-color-hex;
+        is-automatic: ElementInk.fill-color-automatic;
+        is-mixed: ElementInk.fill-color-mixed;
+        automatic-label: "No fill";
+        kind-label: "Shape fill";
+        hex-input <=> ElementInk.hex-input;
+        hex-error: ElementInk.hex-error;
+        select-color(hex) => { ElementInk.color-picked("fill", hex); }
+        select-automatic => { ElementInk.color-picked("fill", ""); }
+        hex-edited(val) => { ElementInk.hex-edited(val); }
+        hex-submitted(val) => { ElementInk.hex-submitted("fill", val); }
+        close-requested => { ElementInk.color-toggled("fill"); }
+    }
+}

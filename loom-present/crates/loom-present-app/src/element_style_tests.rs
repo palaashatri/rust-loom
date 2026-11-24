@@ -15,7 +15,7 @@ use crate::{
     empty_session, refresh, text_element, DragState, ElementInk, GuiState, ObjectParts, PresentApp,
 };
 
-fn fixture(elements: Vec<SlideElement>) -> (PresentApp, Rc<GuiState>) {
+pub(crate) fn fixture(elements: Vec<SlideElement>) -> (PresentApp, Rc<GuiState>) {
     loom_test_support::capture::set_platform();
     let app = PresentApp::new().expect("create app");
     let mut session = empty_session();
@@ -172,6 +172,7 @@ fn a_circle_fills_as_an_ellipse_and_a_picture_offers_no_text_controls() {
             200.0,
         ),
         SlideElement {
+            runs: Vec::new(),
             id: "p".into(),
             element_type: ElementType::Picture,
             content: "asset".into(),
@@ -1046,5 +1047,46 @@ fn a_stored_family_that_is_not_usable_falls_back_to_the_theme_everywhere() {
     assert!(
         parts_of(&app, 0).iter().all(|part| part.family.is_empty()),
         "the canvas never hands '+mj-lt' to the renderer; it falls back to the theme face"
+    );
+}
+
+#[test]
+fn single_run_elements_with_different_fonts_are_mixed_and_preserve_overrides_on_empty_submit() {
+    let mut a = text_element("a", ElementType::BodyText, "one", 50.0, 50.0, 300.0, 80.0);
+    a.runs = vec![loom_present_core::StyledTextRun {
+        text: "one".into(),
+        font_family: Some("Arial".into()),
+        ..Default::default()
+    }];
+    let mut b = text_element("b", ElementType::BodyText, "two", 50.0, 200.0, 300.0, 80.0);
+    b.runs = vec![loom_present_core::StyledTextRun {
+        text: "two".into(),
+        font_family: Some("Georgia".into()),
+        ..Default::default()
+    }];
+    let (app, state) = fixture(vec![a, b]);
+    app.set_show_inspector(true);
+    {
+        let mut session = state.session.borrow_mut();
+        assert!(session.select_element("a", false));
+        assert!(session.select_element("b", true));
+    }
+    refresh(&app, &state);
+    crate::keyboard_flow_tests::render(&app);
+
+    let ink = app.global::<ElementInk>();
+    assert!(ink.get_font_family_mixed());
+    assert_eq!(ink.get_font_family().as_str(), "");
+
+    ink.invoke_font_requested("".into());
+    let session = state.session.borrow();
+    let slide = session.document.active_slide().expect("slide");
+    assert_eq!(
+        slide.elements[0].runs[0].font_family.as_deref(),
+        Some("Arial")
+    );
+    assert_eq!(
+        slide.elements[1].runs[0].font_family.as_deref(),
+        Some("Georgia")
     );
 }

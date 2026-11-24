@@ -43,6 +43,21 @@ pub enum PaletteAction {
     ApplyTemplate(i32),
     SetAppearance(loom_desktop::Appearance),
     SetTransition(i32),
+    FindReplace,
+    PrintPreview,
+    StartHub,
+    WelcomeGuide,
+    StyleUnderline,
+    StyleStrikethrough,
+    DuplicateSelection,
+    SelectAll,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    InsertRoundedRect,
+    InsertArrow,
+    InsertLine,
+    InsertCallout,
 }
 
 pub struct PaletteCommand {
@@ -58,25 +73,25 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::NewDeck,
             id: "present.new",
             label: "New Deck",
-            shortcut: "Ctrl+N",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.new"),
         },
         PaletteCommand {
             action: PaletteAction::OpenDeck,
             id: "present.open",
             label: "Open Deck",
-            shortcut: "Ctrl+O",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.open"),
         },
         PaletteCommand {
             action: PaletteAction::SaveDeck,
             id: "present.save",
             label: "Save Deck",
-            shortcut: "Ctrl+S",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.save"),
         },
         PaletteCommand {
             action: PaletteAction::SaveAsDeck,
             id: "present.save-as",
             label: "Save Deck As",
-            shortcut: "Ctrl+Shift+S",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.save_as"),
         },
         PaletteCommand {
             action: PaletteAction::AddSlide,
@@ -92,7 +107,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::DuplicateSlide,
             id: "present.duplicate-slide",
             label: "Duplicate Slide",
-            shortcut: "Ctrl+D",
+            shortcut: crate::command_dispatch::shortcut_for_id("slide.duplicate"),
         },
         PaletteCommand {
             action: PaletteAction::DeleteSlide,
@@ -124,13 +139,13 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::Undo,
             id: "present.undo",
             label: "Undo",
-            shortcut: "Ctrl+Z",
+            shortcut: crate::command_dispatch::shortcut_for_id("edit.undo"),
         },
         PaletteCommand {
             action: PaletteAction::Redo,
             id: "present.redo",
             label: "Redo",
-            shortcut: "Ctrl+Shift+Z",
+            shortcut: crate::command_dispatch::shortcut_for_id("edit.redo"),
         },
         PaletteCommand {
             action: PaletteAction::AddText,
@@ -142,25 +157,115 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::StyleBold,
             id: "present.text-bold",
             label: "Bold",
-            shortcut: "Ctrl+B",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.bold"),
         },
         PaletteCommand {
             action: PaletteAction::StyleItalic,
             id: "present.text-italic",
             label: "Italic",
-            shortcut: "Ctrl+I",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.italic"),
+        },
+        PaletteCommand {
+            action: PaletteAction::StyleUnderline,
+            id: "present.text-underline",
+            label: "Underline",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.underline"),
+        },
+        PaletteCommand {
+            action: PaletteAction::StyleStrikethrough,
+            id: "present.text-strikethrough",
+            label: "Strikethrough",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.strikethrough"),
+        },
+        PaletteCommand {
+            action: PaletteAction::FindReplace,
+            id: "present.find-replace",
+            label: "Find and Replace",
+            shortcut: crate::command_dispatch::shortcut_for_id("edit.find"),
+        },
+        PaletteCommand {
+            action: PaletteAction::PrintPreview,
+            id: "present.print-preview",
+            label: "Print Preview",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.print_preview"),
+        },
+        PaletteCommand {
+            action: PaletteAction::StartHub,
+            id: "present.start-hub",
+            label: "Start Hub",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.start_hub"),
+        },
+        PaletteCommand {
+            action: PaletteAction::WelcomeGuide,
+            id: "present.welcome-guide",
+            label: "Welcome Guide",
+            shortcut: crate::command_dispatch::shortcut_for_id("help.welcome_guide"),
+        },
+        PaletteCommand {
+            action: PaletteAction::DuplicateSelection,
+            id: "present.duplicate-selection",
+            label: "Duplicate Selection",
+            shortcut: crate::command_dispatch::shortcut_for_id("edit.duplicate"),
+        },
+        PaletteCommand {
+            action: PaletteAction::SelectAll,
+            id: "present.select-all",
+            label: "Select All",
+            shortcut: crate::command_dispatch::shortcut_for_id("edit.select_all"),
+        },
+        PaletteCommand {
+            action: PaletteAction::ZoomIn,
+            id: "present.zoom-in",
+            label: "Zoom In",
+            shortcut: crate::command_dispatch::shortcut_for_id("view.zoom_in"),
+        },
+        PaletteCommand {
+            action: PaletteAction::ZoomOut,
+            id: "present.zoom-out",
+            label: "Zoom Out",
+            shortcut: crate::command_dispatch::shortcut_for_id("view.zoom_out"),
+        },
+        PaletteCommand {
+            action: PaletteAction::ZoomReset,
+            id: "present.zoom-reset",
+            label: "Reset Zoom",
+            shortcut: crate::command_dispatch::shortcut_for_id("view.zoom_reset"),
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertRoundedRect,
+            id: "present.insert-rounded-rect",
+            label: "Insert Rounded Rectangle",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertArrow,
+            id: "present.insert-arrow",
+            label: "Insert Arrow",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertLine,
+            id: "present.insert-line",
+            label: "Insert Line",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertCallout,
+            id: "present.insert-callout",
+            label: "Insert Callout",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::TextLarger,
             id: "present.text-larger",
             label: "Increase Text Size",
-            shortcut: "Ctrl+]",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.font_increase"),
         },
         PaletteCommand {
             action: PaletteAction::TextSmaller,
             id: "present.text-smaller",
             label: "Decrease Text Size",
-            shortcut: "Ctrl+[",
+            shortcut: crate::command_dispatch::shortcut_for_id("format.font_decrease"),
         },
         PaletteCommand {
             action: PaletteAction::AddPicture,
@@ -232,7 +337,7 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             action: PaletteAction::ExportPdf,
             id: "present.export-pdf",
             label: "Export PDF",
-            shortcut: "Ctrl+E",
+            shortcut: crate::command_dispatch::shortcut_for_id("file.export_pdf"),
         },
         PaletteCommand {
             action: PaletteAction::ExportPptx,
@@ -428,6 +533,66 @@ pub fn wire_palette(app: &PresentApp) {
                         PaletteAction::TogglePreview => app.invoke_toggle_preview_mode(),
                         PaletteAction::OpenPresenter => app.invoke_open_presenter(),
                         PaletteAction::PrevSlide => app.invoke_prev_slide(),
+                        PaletteAction::FindReplace => {
+                            let _ = crate::command_dispatch::dispatch_command(&app, "edit.find");
+                        }
+                        PaletteAction::PrintPreview => {
+                            let _ = crate::command_dispatch::dispatch_command(
+                                &app,
+                                "file.print_preview",
+                            );
+                        }
+                        PaletteAction::StartHub => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "file.start_hub");
+                        }
+                        PaletteAction::WelcomeGuide => {
+                            let _ = crate::command_dispatch::dispatch_command(
+                                &app,
+                                "help.welcome_guide",
+                            );
+                        }
+                        PaletteAction::StyleUnderline => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "format.underline");
+                        }
+                        PaletteAction::StyleStrikethrough => {
+                            let _ = crate::command_dispatch::dispatch_command(
+                                &app,
+                                "format.strikethrough",
+                            );
+                        }
+                        PaletteAction::DuplicateSelection => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "edit.duplicate");
+                        }
+                        PaletteAction::SelectAll => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "edit.select_all");
+                        }
+                        PaletteAction::ZoomIn => {
+                            let _ = crate::command_dispatch::dispatch_command(&app, "view.zoom_in");
+                        }
+                        PaletteAction::ZoomOut => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "view.zoom_out");
+                        }
+                        PaletteAction::ZoomReset => {
+                            let _ =
+                                crate::command_dispatch::dispatch_command(&app, "view.zoom_reset");
+                        }
+                        PaletteAction::InsertRoundedRect => {
+                            app.invoke_add_shape_kind("rounded-rect".into());
+                        }
+                        PaletteAction::InsertArrow => {
+                            app.invoke_add_shape_kind("arrow".into());
+                        }
+                        PaletteAction::InsertLine => {
+                            app.invoke_add_shape_kind("line".into());
+                        }
+                        PaletteAction::InsertCallout => {
+                            app.invoke_add_shape_kind("callout".into());
+                        }
                         PaletteAction::NextSlide => app.invoke_next_slide(),
                         PaletteAction::ExportPdf => app.invoke_export_pdf(),
                         PaletteAction::ExportPptx => app.invoke_export_pptx(),

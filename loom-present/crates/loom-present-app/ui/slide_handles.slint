@@ -1,0 +1,106 @@
+import { Theme } from "theme.slint";
+
+component ResizeHandle inherits Rectangle {
+    in property <string> handle-name;
+    in property <bool> is-rotate: false;
+    in property <length> slide-width;
+    in property <length> slide-height;
+    callback focus-slide;
+    callback pressed(string, bool);
+    callback moved(string, float, float);
+    callback released(string);
+    callback cancelled(string);
+
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    background: root.is-rotate ? Theme.palette().accent : Theme.palette().paper;
+    border-width: root.is-rotate ? 0px : 1px;
+    border-color: Theme.palette().accent;
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        property <length> press-abs-x;
+        property <length> press-abs-y;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.focus-slide();
+                self.press-abs-x = self.absolute-position.x + self.mouse-x;
+                self.press-abs-y = self.absolute-position.y + self.mouse-y;
+                root.pressed(root.handle-name, event.modifiers.shift);
+            }
+            if (event.kind == PointerEventKind.cancel) { root.cancelled(root.handle-name); }
+            if (event.kind == PointerEventKind.up) { root.released(root.handle-name); }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(
+                    root.handle-name,
+                    (self.absolute-position.x + self.mouse-x - self.press-abs-x) * 1000.0 / root.slide-width,
+                    (self.absolute-position.y + self.mouse-y - self.press-abs-y) * 562.5 / root.slide-height
+                );
+            }
+        }
+    }
+}
+
+export component SlideSelectionHandles inherits Rectangle {
+    in property <length> slide-width;
+    in property <length> slide-height;
+    callback focus-slide;
+    callback handle-pressed(string, bool);
+    callback handle-moved(string, float, float);
+    callback handle-released(string);
+    callback handle-cancelled(string);
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    ResizeHandle {
+        handle-name: "nw"; x: -5px; y: -5px;
+        slide-width: root.slide-width; slide-height: root.slide-height;
+        focus-slide => { root.focus-slide(); }
+        pressed(h, s) => { root.handle-pressed(h, s); }
+        moved(h, dx, dy) => { root.handle-moved(h, dx, dy); }
+        released(h) => { root.handle-released(h); }
+        cancelled(h) => { root.handle-cancelled(h); }
+    }
+    ResizeHandle {
+        handle-name: "ne"; x: parent.width - 5px; y: -5px;
+        slide-width: root.slide-width; slide-height: root.slide-height;
+        focus-slide => { root.focus-slide(); }
+        pressed(h, s) => { root.handle-pressed(h, s); }
+        moved(h, dx, dy) => { root.handle-moved(h, dx, dy); }
+        released(h) => { root.handle-released(h); }
+        cancelled(h) => { root.handle-cancelled(h); }
+    }
+    ResizeHandle {
+        handle-name: "sw"; x: -5px; y: parent.height - 5px;
+        slide-width: root.slide-width; slide-height: root.slide-height;
+        focus-slide => { root.focus-slide(); }
+        pressed(h, s) => { root.handle-pressed(h, s); }
+        moved(h, dx, dy) => { root.handle-moved(h, dx, dy); }
+        released(h) => { root.handle-released(h); }
+        cancelled(h) => { root.handle-cancelled(h); }
+    }
+    ResizeHandle {
+        handle-name: "se"; x: parent.width - 5px; y: parent.height - 5px;
+        slide-width: root.slide-width; slide-height: root.slide-height;
+        focus-slide => { root.focus-slide(); }
+        pressed(h, s) => { root.handle-pressed(h, s); }
+        moved(h, dx, dy) => { root.handle-moved(h, dx, dy); }
+        released(h) => { root.handle-released(h); }
+        cancelled(h) => { root.handle-cancelled(h); }
+    }
+    ResizeHandle {
+        handle-name: "rotate"; is-rotate: true; x: parent.width / 2 - 5px; y: -30px;
+        slide-width: root.slide-width; slide-height: root.slide-height;
+        focus-slide => { root.focus-slide(); }
+        pressed(h, s) => { root.handle-pressed(h, s); }
+        moved(h, dx, dy) => { root.handle-moved(h, dx, dy); }
+        released(h) => { root.handle-released(h); }
+        cancelled(h) => { root.handle-cancelled(h); }
+    }
+}

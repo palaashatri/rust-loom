@@ -100,6 +100,7 @@ pub(crate) fn images_for(document: &PresentationDocument, slide: Option<&Slide>)
 
 fn fingerprint(document: &PresentationDocument, slide: &Slide) -> String {
     let mut hasher = DefaultHasher::new();
+    slide.bg_color.hash(&mut hasher);
     for element in &slide.elements {
         element.id.hash(&mut hasher);
         element_type_index(&element.element_type).hash(&mut hasher);
@@ -166,6 +167,16 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
                 .map(|e| ModelRc::new(VecModel::from(crate::object_parts::parts_for(e))))
                 .collect::<Vec<_>>(),
         )),
+        has_bg_color: slide.is_some(),
+        bg_color: slide
+            .map(|s| {
+                if s.bg_color.trim().is_empty() {
+                    crate::object_parts::color("#ffffff")
+                } else {
+                    crate::object_parts::color(&s.bg_color)
+                }
+            })
+            .unwrap_or_else(|| slint::Color::from_argb_encoded(0xFFFF_FFFF)),
     }
 }
 

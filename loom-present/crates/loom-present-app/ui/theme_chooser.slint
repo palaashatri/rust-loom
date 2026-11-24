@@ -4,6 +4,7 @@ import {
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import { DocumentInk } from "object_part.slint";
+import { SlideTemplatePreview } from "template_previews.slint";
 
 component PresentThemeCard inherits Rectangle {
     in property <string> title: "Theme";
@@ -156,6 +157,8 @@ export component PresentThemeChooser inherits Rectangle {
         if (root.theme-category == 1 && (idx == 0 || idx == 1)) { return true; }
         if (root.theme-category == 2 && (idx == 2 || idx == 3)) { return true; }
         if (root.theme-category == 3 && idx == 0) { return true; }
+        if (root.theme-category == 4 && idx >= 4 && idx <= 7) { return true; }
+        if (root.theme-category == 5 && idx >= 8 && idx <= 11) { return true; }
         return false;
     }
 
@@ -170,16 +173,19 @@ export component PresentThemeChooser inherits Rectangle {
     function pick-category(cat: int) {
         root.theme-category = cat;
         if (!root.theme-visible(root.theme-selected)) {
-            root.theme-selected = root.theme-visible(0) ? 0 : root.theme-visible(1) ? 1 : root.theme-visible(2) ? 2 : 3;
+            root.theme-selected = root.theme-visible(0) ? 0
+                : root.theme-visible(2) ? 2
+                : root.theme-visible(4) ? 4
+                : 8;
         }
         root.choose-theme-category(cat);
     }
 
     function step-theme(delta: int) {
         let s = root.theme-selected;
-        if (s + delta >= 0 && s + delta <= 3 && root.theme-visible(s + delta)) { root.theme-selected = s + delta; }
-        else if (s + 2 * delta >= 0 && s + 2 * delta <= 3 && root.theme-visible(s + 2 * delta)) { root.theme-selected = s + 2 * delta; }
-        else if (s + 3 * delta >= 0 && s + 3 * delta <= 3 && root.theme-visible(s + 3 * delta)) { root.theme-selected = s + 3 * delta; }
+        if (s + delta >= 0 && s + delta <= 11 && root.theme-visible(s + delta)) { root.theme-selected = s + delta; }
+        else if (s + 2 * delta >= 0 && s + 2 * delta <= 11 && root.theme-visible(s + 2 * delta)) { root.theme-selected = s + 2 * delta; }
+        else if (s + 3 * delta >= 0 && s + 3 * delta <= 11 && root.theme-visible(s + 3 * delta)) { root.theme-selected = s + 3 * delta; }
     }
 
     width: 100%;
@@ -200,7 +206,7 @@ export component PresentThemeChooser inherits Rectangle {
             if (event.text == Key.LeftArrow) { root.step-theme(Theme.rtl ? 1 : -1); return accept; }
             if (event.text == Key.RightArrow) { root.step-theme(Theme.rtl ? -1 : 1); return accept; }
             if (event.text == Key.UpArrow) { root.pick-category(max(0, root.theme-category - 1)); return accept; }
-            if (event.text == Key.DownArrow) { root.pick-category(min(3, root.theme-category + 1)); return accept; }
+            if (event.text == Key.DownArrow) { root.pick-category(min(5, root.theme-category + 1)); return accept; }
             if (event.text == Key.Tab && !event.modifiers.shift && create-button.has-focus) { chooser-focus.focus(); return accept; }
             if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { create-button.grab-focus(); return accept; }
             return reject;
@@ -259,6 +265,8 @@ export component PresentThemeChooser inherits Rectangle {
                         PresentThemeCategory { icon: "document"; label: "Basic"; active: root.theme-category == 1; clicked => { root.pick-category(1); } }
                         PresentThemeCategory { icon: "slide"; label: "Layouts"; active: root.theme-category == 2; clicked => { root.pick-category(2); } }
                         PresentThemeCategory { icon: "stop"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
+                        PresentThemeCategory { icon: "grid"; label: "Business"; active: root.theme-category == 4; clicked => { root.pick-category(4); } }
+                        PresentThemeCategory { icon: "document"; label: "Editorial"; active: root.theme-category == 5; clicked => { root.pick-category(5); } }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
                     }
@@ -271,11 +279,11 @@ export component PresentThemeChooser inherits Rectangle {
                     x: Theme.rtl ? 0px : sidebar.width;
                     width: parent.width - sidebar.width;
                     height: parent.height;
-                    padding-top: Theme.tokens.space.xxl;
-                    padding-bottom: Theme.tokens.space.xl;
+                    padding-top: Theme.tokens.space.lg;
+                    padding-bottom: Theme.tokens.space.md;
                     padding-left: Theme.tokens.space.xxl;
                     padding-right: Theme.tokens.space.xxl;
-                    spacing: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.md;
 
                     Text {
                         text: "Choose a Layout";
@@ -289,61 +297,117 @@ export component PresentThemeChooser inherits Rectangle {
                     // The cards form a grid with as many columns as the width holds (four at most),
                     // each card as wide as its share, so the row fills the content at any width.
                     // Right-to-left starts each row at the right edge.
-                    theme-grid := Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-                        property <length> gap: Theme.tokens.space.xl;
-                        property <float> columns: max(1.0, min(4.0, floor((self.width + self.gap) / (200px + self.gap))));
-                        property <length> card-width: (self.width - self.gap * (self.columns - 1)) / self.columns;
-                        // A card is its 16:9 preview, its caption and its padding.
-                        property <length> card-height: (self.card-width - 20px) * 0.5625 + 38px + 22px * max(1.0, Theme.text-scale);
-                        // Each card's place among the cards this category shows.
-                        property <float> slot-0: 0;
-                        property <float> slot-1: root.theme-visible(0) ? 1 : 0;
-                        property <float> slot-2: self.slot-1 + (root.theme-visible(1) ? 1 : 0);
-                        property <float> slot-3: self.slot-2 + (root.theme-visible(2) ? 1 : 0);
-                        property <float> count: self.slot-3 + (root.theme-visible(3) ? 1 : 0);
-                        property <float> rows: ceil(self.count / self.columns);
-                        height: self.rows * self.card-height + max(0.0, self.rows - 1.0) * self.gap;
+                    grid-scroll := Flickable {
+                        vertical-stretch: 1;
+                        viewport-height: theme-grid.height;
 
-                        function x-of(slot: float) -> length {
-                            return (Theme.rtl ? columns - 1 - mod(slot, columns) : mod(slot, columns)) * (card-width + gap);
-                        }
-                        function y-of(slot: float) -> length {
-                            return floor(slot / columns) * (card-height + gap);
-                        }
+                        theme-grid := Rectangle {
+                            width: parent.width;
+                            background: transparent;
+                            property <length> gap: Theme.tokens.space.md;
+                            property <float> columns: max(1.0, min(4.0, floor((self.width + self.gap) / (176px + self.gap))));
+                            property <length> card-width: (self.width - self.gap * (self.columns - 1)) / self.columns;
+                            // A card is its 16:9 preview, its caption and its padding.
+                            property <length> card-height: (self.card-width - 20px) * 0.5625 + 38px + 22px * max(1.0, Theme.text-scale);
+                            // Each card's place among the cards this category shows.
+                            property <float> slot-0: 0;
+                            property <float> slot-1: root.theme-visible(0) ? 1 : 0;
+                            property <float> slot-2: self.slot-1 + (root.theme-visible(1) ? 1 : 0);
+                            property <float> slot-3: self.slot-2 + (root.theme-visible(2) ? 1 : 0);
+                            property <float> slot-4: self.slot-3 + (root.theme-visible(3) ? 1 : 0);
+                            property <float> slot-5: self.slot-4 + (root.theme-visible(4) ? 1 : 0);
+                            property <float> slot-6: self.slot-5 + (root.theme-visible(5) ? 1 : 0);
+                            property <float> slot-7: self.slot-6 + (root.theme-visible(6) ? 1 : 0);
+                            property <float> slot-8: self.slot-7 + (root.theme-visible(7) ? 1 : 0);
+                            property <float> slot-9: self.slot-8 + (root.theme-visible(8) ? 1 : 0);
+                            property <float> slot-10: self.slot-9 + (root.theme-visible(9) ? 1 : 0);
+                            property <float> slot-11: self.slot-10 + (root.theme-visible(10) ? 1 : 0);
+                            property <float> count: self.slot-11 + (root.theme-visible(11) ? 1 : 0);
+                            property <float> rows: ceil(self.count / self.columns);
+                            height: self.rows * self.card-height + max(0.0, self.rows - 1.0) * self.gap;
 
-                        if root.theme-visible(0) : PresentThemeOption {
-                            theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; }
-                            preview-width: theme-grid.card-width - 20px;
-                            preview-height: self.preview-width * 0.5625;
-                            x: theme-grid.x-of(theme-grid.slot-0);
-                            y: theme-grid.y-of(theme-grid.slot-0);
-                        }
-                        if root.theme-visible(1) : PresentThemeOption {
-                            theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; }
-                            preview-width: theme-grid.card-width - 20px;
-                            preview-height: self.preview-width * 0.5625;
-                            x: theme-grid.x-of(theme-grid.slot-1);
-                            y: theme-grid.y-of(theme-grid.slot-1);
-                        }
-                        if root.theme-visible(2) : PresentThemeOption {
-                            theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; }
-                            preview-width: theme-grid.card-width - 20px;
-                            preview-height: self.preview-width * 0.5625;
-                            x: theme-grid.x-of(theme-grid.slot-2);
-                            y: theme-grid.y-of(theme-grid.slot-2);
-                        }
-                        if root.theme-visible(3) : PresentThemeOption {
-                            theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; }
-                            preview-width: theme-grid.card-width - 20px;
-                            preview-height: self.preview-width * 0.5625;
-                            x: theme-grid.x-of(theme-grid.slot-3);
-                            y: theme-grid.y-of(theme-grid.slot-3);
+                            function x-of(slot: float) -> length {
+                                return (Theme.rtl ? columns - 1 - mod(slot, columns) : mod(slot, columns)) * (card-width + gap);
+                            }
+                            function y-of(slot: float) -> length {
+                                return floor(slot / columns) * (card-height + gap);
+                            }
+
+                            if root.theme-visible(0) : PresentThemeOption {
+                                theme: 0; current: root.theme-selected; clicked => { root.theme-selected = 0; }
+                                preview-width: theme-grid.card-width - 20px;
+                                preview-height: self.preview-width * 0.5625;
+                                x: theme-grid.x-of(theme-grid.slot-0);
+                                y: theme-grid.y-of(theme-grid.slot-0);
+                            }
+                            if root.theme-visible(1) : PresentThemeOption {
+                                theme: 1; current: root.theme-selected; clicked => { root.theme-selected = 1; }
+                                preview-width: theme-grid.card-width - 20px;
+                                preview-height: self.preview-width * 0.5625;
+                                x: theme-grid.x-of(theme-grid.slot-1);
+                                y: theme-grid.y-of(theme-grid.slot-1);
+                            }
+                            if root.theme-visible(2) : PresentThemeOption {
+                                theme: 2; current: root.theme-selected; clicked => { root.theme-selected = 2; }
+                                preview-width: theme-grid.card-width - 20px;
+                                preview-height: self.preview-width * 0.5625;
+                                x: theme-grid.x-of(theme-grid.slot-2);
+                                y: theme-grid.y-of(theme-grid.slot-2);
+                            }
+                            if root.theme-visible(3) : PresentThemeOption {
+                                theme: 3; current: root.theme-selected; clicked => { root.theme-selected = 3; }
+                                preview-width: theme-grid.card-width - 20px;
+                                preview-height: self.preview-width * 0.5625;
+                                x: theme-grid.x-of(theme-grid.slot-3);
+                                y: theme-grid.y-of(theme-grid.slot-3);
+                            }
+                            for item in [
+                                { idx: 4, slot: theme-grid.slot-4, id: "executive-pitch", name: "Executive Pitch" },
+                                { idx: 5, slot: theme-grid.slot-5, id: "quarterly-review", name: "Quarterly Review" },
+                                { idx: 6, slot: theme-grid.slot-6, id: "product-launch", name: "Product Launch" },
+                                { idx: 7, slot: theme-grid.slot-7, id: "data-report", name: "Data Report" },
+                                { idx: 8, slot: theme-grid.slot-8, id: "editorial-portfolio", name: "Editorial Portfolio" },
+                                { idx: 9, slot: theme-grid.slot-9, id: "academic-lecture", name: "Academic Lecture" },
+                                { idx: 10, slot: theme-grid.slot-10, id: "workshop-deck", name: "Workshop Deck" },
+                                { idx: 11, slot: theme-grid.slot-11, id: "minimal-keynote", name: "Minimal Keynote" },
+                            ] : Rectangle {
+                                visible: root.theme-visible(item.idx);
+                                x: theme-grid.x-of(item.slot);
+                                y: theme-grid.y-of(item.slot);
+                                width: theme-grid.card-width;
+                                height: theme-grid.card-height;
+                                border-radius: Theme.tokens.metrics.radius-large;
+                                background: root.theme-selected == item.idx ? Theme.palette().surface-raised : transparent;
+                                border-width: root.theme-selected == item.idx ? 2px : 1px;
+                                border-color: root.theme-selected == item.idx ? Theme.palette().accent : Theme.palette().border;
+
+                                TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: item.name;
+                                    clicked => { root.theme-selected = item.idx; }
+                                }
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    SlideTemplatePreview {
+                                        template-id: item.id;
+                                        selected: root.theme-selected == item.idx;
+                                        width: theme-grid.card-width - 20px;
+                                        height: self.width * 0.5625;
+                                    }
+                                    Text {
+                                        text: item.name;
+                                        font-size: Theme.type.body;
+                                        font-weight: root.theme-selected == item.idx ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        horizontal-alignment: center;
+                                        overflow: elide;
+                                        accessible-role: none;
+                                    }
+                                }
+                            }
                         }
                     }
-
-                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
 

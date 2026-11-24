@@ -165,6 +165,7 @@ fn shift_marquee_adds_to_existing_domain_selection() {
             .expect("slide")
             .elements
             .push(SlideElement {
+                runs: Vec::new(),
                 id: "elem-2".into(),
                 element_type: ElementType::ShapeRectangle,
                 content: "Second".into(),
@@ -471,17 +472,11 @@ fn presentation_path_round_trip_preserves_document() {
 fn present_menu_disables_unhandled_controller_commands() {
     set_platform();
     let menu = build_present_menu_bar();
-    for id in [
-        "edit.select_all",
-        "view.zoom_in",
-        "view.zoom_out",
-        "view.zoom_actual",
-    ] {
-        assert!(
-            !menu.find_item(id).expect("menu command").is_enabled(),
-            "unhandled Present command {id} must be disabled"
-        );
-    }
+    let id = "view.zoom_actual";
+    assert!(
+        !menu.find_item(id).expect("menu command").is_enabled(),
+        "unhandled Present command {id} must be disabled"
+    );
 }
 
 #[test]
@@ -694,11 +689,11 @@ fn present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundar
 
     let before_unsupported = state.session.borrow().document.len();
     let error = menu_service
-        .dispatch_action_from("edit.select_all", CommandSource::Menu)
+        .dispatch_action_from("view.zoom_actual", CommandSource::Menu)
         .expect_err("unsupported menu action must be disabled");
     assert!(error
         .to_string()
-        .contains("menu item edit.select_all is disabled"));
+        .contains("menu item view.zoom_actual is disabled"));
     assert_eq!(state.session.borrow().document.len(), before_unsupported);
 
     menu_service
@@ -1327,6 +1322,7 @@ fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
         for (index, slide) in session.document.slides.iter_mut().enumerate() {
             if slide.elements.is_empty() {
                 slide.add_element(SlideElement {
+                    runs: Vec::new(),
                     id: format!("e{index}"),
                     element_type: ElementType::BodyText,
                     content: String::new(),
@@ -1530,11 +1526,13 @@ fn the_file_menu_keeps_new_from_sample_with_new_and_groups_the_exports_apart() {
     let mut expected = vec![
         "file.new",
         "file.new_sample",
+        "file.start_hub",
         "file.open",
         "-",
         "file.save",
         "file.save_as",
         "-",
+        "file.print_preview",
         "file.export_pdf",
         "file.export_pptx",
     ];
