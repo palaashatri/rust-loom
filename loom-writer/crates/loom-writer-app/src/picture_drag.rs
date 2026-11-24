@@ -50,6 +50,24 @@ impl Corner {
     }
 }
 
+/// Returns `true` when picture `id` is floating/wrapped (`ImageWrapMode != Inline`).
+#[cfg(test)]
+pub(crate) fn is_wrapped_image(doc: &WriterDocument, id: u64) -> bool {
+    doc.image_wrap(id)
+        .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline)
+}
+
+#[cfg(test)]
+mod wrap_drag_tests {
+    use super::*;
+
+    #[test]
+    fn inline_is_not_wrapped() {
+        let doc = WriterDocument::new("d", "t");
+        assert!(!is_wrapped_image(&doc, 999));
+    }
+}
+
 /// A corner drag in progress. Sizes are in points; pointer positions in pixels.
 struct Drag {
     /// Identity of the picture on the page (see `picture_view::picture_key`).

@@ -630,7 +630,17 @@ fn bounded_diagnostic(value: &str, max_chars: usize) -> String {
 
 /// A picture as a PDF image: decoded, shrunk to at most 1,600 pixels on a
 /// side (the samples are stored uncompressed) and split into colour and alpha.
+/// Z-order layer for PDF image rendering: 0 = BehindText, 1 = Inline, 2 = InFrontOfText.
+pub(crate) fn pdf_image_z_order(image: &crate::InlineImage) -> u8 {
+    match image.wrap.map(|w| w.mode) {
+        Some(loom_objects::ImageWrapMode::BehindText) => 0,
+        Some(loom_objects::ImageWrapMode::InFrontOfText) => 2,
+        _ => 1,
+    }
+}
+
 fn pdf_image(image: &crate::InlineImage) -> Result<loom_pdf::PdfImage, String> {
+    let _z_order = pdf_image_z_order(image);
     let (width, height, rgba) = image.preview_rgba(1600)?;
     let pixels = width as usize * height as usize;
     let mut rgb = Vec::with_capacity(pixels * 3);

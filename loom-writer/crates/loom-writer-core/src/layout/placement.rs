@@ -19,6 +19,7 @@ pub(super) struct Placer {
     first_line: usize,
     page: usize,
     break_pending: bool,
+    pub(super) exclusions: Vec<super::wrap_exclusion::ExclusionRect>,
 }
 
 /// The lines of one block between two page breaks.
@@ -47,6 +48,7 @@ impl Placer {
             first_line: 0,
             page: 0,
             break_pending: false,
+            exclusions: Vec::new(),
         }
     }
 
@@ -128,6 +130,22 @@ impl Placer {
                     .and_then(|heights| heights.get(done + local))
                     .copied()
                     .unwrap_or(segment.line_height);
+                let (excl_x, _avail, push_below) = super::wrap_exclusion::compute_line_span(
+                    &self.exclusions,
+                    self.used,
+                    height,
+                    self.usable,
+                );
+                if let Some(y) = push_below {
+                    if y > self.used {
+                        self.used = y;
+                    }
+                }
+                let x_off = if line.x_offset_pt != 0.0 {
+                    line.x_offset_pt
+                } else {
+                    excl_x
+                };
                 self.lines.push(FlowLine {
                     block_index: segment.block_index,
                     start: line.start,
@@ -135,12 +153,12 @@ impl Placer {
                     global_start: segment.block_start + line.start,
                     page: self.page,
                     bounds: PageRect {
-                        x: line.x_offset_pt,
+                        x: x_off,
                         y: 0.0,
                         width: segment.fixed_width.unwrap_or(line.advance_pt),
                         height,
                     },
-                    x_offset_pt: line.x_offset_pt,
+                    x_offset_pt: x_off,
                     shaped_line: line.shaped_line.clone(),
                 });
                 self.used += height;
