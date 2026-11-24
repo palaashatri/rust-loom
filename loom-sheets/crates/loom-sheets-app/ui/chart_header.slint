@@ -21,21 +21,28 @@ export component SheetChartHeader inherits HorizontalLayout {
         overflow: elide;
     }
 
-    HorizontalLayout {
-        spacing: 2px;
-        LoomButton {
-            variant: "ghost";
-            label: root.kind-label;
-            clicked => {
-                root.cycle-kind();
+    Rectangle {
+        background: Theme.active-theme == "light" ? transparent : Theme.palette().surface-raised;
+        border-radius: Theme.tokens.metrics.radius-small;
+        border-width: Theme.active-theme == "light" ? 0px : 1px;
+        border-color: Theme.active-theme == "light" ? transparent : Theme.palette().border;
+        HorizontalLayout {
+            padding: Theme.active-theme == "light" ? 0px : 2px;
+            spacing: 2px;
+            LoomButton {
+                variant: "ghost";
+                label: root.kind-label;
+                clicked => {
+                    root.cycle-kind();
+                }
             }
-        }
 
-        LoomIconButton {
-            icon: "close";
-            label: "Hide chart panel";
-            tooltip: "Hide the chart preview and keep the chart in the worksheet.";
-            clicked => { root.close-chart(); }
+            LoomIconButton {
+                icon: "close";
+                label: "Hide chart panel";
+                tooltip: "Hide the chart preview and keep the chart in the worksheet.";
+                clicked => { root.close-chart(); }
+            }
         }
     }
 }
