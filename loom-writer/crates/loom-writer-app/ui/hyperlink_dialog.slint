@@ -1,6 +1,6 @@
-import { LoomTheme, LoomDialog, LoomButton } from "loom-ui";
+import { LoomButton } from "foundation.slint";
 
-export component HyperlinkDialog inherits LoomDialog {
+export component HyperlinkDialog inherits Rectangle {
     in-out property <string> url-text: "";
     in-out property <string> tooltip-text: "";
     in property <string> error-text: "";
@@ -9,56 +9,50 @@ export component HyperlinkDialog inherits LoomDialog {
     callback remove-link();
     callback cancel();
 
-    title: "Insert Hyperlink";
     width: 400px;
+    height: 220px;
+    background: #ffffff;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #d1d5db;
 
     VerticalLayout {
         spacing: 10px;
         padding: 12px;
 
         Text {
-            text: "URL or Bookmark";
-            color: LoomTheme.text-primary;
-            font-size: 12px;
+            text: "Insert Hyperlink";
+            font-size: 14px;
+            font-weight: 600;
         }
 
         Rectangle {
             height: 30px;
             border-radius: 4px;
             border-width: 1px;
-            border-color: LoomTheme.border-subtle;
-            background: LoomTheme.surface-input;
+            border-color: #d1d5db;
             TextInput {
                 x: 8px;
                 width: parent.width - 16px;
                 height: parent.height;
                 vertical-alignment: center;
                 text <=> root.url-text;
-                color: LoomTheme.text-primary;
                 accessible-role: text-input;
                 accessible-label: "Hyperlink URL";
             }
-        }
-
-        Text {
-            text: "Tooltip (optional)";
-            color: LoomTheme.text-primary;
-            font-size: 12px;
         }
 
         Rectangle {
             height: 30px;
             border-radius: 4px;
             border-width: 1px;
-            border-color: LoomTheme.border-subtle;
-            background: LoomTheme.surface-input;
+            border-color: #d1d5db;
             TextInput {
                 x: 8px;
                 width: parent.width - 16px;
                 height: parent.height;
                 vertical-alignment: center;
                 text <=> root.tooltip-text;
-                color: LoomTheme.text-primary;
                 accessible-role: text-input;
                 accessible-label: "Hyperlink Tooltip";
             }
@@ -66,7 +60,7 @@ export component HyperlinkDialog inherits LoomDialog {
 
         if root.error-text != "" : Text {
             text: root.error-text;
-            color: LoomTheme.danger;
+            color: #dc2626;
             font-size: 11px;
             wrap: word-wrap;
         }
@@ -75,18 +69,17 @@ export component HyperlinkDialog inherits LoomDialog {
             spacing: 8px;
             alignment: end;
             LoomButton {
-                text: "Remove";
+                label: "Remove";
                 accessible-label: "Remove hyperlink";
                 clicked => { root.remove-link(); }
             }
             LoomButton {
-                text: "Cancel";
+                label: "Cancel";
                 accessible-label: "Cancel hyperlink dialog";
                 clicked => { root.cancel(); }
             }
             LoomButton {
-                text: "Apply";
-                primary: true;
+                label: "Apply";
                 accessible-label: "Apply hyperlink";
                 clicked => { root.apply-link(root.url-text, root.tooltip-text); }
             }

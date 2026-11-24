@@ -1,15 +1,12 @@
-import { LoomTheme } from "loom-ui";
-import { InspectorSection, InspectorRow, InspectorActionButton, InspectorStepper } from "inspector_controls.slint";
+import { LoomSectionHeader, LoomButton } from "foundation.slint";
 
-export component ImageWrapInspector inherits InspectorSection {
+export component ImageWrapInspector inherits Rectangle {
     in property <bool> has-image: false;
     in property <int> wrap-mode-index: 0;
     in property <int> wrap-side-index: 0;
     in property <int> wrap-align-index: 0;
     in property <string> x-offset-label: "0 pt";
     in property <string> y-offset-label: "0 pt";
-    in property <string> margin-top-label: "6 pt";
-    in property <string> margin-bottom-label: "6 pt";
     in property <string> margin-left-label: "9 pt";
     in property <string> margin-right-label: "9 pt";
 
@@ -20,155 +17,103 @@ export component ImageWrapInspector inherits InspectorSection {
     callback step-y-offset(float);
     callback step-wrap-margin(string, float);
 
-    title: "Image Wrap";
     visible: root.has-image;
+    height: root.has-image ? layout.preferred-height : 0px;
 
-    VerticalLayout {
+    layout := VerticalLayout {
         spacing: 6px;
 
-        InspectorRow {
-            label: "Wrap";
-            HorizontalLayout {
-                spacing: 4px;
-                InspectorActionButton {
-                    label: "Inline";
-                    active: root.wrap-mode-index == 0;
-                    accessible-label: "Wrap mode: Inline";
-                    clicked => { root.set-wrap-mode(0); }
-                }
-                InspectorActionButton {
-                    label: "Square";
-                    active: root.wrap-mode-index == 1;
-                    accessible-label: "Wrap mode: Square";
-                    clicked => { root.set-wrap-mode(1); }
-                }
-                InspectorActionButton {
-                    label: "Tight";
-                    active: root.wrap-mode-index == 2;
-                    accessible-label: "Wrap mode: Tight";
-                    clicked => { root.set-wrap-mode(2); }
-                }
+        LoomSectionHeader {
+            title: "Image Wrap";
+        }
+
+        HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Inline";
+                accessible-label: "Wrap mode: Inline";
+                clicked => { root.set-wrap-mode(0); }
+            }
+            LoomButton {
+                label: "Square";
+                accessible-label: "Wrap mode: Square";
+                clicked => { root.set-wrap-mode(1); }
+            }
+            LoomButton {
+                label: "Tight";
+                accessible-label: "Wrap mode: Tight";
+                clicked => { root.set-wrap-mode(2); }
             }
         }
 
         HorizontalLayout {
             spacing: 4px;
-            InspectorActionButton {
-                label: "Top & Bottom";
-                active: root.wrap-mode-index == 3;
+            LoomButton {
+                label: "Top/Bot";
                 accessible-label: "Wrap mode: Top and Bottom";
                 clicked => { root.set-wrap-mode(3); }
             }
-            InspectorActionButton {
+            LoomButton {
                 label: "Behind";
-                active: root.wrap-mode-index == 4;
                 accessible-label: "Wrap mode: Behind Text";
                 clicked => { root.set-wrap-mode(4); }
             }
-            InspectorActionButton {
+            LoomButton {
                 label: "In Front";
-                active: root.wrap-mode-index == 5;
                 accessible-label: "Wrap mode: In Front of Text";
                 clicked => { root.set-wrap-mode(5); }
             }
         }
 
-        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 : InspectorRow {
-            label: "Side";
-            HorizontalLayout {
-                spacing: 4px;
-                InspectorActionButton {
-                    label: "Both";
-                    active: root.wrap-side-index == 0;
-                    accessible-label: "Wrap side: Both";
-                    clicked => { root.set-wrap-side(0); }
-                }
-                InspectorActionButton {
-                    label: "Left";
-                    active: root.wrap-side-index == 1;
-                    accessible-label: "Wrap side: Left Only";
-                    clicked => { root.set-wrap-side(1); }
-                }
-                InspectorActionButton {
-                    label: "Right";
-                    active: root.wrap-side-index == 2;
-                    accessible-label: "Wrap side: Right Only";
-                    clicked => { root.set-wrap-side(2); }
-                }
-                InspectorActionButton {
-                    label: "Largest";
-                    active: root.wrap-side-index == 3;
-                    accessible-label: "Wrap side: Largest";
-                    clicked => { root.set-wrap-side(3); }
-                }
+        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 : HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Both";
+                accessible-label: "Wrap side: Both";
+                clicked => { root.set-wrap-side(0); }
+            }
+            LoomButton {
+                label: "Left";
+                accessible-label: "Wrap side: Left Only";
+                clicked => { root.set-wrap-side(1); }
+            }
+            LoomButton {
+                label: "Right";
+                accessible-label: "Wrap side: Right Only";
+                clicked => { root.set-wrap-side(2); }
+            }
+            LoomButton {
+                label: "Largest";
+                accessible-label: "Wrap side: Largest";
+                clicked => { root.set-wrap-side(3); }
             }
         }
 
-        if root.wrap-mode-index != 0 : InspectorRow {
-            label: "Align";
-            HorizontalLayout {
-                spacing: 4px;
-                InspectorActionButton {
-                    label: "Left";
-                    active: root.wrap-align-index == 0;
-                    accessible-label: "Horizontal align: Left";
-                    clicked => { root.set-wrap-align(0); }
-                }
-                InspectorActionButton {
-                    label: "Center";
-                    active: root.wrap-align-index == 1;
-                    accessible-label: "Horizontal align: Center";
-                    clicked => { root.set-wrap-align(1); }
-                }
-                InspectorActionButton {
-                    label: "Right";
-                    active: root.wrap-align-index == 2;
-                    accessible-label: "Horizontal align: Right";
-                    clicked => { root.set-wrap-align(2); }
-                }
+        if root.wrap-mode-index != 0 : HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Left";
+                accessible-label: "Horizontal align: Left";
+                clicked => { root.set-wrap-align(0); }
+            }
+            LoomButton {
+                label: "Center";
+                accessible-label: "Horizontal align: Center";
+                clicked => { root.set-wrap-align(1); }
+            }
+            LoomButton {
+                label: "Right";
+                accessible-label: "Horizontal align: Right";
+                clicked => { root.set-wrap-align(2); }
             }
         }
 
-        if root.wrap-mode-index != 0 : InspectorRow {
-            label: "Offset X";
-            InspectorStepper {
-                value-text: root.x-offset-label;
-                decrease-label: "Decrease horizontal offset";
-                increase-label: "Increase horizontal offset";
-                decreased => { root.step-x-offset(-6.0); }
-                increased => { root.step-x-offset(6.0); }
-            }
-        }
-
-        if root.wrap-mode-index != 0 : InspectorRow {
-            label: "Offset Y";
-            InspectorStepper {
-                value-text: root.y-offset-label;
-                decrease-label: "Decrease vertical offset";
-                increase-label: "Increase vertical offset";
-                decreased => { root.step-y-offset(-6.0); }
-                increased => { root.step-y-offset(6.0); }
-            }
-        }
-
-        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 || root.wrap-mode-index == 3 : InspectorRow {
-            label: "Margin L/R";
-            HorizontalLayout {
-                spacing: 4px;
-                InspectorStepper {
-                    value-text: root.margin-left-label;
-                    decrease-label: "Decrease left wrap margin";
-                    increase-label: "Increase left wrap margin";
-                    decreased => { root.step-wrap-margin("left", -2.0); }
-                    increased => { root.step-wrap-margin("left", 2.0); }
-                }
-                InspectorStepper {
-                    value-text: root.margin-right-label;
-                    decrease-label: "Decrease right wrap margin";
-                    increase-label: "Increase right wrap margin";
-                    decreased => { root.step-wrap-margin("right", -2.0); }
-                    increased => { root.step-wrap-margin("right", 2.0); }
-                }
+        if root.wrap-mode-index != 0 : HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: "X: " + root.x-offset-label + "  Y: " + root.y-offset-label;
+                font-size: 11px;
+                vertical-alignment: center;
             }
         }
     }
