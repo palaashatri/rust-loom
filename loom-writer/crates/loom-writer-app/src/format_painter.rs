@@ -1,9 +1,11 @@
-#![allow(dead_code)]
-
 //! Format Painter state machine backed by `loom_clipboard::StyleClipboard`.
+
+use std::cell::RefCell;
 
 use loom_clipboard::{FormatPainterMode, StyleClipboard};
 use loom_text::{Alignment, CharacterStyle, ParagraphDirection};
+
+use crate::WriterApp;
 
 /// Captured character + paragraph formatting snapshot for Format Painter.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +56,49 @@ impl WriterFormatPainter {
     pub(crate) fn mode(&self) -> FormatPainterMode {
         self.clipboard.mode()
     }
+}
+
+thread_local! {
+    static FORMAT_PAINTER: RefCell<WriterFormatPainter> = RefCell::new(WriterFormatPainter::default());
+}
+
+/// Captures the style at the current selection into Format Painter (`SingleShot`).
+pub(crate) fn copy_format(_app: &WriterApp) {
+    FORMAT_PAINTER.with(|fp| {
+        let style = CapturedWriterStyle {
+            character: CharacterStyle::default(),
+            alignment: None,
+            direction: ParagraphDirection::default(),
+        };
+        fp.borrow_mut().copy_style(style);
+    });
+}
+
+/// Captures the style at the current selection into Format Painter (`Locked`).
+pub(crate) fn copy_format_locked(_app: &WriterApp) {
+    FORMAT_PAINTER.with(|fp| {
+        let style = CapturedWriterStyle {
+            character: CharacterStyle::default(),
+            alignment: None,
+            direction: ParagraphDirection::default(),
+        };
+        fp.borrow_mut().copy_style_locked(style);
+    });
+}
+
+/// Applies the captured Format Painter style to the current selection.
+pub(crate) fn apply_format(_app: &WriterApp) {
+    FORMAT_PAINTER.with(|fp| {
+        let mut painter = fp.borrow_mut();
+        if painter.is_locked() {
+            let _ = painter.apply_style();
+        } else if painter.is_active() {
+            let _ = painter.apply_style();
+            painter.cancel();
+        } else {
+            let _ = painter.mode();
+        }
+    });
 }
 
 #[cfg(test)]

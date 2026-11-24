@@ -523,6 +523,7 @@ fn project_inner(
                 image: picture.clone(),
                 z_order: ImageZOrder::from_image(picture),
             });
+            crate::image_projection::sort_by_z_order(&mut images);
             continue;
         }
 

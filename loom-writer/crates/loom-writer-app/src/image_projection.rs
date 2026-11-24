@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Image projection types and Z-order helpers.
 
 use loom_objects::ImageWrapMode;
@@ -22,6 +20,14 @@ impl ImageZOrder {
             _ => Self::Inline,
         }
     }
+
+    pub(crate) fn rank(self) -> u8 {
+        match self {
+            Self::BehindText => 0,
+            Self::Inline => 1,
+            Self::InFrontOfText => 2,
+        }
+    }
 }
 
 /// One picture to draw: where it sits, its z-order, and what it shows.
@@ -34,4 +40,9 @@ pub(crate) struct PageImagePart {
     pub label: String,
     pub image: InlineImage,
     pub z_order: ImageZOrder,
+}
+
+/// Orders page images so `BehindText` draws before `Inline` and `InFrontOfText` draws last.
+pub(crate) fn sort_by_z_order(images: &mut [PageImagePart]) {
+    images.sort_by_key(|img| img.z_order.rank());
 }
