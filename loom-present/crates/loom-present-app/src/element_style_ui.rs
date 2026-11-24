@@ -9,7 +9,7 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 use crate::object_parts::{color, look};
 use crate::{refresh, set_status, ElementInk, GuiState, LoomColorSwatch, PresentApp};
 use loom_ui::color_palette::{
-    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, LOOM_SWATCHES,
 };
 
 fn slot_of(hex: Option<&str>) -> i32 {
@@ -614,7 +614,7 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         PALETTE.iter().map(|hex| color(hex)).collect::<Vec<_>>(),
     )));
     ink.set_color_swatches(ModelRc::new(VecModel::from(
-        OFFICE_SWATCHES
+        LOOM_SWATCHES
             .iter()
             .map(|swatch| LoomColorSwatch {
                 swatch: color_from_rgb(swatch.rgb),

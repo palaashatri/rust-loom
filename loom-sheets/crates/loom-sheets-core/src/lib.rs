@@ -74,10 +74,7 @@ pub use xlsx::{
     XlsxChartType, XlsxExportWarning, XlsxImport, XlsxImportWarning,
 };
 
-/// Default width of a worksheet column in the desktop editor, in pixels.
-///
-/// Keeping this value in the core model gives the headless engine and the
-/// Slint editor one source of truth for their initial grid geometry.
+/// Default column width in pixels (shared by core and UI).
 pub const DEFAULT_COL_WIDTH: f32 = 80.0;
 /// Default height of a worksheet row in the desktop editor, in pixels.
 pub const DEFAULT_ROW_HEIGHT: f32 = 24.0;

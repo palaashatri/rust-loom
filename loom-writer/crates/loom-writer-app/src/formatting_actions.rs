@@ -6,7 +6,7 @@ use std::rc::Rc;
 use loom_command::{CommandInvocation, CommandSpec, InvocationSource};
 use loom_text::ParagraphDirection;
 use loom_ui::color_palette::{
-    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, LOOM_SWATCHES,
 };
 use loom_writer_core::{TextSelection, WriterDocument};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -348,7 +348,7 @@ fn toggle_script(app: &WriterApp, state: &GuiState, superscript: bool) {
 
 fn wire_color_dialog(app: &WriterApp, state: &Rc<GuiState>) {
     let global = app.global::<WriterFormatState>();
-    let swatches: Vec<LoomColorSwatch> = OFFICE_SWATCHES
+    let swatches: Vec<LoomColorSwatch> = LOOM_SWATCHES
         .iter()
         .map(|swatch| LoomColorSwatch {
             name: SharedString::from(swatch.name),

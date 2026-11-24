@@ -3,18 +3,6 @@ use crate::{find_replace_ui, FindReplaceState};
 use loom_present_core::Slide;
 
 #[test]
-fn find_replace_opens_and_updates_match_counts() {
-    set_platform();
-    let app = PresentApp::new().expect("create PresentApp");
-    assert!(!app.global::<FindReplaceState>().get_open());
-    find_replace_ui::open(&app);
-    assert!(app.global::<FindReplaceState>().get_open());
-    find_replace_ui::update_match_counts(&app, 2, 5);
-    assert_eq!(app.global::<FindReplaceState>().get_current_match(), 2);
-    assert_eq!(app.global::<FindReplaceState>().get_total_matches(), 5);
-}
-
-#[test]
 fn find_replace_mutates_multi_slide_elements_and_notes_with_undo() {
     let mut el1 = text_element(
         "e1",

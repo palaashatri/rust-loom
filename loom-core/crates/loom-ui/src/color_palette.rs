@@ -117,7 +117,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn office_swatches_has_48_unique_valid_entries_in_6x8_grid() {
+    fn loom_swatches_has_48_unique_valid_entries_in_6x8_grid() {
         assert_eq!(LOOM_SWATCHES.len(), 48);
 
         let mut names = HashSet::new();
