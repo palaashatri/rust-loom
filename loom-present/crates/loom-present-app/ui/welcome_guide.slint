@@ -386,13 +386,13 @@ export component WelcomeGuideModal inherits Rectangle {
                             x: Theme.rtl ? 4px : parent.width - self.width - 4px;
                             y: (parent.height - self.height) / 2;
                             width: prev-btn.preferred-width + Theme.tokens.space.md + next-btn.preferred-width;
-                            height: max(prev-btn.preferred-height, next-btn.preferred-height);
+                            height: max(prev-btn.height, next-btn.height);
 
                             prev-btn := LoomButton {
                                 x: Theme.rtl ? next-btn.preferred-width + Theme.tokens.space.md : 0px;
                                 y: (parent.height - self.height) / 2;
                                 width: self.preferred-width;
-                                height: self.preferred-height;
+                                height: max(32px, self.preferred-height);
                                 label: "Previous";
                                 icon: Theme.rtl ? "chevron-right" : "chevron-left";
                                 variant: "secondary";
@@ -405,7 +405,7 @@ export component WelcomeGuideModal inherits Rectangle {
                                 x: Theme.rtl ? 0px : prev-btn.preferred-width + Theme.tokens.space.md;
                                 y: (parent.height - self.height) / 2;
                                 width: self.preferred-width;
-                                height: self.preferred-height;
+                                height: max(32px, self.preferred-height);
                                 label: root.clamped-step() < 6 ? "Next" : "Get Started";
                                 icon: root.clamped-step() < 6 ? (Theme.rtl ? "chevron-left" : "chevron-right") : "check";
                                 variant: "primary";

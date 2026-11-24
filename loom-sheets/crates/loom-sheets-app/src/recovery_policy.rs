@@ -522,7 +522,7 @@ fn sum_legacy_files(directory: &Path) -> Result<u64, String> {
                 "legacy recovery directory entry count exceeds {MAX_RECOVERY_DIRECTORY_ENTRIES}"
             ));
         }
-        if LOCK_FILES.contains(&name.to_string_lossy().as_ref()) {
+        if LOCK_FILES.contains(&name.to_string_lossy().as_ref()) || name == "settings.toml" {
             continue;
         }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
