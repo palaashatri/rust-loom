@@ -314,6 +314,26 @@ pub(crate) fn image_json(image: &InlineImage) -> String {
     out
 }
 
+pub(crate) fn parse_image(raw: &str) -> Result<Option<InlineImage>, crate::WriterError> {
+    let fields = crate::ContentParser::new(raw).parse()?;
+    let (mut name, mut data, mut w, mut h, mut wrap, mut y) =
+        (String::new(), String::new(), None, None, None, 0.0f32);
+    for (k, v) in &fields {
+        match k.as_str() {
+            "name" => name = crate::json_value_text(v),
+            "data" => data = crate::json_value_text(v),
+            "wpt" => w = crate::json_value_text(v).parse().ok(),
+            "hpt" => h = crate::json_value_text(v).parse().ok(),
+            "wrap_mode" => {
+                wrap = crate::image_wrap::parse_wrap_mode_str(&crate::json_value_text(v))
+            }
+            "ypt" => y = crate::json_value_text(v).parse().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    Ok(image_from_fields_with_wrap(&name, w, h, &data, wrap, y))
+}
+
 pub(crate) fn image_from_fields_with_wrap(
     name: &str,
     width_pt: Option<f32>,
