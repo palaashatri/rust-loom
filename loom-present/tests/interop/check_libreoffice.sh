@@ -55,6 +55,19 @@ if [ -s out/present.odp ]; then
     check "round-trip PPTX keeps table" "$(printf '%s' "$rt_all" | grep -q '<a:tbl'; echo $?)" ""
     check "round-trip PPTX keeps picture" "$([ "$(printf '%s' "$rt_list" | grep -c 'ppt/media/')" -ge 1 ]; echo $?)" ""
     check "round-trip PPTX keeps chart" "$([ "$(printf '%s' "$rt_list" | grep -c 'ppt/charts/chart[0-9]*\.xml')" -ge 1 ]; echo $?)" ""
+
+    cli_bin="${LOOM_PRESENT_CLI:-$(command -v loom-present-cli || true)}"
+    if [ -n "$cli_bin" ]; then
+      "$cli_bin" import-pptx out-rt/present.pptx out-rt/reimported.loomdeck >/dev/null 2>&1
+      check "loom-present-cli re-imports round-trip PPTX" "$([ -s out-rt/reimported.loomdeck ]; echo $?)" "import-pptx failed"
+      if [ -s out-rt/reimported.loomdeck ]; then
+        cli_info="$("$cli_bin" inspect out-rt/reimported.loomdeck 2>/dev/null || true)"
+        check "re-imported deck has 4 slides" "$(printf '%s' "$cli_info" | grep -q 'slides: 4'; echo $?)" "$cli_info"
+        check "re-imported deck keeps title & notes" "$(printf '%s' "$cli_info" | grep -qF 'Q3 & Q4 Plan' && printf '%s' "$cli_info" | grep -qF 'Open warmly'; echo $?)" ""
+      fi
+    else
+      echo "SKIP  loom-present-cli not found (set LOOM_PRESENT_CLI); skipping semantic re-import"
+    fi
   fi
 fi
 timeout 180 "$soffice" "$profile" --headless --convert-to pdf --outdir out present.pptx >/dev/null 2>&1

@@ -195,7 +195,7 @@ pub(crate) const ALL_TEMPLATE_IDS: [&str; 12] = [
     "editorial-portfolio",
     "academic-lecture",
     "workshop-deck",
-    "minimal-keynote",
+    "minimal-stage",
 ];
 
 pub(crate) fn template_name(choice: i32) -> &'static str {
@@ -208,7 +208,7 @@ pub(crate) fn template_name(choice: i32) -> &'static str {
         8 => "Editorial Portfolio",
         9 => "Academic Lecture",
         10 => "Workshop Deck",
-        11 => "Minimal Keynote",
+        11 => "Minimal Stage",
         _ => TEMPLATE_NAMES[0],
     }
 }
