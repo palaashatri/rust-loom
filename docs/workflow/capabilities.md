@@ -16,7 +16,7 @@ The implementation includes rich blocks/style runs, multi-page layout, selection
 
 ### Present
 
-The implementation includes slides, scene objects, selection/manipulation helpers, snapping, notes, undo, native persistence, PPTX/PDF paths, themes, transitions, and native command/menu projection. CODE-04 New/Open replacement is guarded; duplicate identities (CODE-16) and non-undoable transitions (CODE-19) still block acceptance. Older source-cleanup and test-count claims are not evidence that these user workflows are correct.
+The implementation includes slides, scene objects, selection/manipulation helpers, snapping, notes, undo, native persistence, PPTX/PDF paths, themes, transitions, Welcome Guide, Start Hub, Find & Replace, Print Preview, and native command/menu projection. CODE-04 New/Open replacement, duplicate identities (CODE-16), and undoable transitions (CODE-19) are repaired; see [current.md](current.md) for the live Gate 1–14 acceptance record.
 
 ### Photo
 

@@ -15,6 +15,8 @@ Evidence tags used below:
 ## What works
 
 ### Start, files and recovery
+- First-run Welcome Guide (`Cmd/Ctrl+Shift+/`) and Start Hub (`Cmd/Ctrl+Shift+O`) with recent-deck badges and template cards, plus Print Preview (`Cmd/Ctrl+P`) and Find & Replace (`Cmd/Ctrl+F`/`H`). [tests]
+- Full 8-menu `LocalMenu` (`File`, `Edit`, `View`, `Insert`, `Slide`, `Format`, `Arrange`, `Help`) with platform-aware shortcut hints and centralized `command_dispatch`. [tests]
 - First launch is a blank one-slide deck with a faint "Click to add title" prompt. The prompt is never saved, exported or drawn in a thumbnail. "New from Sample Deck" is in the File menu and the command palette. [tests] [live-W] [live-L]
 - Native Open, Save and Save As for `.loomdeck`; the window title follows the saved file name and the status bar shows Saved or Edited. A transition-only change also marks the deck Edited. [tests] [live-W]
 - Closing, New or Open with unsaved changes asks Save / Discard / Cancel. [tests] [live-W]

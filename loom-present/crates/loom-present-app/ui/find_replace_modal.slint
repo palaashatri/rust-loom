@@ -1,0 +1,237 @@
+import { LoomButton } from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export global FindReplaceState {
+    in-out property <bool> open: false;
+    in-out property <string> query: "";
+    in-out property <string> replacement: "";
+    in-out property <bool> case-sensitive: false;
+    in-out property <bool> include-notes: true;
+    in-out property <int> current-match: 0;
+    in-out property <int> total-matches: 0;
+    in-out property <bool> focus-request: false;
+    callback close-modal();
+    callback query-changed(string);
+    callback find-prev();
+    callback find-next();
+    callback replace-one();
+    callback replace-all();
+}
+
+export component FindReplaceModal inherits Rectangle {
+    in property <bool> open: FindReplaceState.open;
+    property <bool> modal-open: root.open;
+    property <bool> focus-req: FindReplaceState.focus-request;
+
+    width: 420px;
+    height: self.preferred-height;
+    visible: root.open;
+    border-radius: Theme.tokens.metrics.radius-large;
+    background: Theme.palette().surface;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    drop-shadow-blur: 20px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: Theme.palette().shadow;
+    clip: true;
+
+    changed modal-open => {
+        if root.modal-open {
+            query-input.focus();
+        }
+    }
+
+    init => {
+        query-input.focus();
+    }
+
+    changed focus-req => {
+        if root.modal-open {
+            query-input.focus();
+        }
+    }
+
+    FocusScope {
+        width: 100%;
+        height: self.preferred-height;
+        enabled: root.open;
+
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                FindReplaceState.close-modal();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: Theme.tokens.space.lg;
+            spacing: Theme.tokens.space.sm;
+
+            // Header
+            HorizontalLayout {
+                alignment: space-between;
+                Text {
+                    text: "Find & Replace";
+                    color: Theme.palette().ink;
+                    font-family: Theme.ui-font-family;
+                    font-size: Theme.type.caption;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    Text {
+                        text: FindReplaceState.total-matches > 0
+                            ? FindReplaceState.current-match + " of " + FindReplaceState.total-matches
+                            : "0 of 0";
+                        color: Theme.palette().ink-secondary;
+                        font-family: Theme.ui-font-family;
+                        font-size: Theme.type.caption;
+                        vertical-alignment: center;
+                    }
+                    LoomButton {
+                        width: 28px;
+                        height: 28px;
+                        icon: "close";
+                        variant: "ghost";
+                        accessible-name: "Close Find & Replace";
+                        clicked => { FindReplaceState.close-modal(); }
+                    }
+                }
+            }
+
+            // Find input
+            Rectangle {
+                height: 34px;
+                border-radius: Theme.tokens.metrics.radius-small;
+                background: Theme.palette().surface-raised;
+                border-width: query-input.has-focus ? 2px : 1px;
+                border-color: query-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+
+                if FindReplaceState.query == "" : Text {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: 100%;
+                    text: "Find in slides...";
+                    color: Theme.palette().ink-disabled;
+                    font-family: Theme.ui-font-family;
+                    font-size: Theme.type.body;
+                    vertical-alignment: center;
+                }
+                query-input := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: 100%;
+                    text <=> FindReplaceState.query;
+                    color: Theme.palette().ink;
+                    font-family: Theme.ui-font-family;
+                    font-size: Theme.type.body;
+                    vertical-alignment: center;
+                    single-line: true;
+                    accessible-label: "Find text";
+                    edited => { FindReplaceState.query-changed(self.text); }
+                    accepted => { FindReplaceState.find-next(); }
+                }
+            }
+
+            // Replace input
+            Rectangle {
+                height: 34px;
+                border-radius: Theme.tokens.metrics.radius-small;
+                background: Theme.palette().surface-raised;
+                border-width: replace-input.has-focus ? 2px : 1px;
+                border-color: replace-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+
+                if FindReplaceState.replacement == "" : Text {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: 100%;
+                    text: "Replace with...";
+                    color: Theme.palette().ink-disabled;
+                    font-family: Theme.ui-font-family;
+                    font-size: Theme.type.body;
+                    vertical-alignment: center;
+                }
+                replace-input := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: 100%;
+                    text <=> FindReplaceState.replacement;
+                    color: Theme.palette().ink;
+                    font-family: Theme.ui-font-family;
+                    font-size: Theme.type.body;
+                    vertical-alignment: center;
+                    single-line: true;
+                    accessible-label: "Replacement text";
+                }
+            }
+
+            // Toggles
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                LoomButton {
+                    label: FindReplaceState.case-sensitive ? "Case: On" : "Case: Off";
+                    variant: FindReplaceState.case-sensitive ? "primary" : "secondary";
+                    accessible-name: "Toggle Case Sensitive";
+                    clicked => {
+                        FindReplaceState.case-sensitive = !FindReplaceState.case-sensitive;
+                        FindReplaceState.query-changed(FindReplaceState.query);
+                    }
+                }
+                LoomButton {
+                    label: FindReplaceState.include-notes ? "Notes: On" : "Notes: Off";
+                    variant: FindReplaceState.include-notes ? "primary" : "secondary";
+                    accessible-name: "Toggle Include Speaker Notes";
+                    clicked => {
+                        FindReplaceState.include-notes = !FindReplaceState.include-notes;
+                        FindReplaceState.query-changed(FindReplaceState.query);
+                    }
+                }
+            }
+
+            // Action buttons
+            HorizontalLayout {
+                alignment: space-between;
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        label: "Prev";
+                        icon: "chevron-left";
+                        variant: "secondary";
+                        enabled: FindReplaceState.total-matches > 0;
+                        accessible-name: "Previous Match";
+                        clicked => { FindReplaceState.find-prev(); }
+                    }
+                    LoomButton {
+                        label: "Next";
+                        icon: "chevron-right";
+                        variant: "secondary";
+                        enabled: FindReplaceState.total-matches > 0;
+                        accessible-name: "Next Match";
+                        clicked => { FindReplaceState.find-next(); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    LoomButton {
+                        label: "Replace";
+                        variant: "secondary";
+                        enabled: FindReplaceState.total-matches > 0;
+                        accessible-name: "Replace Current Match";
+                        clicked => { FindReplaceState.replace-one(); }
+                    }
+                    LoomButton {
+                        label: "Replace All";
+                        variant: "primary";
+                        enabled: FindReplaceState.total-matches > 0;
+                        accessible-name: "Replace All Matches";
+                        clicked => { FindReplaceState.replace-all(); }
+                    }
+                }
+            }
+        }
+    }
+}

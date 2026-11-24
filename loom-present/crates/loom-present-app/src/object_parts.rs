@@ -44,6 +44,11 @@ fn part(fx: f32, fy: f32, fw: f32, fh: f32) -> ObjectPart {
         family: SharedString::default(),
         ink: 0,
         round: false,
+        underline: false,
+        strikethrough: false,
+        has_image: false,
+        img: slint::Image::default(),
+        shape_kind: SharedString::default(),
     }
 }
 
@@ -59,7 +64,12 @@ fn type_defaults(kind: &ElementType) -> Option<(f32, bool, i32, bool)> {
         ElementType::Subtitle => Some((16.0, false, 2, false)),
         ElementType::BodyText => Some((16.0, false, 1, false)),
         ElementType::StatCard => Some((22.86, true, 1, true)),
-        ElementType::ShapeRectangle | ElementType::ShapeCircle => Some((16.0, false, 3, false)),
+        ElementType::ShapeRectangle
+        | ElementType::ShapeCircle
+        | ElementType::ShapeRoundedRect
+        | ElementType::ShapeArrowRight
+        | ElementType::ShapeLine
+        | ElementType::ShapeCallout => Some((16.0, false, 3, false)),
         _ => None,
     }
 }
@@ -100,6 +110,8 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
     text.fs = style.size_or(size_pt) / POINTS_PER_UNIT;
     text.bold = style.bold.unwrap_or(bold);
     text.italic = style.italic;
+    text.underline = style.underline;
+    text.strikethrough = style.strikethrough;
     text.wrap = true;
     text.pad = true;
     text.align = match style.align {
@@ -125,25 +137,280 @@ fn styled_text_part(element: &SlideElement) -> Option<ObjectPart> {
     Some(text)
 }
 
+fn shape_kind_tag(kind: &ElementType) -> Option<&'static str> {
+    match kind {
+        ElementType::ShapeRoundedRect => Some("rounded-rect"),
+        ElementType::ShapeArrowRight => Some("arrow-right"),
+        ElementType::ShapeLine => Some("line"),
+        ElementType::ShapeCallout => Some("callout"),
+        _ => None,
+    }
+}
+
+const WRAPPED_LINE_HEIGHT_FACTOR: f32 = 1.25;
+const MIN_READABLE_LINE_FS: f32 = 7.5;
+
+fn max_visible_wrapped_rows(line_count: usize, elem_height: f32, band_frac: f32) -> usize {
+    if line_count == 0 || elem_height <= 0.0 {
+        return line_count;
+    }
+    let avail_h = elem_height * band_frac;
+    let max_rows =
+        ((avail_h / (MIN_READABLE_LINE_FS * WRAPPED_LINE_HEIGHT_FACTOR)).floor() as usize).max(1);
+    line_count.min(max_rows)
+}
+
+fn wrapped_row_scale(shown_rows: usize, elem_height: f32, band_frac: f32, max_fs: f32) -> f32 {
+    if shown_rows == 0 || elem_height <= 0.0 || max_fs <= 0.0 {
+        return 1.0;
+    }
+    let row_h = (elem_height * band_frac) / (shown_rows as f32);
+    ((row_h / WRAPPED_LINE_HEIGHT_FACTOR) / max_fs).clamp(0.05, 1.0)
+}
+
+fn wrap_paragraph_spans(para: &str, max_chars: usize) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut line_start = 0usize;
+    let mut line_end = 0usize;
+    let mut line_chars = 0usize;
+    let mut has_word = false;
+    let mut idx = 0usize;
+    while idx < para.len() {
+        let ws_start = idx;
+        while let Some(ch) = para[idx..].chars().next() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            idx += ch.len_utf8();
+        }
+        let word_start = idx;
+        if word_start == para.len() {
+            line_end = para.len();
+            break;
+        }
+        let mut word_chars = 0usize;
+        while let Some(ch) = para[idx..].chars().next() {
+            if ch.is_whitespace() {
+                break;
+            }
+            word_chars += 1;
+            idx += ch.len_utf8();
+        }
+        let word_end = idx;
+        let ws_chars = para[ws_start..word_start].chars().count();
+        if has_word && line_chars + ws_chars + word_chars > max_chars {
+            spans.push((line_start, word_start));
+            line_start = word_start;
+            line_end = word_end;
+            line_chars = word_chars;
+        } else {
+            line_end = word_end;
+            line_chars += ws_chars + word_chars;
+        }
+        has_word = true;
+    }
+    if spans.is_empty() || line_end > line_start {
+        spans.push((line_start, line_end));
+    }
+    spans
+}
+
+struct RichParagraph<'a> {
+    text: String,
+    max_fs: Option<f32>,
+    pieces: Vec<(usize, usize, &'a loom_present_core::StyledTextRun)>,
+}
+
+fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
+    let Some((size_pt, bold, ink, centred)) = type_defaults(&element.element_type) else {
+        return Vec::new();
+    };
+    let style = &element.style;
+    let default_fs = style.size_or(size_pt) / POINTS_PER_UNIT;
+    let mut paragraphs = vec![RichParagraph {
+        text: String::new(),
+        max_fs: None,
+        pieces: Vec::new(),
+    }];
+    for run in &element.runs {
+        if run.text.is_empty() {
+            continue;
+        }
+        let run_fs = run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT;
+        for (idx, seg) in run.text.split('\n').enumerate() {
+            if idx > 0 {
+                paragraphs.push(RichParagraph {
+                    text: String::new(),
+                    max_fs: None,
+                    pieces: Vec::new(),
+                });
+            }
+            if !seg.is_empty() {
+                let para = paragraphs.last_mut().unwrap();
+                para.max_fs = Some(para.max_fs.map_or(run_fs, |cur| cur.max(run_fs)));
+                let start = para.text.len();
+                para.text.push_str(seg);
+                let end = para.text.len();
+                para.pieces.push((start, end, run));
+            }
+        }
+    }
+    let mut lines: Vec<Vec<(String, &loom_present_core::StyledTextRun)>> = Vec::new();
+    for para in paragraphs {
+        if para.text.is_empty() {
+            lines.push(Vec::new());
+            continue;
+        }
+        let ref_fs = para.max_fs.unwrap_or(default_fs);
+        let max_chars =
+            (((element.width - 24.0).max(40.0) / (ref_fs * 0.56).max(6.0)) as usize).max(1);
+        for (line_start, line_end) in wrap_paragraph_spans(&para.text, max_chars) {
+            let mut line_parts = Vec::new();
+            for &(p_start, p_end, run) in &para.pieces {
+                let ov_start = p_start.max(line_start);
+                let ov_end = p_end.min(line_end);
+                if ov_start < ov_end {
+                    line_parts.push((para.text[ov_start..ov_end].to_string(), run));
+                }
+            }
+            lines.push(line_parts);
+        }
+    }
+    let shown_rows = max_visible_wrapped_rows(lines.len(), element.height, 0.8);
+    if shown_rows < lines.len() {
+        lines.truncate(shown_rows);
+        if let Some((last_text, _)) = lines.iter_mut().rev().find_map(|line| line.last_mut()) {
+            last_text.push('…');
+        }
+    }
+    let max_fs = lines
+        .iter()
+        .flat_map(|line| {
+            line.iter().map(|(_, run)| {
+                run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT
+            })
+        })
+        .fold(0.0f32, f32::max);
+    let fs_scale = wrapped_row_scale(lines.len(), element.height, 0.8, max_fs);
+    let line_count = lines.len().max(1) as f32;
+    let line_h = 0.8 / line_count;
+    let mut out = Vec::new();
+    for (line_idx, line) in lines.into_iter().enumerate() {
+        let total_chars: usize = line
+            .iter()
+            .map(|(t, _)| t.chars().count())
+            .sum::<usize>()
+            .max(1);
+        let mut x_cursor = 0.04f32;
+        let max_w = 0.92f32;
+        let fy = 0.1 + (line_idx as f32) * line_h;
+        for (seg, run) in line {
+            let remaining = (0.96 - x_cursor).max(0.0);
+            let frac = ((seg.chars().count() as f32 / total_chars as f32) * max_w).min(remaining);
+            let mut p = part(x_cursor, fy, frac, line_h);
+            p.text = SharedString::from(seg);
+            p.fs = (run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT)
+                * fs_scale;
+            p.bold = run.bold.unwrap_or_else(|| style.bold.unwrap_or(bold));
+            p.italic = run.italic.unwrap_or(style.italic);
+            p.underline = run.underline.unwrap_or(style.underline);
+            p.strikethrough = run.strikethrough.unwrap_or(style.strikethrough);
+            p.align = match style.align {
+                Some(TextAlign::Left) => 0,
+                Some(TextAlign::Center) => 1,
+                Some(TextAlign::Right) => 2,
+                None => i32::from(centred),
+            };
+            match run.color.as_deref().or(style.color.as_deref()) {
+                Some(hex) => {
+                    p.fg = color(hex);
+                    p.ink = 0;
+                }
+                None => p.ink = ink,
+            }
+            if let Some(family) = run
+                .font_family
+                .as_deref()
+                .or(style.font_family.as_deref())
+                .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+            {
+                p.family = SharedString::from(family);
+            }
+            out.push(p);
+            x_cursor = (x_cursor + frac).min(0.96);
+        }
+    }
+    out
+}
+
 /// Fill and text of a text object or shape whose style overrides its type's
 /// look; nothing for an element that was never styled, which the canvas draws
 /// itself.
 fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
-    if element.style.is_default() {
+    let custom_shape = shape_kind_tag(&element.element_type);
+    if element.style.is_default() && element.runs.is_empty() && custom_shape.is_none() {
         return Vec::new();
     }
-    let Some(text) = styled_text_part(element) else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    if let Some(hex) = element.style.fill.as_deref() {
+    if let Some(tag) = custom_shape {
+        let mut fill = part(0.0, 0.0, 1.0, 1.0);
+        fill.has_bg = true;
+        fill.shape_kind = SharedString::from(tag);
+        let default_hex = if element.element_type == ElementType::ShapeLine {
+            "#1f2328"
+        } else {
+            "#d6e0f5"
+        };
+        fill.bg = color(element.style.fill.as_deref().unwrap_or(default_hex));
+        out.push(fill);
+    } else if let Some(hex) = element.style.fill.as_deref() {
         let mut fill = part(0.0, 0.0, 1.0, 1.0);
         fill.has_bg = true;
         fill.bg = color(hex);
         fill.round = element.element_type == ElementType::ShapeCircle;
         out.push(fill);
     }
-    out.push(text);
+    if !element.runs.is_empty() {
+        out.extend(rich_run_parts(element));
+    } else if let Some(text) = styled_text_part(element) {
+        if !element.content.is_empty() {
+            if element.style.underline || element.style.strikethrough {
+                let max_chars = (((element.width - 24.0).max(40.0) / (text.fs * 0.56).max(6.0))
+                    as usize)
+                    .max(1);
+                let mut lines: Vec<&str> = Vec::new();
+                for para in element.content.split('\n') {
+                    for (start, end) in wrap_paragraph_spans(para, max_chars) {
+                        lines.push(&para[start..end]);
+                    }
+                }
+                if lines.len() > 1 {
+                    let shown_rows = max_visible_wrapped_rows(lines.len(), element.height, 0.84);
+                    let fs_scale = wrapped_row_scale(shown_rows, element.height, 0.84, text.fs);
+                    let truncated = shown_rows < lines.len();
+                    let n = shown_rows as f32;
+                    let lh = 0.84 / n;
+                    for (i, line) in lines.into_iter().take(shown_rows).enumerate() {
+                        let mut p = text.clone();
+                        p.fy = 0.08 + i as f32 * lh;
+                        p.fh = lh;
+                        p.fs *= fs_scale;
+                        p.wrap = false;
+                        p.text = SharedString::from(if truncated && i + 1 == shown_rows {
+                            format!("{line}…")
+                        } else {
+                            line.to_string()
+                        });
+                        out.push(p);
+                    }
+                } else {
+                    out.push(text);
+                }
+            } else {
+                out.push(text);
+            }
+        }
+    }
     out
 }
 
@@ -197,6 +464,21 @@ pub(crate) fn active_cell_for(element: &SlideElement) -> ObjectPart {
     let w: f32 = widths.iter().skip(c0).take(cs).sum();
     let h: f32 = heights.iter().skip(r0).take(rs).sum();
     let mut cell = part(x / total_w, y / total_h, w / total_w, h / total_h);
+    let style =
+        TableStyleCatalog::get(&table.style_id).unwrap_or_else(TableStyleCatalog::default_style);
+    let options = TableStyleOptions {
+        header_row: table.header_row,
+        total_row: table.total_row,
+        first_column: table.first_column,
+        last_column: table.last_column,
+        banded_rows: table.banded_rows,
+        banded_columns: table.banded_columns,
+    };
+    let resolved = style.resolve_cell(r0, c0, rows, cols, &options, table.cell(r0, c0));
+    if let Some(bg) = &resolved.background_color {
+        cell.has_bg = true;
+        cell.bg = color(bg);
+    }
     cell.text = SharedString::from(table.cell_text(r0, c0).unwrap_or_default());
     cell.fs = loom_present_core::table_text_size(&table).map_or_else(
         || (heights[r0] * 0.42).clamp(9.0, 30.0),
@@ -281,8 +563,8 @@ fn dot_part(x: f32, y: f32, d: f32, w: f32, h: f32, fill: Color) -> ObjectPart {
 fn pie_chart_parts(
     chart: &Chart,
     categories: usize,
-    width: f32,
-    height: f32,
+    _width: f32,
+    _height: f32,
     out: &mut Vec<ObjectPart>,
 ) {
     let series = &chart.series[0];
@@ -301,32 +583,61 @@ fn pie_chart_parts(
         }
         Color::from_argb_encoded(SERIES[ci % SERIES.len()])
     };
-    let (w, h) = (width.max(1.0), height.max(1.0));
-    let (cx, cy) = (0.31f32, 0.55f32);
-    let r_px = (w * 0.23).min(h * 0.34).max(12.0);
-    let dot_d = (r_px / 3.8).max(4.0);
-    out.push(dot_part(cx, cy, dot_d, w, h, slice_fill(0)));
-    for ring in 1..=6usize {
-        let rad = (ring as f32 - 0.3) / 6.0 * r_px;
-        let steps = (ring * 12).max(16);
-        for step in 0..steps {
-            let turn = (step as f64 + 0.5) / steps as f64;
-            let target = turn * total;
-            let mut acc = 0.0;
-            let mut slice_idx = categories.saturating_sub(1);
-            for (ci, v) in values.iter().copied().enumerate() {
-                acc += v;
-                if target <= acc {
-                    slice_idx = ci;
-                    break;
+    let size_px = 160u32;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(size_px, size_px);
+    let pixels = buf.make_mut_slice();
+    let center = size_px as f32 * 0.5;
+    let radius = center - 3.0;
+    let aa_offsets = [
+        (-0.25f32, -0.25f32),
+        (0.25, -0.25),
+        (-0.25, 0.25),
+        (0.25, 0.25),
+    ];
+    for py in 0..size_px {
+        for px in 0..size_px {
+            let mut r_acc = 0u32;
+            let mut g_acc = 0u32;
+            let mut b_acc = 0u32;
+            let mut a_acc = 0u32;
+            for (ox, oy) in aa_offsets {
+                let dx = (px as f32 + 0.5 + ox) - center;
+                let dy = (py as f32 + 0.5 + oy) - center;
+                if dx * dx + dy * dy <= radius * radius {
+                    let mut angle = dy.atan2(dx) + std::f32::consts::FRAC_PI_2;
+                    if angle < 0.0 {
+                        angle += std::f32::consts::TAU;
+                    }
+                    let target = (angle as f64 / std::f64::consts::TAU) * total;
+                    let mut acc = 0.0;
+                    let mut slice_idx = categories.saturating_sub(1);
+                    for (ci, v) in values.iter().copied().enumerate() {
+                        acc += v;
+                        if target <= acc {
+                            slice_idx = ci;
+                            break;
+                        }
+                    }
+                    let c = slice_fill(slice_idx);
+                    r_acc += c.red() as u32;
+                    g_acc += c.green() as u32;
+                    b_acc += c.blue() as u32;
+                    a_acc += 255;
                 }
             }
-            let theta = -std::f32::consts::FRAC_PI_2 + (turn as f32) * std::f32::consts::TAU;
-            let x = cx + rad * theta.cos() / w;
-            let y = cy + rad * theta.sin() / h;
-            out.push(dot_part(x, y, dot_d, w, h, slice_fill(slice_idx)));
+            let idx = (py * size_px + px) as usize;
+            pixels[idx] = slint::Rgba8Pixel {
+                r: (r_acc / 4) as u8,
+                g: (g_acc / 4) as u8,
+                b: (b_acc / 4) as u8,
+                a: (a_acc / 4) as u8,
+            };
         }
     }
+    let mut pie = part(0.06, 0.20, 0.48, 0.72);
+    pie.has_image = true;
+    pie.img = slint::Image::from_rgba8(buf);
+    out.push(pie);
     let row_step = (0.66 / categories.max(1) as f32).min(0.13);
     for (ci, v) in values.iter().copied().enumerate() {
         let ry = 0.22 + ci as f32 * row_step;
@@ -509,6 +820,7 @@ fn chart_parts(chart: &Chart, width: f32, height: f32) -> Vec<ObjectPart> {
             label.wrap = true;
             out.push(label);
         }
+        return out;
     } else {
         let bar_w = group_w * 0.8 / chart.series.len() as f32;
         for (si, series) in chart.series.iter().enumerate() {
@@ -624,15 +936,15 @@ mod tests {
             "pie charts must not fall back to columns"
         );
         assert!(
-            parts.iter().filter(|p| p.round).count() > 20,
-            "pie chart disc should be drawn with round sector dots"
+            parts.iter().any(|p| p.has_image),
+            "pie chart disc should be drawn as an anti-aliased raster image"
         );
         assert!(parts.iter().any(|p| p.text.contains("R&D (50%)")));
         assert!(parts.iter().any(|p| p.text.contains("Sales (30%)")));
         assert!(parts.iter().any(|p| p.text.contains("Ops (20%)")));
         let mut slice_colors: Vec<u32> = parts
             .iter()
-            .filter(|p| p.round && p.has_bg)
+            .filter(|p| p.has_bg && p.fw < 0.1)
             .map(|p| p.bg.as_argb_encoded())
             .collect();
         slice_colors.sort_unstable();
@@ -688,6 +1000,7 @@ mod tests {
     #[test]
     fn a_styled_text_object_carries_its_family_into_the_canvas_and_edit_surface() {
         let element = SlideElement {
+            runs: Vec::new(),
             id: "family".into(),
             element_type: ElementType::BodyText,
             content: "Words".into(),
@@ -716,6 +1029,7 @@ mod tests {
     #[test]
     fn an_unstyled_text_object_leaves_the_family_empty_so_the_theme_applies() {
         let element = SlideElement {
+            runs: Vec::new(),
             id: "plain".into(),
             element_type: ElementType::BodyText,
             content: "Words".into(),
@@ -778,6 +1092,169 @@ mod tests {
                 part.has_bg && part.bg.as_argb_encoded() == 0xFF90_9090 && part.fx == 0.32
             }),
             "all-zero charts retain a finite zero axis"
+        );
+    }
+
+    #[test]
+    fn decorated_plain_text_preserves_multiple_spaces_and_tabs() {
+        let mut elem = SlideElement {
+            id: "deco-ws".into(),
+            element_type: ElementType::BodyText,
+            content: "A  B\nC\tD".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 500.0,
+            height: 120.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: Vec::new(),
+        };
+        elem.style.underline = true;
+        let parts = parts_for(&elem);
+        let texts: Vec<&str> = parts.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, vec!["A  B", "C\tD"]);
+    }
+
+    #[test]
+    fn rich_run_parts_word_wrap_paragraphs_across_run_boundaries() {
+        let elem = SlideElement {
+            id: "rich-wrap".into(),
+            element_type: ElementType::BodyText,
+            content: "Alpha Beta Gamma Delta Epsilon".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 140.0,
+            height: 200.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: vec![
+                loom_present_core::StyledTextRun {
+                    text: "Alpha Beta ".into(),
+                    bold: Some(true),
+                    ..Default::default()
+                },
+                loom_present_core::StyledTextRun {
+                    text: "Gamma Delta Epsilon".into(),
+                    italic: Some(true),
+                    ..Default::default()
+                },
+            ],
+        };
+        let parts = parts_for(&elem);
+        assert!(
+            parts.len() > 2,
+            "expected wrapped segments across multiple lines, got {parts:?}"
+        );
+        let distinct_rows: std::collections::BTreeSet<i32> = parts
+            .iter()
+            .map(|p| (p.fy * 1000.0).round() as i32)
+            .collect();
+        assert!(
+            distinct_rows.len() > 1,
+            "rich runs must wrap onto multiple vertical rows: {parts:?}"
+        );
+        assert!(parts.iter().all(|p| !p.wrap));
+        let combined: String = parts.iter().map(|p| p.text.as_str()).collect();
+        assert!(combined.contains("Epsilon"), "lost tail: {combined}");
+    }
+
+    #[test]
+    fn soft_wrap_preserves_boundary_whitespace() {
+        let para = "AAAA  B";
+        let spans = wrap_paragraph_spans(para, 4);
+        let slices: Vec<&str> = spans.iter().map(|&(s, e)| &para[s..e]).collect();
+        assert_eq!(slices, vec!["AAAA  ", "B"]);
+        assert_eq!(slices.concat(), para);
+
+        let mut elem = SlideElement {
+            id: "soft-ws".into(),
+            element_type: ElementType::BodyText,
+            content: "AAAA  B".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 60.0,
+            height: 120.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: Vec::new(),
+        };
+        elem.style.underline = true;
+        let parts = parts_for(&elem);
+        assert_eq!(parts.len(), 2);
+        let rendered: String = parts.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(rendered, "AAAA  B");
+    }
+
+    #[test]
+    fn wrapped_rich_text_rows_fit_without_overlapping() {
+        let long_runs: Vec<loom_present_core::StyledTextRun> = (1..=10)
+            .map(|i| loom_present_core::StyledTextRun {
+                text: if i < 10 {
+                    format!("Row{i}\n")
+                } else {
+                    "Row10".to_string()
+                },
+                bold: Some(i % 2 == 0),
+                ..Default::default()
+            })
+            .collect();
+        let elem = SlideElement {
+            id: "cramped-rich".into(),
+            element_type: ElementType::BodyText,
+            content: String::new(),
+            x: 40.0,
+            y: 40.0,
+            width: 140.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: long_runs,
+        };
+        let parts = parts_for(&elem);
+        assert!(!parts.is_empty());
+        for p in &parts {
+            let row_units = elem.height * p.fh;
+            assert!(
+                p.fs * WRAPPED_LINE_HEIGHT_FACTOR <= row_units + 1e-3,
+                "row height {row_units} too short for font size {}",
+                p.fs
+            );
+            assert!(
+                p.fs >= MIN_READABLE_LINE_FS - 1e-3,
+                "font size {} became unreadably small",
+                p.fs
+            );
+        }
+
+        // A discarded 72pt tail row must not shrink the remaining visible rows below readable size.
+        let mut mixed_tail_runs: Vec<loom_present_core::StyledTextRun> = (1..=9)
+            .map(|i| loom_present_core::StyledTextRun {
+                text: format!("Row{i}\n"),
+                font_size_pt: Some(16.0),
+                ..Default::default()
+            })
+            .collect();
+        mixed_tail_runs.push(loom_present_core::StyledTextRun {
+            text: "Huge".to_string(),
+            font_size_pt: Some(72.0),
+            ..Default::default()
+        });
+        let elem_tail = SlideElement {
+            runs: mixed_tail_runs,
+            ..elem
+        };
+        let tail_parts = parts_for(&elem_tail);
+        assert_eq!(tail_parts.len(), 6);
+        assert!(
+            tail_parts
+                .iter()
+                .all(|p| p.fs >= MIN_READABLE_LINE_FS - 1e-3),
+            "truncated 72pt row shrank visible 16pt rows: {:?}",
+            tail_parts.iter().map(|p| p.fs).collect::<Vec<_>>()
         );
     }
 }

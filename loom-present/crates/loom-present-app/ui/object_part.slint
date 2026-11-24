@@ -1,4 +1,5 @@
 import { Theme } from "theme.slint";
+import { LoomColorSwatch } from "foundation.slint";
 
 /// One drawable piece of an element, in fractions of the element's box: a table
 /// cell, a chart bar or label, or the fill and text of a styled text object.
@@ -28,6 +29,11 @@ export struct ObjectPart {
     ink: int,
     /// Draw the background as an ellipse (a circle shape).
     round: bool,
+    underline: bool,
+    strikethrough: bool,
+    has-image: bool,
+    img: image,
+    shape-kind: string,
 }
 
 /// The slide's own colours. They are document artwork, not window chrome, so
@@ -81,6 +87,55 @@ export global ElementInk {
     /// A field was accepted: `field` is x, y, w, h or rot and `text` what was typed;
     /// empty text means the edit was cancelled and the field should show the real value.
     callback geometry-requested(string, string);
+
+    // Extended style & mixed-value state
+    in-out property <bool> underline: false;
+    in-out property <bool> strikethrough: false;
+    in-out property <bool> bold-mixed: false;
+    in-out property <bool> italic-mixed: false;
+    in-out property <bool> underline-mixed: false;
+    in-out property <bool> strikethrough-mixed: false;
+    in-out property <bool> size-mixed: false;
+    in-out property <bool> align-mixed: false;
+
+    // 48-color palette state (Text Color, Shape Fill, Slide Background)
+    in-out property <[LoomColorSwatch]> color-swatches: [];
+    in-out property <string> active-palette: ""; // "", "text", "fill", "bg"
+    in-out property <string> text-color-hex: "";
+    in-out property <bool> text-color-automatic: true;
+    in-out property <bool> text-color-mixed: false;
+    in-out property <string> text-color-label: "Automatic";
+    in-out property <color> text-color-swatch: #1d1d1f;
+
+    in-out property <string> fill-color-hex: "";
+    in-out property <bool> fill-color-automatic: true;
+    in-out property <bool> fill-color-mixed: false;
+    in-out property <string> fill-color-label: "Automatic";
+    in-out property <color> fill-color-swatch: transparent;
+
+    in-out property <string> bg-color-hex: "";
+    in-out property <bool> bg-color-automatic: true;
+    in-out property <bool> bg-color-mixed: false;
+    in-out property <string> bg-color-label: "Automatic";
+    in-out property <color> bg-color-swatch: #ffffff;
+
+    in-out property <string> hex-input: "";
+    in-out property <string> hex-error: "";
+
+    callback color-toggled(string);
+    callback color-picked(string, string);
+    callback hex-edited(string);
+    callback hex-submitted(string, string);
+
+    // Arrange & Document
+    callback arrange-requested(string);
+    callback layout-picked(string);
+    in-out property <string> aspect-ratio: "16:9";
+    callback aspect-requested(string);
+    callback theme-preset-requested(int);
+    in-out property <int> deck-theme-index: 0;
+    in-out property <string> active-layout: "content";
+    in-out property <string> deck-stats: "";
 }
 
 /// A part drawn at the box its caller gives it. `text-scale` is the slide's
@@ -90,14 +145,65 @@ export component ObjectPartView inherits Rectangle {
     in property <length> slide-height;
     in property <float> text-scale: 1.0;
 
-    background: root.part.has-bg ? root.part.bg : transparent;
+    background: root.part.has-bg && root.part.shape-kind == "" ? root.part.bg : transparent;
     border-radius: root.part.round ? self.width / 2 : 0px;
     border-width: root.part.has-border ? 1px : 0px;
     border-color: #d0d0d0;
     clip: true;
     accessible-role: none;
 
-    Text {
+    if root.part.shape-kind == "rounded-rect" : Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: min(self.width, self.height) * 0.22;
+        background: root.part.bg;
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "line" : Rectangle {
+        x: 0px;
+        y: (parent.height - max(2px, parent.height * 0.14)) / 2;
+        width: parent.width;
+        height: max(2px, parent.height * 0.14);
+        background: root.part.bg;
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "arrow-right" : Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fill: root.part.bg;
+        MoveTo { x: 0; y: 32; }
+        LineTo { x: 65; y: 32; }
+        LineTo { x: 65; y: 12; }
+        LineTo { x: 100; y: 50; }
+        LineTo { x: 65; y: 88; }
+        LineTo { x: 65; y: 68; }
+        LineTo { x: 0; y: 68; }
+        Close {}
+        accessible-role: none;
+    }
+
+    if root.part.shape-kind == "callout" : Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fill: root.part.bg;
+        MoveTo { x: 6; y: 6; }
+        LineTo { x: 94; y: 6; }
+        LineTo { x: 94; y: 74; }
+        LineTo { x: 38; y: 74; }
+        LineTo { x: 20; y: 96; }
+        LineTo { x: 24; y: 74; }
+        LineTo { x: 6; y: 74; }
+        Close {}
+        accessible-role: none;
+    }
+
+    txt := Text {
         x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
         y: root.part.pad ? Theme.tokens.space.xs * root.text-scale : 0px;
         width: root.part.pad ? max(1px, parent.width - Theme.tokens.space.lg * 2 * root.text-scale)
@@ -118,5 +224,39 @@ export component ObjectPartView inherits Rectangle {
         wrap: root.part.wrap ? word-wrap : no-wrap;
         overflow: elide;
         accessible-role: none;
+    }
+
+    if root.part.has-image : Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.part.img;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    property <length> deco-w: min(txt.width, txt.preferred-width);
+    property <length> deco-x: root.part.align == 1 ? txt.x + (txt.width - self.deco-w) / 2
+        : root.part.align == 2 ? txt.x + txt.width - self.deco-w : txt.x;
+
+    if root.part.underline && root.part.text != "" : Rectangle {
+        x: root.deco-x;
+        y: txt.y + txt.height * 0.5 + (root.part.fs * root.slide-height / 562.5) * 0.55;
+        width: max(0px, root.deco-w);
+        height: max(1px, 1.2 * root.slide-height / 562.5);
+        background: root.part.ink == 1 ? DocumentInk.ink
+            : root.part.ink == 2 ? DocumentInk.muted
+            : root.part.ink == 3 ? DocumentInk.ink
+            : root.part.fg;
+    }
+
+    if root.part.strikethrough && root.part.text != "" : Rectangle {
+        x: root.deco-x;
+        y: txt.y + txt.height * 0.5;
+        width: max(0px, root.deco-w);
+        height: max(1px, 1.2 * root.slide-height / 562.5);
+        background: root.part.ink == 1 ? DocumentInk.ink
+            : root.part.ink == 2 ? DocumentInk.muted
+            : root.part.ink == 3 ? DocumentInk.ink
+            : root.part.fg;
     }
 }

@@ -7,9 +7,9 @@ use loom_desktop::{MenuBar, MenuItem};
 
 /// The File commands in display order, one group per line.
 const GROUPS: [&[&str]; 3] = [
-    &["file.new", "file.new_sample", "file.open"],
+    &["file.new", "file.new_sample", "file.start_hub", "file.open"],
     &["file.save", "file.save_as"],
-    &["file.export_pdf", "file.export_pptx"],
+    &["file.print_preview", "file.export_pdf", "file.export_pptx"],
 ];
 
 /// Regroups the File menu in place. Commands that are not in `GROUPS` (Exit)

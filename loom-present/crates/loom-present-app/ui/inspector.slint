@@ -4,183 +4,23 @@ import {
 import { Theme } from "theme.slint";
 import { PresentTableInspector } from "table_inspector.slint";
 import { ElementInk } from "object_part.slint";
+import { PresentFormatSection } from "format_section.slint";
+import { PresentArrangeSection } from "arrange_section.slint";
+import { PresentLayoutPicker } from "layout_picker.slint";
+import { PresentDocumentSection } from "document_section.slint";
 
-/// A keyboard-operable colour swatch; `ring` marks the chosen one.
-component StyleSwatch inherits Rectangle {
-    in property <color> swatch-color: transparent;
-    in property <bool> selected: false;
-    in property <bool> focus-target: false;
-    in property <int> slot: 0;
-    in property <string> swatch-label: "";
-    callback pick();
-    callback move-focus(int, int);
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    background: root.swatch-color;
-    border-width: focus.has-focus ? 2px : root.selected ? 2px : 1px;
-    border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().ink : Theme.palette().border;
-    accessible-role: button;
-    accessible-label: root.swatch-label;
-    accessible-checked: root.selected;
-    accessible-action-default => { root.pick(); }
-    focus := FocusScope {
-        key-pressed(event) => {
-            if (event.text == Key.Space || event.text == Key.Return) { root.pick(); return accept; }
-            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
-                let direction = event.text == Key.LeftArrow ? -1 : 1;
-                root.move-focus(root.slot, direction);
-                return accept;
-            }
-            return reject;
-        }
-    }
-    changed focus-target => { if (root.focus-target) { focus.focus(); } }
-    TouchArea { clicked => { focus.focus(); root.move-focus(root.slot, 0); root.pick(); } }
-}
-
-/// Seven palette colours and a reset swatch; right-to-left starts at the right edge.
-component StyleSwatchRow inherits HorizontalLayout {
-    in property <int> chosen: -1;
-    in property <string> kind-name: "Text colour";
-    in-out property <int> focus-slot: -1;
-    callback pick(int);
-    spacing: Theme.tokens.space.xs;
-    alignment: Theme.rtl ? end : start;
-    property <[string]> colour-names: ["Red", "Orange", "Green", "Blue", "Purple", "Gray", "Black"];
-    for slot in 8 : StyleSwatch {
-        property <int> k: Theme.rtl ? 7 - slot : slot;
-        swatch-color: k == 7 ? transparent : (k < ElementInk.palette.length ? ElementInk.palette[k] : transparent);
-        selected: root.chosen == (k == 7 ? -1 : k);
-        focus-target: root.focus-slot == k;
-        slot: k;
-        swatch-label: k == 7
-            ? (root.kind-name == "Fill" ? "Remove fill" : "Automatic text colour")
-            : root.kind-name + " " + root.colour-names[k];
-        pick => { root.pick(k); }
-        move-focus(from, direction) => {
-            let target = from + direction;
-            root.focus-slot = target < 0 ? 7 : target > 7 ? 0 : target;
-        }
-    }
-}
-
-/// Size, bold and italic in one row. Right-to-left starts from the right edge, so
-/// the row lists its controls in the opposite order there.
-component TextStyleRow inherits HorizontalLayout {
-    spacing: Theme.tokens.space.xs;
-    alignment: Theme.rtl ? end : start;
-    for slot in 5 : VerticalLayout {
-        property <int> k: Theme.rtl ? 4 - slot : slot;
-        if k == 0 : LoomButton {
-            label: "A-";
-            variant: "ghost";
-            accessible-name: "Decrease text size";
-            clicked => { ElementInk.requested("size", -1); }
-        }
-        if k == 1 : Text {
-            text: ElementInk.size-label;
-            min-width: 48px;
-            font-size: Theme.type.body;
-            color: Theme.palette().ink;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            accessible-role: AccessibleRole.text;
-            accessible-label: "Text size " + ElementInk.size-label;
-        }
-        if k == 2 : LoomButton {
-            label: "A+";
-            variant: "ghost";
-            accessible-name: "Increase text size";
-            clicked => { ElementInk.requested("size", 1); }
-        }
-        if k == 3 : LoomButton {
-            label: "B";
-            variant: ElementInk.bold ? "primary" : "ghost";
-            accessible-name: ElementInk.bold ? "Bold, on" : "Bold, off";
-            clicked => { ElementInk.requested("bold", 0); }
-        }
-        if k == 4 : LoomButton {
-            label: "I";
-            variant: ElementInk.italic ? "primary" : "ghost";
-            accessible-name: ElementInk.italic ? "Italic, on" : "Italic, off";
-            clicked => { ElementInk.requested("italic", 0); }
-        }
-    }
-}
-
-/// Two narrow number fields side by side; right-to-left lists them in the opposite
-/// order so the first field stays at the reading-start edge.
-component GeometryPair inherits HorizontalLayout {
-    in property <string> first-label;
-    in property <string> second-label;
-    in-out property <string> first-value;
-    in-out property <string> second-value;
-    callback accepted(int, string);
-    callback cancelled(int);
-    /// A field took keyboard focus; the window position and height of the field.
-    callback focus-moved(length, length);
-    spacing: Theme.tokens.space.xs;
-    for slot in 2 : VerticalLayout {
-        property <int> k: Theme.rtl ? 1 - slot : slot;
-        horizontal-stretch: 1;
-        if k == 0 : LoomTextField {
-            label: root.first-label;
-            field-min-width: 96px;
-            value <=> root.first-value;
-            accepted(text) => { root.accepted(0, text); }
-            cancelled => { root.cancelled(0); }
-            changed focused => { if (self.focused) { root.focus-moved(self.absolute-position.y, self.height); } }
-        }
-        if k == 1 : LoomTextField {
-            label: root.second-label;
-            field-min-width: 96px;
-            value <=> root.second-value;
-            accepted(text) => { root.accepted(1, text); }
-            cancelled => { root.cancelled(1); }
-            changed focused => { if (self.focused) { root.focus-moved(self.absolute-position.y, self.height); } }
-        }
-    }
-}
-
-component InspectorPropertyRow inherits Rectangle {
-    in property <string> label: "Property";
-    min-height: Theme.scaled-control-height;
-    VerticalLayout {
-        spacing: Theme.tokens.space.xs;
-        Text {
-            text: root.label;
-            font-size: Theme.type.caption;
-            font-weight: 500;
-            color: Theme.palette().ink-secondary;
-            horizontal-alignment: Theme.rtl ? right : left;
-            wrap: word-wrap;
-            horizontal-stretch: 1;
-        }
-        VerticalLayout {
-            horizontal-stretch: 1;
-            @children
-        }
-    }
-}
-
-/// A section heading on the controls' edge. The shared header insets its text to
-/// sit under a panel title (`space.xl`), but the inspector's controls start at the
-/// panel edge, so the header moves back by that inset. Its box grows by the same
-/// amount, so the text keeps its place at the reading end.
-component InspectorHeading inherits Rectangle {
-    in property <string> title: "Section";
-    height: Theme.tokens.metrics.panel-header-height;
-    LoomSectionHeader {
-        title: root.title;
-        x: Theme.rtl ? 0px : -Theme.tokens.space.xl;
-        width: parent.width + Theme.tokens.space.xl;
-    }
+component InspectorHeading inherits Text {
+    in property <string> title: "";
+    text: root.title;
+    font-size: Theme.type.caption;
+    font-weight: 700;
+    color: Theme.palette().ink-secondary;
+    horizontal-alignment: Theme.rtl ? right : left;
+    horizontal-stretch: 1;
 }
 
 export component PresentInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
-    /// Icon-only chrome: a narrower dock leaves more of the slide visible.
     in property <bool> compact: false;
     in-out property <int> active-template-index: 1;
     in-out property <int> transition-index: 0;
@@ -188,7 +28,6 @@ export component PresentInspector inherits LoomPanel {
     in property <bool> aspect-ratio-wide: true;
     in property <string> active-element-label: "No element selected";
     in property <string> active-element-content: "";
-    /// False for a picture: its content is image data, not text.
     in property <bool> content-editable: true;
     in property <int> active-element-index: 0;
     in property <int> element-count: 0;
@@ -211,11 +50,8 @@ export component PresentInspector inherits LoomPanel {
     callback set-table-style(string);
     callback toggle-table-option(string);
     callback table-action(string);
-    /// F6 or Shift+F6 pressed inside the inspector.
     callback region-key(bool);
 
-    /// Scroll the tab's content so a control at window height `y` is fully visible;
-    /// called when a control below the fold takes keyboard focus.
     function reveal(y: length, h: length) {
         let top = y - scroller.absolute-position.y;
         if (top < 0px) {
@@ -225,120 +61,92 @@ export component PresentInspector inherits LoomPanel {
         }
     }
 
-    /// Bumped by F6 to move keyboard focus to the Format / Animate / Document tabs.
     in property <int> focus-request: 0;
 
     accessible-role: groupbox;
     accessible-label: "Slide inspector";
     width: (root.compact ? 248px : 280px) * (1.0 + 0.7 * (max(1.0, Theme.text-scale) - 1.0));
 
-    // Keys from inside the inspector pass through this scope on their way up, so F6
-    // can move between the window's regions. It is not a Tab stop and takes no click.
-    inspector-region := FocusScope {
-        width: parent.width;
-        height: parent.height;
+    FocusScope {
+        width: 100%;
+        height: 100%;
         focus-on-tab-navigation: false;
         focus-on-click: false;
         key-pressed(event) => {
-            if (event.text == Key.F6) { root.region-key(event.modifiers.shift); return accept; }
+            if (event.text == Key.F6) {
+                root.region-key(event.modifiers.shift);
+                return accept;
+            }
             return reject;
         }
 
         VerticalLayout {
             width: parent.width;
             height: parent.height;
-            spacing: Theme.tokens.space.md;
-            padding: Theme.tokens.space.md;
-            alignment: start;
+            padding: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
 
-            // The tab's content scrolls inside the panel, so a long Format tab or a large
-            // text scale never grows the window's own layout.
             scroller := Flickable {
                 vertical-stretch: 1;
                 min-height: 0px;
+                max-height: 100000px;
                 viewport-width: self.width;
-                // The content keeps its natural height and scrolls; squeezing it into
-                // the panel would crush the spacing between sections.
-                viewport-height: max(self.height, tab-content.preferred-height);
+                viewport-height: max(self.height, content-col.preferred-height);
                 interactive: true;
 
-                tab-content := VerticalLayout {
+                content-col := VerticalLayout {
                     width: scroller.viewport-width;
                     height: max(scroller.height, self.preferred-height);
-                if root.inspector-tab == 0 : VerticalLayout {
-                    property <int> focus-request-tick: root.focus-request;
-                    changed focus-request-tick => {
-                        if (focus-request-tick > 0) { layout-template-control.grab-focus(); }
-                    }
-                    spacing: Theme.tokens.space.md;
+                    alignment: start;
+                    spacing: 2px;
 
-                    InspectorHeading { title: "Slide Layout"; }
-                    layout-template-control := LoomSegmentedControl {
-                        items: ["Title", "Content", "2 Col", "Image"];
-                        current <=> root.active-template-index;
-                        label: "Layout Template";
-                        selected(idx) => { root.apply-template(idx); }
-                    }
-
-                    if root.selection-count == 0 : Text {
-                        text: "Select an object to edit its position and style.";
-                        wrap: word-wrap;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        font-size: Theme.type.body;
-                        color: Theme.palette().ink-secondary;
-                    }
-                    if root.selection-count > 0 : InspectorHeading {
-                        title: root.selection-count > 1 ? "Selected Elements" : "Selected Element";
-                    }
-                    if root.selection-count > 0 : Rectangle {
-                        min-height: 48px * max(1.0, Theme.text-scale);
-                        border-radius: Theme.tokens.metrics.radius-small;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-                        background: Theme.palette().selection-soft;
-                        VerticalLayout {
-                            padding: Theme.tokens.space.sm;
-                            spacing: Theme.tokens.space.xs;
-                            Text {
-                                text: root.selection-count > 1
-                                    ? root.selection-count + " objects selected"
-                                    : root.active-element-label;
-                                font-size: Theme.type.body;
-                                font-weight: 600;
-                                color: Theme.palette().ink;
-                                horizontal-alignment: Theme.rtl ? right : left;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: root.selection-count > 1
-                                    ? "Style and colour apply to every selected object."
-                                    : root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
-                                font-size: Theme.type.micro;
-                                color: Theme.palette().ink-secondary;
-                                horizontal-alignment: Theme.rtl ? right : left;
-                                overflow: elide;
-                            }
+                    if root.inspector-tab == 0 : VerticalLayout {
+                        alignment: start;
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { layout-template-control.grab-focus(); }
                         }
-                    }
-
-                    if root.selection-count > 1 && root.content-editable : Text {
-                        text: "Select one object to edit its text content.";
-                        wrap: word-wrap;
-                        horizontal-alignment: Theme.rtl ? right : left;
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                    }
-                    if root.selection-count == 1 && root.content-editable : InspectorPropertyRow {
-                        label: "Content";
-                        Rectangle {
+                        spacing: Theme.tokens.space.xs;
+                        InspectorHeading { title: "Slide Layout"; }
+                        layout-template-control := LoomSegmentedControl {
+                            items: ["Title", "Content", "2 Col", "Image"];
+                            current <=> root.active-template-index;
+                            label: "Layout Template";
+                            selected(idx) => { root.apply-template(idx); }
+                        }
+                        if root.selection-count == 0 : Text {
+                            text: "Select an object to edit its position and style.";
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            font-size: Theme.type.body;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
+                        if root.selection-count > 1 : Text {
+                            text: root.selection-count + " objects selected";
+                            font-size: Theme.type.body;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count > 1 && root.content-editable : Text {
+                            text: "Select one object to edit its text content.";
+                            wrap: word-wrap;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 && root.content-editable : Rectangle {
                             height: Theme.scaled-control-height;
                             border-radius: Theme.tokens.metrics.radius-small;
                             border-width: 1px;
                             border-color: Theme.palette().border;
                             background: Theme.palette().surface-raised;
                             clip: true;
-                            // Sized to the field, not to its text: a long title must scroll inside
-                            // the field rather than push the caret off the panel.
                             HorizontalLayout {
                                 padding-left: Theme.tokens.space.sm;
                                 padding-right: Theme.tokens.space.sm;
@@ -356,161 +164,151 @@ export component PresentInspector inherits LoomPanel {
                                 }
                             }
                         }
-                    }
-
-                    if root.selection-count > 0 && ElementInk.available : InspectorHeading { title: "Text"; }
-                    if root.selection-count > 0 && ElementInk.available : TextStyleRow { }
-                    if root.selection-count > 0 && ElementInk.available : LoomTextField {
-                        label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
-                        title: ElementInk.font-family-mixed ? "Font family (mixed)" : "Font family";
-                        description: ElementInk.font-family-mixed
-                            ? "The selected objects use different font families. Type one to apply it to all of them."
-                            : "Type a font family such as Inter or Aptos. Leave empty to follow the theme.";
-                        placeholder: ElementInk.font-family-mixed ? "Mixed - type to apply" : "Theme font";
-                        field-min-width: 120px;
-                        value <=> ElementInk.font-family;
-                        accepted(text) => { ElementInk.font-requested(text); }
-                        cancelled => { ElementInk.font-cancelled(); }
-                        changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
-                    }
-                    if root.selection-count > 0 && ElementInk.available : LoomSegmentedControl {
-                        items: ["Left", "Center", "Right"];
-                        current: ElementInk.align;
-                        label: "Text alignment";
-                        selected(idx) => { ElementInk.requested("align", idx); }
-                    }
-                    if root.selection-count > 0 && ElementInk.available : InspectorPropertyRow {
-                        label: "Text colour";
-                        StyleSwatchRow { chosen: ElementInk.color-slot; kind-name: "Text colour"; pick(slot) => { ElementInk.requested("color", slot); } }
-                    }
-                    if root.selection-count > 0 && ElementInk.available : InspectorPropertyRow {
-                        label: "Fill";
-                        StyleSwatchRow { chosen: ElementInk.fill-slot; kind-name: "Fill"; pick(slot) => { ElementInk.requested("fill", slot); } }
-                    }
-
-                    if root.selection-count > 0 && root.is-table : PresentTableInspector {
-                        current-style-id <=> root.table-style-id;
-                        header-row <=> root.table-header-row;
-                        banded-rows <=> root.table-banded-rows;
-                        first-column <=> root.table-first-column;
-                        set-table-style(s) => { root.set-table-style(s); }
-                        toggle-table-option(o) => { root.toggle-table-option(o); }
-                        table-action(a) => { root.table-action(a); }
-                    }
-
-                    if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
-                    if root.selection-count > 1 : Text {
-                        text: "Select one object to edit its geometry.";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        wrap: word-wrap;
-                        horizontal-stretch: 1;
-                    }
-                    if root.selection-count == 1 : Text {
-                        text: "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg.";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        wrap: word-wrap;
-                        horizontal-stretch: 1;
-                    }
-                    if root.selection-count == 1 : InspectorPropertyRow {
-                        label: "Position (slide units)";
-                        GeometryPair {
-                            first-label: "X position";
-                            second-label: "Y position";
-                            first-value <=> ElementInk.x-text;
-                            second-value <=> ElementInk.y-text;
-                            accepted(which, text) => { ElementInk.geometry-requested(which == 0 ? "x" : "y", text); }
-                            cancelled(which) => { ElementInk.geometry-requested(which == 0 ? "x" : "y", ""); }
-                            focus-moved(y, h) => { root.reveal(y, h); }
+                        if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
+                        if root.is-table : PresentTableInspector {
+                            current-style-id: root.table-style-id;
+                            header-row: root.table-header-row;
+                            banded-rows: root.table-banded-rows;
+                            first-column: root.table-first-column;
+                            set-table-style(id) => { root.set-table-style(id); }
+                            toggle-table-option(opt) => { root.toggle-table-option(opt); }
+                            table-action(act) => { root.table-action(act); }
                         }
-                    }
-                    if root.selection-count == 1 : InspectorPropertyRow {
-                        label: "Size (slide units)";
-                        GeometryPair {
-                            first-label: "Width";
-                            second-label: "Height";
-                            first-value <=> ElementInk.w-text;
-                            second-value <=> ElementInk.h-text;
-                            accepted(which, text) => { ElementInk.geometry-requested(which == 0 ? "w" : "h", text); }
-                            cancelled(which) => { ElementInk.geometry-requested(which == 0 ? "w" : "h", ""); }
-                            focus-moved(y, h) => { root.reveal(y, h); }
+                        if root.selection-count > 0 : PresentArrangeSection {
+                            selection-count: root.selection-count;
                         }
-                    }
-                    if root.selection-count == 1 : InspectorPropertyRow {
-                        label: "Rotation (degrees)";
-                        LoomTextField {
+                        if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
+                        if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
+                        if root.selection-count > 1 : Text {
+                            text: "Select one object to edit its geometry.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 : Text {
+                            text: "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: self.text;
+                        }
+                        if root.selection-count == 1 : HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            for slot in 2 : VerticalLayout {
+                                property <int> k: Theme.rtl ? 1 - slot : slot;
+                                horizontal-stretch: 1;
+                                if k == 0 : LoomTextField {
+                                    label: "X position";
+                                    placeholder: "X";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.x-text;
+                                    accepted(v) => { ElementInk.geometry-requested("x", v); }
+                                    cancelled => { ElementInk.geometry-requested("x", ""); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                                if k == 1 : LoomTextField {
+                                    label: "Y position";
+                                    placeholder: "Y";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.y-text;
+                                    accepted(v) => { ElementInk.geometry-requested("y", v); }
+                                    cancelled => { ElementInk.geometry-requested("y", ""); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                            }
+                        }
+                        if root.selection-count == 1 : HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            for slot in 2 : VerticalLayout {
+                                property <int> k: Theme.rtl ? 1 - slot : slot;
+                                horizontal-stretch: 1;
+                                if k == 0 : LoomTextField {
+                                    label: "Width";
+                                    placeholder: "W";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.w-text;
+                                    accepted(v) => { ElementInk.geometry-requested("w", v); }
+                                    cancelled => { ElementInk.geometry-requested("w", ""); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                                if k == 1 : LoomTextField {
+                                    label: "Height";
+                                    placeholder: "H";
+                                    field-min-width: 96px;
+                                    value <=> ElementInk.h-text;
+                                    accepted(v) => { ElementInk.geometry-requested("h", v); }
+                                    cancelled => { ElementInk.geometry-requested("h", ""); }
+                                    changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                                }
+                            }
+                        }
+                        if root.selection-count == 1 : LoomTextField {
                             label: "Rotation";
+                            placeholder: "0°";
                             field-min-width: 96px;
                             value <=> ElementInk.rot-text;
-                            accepted(text) => { ElementInk.geometry-requested("rot", text); }
+                            accepted(v) => { ElementInk.geometry-requested("rot", v); }
                             cancelled => { ElementInk.geometry-requested("rot", ""); }
                             changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                         }
+                        if root.selection-count == 0 : PresentLayoutPicker { }
                     }
-                }
 
-                if root.inspector-tab == 1 : VerticalLayout {
-                    property <int> focus-request-tick: root.focus-request;
-                    changed focus-request-tick => {
-                        if (focus-request-tick > 0) { transition-type-control.grab-focus(); }
-                    }
-                    spacing: Theme.tokens.space.md;
-                    InspectorHeading { title: "Slide Transition"; }
-                    transition-type-control := LoomSegmentedControl {
-                        items: ["None", "Dissolve", "Push"];
-                        current <=> root.transition-index;
-                        label: "Transition Type";
-                        selected(idx) => { root.set-transition(idx); }
-                    }
-                    if root.transition-index == 3 : Text {
-                        text: "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it.";
-                        font-size: Theme.type.caption;
-                        color: Theme.palette().ink-secondary;
-                        wrap: word-wrap;
-                        horizontal-stretch: 1;
-                    }
-                }
-
-                if root.inspector-tab == 2 : VerticalLayout {
-                    property <int> focus-request-tick: root.focus-request;
-                    changed focus-request-tick => {
-                        if (focus-request-tick > 0) { new-presentation-template.grab-focus(); }
-                    }
-                    spacing: Theme.tokens.space.md;
-                    InspectorHeading { title: "New Presentation"; }
-                    new-presentation-template := LoomButton {
-                        icon: "format";
-                        label: "New from Template...";
-                        variant: "secondary";
-                        clicked => { root.open-theme-chooser(); }
-                    }
-                    InspectorHeading { title: "Slide Size"; }
-                    InspectorPropertyRow {
-                        label: "Aspect ratio";
-                        Text {
-                            text: root.aspect-ratio-wide ? "16:9 Wide" : "4:3 Standard";
-                            font-size: Theme.type.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            vertical-alignment: center;
+                    if root.inspector-tab == 1 : VerticalLayout {
+                        alignment: start;
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { transition-type-control.grab-focus(); }
+                        }
+                        spacing: Theme.tokens.space.sm;
+                        LoomSectionHeader { title: "Slide Transition"; }
+                        transition-type-control := LoomSegmentedControl {
+                            items: ["None", "Dissolve", "Push"];
+                            current <=> root.transition-index;
+                            label: "Transition Type";
+                            selected(idx) => { root.set-transition(idx); }
+                        }
+                        if root.transition-index == 3 : Text {
+                            text: "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it.";
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                     }
-                    InspectorHeading { title: "Deck Information"; }
-                    InspectorPropertyRow {
-                        label: "Slides";
+
+                    if root.inspector-tab == 2 : VerticalLayout {
+                        alignment: start;
+                        property <int> focus-request-tick: root.focus-request;
+                        changed focus-request-tick => {
+                            if (focus-request-tick > 0) { new-presentation-template.grab-focus(); }
+                        }
+                        spacing: Theme.tokens.space.md;
+                        PresentDocumentSection {
+                            deck-theme-index: ElementInk.deck-theme-index;
+                            deck-theme-selected(idx) => { ElementInk.theme-preset-requested(idx); }
+                        }
+                        new-presentation-template := LoomButton {
+                            icon: "format";
+                            label: "New from Template...";
+                            variant: "secondary";
+                            clicked => { root.open-theme-chooser(); }
+                        }
                         Text {
                             text: root.slide-count-text;
-                            font-size: Theme.type.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: Theme.rtl ? right : left;
-                            vertical-alignment: center;
+                            font-size: Theme.type.caption;
+                            color: Theme.palette().ink-secondary;
                         }
                     }
                 }
-                }
             }
-
         }
     }
 }

@@ -411,9 +411,20 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     let s = launched();
     let page = focus_weak(&s.app);
     let menus = labels(&s.app);
-    assert_eq!(menus, ["File", "Edit", "View", "Slide"]);
+    assert_eq!(
+        menus,
+        ["File", "Edit", "View", "Insert", "Slide", "Format", "Arrange", "Help"]
+    );
 
-    for (index, letter) in ["f", "e", "v", "s"].iter().enumerate() {
+    for (index, letter) in [
+        (0, "f"),
+        (1, "e"),
+        (2, "v"),
+        (3, "i"),
+        (4, "s"),
+        (6, "a"),
+        (7, "h"),
+    ] {
         alt(&s.app, letter);
         assert_eq!(
             s.app.get_local_menu_open_index(),
@@ -446,7 +457,7 @@ fn alt_letters_open_every_menu_and_arrows_walk_them() {
     press(&s.app, Key::LeftArrow);
     assert_eq!(
         s.app.get_local_menu_open_index(),
-        3,
+        7,
         "Left wraps to the last menu"
     );
     press(&s.app, Key::Escape);
@@ -652,7 +663,7 @@ fn a_typed_letter_closes_an_open_menu_instead_of_going_into_it() {
     alt(&s.app, "s");
     assert_eq!(
         s.app.get_local_menu_open_index(),
-        3,
+        4,
         "the Slide menu is open"
     );
     tap(&s.app, "x");
@@ -1602,7 +1613,10 @@ fn tab_order_is_logical_named_visible_and_free_of_traps() {
                 .map(|(_, group)| group.iter().map(|st| st.name.clone()).collect())
                 .unwrap_or_default()
         };
-        assert_eq!(names(Part::Menu), ["File", "Edit", "View", "Slide"]);
+        assert_eq!(
+            names(Part::Menu),
+            ["File", "Edit", "View", "Insert", "Slide", "Format", "Arrange", "Help"]
+        );
         assert_eq!(
             names(Part::Toolbar),
             [

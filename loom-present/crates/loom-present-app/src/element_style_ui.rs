@@ -7,11 +7,49 @@ use loom_present_core::{ElementStyle, PresentationSession, TextAlign, PALETTE};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::object_parts::{color, look};
-use crate::{refresh, set_status, ElementInk, GuiState, PresentApp};
+use crate::{refresh, set_status, ElementInk, GuiState, LoomColorSwatch, PresentApp};
+use loom_ui::color_palette::{
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+};
 
 fn slot_of(hex: Option<&str>) -> i32 {
     hex.and_then(|hex| PALETTE.iter().position(|p| p.eq_ignore_ascii_case(hex)))
         .map_or(-1, |slot| slot as i32)
+}
+
+fn publish_color_well(
+    hex: Option<&str>,
+    mixed: bool,
+    auto_label: &str,
+    default_rgb: u32,
+) -> (String, bool, bool, String, slint::Color) {
+    if mixed {
+        return (
+            String::new(),
+            false,
+            true,
+            "Mixed".to_string(),
+            color_from_rgb(default_rgb),
+        );
+    }
+    let Some(raw) = hex.filter(|s| !s.is_empty()) else {
+        return (
+            String::new(),
+            true,
+            false,
+            auto_label.to_string(),
+            color_from_rgb(default_rgb),
+        );
+    };
+    if let Some(rgb) = parse_hex_rgb(raw) {
+        let formatted = format_hex_rgb(rgb);
+        let label = swatch_name_for_rgb(rgb)
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| formatted.clone());
+        (formatted, false, false, label, color_from_rgb(rgb))
+    } else {
+        (raw.to_string(), false, false, raw.to_string(), color(raw))
+    }
 }
 
 /// Show the active object's style in the inspector; hide the controls when it
@@ -31,26 +69,151 @@ pub(crate) fn publish(
     ink.set_size_label(format!("{:.0} pt", active_look.size_pt).into());
     ink.set_bold(active_look.bold);
     ink.set_italic(active_look.italic);
+    let eff_underline = if element.runs.is_empty() {
+        element.style.underline
+    } else {
+        element
+            .runs
+            .iter()
+            .any(|r| r.underline.unwrap_or(element.style.underline))
+    };
+    let eff_strikethrough = if element.runs.is_empty() {
+        element.style.strikethrough
+    } else {
+        element
+            .runs
+            .iter()
+            .any(|r| r.strikethrough.unwrap_or(element.style.strikethrough))
+    };
+    ink.set_underline(eff_underline);
+    ink.set_strikethrough(eff_strikethrough);
     ink.set_align(active_look.align);
     ink.set_color_slot(slot_of(element.style.color.as_deref()));
     ink.set_fill_slot(slot_of(element.style.fill.as_deref()));
+
+    // Compute mixed-value flags across all selected styleable elements
+    let selected_looks: Vec<(
+        &loom_present_core::SlideElement,
+        crate::object_parts::TextLook,
+    )> = session
+        .document
+        .active_slide()
+        .map(|slide| {
+            slide
+                .elements
+                .iter()
+                .filter(|c| session.selected_elements.contains(&c.id))
+                .filter_map(|c| Some((c, look(c)?)))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let size_mixed = selected_looks.split_first().is_some_and(|(f, rest)| {
+        rest.iter()
+            .any(|(_, l)| (l.size_pt - f.1.size_pt).abs() > 0.1)
+    });
+    let bold_mixed = selected_looks
+        .split_first()
+        .is_some_and(|(f, rest)| rest.iter().any(|(_, l)| l.bold != f.1.bold));
+    let italic_mixed = selected_looks
+        .split_first()
+        .is_some_and(|(f, rest)| rest.iter().any(|(_, l)| l.italic != f.1.italic));
+    let underline_mixed = selected_looks.split_first().is_some_and(|(f, rest)| {
+        let first_u = if f.0.runs.is_empty() {
+            f.0.style.underline
+        } else {
+            f.0.runs
+                .iter()
+                .any(|r| r.underline.unwrap_or(f.0.style.underline))
+        };
+        let within_runs = !f.0.runs.is_empty()
+            && f.0
+                .runs
+                .iter()
+                .any(|r| r.underline.unwrap_or(f.0.style.underline) != first_u);
+        within_runs
+            || rest.iter().any(|(e, _)| {
+                let u = if e.runs.is_empty() {
+                    e.style.underline
+                } else {
+                    e.runs
+                        .iter()
+                        .any(|r| r.underline.unwrap_or(e.style.underline))
+                };
+                u != first_u
+            })
+    });
+    let strikethrough_mixed = selected_looks.split_first().is_some_and(|(f, rest)| {
+        let first_s = if f.0.runs.is_empty() {
+            f.0.style.strikethrough
+        } else {
+            f.0.runs
+                .iter()
+                .any(|r| r.strikethrough.unwrap_or(f.0.style.strikethrough))
+        };
+        let within_runs = !f.0.runs.is_empty()
+            && f.0
+                .runs
+                .iter()
+                .any(|r| r.strikethrough.unwrap_or(f.0.style.strikethrough) != first_s);
+        within_runs
+            || rest.iter().any(|(e, _)| {
+                let s = if e.runs.is_empty() {
+                    e.style.strikethrough
+                } else {
+                    e.runs
+                        .iter()
+                        .any(|r| r.strikethrough.unwrap_or(e.style.strikethrough))
+                };
+                s != first_s
+            })
+    });
+    let align_mixed = selected_looks
+        .split_first()
+        .is_some_and(|(f, rest)| rest.iter().any(|(_, l)| l.align != f.1.align));
+    let text_color_mixed = selected_looks
+        .split_first()
+        .is_some_and(|(f, rest)| rest.iter().any(|(e, _)| e.style.color != f.0.style.color));
+    let fill_color_mixed = selected_looks
+        .split_first()
+        .is_some_and(|(f, rest)| rest.iter().any(|(e, _)| e.style.fill != f.0.style.fill));
+
+    ink.set_size_mixed(size_mixed);
+    ink.set_bold_mixed(bold_mixed);
+    ink.set_italic_mixed(italic_mixed);
+    ink.set_underline_mixed(underline_mixed);
+    ink.set_strikethrough_mixed(strikethrough_mixed);
+    ink.set_align_mixed(align_mixed);
+
+    let (t_hex, t_auto, t_mix, t_lbl, t_sw) = publish_color_well(
+        element.style.color.as_deref(),
+        text_color_mixed,
+        "Automatic",
+        0x1D1D1F,
+    );
+    ink.set_text_color_hex(t_hex.into());
+    ink.set_text_color_automatic(t_auto);
+    ink.set_text_color_mixed(t_mix);
+    ink.set_text_color_label(t_lbl.into());
+    ink.set_text_color_swatch(t_sw);
+
+    let (f_hex, f_auto, f_mix, f_lbl, f_sw) = publish_color_well(
+        element.style.fill.as_deref(),
+        fill_color_mixed,
+        "No fill",
+        0xE6F0FC,
+    );
+    ink.set_fill_color_hex(f_hex.into());
+    ink.set_fill_color_automatic(f_auto);
+    ink.set_fill_color_mixed(f_mix);
+    ink.set_fill_color_label(f_lbl.into());
+    ink.set_fill_color_swatch(f_sw);
+
     let (family, mixed) = session
         .document
         .active_slide()
         .map(|slide| {
-            let families: Vec<Option<String>> = slide
-                .elements
-                .iter()
-                .filter(|candidate| session.selected_elements.contains(&candidate.id))
-                .filter(|candidate| look(candidate).is_some())
-                .map(|candidate| {
-                    candidate
-                        .style
-                        .font_family
-                        .as_deref()
-                        .and_then(|name| loom_present_core::normalize_font_family(name).ok())
-                })
-                .collect();
+            let (_, families) = selection_font_families(slide, &session.selected_elements);
             match families.split_first() {
                 Some((first, rest)) => {
                     let mixed = rest.iter().any(|family| family != first);
@@ -67,8 +230,60 @@ pub(crate) fn publish(
             }
         })
         .unwrap_or_default();
-    ink.set_font_family(family.into());
+    ink.set_font_family(family.clone().into());
     ink.set_font_family_mixed(mixed);
+    crate::font_picker::publish_current(
+        app,
+        if family.is_empty() {
+            None
+        } else {
+            Some(family.as_str())
+        },
+        mixed,
+    );
+}
+
+/// Publish document-level properties (slide background, aspect ratio, deck stats,
+/// active layout, and deck theme preset) regardless of element selection.
+pub(crate) fn publish_document(app: &PresentApp, session: &PresentationSession) {
+    let ink = app.global::<ElementInk>();
+    let bg_hex_opt = session
+        .document
+        .active_slide()
+        .map(|s| s.bg_color.as_str())
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("#ffffff"));
+    let (b_hex, b_auto, b_mix, b_lbl, b_sw) =
+        publish_color_well(bg_hex_opt, false, "Theme paper", 0xFFFFFF);
+    ink.set_bg_color_hex(b_hex.into());
+    ink.set_bg_color_automatic(b_auto);
+    ink.set_bg_color_mixed(b_mix);
+    ink.set_bg_color_label(b_lbl.into());
+    ink.set_bg_color_swatch(b_sw);
+
+    let wide = session.document.aspect_ratio_wide;
+    app.set_aspect_ratio_wide(wide);
+    ink.set_aspect_ratio(if wide { "16:9" } else { "4:3" }.into());
+    ink.set_deck_stats(format!("{} slide(s)", session.document.slides.len()).into());
+    let active_layout = session
+        .document
+        .active_slide()
+        .map(|s| s.layout.as_str())
+        .unwrap_or("content");
+    ink.set_active_layout(active_layout.into());
+    let theme_idx = session
+        .document
+        .active_slide()
+        .map(|s| {
+            if s.bg_color.eq_ignore_ascii_case("#0F172A") {
+                1
+            } else if s.bg_color.eq_ignore_ascii_case("#FAF7F2") {
+                2
+            } else {
+                0
+            }
+        })
+        .unwrap_or(0);
+    ink.set_deck_theme_index(theme_idx);
 }
 
 pub(crate) fn clear(app: &PresentApp) {
@@ -196,18 +411,76 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
         "size" => {
             let next = ElementStyle::stepped_size(size, value);
             (
-                session.restyle_elements(&ids, |style| style.font_size_pt = Some(next)),
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.font_size_pt = Some(next),
+                    |run| run.font_size_pt = Some(next),
+                ),
                 format!("Text size {next:.0} pt"),
             )
         }
         "bold" => (
-            session.restyle_elements(&ids, |style| style.bold = Some(!bold)),
+            session.restyle_elements_and_runs(
+                &ids,
+                |style| style.bold = Some(!bold),
+                |run| run.bold = Some(!bold),
+            ),
             format!("Bold {}", if bold { "off" } else { "on" }),
         ),
         "italic" => (
-            session.restyle_elements(&ids, |style| style.italic = !italic),
+            session.restyle_elements_and_runs(
+                &ids,
+                |style| style.italic = !italic,
+                |run| run.italic = Some(!italic),
+            ),
             format!("Italic {}", if italic { "off" } else { "on" }),
         ),
+        "underline" => {
+            let current = slide
+                .elements
+                .iter()
+                .find(|e| e.id == ids[0])
+                .is_some_and(|e| {
+                    if e.runs.is_empty() {
+                        e.style.underline
+                    } else {
+                        e.runs
+                            .iter()
+                            .any(|r| r.underline.unwrap_or(e.style.underline))
+                    }
+                });
+            (
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.underline = !current,
+                    |run| run.underline = Some(!current),
+                ),
+                format!("Underline {}", if current { "off" } else { "on" }),
+            )
+        }
+        "strikethrough" => {
+            let current = slide
+                .elements
+                .iter()
+                .find(|e| e.id == ids[0])
+                .is_some_and(|e| {
+                    if e.runs.is_empty() {
+                        e.style.strikethrough
+                    } else {
+                        e.runs
+                            .iter()
+                            .any(|r| r.strikethrough.unwrap_or(e.style.strikethrough))
+                    }
+                });
+            (
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.strikethrough = !current,
+                    |run| run.strikethrough = Some(!current),
+                ),
+                format!("Strikethrough {}", if current { "off" } else { "on" }),
+            )
+        }
         "align" => {
             let align = match value {
                 0 => TextAlign::Left,
@@ -222,7 +495,11 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
         "color" => {
             let hex = slot.map(|hex| (*hex).to_string());
             (
-                session.restyle_elements(&ids, |style| style.color = hex.clone()),
+                session.restyle_elements_and_runs(
+                    &ids,
+                    |style| style.color = hex.clone(),
+                    |run| run.color = hex.clone(),
+                ),
                 if slot.is_some() {
                     "Text colour set"
                 } else {
@@ -248,48 +525,76 @@ pub(crate) fn apply(state: &GuiState, kind: &str, value: i32) -> Option<String> 
     changed.then_some(words)
 }
 
+fn selection_font_families(
+    slide: &loom_present_core::Slide,
+    selected_ids: &[String],
+) -> (Vec<String>, Vec<Option<String>>) {
+    let mut ids = Vec::new();
+    let mut families = Vec::new();
+    for element in &slide.elements {
+        if !selected_ids.contains(&element.id) || look(element).is_none() {
+            continue;
+        }
+        ids.push(element.id.clone());
+        let elem_family = element
+            .style
+            .font_family
+            .as_deref()
+            .and_then(|name| loom_present_core::normalize_font_family(name).ok());
+        if element.runs.is_empty() {
+            families.push(elem_family);
+        } else {
+            for run in &element.runs {
+                let run_family = run
+                    .font_family
+                    .as_deref()
+                    .and_then(|name| loom_present_core::normalize_font_family(name).ok())
+                    .or_else(|| elem_family.clone());
+                families.push(run_family);
+            }
+        }
+    }
+    (ids, families)
+}
+
 /// Apply a font family name, or the theme's face when the field is empty, to
 /// every selected text object and shape as one undo step. In a mixed selection
 /// the field is empty because the objects disagree; submitting that empty field
 /// is a no-op rather than wiping every family.
 pub(crate) fn apply_font(state: &GuiState, text: &str) -> Result<Option<String>, String> {
+    apply_font_with_reset(state, text, false)
+}
+
+pub(crate) fn apply_font_with_reset(
+    state: &GuiState,
+    text: &str,
+    allow_mixed_reset: bool,
+) -> Result<Option<String>, String> {
     let family = if text.trim().is_empty() {
         None
     } else {
         Some(loom_present_core::normalize_font_family(text)?)
     };
     let mut session = state.session.borrow_mut();
-    let selected: Vec<(String, Option<String>)> = session
+    let (ids, families) = session
         .document
         .active_slide()
-        .map(|slide| {
-            slide
-                .elements
-                .iter()
-                .filter(|element| session.selected_elements.contains(&element.id))
-                .filter(|element| look(element).is_some())
-                .map(|element| {
-                    let family = element
-                        .style
-                        .font_family
-                        .as_deref()
-                        .and_then(|name| loom_present_core::normalize_font_family(name).ok());
-                    (element.id.clone(), family)
-                })
-                .collect()
-        })
+        .map(|slide| selection_font_families(slide, &session.selected_elements))
         .unwrap_or_default();
-    let mixed = selected
+    let mixed = families
         .split_first()
-        .is_some_and(|(first, rest)| rest.iter().any(|(_, family)| family != &first.1));
-    if family.is_none() && mixed {
+        .is_some_and(|(first, rest)| rest.iter().any(|candidate| candidate != first));
+    if family.is_none() && mixed && !allow_mixed_reset {
         return Ok(None);
     }
-    let ids: Vec<String> = selected.into_iter().map(|(id, _)| id).collect();
     if ids.is_empty() {
         return Ok(None);
     }
-    let changed = session.restyle_elements(&ids, |style| style.font_family = family.clone());
+    let changed = session.restyle_elements_and_runs(
+        &ids,
+        |style| style.font_family = family.clone(),
+        |run| run.font_family = family.clone(),
+    );
     Ok(changed.then(|| match family {
         Some(family) => format!("Font family {family}"),
         None => "Font family follows the theme".to_string(),
@@ -308,6 +613,165 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
     ink.set_palette(ModelRc::new(VecModel::from(
         PALETTE.iter().map(|hex| color(hex)).collect::<Vec<_>>(),
     )));
+    ink.set_color_swatches(ModelRc::new(VecModel::from(
+        OFFICE_SWATCHES
+            .iter()
+            .map(|swatch| LoomColorSwatch {
+                swatch: color_from_rgb(swatch.rgb),
+                hex: swatch.hex.into(),
+                name: swatch.name.into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
+    {
+        let app_ref = app.as_weak();
+        ink.on_color_toggled(move |kind| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let ink = app.global::<ElementInk>();
+            let cur = ink.get_active_palette();
+            if cur == kind {
+                ink.set_active_palette("".into());
+            } else {
+                ink.set_active_palette(kind);
+                ink.set_hex_error("".into());
+            }
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_arrange_requested(move |action| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut session = state.session.borrow_mut();
+            let changed = match action.as_str() {
+                "front" => session.bring_to_front(),
+                "forward" => session.bring_forward(),
+                "backward" => session.send_backward(),
+                "back" => session.send_to_back(),
+                "align-left" => session.align_selected(loom_present_core::arrange::AlignMode::Left),
+                "align-center" => {
+                    session.align_selected(loom_present_core::arrange::AlignMode::Center)
+                }
+                "align-right" => {
+                    session.align_selected(loom_present_core::arrange::AlignMode::Right)
+                }
+                "align-top" => session.align_selected(loom_present_core::arrange::AlignMode::Top),
+                "align-middle" => {
+                    session.align_selected(loom_present_core::arrange::AlignMode::Middle)
+                }
+                "align-bottom" => {
+                    session.align_selected(loom_present_core::arrange::AlignMode::Bottom)
+                }
+                "dist-h" => session
+                    .distribute_selected(loom_present_core::arrange::DistributeAxis::Horizontal),
+                "dist-v" => session
+                    .distribute_selected(loom_present_core::arrange::DistributeAxis::Vertical),
+                "rot-ccw" => session.rotate_selected_by(-90.0),
+                "rot-cw" => session.rotate_selected_by(90.0),
+                _ => false,
+            };
+            drop(session);
+            if changed {
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_layout_picked(move |layout| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut session = state.session.borrow_mut();
+            session.checkpoint();
+            if let Some(slide) = session.document.active_slide_mut() {
+                crate::slide_layouts::apply_layout(slide, layout.as_str());
+            }
+            drop(session);
+            refresh(&app, &state);
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_aspect_requested(move |ratio| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let wide = ratio.as_str() != "4:3";
+            state.session.borrow_mut().set_aspect_ratio_wide(wide);
+            app.set_aspect_ratio_wide(wide);
+            refresh(&app, &state);
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_theme_preset_requested(move |idx| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let theme_id = match idx {
+                1 => "executive-pitch",
+                2 => "editorial-portfolio",
+                _ => "blank",
+            };
+            let changed = {
+                let mut session = state.session.borrow_mut();
+                loom_present_core::templates::apply_theme_preset(&mut session, theme_id).is_ok()
+            };
+            if changed {
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let (state, app_ref) = (state.clone(), app.as_weak());
+        ink.on_color_picked(move |kind, hex| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let hex_val = if hex.is_empty() {
+                None
+            } else {
+                Some(hex.to_string())
+            };
+            let mut session = state.session.borrow_mut();
+            let changed = match kind.as_str() {
+                "text" => {
+                    let ids: Vec<String> = session.selected_elements.clone();
+                    session.restyle_elements_and_runs(
+                        &ids,
+                        |s| s.color = hex_val.clone(),
+                        |r| r.color = hex_val.clone(),
+                    )
+                }
+                "fill" => {
+                    let ids: Vec<String> = session.selected_elements.clone();
+                    session.restyle_elements(&ids, |s| s.fill = hex_val.clone())
+                }
+                "bg" => session.set_slide_background(hex_val.as_deref().unwrap_or("#ffffff")),
+                _ => false,
+            };
+            drop(session);
+            app.global::<ElementInk>().set_active_palette("".into());
+            if changed {
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        ink.on_hex_edited(move |_val| {
+            if let Some(app) = app_ref.upgrade() {
+                app.global::<ElementInk>().set_hex_error("".into());
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        ink.on_hex_submitted(move |kind, val| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let trimmed = val.trim().trim_start_matches('#');
+            if trimmed.len() == 6 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+                let normalized = format!("#{}", trimmed.to_ascii_uppercase());
+                app.global::<ElementInk>()
+                    .invoke_color_picked(kind, normalized.into());
+            } else {
+                app.global::<ElementInk>()
+                    .set_hex_error("Enter #RRGGBB".into());
+            }
+        });
+    }
     {
         let (state, app_ref) = (state.clone(), app.as_weak());
         ink.on_geometry_requested(move |field, text| {

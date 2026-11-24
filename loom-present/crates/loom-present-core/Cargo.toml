@@ -11,6 +11,7 @@ loom-package.workspace = true
 loom-command.workspace = true
 loom-pdf.workspace = true
 loom-objects.workspace = true
+loom-fonts.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

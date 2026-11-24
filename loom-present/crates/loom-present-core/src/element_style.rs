@@ -33,6 +33,10 @@ pub struct ElementStyle {
     pub bold: Option<bool>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub italic: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub underline: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strikethrough: bool,
     /// Text colour as `#RRGGBB`; `None` follows the element type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -127,6 +131,50 @@ impl ElementStyle {
 impl PresentationSession {
     /// Changes the style of the given elements on the active slide as one
     /// undoable step. Returns false, with no history entry, when nothing changed.
+    pub fn restyle_elements_and_runs(
+        &mut self,
+        element_ids: &[String],
+        change_style: impl Fn(&mut ElementStyle),
+        change_run: impl Fn(&mut crate::StyledTextRun),
+    ) -> bool {
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        let changes = slide
+            .elements
+            .iter()
+            .filter(|element| element_ids.contains(&element.id))
+            .any(|element| {
+                let mut next_style = element.style.clone();
+                change_style(&mut next_style);
+                if next_style != element.style {
+                    return true;
+                }
+                element.runs.iter().any(|run| {
+                    let mut next_run = run.clone();
+                    change_run(&mut next_run);
+                    next_run != *run
+                })
+            });
+        if !changes {
+            return false;
+        }
+        self.checkpoint();
+        if let Some(slide) = self.document.active_slide_mut() {
+            for element in slide
+                .elements
+                .iter_mut()
+                .filter(|element| element_ids.contains(&element.id))
+            {
+                change_style(&mut element.style);
+                for run in &mut element.runs {
+                    change_run(run);
+                }
+            }
+        }
+        true
+    }
+
     pub fn restyle_elements(
         &mut self,
         element_ids: &[String],
@@ -289,6 +337,7 @@ mod tests {
             rotation_deg: 0.0,
             action: None,
             style,
+            runs: Vec::new(),
         }
     }
 
@@ -298,6 +347,8 @@ mod tests {
             font_size_pt: Some(40.0),
             bold: Some(false),
             italic: true,
+            underline: false,
+            strikethrough: false,
             color: Some("#1565C0".into()),
             fill: Some("#E65100".into()),
             align: Some(TextAlign::Right),

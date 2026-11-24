@@ -5,6 +5,12 @@
 )]
 
 #[cfg(test)]
+use command_dispatch::{dispatch_command, dispatch_scheduled_menu_action, is_present_menu_command};
+#[cfg(test)]
+use local_menu::build_present_menu_bar;
+#[cfg(test)]
+use loom_desktop::{DesktopError, MenuItem};
+#[cfg(test)]
 use menu_models::menu_projection;
 use menu_models::sync_menu_state;
 use model_sync::synced;
@@ -13,8 +19,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    build_standard_menu_bar, CommandAction, DesktopError, FileDialogService, FileFilter, Menu,
-    MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs, NativeMenuBar,
+    CommandAction, FileDialogService, FileFilter, MenuBarService, NativeFileDialogs, NativeMenuBar,
     OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
@@ -225,6 +230,7 @@ fn text_element(
     height: f32,
 ) -> SlideElement {
     SlideElement {
+        runs: Vec::new(),
         id: id.into(),
         element_type: kind,
         content: content.into(),
@@ -428,8 +434,13 @@ enum PendingReplacement {
     /// A new deck from the template chooser; the number is the card picked.
     NewFromTemplate(i32),
     OpenDeck,
+    OpenRecentDeck,
     /// Closing the window with unsaved changes.
     CloseWindow,
+}
+
+thread_local! {
+    pub(crate) static PENDING_RECENT_PATH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 struct GuiState {
@@ -475,6 +486,10 @@ pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
         ElementType::Picture => 6,
         ElementType::Table => 7,
         ElementType::Chart => 8,
+        ElementType::ShapeRoundedRect => 9,
+        ElementType::ShapeArrowRight => 10,
+        ElementType::ShapeLine => 11,
+        ElementType::ShapeCallout => 12,
     }
 }
 
@@ -661,6 +676,10 @@ fn element_type_name(kind: &ElementType) -> &'static str {
         ElementType::Picture => "Picture",
         ElementType::Table => "Table",
         ElementType::Chart => "Chart",
+        ElementType::ShapeRoundedRect => "Rounded rectangle",
+        ElementType::ShapeArrowRight => "Arrow",
+        ElementType::ShapeLine => "Line",
+        ElementType::ShapeCallout => "Callout",
     }
 }
 
@@ -889,6 +908,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_height_text("—".into());
             app.set_element_rotation_text("—".into());
         }
+        element_style_ui::publish_document(app, &session);
         app.set_transition_index(match session.transition_for(&slide.id) {
             TransitionKind::None => 0,
             TransitionKind::Dissolve => 1,
@@ -1019,6 +1039,7 @@ fn wire_responsive_layout_with_state(app: &PresentApp, state: Rc<GuiState>) {
 
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     window_chrome::install(&app);
     configure_direction(&app, args.rtl);
@@ -1137,7 +1158,8 @@ fn replace_opened_deck(
     *state.last_saved.borrow_mut() = session.document.clone();
     *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
     *state.session.borrow_mut() = session;
-    *state.save_path.borrow_mut() = Some(path);
+    *state.save_path.borrow_mut() = Some(path.clone());
+    start_hub::record_recent(&path);
     state.selected_element.set(0);
     refresh(app, state);
 }
@@ -1234,9 +1256,7 @@ fn replace_with_template(app: &PresentApp, state: &GuiState, choice: i32) {
     *state.save_path.borrow_mut() = None;
     state.selected_element.set(0);
     refresh(app, state);
-    let name = slide_layouts::TEMPLATE_NAMES
-        .get(choice.max(0) as usize)
-        .unwrap_or(&slide_layouts::TEMPLATE_NAMES[0]);
+    let name = slide_layouts::template_name(choice);
     set_status(
         app,
         format!("Created unsaved presentation from the {name} template"),
@@ -1262,53 +1282,7 @@ fn replace_with_sample_deck(app: &PresentApp, state: &GuiState) {
 fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
-            if pptx_import::is_pptx_path(&path) {
-                match pptx_import::prepare(&path) {
-                    Ok(candidate) if !candidate.warnings.is_empty() => {
-                        app.set_pptx_import_warning_message(
-                            pptx_import::warning_message(&candidate.warnings).into(),
-                        );
-                        table_actions::PENDING_PPTX_IMPORT.with(|slot| {
-                            *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
-                                path: candidate.path,
-                                session: candidate.session,
-                                warnings: candidate.warnings,
-                                kept: None,
-                                preserved_path: None,
-                                cancel_must_checkpoint_visible_session: false,
-                            });
-                        });
-                        recovery_deferred::hold_for_import_warning();
-                        app.set_pptx_import_warning_open(true);
-                        set_status(
-                            app,
-                            "Review the PowerPoint import warning before replacing this deck",
-                        );
-                    }
-                    Ok(candidate) => {
-                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
-                            replace_opened_deck(
-                                app,
-                                state,
-                                candidate.path.clone(),
-                                candidate.session,
-                            );
-                            set_status(app, format!("Opened {}", candidate.path.display()));
-                        }
-                    }
-                    Err(error) => set_status(app, format!("Open failed: {error}")),
-                }
-            } else {
-                match load_session(&path) {
-                    Ok(session) => {
-                        if recovery_replacement::clear_recovery_before_replacement(app, state) {
-                            replace_opened_deck(app, state, path.clone(), session);
-                            set_status(app, format!("Opened {}", path.display()));
-                        }
-                    }
-                    Err(error) => set_status(app, format!("Open failed: {error}")),
-                }
-            }
+            let _ = open_deck_at_path(app, state, path);
         }
         Ok(None) => set_status(app, "Open cancelled"),
         Err(error) => set_status(app, format!("Open dialog failed: {error}")),
@@ -1349,6 +1323,7 @@ fn save_current_deck(
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
+    start_hub::record_recent(&path);
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
     *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
     file_title::sync(app, state);
@@ -1409,6 +1384,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let out_dir = Path::new(out_dir);
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     appearance::apply_ui_font(&app, true);
     window_chrome::install(&app);
@@ -1749,7 +1725,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
     }
 
+    #[cfg(target_os = "windows")]
+    windows_platform::init_backend_if_needed()?;
+
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    windows_platform::install_alt_modifier_guard(&app);
     window_chrome::start(&app, appearance::APPLICATION_ID);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
@@ -1810,13 +1791,23 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     });
 
     wire_app_callbacks(&app, &state);
+    command_dispatch::wire_shortcuts(&app);
     wire_responsive_layout_with_state(&app, state.clone());
     wire_close_guard(&app, &state);
 
-    let menu_bar = build_present_menu_bar();
+    if !args.palette
+        && !args.theme_chooser
+        && args.open.is_none()
+        && welcome_guide::should_show_on_first_run()
+    {
+        welcome_guide::open(&app);
+    }
+
+    let menu_bar = local_menu::build_present_menu_bar();
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
+    app.set_local_menu_visible(!cfg!(target_os = "macos"));
     local_menu::wire_action(&app, menu_service.clone());
     // A choice from any surface refreshes the menu check marks and the
     // presenter window.
@@ -1830,7 +1821,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let app_ref = app.as_weak();
     menu_service
         .register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
-            schedule_menu_action(&app_ref, action)
+            command_dispatch::schedule_menu_action(&app_ref, action)
         }))
         .map_err(|error| error.to_string())?;
 
@@ -1893,184 +1884,82 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
+pub(crate) enum OpenPathOutcome {
+    Opened,
+    AwaitingImportConfirmation,
+    Failed,
+}
+
+pub(crate) fn open_deck_at_path(
+    app: &PresentApp,
+    state: &GuiState,
+    path: PathBuf,
+) -> OpenPathOutcome {
+    if pptx_import::is_pptx_path(&path) {
+        return match pptx_import::prepare(&path) {
+            Ok(candidate) if !candidate.warnings.is_empty() => {
+                app.set_pptx_import_warning_message(
+                    pptx_import::warning_message(&candidate.warnings).into(),
+                );
+                table_actions::PENDING_PPTX_IMPORT.with(|slot| {
+                    *slot.borrow_mut() = Some(table_actions::PendingPptxImport {
+                        path: candidate.path,
+                        session: candidate.session,
+                        warnings: candidate.warnings,
+                        kept: None,
+                        preserved_path: None,
+                        cancel_must_checkpoint_visible_session: false,
+                    });
+                });
+                recovery_deferred::hold_for_import_warning();
+                app.set_pptx_import_warning_open(true);
+                set_status(
+                    app,
+                    "Review the PowerPoint import warning before replacing this deck",
+                );
+                OpenPathOutcome::AwaitingImportConfirmation
+            }
+            Ok(candidate) => {
+                if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+                    return OpenPathOutcome::Failed;
+                }
+                replace_opened_deck(app, state, candidate.path.clone(), candidate.session);
+                set_status(app, format!("Opened {}", candidate.path.display()));
+                OpenPathOutcome::Opened
+            }
+            Err(error) => {
+                set_status(app, format!("Open failed: {error}"));
+                OpenPathOutcome::Failed
+            }
+        };
+    }
+    match load_session(&path) {
+        Ok(loaded) => {
+            if !recovery_replacement::clear_recovery_before_replacement(app, state) {
+                return OpenPathOutcome::Failed;
+            }
+            replace_opened_deck(app, state, path.clone(), loaded);
+            set_status(app, format!("Opened {}", path.display()));
+            OpenPathOutcome::Opened
+        }
+        Err(error) => {
+            set_status(app, format!("Open failed: {error}"));
+            OpenPathOutcome::Failed
+        }
+    }
+}
+
 /// The slide editor takes keyboard focus once the window exists, unless a
 /// startup overlay owns it, so arrows, Delete and Ctrl+Z work without a click.
 fn focus_editor_at_launch(app: &PresentApp) {
     if !(app.get_theme_chooser_open()
         || app.get_palette_open()
         || app.get_save_changes_open()
-        || app.get_pptx_import_warning_open())
+        || app.get_pptx_import_warning_open()
+        || app.global::<WelcomeGuideState>().get_open()
+        || app.global::<StartHubState>().get_open())
     {
         app.invoke_focus_editor();
-    }
-}
-
-fn build_present_menu_bar() -> MenuBar {
-    let mut menu_bar = build_standard_menu_bar(
-        "Loom Present",
-        vec![
-            MenuItem::action_with_shortcut(
-                "file.export_pdf",
-                "Export to PDF...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.new_sample", "New from Sample Deck"),
-            MenuItem::action("file.export_pptx", "Export to PowerPoint..."),
-        ],
-        vec![],
-        vec![
-            MenuItem::check("view.navigator", "Navigator", true),
-            MenuItem::check("view.notes", "Speaker Notes", false),
-            MenuItem::check("view.inspector", "Format Inspector", false),
-        ]
-        .into_iter()
-        .chain(loom_desktop::appearance::menu_items())
-        .chain(loom_desktop::window_frame::menu_items())
-        .collect(),
-        vec![Menu::new(
-            "Slide",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "slide.new",
-                    "New Slide",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("slide.insert_table", "Insert Table..."),
-                MenuItem::action("slide.insert_chart", "Paste Chart from Sheets..."),
-                MenuItem::action("slide.insert_image", "Insert Image..."),
-                MenuItem::action("slide.duplicate", "Duplicate Slide"),
-                MenuItem::action("slide.delete", "Delete Slide"),
-                MenuItem::Separator,
-                MenuItem::action_with_shortcut(
-                    slide_order::MOVE_UP,
-                    "Move Slide Up",
-                    MenuShortcut::primary_alt("Up"),
-                ),
-                MenuItem::action_with_shortcut(
-                    slide_order::MOVE_DOWN,
-                    "Move Slide Down",
-                    MenuShortcut::primary_alt("Down"),
-                ),
-                MenuItem::Separator,
-                MenuItem::action("slide.prev", "Previous Slide"),
-                MenuItem::action("slide.next", "Next Slide"),
-            ],
-        )],
-    );
-    file_menu::group(&mut menu_bar);
-    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
-    menu_bar
-}
-
-fn dispatch_command(app: &PresentApp, id: &str) -> bool {
-    if app.get_pptx_import_warning_open() {
-        return is_present_menu_command(id);
-    }
-    match id {
-        "file.new" => app.invoke_new_deck(),
-        "file.new_sample" => app.invoke_new_sample_deck(),
-        "slide.insert_table" => app.invoke_add_table(),
-        "slide.insert_chart" => app.invoke_add_chart(),
-        "slide.insert_image" => app.invoke_add_picture(),
-        "table.delete_row" | "slide.delete_table_row" => {
-            app.invoke_table_action("delete-row".into())
-        }
-        "table.delete_column" | "slide.delete_table_column" => {
-            app.invoke_table_action("delete-col".into())
-        }
-        "file.open" => app.invoke_open_deck(),
-        "file.save" => app.invoke_save_deck(),
-        "file.save_as" => app.invoke_save_as_deck(),
-        "file.export_pdf" => app.invoke_export_pdf(),
-        "file.export_pptx" => app.invoke_export_pptx(),
-        "edit.undo" => app.invoke_undo(),
-        "edit.redo" => app.invoke_redo(),
-        "edit.cut" => app.invoke_cut(),
-        "edit.copy" => app.invoke_copy(),
-        "edit.paste" => app.invoke_paste(),
-        "slide.new" => app.invoke_add_slide(),
-        "slide.duplicate" => app.invoke_duplicate_slide(),
-        "slide.delete" => app.invoke_delete_slide(),
-        "slide.prev" => app.invoke_prev_slide(),
-        "slide.next" => app.invoke_next_slide(),
-        "view.inspector" => app.invoke_toggle_inspector(),
-        id if view_state::dispatch(app, id) => {}
-        id if appearance::dispatch(app, id) => {}
-        id if window_chrome::dispatch(app, id) => {}
-        id if slide_order::dispatch(app, id) => {}
-        "app.palette" => app.invoke_open_palette(),
-        _ => return false,
-    }
-    true
-}
-
-fn is_present_menu_command(id: &str) -> bool {
-    slide_order::is_command(id)
-        || matches!(
-            id,
-            "file.new"
-                | "file.new_sample"
-                | "slide.insert_table"
-                | "slide.insert_chart"
-                | "slide.insert_image"
-                | "table.delete_row"
-                | "table.delete_column"
-                | "slide.delete_table_row"
-                | "slide.delete_table_column"
-                | "file.open"
-                | "file.save"
-                | "file.save_as"
-                | "file.export_pdf"
-                | "file.export_pptx"
-                | "edit.undo"
-                | "edit.redo"
-                | "edit.cut"
-                | "edit.copy"
-                | "edit.paste"
-                | "slide.new"
-                | "slide.duplicate"
-                | "slide.delete"
-                | "slide.prev"
-                | "slide.next"
-                | "view.inspector"
-                | "view.navigator"
-                | "view.notes"
-                | "view.appearance.system"
-                | "view.appearance.light"
-                | "view.appearance.dark"
-                | "view.appearance.high_contrast"
-                | "view.window-frame.system"
-                | "view.window-frame.loom"
-                | "app.palette"
-        )
-}
-
-fn schedule_menu_action(
-    app_ref: &slint::Weak<PresentApp>,
-    action: CommandAction,
-) -> Result<(), DesktopError> {
-    if !is_present_menu_command(&action.id) {
-        return Err(DesktopError::InvalidRequest(format!(
-            "unsupported Present menu command {}",
-            action.id
-        )));
-    }
-    let id = action.id;
-    let error_id = id.clone();
-    app_ref
-        .upgrade_in_event_loop(move |app| {
-            dispatch_scheduled_menu_action(&app, &id);
-        })
-        .map_err(|error| {
-            DesktopError::InvalidRequest(format!(
-                "failed to schedule Present menu command {error_id}: {error}"
-            ))
-        })
-}
-
-fn dispatch_scheduled_menu_action(app: &PresentApp, id: &str) {
-    if !dispatch_command(app, id) {
-        set_status(app, format!("Unsupported menu command: {id}"));
     }
 }
 
@@ -2131,6 +2020,11 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
             replace_with_template(app, state, choice)
         }
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
+        Some(PendingReplacement::OpenRecentDeck) => {
+            if let Some(path) = PENDING_RECENT_PATH.with(|slot| slot.borrow_mut().take()) {
+                let _ = open_deck_at_path(app, state, path);
+            }
+        }
         Some(PendingReplacement::CloseWindow) => {
             if close_blocked_by_pending_import_recovery(app) {
                 return;
@@ -2144,11 +2038,13 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
 }
 
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
+    command_dispatch::wire_shortcuts(app);
     view_state::wire(app, state);
     slide_order::wire(app, state);
     deck_guard::wire(app, state);
     table_actions::wire(app, state);
     element_style_ui::wire(app, state);
+    modal_wiring::wire(app, state);
     recovery_deferred::wire_callbacks(app, state);
     {
         let state = state.clone();
@@ -2499,7 +2395,10 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                                     element.set_chart(&chart);
                                 }
                             } else {
-                                element.content = content.as_str().to_string();
+                                loom_present_core::rich_text::replace_content_preserving_runs(
+                                    element,
+                                    content.as_str(),
+                                );
                             }
                             element.element_type == ElementType::Title
                         } else {
@@ -3236,7 +3135,16 @@ mod appearance;
 #[cfg(test)]
 mod appearance_tests;
 mod clipboard_actions;
+mod command_dispatch;
 mod deck_guard;
+mod find_replace_ui;
+mod font_picker;
+mod modal_wiring;
+mod print_preview;
+mod start_hub;
+mod welcome_guide;
+#[cfg(target_os = "windows")]
+mod windows_platform;
 use deck_guard::{deck_is_dirty, request_deck_replacement};
 mod element_names;
 #[cfg(test)]
@@ -3300,7 +3208,13 @@ mod ui_font_tests;
 #[cfg(test)]
 mod accessibility_tests;
 #[cfg(test)]
+mod color_font_picker_tests;
+#[cfg(test)]
+mod command_dispatch_tests;
+#[cfg(test)]
 mod deck_guard_tests;
+#[cfg(test)]
+mod find_replace_tests;
 #[cfg(test)]
 mod import_warning_tests;
 #[cfg(test)]
@@ -3308,6 +3222,14 @@ mod layout_bounds_tests;
 #[cfg(test)]
 mod miniature_tests;
 #[cfg(test)]
+mod print_preview_tests;
+#[cfg(test)]
+mod rich_text_arrange_tests;
+#[cfg(test)]
+mod start_hub_tests;
+#[cfg(test)]
 mod table_tests;
 #[cfg(test)]
 mod visual_defect_tests;
+#[cfg(test)]
+mod welcome_guide_tests;

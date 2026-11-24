@@ -1,0 +1,61 @@
+import { LoomSectionHeader, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ElementInk } from "object_part.slint";
+
+export component PresentArrangeSection inherits VerticalLayout {
+    in property <int> selection-count: 1;
+    in-out property <bool> expanded: false;
+    spacing: 2px;
+
+    LoomButton {
+        label: root.expanded ? "Hide Arrange ▴" : "Arrange ▾";
+        variant: "ghost";
+        accessible-name: root.expanded ? "Hide arrange controls" : "Show arrange controls";
+        clicked => { root.expanded = !root.expanded; }
+    }
+    if root.expanded : VerticalLayout {
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 2px;
+            for slot in 4 : VerticalLayout {
+                property <int> k: Theme.rtl ? 3 - slot : slot;
+                horizontal-stretch: 1;
+                if k == 0 : LoomButton { label: "Front"; variant: "ghost"; clicked => { ElementInk.arrange-requested("front"); } }
+                if k == 1 : LoomButton { label: "Fwd"; variant: "ghost"; clicked => { ElementInk.arrange-requested("forward"); } }
+                if k == 2 : LoomButton { label: "Bwd"; variant: "ghost"; clicked => { ElementInk.arrange-requested("backward"); } }
+                if k == 3 : LoomButton { label: "Back"; variant: "ghost"; clicked => { ElementInk.arrange-requested("back"); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 2px;
+            for slot in 3 : VerticalLayout {
+                property <int> k: Theme.rtl ? 2 - slot : slot;
+                horizontal-stretch: 1;
+                if k == 0 : LoomButton { label: "Left"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-left"); } }
+                if k == 1 : LoomButton { label: "Center"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-center"); } }
+                if k == 2 : LoomButton { label: "Right"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-right"); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 2px;
+            for slot in 3 : VerticalLayout {
+                property <int> k: Theme.rtl ? 2 - slot : slot;
+                horizontal-stretch: 1;
+                if k == 0 : LoomButton { label: "Top"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-top"); } }
+                if k == 1 : LoomButton { label: "Mid"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-middle"); } }
+                if k == 2 : LoomButton { label: "Bot"; variant: "ghost"; clicked => { ElementInk.arrange-requested("align-bottom"); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 2px;
+            for slot in 4 : VerticalLayout {
+                property <int> k: Theme.rtl ? 3 - slot : slot;
+                horizontal-stretch: 1;
+                if k == 0 : LoomButton { label: "-90°"; variant: "ghost"; clicked => { ElementInk.arrange-requested("rot-ccw"); } }
+                if k == 1 : LoomButton { label: "+90°"; variant: "ghost"; clicked => { ElementInk.arrange-requested("rot-cw"); } }
+                if k == 2 : LoomButton { label: "Dist H"; variant: "ghost"; clicked => { ElementInk.arrange-requested("dist-h"); } }
+                if k == 3 : LoomButton { label: "Dist V"; variant: "ghost"; clicked => { ElementInk.arrange-requested("dist-v"); } }
+            }
+        }
+    }
+}

@@ -13,10 +13,35 @@ use crate::{ElementStyle, ElementType, PresentationDocument, Slide, SlideElement
 const EMU_PER_UNIT: f32 = 12_192.0;
 const PPTX_SLIDE_PART_PREFIX: &str = "ppt/slides/slide";
 
+const MAX_SLIDE_XML_BYTES: usize = 32 * 1024 * 1024;
+const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
 /// Imports a `.pptx` presentation package archive into a complete [`PresentationDocument`].
 pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
+    if pptx_bytes.starts_with(&OLE2_MAGIC) {
+        return Err(
+            "This presentation is encrypted or password-protected (OLE2 container); remove the password before importing."
+                .to_string(),
+        );
+    }
     let archive = PackageArchive::from_bytes(pptx_bytes)
         .map_err(|err| format!("unreadable pptx archive: {err}"))?;
+
+    if archive.get("ppt/presentation.xml").is_none() {
+        return Err("pptx archive is missing ppt/presentation.xml".to_string());
+    }
+
+    for path in archive.paths() {
+        if path.ends_with(".xml") {
+            if let Some(bytes) = archive.get(path) {
+                if bytes.len() > MAX_SLIDE_XML_BYTES {
+                    return Err(format!(
+                        "pptx XML part '{path}' exceeds maximum supported size ({MAX_SLIDE_XML_BYTES} bytes)"
+                    ));
+                }
+            }
+        }
+    }
 
     let mut slide_parts: Vec<(u64, String)> = Vec::new();
     for path in archive.paths() {
@@ -48,6 +73,29 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         .unwrap_or_else(|| "Imported Presentation".to_string());
 
     let mut doc = PresentationDocument::new("imported-deck", title);
+    let mut inv_sx = 1.0_f32;
+    let mut inv_sy = 1.0_f32;
+    if let Some(pres_bytes) = archive.get("ppt/presentation.xml") {
+        let pres_xml = String::from_utf8_lossy(pres_bytes);
+        if let Some(pos) = find_tag_start(&pres_xml, "p:sldSz") {
+            let tag_end = pres_xml[pos..]
+                .find('>')
+                .map_or(pres_xml.len(), |e| pos + e);
+            let tag = &pres_xml[pos..tag_end];
+            if let (Some(cx), Some(cy)) = (
+                extract_attr(tag, "cx").and_then(|v| v.parse::<i64>().ok()),
+                extract_attr(tag, "cy").and_then(|v| v.parse::<i64>().ok()),
+            ) {
+                if cx > 0 && cy > 0 {
+                    doc.aspect_ratio_wide = (cx as f64 / cy as f64) > 1.5;
+                    if !doc.aspect_ratio_wide {
+                        inv_sx = crate::SLIDE_WIDTH / emu_to_units(cx).max(1.0);
+                        inv_sy = crate::SLIDE_HEIGHT / emu_to_units(cy).max(1.0);
+                    }
+                }
+            }
+        }
+    }
     doc.slides.clear();
 
     for (index, (slide_num, path)) in slide_parts.iter().enumerate() {
@@ -88,6 +136,16 @@ pub fn import_pptx(pptx_bytes: &[u8]) -> Result<PresentationDocument, String> {
         doc.slides.push(slide);
     }
 
+    if !doc.aspect_ratio_wide {
+        for slide in &mut doc.slides {
+            for elem in &mut slide.elements {
+                elem.x *= inv_sx;
+                elem.y *= inv_sy;
+                elem.width *= inv_sx;
+                elem.height *= inv_sy;
+            }
+        }
+    }
     Ok(doc)
 }
 
@@ -338,11 +396,19 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
                 ElementType::Title
             } else if sp_xml.contains("type=\"subTitle\"") {
                 ElementType::Subtitle
+            } else if sp_xml.contains("prst=\"line\"") {
+                ElementType::ShapeLine
             } else if sp_xml.contains("txBox=\"1\"") || sp_xml.contains("type=\"body\"") {
                 ElementType::BodyText
             } else if sp_xml.contains("prst=\"ellipse\"") {
                 ElementType::ShapeCircle
-            } else if sp_xml.contains("prst=\"rect\"") || sp_xml.contains("prst=\"roundRect\"") {
+            } else if sp_xml.contains("prst=\"roundRect\"") {
+                ElementType::ShapeRoundedRect
+            } else if sp_xml.contains("prst=\"rightArrow\"") {
+                ElementType::ShapeArrowRight
+            } else if sp_xml.contains("prst=\"wedgeRoundRectCallout\"") {
+                ElementType::ShapeCallout
+            } else if sp_xml.contains("prst=\"rect\"") {
                 if sp_xml.contains("name=\"Stat") || sp_xml.contains("stat-card") {
                     ElementType::StatCard
                 } else {
@@ -363,7 +429,17 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
         };
         let id = extract_attr(sp_xml, "name").unwrap_or_else(|| format!("shape-{elem_counter}"));
         elem_counter += 1;
-        let style = parse_shape_style(sp_xml, &element_type);
+        let mut style = parse_shape_style(sp_xml, &element_type);
+        let runs = parse_shape_runs(sp_xml);
+        if runs.len() > 1 {
+            style.font_size_pt = None;
+            style.bold = None;
+            style.italic = false;
+            style.underline = false;
+            style.strikethrough = false;
+            style.color = None;
+            style.font_family = None;
+        }
 
         elements.push(SlideElement {
             id,
@@ -376,6 +452,7 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
             rotation_deg,
             action: None,
             style,
+            runs,
         });
     }
     elements
@@ -463,6 +540,8 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
             }
         }
         style.italic = matches!(extract_attr(tag, "i").as_deref(), Some("1" | "true"));
+        style.underline = extract_attr(tag, "u").is_some_and(|v| v != "none");
+        style.strikethrough = extract_attr(tag, "strike").is_some_and(|v| v != "noStrike");
         if let Some(color) = first_srgb(&sp_xml[pos..end]) {
             if !default_inks
                 .iter()
@@ -508,9 +587,130 @@ fn parse_shape_style(sp_xml: &str, kind: &ElementType) -> ElementStyle {
                     style.fill = Some(fill);
                 }
             }
+        } else if *kind == ElementType::ShapeLine {
+            if let Some(ln_pos) = props.find("<a:ln") {
+                let ln_end = props[ln_pos..]
+                    .find("</a:ln>")
+                    .map_or(props.len(), |e| ln_pos + e);
+                let ln_xml = &props[ln_pos..ln_end];
+                if let Some(fill_pos) = ln_xml.find("<a:solidFill>") {
+                    if let Some(stroke) = first_srgb(&ln_xml[fill_pos..]) {
+                        style.fill = Some(stroke);
+                    }
+                }
+            }
         }
     }
     style
+}
+
+fn parse_shape_runs(sp_xml: &str) -> Vec<crate::StyledTextRun> {
+    let mut runs = Vec::new();
+    let mut p_cursor = 0usize;
+    let mut first_para = true;
+    while let Some(p_start_rel) = sp_xml[p_cursor..].find("<a:p>") {
+        let p_start = p_cursor + p_start_rel;
+        let Some(p_end_rel) = sp_xml[p_start..].find("</a:p>") else {
+            break;
+        };
+        let p_xml = &sp_xml[p_start..p_start + p_end_rel];
+        p_cursor = p_start + p_end_rel + "</a:p>".len();
+
+        if !first_para {
+            runs.push(crate::StyledTextRun::plain("\n"));
+        }
+        first_para = false;
+
+        let mut r_cursor = 0usize;
+        loop {
+            let next_r = p_xml[r_cursor..].find("<a:r>").map(|p| r_cursor + p);
+            let next_fld = find_tag_start(&p_xml[r_cursor..], "a:fld").map(|p| r_cursor + p);
+            let (is_fld, tag_start) = match (next_r, next_fld) {
+                (Some(r), Some(f)) if f < r => (true, f),
+                (Some(r), _) => (false, r),
+                (None, Some(f)) => (true, f),
+                (None, None) => break,
+            };
+            let close_tag = if is_fld { "</a:fld>" } else { "</a:r>" };
+            let Some(end_rel) = p_xml[tag_start..].find(close_tag) else {
+                break;
+            };
+            let r_xml = &p_xml[tag_start..tag_start + end_rel];
+            r_cursor = tag_start + end_rel + close_tag.len();
+
+            if is_fld {
+                if let Some(ts) = r_xml.find("<a:t>") {
+                    let after_open = ts + "<a:t>".len();
+                    if let Some(te_rel) = r_xml[after_open..].find("</a:t>") {
+                        let text = xml_unescape(&r_xml[after_open..after_open + te_rel]);
+                        if !text.is_empty() {
+                            runs.push(crate::StyledTextRun::plain(text));
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let Some(t_start) = r_xml.find("<a:t>") else {
+                continue;
+            };
+            let Some(t_end) = r_xml[t_start..].find("</a:t>") else {
+                continue;
+            };
+            let raw_text = &r_xml[t_start + "<a:t>".len()..t_start + t_end];
+            let text = xml_unescape(raw_text);
+            if text.is_empty() {
+                continue;
+            }
+
+            let rpr_xml = find_tag_start(r_xml, "a:rPr")
+                .and_then(|pos| {
+                    let slice = &r_xml[pos..];
+                    slice
+                        .find("</a:rPr>")
+                        .or_else(|| slice.find("/>"))
+                        .map(|end| &slice[..end])
+                })
+                .unwrap_or("");
+
+            let font_size_pt = extract_attr(rpr_xml, "sz")
+                .and_then(|v| v.parse::<f32>().ok())
+                .map(|h| h / 100.0);
+            let bold = extract_attr(rpr_xml, "b").map(|v| v == "1" || v == "true");
+            let italic = extract_attr(rpr_xml, "i").map(|v| v == "1" || v == "true");
+            let underline = extract_attr(rpr_xml, "u").map(|v| v != "none");
+            let strikethrough = extract_attr(rpr_xml, "strike").map(|v| v != "noStrike");
+            let color = extract_attr(rpr_xml, "val")
+                .filter(|v| v.len() == 6 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+                .map(|v| format!("#{}", v.to_ascii_uppercase()));
+            let font_family = extract_attr(rpr_xml, "typeface")
+                .and_then(|raw| crate::normalize_font_family(&raw).ok());
+
+            runs.push(crate::StyledTextRun {
+                text,
+                font_family,
+                font_size_pt,
+                bold,
+                italic,
+                underline,
+                strikethrough,
+                color,
+            });
+        }
+    }
+    let normalized = crate::rich_text::normalize_runs(runs);
+    let joined: String = normalized.iter().map(|r| r.text.as_str()).collect();
+    if joined.trim_end_matches('\n') != parse_txbody_text(sp_xml).trim_end_matches('\n') {
+        return Vec::new();
+    }
+    if normalized.len() <= 1
+        && normalized.first().map_or(true, |r| {
+            !r.underline.unwrap_or(false) && !r.strikethrough.unwrap_or(false)
+        })
+    {
+        return Vec::new();
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -604,6 +804,7 @@ fn parse_slide_pictures(
                 action: None,
 
                 style: Default::default(),
+                runs: Vec::new(),
             });
         }
     }
@@ -701,6 +902,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         s1.add_element(SlideElement {
             id: "body-1".to_string(),
@@ -714,6 +916,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides.push(s1);
 
@@ -814,6 +1017,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
+            runs: Vec::new(),
         });
         doc.slides.push(s);
 
@@ -848,5 +1052,94 @@ mod tests {
             subtitle.y >= title.y + title.height,
             "the subtitle sits below the title, not on it"
         );
+    }
+
+    #[test]
+    fn roundtrip_line_decorations_fld_and_aspect_ratio() {
+        let mut doc = PresentationDocument::new("d", "Deck");
+        doc.aspect_ratio_wide = false;
+        doc.slides[0].elements.push(SlideElement {
+            id: "line-1".to_string(),
+            element_type: ElementType::ShapeLine,
+            content: String::new(),
+            x: 50.0,
+            y: 50.0,
+            width: 200.0,
+            height: 4.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle::default(),
+            runs: Vec::new(),
+        });
+        doc.slides[0].elements.push(SlideElement {
+            id: "deco-1".to_string(),
+            element_type: ElementType::BodyText,
+            content: "Decorated".to_string(),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 40.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle {
+                underline: true,
+                strikethrough: true,
+                ..Default::default()
+            },
+            runs: Vec::new(),
+        });
+        let session = crate::PresentationSession::new(doc);
+        let bytes = crate::pptx_export::export_pptx(&session).expect("export");
+        let imported = import_pptx(&bytes).expect("import");
+        assert!(!imported.aspect_ratio_wide);
+        assert!(imported.slides[0]
+            .elements
+            .iter()
+            .any(|e| e.element_type == ElementType::ShapeLine));
+        let deco = imported.slides[0]
+            .elements
+            .iter()
+            .find(|e| e.content == "Decorated")
+            .expect("deco");
+        assert!(deco.style.underline && deco.style.strikethrough);
+
+        // <a:fld> in document order between two styled <a:r> runs
+        let sp = "<p:sp><p:txBody><a:p><a:r><a:rPr b=\"1\"/><a:t>A </a:t></a:r><a:fld><a:t>1</a:t></a:fld><a:r><a:rPr i=\"1\"/><a:t> B</a:t></a:r></a:p></p:txBody></p:sp>";
+        let runs = parse_shape_runs(sp);
+        let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(joined, "A 1 B");
+
+        // Malformed <a:fld> with inverted tags reaches parse_shape_runs and does not panic
+        let malformed_fld =
+            "<p:sp><p:txBody><a:p><a:fld></a:t><a:t>X</a:fld></a:p></p:txBody></p:sp>";
+        assert!(parse_shape_runs(malformed_fld).is_empty());
+
+        // Line stroke color survives export/import
+        let mut doc2 = PresentationDocument::new("d2", "LineColor");
+        doc2.slides[0].elements.push(SlideElement {
+            id: "l-red".to_string(),
+            element_type: ElementType::ShapeLine,
+            content: String::new(),
+            x: 100.0,
+            y: 100.0,
+            width: 300.0,
+            height: 4.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: ElementStyle {
+                fill: Some("#FF0000".to_string()),
+                ..Default::default()
+            },
+            runs: Vec::new(),
+        });
+        let s2 = crate::PresentationSession::new(doc2);
+        let b2 = crate::pptx_export::export_pptx(&s2).expect("export2");
+        let imp2 = import_pptx(&b2).expect("import2");
+        let line = imp2.slides[0]
+            .elements
+            .iter()
+            .find(|e| e.element_type == ElementType::ShapeLine)
+            .expect("line");
+        assert_eq!(line.style.fill.as_deref(), Some("#FF0000"));
     }
 }

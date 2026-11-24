@@ -32,6 +32,7 @@ fn element(
         rotation_deg: rotation,
         action: None,
         style: Default::default(),
+        runs: Vec::new(),
     }
 }
 
@@ -98,6 +99,8 @@ fn fixture_session() -> PresentationSession {
         fill: Some("#E65100".to_string()),
         align: Some(loom_present_core::TextAlign::Right),
         font_family: None,
+        underline: false,
+        strikethrough: false,
     };
     two.add_element(rect2);
     two.add_element(element(
