@@ -378,60 +378,6 @@ export component SheetInspector inherits LoomPanel {
                             toggled => { root.toggle-borders(); }
                         }
                     }
-                    if !Theme.rtl : HorizontalLayout {
-                        spacing: 4px;
-                        alignment: start;
-                        for preset in [
-                            { key: "all", label: "All" },
-                            { key: "outer", label: "Outer" },
-                            { key: "top", label: "Top" },
-                            { key: "bottom", label: "Bot" },
-                        ] : LoomButton {
-                            label: preset.label;
-                            variant: "secondary";
-                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
-                        }
-                    }
-                    if !Theme.rtl : HorizontalLayout {
-                        spacing: 4px;
-                        alignment: start;
-                        for preset in [
-                            { key: "left", label: "Left" },
-                            { key: "right", label: "Right" },
-                            { key: "none", label: "None" },
-                        ] : LoomButton {
-                            label: preset.label;
-                            variant: "secondary";
-                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
-                        }
-                    }
-                    if Theme.rtl : HorizontalLayout {
-                        spacing: 4px;
-                        alignment: end;
-                        for preset in [
-                            { key: "bottom", label: "Bot" },
-                            { key: "top", label: "Top" },
-                            { key: "outer", label: "Outer" },
-                            { key: "all", label: "All" },
-                        ] : LoomButton {
-                            label: preset.label;
-                            variant: "secondary";
-                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
-                        }
-                    }
-                    if Theme.rtl : HorizontalLayout {
-                        spacing: 4px;
-                        alignment: end;
-                        for preset in [
-                            { key: "none", label: "None" },
-                            { key: "right", label: "Right" },
-                            { key: "left", label: "Left" },
-                        ] : LoomButton {
-                            label: preset.label;
-                            variant: "secondary";
-                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
-                        }
-                    }
                     Text {
                         text: "Fill";
                         font-size: Theme.type.caption;
@@ -467,6 +413,60 @@ export component SheetInspector inherits LoomPanel {
                     SheetHeading { title: "Alignment"; }
                     SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
                     DataValidationSection { }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for preset in [
+                            { key: "all", label: "All" },
+                            { key: "outer", label: "Outer" },
+                            { key: "top", label: "Top" },
+                            { key: "bottom", label: "Bot" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for preset in [
+                            { key: "left", label: "Left" },
+                            { key: "right", label: "Right" },
+                            { key: "none", label: "None" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: end;
+                        for preset in [
+                            { key: "bottom", label: "Bot" },
+                            { key: "top", label: "Top" },
+                            { key: "outer", label: "Outer" },
+                            { key: "all", label: "All" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: 4px;
+                        alignment: end;
+                        for preset in [
+                            { key: "none", label: "None" },
+                            { key: "right", label: "Right" },
+                            { key: "left", label: "Left" },
+                        ] : LoomButton {
+                            label: preset.label;
+                            variant: "secondary";
+                            clicked => { CellRichFormat.apply-border-preset(preset.key); }
+                        }
+                    }
                     if !Theme.rtl : HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
                         alignment: start;

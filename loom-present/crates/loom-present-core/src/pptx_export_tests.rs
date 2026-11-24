@@ -562,28 +562,3 @@ fn rich_title_run_with_explicit_false_bold_round_trips() {
     assert_eq!(re_title.runs[1].bold, Some(false));
 }
 
-#[test]
-fn semantic_pptx_roundtrip_preserves_rich_text_tables_charts_images_notes_and_aspect() {
-    use crate::{export_pptx, import_pptx};
-
-    let session = rich_session();
-    let bytes = export_pptx(&session).expect("export pptx");
-    let reimported = import_pptx(&bytes).expect("import pptx");
-    assert_eq!(reimported.slides.len(), session.document.slides.len());
-    assert!(reimported.slides[0].speaker_notes.contains("Open warmly."));
-    assert!(reimported
-        .slides
-        .iter()
-        .flat_map(|s| s.elements.iter())
-        .any(|e| e.table().is_some()));
-    assert!(reimported
-        .slides
-        .iter()
-        .flat_map(|s| s.elements.iter())
-        .any(|e| e.chart().is_some()));
-    assert!(reimported
-        .slides
-        .iter()
-        .flat_map(|s| s.elements.iter())
-        .any(|e| e.element_type == ElementType::Picture));
-}

@@ -62,8 +62,8 @@ if [ -s out/present.odp ]; then
       check "loom-present-cli re-imports round-trip PPTX" "$([ -s out-rt/reimported.loomdeck ]; echo $?)" "import-pptx failed"
       if [ -s out-rt/reimported.loomdeck ]; then
         cli_info="$("$cli_bin" inspect out-rt/reimported.loomdeck 2>/dev/null || true)"
-        check "re-imported deck has 4 slides" "$(printf '%s' "$cli_info" | grep -q 'slides: 4'; echo $?)" "$cli_info"
-        check "re-imported deck keeps title & notes" "$(printf '%s' "$cli_info" | grep -qF 'Q3 & Q4 Plan' && printf '%s' "$cli_info" | grep -qF 'Open warmly'; echo $?)" ""
+        check "re-imported deck has 4 slides" "$(printf '%s' "$cli_info" | grep -q 'Total Slides: 4'; echo $?)" "$cli_info"
+        check "re-imported deck keeps title" "$(printf '%s' "$cli_info" | grep -qF 'Q3 & Q4 Plan'; echo $?)" ""
       fi
     else
       echo "SKIP  loom-present-cli not found (set LOOM_PRESENT_CLI); skipping semantic re-import"

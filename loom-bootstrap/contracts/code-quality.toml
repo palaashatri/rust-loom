@@ -19,18 +19,14 @@ new_generic_ui_must_live_in_foundation = true
 # Exact byte ceilings for legacy oversized source. These are debt ceilings,
 # not acceptable target sizes. Any meaningful edit should reduce them.
 [legacy_byte_caps]
-"loom-writer/crates/loom-writer-app/src/main.rs" = 194401
-"loom-sheets/crates/loom-sheets-app/src/main.rs" = 108783
-"loom-present/crates/loom-present-app/src/main.rs" = 123901
-
-"loom-writer/crates/loom-writer-core/src/lib.rs" = 252727
-"loom-sheets/crates/loom-sheets-core/src/lib.rs" = 199529
-"loom-present/crates/loom-present-core/src/lib.rs" = 152566
-
-"loom-core/crates/loom-ui/ui/toolkit.slint" = 51906
-"loom-core/crates/loom-ui/ui/components.slint" = 41805
-"loom-writer/crates/loom-writer-app/ui/app.slint" = 36518
-"loom-sheets/crates/loom-sheets-app/ui/app.slint" = 39732
-"loom-sheets/crates/loom-sheets-app/ui/components.slint" = 37323
-"loom-present/crates/loom-present-app/ui/app.slint" = 42883
-"loom-present/crates/loom-present-app/ui/present_components.slint" = 34385
+"loom-writer/crates/loom-writer-app/src/main.rs" = 184397
+"loom-sheets/crates/loom-sheets-app/src/main.rs" = 85226
+"loom-present/crates/loom-present-app/src/main.rs" = 119022
+"loom-writer/crates/loom-writer-core/src/lib.rs" = 233716
+"loom-sheets/crates/loom-sheets-core/src/lib.rs" = 146343
+"loom-present/crates/loom-present-core/src/lib.rs" = 143222
+"loom-core/crates/loom-ui/ui/toolkit.slint" = 50808
+"loom-writer/crates/loom-writer-app/ui/app.slint" = 36500
+"loom-sheets/crates/loom-sheets-app/ui/app.slint" = 39694
+"loom-sheets/crates/loom-sheets-app/ui/components.slint" = 35953
+"loom-present/crates/loom-present-app/ui/app.slint" = 39826
