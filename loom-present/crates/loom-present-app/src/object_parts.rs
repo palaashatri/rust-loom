@@ -150,22 +150,22 @@ fn shape_kind_tag(kind: &ElementType) -> Option<&'static str> {
 const WRAPPED_LINE_HEIGHT_FACTOR: f32 = 1.25;
 const MIN_READABLE_LINE_FS: f32 = 7.5;
 
-fn wrapped_row_fit(
-    line_count: usize,
-    elem_height: f32,
-    band_frac: f32,
-    max_fs: f32,
-) -> (usize, f32) {
-    if line_count == 0 || elem_height <= 0.0 || max_fs <= 0.0 {
-        return (line_count, 1.0);
+fn max_visible_wrapped_rows(line_count: usize, elem_height: f32, band_frac: f32) -> usize {
+    if line_count == 0 || elem_height <= 0.0 {
+        return line_count;
     }
     let avail_h = elem_height * band_frac;
     let max_rows =
         ((avail_h / (MIN_READABLE_LINE_FS * WRAPPED_LINE_HEIGHT_FACTOR)).floor() as usize).max(1);
-    let shown_rows = line_count.min(max_rows);
-    let row_h = avail_h / (shown_rows as f32);
-    let scale = ((row_h / WRAPPED_LINE_HEIGHT_FACTOR) / max_fs).clamp(0.05, 1.0);
-    (shown_rows, scale)
+    line_count.min(max_rows)
+}
+
+fn wrapped_row_scale(shown_rows: usize, elem_height: f32, band_frac: f32, max_fs: f32) -> f32 {
+    if shown_rows == 0 || elem_height <= 0.0 || max_fs <= 0.0 {
+        return 1.0;
+    }
+    let row_h = (elem_height * band_frac) / (shown_rows as f32);
+    ((row_h / WRAPPED_LINE_HEIGHT_FACTOR) / max_fs).clamp(0.05, 1.0)
 }
 
 fn wrap_paragraph_spans(para: &str, max_chars: usize) -> Vec<(usize, usize)> {
@@ -276,6 +276,13 @@ fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
             lines.push(line_parts);
         }
     }
+    let shown_rows = max_visible_wrapped_rows(lines.len(), element.height, 0.8);
+    if shown_rows < lines.len() {
+        lines.truncate(shown_rows);
+        if let Some((last_text, _)) = lines.iter_mut().rev().find_map(|line| line.last_mut()) {
+            last_text.push('…');
+        }
+    }
     let max_fs = lines
         .iter()
         .flat_map(|line| {
@@ -284,13 +291,7 @@ fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
             })
         })
         .fold(0.0f32, f32::max);
-    let (shown_rows, fs_scale) = wrapped_row_fit(lines.len(), element.height, 0.8, max_fs);
-    if shown_rows < lines.len() {
-        lines.truncate(shown_rows);
-        if let Some((last_text, _)) = lines.iter_mut().rev().find_map(|line| line.last_mut()) {
-            last_text.push('…');
-        }
-    }
+    let fs_scale = wrapped_row_scale(lines.len(), element.height, 0.8, max_fs);
     let line_count = lines.len().max(1) as f32;
     let line_h = 0.8 / line_count;
     let mut out = Vec::new();
@@ -384,8 +385,8 @@ fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
                     }
                 }
                 if lines.len() > 1 {
-                    let (shown_rows, fs_scale) =
-                        wrapped_row_fit(lines.len(), element.height, 0.84, text.fs);
+                    let shown_rows = max_visible_wrapped_rows(lines.len(), element.height, 0.84);
+                    let fs_scale = wrapped_row_scale(shown_rows, element.height, 0.84, text.fs);
                     let truncated = shown_rows < lines.len();
                     let n = shown_rows as f32;
                     let lh = 0.84 / n;
@@ -1228,5 +1229,32 @@ mod tests {
                 p.fs
             );
         }
+
+        // A discarded 72pt tail row must not shrink the remaining visible rows below readable size.
+        let mut mixed_tail_runs: Vec<loom_present_core::StyledTextRun> = (1..=9)
+            .map(|i| loom_present_core::StyledTextRun {
+                text: format!("Row{i}\n"),
+                font_size_pt: Some(16.0),
+                ..Default::default()
+            })
+            .collect();
+        mixed_tail_runs.push(loom_present_core::StyledTextRun {
+            text: "Huge".to_string(),
+            font_size_pt: Some(72.0),
+            ..Default::default()
+        });
+        let elem_tail = SlideElement {
+            runs: mixed_tail_runs,
+            ..elem
+        };
+        let tail_parts = parts_for(&elem_tail);
+        assert_eq!(tail_parts.len(), 6);
+        assert!(
+            tail_parts
+                .iter()
+                .all(|p| p.fs >= MIN_READABLE_LINE_FS - 1e-3),
+            "truncated 72pt row shrank visible 16pt rows: {:?}",
+            tail_parts.iter().map(|p| p.fs).collect::<Vec<_>>()
+        );
     }
 }
