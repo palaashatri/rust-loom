@@ -27,10 +27,12 @@ export component LoomButton inherits Rectangle {
 
     // Scales with the body text, so a double-size label fits inside the button.
     // At 1.0x this equals the control height.
-    height: Theme.scaled-control-height;
-    measure := Text { visible: false; text: root.label; font-size: Theme.type.body; font-weight: 600; }
-    min-width: max(Theme.tokens.metrics.control-height,
-        measure.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
+    min-height: Theme.scaled-control-height;
+    preferred-height: Theme.scaled-control-height;
+    measure := Text { visible: false; text: root.label; font-size: Theme.type.body; font-weight: root.primary ? 600 : 500; }
+    min-width: root.label == "" ? Theme.scaled-control-height
+        : max(Theme.tokens.metrics.control-height,
+            measure.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
     preferred-width: root.min-width;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.ghost ? 0px : 1px;
@@ -47,11 +49,11 @@ export component LoomButton inherits Rectangle {
         : root.destructive ? (touch.pressed ? Theme.palette().danger-surface : touch.has-hover ? Theme.palette().danger-surface : Theme.palette().surface)
         : root.ghost ? (touch.pressed ? Theme.palette().surface-sunken
             : root.selected ? Theme.palette().selection-soft
-            : touch.has-hover ? Theme.palette().selection-soft : transparent)
+            : touch.has-hover ? Theme.palette().surface-sunken : transparent)
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().selection-soft
-        : Theme.palette().surface;
+        : touch.has-hover ? Theme.palette().panel
+        : Theme.palette().surface-raised;
 
     accessible-role: button;
     accessible-enabled: root.enabled;
@@ -60,9 +62,9 @@ export component LoomButton inherits Rectangle {
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     HorizontalLayout {
-        spacing: Theme.tokens.space.md;
-        padding-left: Theme.tokens.space.lg;
-        padding-right: Theme.tokens.space.lg;
+        spacing: root.label != "" ? Theme.tokens.space.sm : 0px;
+        padding-left: root.label != "" ? Theme.tokens.space.lg : 0px;
+        padding-right: root.label != "" ? Theme.tokens.space.lg : 0px;
         alignment: root.leading ? start : center;
         cross-axis-alignment: center;
 
@@ -73,10 +75,10 @@ export component LoomButton inherits Rectangle {
         }
         // The button is the one element named by its label. Without this the
         // text would be a second element with the same name.
-        Text {
+        if root.label != "" : Text {
             text: root.label;
             font-size: Theme.type.body;
-            font-weight: 600;
+            font-weight: root.primary ? 600 : 500;
             color: root.foreground;
             vertical-alignment: center;
             accessible-role: none;
@@ -253,7 +255,7 @@ export component LoomTextField inherits VerticalLayout {
         border-width: input.has-focus ? 2px : 1px;
         border-color: root.invalid ? Theme.palette().danger
             : input.has-focus ? Theme.palette().focus
-            : Theme.palette().ink-secondary;
+            : Theme.palette().border-strong;
         background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
 
         TouchArea {
@@ -332,7 +334,7 @@ export component LoomSearchField inherits VerticalLayout {
         horizontal-stretch: 1;
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: input.has-focus ? 2px : 1px;
-        border-color: input.has-focus ? Theme.palette().focus : Theme.palette().ink-secondary;
+        border-color: input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
         background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
 
         Icon {
@@ -425,15 +427,15 @@ export component LoomToggle inherits Rectangle {
             border-width: focus.has-focus ? 2px : 1px;
             border-color: focus.has-focus ? Theme.palette().focus
                 : root.checked ? Theme.palette().accent
-                : touch.has-hover ? Theme.palette().ink
-                : Theme.palette().ink-secondary;
+                : touch.has-hover ? Theme.palette().ink-secondary
+                : Theme.palette().border-strong;
             // High contrast's off track is the black surface: the white knob would
             // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
                 : root.checked ? (touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
                 : Theme.active-theme == "high-contrast" ? Theme.palette().surface
-                : touch.has-hover ? Theme.palette().ink
-                : Theme.palette().ink-secondary;
+                : touch.has-hover ? Theme.palette().ink-secondary
+                : Theme.palette().border-strong;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;
                 y: 2px;
@@ -496,7 +498,7 @@ export component LoomSegmentedControl inherits Rectangle {
 
     HorizontalLayout {
         spacing: 0px;
-        padding: Theme.tokens.space.xs;
+        padding: 2px;
         for item[idx] in root.items : Rectangle {
             horizontal-stretch: 1;
             property <int> rel: Theme.rtl ? root.items.length - 1 - idx : idx;
