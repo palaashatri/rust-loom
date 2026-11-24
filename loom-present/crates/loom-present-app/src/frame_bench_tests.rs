@@ -133,6 +133,12 @@ pub(super) fn build_session(slides: usize) -> PresentationSession {
         for (p, asset) in assets.iter().enumerate() {
             slide.add_element(SlideElement {
                 runs: Vec::new(),
+                effects: None,
+                group_id: None,
+                locked: false,
+                flip_h: false,
+                flip_v: false,
+                paragraphs: Vec::new(),
                 id: format!("s{n}-p{p}"),
                 element_type: ElementType::Picture,
                 content: asset.id.clone(),

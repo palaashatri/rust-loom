@@ -528,6 +528,12 @@ mod tests {
             action: None,
             style: ElementStyle::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         };
         let mut s0 = Slide::new("s0", "S0", "blank");
         s0.elements

@@ -1,0 +1,68 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+
+export component StyleEffectsPanel inherits VerticalLayout {
+    in property <bool> has-selection: false;
+    in property <int> opacity-pct: 100;
+    in property <int> corner-radius-px: 0;
+    in property <int> stroke-width-px: 0;
+    in property <int> stroke-dash: 0; // 0=Solid, 1=Dashed, 2=Dotted
+    in property <bool> has-shadow: false;
+    in property <bool> has-gradient: false;
+
+    callback set-opacity(int);
+    callback set-corner-radius(int);
+    callback set-stroke-width(int);
+    callback cycle-stroke-dash();
+    callback toggle-shadow();
+    callback toggle-gradient();
+
+    spacing: Theme.tokens.space.xs;
+    visible: root.has-selection;
+
+    Text {
+        text: "Effects";
+        font-size: Theme.type.caption;
+        font-weight: 600;
+        color: Theme.palette().text-muted;
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text { text: "Opacity " + root.opacity-pct + "%"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
+        LoomButton { label: "-"; clicked => { root.set-opacity(Math.max(10, root.opacity-pct - 10)); } }
+        LoomButton { label: "+"; clicked => { root.set-opacity(Math.min(100, root.opacity-pct + 10)); } }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text { text: "Radius " + root.corner-radius-px + "px"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
+        LoomButton { label: "-"; clicked => { root.set-corner-radius(Math.max(0, root.corner-radius-px - 4)); } }
+        LoomButton { label: "+"; clicked => { root.set-corner-radius(Math.min(48, root.corner-radius-px + 4)); } }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text { text: "Stroke " + root.stroke-width-px + "px"; font-size: Theme.type.caption; color: Theme.palette().text; vertical-alignment: center; horizontal-stretch: 1; }
+        LoomButton { label: "-"; clicked => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); } }
+        LoomButton { label: "+"; clicked => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); } }
+        LoomButton {
+            label: root.stroke-dash == 0 ? "Solid" : (root.stroke-dash == 1 ? "Dash" : "Dot");
+            clicked => { root.cycle-stroke-dash(); }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LoomButton {
+            label: root.has-shadow ? "Shadow: On" : "Shadow: Off";
+            primary: root.has-shadow;
+            clicked => { root.toggle-shadow(); }
+        }
+        LoomButton {
+            label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
+            primary: root.has-gradient;
+            clicked => { root.toggle-gradient(); }
+        }
+    }
+}

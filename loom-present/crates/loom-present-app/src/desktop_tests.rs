@@ -166,6 +166,12 @@ fn shift_marquee_adds_to_existing_domain_selection() {
             .elements
             .push(SlideElement {
                 runs: Vec::new(),
+                effects: None,
+                group_id: None,
+                locked: false,
+                flip_h: false,
+                flip_v: false,
+                paragraphs: Vec::new(),
                 id: "elem-2".into(),
                 element_type: ElementType::ShapeRectangle,
                 content: "Second".into(),
@@ -1323,6 +1329,12 @@ fn presenter_thumbnails_follow_navigation_from_both_windows_and_live_edits() {
             if slide.elements.is_empty() {
                 slide.add_element(SlideElement {
                     runs: Vec::new(),
+                    effects: None,
+                    group_id: None,
+                    locked: false,
+                    flip_h: false,
+                    flip_v: false,
+                    paragraphs: Vec::new(),
                     id: format!("e{index}"),
                     element_type: ElementType::BodyText,
                     content: String::new(),

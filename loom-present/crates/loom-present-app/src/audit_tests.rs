@@ -14,6 +14,12 @@ fn test_audit_doc() -> PresentationDocument {
     slide1.elements.clear();
     slide1.elements.push(SlideElement {
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
         id: "title-1".into(),
         element_type: ElementType::Title,
         content: "Loom Present".into(),
@@ -28,6 +34,12 @@ fn test_audit_doc() -> PresentationDocument {
     });
     slide1.elements.push(SlideElement {
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
         id: "subtitle-1".into(),
         element_type: ElementType::Subtitle,
         content: "High performance native presentations".into(),
@@ -47,6 +59,12 @@ fn test_audit_doc() -> PresentationDocument {
     slide2.speaker_notes = "Discussing modular UI and vector graphics.".into();
     slide2.elements.push(SlideElement {
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
         id: "rect-1".into(),
         element_type: ElementType::ShapeRectangle,
         content: "Slint UI Layer".into(),
@@ -61,6 +79,12 @@ fn test_audit_doc() -> PresentationDocument {
     });
     slide2.elements.push(SlideElement {
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
         id: "rect-2".into(),
         element_type: ElementType::ShapeRectangle,
         content: "Core Engine".into(),

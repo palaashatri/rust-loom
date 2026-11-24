@@ -631,6 +631,12 @@ fn high_contrast_keeps_slide_artwork_colours_and_recolours_only_chrome() {
     {
         slide.add_element(loom_present_core::SlideElement {
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             id: "contrast-shape".into(),
             element_type: loom_present_core::ElementType::ShapeRectangle,
             content: "Deck shape".into(),
@@ -794,6 +800,12 @@ fn parity_rotation_new_shapes_rich_runs_and_slide_bg_render_visibly() {
             height: h,
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             rotation_deg: 0.0,
             action: None,
         };

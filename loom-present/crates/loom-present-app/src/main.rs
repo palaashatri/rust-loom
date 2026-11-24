@@ -230,7 +230,6 @@ fn text_element(
     height: f32,
 ) -> SlideElement {
     SlideElement {
-        runs: Vec::new(),
         id: id.into(),
         element_type: kind,
         content: content.into(),
@@ -240,7 +239,7 @@ fn text_element(
         height,
         rotation_deg: 0.0,
         action: None,
-        style: Default::default(),
+        ..Default::default()
     }
 }
 

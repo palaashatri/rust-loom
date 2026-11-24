@@ -1,0 +1,49 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+
+export component AnimationInspector inherits VerticalLayout {
+    in property <bool> has-selection: false;
+    in property <int> build-count: 0;
+    in property <int> selected-phase: 0; // 0=BuildIn, 1=Action, 2=BuildOut
+    in property <int> selected-trigger: 0; // 0=OnClick, 1=WithPrevious, 2=AfterPrevious
+
+    callback add-build(int, int); // phase, trigger
+    callback remove-last-build();
+    callback cycle-phase();
+    callback cycle-trigger();
+
+    spacing: Theme.tokens.space.xs;
+
+    Text {
+        text: "Animate (" + root.build-count + " builds)";
+        font-size: Theme.type.caption;
+        font-weight: 600;
+        color: Theme.palette().text-muted;
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LoomButton {
+            label: root.selected-phase == 0 ? "Build In" : (root.selected-phase == 1 ? "Action" : "Build Out");
+            clicked => { root.cycle-phase(); }
+        }
+        LoomButton {
+            label: root.selected-trigger == 0 ? "On Click" : (root.selected-trigger == 1 ? "With Prev" : "After Prev");
+            clicked => { root.cycle-trigger(); }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        LoomButton {
+            label: "+ Add Build";
+            enabled: root.has-selection;
+            clicked => { root.add-build(root.selected-phase, root.selected-trigger); }
+        }
+        LoomButton {
+            label: "Remove";
+            enabled: root.build-count > 0;
+            clicked => { root.remove-last-build(); }
+        }
+    }
+}

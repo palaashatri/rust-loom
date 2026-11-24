@@ -147,6 +147,12 @@ pub(crate) fn apply_layout(slide: &mut Slide, layout: &str) {
                 let id = unused_id(slide, spot.id_stem);
                 slide.add_element(SlideElement {
                     runs: Vec::new(),
+                    effects: None,
+                    group_id: None,
+                    locked: false,
+                    flip_h: false,
+                    flip_v: false,
+                    paragraphs: Vec::new(),
                     id,
                     element_type: spot.kind,
                     content: String::new(),

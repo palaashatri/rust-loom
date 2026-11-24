@@ -150,6 +150,12 @@ fn picture_state() -> Rc<GuiState> {
         .expect("slide")
         .add_element(SlideElement {
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             id: "pic".into(),
             element_type: ElementType::Picture,
             content: id,

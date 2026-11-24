@@ -385,6 +385,12 @@ mod tests {
             height: 40.0,
             rotation_deg: 0.0,
             action: None,
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             style: Default::default(),
             runs: vec![
                 StyledTextRun {

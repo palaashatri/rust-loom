@@ -130,7 +130,11 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
         720.0
     };
     let sx = page_w / PAGE_WIDTH;
+    let has_visible = doc.slides.iter().any(|s| !s.hidden);
     for slide in &doc.slides {
+        if has_visible && slide.hidden {
+            continue;
+        }
         let page = pdf.add_page(page_w, PAGE_HEIGHT);
         if let Some(bg_rgb) = parse_rgb(&slide.bg_color) {
             pdf.draw_rect(
@@ -1144,6 +1148,12 @@ mod tests {
             y: 120.0,
             width: 400.0,
             height: 120.0,
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             style: Default::default(),
             runs: vec![
                 crate::StyledTextRun {
@@ -1189,6 +1199,12 @@ mod tests {
                 ..Default::default()
             },
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
             rotation_deg: 0.0,
             action: None,
         });

@@ -148,9 +148,29 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
     } else {
         content.lines().collect()
     };
-    for line in lines {
-        xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\"/>"));
-        if line.is_empty() {
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start_matches("  ");
+        let lvl = ((line.len() - trimmed.len()) / 2).min(4);
+        let (ppr_inner, body_text) = if let Some(rest) = trimmed.strip_prefix("• ") {
+            ("<a:buChar char=\"•\"/>", rest)
+        } else if let Some((num, rest)) = trimmed.split_once(". ") {
+            if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+                ("<a:buAutoNum type=\"arabicPeriod\"/>", rest)
+            } else {
+                ("", *line)
+            }
+        } else {
+            ("", *line)
+        };
+        let _ = idx;
+        if ppr_inner.is_empty() {
+            xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\"/>"));
+        } else {
+            xml.push_str(&format!(
+                "<a:p><a:pPr algn=\"{algn}\" lvl=\"{lvl}\">{ppr_inner}</a:pPr>"
+            ));
+        }
+        if body_text.is_empty() {
             // An empty text object still records its family on the paragraph's
             // end properties, so a save/reopen in PowerPoint keeps the face.
             xml.push_str(&format!(
@@ -160,7 +180,7 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
             xml.push_str(&format!(
                 "<a:r><a:rPr lang=\"en-US\" {rpr}><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>{font}</a:rPr><a:t>{}</a:t></a:r>",
                 spec.color,
-                esc(line)
+                esc(body_text)
             ));
         }
         xml.push_str("</a:p>");
