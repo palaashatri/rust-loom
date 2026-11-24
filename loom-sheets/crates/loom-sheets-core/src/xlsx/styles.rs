@@ -27,7 +27,7 @@ impl XfKey {
     }
 }
 
-pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
+pub(super) fn render_styles_xml(keys: &[XfKey], dxfs: &[String]) -> String {
     let mut fonts = Vec::<(bool, bool, bool, bool, Option<u8>, Option<u32>)>::new();
     let mut fills = Vec::<FillColor>::new();
     let mut borders = Vec::<CellBorders>::new();
@@ -198,8 +198,13 @@ pub(super) fn render_styles_xml(keys: &[XfKey]) -> String {
             formats.len()
         )
     };
+    let dxfs_xml = if dxfs.is_empty() {
+        "<dxfs count=\"0\"/>".to_string()
+    } else {
+        format!("<dxfs count=\"{}\">{}</dxfs>", dxfs.len(), dxfs.join(""))
+    };
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"{MAIN_NS}\">{num_fmts}<fonts count=\"{}\">{font_xml}</fonts><fills count=\"{}\">{fill_xml}</fills><borders count=\"{}\">{border_xml}</borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"{}\">{xf_xml}</cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles><dxfs count=\"0\"/><tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/></styleSheet>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"{MAIN_NS}\">{num_fmts}<fonts count=\"{}\">{font_xml}</fonts><fills count=\"{}\">{fill_xml}</fills><borders count=\"{}\">{border_xml}</borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"{}\">{xf_xml}</cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>{dxfs_xml}<tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/></styleSheet>",
         fonts.len(),
         fills.len() + 2,
         borders.len(),

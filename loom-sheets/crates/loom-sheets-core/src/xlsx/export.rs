@@ -8,6 +8,10 @@ use crate::style::{CellAlignment, CellStyle};
 use crate::{CellRef, ChartKind, Sheet, SheetChart, SheetObject, SheetObjectKind};
 
 use super::cell_refs::{chart_sheet_reference, column_letters};
+use super::export_features::{
+    render_conditional_formatting, render_defined_names, render_table_parts,
+};
+use super::export_warnings::{collect_export_warnings, XlsxExportWarning};
 use super::styles::{render_styles_xml, rgb_for_fill, XfKey};
 use super::worksheet_xml::{render_worksheet, SharedStrings, WorksheetInput};
 use super::xml::{xml_escape_attr, xml_escape_text};
@@ -19,9 +23,18 @@ use super::{CHART_NS, DRAWINGML_NS, DRAWING_NS, EMU_PER_PIXEL, MAIN_NS, PACKAGE_
 /// frozen panes, the reserved style entries) because Excel silently repairs,
 /// or refuses, packages that break its rules.
 pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
+    export_xlsx_sheets_with_warnings(sheets).map(|(bytes, _)| bytes)
+}
+
+/// Export every worksheet to XLSX and return any truthful warnings about
+/// Loom-specific features that cannot be represented losslessly in OOXML.
+pub fn export_xlsx_sheets_with_warnings(
+    sheets: &[Sheet],
+) -> Result<(Vec<u8>, Vec<XlsxExportWarning>), String> {
     if sheets.is_empty() {
         return Err("xlsx export needs at least one sheet".to_string());
     }
+    let warnings = collect_export_warnings(sheets);
     let evaluated = crate::workbook::evaluate_workbook(sheets);
     let names = crate::unique_xlsx_sheet_names(
         &sheets
@@ -64,9 +77,19 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
     let mut strings = SharedStrings::default();
     let mut image_extensions = BTreeSet::new();
     let mut sheet_parts: Vec<(String, String)> = Vec::new();
+    let mut all_dxfs: Vec<String> = Vec::new();
+    let mut next_table_id = 1usize;
 
     for (index, sheet) in sheets.iter().enumerate() {
+        let number = index + 1;
         let has_drawing = sheet.chart.is_some() || !sheet.objects.is_empty();
+        let (cf_xml, sheet_dxfs) = render_conditional_formatting(sheet, all_dxfs.len());
+        all_dxfs.extend(sheet_dxfs);
+        let start_rid = if has_drawing { 2 } else { 1 };
+        let (table_parts_xml, table_files, table_rels) =
+            render_table_parts(sheet, start_rid, next_table_id);
+        next_table_id += sheet.tables.len();
+
         let worksheet = render_worksheet(
             &WorksheetInput {
                 sheet,
@@ -75,12 +98,17 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
                 sheet_names: &names.formula_mapping,
                 selected: index == 0,
                 has_drawing,
+                conditional_formatting_xml: cf_xml,
+                table_parts_xml,
             },
             &mut strings,
         );
-        sheet_parts.push((format!("xl/worksheets/sheet{}.xml", index + 1), worksheet));
+        sheet_parts.push((format!("xl/worksheets/sheet{number}.xml"), worksheet));
+        for (path, xml) in table_files {
+            add(&path, xml.into_bytes())?;
+        }
+        let mut sheet_rels = Vec::new();
         if has_drawing {
-            let number = index + 1;
             let (drawing_xml, drawing_rels, chart_parts, image_parts, extensions) =
                 render_drawing_parts(sheet, number, &exported_sheet_names[index])?;
             image_extensions.extend(extensions);
@@ -98,9 +126,19 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
             for (path, bytes) in image_parts {
                 add(&path, bytes)?;
             }
+            sheet_rels.push(format!(
+                "<Relationship Id=\"rId1\" Type=\"{DRAWING_REL_TYPE}\" Target=\"../drawings/drawing{number}.xml\"/>"
+            ));
+        }
+        sheet_rels.extend(table_rels);
+        if !sheet_rels.is_empty() {
+            let rels_xml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"{PACKAGE_REL_NS}\">{}</Relationships>",
+                sheet_rels.join("")
+            );
             add(
                 &format!("xl/worksheets/_rels/sheet{number}.xml.rels"),
-                worksheet_drawing_rels(number).into_bytes(),
+                rels_xml.into_bytes(),
             )?;
         }
     }
@@ -109,28 +147,32 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
     }
     add(
         "[Content_Types].xml",
-        render_content_types(sheets, &image_extensions).into_bytes(),
+        render_content_types(sheets, &image_extensions, next_table_id - 1).into_bytes(),
     )?;
     add("_rels/.rels", ROOT_RELATIONSHIPS.as_bytes().to_vec())?;
     add(
         "xl/workbook.xml",
-        render_workbook(&exported_sheet_names).into_bytes(),
+        render_workbook(sheets, &exported_sheet_names).into_bytes(),
     )?;
     add(
         "xl/_rels/workbook.xml.rels",
         render_workbook_relationships(sheets.len()).into_bytes(),
     )?;
     add("xl/sharedStrings.xml", strings.render().into_bytes())?;
-    add("xl/styles.xml", render_styles_xml(&style_keys).into_bytes())?;
-    archive
+    add(
+        "xl/styles.xml",
+        render_styles_xml(&style_keys, &all_dxfs).into_bytes(),
+    )?;
+    let bytes = archive
         .to_bytes()
-        .map_err(|e| format!("xlsx export failed: {e}"))
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    Ok((bytes, warnings))
 }
 
 const ROOT_RELATIONSHIPS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>";
 
-fn render_workbook(sheet_names: &[String]) -> String {
-    let sheets = sheet_names
+fn render_workbook(sheets: &[Sheet], sheet_names: &[String]) -> String {
+    let sheets_xml = sheet_names
         .iter()
         .enumerate()
         .map(|(index, name)| {
@@ -141,8 +183,9 @@ fn render_workbook(sheet_names: &[String]) -> String {
             )
         })
         .collect::<String>();
+    let defined_names = render_defined_names(sheets, sheet_names);
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"{MAIN_NS}\" xmlns:r=\"{REL_NS}\"><workbookPr/><bookViews><workbookView xWindow=\"0\" yWindow=\"0\" windowWidth=\"28800\" windowHeight=\"12300\" activeTab=\"0\"/></bookViews><sheets>{sheets}</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"{MAIN_NS}\" xmlns:r=\"{REL_NS}\"><workbookPr/><bookViews><workbookView xWindow=\"0\" yWindow=\"0\" windowWidth=\"28800\" windowHeight=\"12300\" activeTab=\"0\"/></bookViews><sheets>{sheets_xml}</sheets>{defined_names}<calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>"
     )
 }
 
@@ -333,14 +376,17 @@ fn render_chart_xml(sheet: &Sheet, chart: &SheetChart, exported_sheet_name: &str
     )
 }
 
-fn worksheet_drawing_rels(drawing_number: usize) -> String {
-    format!(
-        "<?xml version=\"1.0\"?><Relationships xmlns=\"{PACKAGE_REL_NS}\"><Relationship Id=\"rId1\" Type=\"{DRAWING_REL_TYPE}\" Target=\"../drawings/drawing{drawing_number}.xml\"/></Relationships>"
-    )
-}
-
-fn render_content_types(sheets: &[Sheet], image_extensions: &BTreeSet<String>) -> String {
+fn render_content_types(
+    sheets: &[Sheet],
+    image_extensions: &BTreeSet<String>,
+    table_count: usize,
+) -> String {
     let mut additions = String::new();
+    for table_id in 1..=table_count {
+        additions.push_str(&format!(
+            "<Override PartName=\"/xl/tables/table{table_id}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml\"/>"
+        ));
+    }
     for (index, sheet) in sheets.iter().enumerate() {
         additions.push_str(&format!(
             "<Override PartName=\"/xl/worksheets/sheet{}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>",

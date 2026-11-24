@@ -70,8 +70,8 @@ pub use row_order::RowOrder;
 pub use sheet_tables::{SheetTable, TableStylePreset};
 pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
 pub use xlsx::{
-    export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
-    XlsxImportWarning,
+    export_xlsx_sheets, export_xlsx_sheets_with_warnings, extract_xlsx_sheets, import_xlsx_sheets,
+    XlsxChartType, XlsxExportWarning, XlsxImport, XlsxImportWarning,
 };
 
 /// Default width of a worksheet column in the desktop editor, in pixels.

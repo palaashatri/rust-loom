@@ -1186,12 +1186,13 @@ fn export_at_revision(
             })
         }
         ExportFormat::Xlsx => {
-            let bytes = loom_sheets_core::export_xlsx_sheets(sheets)
+            let (bytes, warnings) = loom_sheets_core::export_xlsx_sheets_with_warnings(sheets)
                 .map_err(|error| format!("XLSX generation failed: {error}"))?;
             loom_storage::atomic_write(&operation.path, &bytes)
                 .map_err(|error| format!("XLSX write failed: {error}"))?;
             Ok(ExportOutputSummary::Xlsx {
                 sheet_count: sheets.len(),
+                warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
             })
         }
         ExportFormat::Pdf => {

@@ -4,10 +4,13 @@ mod cell_refs;
 #[cfg(test)]
 mod excel_conformance_tests;
 mod export;
+mod export_features;
+mod export_warnings;
 mod formula_import;
 mod formula_text;
 mod import;
 mod import_audit;
+mod import_features;
 #[cfg(test)]
 mod import_tests;
 mod number_formats;
@@ -19,7 +22,8 @@ mod warnings;
 mod worksheet_xml;
 mod xml;
 
-pub use export::export_xlsx_sheets;
+pub use export::{export_xlsx_sheets, export_xlsx_sheets_with_warnings};
+pub use export_warnings::XlsxExportWarning;
 pub use import::{extract_xlsx_sheets, import_xlsx_sheets, XlsxImport};
 pub use warnings::{XlsxChartType, XlsxImportWarning};
 
