@@ -1,4 +1,6 @@
 import { Theme } from "theme.slint";
+import { FillHandleOverlay, SheetsParityState } from "fill_handle.slint";
+import { FormulaAuditOverlay } from "formula_audit_overlay.slint";
 
 export struct TableBandView {
     x: length,
@@ -133,5 +135,17 @@ export component TableCanvasLayer inherits Rectangle {
                 clicked => { SheetTableState.select-table(t.id); }
             }
         }
+    }
+
+    FormulaAuditOverlay {
+        width: 100%;
+        height: 100%;
+        show-formulas: SheetsParityState.show-formulas;
+    }
+
+    FillHandleOverlay {
+        width: 100%;
+        height: 100%;
+        double-clicked => { SheetsParityState.autofill-series(); }
     }
 }

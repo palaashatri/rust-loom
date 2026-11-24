@@ -16,6 +16,7 @@ fn wire_everything(session: &Session) {
     crate::chart_actions::register_chart_inspector_actions(app, state, &menu_service);
     register_history_actions(app, state, &menu_service);
     object_actions::register_object_actions(app, state, &menu_service);
+    crate::parity_actions::register_parity_actions(app, state, &menu_service);
     crate::cell_actions::register_quick_edit_actions(app, state, &menu_service);
     crate::ink_actions::wire(app, state, &menu_service);
     crate::sheet_tables::wire(app, state, &menu_service);
@@ -74,6 +75,14 @@ fn table() -> Vec<(&'static str, Action)> {
         a("delete_row", |app| app.invoke_delete_row()),
         a("delete_sheet", |app| app.invoke_delete_sheet()),
         a("fill_selection", |app| app.invoke_fill_selection()),
+        a("autofill_series", |app| {
+            app.global::<crate::SheetsParityState>()
+                .invoke_autofill_series()
+        }),
+        a("format_painter_apply", |app| {
+            app.global::<crate::SheetsParityState>()
+                .invoke_format_painter_apply()
+        }),
         a("freeze_panes", |app| app.invoke_freeze_panes()),
         a("header_autofit", |app| {
             app.global::<GridPointer>().invoke_header_autofit(false, 0)

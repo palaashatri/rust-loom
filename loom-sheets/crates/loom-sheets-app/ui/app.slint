@@ -17,17 +17,18 @@ import {SheetObjectLayer,SheetObjectView} from "objects.slint";
 import {CommandPalette,CommandPaletteItem} from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {FormulaNameBar,SheetActionToolbar,SheetGridSurface,SheetInspector,SheetTabs,SheetStatusRow,FormulaAssistPopup} from "components.slint";
 import {Theme,ResponsivePolicy} from "theme.slint";
-export {Theme,ResponsivePolicy} from "theme.slint";
-export {LocalMenu,LocalMenuEntry} from "foundation.slint";
+export {Theme,ResponsivePolicy}
+export {LocalMenu,LocalMenuEntry}
 export {GridPointer,CellSpill,CellInk,CellRichFormat} from "grid_pointer.slint";
+export {SheetsParityState} from "fill_handle.slint";
 export {FormulaAssist} from "formula_assist.slint";
 export {SheetTableState} from "table_canvas_layer.slint";
 export component SheetsApp inherits Window {
-    init => { Theme.application = "sheets"; }
+    init=>{Theme.application="sheets";}
     icon: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.png");
-    in-out property <string> window-title: "Untitled";
-    title: root.window-title;
-    default-font-family: Theme.ui-font-family;
+    in-out property <string> window-title:"Untitled";
+    title:root.window-title;
+    default-font-family:Theme.ui-font-family;
     in property <bool> custom-chrome: false;
     no-frame: root.custom-chrome;
     callback window-drag;

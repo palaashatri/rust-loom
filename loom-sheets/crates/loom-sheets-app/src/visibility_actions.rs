@@ -1,5 +1,4 @@
 //! Undoable Hide/Unhide Rows & Columns and Freeze Panes at Selection actions.
-#![allow(dead_code)]
 
 use loom_sheets_core::visibility::{hide_cols, hide_rows, unhide_cols, unhide_rows};
 use loom_sheets_core::{CellRange, Sheet};
@@ -47,6 +46,7 @@ pub fn freeze_panes_at_selection(sheet: &mut Sheet, selection: CellRange) -> Vis
 }
 
 /// Reverts a `VisibilityUndo` on `sheet`.
+#[cfg(test)]
 pub fn undo_visibility_action(sheet: &mut Sheet, undo: VisibilityUndo) {
     match undo {
         VisibilityUndo::RowsHidden(rows) => {

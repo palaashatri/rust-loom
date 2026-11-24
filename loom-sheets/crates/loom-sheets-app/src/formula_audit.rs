@@ -1,5 +1,4 @@
 //! Formula Auditing: Show Formulas mode (Cmd/Ctrl+~) + Trace Precedents/Dependents.
-#![allow(dead_code)]
 
 use loom_sheets_core::{CellRef, Sheet};
 

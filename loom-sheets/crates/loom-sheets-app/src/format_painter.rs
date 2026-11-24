@@ -1,7 +1,6 @@
 //! Format Painter state machine wired to `loom_clipboard::StyleClipboard<CellStyle>`.
-#![allow(dead_code)]
 
-use loom_clipboard::{FormatPainterMode, StyleClipboard};
+use loom_clipboard::StyleClipboard;
 use loom_sheets_core::style::CellStyle;
 use loom_sheets_core::{CellRange, CellRef, Sheet};
 
@@ -57,14 +56,10 @@ impl SheetsFormatPainter {
         Some(FormatPainterUndo { previous })
     }
 
-    /// Cancels Format Painter and returns to `Inactive`.
+    /// Clears the armed style and returns to `Inactive`.
+    #[cfg(test)]
     pub fn cancel(&mut self) {
         self.clipboard.cancel();
-    }
-
-    /// Current Format Painter mode.
-    pub fn mode(&self) -> FormatPainterMode {
-        self.clipboard.mode()
     }
 
     /// Whether Format Painter is armed (`SingleShot` or `Locked`).
@@ -79,6 +74,7 @@ impl SheetsFormatPainter {
 }
 
 /// Reverts a `FormatPainterUndo` on `sheet`.
+#[cfg(test)]
 pub fn undo_format_painter(sheet: &mut Sheet, undo: FormatPainterUndo) {
     for (coord, prev_style) in undo.previous {
         sheet.set_cell_style(coord, prev_style);

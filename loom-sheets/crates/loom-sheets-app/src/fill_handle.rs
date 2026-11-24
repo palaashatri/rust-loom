@@ -1,10 +1,10 @@
 //! Interactive Fill Handle state, hit-testing, and undoable batch auto-fill.
-#![allow(dead_code)]
 
 use loom_sheets_core::autofill::{double_click_fill_extent, generate_fill_values};
 use loom_sheets_core::{Cell, CellRange, CellRef, Sheet};
 
 /// State for an active fill-handle drag gesture.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FillHandleState {
     /// Whether the user is currently dragging the fill handle.
@@ -15,6 +15,7 @@ pub struct FillHandleState {
     pub target_range: Option<CellRange>,
 }
 
+#[cfg(test)]
 impl FillHandleState {
     /// Returns `true` if `(px, py)` hits the 6x6px bottom-right corner handle
     /// centered at `(corner_x, corner_y)` (with a 10px hit slop).
@@ -83,13 +84,6 @@ impl FillHandleState {
             None
         }
     }
-
-    /// Cancels an in-progress drag.
-    pub fn cancel(&mut self) {
-        self.dragging = false;
-        self.source_range = None;
-        self.target_range = None;
-    }
 }
 
 /// Undoable batch record for an auto-fill operation.
@@ -112,6 +106,7 @@ pub fn apply_fill_range(sheet: &mut Sheet, source: CellRange, target: CellRange)
 }
 
 /// Reverts a previously applied `FillBatchUndo` on `sheet`.
+#[cfg(test)]
 pub fn undo_fill_range(sheet: &mut Sheet, undo: FillBatchUndo) {
     for (coord, old_cell) in undo.previous {
         match old_cell {

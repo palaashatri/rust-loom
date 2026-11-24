@@ -47,6 +47,7 @@ use grid_navigation::{extend_selection, navigate_selection};
 mod grid_pointer;
 mod ink_actions;
 mod inspector_search;
+mod parity_actions;
 mod pivot_builder;
 mod rich_format_actions;
 mod sheet_tables;
@@ -2107,6 +2108,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     chart_actions::register_chart_actions(&app, &state);
     chart_actions::register_chart_inspector_actions(&app, &state, &menu_service);
     object_actions::register_object_actions(&app, &state, &menu_service);
+    parity_actions::register_parity_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
