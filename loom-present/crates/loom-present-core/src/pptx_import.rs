@@ -1109,8 +1109,9 @@ mod tests {
         let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(joined, "A 1 B");
 
-        // Malformed <a:fld> with inverted tags does not panic
-        let malformed_fld = "<p:sp><p:txBody><a:p><a:fld></a:t><a:t>X</a:fld></p:txBody></p:sp>";
+        // Malformed <a:fld> with inverted tags reaches parse_shape_runs and does not panic
+        let malformed_fld =
+            "<p:sp><p:txBody><a:p><a:fld></a:t><a:t>X</a:fld></a:p></p:txBody></p:sp>";
         assert!(parse_shape_runs(malformed_fld).is_empty());
 
         // Line stroke color survives export/import

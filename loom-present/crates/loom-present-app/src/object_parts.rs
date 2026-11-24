@@ -147,6 +147,27 @@ fn shape_kind_tag(kind: &ElementType) -> Option<&'static str> {
     }
 }
 
+const WRAPPED_LINE_HEIGHT_FACTOR: f32 = 1.25;
+const MIN_READABLE_LINE_FS: f32 = 7.5;
+
+fn wrapped_row_fit(
+    line_count: usize,
+    elem_height: f32,
+    band_frac: f32,
+    max_fs: f32,
+) -> (usize, f32) {
+    if line_count == 0 || elem_height <= 0.0 || max_fs <= 0.0 {
+        return (line_count, 1.0);
+    }
+    let avail_h = elem_height * band_frac;
+    let max_rows =
+        ((avail_h / (MIN_READABLE_LINE_FS * WRAPPED_LINE_HEIGHT_FACTOR)).floor() as usize).max(1);
+    let shown_rows = line_count.min(max_rows);
+    let row_h = avail_h / (shown_rows as f32);
+    let scale = ((row_h / WRAPPED_LINE_HEIGHT_FACTOR) / max_fs).clamp(0.05, 1.0);
+    (shown_rows, scale)
+}
+
 fn wrap_paragraph_spans(para: &str, max_chars: usize) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut line_start = 0usize;
@@ -178,7 +199,7 @@ fn wrap_paragraph_spans(para: &str, max_chars: usize) -> Vec<(usize, usize)> {
         let word_end = idx;
         let ws_chars = para[ws_start..word_start].chars().count();
         if has_word && line_chars + ws_chars + word_chars > max_chars {
-            spans.push((line_start, line_end));
+            spans.push((line_start, word_start));
             line_start = word_start;
             line_end = word_end;
             line_chars = word_chars;
@@ -255,6 +276,21 @@ fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
             lines.push(line_parts);
         }
     }
+    let max_fs = lines
+        .iter()
+        .flat_map(|line| {
+            line.iter().map(|(_, run)| {
+                run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT
+            })
+        })
+        .fold(0.0f32, f32::max);
+    let (shown_rows, fs_scale) = wrapped_row_fit(lines.len(), element.height, 0.8, max_fs);
+    if shown_rows < lines.len() {
+        lines.truncate(shown_rows);
+        if let Some((last_text, _)) = lines.iter_mut().rev().find_map(|line| line.last_mut()) {
+            last_text.push('…');
+        }
+    }
     let line_count = lines.len().max(1) as f32;
     let line_h = 0.8 / line_count;
     let mut out = Vec::new();
@@ -272,7 +308,8 @@ fn rich_run_parts(element: &SlideElement) -> Vec<ObjectPart> {
             let frac = ((seg.chars().count() as f32 / total_chars as f32) * max_w).min(remaining);
             let mut p = part(x_cursor, fy, frac, line_h);
             p.text = SharedString::from(seg);
-            p.fs = run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT;
+            p.fs = (run.font_size_pt.unwrap_or_else(|| style.size_or(size_pt)) / POINTS_PER_UNIT)
+                * fs_scale;
             p.bold = run.bold.unwrap_or_else(|| style.bold.unwrap_or(bold));
             p.italic = run.italic.unwrap_or(style.italic);
             p.underline = run.underline.unwrap_or(style.underline);
@@ -347,14 +384,22 @@ fn styled_parts(element: &SlideElement) -> Vec<ObjectPart> {
                     }
                 }
                 if lines.len() > 1 {
-                    let n = lines.len() as f32;
+                    let (shown_rows, fs_scale) =
+                        wrapped_row_fit(lines.len(), element.height, 0.84, text.fs);
+                    let truncated = shown_rows < lines.len();
+                    let n = shown_rows as f32;
                     let lh = 0.84 / n;
-                    for (i, line) in lines.into_iter().enumerate() {
+                    for (i, line) in lines.into_iter().take(shown_rows).enumerate() {
                         let mut p = text.clone();
                         p.fy = 0.08 + i as f32 * lh;
                         p.fh = lh;
+                        p.fs *= fs_scale;
                         p.wrap = false;
-                        p.text = SharedString::from(line);
+                        p.text = SharedString::from(if truncated && i + 1 == shown_rows {
+                            format!("{line}…")
+                        } else {
+                            line.to_string()
+                        });
                         out.push(p);
                     }
                 } else {
@@ -1112,5 +1157,76 @@ mod tests {
         assert!(parts.iter().all(|p| !p.wrap));
         let combined: String = parts.iter().map(|p| p.text.as_str()).collect();
         assert!(combined.contains("Epsilon"), "lost tail: {combined}");
+    }
+
+    #[test]
+    fn soft_wrap_preserves_boundary_whitespace() {
+        let para = "AAAA  B";
+        let spans = wrap_paragraph_spans(para, 4);
+        let slices: Vec<&str> = spans.iter().map(|&(s, e)| &para[s..e]).collect();
+        assert_eq!(slices, vec!["AAAA  ", "B"]);
+        assert_eq!(slices.concat(), para);
+
+        let mut elem = SlideElement {
+            id: "soft-ws".into(),
+            element_type: ElementType::BodyText,
+            content: "AAAA  B".into(),
+            x: 40.0,
+            y: 40.0,
+            width: 60.0,
+            height: 120.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: Vec::new(),
+        };
+        elem.style.underline = true;
+        let parts = parts_for(&elem);
+        assert_eq!(parts.len(), 2);
+        let rendered: String = parts.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(rendered, "AAAA  B");
+    }
+
+    #[test]
+    fn wrapped_rich_text_rows_fit_without_overlapping() {
+        let long_runs: Vec<loom_present_core::StyledTextRun> = (1..=10)
+            .map(|i| loom_present_core::StyledTextRun {
+                text: if i < 10 {
+                    format!("Row{i}\n")
+                } else {
+                    "Row10".to_string()
+                },
+                bold: Some(i % 2 == 0),
+                ..Default::default()
+            })
+            .collect();
+        let elem = SlideElement {
+            id: "cramped-rich".into(),
+            element_type: ElementType::BodyText,
+            content: String::new(),
+            x: 40.0,
+            y: 40.0,
+            width: 140.0,
+            height: 80.0,
+            rotation_deg: 0.0,
+            action: None,
+            style: Default::default(),
+            runs: long_runs,
+        };
+        let parts = parts_for(&elem);
+        assert!(!parts.is_empty());
+        for p in &parts {
+            let row_units = elem.height * p.fh;
+            assert!(
+                p.fs * WRAPPED_LINE_HEIGHT_FACTOR <= row_units + 1e-3,
+                "row height {row_units} too short for font size {}",
+                p.fs
+            );
+            assert!(
+                p.fs >= MIN_READABLE_LINE_FS - 1e-3,
+                "font size {} became unreadably small",
+                p.fs
+            );
+        }
     }
 }

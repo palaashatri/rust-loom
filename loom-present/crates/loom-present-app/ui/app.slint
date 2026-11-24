@@ -720,7 +720,11 @@ export component PresentApp inherits Window {
         insert-table-dialog-rows <=> root.insert-table-dialog-rows;
         insert-table-dialog-cols <=> root.insert-table-dialog-cols;
         insert-table-size(r, c) => { root.insert-table-size(r, c); }
-        restore-editor-focus => { root.focus-editor(); }
+        restore-editor-focus => {
+            if (!root.pptx-import-warning-open && !root.save-changes-open && !root.theme-chooser-open && !root.insert-table-dialog-open) {
+                root.focus-editor();
+            }
+        }
     }
 
     menu-keys := FocusScope {

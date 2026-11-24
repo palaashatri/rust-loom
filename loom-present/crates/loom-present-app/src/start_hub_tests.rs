@@ -58,8 +58,14 @@ fn recent_warned_pptx_open_keeps_document_until_import_confirmation() {
 
     app.global::<StartHubState>()
         .invoke_open_deck(pptx_path.to_string_lossy().as_ref().into());
+    crate::keyboard_flow_tests::render(&app);
     assert!(app.get_pptx_import_warning_open());
     assert!(!app.global::<StartHubState>().get_open());
+    assert_eq!(
+        crate::keyboard_flow_tests::focus_name(&app),
+        "Cancel",
+        "closing Start Hub must leave keyboard focus on the PPTX import warning dialog"
+    );
     assert_eq!(state.session.borrow().document.title, initial_title);
     assert!(crate::table_actions::PENDING_PPTX_IMPORT.with(|s| s.borrow().is_some()));
     let preserved = loom_production::snapshot::SnapshotRecovery::open_at(&rec_dir)
