@@ -92,7 +92,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.toggle-menu(3, self.absolute-position.x); }
         }
         LoomToolbarItem {
-            icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            icon: "text-box"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
             arrow(delta) => { root.step-focus(4, delta); }
             clicked => { root.toggle-menu(4, self.absolute-position.x); }
         }
@@ -179,7 +179,7 @@ export component WriterActionToolbar inherits LabeledToolbar {
             clicked => { root.toggle-menu(5, self.absolute-position.x + self.width); }
         }
         LoomToolbarItem {
-            icon: "bold"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
+            icon: "text-box"; label: "Text"; checked: root.menu-kind == 4; focus-request: root.request(4);
             arrow(delta) => { root.step-focus(4, delta); }
             clicked => { root.toggle-menu(4, self.absolute-position.x + self.width); }
         }

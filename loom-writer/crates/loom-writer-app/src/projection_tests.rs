@@ -378,3 +378,42 @@ fn a_synchronous_write_invalidates_a_draft_still_being_serialized() {
         "the worker's result is dropped when it arrives"
     );
 }
+
+#[test]
+fn high_contrast_medium_1_table_header_projects_dark_ink() {
+    let mut doc = text_document("x");
+    let mut table = loom_objects::table::Table::new(2, 2);
+    table.style_id = "table-style-medium-1".to_string();
+    table.set_cell_rich_text(0, 0, vec![loom_objects::table::TextRun::plain("Metric")]);
+    doc.insert_table_object(0, &table).unwrap();
+
+    let light = projection::project_with_viewport_scale_and_theme(
+        &doc,
+        PageViewport::default(),
+        900.0,
+        Some(800.0),
+        1.0,
+        false,
+    );
+    let light_header = light
+        .rows
+        .iter()
+        .find(|row| row.table_cell)
+        .expect("light header row");
+    assert!(light_header.has_color);
+
+    let hc = projection::project_with_viewport_scale_and_theme(
+        &doc,
+        PageViewport::default(),
+        900.0,
+        Some(800.0),
+        1.0,
+        true,
+    );
+    let hc_header = hc
+        .rows
+        .iter()
+        .find(|row| row.table_cell)
+        .expect("high-contrast header row");
+    assert!(!hc_header.has_color);
+}

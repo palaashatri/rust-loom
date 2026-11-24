@@ -3,6 +3,7 @@ import { Theme } from "theme.slint";
 import { Doc } from "doc_palette.slint";
 import { SheetChartConfig } from "chart_inspector.slint";
 import { SheetChartPieLegend, SheetChartLegendBar } from "chart_legend.slint";
+import { SheetChartHeader } from "chart_header.slint";
 
 export component SheetChart inherits Rectangle {
     in property <string> title: "Chart";
@@ -178,57 +179,26 @@ export component SheetChart inherits Rectangle {
         spacing: root.text-scale > 1.0 ? Theme.tokens.space.xs : Theme.tokens.space.sm;
 
         // Chart Header
-        HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
-            cross-axis-alignment: center;
-
-            Text {
-                text: root.title;
-                font-size: Theme.tokens.typography.body-large * root.text-scale;
-                font-weight: 700;
-                color: Theme.palette().paper-ink;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-
-            Rectangle {
-                background: Theme.active-theme == "light" ? transparent : Theme.palette().surface-raised;
-                border-radius: Theme.tokens.metrics.radius-small;
-                border-width: Theme.active-theme == "light" ? 0px : 1px;
-                border-color: Theme.active-theme == "light" ? transparent : Theme.palette().border;
-                HorizontalLayout {
-                    padding: Theme.active-theme == "light" ? 0px : 2px;
-                    spacing: 2px;
-                    LoomButton {
-                        variant: "ghost";
-                        label: root.kind-label();
-                        clicked => {
-                            root.cycle-kind();
-                        }
-                    }
-
-                    LoomIconButton {
-                        icon: "close";
-                        label: "Hide chart panel";
-                        tooltip: "Hide the chart preview and keep the chart in the worksheet.";
-                        clicked => { root.close-chart(); }
-                    }
-                }
-            }
+        SheetChartHeader {
+            title: root.title;
+            kind-label: root.kind-label();
+            text-scale: root.text-scale;
+            cycle-kind => { root.cycle-kind(); }
+            close-chart => { root.close-chart(); }
         }
 
         Text {
             text: "Source: " + root.source-range + " · Series: " + root.series-label + " · Unit: " + root.unit-label;
             width: parent.width;
             overflow: elide;
-            color: Theme.palette().paper-ink;
+            color: Doc.muted;
             font-size: Theme.tokens.typography.caption * root.text-scale;
         }
         chart-guidance-text := Text {
             text: root.chart-guidance();
             accessible-label: root.chart-guidance();
             wrap: word-wrap;
-            color: Theme.palette().paper-ink;
+            color: Doc.muted;
             font-size: Theme.tokens.typography.caption * root.text-scale;
         }
         if SheetChartConfig.chart-exists && (SheetChartConfig.show-legend || SheetChartConfig.x-axis-label != "" || SheetChartConfig.y-axis-label != "") : SheetChartLegendBar {
@@ -441,7 +411,7 @@ export component SheetChart inherits Rectangle {
                         height: bar-column.bar-shape-height;
                         background: Doc.accent;
                         border-width: idx == root.selected-point ? 2px : 0px;
-                        border-color: Theme.palette().paper-ink;
+                        border-color: Doc.ring;
                         border-radius: 3px;
                         drop-shadow-blur: 2px;
                         drop-shadow-color: Theme.palette().shadow;

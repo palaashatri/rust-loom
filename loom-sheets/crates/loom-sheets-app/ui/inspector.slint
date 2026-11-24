@@ -1,5 +1,5 @@
 import {
-    LoomTextField, LoomSearchField, LoomTabStrip,
+    LoomTextField, LoomSearchField, LoomSegmentedControl,
     LoomPanel, LoomToggle, LoomButton, LoomIconButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
@@ -143,17 +143,19 @@ export component SheetInspector inherits LoomPanel {
                 accessible-role: AccessibleRole.text;
                 accessible-label: root.selection-range + " selection";
             }
-            LoomButton {
+            LoomIconButton {
+                icon: "close";
                 label: "Close";
-                variant: "ghost";
+                tooltip: "Close inspector";
                 clicked => { root.close-requested(); }
             }
         }
         if Theme.rtl : HorizontalLayout {
             cross-axis-alignment: center;
-            LoomButton {
+            LoomIconButton {
+                icon: "close";
                 label: "Close";
-                variant: "ghost";
+                tooltip: "Close inspector";
                 clicked => { root.close-requested(); }
             }
             Text {
@@ -177,7 +179,7 @@ export component SheetInspector inherits LoomPanel {
             edited(text) => { root.inspector-search-edited(text); }
         }
 
-        LoomTabStrip {
+        LoomSegmentedControl {
             items: ["Organize", "Format"];
             current <=> root.inspector-tab;
             selected(idx) => { root.inspector-context-changed(idx); }
@@ -252,76 +254,90 @@ export component SheetInspector inherits LoomPanel {
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     SheetHeading { title: "Font Style"; }
-                    if !Theme.rtl : HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        alignment: start;
-                        LoomIconButton {
-                            icon: "bold";
-                            label: "Toggle bold formatting (Cell inspector)";
-                            tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-bold;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-bold(); }
-                        }
-                        LoomIconButton {
-                            icon: "italic";
-                            label: "Toggle italic formatting (Cell inspector)";
-                            tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-italic;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-italic(); }
-                        }
-                        LoomIconButton {
-                            icon: "underline";
-                            label: "Toggle underline formatting (Cell inspector)";
-                            tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-underline;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-underline(); }
-                        }
-                        LoomButton {
-                            label: "S";
-                            width: 32px;
-                            height: 32px;
-                            variant: CellRichFormat.selected-strikethrough ? "primary" : "secondary";
-                            accessible-label: "Toggle strikethrough formatting";
-                            clicked => { CellRichFormat.toggle-strikethrough(); }
+                    if !Theme.rtl : Rectangle {
+                        background: Theme.palette().surface-sunken;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        HorizontalLayout {
+                            padding: 2px;
+                            spacing: 2px;
+                            alignment: start;
+                            LoomIconButton {
+                                icon: "bold";
+                                label: "Toggle bold formatting (Cell inspector)";
+                                tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-bold;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-bold(); }
+                            }
+                            LoomIconButton {
+                                icon: "italic";
+                                label: "Toggle italic formatting (Cell inspector)";
+                                tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-italic;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-italic(); }
+                            }
+                            LoomIconButton {
+                                icon: "underline";
+                                label: "Toggle underline formatting (Cell inspector)";
+                                tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-underline;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-underline(); }
+                            }
+                            LoomIconButton {
+                                icon: "strikethrough";
+                                label: "Toggle strikethrough formatting";
+                                tooltip: "Turn strikethrough formatting on or off for selected cells in the Cell inspector.";
+                                selected: CellRichFormat.selected-strikethrough;
+                                text-scale: Theme.text-scale;
+                                clicked => { CellRichFormat.toggle-strikethrough(); }
+                            }
                         }
                     }
-                    if Theme.rtl : HorizontalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        alignment: end;
-                        LoomButton {
-                            label: "S";
-                            width: 32px;
-                            height: 32px;
-                            variant: CellRichFormat.selected-strikethrough ? "primary" : "secondary";
-                            accessible-label: "Toggle strikethrough formatting";
-                            clicked => { CellRichFormat.toggle-strikethrough(); }
-                        }
-                        LoomIconButton {
-                            icon: "underline";
-                            label: "Toggle underline formatting (Cell inspector)";
-                            tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-underline;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-underline(); }
-                        }
-                        LoomIconButton {
-                            icon: "italic";
-                            label: "Toggle italic formatting (Cell inspector)";
-                            tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-italic;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-italic(); }
-                        }
-                        LoomIconButton {
-                            icon: "bold";
-                            label: "Toggle bold formatting (Cell inspector)";
-                            tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
-                            selected: root.cell-bold;
-                            text-scale: Theme.text-scale;
-                            clicked => { root.toggle-bold(); }
+                    if Theme.rtl : Rectangle {
+                        background: Theme.palette().surface-sunken;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        HorizontalLayout {
+                            padding: 2px;
+                            spacing: 2px;
+                            alignment: end;
+                            LoomIconButton {
+                                icon: "strikethrough";
+                                label: "Toggle strikethrough formatting";
+                                tooltip: "Turn strikethrough formatting on or off for selected cells in the Cell inspector.";
+                                selected: CellRichFormat.selected-strikethrough;
+                                text-scale: Theme.text-scale;
+                                clicked => { CellRichFormat.toggle-strikethrough(); }
+                            }
+                            LoomIconButton {
+                                icon: "underline";
+                                label: "Toggle underline formatting (Cell inspector)";
+                                tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-underline;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-underline(); }
+                            }
+                            LoomIconButton {
+                                icon: "italic";
+                                label: "Toggle italic formatting (Cell inspector)";
+                                tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-italic;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-italic(); }
+                            }
+                            LoomIconButton {
+                                icon: "bold";
+                                label: "Toggle bold formatting (Cell inspector)";
+                                tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
+                                selected: root.cell-bold;
+                                text-scale: Theme.text-scale;
+                                clicked => { root.toggle-bold(); }
+                            }
                         }
                     }
                     SheetStepperRow {
@@ -364,6 +380,7 @@ export component SheetInspector inherits LoomPanel {
                             toggled => { CellInk.wrap-toggled(); }
                         }
                     }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
                     SheetHeading { title: "Borders & Fill"; }
                     HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
@@ -387,6 +404,7 @@ export component SheetInspector inherits LoomPanel {
                         accessible-label: "Fill";
                     }
                     SheetFillRow { cell-fill: root.cell-fill; set-fill(idx) => { root.set-fill(idx); } }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
                     SheetHeading { title: "Data Format"; }
                     SheetChoiceRow { choices: ["123", "$", "%", "1.23"]; choice-names: ["General", "Currency", "Percentage", "Number"]; current: root.cell-format; chosen(i) => { root.set-cell-format(i); } }
                     SheetStepperRow {
@@ -410,6 +428,7 @@ export component SheetInspector inherits LoomPanel {
                         decrease => { root.adjust-decimals(-1); }
                         increase => { root.adjust-decimals(1); }
                     }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
                     SheetHeading { title: "Alignment"; }
                     SheetChoiceRow { choices: ["Left", "Center", "Right"]; current: root.cell-alignment; chosen(i) => { root.set-cell-alignment(i); } }
                     DataValidationSection { }

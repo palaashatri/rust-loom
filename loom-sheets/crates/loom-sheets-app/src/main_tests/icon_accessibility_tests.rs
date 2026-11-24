@@ -19,6 +19,7 @@ const SHARED_ACTIONS: &[(&str, &str)] = &[
         "Hide chart panel",
         "Hide the chart preview and keep the chart in the worksheet.",
     ),
+    ("Close", "Close inspector"),
 ];
 
 const TABLE_ACTIONS: &[(&str, &str)] = &[
@@ -52,6 +53,10 @@ const CELL_ACTIONS: &[(&str, &str)] = &[
     (
         "Toggle underline formatting (Cell inspector)",
         "Turn underline formatting on or off for selected cells in the Cell inspector.",
+    ),
+    (
+        "Toggle strikethrough formatting",
+        "Turn strikethrough formatting on or off for selected cells in the Cell inspector.",
     ),
     (
         "Decrease selected cell font size",
@@ -190,7 +195,7 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
     assert_eq!(
         declaring_files,
         [
-            "chart.slint",
+            "chart_header.slint",
             "inspector.slint",
             "inspector_rows.slint",
             "sheet_bars.slint"
@@ -207,13 +212,13 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
 
     app.set_inspector_tab(1);
     let mut cell_top_expected = SHARED_ACTIONS.to_vec();
-    cell_top_expected.extend_from_slice(&CELL_ACTIONS[..5]);
+    cell_top_expected.extend_from_slice(&CELL_ACTIONS[..6]);
     check_icon_button_tree(&app, &cell_top_expected, &mut seen_labels);
 
     scroll_cell_inspector_by(&app, -240.0);
-    check_icon_button_tree(&app, &CELL_ACTIONS[5..7], &mut seen_labels);
+    check_icon_button_tree(&app, &CELL_ACTIONS[6..8], &mut seen_labels);
     scroll_cell_inspector_by(&app, -1_000.0);
-    check_icon_button_tree(&app, &CELL_ACTIONS[7..], &mut seen_labels);
+    check_icon_button_tree(&app, &CELL_ACTIONS[8..], &mut seen_labels);
 
     app.set_inspector_tab(0);
     let _ = snapshot_component(&app, 1280.0, 720.0, 1.0)

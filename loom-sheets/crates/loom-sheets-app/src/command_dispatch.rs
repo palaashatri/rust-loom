@@ -391,7 +391,16 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
             }
         }
     }
-    let lower = key.to_ascii_lowercase();
+    let normalized = if alt {
+        match key {
+            "Ø" | "ø" => "o",
+            "∏" | "π" => "p",
+            _ => key,
+        }
+    } else {
+        key
+    };
+    let lower = normalized.to_ascii_lowercase();
     if !alt && lower == "q" && !shift {
         app.invoke_window_close();
         return true;

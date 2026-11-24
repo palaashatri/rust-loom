@@ -97,6 +97,8 @@ pub(crate) fn open(app: &SheetsApp, state: &GuiState) {
     let ui = app.global::<PrintPreviewState>();
     ui.set_current_page(1);
     ui.set_status_message(SharedString::new());
+    app.set_welcome_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
     ui.set_open(true);
     refresh_preview(app, state);
 }

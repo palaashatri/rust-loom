@@ -304,6 +304,9 @@ pub(crate) fn sync_recents_to_app(app: &WriterApp) {
 
 /// Open the Step 1 Start / Recents Hub modal.
 pub(crate) fn open_hub(app: &WriterApp) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
+    app.global::<crate::WordCountState>().set_open(false);
     let hub = app.global::<StartHubState>();
     hub.set_search_query(SharedString::default());
     hub.set_sidebar_tab(0);

@@ -48,8 +48,7 @@ export component LoomButton inherits Rectangle {
         : root.primary ? (touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
         : root.destructive ? (touch.pressed ? Theme.palette().danger-surface : touch.has-hover ? Theme.palette().danger-surface : Theme.palette().surface)
         : root.ghost ? (touch.pressed ? Theme.palette().surface-sunken
-            : root.selected ? Theme.palette().selection-soft
-            : touch.has-hover ? Theme.palette().surface-sunken : transparent)
+            : (root.selected || touch.has-hover) ? Theme.palette().selection-soft : transparent)
         : touch.pressed ? Theme.palette().surface-sunken
         : root.selected ? Theme.palette().selection-soft
         : touch.has-hover ? Theme.palette().panel
@@ -427,15 +426,13 @@ export component LoomToggle inherits Rectangle {
             border-width: focus.has-focus ? 2px : 1px;
             border-color: focus.has-focus ? Theme.palette().focus
                 : root.checked ? Theme.palette().accent
-                : touch.has-hover ? Theme.palette().ink-secondary
-                : Theme.palette().border-strong;
+                : Theme.palette().ink-secondary;
             // High contrast's off track is the black surface: the white knob would
             // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
                 : root.checked ? (touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
                 : Theme.active-theme == "high-contrast" ? Theme.palette().surface
-                : touch.has-hover ? Theme.palette().ink-secondary
-                : Theme.palette().border-strong;
+                : Theme.palette().ink-secondary;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;
                 y: 2px;

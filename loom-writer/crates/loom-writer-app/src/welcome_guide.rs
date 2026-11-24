@@ -39,6 +39,9 @@ pub(crate) fn should_show_on_first_run() -> bool {
 
 /// Opens the 7-step Loom Writer Welcome Guide at Step 1 and syncs platform shortcut labels.
 pub(crate) fn open(app: &WriterApp) {
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
+    app.global::<crate::WordCountState>().set_open(false);
     let guide = app.global::<WelcomeGuideState>();
     let mod_key = if cfg!(target_os = "macos") {
         "Cmd+"
@@ -280,5 +283,31 @@ mod tests {
         guide.invoke_try_action("sample-doc".into());
         assert!(!guide.get_open());
         assert_eq!(state.current.borrow().id, "quick-start");
+    }
+
+    #[test]
+    fn modal_overlays_are_mutually_exclusive() {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = WriterApp::new().expect("create test app");
+        let doc = WriterDocument::new("test-doc", "Test");
+
+        open(&app);
+        assert!(app.global::<WelcomeGuideState>().get_open());
+
+        crate::start_hub::open_hub(&app);
+        assert!(app.global::<crate::StartHubState>().get_open());
+        assert!(!app.global::<WelcomeGuideState>().get_open());
+
+        crate::print_preview::open_document(&app, &doc);
+        assert!(app.global::<crate::PrintPreviewState>().get_open());
+        assert!(!app.global::<crate::StartHubState>().get_open());
+
+        crate::word_count_dialog::open_document(&app, &doc);
+        assert!(app.global::<crate::WordCountState>().get_open());
+        assert!(!app.global::<crate::PrintPreviewState>().get_open());
+
+        open(&app);
+        assert!(app.global::<WelcomeGuideState>().get_open());
+        assert!(!app.global::<crate::WordCountState>().get_open());
     }
 }

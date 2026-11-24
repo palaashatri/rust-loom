@@ -366,12 +366,13 @@ pub(crate) fn project(
     viewport: PageViewport,
     view_height: Option<f32>,
 ) -> Projection {
-    project_inner(doc, viewport, view_height, None, None)
+    project_inner(doc, viewport, view_height, None, None, false)
 }
 
 /// Project and rasterize only the part visible in the page canvas. The width
 /// and height are logical pixels reported by the canvas; the device scale is
 /// applied only to physical glyph pixels.
+#[cfg(test)]
 pub(crate) fn project_with_viewport_scale(
     doc: &WriterDocument,
     viewport: PageViewport,
@@ -385,6 +386,25 @@ pub(crate) fn project_with_viewport_scale(
         view_height,
         Some(view_width),
         Some(device_scale_factor),
+        false,
+    )
+}
+
+pub(crate) fn project_with_viewport_scale_and_theme(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    view_width: f32,
+    view_height: Option<f32>,
+    device_scale_factor: f32,
+    high_contrast: bool,
+) -> Projection {
+    project_inner(
+        doc,
+        viewport,
+        view_height,
+        Some(view_width),
+        Some(device_scale_factor),
+        high_contrast,
     )
 }
 
@@ -394,6 +414,7 @@ fn project_inner(
     view_height: Option<f32>,
     raster_view_width: Option<f32>,
     raster_device_scale: Option<f32>,
+    high_contrast: bool,
 ) -> Projection {
     // Startup can project before Slint reports a nonzero canvas size.
     let raster_view_width = raster_view_width.filter(|width| width.is_finite() && *width > 0.0);
@@ -741,13 +762,16 @@ fn project_inner(
                                 &options,
                                 table.cell(r, c),
                             );
+                            let cell_text_color = (!high_contrast)
+                                .then_some(resolved.text_color.as_deref())
+                                .flatten();
                             let Some(cell_block) = cell_text_block_with_color(
                                 block.id,
                                 table,
                                 r,
                                 c,
                                 resolved.bold,
-                                resolved.text_color.as_deref(),
+                                cell_text_color,
                             ) else {
                                 continue;
                             };
@@ -771,8 +795,9 @@ fn project_inner(
                             );
                             row.table_cell = true;
                             // The style's own text colour (white on a dark
-                            // header fill), not the page ink.
-                            if let Some(hex) = &resolved.text_color {
+                            // header fill), not the page ink, unless high-contrast
+                            // theme is active (which uses dark ink on white).
+                            if let Some(hex) = cell_text_color {
                                 row.has_color = true;
                                 row.color = slint::Color::from_argb_encoded(parse_hex_color(hex));
                             }

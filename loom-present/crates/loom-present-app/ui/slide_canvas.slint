@@ -74,7 +74,9 @@ export component PresentSlideCanvas inherits Rectangle {
     callback content-edited(string);
     callback table-text-edit-ended;
 
-    background: Theme.palette().canvas;
+    background: root.fit-screen ? Theme.palette().media-stage : Theme.palette().canvas-alt;
+    drop-shadow-blur: 20px;
+    drop-shadow-offset-y: 5px;
 
     /// Give the slide editor keyboard focus (arrows, Delete, shortcuts).
     public function focus-slide() { slide-focus.focus(); }

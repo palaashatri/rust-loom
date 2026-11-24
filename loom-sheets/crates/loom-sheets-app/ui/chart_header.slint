@@ -1,0 +1,41 @@
+import { LoomIconButton, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { Doc } from "doc_palette.slint";
+
+export component SheetChartHeader inherits HorizontalLayout {
+    in property <string> title: "Chart";
+    in property <string> kind-label: "Bar";
+    in property <float> text-scale: 1.0;
+    callback cycle-kind();
+    callback close-chart();
+
+    spacing: Theme.tokens.space.sm;
+    cross-axis-alignment: center;
+
+    Text {
+        text: root.title;
+        font-size: Theme.tokens.typography.body-large * root.text-scale;
+        font-weight: 700;
+        color: Theme.palette().paper-ink;
+        horizontal-stretch: 1;
+        overflow: elide;
+    }
+
+    HorizontalLayout {
+        spacing: 2px;
+        LoomButton {
+            variant: "ghost";
+            label: root.kind-label;
+            clicked => {
+                root.cycle-kind();
+            }
+        }
+
+        LoomIconButton {
+            icon: "close";
+            label: "Hide chart panel";
+            tooltip: "Hide the chart preview and keep the chart in the worksheet.";
+            clicked => { root.close-chart(); }
+        }
+    }
+}

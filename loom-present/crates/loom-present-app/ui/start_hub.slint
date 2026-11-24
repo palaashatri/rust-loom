@@ -1,4 +1,4 @@
-import { LoomButton } from "foundation.slint";
+import { LoomButton, LoomIconButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import { SlideTemplatePreview } from "template_previews.slint";
@@ -207,6 +207,7 @@ export component StartHubModal inherits Rectangle {
                     HorizontalLayout {
                         x: Theme.rtl ? Theme.tokens.space.lg : parent.width - self.preferred-width - Theme.tokens.space.lg;
                         y: (parent.height - self.preferred-height) / 2;
+                        width: self.preferred-width;
                         spacing: Theme.tokens.space.sm;
 
                         LoomButton {
@@ -223,13 +224,10 @@ export component StartHubModal inherits Rectangle {
                             accessible-name: "New Presentation from Template Chooser";
                             clicked => { StartHubState.new-presentation(); }
                         }
-                        LoomButton {
-                            width: 32px;
-                            height: 32px;
-                            label: "";
+                        LoomIconButton {
                             icon: "close";
-                            variant: "ghost";
-                            accessible-name: "Close Start Hub";
+                            label: "Close Start Hub";
+                            tooltip: "Close Start Hub";
                             clicked => { StartHubState.close-hub(); }
                         }
                     }
