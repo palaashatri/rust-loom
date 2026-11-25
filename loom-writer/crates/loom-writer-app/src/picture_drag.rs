@@ -51,7 +51,6 @@ impl Corner {
 }
 
 /// Returns `true` when picture `id` is floating/wrapped (`ImageWrapMode != Inline`).
-#[cfg(test)]
 pub(crate) fn is_wrapped_image(doc: &WriterDocument, id: u64) -> bool {
     doc.image_wrap(id)
         .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline)
@@ -89,8 +88,20 @@ struct Drag {
     width: f32,
 }
 
+/// A floating-image move drag in progress.
+struct MoveDrag {
+    key: usize,
+    id: u64,
+    start: (f32, f32),
+    zoom: f32,
+    orig_rect: (f32, f32, f32, f32),
+    orig_offset: (f32, f32),
+    cur_offset: (f32, f32),
+}
+
 thread_local! {
     static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
+    static MOVE_DRAG: RefCell<Option<MoveDrag>> = const { RefCell::new(None) };
 }
 
 /// The width a picture may take: its shorter side at least sixteen points,
@@ -157,7 +168,7 @@ fn block_start(document: &WriterDocument, id: u64) -> Option<usize> {
 /// resize; any other press on a picture selects it. Returns `false` when the
 /// press is not on a picture, so the text editor handles it.
 pub(crate) fn pointer_pressed(app: &WriterApp, state: &GuiState, x: f32, y: f32) -> bool {
-    if DRAG.with(|slot| slot.borrow().is_some()) {
+    if DRAG.with(|slot| slot.borrow().is_some()) || MOVE_DRAG.with(|slot| slot.borrow().is_some()) {
         return true;
     }
     let laid_out = picture_view::laid_out();
@@ -169,6 +180,33 @@ pub(crate) fn pointer_pressed(app: &WriterApp, state: &GuiState, x: f32, y: f32)
     if let Some(rect) = selected.and_then(|key| laid_out.iter().find(|rect| rect.key == key)) {
         if let Some(corner) = handle_at(rect, zoom, x, y) {
             return begin_drag(state, rect, corner, zoom, (x, y));
+        }
+        if inside(rect, zoom, x, y) {
+            let doc = state.current.borrow();
+            if let Some(block) = picture_actions::picture_block_for_key(&doc, rect.key) {
+                if is_wrapped_image(&doc, block.id) {
+                    let block_id = block.id;
+                    let cur_x =
+                        doc.image_wrap(block_id)
+                            .map_or(0.0, |w| match w.horizontal_align {
+                                loom_objects::WrapHorizontalAlign::OffsetPt(ox) => ox,
+                                _ => 0.0,
+                            });
+                    let cur_y = block.image.as_ref().map_or(0.0, |i| i.wrap_y_offset_pt);
+                    MOVE_DRAG.with(|slot| {
+                        *slot.borrow_mut() = Some(MoveDrag {
+                            key: rect.key,
+                            id: block_id,
+                            start: (x, y),
+                            zoom,
+                            orig_rect: (rect.x, rect.y, rect.width, rect.height),
+                            orig_offset: (cur_x, cur_y),
+                            cur_offset: (cur_x, cur_y),
+                        });
+                    });
+                    return true;
+                }
+            }
         }
     }
     let Some(rect) = laid_out.iter().find(|rect| inside(rect, zoom, x, y)) else {
@@ -243,6 +281,27 @@ fn begin_drag(
 /// A pointer move during a drag: the page shows the picture at the new size.
 /// `false` when no drag is running.
 pub(crate) fn pointer_moved(x: f32, y: f32) -> bool {
+    let move_preview = MOVE_DRAG.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let md = slot.as_mut()?;
+        let dx = (x - md.start.0) / md.zoom;
+        let dy = (y - md.start.1) / md.zoom;
+        md.cur_offset = (
+            (md.orig_offset.0 + dx).max(0.0),
+            (md.orig_offset.1 + dy).max(0.0),
+        );
+        Some((
+            md.key,
+            md.orig_rect.0 + dx,
+            md.orig_rect.1 + dy,
+            md.orig_rect.2,
+            md.orig_rect.3,
+        ))
+    });
+    if let Some((key, left, top, width, height)) = move_preview {
+        picture_view::preview(key, left, top, width, height);
+        return true;
+    }
     let preview = DRAG.with(|slot| {
         let mut slot = slot.borrow_mut();
         let drag = slot.as_mut()?;
@@ -273,6 +332,27 @@ pub(crate) fn pointer_moved(x: f32, y: f32) -> bool {
 /// The release of a drag. A real size change is one undo step; a release
 /// without one leaves the document alone. `false` when no drag is running.
 pub(crate) fn pointer_released(app: &WriterApp, state: &GuiState) -> bool {
+    if let Some(md) = MOVE_DRAG.with(|slot| slot.borrow_mut().take()) {
+        let moved = (md.cur_offset.0 - md.orig_offset.0).abs() >= SAME_PT
+            || (md.cur_offset.1 - md.orig_offset.1).abs() >= SAME_PT;
+        if moved {
+            let mut next = state.current.borrow().clone();
+            if next.set_image_wrap_offset(md.id, md.cur_offset.0, md.cur_offset.1)
+                && apply_with_history(app, state, next, HistoryKind::DocumentAction)
+            {
+                app.set_status_left(
+                    format!(
+                        "Picture moved to ({:.0}, {:.0}) pt",
+                        md.cur_offset.0, md.cur_offset.1
+                    )
+                    .into(),
+                );
+                return true;
+            }
+        }
+        picture_view::restore(md.key);
+        return true;
+    }
     let Some(drag) = DRAG.with(|slot| slot.borrow_mut().take()) else {
         return false;
     };
@@ -297,6 +377,10 @@ pub(crate) fn pointer_released(app: &WriterApp, state: &GuiState) -> bool {
 /// Cancels a drag in progress and shows the picture at its old size. `false`
 /// when no drag is running.
 pub(crate) fn cancel() -> bool {
+    if let Some(md) = MOVE_DRAG.with(|slot| slot.borrow_mut().take()) {
+        picture_view::restore(md.key);
+        return true;
+    }
     let Some(drag) = DRAG.with(|slot| slot.borrow_mut().take()) else {
         return false;
     };

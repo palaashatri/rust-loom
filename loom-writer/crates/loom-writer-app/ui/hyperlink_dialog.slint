@@ -1,9 +1,11 @@
 import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
 
 export component HyperlinkDialog inherits Rectangle {
     in-out property <string> url-text: "";
     in-out property <string> tooltip-text: "";
     in property <string> error-text: "";
+    in property <bool> has-existing: false;
 
     callback apply-link(string, string);
     callback remove-link();
@@ -11,10 +13,10 @@ export component HyperlinkDialog inherits Rectangle {
 
     width: 400px;
     height: 220px;
-    background: #ffffff;
-    border-radius: 8px;
+    background: Theme.palette().surface;
+    border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
-    border-color: #d1d5db;
+    border-color: Theme.palette().border;
 
     VerticalLayout {
         spacing: 10px;
@@ -24,19 +26,22 @@ export component HyperlinkDialog inherits Rectangle {
             text: "Insert Hyperlink";
             font-size: 14px;
             font-weight: 600;
+            color: Theme.palette().ink;
         }
 
         Rectangle {
             height: 30px;
-            border-radius: 4px;
+            border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
-            border-color: #d1d5db;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface-sunken;
             TextInput {
                 x: 8px;
                 width: parent.width - 16px;
                 height: parent.height;
                 vertical-alignment: center;
                 text <=> root.url-text;
+                color: Theme.palette().ink;
                 accessible-role: text-input;
                 accessible-label: "Hyperlink URL";
             }
@@ -44,15 +49,17 @@ export component HyperlinkDialog inherits Rectangle {
 
         Rectangle {
             height: 30px;
-            border-radius: 4px;
+            border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
-            border-color: #d1d5db;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface-sunken;
             TextInput {
                 x: 8px;
                 width: parent.width - 16px;
                 height: parent.height;
                 vertical-alignment: center;
                 text <=> root.tooltip-text;
+                color: Theme.palette().ink;
                 accessible-role: text-input;
                 accessible-label: "Hyperlink Tooltip";
             }
@@ -60,7 +67,7 @@ export component HyperlinkDialog inherits Rectangle {
 
         if root.error-text != "" : Text {
             text: root.error-text;
-            color: #dc2626;
+            color: Theme.palette().danger;
             font-size: 11px;
             wrap: word-wrap;
         }
@@ -68,7 +75,7 @@ export component HyperlinkDialog inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             alignment: end;
-            LoomButton {
+            if root.has-existing : LoomButton {
                 label: "Remove";
                 accessible-label: "Remove hyperlink";
                 clicked => { root.remove-link(); }
@@ -80,6 +87,7 @@ export component HyperlinkDialog inherits Rectangle {
             }
             LoomButton {
                 label: "Apply";
+                variant: "primary";
                 accessible-label: "Apply hyperlink";
                 clicked => { root.apply-link(root.url-text, root.tooltip-text); }
             }

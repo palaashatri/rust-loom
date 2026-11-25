@@ -417,6 +417,109 @@ pub fn validate_input_against_rule(
     }
 }
 
+/// Removes duplicate rows in `range` based on `key_cols`, shifting remaining rows up.
+/// Returns the number of duplicate rows removed.
+pub fn remove_duplicates(
+    sheet: &mut Sheet,
+    range: CellRange,
+    key_cols: &[u32],
+    has_header: bool,
+) -> usize {
+    let start_row = if has_header {
+        range.start.row + 1
+    } else {
+        range.start.row
+    };
+    if start_row > range.end.row || key_cols.is_empty() {
+        return 0;
+    }
+    let mut seen = BTreeSet::<Vec<String>>::new();
+    let mut kept_rows = Vec::<Vec<Option<String>>>::new();
+    let mut removed = 0usize;
+    for r in start_row..=range.end.row {
+        let key: Vec<String> = key_cols
+            .iter()
+            .map(|&c| {
+                sheet
+                    .raw(CellRef { row: r, col: c })
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        if seen.insert(key) {
+            let row_vals = (range.start.col..=range.end.col)
+                .map(|c| sheet.raw(CellRef { row: r, col: c }).map(str::to_string))
+                .collect();
+            kept_rows.push(row_vals);
+        } else {
+            removed += 1;
+        }
+    }
+    if removed == 0 {
+        return 0;
+    }
+    for (idx, r) in (start_row..=range.end.row).enumerate() {
+        for (c_off, c) in (range.start.col..=range.end.col).enumerate() {
+            let cell = CellRef { row: r, col: c };
+            if let Some(Some(val)) = kept_rows.get(idx).and_then(|row| row.get(c_off)) {
+                sheet.set_raw(cell, val);
+            } else {
+                sheet.cells.remove(&cell);
+            }
+        }
+    }
+    removed
+}
+
+/// Sorts rows in `range` by multiple `(col, ascending)` keys.
+pub fn multi_level_sort(
+    sheet: &mut Sheet,
+    range: CellRange,
+    keys: &[(u32, bool)],
+    has_header: bool,
+) {
+    let start_row = if has_header {
+        range.start.row + 1
+    } else {
+        range.start.row
+    };
+    if start_row >= range.end.row || keys.is_empty() {
+        return;
+    }
+    let mut rows: Vec<Vec<Option<String>>> = (start_row..=range.end.row)
+        .map(|r| {
+            (range.start.col..=range.end.col)
+                .map(|c| sheet.raw(CellRef { row: r, col: c }).map(str::to_string))
+                .collect()
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        for &(col, asc) in keys {
+            let idx = (col.saturating_sub(range.start.col)) as usize;
+            let sa = a.get(idx).and_then(|v| v.as_deref()).unwrap_or("");
+            let sb = b.get(idx).and_then(|v| v.as_deref()).unwrap_or("");
+            let ord = match (sa.parse::<f64>(), sb.parse::<f64>()) {
+                (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
+                _ => sa.cmp(sb),
+            };
+            if ord != std::cmp::Ordering::Equal {
+                return if asc { ord } else { ord.reverse() };
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    for (r_off, r) in (start_row..=range.end.row).enumerate() {
+        for (c_off, c) in (range.start.col..=range.end.col).enumerate() {
+            let cell = CellRef { row: r, col: c };
+            if let Some(Some(val)) = rows.get(r_off).and_then(|row| row.get(c_off)) {
+                sheet.set_raw(cell, val);
+            } else {
+                sheet.cells.remove(&cell);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,5 +739,27 @@ mod tests {
             expand_named_ranges_in_formula("=\"café\"&RATE+'Données'!B1", &ranges),
             "=\"café\"&A1+'Données'!B1"
         );
+    }
+
+    #[test]
+    fn remove_duplicates_and_multi_level_sort() {
+        let mut sheet = Sheet::new("S1");
+        sheet.set_raw(CellRef { row: 0, col: 0 }, "Name");
+        sheet.set_raw(CellRef { row: 0, col: 1 }, "Score");
+        sheet.set_raw(CellRef { row: 1, col: 0 }, "Bob");
+        sheet.set_raw(CellRef { row: 1, col: 1 }, "10");
+        sheet.set_raw(CellRef { row: 2, col: 0 }, "Alice");
+        sheet.set_raw(CellRef { row: 2, col: 1 }, "20");
+        sheet.set_raw(CellRef { row: 3, col: 0 }, "Bob");
+        sheet.set_raw(CellRef { row: 3, col: 1 }, "10");
+        let range = CellRange::new(CellRef { row: 0, col: 0 }, CellRef { row: 3, col: 1 });
+        let removed = remove_duplicates(&mut sheet, range, &[0, 1], true);
+        assert_eq!(removed, 1);
+        assert_eq!(sheet.raw(CellRef { row: 3, col: 0 }), None);
+
+        let sort_range = CellRange::new(CellRef { row: 0, col: 0 }, CellRef { row: 2, col: 1 });
+        multi_level_sort(&mut sheet, sort_range, &[(0, true)], true);
+        assert_eq!(sheet.raw(CellRef { row: 1, col: 0 }), Some("Alice"));
+        assert_eq!(sheet.raw(CellRef { row: 2, col: 0 }), Some("Bob"));
     }
 }

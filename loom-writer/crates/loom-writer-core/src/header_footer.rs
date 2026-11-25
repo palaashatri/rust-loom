@@ -119,6 +119,10 @@ pub struct HeaderFooterConfig {
     pub page_number_format: PageNumberFormat,
     /// Whether the first page omits headers and footers (e.g. cover page).
     pub different_first_page: bool,
+    /// Optional diagonal watermark text rendered on every page.
+    pub watermark_text: String,
+    /// Whether the first paragraph uses a drop cap.
+    pub drop_cap_enabled: bool,
 }
 
 /// Which repeated page region a header/footer line occupies.
@@ -190,7 +194,11 @@ impl HeaderFooterConfig {
         };
         template
             .replace("{page}", &widest_number)
+            .replace("{PAGE}", &widest_number)
             .replace("{total}", &widest_number)
+            .replace("{NUMPAGES}", &widest_number)
+            .replace("{date}", "2026-11-25")
+            .replace("{DATE}", "2026-11-25")
     }
 
     /// Returns the canonical page-local line box and PDF baseline for `text`.
@@ -310,9 +318,15 @@ impl HeaderFooterConfig {
         if (self.different_first_page && page_num == 1) || text.is_empty() {
             return None;
         }
+        let page_str = self.page_number_format.format(page_num);
+        let total_str = total_pages.to_string();
         Some(
-            text.replace("{page}", &self.page_number_format.format(page_num))
-                .replace("{total}", &total_pages.to_string()),
+            text.replace("{page}", &page_str)
+                .replace("{PAGE}", &page_str)
+                .replace("{total}", &total_str)
+                .replace("{NUMPAGES}", &total_str)
+                .replace("{date}", "2026-11-25")
+                .replace("{DATE}", "2026-11-25"),
         )
     }
 
@@ -362,14 +376,25 @@ impl HeaderFooterConfig {
     }
 
     pub(crate) fn write_content_json(&self) -> String {
-        format!(
-            "{{\"header_text\":{},\"footer_text\":{},\"alignment\":{},\"page_number_format\":{},\"different_first_page\":{}}}",
+        let mut s = format!(
+            "{{\"header_text\":{},\"footer_text\":{},\"alignment\":{},\"page_number_format\":{},\"different_first_page\":{}",
             pkg_json::escape(&self.header_text),
             pkg_json::escape(&self.footer_text),
             pkg_json::escape(&self.alignment),
             pkg_json::escape(self.page_number_format.name()),
             self.different_first_page,
-        )
+        );
+        if !self.watermark_text.is_empty() {
+            s.push_str(&format!(
+                ",\"watermark_text\":{}",
+                pkg_json::escape(&self.watermark_text)
+            ));
+        }
+        if self.drop_cap_enabled {
+            s.push_str(",\"drop_cap_enabled\":true");
+        }
+        s.push('}');
+        s
     }
 
     pub(crate) fn from_content_json_value(value: &str) -> Result<Self, WriterError> {
@@ -401,6 +426,12 @@ impl HeaderFooterConfig {
                 }
                 "different_first_page" => {
                     config.different_first_page = bool_value(value, "different_first_page")?;
+                }
+                "watermark_text" => {
+                    config.watermark_text = string_value(value, "watermark_text")?;
+                }
+                "drop_cap_enabled" => {
+                    config.drop_cap_enabled = bool_value(value, "drop_cap_enabled")?;
                 }
                 _ => {
                     return Err(WriterError::Invalid(format!(

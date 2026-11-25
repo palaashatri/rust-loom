@@ -167,11 +167,25 @@ pub(super) fn render_styles_xml(keys: &[XfKey], dxfs: &[String]) -> String {
                 CellAlignment::Right => " horizontal=\"right\"",
                 CellAlignment::General => "",
             };
+            let vertical = match key.style.vertical_align {
+                crate::style::VerticalAlign::Top => " vertical=\"top\"",
+                crate::style::VerticalAlign::Middle => " vertical=\"center\"",
+                crate::style::VerticalAlign::Bottom => "",
+            };
+            let indent = if key.style.indent > 0 {
+                format!(" indent=\"{}\"", key.style.indent)
+            } else {
+                String::new()
+            };
             let wrap = if key.style.wrap { " wrapText=\"1\"" } else { "" };
-            let alignment = if horizontal.is_empty() && wrap.is_empty() {
+            let alignment = if horizontal.is_empty()
+                && vertical.is_empty()
+                && indent.is_empty()
+                && wrap.is_empty()
+            {
                 String::new()
             } else {
-                format!("<alignment{horizontal}{wrap}/>")
+                format!("<alignment{horizontal}{vertical}{indent}{wrap}/>")
             };
             let mut apply = String::new();
             for (flag, used) in [

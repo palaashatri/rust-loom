@@ -140,12 +140,24 @@ export component TableCanvasLayer inherits Rectangle {
     FormulaAuditOverlay {
         width: 100%;
         height: 100%;
+        highlights: SheetsParityState.audit-highlights;
         show-formulas: SheetsParityState.show-formulas;
     }
 
     FillHandleOverlay {
         width: 100%;
         height: 100%;
+        visible-handle: SheetsParityState.fill-handle-visible;
+        corner-x: SheetsParityState.fill-handle-x;
+        corner-y: SheetsParityState.fill-handle-y;
+        dragging: SheetsParityState.fill-dragging;
+        preview-x: SheetsParityState.fill-preview-x;
+        preview-y: SheetsParityState.fill-preview-y;
+        preview-w: SheetsParityState.fill-preview-w;
+        preview-h: SheetsParityState.fill-preview-h;
+        drag-started(x, y) => { SheetsParityState.fill-drag-started(x, y); }
+        drag-moved(x, y) => { SheetsParityState.fill-drag-moved(x, y); }
+        drag-ended(x, y) => { SheetsParityState.fill-drag-ended(x, y); }
         double-clicked => { SheetsParityState.autofill-series(); }
     }
 }

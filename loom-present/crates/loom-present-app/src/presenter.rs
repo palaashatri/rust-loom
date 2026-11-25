@@ -72,6 +72,8 @@ pub(crate) fn format_elapsed(elapsed: Duration) -> String {
 struct Presenter {
     window: PresenterWindow,
     _ticker: Timer,
+    slide_count: Rc<std::cell::Cell<usize>>,
+    active_slide: Rc<std::cell::Cell<usize>>,
 }
 
 thread_local! {
@@ -111,6 +113,8 @@ pub(crate) fn sync(session: &PresentationSession) {
             return;
         };
         let document = &session.document;
+        presenter.slide_count.set(document.len());
+        presenter.active_slide.set(document.active_index);
         let index = document.active_index;
         let window = &presenter.window;
         window.set_position_text(format!("Slide {} of {}", index + 1, document.len()).into());
@@ -217,6 +221,8 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         });
     }
     window.on_close_presenter(close);
+    let slide_count = Rc::new(std::cell::Cell::new(1));
+    let active_slide = Rc::new(std::cell::Cell::new(0));
     let tools = Rc::new(RefCell::new(
         crate::presenter_tools::PresenterToolState::default(),
     ));
@@ -234,8 +240,63 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
     }
     {
         let tools = tools.clone();
+        let active_slide = active_slide.clone();
+        let w = window.as_weak();
         window.on_clear_annotations(move || {
-            tools.borrow_mut().clear_slide(0);
+            tools.borrow_mut().clear_slide(active_slide.get());
+            if let Some(win) = w.upgrade() {
+                win.set_stroke_xs(slint::ModelRc::default());
+                win.set_stroke_ys(slint::ModelRc::default());
+                win.set_has_laser(false);
+            }
+        });
+    }
+    {
+        let tools = tools.clone();
+        let active_slide = active_slide.clone();
+        let w = window.as_weak();
+        let active_sync = Rc::clone(&active_slide);
+        let sync_strokes =
+            move |win: &PresenterWindow, st: &crate::presenter_tools::PresenterToolState| {
+                let mut xs = Vec::new();
+                let mut ys = Vec::new();
+                if let Some(overlay) = st.overlays.get(&active_sync.get()) {
+                    for stroke in &overlay.strokes {
+                        for &(px, py) in &stroke.points {
+                            xs.push(px);
+                            ys.push(py);
+                        }
+                    }
+                }
+                win.set_stroke_xs(slint::ModelRc::new(slint::VecModel::from(xs)));
+                win.set_stroke_ys(slint::ModelRc::new(slint::VecModel::from(ys)));
+                if let Some((lx, ly)) = st.laser_pos {
+                    win.set_has_laser(true);
+                    win.set_laser_x(lx);
+                    win.set_laser_y(ly);
+                } else {
+                    win.set_has_laser(false);
+                }
+            };
+        let tools_b = tools.clone();
+        let active_b = active_slide.clone();
+        let w_b = w.clone();
+        let sync_b = sync_strokes.clone();
+        window.on_stroke_begin(move |fx, fy| {
+            let mut st = tools_b.borrow_mut();
+            st.begin_stroke(active_b.get(), fx, fy);
+            if let Some(win) = w_b.upgrade() {
+                sync_b(&win, &st);
+            }
+        });
+        let tools_m = tools.clone();
+        let active_m = active_slide.clone();
+        window.on_stroke_move(move |fx, fy| {
+            let mut st = tools_m.borrow_mut();
+            st.extend_stroke(active_m.get(), fx, fy);
+            if let Some(win) = w.upgrade() {
+                sync_strokes(&win, &st);
+            }
         });
     }
     {
@@ -254,8 +315,9 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         let tools = tools.clone();
         let w = window.as_weak();
         let app = app.as_weak();
+        let slide_count = slide_count.clone();
         window.on_commit_jump(move || {
-            if let Some(target) = tools.borrow_mut().commit_jump(usize::MAX) {
+            if let Some(target) = tools.borrow_mut().commit_jump(slide_count.get()) {
                 if let Some(a) = app.upgrade() {
                     a.invoke_select_slide(target as i32);
                 }
@@ -272,6 +334,8 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
     Ok(Presenter {
         window,
         _ticker: ticker,
+        slide_count,
+        active_slide,
     })
 }
 

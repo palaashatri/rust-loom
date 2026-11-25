@@ -1,9 +1,4 @@
-#![allow(dead_code)]
-
 //! Line-by-line exclusion-rect text wrapping for floating/wrapped images.
-
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 use loom_objects::{
     HorizontalAnchor, ImageWrap, ImageWrapMode, VerticalAnchor, WrapHorizontalAlign, WrapMargins,
@@ -109,25 +104,6 @@ pub(crate) fn compute_line_span(
 
     let avail = (x_end - x_start).max(24.0_f32.min(col_width));
     (x_start, avail, push_below)
-}
-
-/// Computes a deterministic hash of `exclusions` for `WrapCache` invalidation.
-pub(crate) fn hash_exclusions(exclusions: &[ExclusionRect]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    exclusions.len().hash(&mut hasher);
-    for excl in exclusions {
-        excl.x_pt.to_bits().hash(&mut hasher);
-        excl.y_pt.to_bits().hash(&mut hasher);
-        excl.width_pt.to_bits().hash(&mut hasher);
-        excl.height_pt.to_bits().hash(&mut hasher);
-        (excl.mode as u8).hash(&mut hasher);
-        (excl.side as u8).hash(&mut hasher);
-        excl.margins.top_pt.to_bits().hash(&mut hasher);
-        excl.margins.bottom_pt.to_bits().hash(&mut hasher);
-        excl.margins.left_pt.to_bits().hash(&mut hasher);
-        excl.margins.right_pt.to_bits().hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 /// Computes `(x_pt, y_pt, w_pt, h_pt)` in content-area coordinates for a floating image.

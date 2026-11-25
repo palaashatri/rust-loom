@@ -36,6 +36,17 @@ export struct ObjectPart {
     shape-kind: string,
 }
 
+export struct ElementVisualMeta {
+    opacity: float,
+    corner-radius: float,
+    has-shadow: bool,
+    shadow-dx: float,
+    shadow-dy: float,
+    locked: bool,
+    flip-h: bool,
+    flip-v: bool,
+}
+
 /// The slide's own colours. They are document artwork, not window chrome, so
 /// selecting a different application theme (including high contrast) never
 /// recolours the deck the user authored.
@@ -136,6 +147,41 @@ export global ElementInk {
     in-out property <int> deck-theme-index: 0;
     in-out property <string> active-layout: "content";
     in-out property <string> deck-stats: "";
+
+    // Effects, Animation, Hidden Slide, Group & Lock state
+    in-out property <int> effects-opacity-pct: 100;
+    in-out property <int> effects-corner-radius-px: 0;
+    in-out property <int> effects-stroke-width-px: 0;
+    in-out property <int> effects-stroke-dash: 0;
+    in-out property <bool> effects-has-shadow: false;
+    in-out property <bool> effects-has-gradient: false;
+    in-out property <int> build-count: 0;
+    in-out property <int> build-phase: 0;
+    in-out property <int> build-trigger: 0;
+    in-out property <bool> slide-hidden: false;
+    in-out property <bool> selection-locked: false;
+    in-out property <bool> selection-grouped: false;
+    callback effects-set-opacity(int);
+    callback effects-set-corner-radius(int);
+    callback effects-set-stroke-width(int);
+    callback effects-cycle-stroke-dash();
+    callback effects-toggle-shadow();
+    callback effects-toggle-gradient();
+    callback add-build(int, int);
+    callback remove-last-build();
+    callback cycle-build-phase();
+    callback cycle-build-trigger();
+    callback toggle-slide-hidden();
+    in-out property <bool> slide-sorter-open: false;
+    callback toggle-slide-sorter();
+    in-out property <string> slide-footer-text: "";
+    in-out property <bool> show-slide-number: false;
+    in-out property <int> active-slide-number: 1;
+    callback set-slide-footer(string);
+    callback toggle-slide-number();
+    in-out property <bool> format-painter-active: false;
+    callback copy-format-style();
+    callback apply-format-style();
 }
 
 /// A part drawn at the box its caller gives it. `text-scale` is the slide's

@@ -24,10 +24,16 @@ pub(crate) fn project(app: &WriterApp, document: &WriterDocument) {
         margin_left_pt: page.margin_left_pt,
         margin_right_pt: page.margin_right_pt,
     });
+    let fmt = app.global::<crate::WriterFormatState>();
+    fmt.set_page_width_px(page.width_pt);
+    fmt.set_margin_left_px(page.margin_left_pt);
+    fmt.set_margin_right_px(page.margin_right_pt);
+    fmt.set_watermark_text(document.header_footer.watermark_text.as_str().into());
+    fmt.set_drop_cap_enabled(document.header_footer.drop_cap_enabled);
 }
 
 pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
-    let state = state.clone();
+    let state_geom = Rc::clone(state);
     let app_ref = app.as_weak();
     app.on_edit_page_geometry(move |field, value| {
         let Some(app) = app_ref.upgrade() else {
@@ -37,7 +43,7 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
             app.set_status_right(SharedString::from("Enter a valid millimeter value"));
             return false;
         };
-        let mut next = state.current.borrow().clone();
+        let mut next = state_geom.current.borrow().clone();
         if let Err(error) = apply_measurement(&mut next.page, field.as_str(), millimeters) {
             app.set_status_right(SharedString::from(error));
             return false;
@@ -49,12 +55,34 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
             app.set_status_right(SharedString::from(error));
             return false;
         }
-        if !apply_with_history(&app, &state, next, HistoryKind::DocumentAction) {
+        if !apply_with_history(&app, &state_geom, next, HistoryKind::DocumentAction) {
             return false;
         }
         app.set_status_right(SharedString::from("Custom page geometry updated"));
         true
     });
+    let state_wm = Rc::clone(state);
+    let app_wm = app.as_weak();
+    app.global::<crate::WriterFormatState>()
+        .on_set_watermark_text(move |text| {
+            let Some(app) = app_wm.upgrade() else {
+                return;
+            };
+            let mut next = state_wm.current.borrow().clone();
+            next.header_footer.watermark_text = text.to_string();
+            let _ = apply_with_history(&app, &state_wm, next, HistoryKind::DocumentAction);
+        });
+    let state_dc = Rc::clone(state);
+    let app_dc = app.as_weak();
+    app.global::<crate::WriterFormatState>()
+        .on_toggle_drop_cap(move || {
+            let Some(app) = app_dc.upgrade() else {
+                return;
+            };
+            let mut next = state_dc.current.borrow().clone();
+            next.header_footer.drop_cap_enabled = !next.header_footer.drop_cap_enabled;
+            let _ = apply_with_history(&app, &state_dc, next, HistoryKind::DocumentAction);
+        });
 }
 
 fn apply_measurement(

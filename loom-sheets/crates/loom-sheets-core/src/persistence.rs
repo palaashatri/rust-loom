@@ -192,6 +192,8 @@ struct PersistedSheet {
     auto_filter: Option<PersistedAutoFilter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden_rows: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden_cols: Vec<u32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     named_ranges: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -338,6 +340,7 @@ impl From<&Sheet> for PersistedSheet {
                     .collect(),
             }),
             hidden_rows: sheet.hidden_rows.iter().copied().collect(),
+            hidden_cols: sheet.hidden_cols.iter().copied().collect(),
             named_ranges: sheet
                 .named_ranges
                 .iter()
@@ -640,6 +643,7 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
         };
     }
     sheet.hidden_rows = raw.hidden_rows.into_iter().collect();
+    sheet.hidden_cols = raw.hidden_cols.into_iter().collect();
     for (name, range_a1) in raw.named_ranges {
         let range = CellRange::parse(&range_a1)
             .ok_or_else(|| format!("invalid named range target {range_a1:?}"))?;

@@ -1,13 +1,16 @@
 import { Theme } from "theme.slint";
 import { SlideSelectionHandles } from "slide_handles.slint";
 
-import { ObjectPart, ObjectPartView, ElementInk, DocumentInk } from "object_part.slint";
-export { ObjectPart, ElementInk }
+import { ObjectPart, ElementVisualMeta, ObjectPartView, ElementInk, DocumentInk } from "object_part.slint";
+export { ObjectPart, ElementVisualMeta, ElementInk }
 
 /// The editor canvas's table and chart parts, one list per element.
 /// Thumbnails and the presenter view carry theirs in `ThumbRows`.
 export global ObjectParts {
     in-out property <[[ObjectPart]]> main: [];
+    in-out property <[ElementVisualMeta]> element-meta: [];
+    in-out property <int> sorter-active-index: 0;
+    callback sorter-select-slide(int);
     /// Per element: the table cell being edited (box and text); the whole
     /// element for everything else.
     in-out property <[ObjectPart]> active-cells: [];
@@ -188,7 +191,13 @@ export component PresentSlideCanvas inherits Rectangle {
                 y: self.render-y;
                 width: self.render-width;
                 height: self.render-height;
-                border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
+                opacity: ObjectParts.element-meta.length > idx ? ObjectParts.element-meta[idx].opacity : 1.0;
+                drop-shadow-blur: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? 8px : 0px;
+                drop-shadow-offset-x: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dx * 1px : 0px;
+                drop-shadow-offset-y: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dy * 1px : 0px;
+                drop-shadow-color: Theme.palette().shadow;
+                border-radius: root.element-types[idx] == 4 ? self.width / 2
+                    : (ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].corner-radius > 0 ? ObjectParts.element-meta[idx].corner-radius * 1px : Theme.tokens.metrics.radius-small);
                 border-width: root.editing-enabled && (element-focus.has-focus || (root.element-selected.length > idx && root.element-selected[idx])) ? 2px : 0px;
                 border-color: element-focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
                 background: root.element-types[idx] == 3 ? DocumentInk.shape-fill
@@ -418,7 +427,45 @@ export component PresentSlideCanvas inherits Rectangle {
                     handle-released(h) => { root.handle-released(idx, h); }
                     handle-cancelled(h) => { root.handle-cancelled(idx, h); }
                 }
+
+                if root.editing-enabled && root.element-selected.length > idx && root.element-selected[idx] && ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].locked : Rectangle {
+                    x: max(2px, parent.width - 54px);
+                    y: 4px;
+                    width: 50px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.palette().surface-raised;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    Text {
+                        text: "Locked";
+                        font-size: Theme.type.caption;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            if ElementInk.slide-footer-text != "" || ElementInk.show-slide-number : HorizontalLayout {
+                x: 24px;
+                y: parent.height - 26px;
+                width: max(1px, parent.width - 48px);
+                height: 20px;
+                Text {
+                    text: ElementInk.slide-footer-text;
+                    font-size: Theme.type.caption;
+                    color: DocumentInk.muted;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+            if ElementInk.show-slide-number : Text {
+                text: "" + ElementInk.active-slide-number;
+                font-size: Theme.type.caption;
+                color: DocumentInk.muted;
+                vertical-alignment: center;
             }
         }
     }
+}
 }

@@ -1,4 +1,5 @@
 import { LoomSectionHeader, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
 
 export component ImageWrapInspector inherits Rectangle {
     in property <bool> has-image: false;
@@ -31,16 +32,19 @@ export component ImageWrapInspector inherits Rectangle {
             spacing: 4px;
             LoomButton {
                 label: "Inline";
+                variant: root.wrap-mode-index == 0 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: Inline";
                 clicked => { root.set-wrap-mode(0); }
             }
             LoomButton {
                 label: "Square";
+                variant: root.wrap-mode-index == 1 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: Square";
                 clicked => { root.set-wrap-mode(1); }
             }
             LoomButton {
                 label: "Tight";
+                variant: root.wrap-mode-index == 2 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: Tight";
                 clicked => { root.set-wrap-mode(2); }
             }
@@ -50,16 +54,19 @@ export component ImageWrapInspector inherits Rectangle {
             spacing: 4px;
             LoomButton {
                 label: "Top/Bot";
+                variant: root.wrap-mode-index == 3 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: Top and Bottom";
                 clicked => { root.set-wrap-mode(3); }
             }
             LoomButton {
                 label: "Behind";
+                variant: root.wrap-mode-index == 4 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: Behind Text";
                 clicked => { root.set-wrap-mode(4); }
             }
             LoomButton {
                 label: "In Front";
+                variant: root.wrap-mode-index == 5 ? "primary" : "secondary";
                 accessible-label: "Wrap mode: In Front of Text";
                 clicked => { root.set-wrap-mode(5); }
             }
@@ -69,21 +76,25 @@ export component ImageWrapInspector inherits Rectangle {
             spacing: 4px;
             LoomButton {
                 label: "Both";
+                variant: root.wrap-side-index == 0 ? "primary" : "secondary";
                 accessible-label: "Wrap side: Both";
                 clicked => { root.set-wrap-side(0); }
             }
             LoomButton {
                 label: "Left";
+                variant: root.wrap-side-index == 1 ? "primary" : "secondary";
                 accessible-label: "Wrap side: Left Only";
                 clicked => { root.set-wrap-side(1); }
             }
             LoomButton {
                 label: "Right";
+                variant: root.wrap-side-index == 2 ? "primary" : "secondary";
                 accessible-label: "Wrap side: Right Only";
                 clicked => { root.set-wrap-side(2); }
             }
             LoomButton {
                 label: "Largest";
+                variant: root.wrap-side-index == 3 ? "primary" : "secondary";
                 accessible-label: "Wrap side: Largest";
                 clicked => { root.set-wrap-side(3); }
             }
@@ -93,16 +104,19 @@ export component ImageWrapInspector inherits Rectangle {
             spacing: 4px;
             LoomButton {
                 label: "Left";
+                variant: root.wrap-align-index == 0 ? "primary" : "secondary";
                 accessible-label: "Horizontal align: Left";
                 clicked => { root.set-wrap-align(0); }
             }
             LoomButton {
                 label: "Center";
+                variant: root.wrap-align-index == 1 ? "primary" : "secondary";
                 accessible-label: "Horizontal align: Center";
                 clicked => { root.set-wrap-align(1); }
             }
             LoomButton {
                 label: "Right";
+                variant: root.wrap-align-index == 2 ? "primary" : "secondary";
                 accessible-label: "Horizontal align: Right";
                 clicked => { root.set-wrap-align(2); }
             }
@@ -111,10 +125,53 @@ export component ImageWrapInspector inherits Rectangle {
         if root.wrap-mode-index != 0 : HorizontalLayout {
             spacing: 4px;
             Text {
-                text: "X: " + root.x-offset-label + "  Y: " + root.y-offset-label;
+                text: "X: " + root.x-offset-label;
                 font-size: 11px;
+                color: Theme.palette().ink;
                 vertical-alignment: center;
+                horizontal-stretch: 1;
             }
+            LoomButton { label: "-"; accessible-label: "Decrease X offset"; clicked => { root.step-x-offset(-6.0); } }
+            LoomButton { label: "+"; accessible-label: "Increase X offset"; clicked => { root.step-x-offset(6.0); } }
+        }
+
+        if root.wrap-mode-index != 0 : HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: "Y: " + root.y-offset-label;
+                font-size: 11px;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            LoomButton { label: "-"; accessible-label: "Decrease Y offset"; clicked => { root.step-y-offset(-6.0); } }
+            LoomButton { label: "+"; accessible-label: "Increase Y offset"; clicked => { root.step-y-offset(6.0); } }
+        }
+
+        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 || root.wrap-mode-index == 3 : HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: "Margin L: " + root.margin-left-label;
+                font-size: 11px;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            LoomButton { label: "-"; accessible-label: "Decrease left margin"; clicked => { root.step-wrap-margin("left", -2.0); } }
+            LoomButton { label: "+"; accessible-label: "Increase left margin"; clicked => { root.step-wrap-margin("left", 2.0); } }
+        }
+
+        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 || root.wrap-mode-index == 3 : HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: "Margin R: " + root.margin-right-label;
+                font-size: 11px;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            LoomButton { label: "-"; accessible-label: "Decrease right margin"; clicked => { root.step-wrap-margin("right", -2.0); } }
+            LoomButton { label: "+"; accessible-label: "Increase right margin"; clicked => { root.step-wrap-margin("right", 2.0); } }
         }
     }
 }

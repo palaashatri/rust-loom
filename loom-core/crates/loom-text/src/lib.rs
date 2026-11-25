@@ -6,8 +6,10 @@
 //! wrapping decisions via grapheme / width tables, and a document line model)
 //! so it compiles anywhere without external fonts or platform bindings.
 
+mod capabilities;
 mod direction;
 
+pub use capabilities::{AppRichTextCapabilities, AttributeSupport, RichTextApp};
 pub use direction::ParagraphDirection;
 
 /// Character style.

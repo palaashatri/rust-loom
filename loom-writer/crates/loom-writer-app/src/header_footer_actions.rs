@@ -86,6 +86,7 @@ fn dialog_config(global: &WriterHeaderFooterState) -> Result<HeaderFooterConfig,
         alignment: alignment.into(),
         page_number_format,
         different_first_page: global.get_different_first_page(),
+        ..Default::default()
     };
     config.validate().map_err(str::to_owned)?;
     Ok(config)

@@ -94,6 +94,7 @@ pub(super) fn import_config(
         },
         page_number_format: parse_page_number_format(&section)?,
         different_first_page: has_title_page,
+        ..Default::default()
     };
     config.validate().map_err(str::to_owned)?;
     Ok(config)

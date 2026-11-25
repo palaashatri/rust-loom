@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-#[cfg(test)]
-use loom_present_core::AnnotationStroke;
-use loom_present_core::{AnnotationDrawingTool, SlideAnnotationOverlay};
+use loom_present_core::{AnnotationDrawingTool, AnnotationStroke, SlideAnnotationOverlay};
 
 /// Live presenter rehearsal state: annotation tool, per-slide strokes, laser pointer, and numeric jump buffer.
 #[derive(Debug, Default)]
@@ -37,7 +35,6 @@ impl PresenterToolState {
         Some(one_based - 1)
     }
 
-    #[cfg(test)]
     pub fn begin_stroke(&mut self, slide_index: usize, x: f32, y: f32) {
         if self.active_tool == AnnotationDrawingTool::LaserPointer {
             self.laser_pos = Some((x, y));
@@ -64,7 +61,6 @@ impl PresenterToolState {
         });
     }
 
-    #[cfg(test)]
     pub fn extend_stroke(&mut self, slide_index: usize, x: f32, y: f32) {
         if self.active_tool == AnnotationDrawingTool::LaserPointer {
             self.laser_pos = Some((x, y));
@@ -81,7 +77,6 @@ impl PresenterToolState {
         }
     }
 
-    #[cfg(test)]
     pub fn erase_near(&mut self, slide_index: usize, x: f32, y: f32, radius: f32) {
         let r2 = radius * radius;
         if let Some(overlay) = self.overlays.get_mut(&slide_index) {

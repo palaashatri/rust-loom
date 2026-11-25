@@ -154,6 +154,7 @@ pub(crate) fn retained_bytes(before: &WriterDocument, after: &WriterDocument) ->
             comments,
             footnotes,
             tracked_changes,
+            hyperlinks: _,
             blocks,
             selection: _,
         } = document;

@@ -224,6 +224,7 @@ pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart], selected: Option
                         source: result.image,
                         label: label.into(),
                         selected: false,
+                        z_order: p.z_order.rank() as i32,
                     }
                 })
                 .collect();

@@ -435,7 +435,7 @@ impl WriterDocument {
         let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
         let body_line = style.body_font_size_pt * style.line_height;
         begin_pass();
-        let mut placer = Placer::new(usable_height);
+        let mut placer = Placer::new(usable_width, usable_height);
         let mut block_starts = Vec::with_capacity(self.blocks.len());
         let mut block_start = 0usize;
         for (block_index, block) in self.blocks.iter().enumerate() {
@@ -444,8 +444,58 @@ impl WriterDocument {
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let picture = block.object_display_size(usable_width, usable_height);
-            let info =
-                wrapped_document_block(self, block, font_size, block.text_column_width(style));
+            let col_width = block.text_column_width(style);
+            let wrap_width = if !placer.exclusions.is_empty()
+                && picture.is_none()
+                && block.kind != crate::TABLE_BLOCK_KIND
+            {
+                let est_h = text_line_height(style, block);
+                let (_, avail, _) = wrap_exclusion::compute_line_span(
+                    &placer.exclusions,
+                    placer.used,
+                    est_h,
+                    col_width,
+                );
+                avail
+            } else {
+                col_width
+            };
+            let info = wrapped_document_block(self, block, font_size, wrap_width);
+            if let Some(image) = block.image.as_ref() {
+                if let Some(wrap) = image
+                    .wrap
+                    .filter(|w| w.mode != loom_objects::ImageWrapMode::Inline)
+                {
+                    let rect = wrap_exclusion::compute_floating_image_rect(
+                        image,
+                        &wrap,
+                        usable_width,
+                        usable_height,
+                        placer.used,
+                    );
+                    if matches!(
+                        wrap.mode,
+                        loom_objects::ImageWrapMode::Square
+                            | loom_objects::ImageWrapMode::Tight
+                            | loom_objects::ImageWrapMode::TopAndBottom
+                    ) {
+                        placer.exclusions.push(wrap_exclusion::ExclusionRect {
+                            x_pt: rect.0,
+                            y_pt: rect.1,
+                            width_pt: rect.2,
+                            height_pt: rect.3,
+                            mode: wrap.mode,
+                            side: wrap.side,
+                            margins: wrap.margins,
+                        });
+                    }
+                    if let Some(first_line) = info.lines.first() {
+                        placer.place_floating_image(block_index, block_start, first_line, rect);
+                    }
+                    block_start += block.text.len_bytes() + 1;
+                    continue;
+                }
+            }
             // Typed table cells may wrap and carry larger run metrics than the
             // table's flat editor text can express. Keep one reserved height
             // per typed row, falling back only when shaping itself is refused;
@@ -489,7 +539,7 @@ impl WriterDocument {
                         .object_display_size(usable_width, usable_height)
                         .map_or(text_line_height(style, next), |(_, h)| h);
                     let wanted = if next_lines.lines.len() >= 3 { 2 } else { 1 };
-                    let mut probe = Placer::new(usable_height);
+                    let mut probe = Placer::new(usable_width, usable_height);
                     probe.used = used;
                     if !probe.fits(wanted, next_height) {
                         placer.next_page();
@@ -676,8 +726,22 @@ impl WriterDocument {
                     },
                     |(width, _)| width * zoom,
                 );
+                let is_floating_image = block
+                    .image
+                    .as_ref()
+                    .and_then(|img| img.wrap)
+                    .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline);
+                if is_floating_image {
+                    lines[at].bounds = PageRect {
+                        x: content_x + lines[at].bounds.x * zoom,
+                        y: page_y + (style.margin_top_pt + lines[at].bounds.y) * zoom,
+                        width: lines[at].bounds.width * zoom,
+                        height: lines[at].bounds.height * zoom,
+                    };
+                    continue;
+                }
                 lines[at].bounds = PageRect {
-                    x: content_x + block.text_start_pt(style) * zoom,
+                    x: content_x + (block.text_start_pt(style) + line.x_offset_pt) * zoom,
                     y: line_y,
                     width,
                     height: line_height,

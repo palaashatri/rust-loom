@@ -238,14 +238,16 @@ fn fill_sheet(
     }
 
     for column in &parsed.columns {
+        let last = column
+            .last
+            .min(column.first.saturating_add(MAX_COLUMNS_PER_SIZE_RANGE - 1));
         if column.hidden {
             warnings.insert(XlsxImportWarning::HiddenContent);
-            continue;
+            for col in column.first..=last {
+                sheet.hidden_cols.insert(col);
+            }
         }
         if let (true, Some(width)) = (column.custom, column.width) {
-            let last = column
-                .last
-                .min(column.first.saturating_add(MAX_COLUMNS_PER_SIZE_RANGE - 1));
             for col in column.first..=last {
                 sheet.set_col_width(col, width * PIXELS_PER_CHARACTER);
             }
@@ -257,7 +259,7 @@ fn fill_sheet(
     for row in &parsed.rows {
         if row.hidden {
             warnings.insert(XlsxImportWarning::HiddenContent);
-            continue;
+            sheet.hidden_rows.insert(row.row);
         }
         if let Some(height) = row.height {
             if row.custom || (height - default_points).abs() > 0.01 {

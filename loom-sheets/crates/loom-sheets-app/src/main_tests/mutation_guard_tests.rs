@@ -79,6 +79,14 @@ fn table() -> Vec<(&'static str, Action)> {
             app.global::<crate::SheetsParityState>()
                 .invoke_autofill_series()
         }),
+        a("fill_drag_started", |app| {
+            app.global::<crate::SheetsParityState>()
+                .invoke_fill_drag_started(0.0, 0.0)
+        }),
+        a("fill_drag_ended", |app| {
+            app.global::<crate::SheetsParityState>()
+                .invoke_fill_drag_ended(0.0, 0.0)
+        }),
         a("format_painter_apply", |app| {
             app.global::<crate::SheetsParityState>()
                 .invoke_format_painter_apply()

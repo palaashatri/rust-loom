@@ -99,6 +99,105 @@ impl HyperlinkTable {
             .filter(|s| s.block_id == block_id)
             .collect()
     }
+
+    /// Serializes `self` to a JSON string for `.loom` content persistence.
+    pub fn write_content_json(&self) -> String {
+        let mut out = String::from("{\"spans\":[");
+        for (i, s) in self.spans.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let target = match &s.link.target {
+                HyperlinkTarget::Url(u) => format!("url:{}", u.replace('"', "\\\"")),
+                HyperlinkTarget::Bookmark(b) => format!("bm:{}", b.replace('"', "\\\"")),
+                _ => String::new(),
+            };
+            out.push_str(&format!(
+                "{{\"b\":{},\"s\":{},\"e\":{},\"t\":\"{}\"}}",
+                s.block_id, s.start, s.end, target
+            ));
+        }
+        out.push_str("]}");
+        out
+    }
+
+    /// Deserializes a `HyperlinkTable` from a `.loom` JSON string.
+    pub fn from_content_json(raw: &str) -> Result<Self, String> {
+        let mut table = Self::default();
+        for chunk in raw.split("{\"b\":").skip(1) {
+            let Some(b_end) = chunk.find(',') else {
+                continue;
+            };
+            let Ok(block_id) = chunk[..b_end].trim().parse::<u64>() else {
+                continue;
+            };
+            let rest = &chunk[b_end + 1..];
+            let Some(s_pos) = rest.find("\"s\":") else {
+                continue;
+            };
+            let after_s = &rest[s_pos + 4..];
+            let Some(s_end) = after_s.find(',') else {
+                continue;
+            };
+            let Ok(start) = after_s[..s_end].trim().parse::<usize>() else {
+                continue;
+            };
+            let after_s_comma = &after_s[s_end + 1..];
+            let Some(e_pos) = after_s_comma.find("\"e\":") else {
+                continue;
+            };
+            let after_e = &after_s_comma[e_pos + 4..];
+            let Some(e_end) = after_e.find(',') else {
+                continue;
+            };
+            let Ok(end) = after_e[..e_end].trim().parse::<usize>() else {
+                continue;
+            };
+            let Some(t_pos) = after_e.find("\"t\":\"") else {
+                continue;
+            };
+            let after_t = &after_e[t_pos + 5..];
+            let Some(t_end) = after_t.find('"') else {
+                continue;
+            };
+            let t_val = &after_t[..t_end];
+            if let Some(url) = t_val.strip_prefix("url:") {
+                if let Ok(span) = HyperlinkSpan::url(block_id, start..end, url, None) {
+                    table.set(span);
+                }
+            } else if let Some(bm) = t_val.strip_prefix("bm:") {
+                table.set(HyperlinkSpan::bookmark(block_id, start..end, bm, None));
+            }
+        }
+        Ok(table)
+    }
+}
+
+impl crate::WriterDocument {
+    /// Inserts or replaces a URL hyperlink on `block_id` at `range`.
+    pub fn set_hyperlink(
+        &mut self,
+        block_id: u64,
+        range: Range<usize>,
+        raw_url: &str,
+        tooltip: Option<String>,
+    ) -> Result<(), HyperlinkError> {
+        let span = HyperlinkSpan::url(block_id, range, raw_url, tooltip)?;
+        self.hyperlinks.set(span);
+        Ok(())
+    }
+
+    /// Removes any hyperlink overlapping `range` in `block_id`. Returns `true` if removed.
+    pub fn remove_hyperlink(&mut self, block_id: u64, range: Range<usize>) -> bool {
+        let before = self.hyperlinks.spans.len();
+        self.hyperlinks.remove(block_id, range);
+        self.hyperlinks.spans.len() < before
+    }
+
+    /// Returns the hyperlink at `offset` in `block_id`, if any.
+    pub fn hyperlink_at(&self, block_id: u64, offset: usize) -> Option<&HyperlinkSpan> {
+        self.hyperlinks.at(block_id, offset)
+    }
 }
 
 #[cfg(test)]

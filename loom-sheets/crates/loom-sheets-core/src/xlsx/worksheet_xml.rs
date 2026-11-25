@@ -186,7 +186,7 @@ pub(super) fn render_worksheet(input: &WorksheetInput<'_>, strings: &mut SharedS
     for cell in &coordinates {
         rows.entry(cell.row).or_default().push(*cell);
     }
-    for row in sheet.row_heights.keys() {
+    for row in sheet.row_heights.keys().chain(sheet.hidden_rows.iter()) {
         rows.entry(*row).or_default();
     }
 
@@ -198,6 +198,9 @@ pub(super) fn render_worksheet(input: &WorksheetInput<'_>, strings: &mut SharedS
                 " ht=\"{}\" customHeight=\"1\"",
                 trim_number(height * POINTS_PER_PIXEL)
             ));
+        }
+        if sheet.hidden_rows.contains(row) {
+            open.push_str(" hidden=\"1\"");
         }
         if cells.is_empty() {
             sheet_data.push_str(&format!("{open}/>"));
@@ -234,17 +237,36 @@ pub(super) fn render_worksheet(input: &WorksheetInput<'_>, strings: &mut SharedS
         _ => "A1".to_string(),
     };
 
-    let columns = if sheet.col_widths.is_empty() {
+    let col_indices: BTreeSet<u32> = sheet
+        .col_widths
+        .keys()
+        .copied()
+        .chain(sheet.hidden_cols.iter().copied())
+        .collect();
+    let columns = if col_indices.is_empty() {
         String::new()
     } else {
-        let items = sheet
-            .col_widths
-            .iter()
-            .map(|(col, width)| {
+        let items = col_indices
+            .into_iter()
+            .map(|col| {
+                let width_attr = sheet
+                    .col_widths
+                    .get(&col)
+                    .map(|w| {
+                        format!(
+                            " width=\"{}\" customWidth=\"1\"",
+                            trim_number(w / PIXELS_PER_CHARACTER)
+                        )
+                    })
+                    .unwrap_or_default();
+                let hidden_attr = if sheet.hidden_cols.contains(&col) {
+                    " hidden=\"1\""
+                } else {
+                    ""
+                };
                 format!(
-                    "<col min=\"{0}\" max=\"{0}\" width=\"{1}\" customWidth=\"1\"/>",
+                    "<col min=\"{0}\" max=\"{0}\"{width_attr}{hidden_attr}/>",
                     col + 1,
-                    trim_number(width / PIXELS_PER_CHARACTER)
                 )
             })
             .collect::<String>();

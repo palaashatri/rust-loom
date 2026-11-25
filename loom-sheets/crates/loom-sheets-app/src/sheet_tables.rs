@@ -51,6 +51,7 @@ pub(crate) fn project_tables(
     selection: GridSelection,
     zoom: f32,
 ) {
+    crate::parity_actions::sync_overlays(app, sheet, viewport, selection.range(), zoom);
     let state = app.global::<SheetTableState>();
     let active_idx = table_at(&sheet.tables, selection.focus.row, selection.focus.col);
     let view_end_row = viewport.first_row + viewport.visible_rows;

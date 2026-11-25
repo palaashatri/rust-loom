@@ -44,4 +44,27 @@ export global WriterFormatState {
     callback clear-foreground-color-error;
     callback select-list-marker(int);
     callback apply-list-preset(int, int);
+    in-out property <bool> format-painter-active: false;
+    in-out property <bool> format-painter-locked: false;
+    callback format-painter-copy;
+    callback format-painter-copy-locked;
+    callback format-painter-apply;
+    in-out property <bool> hyperlink-open: false;
+    in-out property <string> hyperlink-url: "";
+    in-out property <string> hyperlink-tooltip: "";
+    in-out property <string> hyperlink-error: "";
+    in-out property <bool> hyperlink-has-existing: false;
+    callback hyperlink-open-requested();
+    callback hyperlink-apply(string, string);
+    callback hyperlink-remove();
+    callback hyperlink-cancel();
+    callback insert-toc();
+    in-out property <bool> show-ruler: false;
+    in-out property <length> page-width-px: 612px;
+    in-out property <length> margin-left-px: 72px;
+    in-out property <length> margin-right-px: 72px;
+    in-out property <string> watermark-text: "";
+    in-out property <bool> drop-cap-enabled: false;
+    callback set-watermark-text(string);
+    callback toggle-drop-cap();
 }

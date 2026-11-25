@@ -171,10 +171,18 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "edit.paste" | "writer.paste" => app.invoke_paste(),
         "edit.find" => app.global::<FindBar>().invoke_open_requested(false),
         "edit.replace" => app.global::<FindBar>().invoke_open_requested(true),
-        "format.copy_style" => crate::format_painter::copy_format(app),
-        "format.copy_style_locked" => crate::format_painter::copy_format_locked(app),
-        "format.apply_style" => crate::format_painter::apply_format(app),
-        "insert.hyperlink" => {}
+        "format.copy_style" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_format_painter_copy(),
+        "format.copy_style_locked" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_format_painter_copy_locked(),
+        "format.apply_style" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_format_painter_apply(),
+        "insert.hyperlink" => app
+            .global::<crate::WriterFormatState>()
+            .invoke_hyperlink_open_requested(),
         "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
         "help.welcome" => crate::welcome_guide::open(app),
         "review.word_count" => app.global::<WordCountState>().invoke_open_dialog(),
@@ -184,6 +192,11 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
             review.invoke_navigate(0);
         }
         "insert.header_footer" => app.global::<WriterHeaderFooterState>().invoke_open_editor(),
+        "insert.toc" => app.global::<crate::WriterFormatState>().invoke_insert_toc(),
+        "view.ruler" => {
+            let fmt = app.global::<crate::WriterFormatState>();
+            fmt.set_show_ruler(!fmt.get_show_ruler());
+        }
         "insert.comment" => app.invoke_open_comment_composer(),
         "writer.footnotes" => app.global::<WriterFootnoteState>().invoke_open_editor(),
         "insert.table" | "writer.table.insert" => app.invoke_insert_table(),

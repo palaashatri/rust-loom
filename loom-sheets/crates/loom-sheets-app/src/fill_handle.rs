@@ -4,7 +4,6 @@ use loom_sheets_core::autofill::{double_click_fill_extent, generate_fill_values}
 use loom_sheets_core::{Cell, CellRange, CellRef, Sheet};
 
 /// State for an active fill-handle drag gesture.
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FillHandleState {
     /// Whether the user is currently dragging the fill handle.
@@ -15,10 +14,10 @@ pub struct FillHandleState {
     pub target_range: Option<CellRange>,
 }
 
-#[cfg(test)]
 impl FillHandleState {
     /// Returns `true` if `(px, py)` hits the 6x6px bottom-right corner handle
     /// centered at `(corner_x, corner_y)` (with a 10px hit slop).
+    #[cfg(test)]
     pub fn hit_test_corner(px: f32, py: f32, corner_x: f32, corner_y: f32) -> bool {
         (px - corner_x).abs() <= 6.0 && (py - corner_y).abs() <= 6.0
     }

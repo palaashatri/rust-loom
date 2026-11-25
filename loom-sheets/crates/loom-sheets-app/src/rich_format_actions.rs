@@ -42,7 +42,7 @@ pub(crate) fn publish_viewport(
     zoom: f32,
 ) {
     let mat_rows = crate::materialized_rows(sheet, viewport);
-    let mat_cols = crate::materialized_cols(viewport);
+    let mat_cols = crate::materialized_cols(sheet, viewport);
     let cap = mat_rows.len() * mat_cols.len();
     let mut strikethroughs = Vec::with_capacity(cap);
     let mut border_tops = Vec::with_capacity(cap);

@@ -109,6 +109,52 @@ fn parse_numeric(raw: &str) -> Option<f64> {
     scaled.is_finite().then_some(scaled)
 }
 
+/// Data bar conditional formatting rule for a numeric range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataBarRule {
+    pub range: CellRange,
+    pub color: u32,
+}
+
+impl DataBarRule {
+    /// Returns the normalized `[0.0, 1.0]` bar fill fraction for `value`.
+    pub fn fraction(&self, value: f64, min: f64, max: f64) -> f32 {
+        if !value.is_finite() || !min.is_finite() || !max.is_finite() || (max - min).abs() < 1e-12 {
+            return 0.0;
+        }
+        ((value - min) / (max - min)).clamp(0.0, 1.0) as f32
+    }
+}
+
+/// 2-color scale conditional formatting rule for a numeric range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColorScaleRule {
+    pub range: CellRange,
+    pub min_color: u32,
+    pub max_color: u32,
+}
+
+impl ColorScaleRule {
+    /// Linearly interpolates `0xRRGGBB` between `min_color` and `max_color`.
+    pub fn interpolate(&self, value: f64, min: f64, max: f64) -> u32 {
+        let t = if !value.is_finite()
+            || !min.is_finite()
+            || !max.is_finite()
+            || (max - min).abs() < 1e-12
+        {
+            0.0
+        } else {
+            ((value - min) / (max - min)).clamp(0.0, 1.0)
+        };
+        let lerp = |shift: u32| -> u32 {
+            let a = ((self.min_color >> shift) & 0xFF) as f64;
+            let b = ((self.max_color >> shift) & 0xFF) as f64;
+            (a + (b - a) * t).round().clamp(0.0, 255.0) as u32
+        };
+        (lerp(16) << 16) | (lerp(8) << 8) | lerp(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +232,22 @@ mod tests {
 
         let eq_fraction = sample_rule(ConditionalOperator::EqualTo, "0.125");
         assert!(eq_fraction.matches("12.5%"));
+    }
+
+    #[test]
+    fn databar_and_colorscale_normalize_values() {
+        let bar = DataBarRule {
+            range: CellRange::new(CellRef { row: 0, col: 0 }, CellRef { row: 2, col: 0 }),
+            color: 0x002B_579A,
+        };
+        assert!((bar.fraction(50.0, 0.0, 100.0) - 0.5).abs() < 1e-6);
+
+        let scale = ColorScaleRule {
+            range: CellRange::new(CellRef { row: 0, col: 0 }, CellRef { row: 2, col: 0 }),
+            min_color: 0x00FF_0000,
+            max_color: 0x0000_FF00,
+        };
+        assert_eq!(scale.interpolate(0.0, 0.0, 100.0), 0x00FF_0000);
+        assert_eq!(scale.interpolate(100.0, 0.0, 100.0), 0x0000_FF00);
     }
 }

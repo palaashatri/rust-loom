@@ -344,6 +344,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
     // A page break (form feed) ends its line; the next line starts a page.
     let mut break_pending = false;
     let mut flow_line_index = 0usize;
+    let mut deferred_in_front = Vec::new();
     for line in lines {
         let flow_line = if let Some(flow) = &flow {
             let flow_line = flow.lines().get(flow_line_index).ok_or_else(|| {
@@ -568,6 +569,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                         line.block
                     ))
                 })?;
+                let z_order = pdf_image_z_order(image);
                 let image = pdf_image(image).map_err(|error| {
                     WriterError::Invalid(format!(
                         "PDF export image block {} ({}): {}",
@@ -578,12 +580,21 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                 })?;
                 let id = pdf.add_image(image);
                 let x = page_style.margin_left_pt + indent + shift;
-                pdf.draw_image_with_transform(
-                    page,
-                    id,
-                    (*width, *height),
-                    [1.0, 0.0, 0.0, -1.0, x, y],
-                );
+                if z_order == 2 {
+                    deferred_in_front.push((
+                        page,
+                        id,
+                        (*width, *height),
+                        [1.0, 0.0, 0.0, -1.0, x, y],
+                    ));
+                } else {
+                    pdf.draw_image_with_transform(
+                        page,
+                        id,
+                        (*width, *height),
+                        [1.0, 0.0, 0.0, -1.0, x, y],
+                    );
+                }
             }
         }
         if flow.is_none() {
@@ -608,7 +619,25 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
         }
         footnote_export::draw_body_lines(&mut pdf, &mut fonts, &pages, flow, doc, &page_style)?;
     }
+    for (page, id, size, transform) in deferred_in_front {
+        pdf.draw_image_with_transform(page, id, size, transform);
+    }
     header_footer_export::draw(&mut pdf, &pages, doc, &page_style)?;
+    if !doc.header_footer.watermark_text.is_empty() {
+        let wm_style = loom_pdf::TextStyle {
+            size_pt: 36.0,
+            bold: true,
+            fill_rgb: (0.82, 0.82, 0.82),
+            ..Default::default()
+        };
+        let wm_w =
+            crate::text_metrics::pdf_text_width(&doc.header_footer.watermark_text, &wm_style);
+        let x = ((page_style.width_pt - wm_w) / 2.0).max(page_style.margin_left_pt);
+        let y = page_style.height_pt / 2.0;
+        for &page in &pages {
+            pdf.draw_text(page, x, y, &doc.header_footer.watermark_text, &wm_style);
+        }
+    }
     Ok(pdf.serialize())
 }
 

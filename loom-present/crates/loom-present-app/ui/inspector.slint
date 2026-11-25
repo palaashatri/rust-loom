@@ -178,6 +178,18 @@ export component PresentInspector inherits LoomPanel {
                         if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
                         if root.selection-count > 0 : StyleEffectsPanel {
                             has-selection: root.selection-count > 0;
+                            opacity-pct: ElementInk.effects-opacity-pct;
+                            corner-radius-px: ElementInk.effects-corner-radius-px;
+                            stroke-width-px: ElementInk.effects-stroke-width-px;
+                            stroke-dash: ElementInk.effects-stroke-dash;
+                            has-shadow: ElementInk.effects-has-shadow;
+                            has-gradient: ElementInk.effects-has-gradient;
+                            set-opacity(v) => { ElementInk.effects-set-opacity(v); }
+                            set-corner-radius(v) => { ElementInk.effects-set-corner-radius(v); }
+                            set-stroke-width(v) => { ElementInk.effects-set-stroke-width(v); }
+                            cycle-stroke-dash => { ElementInk.effects-cycle-stroke-dash(); }
+                            toggle-shadow => { ElementInk.effects-toggle-shadow(); }
+                            toggle-gradient => { ElementInk.effects-toggle-gradient(); }
                         }
                         if root.is-table : PresentTableInspector {
                             current-style-id: root.table-style-id;
@@ -321,6 +333,13 @@ export component PresentInspector inherits LoomPanel {
                         }
                         AnimationInspector {
                             has-selection: root.selection-count > 0;
+                            build-count: ElementInk.build-count;
+                            selected-phase: ElementInk.build-phase;
+                            selected-trigger: ElementInk.build-trigger;
+                            add-build(p, t) => { ElementInk.add-build(p, t); }
+                            remove-last-build => { ElementInk.remove-last-build(); }
+                            cycle-phase => { ElementInk.cycle-build-phase(); }
+                            cycle-trigger => { ElementInk.cycle-build-trigger(); }
                         }
                         new-presentation-template := LoomButton {
                             icon: "format";

@@ -14,6 +14,7 @@ pub use charts::{
     ChartKind, ChartPlacement, ChartSeries, ChartSpec, ChartUpdatePolicy, SheetChart,
 };
 
+pub mod annotations;
 pub mod autofill;
 pub mod banded;
 pub mod conditional_format;
@@ -524,6 +525,8 @@ pub struct Sheet {
     pub hidden_rows: BTreeSet<u32>,
     /// Column indexes hidden manually.
     pub hidden_cols: BTreeSet<u32>,
+    /// Cell hyperlinks, notes, conditional visuals, and print settings.
+    pub annotations: annotations::SheetAnnotations,
     /// Named ranges keyed by uppercase identifier.
     pub named_ranges: BTreeMap<String, CellRange>,
     /// Cell data validation rules.
@@ -553,6 +556,7 @@ impl Sheet {
             auto_filter: AutoFilterState::default(),
             hidden_rows: BTreeSet::new(),
             hidden_cols: BTreeSet::new(),
+            annotations: Default::default(),
             named_ranges: BTreeMap::new(),
             validations: Vec::new(),
             merged_ranges: Vec::new(),

@@ -4,6 +4,7 @@ import { LoomWindowResizeEdges, LocalMenuEntry, LocalMenuPopup } from "foundatio
 import { FindBar, FindBarOverlay, FindRect } from "find_bar.slint";
 import { WriterSaveChangesDialog } from "save_changes_dialog.slint";
 import { HyperlinkDialog } from "hyperlink_dialog.slint";
+import { WriterFormatState } from "alignment_state.slint";
 import { DocxImportWarningDialog } from "docx_import_warning.slint";
 import { DocxSaveWarningDialog, DocxSaveWarningState } from "docx_save_warning.slint";
 import { DocxExportReportDialog } from "docx_export_report.slint";
@@ -219,8 +220,24 @@ PictureAltDialog {}
         height: root.height;
     }
 
-    HyperlinkDialog {
-        visible: false;
+    if WriterFormatState.hyperlink-open : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+        TouchArea { clicked => { WriterFormatState.hyperlink-cancel(); } }
+        HyperlinkDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            url-text <=> WriterFormatState.hyperlink-url;
+            tooltip-text <=> WriterFormatState.hyperlink-tooltip;
+            error-text: WriterFormatState.hyperlink-error;
+            has-existing: WriterFormatState.hyperlink-has-existing;
+            apply-link(url, tip) => { WriterFormatState.hyperlink-apply(url, tip); }
+            remove-link => { WriterFormatState.hyperlink-remove(); }
+            cancel => { WriterFormatState.hyperlink-cancel(); }
+        }
     }
 
     LoomWindowResizeEdges {

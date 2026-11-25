@@ -81,6 +81,16 @@ export component PresentFormatSection inherits VerticalLayout {
         }
     }
 
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        for slot in 2 : VerticalLayout {
+            property <int> k: Theme.rtl ? 1 - slot : slot;
+            horizontal-stretch: 1;
+            if k == 0 : LoomButton { label: "• List"; variant: "ghost"; clicked => { ElementInk.requested("list-bullet", 0); } }
+            if k == 1 : LoomButton { label: "1. List"; variant: "ghost"; clicked => { ElementInk.requested("list-numbered", 0); } }
+        }
+    }
+
     LoomTextField {
         label: ElementInk.font-family-mixed ? "Font family, mixed" : "Font family";
         title: ElementInk.font-family-mixed ? "Font family (mixed)" : "Font family";

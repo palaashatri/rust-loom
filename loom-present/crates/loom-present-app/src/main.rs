@@ -2481,48 +2481,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_element_moved(move |_, dx, dy| {
             if let Some(app) = app_ref.upgrade() {
-                if app.get_is_preview_mode() {
-                    return;
-                }
-                let mut drag = state.drag_state.borrow_mut();
-                if drag.mode != Some(HandleKind::Move) {
-                    return;
-                }
-                let (targets, guides) = {
-                    let session = state.session.borrow();
-                    move_targets(&session, &drag.elements, dx, dy)
-                };
-                let changed = {
-                    let session = state.session.borrow();
-                    targets.iter().any(|(id, x, y, width, height)| {
-                        session
-                            .document
-                            .active_slide()
-                            .and_then(|slide| {
-                                slide.elements.iter().find(|element| element.id == *id)
-                            })
-                            .map(|element| {
-                                (element.x - *x).abs() > f32::EPSILON
-                                    || (element.y - *y).abs() > f32::EPSILON
-                                    || (element.width - *width).abs() > f32::EPSILON
-                                    || (element.height - *height).abs() > f32::EPSILON
-                            })
-                            .unwrap_or(false)
-                    })
-                };
-                if changed {
-                    let mut session = state.session.borrow_mut();
-                    if !drag.checkpointed {
-                        session.checkpoint();
-                        drag.checkpointed = true;
-                    }
-                    for (id, x, y, width, height) in targets {
-                        session.transform_element_no_checkpoint(&id, x, y, width, height);
-                    }
-                    drag.guides = guides;
-                }
-                drop(drag);
-                refresh_without_recovery(&app, &state);
+                element_style_ui::parity_ui::handle_element_moved(&app, &state, dx, dy);
             }
         });
     }
@@ -2608,86 +2567,13 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_handle_moved(move |_, kind, dx, dy| {
             if let Some(app) = app_ref.upgrade() {
-                if app.get_is_preview_mode() {
-                    return;
-                }
-                let mut drag = state.drag_state.borrow_mut();
-                let mode = handle_kind(kind.as_str());
-                if drag.mode != Some(mode) {
-                    return;
-                }
-                let Some(target_id) = drag.target_id.as_deref() else {
-                    return;
-                };
-                let Some(element) = drag
-                    .elements
-                    .iter()
-                    .find(|element| element.id == target_id)
-                    .cloned()
-                else {
-                    return;
-                };
-                let mut session = state.session.borrow_mut();
-                let (x, y, width, height, changed) = if mode == HandleKind::Rotate {
-                    let rotation = normalize_angle_degrees(element.rotation_deg + dx * 0.5);
-                    let changed = session
-                        .document
-                        .active_slide()
-                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
-                        .map(|item| (item.rotation_deg - rotation).abs() > f32::EPSILON)
-                        .unwrap_or(false);
-                    if changed && !drag.checkpointed {
-                        session.checkpoint();
-                        drag.checkpointed = true;
-                    }
-                    let changed = session.set_element_rotation_no_checkpoint(&element.id, rotation);
-                    (element.x, element.y, element.width, element.height, changed)
-                } else {
-                    let ((mut x, mut y, mut width, mut height), guides) =
-                        resize_targets(&session, &element, mode, dx, dy);
-                    let is_picture = session
-                        .document
-                        .active_slide()
-                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
-                        .is_some_and(|item| item.element_type == ElementType::Picture);
-                    if is_picture {
-                        (x, y, width, height) = lock_aspect(
-                            (element.x, element.y, element.width, element.height),
-                            (x, y, width, height),
-                            matches!(
-                                mode,
-                                HandleKind::ResizeNorthWest | HandleKind::ResizeSouthWest
-                            ),
-                            matches!(
-                                mode,
-                                HandleKind::ResizeNorthWest | HandleKind::ResizeNorthEast
-                            ),
-                        );
-                    }
-                    let changed = session
-                        .document
-                        .active_slide()
-                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
-                        .map(|item| {
-                            (item.x - x).abs() > f32::EPSILON
-                                || (item.y - y).abs() > f32::EPSILON
-                                || (item.width - width).abs() > f32::EPSILON
-                                || (item.height - height).abs() > f32::EPSILON
-                        })
-                        .unwrap_or(false);
-                    if changed && !drag.checkpointed {
-                        session.checkpoint();
-                        drag.checkpointed = true;
-                    }
-                    drag.guides = guides;
-                    (x, y, width, height, changed)
-                };
-                if mode != HandleKind::Rotate && changed {
-                    session.transform_element_no_checkpoint(&element.id, x, y, width, height);
-                }
-                drop(session);
-                drop(drag);
-                refresh_without_recovery(&app, &state);
+                element_style_ui::parity_ui::handle_handle_moved(
+                    &app,
+                    &state,
+                    kind.as_str(),
+                    dx,
+                    dy,
+                );
             }
         });
     }
@@ -2990,12 +2876,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_prev_slide(move || {
             if let Some(app) = app_ref.upgrade() {
-                let index = state.session.borrow().document.active_index;
-                if index > 0 {
-                    state.session.borrow_mut().document.select_slide(index - 1);
-                    state.selected_element.set(0);
-                    refresh(&app, &state);
-                }
+                element_style_ui::parity_ui::select_prev_slide(&app, &state);
             }
         });
     }
@@ -3004,15 +2885,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_next_slide(move || {
             if let Some(app) = app_ref.upgrade() {
-                let (index, len) = {
-                    let session = state.session.borrow();
-                    (session.document.active_index, session.document.len())
-                };
-                if index + 1 < len {
-                    state.session.borrow_mut().document.select_slide(index + 1);
-                    state.selected_element.set(0);
-                    refresh(&app, &state);
-                }
+                element_style_ui::parity_ui::select_next_slide(&app, &state);
             }
         });
     }

@@ -944,6 +944,7 @@ fn build_writer_registry() -> CommandRegistry {
                 .with_announcement(label_for_handler.clone()))
         });
     }
+    format_painter::register_commands(&mut registry);
     registry
 }
 
