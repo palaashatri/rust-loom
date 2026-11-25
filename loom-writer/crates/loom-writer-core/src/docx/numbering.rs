@@ -11,6 +11,25 @@ use super::xml::{W_NS, XML_DECLARATION};
 /// the shared bullet definitions (`Default`, `Disc`, `Circle`, `Square`, `Dash`).
 pub(super) const FIRST_NUMBERED_NUM_ID: usize = 6;
 
+/// Definition of a single exported numbered list run, including any nested
+/// levels whose marker style differs from the level-0 base style.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NumberedListDef {
+    pub(super) base: ListMarkerStyle,
+    pub(super) level_overrides: Vec<(u8, ListMarkerStyle)>,
+}
+
+fn ordered_num_fmt(marker: ListMarkerStyle) -> Option<&'static str> {
+    match marker {
+        ListMarkerStyle::Decimal => Some("decimal"),
+        ListMarkerStyle::LowerAlpha => Some("lowerLetter"),
+        ListMarkerStyle::UpperAlpha => Some("upperLetter"),
+        ListMarkerStyle::LowerRoman => Some("lowerRoman"),
+        ListMarkerStyle::UpperRoman => Some("upperRoman"),
+        _ => None,
+    }
+}
+
 pub(super) fn bullet_num_id(marker: ListMarkerStyle) -> usize {
     match marker {
         ListMarkerStyle::Disc => 2,
@@ -75,7 +94,7 @@ fn write_ordered_abstract_num(out: &mut String, abs_id: usize, fixed_format: Opt
 /// Generates `word/numbering.xml` with distinct `<w:abstractNum>` definitions for
 /// every supported bullet and ordered `ListMarkerStyle`, plus `<w:num>` entries
 /// for each bullet style and each numbered list run.
-pub(super) fn numbering_xml(numbered_lists: &[ListMarkerStyle]) -> String {
+pub(super) fn numbering_xml(numbered_lists: &[NumberedListDef]) -> String {
     let mut out = String::from(XML_DECLARATION);
     out.push_str(&format!("<w:numbering xmlns:w=\"{W_NS}\">"));
 
@@ -97,23 +116,77 @@ pub(super) fn numbering_xml(numbered_lists: &[ListMarkerStyle]) -> String {
     out.push_str("<w:num w:numId=\"4\"><w:abstractNumId w:val=\"4\"/></w:num>");
     out.push_str("<w:num w:numId=\"5\"><w:abstractNumId w:val=\"5\"/></w:num>");
 
-    for (index, marker) in numbered_lists.iter().enumerate() {
+    for (index, def) in numbered_lists.iter().enumerate() {
         let num_id = FIRST_NUMBERED_NUM_ID + index;
-        let abs_id = numbered_abstract_num_id(*marker);
+        let abs_id = numbered_abstract_num_id(def.base);
         out.push_str(&format!(
             "<w:num w:numId=\"{num_id}\"><w:abstractNumId w:val=\"{abs_id}\"/>\
-             <w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride></w:num>"
+             <w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride>"
         ));
+        for &(lvl, marker) in &def.level_overrides {
+            if let Some(fmt) = ordered_num_fmt(marker) {
+                out.push_str(&format!(
+                    "<w:lvlOverride w:ilvl=\"{lvl}\"><w:lvl w:ilvl=\"{lvl}\"><w:start w:val=\"1\"/>\
+                     <w:numFmt w:val=\"{fmt}\"/><w:lvlText w:val=\"%{}.\"/><w:lvlJc w:val=\"left\"/>\
+                     <w:pPr><w:ind w:left=\"{}\" w:hanging=\"360\"/></w:pPr></w:lvl></w:lvlOverride>",
+                    u32::from(lvl) + 1,
+                    720 * (u32::from(lvl) + 1)
+                ));
+            }
+        }
+        out.push_str("</w:num>");
     }
 
     out.push_str("</w:numbering>");
     out
 }
 
-/// Resolves a `w:numId` from `word/numbering.xml` to `(block_kind, ListMarkerStyle)`.
+fn find_lvl_block(xml: &str, ilvl: u8) -> Option<&str> {
+    let tag = format!("<w:lvl w:ilvl=\"{ilvl}\"");
+    let start = xml.find(&tag)?;
+    let rest = &xml[start..];
+    let end = rest.find("</w:lvl>").unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+fn find_lvl_override_block(num_block: &str, ilvl: u8) -> Option<&str> {
+    let tag = format!("<w:lvlOverride w:ilvl=\"{ilvl}\"");
+    let start = num_block.find(&tag)?;
+    let rest = &num_block[start..];
+    let end = rest.find("</w:lvlOverride>").unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+fn is_canonical_default_bullet(abs_block: &str) -> bool {
+    let lvl0 = find_lvl_block(abs_block, 0).and_then(|b| {
+        b.find("<w:lvlText")
+            .and_then(|p| super::import::extract_attribute_value(&b[p..], "w:val"))
+    });
+    let lvl1 = find_lvl_block(abs_block, 1).and_then(|b| {
+        b.find("<w:lvlText")
+            .and_then(|p| super::import::extract_attribute_value(&b[p..], "w:val"))
+    });
+    lvl0.as_deref() == Some("\u{2022}") && lvl1.as_deref() == Some("\u{2013}")
+}
+
+fn is_canonical_default_ordered(abs_block: &str) -> bool {
+    let fmt = |lvl: u8| {
+        find_lvl_block(abs_block, lvl).and_then(|b| {
+            b.find("<w:numFmt")
+                .and_then(|p| super::import::extract_attribute_value(&b[p..], "w:val"))
+        })
+    };
+    fmt(0).as_deref() == Some("decimal")
+        && fmt(1).as_deref() == Some("lowerLetter")
+        && fmt(2).as_deref() == Some("lowerRoman")
+}
+
+/// Resolves a `w:numId` (and paragraph `w:ilvl`) from `word/numbering.xml` to
+/// `(block_kind, ListMarkerStyle)`.
 pub(super) fn resolve_num_id_list_style(
     archive: Option<&PackageArchive>,
     num_id: &str,
+    ilvl: u8,
 ) -> Option<(&'static str, ListMarkerStyle)> {
     if let Some(num_xml) = archive
         .and_then(|a| a.get("word/numbering.xml"))
@@ -124,6 +197,7 @@ pub(super) fn resolve_num_id_list_style(
             let num_rest = &num_xml[num_pos..];
             let num_end = num_rest.find("</w:num>").unwrap_or(num_rest.len());
             let num_block = &num_rest[..num_end];
+            let override_block = find_lvl_override_block(num_block, ilvl);
             if let Some(abs_pos) = num_block.find("<w:abstractNumId") {
                 if let Some(abs_id) =
                     super::import::extract_attribute_value(&num_block[abs_pos..], "w:val")
@@ -133,31 +207,46 @@ pub(super) fn resolve_num_id_list_style(
                         let abs_rest = &num_xml[abs_start..];
                         let abs_end = abs_rest.find("</w:abstractNum>").unwrap_or(abs_rest.len());
                         let abs_block = &abs_rest[..abs_end];
-                        if let Some(fmt_pos) = abs_block.find("<w:numFmt") {
+                        let override_lvl = override_block.and_then(|ov| find_lvl_block(ov, ilvl));
+                        let target_block = override_lvl
+                            .or_else(|| find_lvl_block(abs_block, ilvl))
+                            .unwrap_or(abs_block);
+                        if let Some(fmt_pos) = target_block.find("<w:numFmt") {
                             if let Some(fmt_val) = super::import::extract_attribute_value(
-                                &abs_block[fmt_pos..],
+                                &target_block[fmt_pos..],
                                 "w:val",
                             ) {
                                 return match fmt_val.as_str() {
                                     "none" => None,
                                     "bullet" => {
-                                        let marker = abs_block
-                                            .find("<w:lvlText")
-                                            .and_then(|p| {
-                                                super::import::extract_attribute_value(
-                                                    &abs_block[p..],
-                                                    "w:val",
-                                                )
-                                            })
-                                            .map(|t| match t.as_str() {
-                                                "\u{2022}" => ListMarkerStyle::Disc,
-                                                "\u{25e6}" => ListMarkerStyle::Circle,
-                                                "\u{25aa}" => ListMarkerStyle::Square,
-                                                "\u{2013}" | "-" => ListMarkerStyle::Dash,
-                                                _ => ListMarkerStyle::Default,
-                                            })
-                                            .unwrap_or(ListMarkerStyle::Default);
+                                        let marker = if override_lvl.is_none()
+                                            && is_canonical_default_bullet(abs_block)
+                                        {
+                                            ListMarkerStyle::Default
+                                        } else {
+                                            target_block
+                                                .find("<w:lvlText")
+                                                .and_then(|p| {
+                                                    super::import::extract_attribute_value(
+                                                        &target_block[p..],
+                                                        "w:val",
+                                                    )
+                                                })
+                                                .map(|t| match t.as_str() {
+                                                    "\u{2022}" => ListMarkerStyle::Disc,
+                                                    "\u{25e6}" => ListMarkerStyle::Circle,
+                                                    "\u{25aa}" => ListMarkerStyle::Square,
+                                                    "\u{2013}" | "-" => ListMarkerStyle::Dash,
+                                                    _ => ListMarkerStyle::Default,
+                                                })
+                                                .unwrap_or(ListMarkerStyle::Default)
+                                        };
                                         Some(("list-bulleted", marker))
+                                    }
+                                    _ if override_lvl.is_none()
+                                        && is_canonical_default_ordered(abs_block) =>
+                                    {
+                                        Some(("list-numbered", ListMarkerStyle::Default))
                                     }
                                     "decimal" => Some(("list-numbered", ListMarkerStyle::Decimal)),
                                     "lowerLetter" => {

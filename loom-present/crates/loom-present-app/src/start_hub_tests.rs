@@ -95,6 +95,11 @@ fn start_hub_template_creation_creates_expected_slides_and_theme() {
         .invoke_open_template("minimal-stage".into());
     assert!(!app.global::<StartHubState>().get_open());
     let s = state.session.borrow();
-    assert!(!s.document.slides.is_empty());
-    assert_eq!(s.document.theme, "Modern Clean");
+    assert_eq!(s.document.slides.len(), 2);
+    let accent = s.document.slides[0]
+        .elements
+        .iter()
+        .find(|e| e.id == "accent-bar-1")
+        .expect("Minimal Stage accent-bar-1");
+    assert_eq!(accent.style.fill.as_deref(), Some("#18181B"));
 }

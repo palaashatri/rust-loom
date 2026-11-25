@@ -320,6 +320,10 @@ fn extract_from_archive(archive: &PackageArchive) -> Result<Extracted, String> {
         import_drawings(&mut sheet, &part.xml, &part.path, archive)?;
         super::import_features::parse_worksheet_features(&part.xml, &dxfs, &mut sheet);
         super::import_features::parse_sheet_tables(archive, &part.path, &part.xml, &mut sheet);
+        if sheet.auto_filter.enabled && !sheet.auto_filter.column_filters.is_empty() {
+            let values = crate::evaluate(&sheet);
+            crate::data_tools::recompute_hidden_rows(&mut sheet, &values);
+        }
         sheets.push(sheet);
     }
     if let Some(workbook_xml) = archive

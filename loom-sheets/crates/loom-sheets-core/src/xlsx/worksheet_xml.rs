@@ -140,7 +140,10 @@ struct ArrayOwner {
     cols: usize,
 }
 
-pub(super) fn render_worksheet(input: &WorksheetInput<'_>, strings: &mut SharedStrings) -> String {
+pub(super) fn render_worksheet(
+    input: &WorksheetInput<'_>,
+    strings: &mut SharedStrings,
+) -> Result<String, String> {
     let sheet = input.sheet;
     let mut array_owners = BTreeMap::<CellRef, ArrayOwner>::new();
     let mut spill_values = BTreeMap::<CellRef, &Value>::new();
@@ -282,13 +285,13 @@ pub(super) fn render_worksheet(input: &WorksheetInput<'_>, strings: &mut SharedS
     };
     let auto_filter = super::export_features::render_auto_filter(sheet);
     let merge_cells = super::export_features::render_merge_cells(sheet);
-    let data_validations = super::export_features::render_data_validations(sheet);
-    format!(
+    let data_validations = super::export_features::render_data_validations(sheet)?;
+    Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"{MAIN_NS}\" xmlns:r=\"{REL_NS}\"><dimension ref=\"{dimension}\"/>{}<sheetFormatPr defaultColWidth=\"{default_width}\" defaultRowHeight=\"{default_height}\" customHeight=\"1\"/>{columns}<sheetData>{sheet_data}</sheetData>{auto_filter}{merge_cells}{}{data_validations}<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>{drawing}{}</worksheet>",
         sheet_views(sheet, input.selected),
         input.conditional_formatting_xml,
         input.table_parts_xml,
-    )
+    ))
 }
 
 fn trim_number(value: f32) -> String {
