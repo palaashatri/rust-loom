@@ -1,8 +1,11 @@
 //! OOXML export rendering for workbook definedNames, worksheet autoFilter,
 //! mergeCells, conditionalFormatting (+ dxfs), dataValidations, and tables.
 
+use std::collections::BTreeSet;
+
 use crate::conditional_format::{CellConditionalRule, ConditionalOperator};
 use crate::sheet_tables::{SheetTable, TableStylePreset};
+use crate::style::FillColor;
 use crate::{CellRange, Sheet, ValidationCriteria};
 
 use super::cell_refs::column_letters;
@@ -128,6 +131,15 @@ pub(super) fn render_merge_cells(sheet: &Sheet) -> String {
     )
 }
 
+fn format_cf_operand(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.parse::<f64>().is_ok_and(|v| v.is_finite()) {
+        trimmed.to_string()
+    } else {
+        format!("\"{}\"", raw.replace('"', "\"\""))
+    }
+}
+
 /// Render `<conditionalFormatting ...>` blocks for one sheet and return the
 /// corresponding `<dxf>` XML elements to append to `xl/styles.xml`.
 pub(super) fn render_conditional_formatting(
@@ -139,11 +151,12 @@ pub(super) fn render_conditional_formatting(
     }
     let mut xml = String::new();
     let mut dxfs = Vec::new();
+    let total = sheet.conditional_rules.len();
     for (idx, rule) in sheet.conditional_rules.iter().enumerate() {
         let dxf_id = dxf_offset + idx;
         dxfs.push(render_dxf(rule));
         let sqref = format_range_ref(rule.range);
-        let priority = idx + 1;
+        let priority = total - idx;
         let top_left = format!(
             "{}{}",
             column_letters(rule.range.start.col as usize),
@@ -152,15 +165,15 @@ pub(super) fn render_conditional_formatting(
         let cf_rule = match rule.operator {
             ConditionalOperator::GreaterThan => format!(
                 "<cfRule type=\"cellIs\" dxfId=\"{dxf_id}\" priority=\"{priority}\" operator=\"greaterThan\"><formula>{}</formula></cfRule>",
-                xml_escape_text(&rule.value)
+                xml_escape_text(&format_cf_operand(&rule.value))
             ),
             ConditionalOperator::LessThan => format!(
                 "<cfRule type=\"cellIs\" dxfId=\"{dxf_id}\" priority=\"{priority}\" operator=\"lessThan\"><formula>{}</formula></cfRule>",
-                xml_escape_text(&rule.value)
+                xml_escape_text(&format_cf_operand(&rule.value))
             ),
             ConditionalOperator::EqualTo => format!(
                 "<cfRule type=\"cellIs\" dxfId=\"{dxf_id}\" priority=\"{priority}\" operator=\"equal\"><formula>{}</formula></cfRule>",
-                xml_escape_text(&rule.value)
+                xml_escape_text(&format_cf_operand(&rule.value))
             ),
             ConditionalOperator::Contains => {
                 let escaped = rule.value.replace('"', "\"\"");
@@ -184,17 +197,21 @@ fn render_dxf(rule: &CellConditionalRule) -> String {
         Some(rgb) => format!("<font><color rgb=\"FF{:06X}\"/></font>", rgb & 0x00FF_FFFF),
         None => String::new(),
     };
-    let fill = format!(
-        "<fill><patternFill patternType=\"solid\"><bgColor rgb=\"FF{}\"/></patternFill></fill>",
-        rgb_for_fill(rule.fill)
-    );
+    let fill = if rule.fill == FillColor::None {
+        String::new()
+    } else {
+        format!(
+            "<fill><patternFill patternType=\"solid\"><bgColor rgb=\"FF{}\"/></patternFill></fill>",
+            rgb_for_fill(rule.fill)
+        )
+    };
     format!("<dxf>{font}{fill}</dxf>")
 }
 
 /// Render `<dataValidations ...>` for `xl/worksheets/sheetN.xml`.
-pub(super) fn render_data_validations(sheet: &Sheet) -> String {
+pub(super) fn render_data_validations(sheet: &Sheet) -> Result<String, String> {
     if sheet.validations.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     let mut items = String::new();
     for validation in &sheet.validations {
@@ -214,6 +231,14 @@ pub(super) fn render_data_validations(sheet: &Sheet) -> String {
         };
         let (attrs, formulas) = match &validation.rule.criteria {
             ValidationCriteria::List(items_list) => {
+                if items_list
+                    .iter()
+                    .any(|item| item.contains(',') || item.contains('"'))
+                {
+                    return Err(
+                        "xlsx export cannot represent inline list validation items containing commas or quotes without a range".to_string(),
+                    );
+                }
                 let joined = items_list.join(",");
                 (
                     "type=\"list\"".to_string(),
@@ -241,11 +266,36 @@ pub(super) fn render_data_validations(sheet: &Sheet) -> String {
             "<dataValidation {attrs} allowBlank=\"{allow_blank}\"{error_attr} sqref=\"{sqref}\">{formulas}</dataValidation>"
         ));
     }
-    format!(
+    Ok(format!(
         "<dataValidations count=\"{}\">{items}</dataValidations>",
         sheet.validations.len()
-    )
+    ))
 }
+
+fn allocate_unique_table_name(raw: &str, used_names: &mut BTreeSet<String>) -> String {
+    let mut base: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if base.is_empty() || base.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        base.insert_str(0, "Table_");
+    }
+    let mut candidate = base.clone();
+    let mut suffix = 2usize;
+    while !used_names.insert(candidate.to_ascii_lowercase()) {
+        candidate = format!("{base}_{suffix}");
+        suffix += 1;
+    }
+    candidate
+}
+
+pub(super) type TablePartsResult = (String, Vec<(String, String)>, Vec<String>);
 
 /// Render `<tableParts ...>`, `xl/tables/tableN.xml` files, and worksheet
 /// relationship entries for `sheet.tables`.
@@ -253,9 +303,10 @@ pub(super) fn render_table_parts(
     sheet: &Sheet,
     start_rid: usize,
     table_start_id: usize,
-) -> (String, Vec<(String, String)>, Vec<String>) {
+    used_names: &mut BTreeSet<String>,
+) -> Result<TablePartsResult, String> {
     if sheet.tables.is_empty() {
-        return (String::new(), Vec::new(), Vec::new());
+        return Ok((String::new(), Vec::new(), Vec::new()));
     }
     let mut parts_xml = String::new();
     let mut table_files = Vec::new();
@@ -263,26 +314,32 @@ pub(super) fn render_table_parts(
     for (idx, table) in sheet.tables.iter().enumerate() {
         let rid = format!("rId{}", start_rid + idx);
         let table_id = table_start_id + idx;
+        let table_name = allocate_unique_table_name(&table.name, used_names);
         parts_xml.push_str(&format!("<tablePart r:id=\"{rid}\"/>"));
         rels.push(format!(
             "<Relationship Id=\"{rid}\" Type=\"{TABLE_REL_TYPE}\" Target=\"../tables/table{table_id}.xml\"/>"
         ));
         table_files.push((
             format!("xl/tables/table{table_id}.xml"),
-            render_table_xml(sheet, table, table_id),
+            render_table_xml(sheet, table, table_id, &table_name)?,
         ));
     }
-    (
+    Ok((
         format!(
             "<tableParts count=\"{}\" xmlns:r=\"{REL_NS}\">{parts_xml}</tableParts>",
             sheet.tables.len()
         ),
         table_files,
         rels,
-    )
+    ))
 }
 
-fn render_table_xml(sheet: &Sheet, table: &SheetTable, table_id: usize) -> String {
+fn render_table_xml(
+    sheet: &Sheet,
+    table: &SheetTable,
+    table_id: usize,
+    table_name: &str,
+) -> Result<String, String> {
     let end_row = table.start_row + table.rows.saturating_sub(1);
     let end_col = table.start_col + table.cols.saturating_sub(1);
     let ref_str = format!(
@@ -293,18 +350,43 @@ fn render_table_xml(sheet: &Sheet, table: &SheetTable, table_id: usize) -> Strin
         end_row + 1
     );
     let header_row_count = if table.header_rows == 0 { 0 } else { 1 };
-    let mut cols_xml = String::new();
+    let mut seen_captions: BTreeSet<String> = BTreeSet::new();
+    let mut explicit_captions: Vec<Option<String>> = Vec::with_capacity(table.cols as usize);
     for c in 0..table.cols {
-        let col_idx = table.start_col + c;
         let header_cell = crate::CellRef {
             row: table.start_row,
-            col: col_idx,
+            col: table.start_col + c,
         };
-        let col_name = sheet
+        let explicit = sheet
             .raw(header_cell)
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("Column{}", c + 1));
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if let Some(ref cap) = explicit {
+            if !seen_captions.insert(cap.to_ascii_lowercase()) {
+                return Err(format!(
+                    "xlsx export duplicate table column caption '{cap}' in table '{}'",
+                    table.name
+                ));
+            }
+        }
+        explicit_captions.push(explicit);
+    }
+    let mut cols_xml = String::new();
+    for (c, explicit) in explicit_captions.into_iter().enumerate() {
+        let col_name = match explicit {
+            Some(cap) => cap,
+            None => {
+                let mut idx = c + 1;
+                loop {
+                    let candidate = format!("Column{idx}");
+                    if seen_captions.insert(candidate.to_ascii_lowercase()) {
+                        break candidate;
+                    }
+                    idx += 1;
+                }
+            }
+        };
         cols_xml.push_str(&format!(
             "<tableColumn id=\"{}\" name=\"{}\"/>",
             c + 1,
@@ -319,9 +401,9 @@ fn render_table_xml(sheet: &Sheet, table: &SheetTable, table_id: usize) -> Strin
         TableStylePreset::Charcoal => "TableStyleMedium1",
     };
     let row_stripes = if table.alternating_rows { "1" } else { "0" };
-    let safe_name = xml_escape_attr(&table.name.replace(' ', "_"));
-    format!(
+    let safe_name = xml_escape_attr(table_name);
+    Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><table xmlns=\"{MAIN_NS}\" id=\"{table_id}\" name=\"{safe_name}\" displayName=\"{safe_name}\" ref=\"{ref_str}\" headerRowCount=\"{header_row_count}\"><tableColumns count=\"{}\">{cols_xml}</tableColumns><tableStyleInfo name=\"{style_name}\" showFirstColumn=\"0\" showLastColumn=\"0\" showRowStripes=\"{row_stripes}\" showColumnStripes=\"0\"/></table>",
         table.cols
-    )
+    ))
 }

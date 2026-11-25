@@ -51,7 +51,17 @@ fn font_picker_selection_changes_element_font_and_undo_reverts() {
         200.0,
         40.0,
     );
-    let (app, state) = crate::element_style_tests::fixture(vec![el]);
+    let mut el2 = text_element(
+        "e2",
+        ElementType::BodyText,
+        "Deck font",
+        40.0,
+        100.0,
+        200.0,
+        40.0,
+    );
+    el2.style.font_family = Some("Georgia".into());
+    let (app, state) = crate::element_style_tests::fixture(vec![el, el2]);
     state.session.borrow_mut().select_element("e1", false);
     crate::refresh(&app, &state);
 

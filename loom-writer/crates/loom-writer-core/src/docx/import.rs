@@ -1378,10 +1378,12 @@ fn parse_paragraph(
             .find("</w:numPr>")
             .unwrap_or(paragraph_properties.current_xml.len() - num_start);
         let num_snippet = &paragraph_properties.current_xml[num_start..num_start + num_end];
+        let ilvl =
+            num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
         if let Some(num_id_pos) = num_snippet.find("<w:numId") {
             if let Some(num_id_val) = extract_attribute_value(&num_snippet[num_id_pos..], "w:val") {
                 if let Some((_, marker)) =
-                    super::numbering::resolve_num_id_list_style(archive, &num_id_val)
+                    super::numbering::resolve_num_id_list_style(archive, &num_id_val, ilvl)
                 {
                     paragraph_style.list_marker = marker;
                 }
@@ -1665,5 +1667,5 @@ pub(super) fn resolve_num_id_list_kind(
     archive: Option<&PackageArchive>,
     num_id: &str,
 ) -> Option<&'static str> {
-    super::numbering::resolve_num_id_list_style(archive, num_id).map(|(kind, _)| kind)
+    super::numbering::resolve_num_id_list_style(archive, num_id, 0).map(|(kind, _)| kind)
 }
