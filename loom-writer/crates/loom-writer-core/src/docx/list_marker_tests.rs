@@ -127,3 +127,43 @@ fn round_trip_preserves_all_list_marker_styles_levels_and_restarts() {
         );
     }
 }
+
+#[test]
+fn docx_preserves_default_list_markers_and_nested_mixed_numbered_runs() {
+    let mut doc = WriterDocument::new("doc1", "Test");
+    let mut b0 = RichBlock::new(1, "list-bulleted", "Default bullet");
+    b0.style.list_marker = ListMarkerStyle::Default;
+    let mut n0 = RichBlock::new(2, "list-numbered", "Outer 1");
+    n0.style.list_marker = ListMarkerStyle::Decimal;
+    let mut n1 = RichBlock::new(3, "list-numbered", "Inner a");
+    n1.style.list_marker = ListMarkerStyle::LowerAlpha;
+    n1.style.list_level = 1;
+    let mut n2 = RichBlock::new(4, "list-numbered", "Outer 2");
+    n2.style.list_marker = ListMarkerStyle::Decimal;
+    doc.blocks = vec![b0, n0, n1, n2];
+
+    let exported = export_docx(&doc).expect("export_docx should succeed");
+    let archive = PackageArchive::from_bytes(&exported.bytes).expect("valid docx zip");
+    let numbering_xml = std::str::from_utf8(archive.get("word/numbering.xml").unwrap()).unwrap();
+    // All 3 numbered items share 1 numbering instance (only 1 startOverride).
+    assert_eq!(numbering_xml.matches("startOverride").count(), 1);
+
+    let reimported = import_docx(&exported.bytes).expect("import_docx should succeed");
+    assert_eq!(
+        reimported.blocks[0].style.list_marker,
+        ListMarkerStyle::Default
+    );
+    assert_eq!(
+        reimported.blocks[1].style.list_marker,
+        ListMarkerStyle::Decimal
+    );
+    assert_eq!(
+        reimported.blocks[2].style.list_marker,
+        ListMarkerStyle::LowerAlpha
+    );
+    assert_eq!(reimported.blocks[2].style.list_level, 1);
+    assert_eq!(
+        reimported.blocks[3].style.list_marker,
+        ListMarkerStyle::Decimal
+    );
+}

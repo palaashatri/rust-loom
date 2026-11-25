@@ -40,7 +40,7 @@ pub(super) fn parse_dxf_styles(styles_xml: &str) -> Vec<(FillColor, Option<u32>)
                 .chain(elements(dxf.body, "fgColor"))
                 .find_map(|c| attr(c.attrs, "rgb"))
                 .map(|rgb| fill_from_rgb(&rgb))
-                .unwrap_or(FillColor::Yellow);
+                .unwrap_or(FillColor::None);
             let text_color = elements(dxf.body, "font")
                 .next()
                 .and_then(|f| elements(f.body, "color").next())
@@ -95,7 +95,21 @@ pub(super) fn parse_defined_names_into_sheets(
     }
 }
 
-/// Parse worksheet-level OOXML features into `sheet`.
+fn decode_cf_formula_operand(raw: &str) -> String {
+    let unescaped = xml_unescape(raw.trim());
+    if unescaped.len() >= 2 && unescaped.starts_with('"') && unescaped.ends_with('"') {
+        unescaped[1..unescaped.len() - 1].replace("\"\"", "\"")
+    } else {
+        unescaped
+    }
+}
+
+fn parse_sqref_ranges(sqref: &str) -> Vec<CellRange> {
+    sqref
+        .split_ascii_whitespace()
+        .filter_map(parse_range_ref)
+        .collect()
+}
 pub(super) fn parse_worksheet_features(
     sheet_xml: &str,
     dxfs: &[(FillColor, Option<u32>)],
@@ -145,16 +159,17 @@ pub(super) fn parse_worksheet_features(
         let Some(sqref) = attr(cf_tag.attrs, "sqref") else {
             continue;
         };
-        let Some(range) = parse_range_ref(&sqref) else {
+        let ranges = parse_sqref_ranges(&sqref);
+        if ranges.is_empty() {
             continue;
-        };
+        }
         for rule_tag in elements(cf_tag.body, "cfRule") {
             let rule_type = attr(rule_tag.attrs, "type").unwrap_or_default();
             let op_attr = attr(rule_tag.attrs, "operator").unwrap_or_default();
             let dxf_id = attr(rule_tag.attrs, "dxfId").and_then(|s| s.parse::<usize>().ok());
             let (fill, text_color) = dxf_id
                 .and_then(|id| dxfs.get(id).copied())
-                .unwrap_or((FillColor::Yellow, None));
+                .unwrap_or((FillColor::None, None));
 
             let (operator, value) = if rule_type == "containsText" || op_attr == "containsText" {
                 let text = attr(rule_tag.attrs, "text")
@@ -170,17 +185,19 @@ pub(super) fn parse_worksheet_features(
                 };
                 let formula = elements(rule_tag.body, "formula")
                     .next()
-                    .map(|f| xml_unescape(f.body.trim()))
+                    .map(|f| decode_cf_formula_operand(f.body))
                     .unwrap_or_default();
                 (op, formula)
             };
-            sheet.conditional_rules.push(CellConditionalRule {
-                range,
-                operator,
-                value,
-                fill,
-                text_color,
-            });
+            for &range in &ranges {
+                sheet.conditional_rules.push(CellConditionalRule {
+                    range,
+                    operator,
+                    value: value.clone(),
+                    fill,
+                    text_color,
+                });
+            }
         }
     }
 
@@ -189,11 +206,16 @@ pub(super) fn parse_worksheet_features(
         let Some(sqref) = attr(dv_tag.attrs, "sqref") else {
             continue;
         };
-        let Some(range) = parse_range_ref(&sqref) else {
+        let ranges = parse_sqref_ranges(&sqref);
+        if ranges.is_empty() {
             continue;
-        };
+        }
         let dv_type = attr(dv_tag.attrs, "type").unwrap_or_default();
-        let allow_blank = attr(dv_tag.attrs, "allowBlank").as_deref() != Some("0");
+        let dv_operator = attr(dv_tag.attrs, "operator").unwrap_or_else(|| "between".to_string());
+        let allow_blank = matches!(
+            attr(dv_tag.attrs, "allowBlank").as_deref(),
+            Some("1") | Some("true")
+        );
         let error_message = attr(dv_tag.attrs, "error")
             .map(|e| xml_unescape(&e))
             .unwrap_or_default();
@@ -219,19 +241,19 @@ pub(super) fn parse_worksheet_features(
                     continue;
                 }
             }
-            "whole" => {
+            "whole" if dv_operator == "between" => {
                 let (Ok(min), Ok(max)) = (f1.parse::<i64>(), f2.parse::<i64>()) else {
                     continue;
                 };
                 ValidationCriteria::WholeNumberBetween(min, max)
             }
-            "decimal" => {
+            "decimal" if dv_operator == "between" => {
                 let (Ok(min), Ok(max)) = (f1.parse::<f64>(), f2.parse::<f64>()) else {
                     continue;
                 };
                 ValidationCriteria::DecimalBetween(min, max)
             }
-            "textLength" => {
+            "textLength" if dv_operator == "between" => {
                 let (Ok(min), Ok(max)) = (f1.parse::<usize>(), f2.parse::<usize>()) else {
                     continue;
                 };
@@ -239,14 +261,16 @@ pub(super) fn parse_worksheet_features(
             }
             _ => continue,
         };
-        sheet.validations.push(SheetValidation {
-            range,
-            rule: DataValidationRule {
-                criteria,
-                allow_blank,
-                error_message,
-            },
-        });
+        for range in ranges {
+            sheet.validations.push(SheetValidation {
+                range,
+                rule: DataValidationRule {
+                    criteria: criteria.clone(),
+                    allow_blank,
+                    error_message: error_message.clone(),
+                },
+            });
+        }
     }
 }
 
