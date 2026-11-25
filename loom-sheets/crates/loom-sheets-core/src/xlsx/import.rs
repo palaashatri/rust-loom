@@ -238,16 +238,17 @@ fn fill_sheet(
     }
 
     for column in &parsed.columns {
-        let last = column
-            .last
-            .min(column.first.saturating_add(MAX_COLUMNS_PER_SIZE_RANGE - 1));
         if column.hidden {
             warnings.insert(XlsxImportWarning::HiddenContent);
-            for col in column.first..=last {
+            let hidden_last = column.last.min(16_384);
+            for col in column.first..=hidden_last {
                 sheet.hidden_cols.insert(col);
             }
         }
         if let (true, Some(width)) = (column.custom, column.width) {
+            let last = column
+                .last
+                .min(column.first.saturating_add(MAX_COLUMNS_PER_SIZE_RANGE - 1));
             for col in column.first..=last {
                 sheet.set_col_width(col, width * PIXELS_PER_CHARACTER);
             }

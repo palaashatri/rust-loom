@@ -253,6 +253,13 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     app.set_view_col_origin(viewport.first_col as i32);
     let grid = project_sheet_grid_with_values(&sheet, &values, viewport);
     apply_grid(app, grid, None, &geometry, zoom);
+    crate::parity_actions::sync_overlays(
+        app,
+        &sheet,
+        viewport,
+        crate::selection_from_app(app).range(),
+        zoom,
+    );
     crate::rich_format_actions::publish_viewport(
         app,
         &sheet,

@@ -84,7 +84,9 @@ pub const DEFAULT_COL_WIDTH: f32 = 80.0;
 pub const DEFAULT_ROW_HEIGHT: f32 = 24.0;
 
 /// A cell coordinate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct CellRef {
     /// Row (0-based).
     pub row: u32,
@@ -2194,7 +2196,7 @@ pub fn parse_literal(s: &str) -> Value {
 // Sheet JSON persistence lives in `persistence`; see
 // `persistence::sheet_to_json` and `persistence::sheet_from_json`.
 /// Inclusive rectangular cell range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CellRange {
     /// Top-left cell.
     pub start: CellRef,

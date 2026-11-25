@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use loom_desktop::NativeMenuBar;
-use loom_sheets_core::{CellRange, Sheet, SheetViewport};
+use loom_sheets_core::{CellRange, CellRef, Sheet, SheetViewport};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::{
@@ -15,35 +15,125 @@ use crate::{
 
 thread_local! {
     static SHOW_FORMULAS: Cell<bool> = const { Cell::new(false) };
+    static ACTIVE_AUDIT_CELLS: RefCell<(Vec<CellRef>, bool)> = const { RefCell::new((Vec::new(), true)) };
 }
 
 pub(crate) fn show_formulas_enabled() -> bool {
     SHOW_FORMULAS.with(Cell::get)
 }
 
+fn vis_col_width(sheet: &Sheet, col: u32, zoom: f32) -> f32 {
+    if sheet.hidden_cols.contains(&col) {
+        0.0
+    } else {
+        sheet.col_width(col) * zoom
+    }
+}
+
+fn vis_row_height(sheet: &Sheet, row: u32, zoom: f32) -> f32 {
+    if sheet.hidden_rows.contains(&row) {
+        0.0
+    } else {
+        sheet.row_height(row) * zoom
+    }
+}
+
+fn cell_rect_in_viewport(
+    sheet: &Sheet,
+    viewport: SheetViewport,
+    zoom: f32,
+    cell: CellRef,
+) -> Option<(f32, f32, f32, f32)> {
+    let col_end = viewport.first_col + viewport.visible_cols.max(1);
+    let row_end = viewport.first_row + viewport.visible_rows.max(1);
+    if cell.col < viewport.first_col
+        || cell.col >= col_end
+        || cell.row < viewport.first_row
+        || cell.row >= row_end
+        || sheet.hidden_cols.contains(&cell.col)
+        || sheet.hidden_rows.contains(&cell.row)
+    {
+        return None;
+    }
+    let x: f32 = (viewport.first_col..cell.col)
+        .map(|c| vis_col_width(sheet, c, zoom))
+        .sum();
+    let y: f32 = (viewport.first_row..cell.row)
+        .map(|r| vis_row_height(sheet, r, zoom))
+        .sum();
+    let w = vis_col_width(sheet, cell.col, zoom);
+    let h = vis_row_height(sheet, cell.row, zoom);
+    Some((x, y, w, h))
+}
+
+fn hit_test_cell_in_viewport(
+    sheet: &Sheet,
+    viewport: SheetViewport,
+    zoom: f32,
+    x: f32,
+    y: f32,
+) -> CellRef {
+    let mut cur_x = 0.0f32;
+    let mut hit_col = viewport.first_col;
+    let col_end = viewport.first_col + viewport.visible_cols.max(1);
+    for c in viewport.first_col..col_end {
+        let w = vis_col_width(sheet, c, zoom);
+        if w > 0.0 {
+            hit_col = c;
+            if cur_x + w > x {
+                break;
+            }
+            cur_x += w;
+        }
+    }
+    let mut cur_y = 0.0f32;
+    let mut hit_row = viewport.first_row;
+    let row_end = viewport.first_row + viewport.visible_rows.max(1);
+    for r in viewport.first_row..row_end {
+        let h = vis_row_height(sheet, r, zoom);
+        if h > 0.0 {
+            hit_row = r;
+            if cur_y + h > y {
+                break;
+            }
+            cur_y += h;
+        }
+    }
+    CellRef {
+        row: hit_row,
+        col: hit_col,
+    }
+}
+
 pub(crate) fn sync_overlays(
     app: &SheetsApp,
-    _sheet: &Sheet,
+    sheet: &Sheet,
     viewport: SheetViewport,
     selection: CellRange,
     zoom: f32,
 ) {
     let g = app.global::<crate::SheetsParityState>();
-    let vis_col = selection.end.col >= viewport.first_col
-        && selection.end.col < viewport.first_col + viewport.visible_cols.max(1);
-    let vis_row = selection.end.row >= viewport.first_row
-        && selection.end.row < viewport.first_row + viewport.visible_rows.max(1);
-    if vis_col && vis_row {
-        let cx =
-            ((selection.end.col - viewport.first_col + 1) as f32) * crate::GRID_COL_WIDTH * zoom;
-        let cy =
-            ((selection.end.row - viewport.first_row + 1) as f32) * crate::GRID_ROW_HEIGHT * zoom;
+    if let Some((x, y, w, h)) = cell_rect_in_viewport(sheet, viewport, zoom, selection.end) {
         g.set_fill_handle_visible(true);
-        g.set_fill_handle_x(cx);
-        g.set_fill_handle_y(cy);
+        g.set_fill_handle_x(x + w);
+        g.set_fill_handle_y(y + h);
     } else {
         g.set_fill_handle_visible(false);
     }
+    let rects: Vec<AuditHighlightRect> = ACTIVE_AUDIT_CELLS.with(|cells| {
+        let (list, is_precedent) = &*cells.borrow();
+        list.iter()
+            .filter_map(|&c| cell_rect_in_viewport(sheet, viewport, zoom, c))
+            .map(|(x, y, w, h)| AuditHighlightRect {
+                x,
+                y,
+                w,
+                h,
+                is_precedent: *is_precedent,
+            })
+            .collect()
+    });
+    g.set_audit_highlights(ModelRc::new(VecModel::from(rects)));
 }
 
 /// Wires P0 parity callbacks on `SheetsParityState`.
@@ -88,28 +178,22 @@ pub(crate) fn register_parity_actions(
                 if !g.get_fill_dragging() {
                     return;
                 }
-                let vp = crate::viewport_from_app(&app, &state.current.borrow(), None);
-                let row = ((y / crate::GRID_ROW_HEIGHT).floor().max(0.0) as u32)
-                    .saturating_add(vp.first_row);
-                let col = ((x / crate::GRID_COL_WIDTH).floor().max(0.0) as u32)
-                    .saturating_add(vp.first_col);
-                let hovered = loom_sheets_core::CellRef { row, col };
+                let sheet = state.current.borrow();
+                let zoom = crate::grid_zoom(&app);
+                let vp = crate::viewport_from_app(&app, &sheet, None);
+                let hovered = hit_test_cell_in_viewport(&sheet, vp, zoom, x, y);
                 fill_state.borrow_mut().update_drag(hovered);
                 if let Some(target) = fill_state.borrow().target_range {
-                    let fr = vp.first_row;
-                    let fc = vp.first_col;
-                    let px = (target.start.col.saturating_sub(fc) as f32) * crate::GRID_COL_WIDTH;
-                    let py = (target.start.row.saturating_sub(fr) as f32) * crate::GRID_ROW_HEIGHT;
-                    let pw = ((target.end.col.saturating_sub(target.start.col) + 1) as f32)
-                        * crate::GRID_COL_WIDTH;
-                    let ph = ((target.end.row.saturating_sub(target.start.row) + 1) as f32)
-                        * crate::GRID_ROW_HEIGHT;
-                    g.set_fill_preview_x(px);
-                    g.set_fill_preview_y(py);
-                    g.set_fill_preview_w(pw);
-                    g.set_fill_preview_h(ph);
+                    if let (Some((px, py, _, _)), Some((ex, ey, ew, eh))) = (
+                        cell_rect_in_viewport(&sheet, vp, zoom, target.start),
+                        cell_rect_in_viewport(&sheet, vp, zoom, target.end),
+                    ) {
+                        g.set_fill_preview_x(px);
+                        g.set_fill_preview_y(py);
+                        g.set_fill_preview_w((ex + ew - px).max(0.0));
+                        g.set_fill_preview_h((ey + eh - py).max(0.0));
+                    }
                 }
-                let _ = &state;
             }
         });
     }
@@ -312,7 +396,7 @@ pub(crate) fn register_parity_actions(
                 SHOW_FORMULAS.with(|s| s.set(on));
                 app.global::<crate::SheetsParityState>()
                     .set_show_formulas(on);
-                apply_sheet(&app, &state);
+                crate::project_current(&app, &state);
                 app.set_status_left(
                     if on {
                         "Show Formulas: ON"
@@ -331,27 +415,21 @@ pub(crate) fn register_parity_actions(
         let audit = audit.clone();
         parity.on_trace_precedents(move || {
             if let Some(app) = app_ref.upgrade() {
+                let sheet = state.current.borrow();
                 let active = crate::selection_from_app(&app).focus;
-                audit
-                    .borrow_mut()
-                    .trace_precedents(&state.current.borrow(), active);
-                let vp = crate::viewport_from_app(&app, &state.current.borrow(), None);
-                let rects: Vec<AuditHighlightRect> = audit
-                    .borrow()
-                    .precedents
-                    .iter()
-                    .filter(|c| c.row >= vp.first_row && c.col >= vp.first_col)
-                    .map(|c| AuditHighlightRect {
-                        x: ((c.col - vp.first_col) as f32) * crate::GRID_COL_WIDTH,
-                        y: ((c.row - vp.first_row) as f32) * crate::GRID_ROW_HEIGHT,
-                        w: crate::GRID_COL_WIDTH,
-                        h: crate::GRID_ROW_HEIGHT,
-                        is_precedent: true,
-                    })
-                    .collect();
-                let count = rects.len();
-                app.global::<crate::SheetsParityState>()
-                    .set_audit_highlights(ModelRc::new(VecModel::from(rects)));
+                audit.borrow_mut().trace_precedents(&sheet, active);
+                let cells = audit.borrow().precedents.clone();
+                let count = cells.len();
+                ACTIVE_AUDIT_CELLS.with(|c| *c.borrow_mut() = (cells, true));
+                let vp = crate::viewport_from_app(&app, &sheet, None);
+                let zoom = crate::grid_zoom(&app);
+                sync_overlays(
+                    &app,
+                    &sheet,
+                    vp,
+                    crate::selection_from_app(&app).range(),
+                    zoom,
+                );
                 app.set_status_left(SharedString::from(format!("Traced {count} precedent(s)")));
             }
         });
@@ -363,27 +441,21 @@ pub(crate) fn register_parity_actions(
         let audit = audit.clone();
         parity.on_trace_dependents(move || {
             if let Some(app) = app_ref.upgrade() {
+                let sheet = state.current.borrow();
                 let active = crate::selection_from_app(&app).focus;
-                audit
-                    .borrow_mut()
-                    .trace_dependents(&state.current.borrow(), active);
-                let vp = crate::viewport_from_app(&app, &state.current.borrow(), None);
-                let rects: Vec<AuditHighlightRect> = audit
-                    .borrow()
-                    .dependents
-                    .iter()
-                    .filter(|c| c.row >= vp.first_row && c.col >= vp.first_col)
-                    .map(|c| AuditHighlightRect {
-                        x: ((c.col - vp.first_col) as f32) * crate::GRID_COL_WIDTH,
-                        y: ((c.row - vp.first_row) as f32) * crate::GRID_ROW_HEIGHT,
-                        w: crate::GRID_COL_WIDTH,
-                        h: crate::GRID_ROW_HEIGHT,
-                        is_precedent: false,
-                    })
-                    .collect();
-                let count = rects.len();
-                app.global::<crate::SheetsParityState>()
-                    .set_audit_highlights(ModelRc::new(VecModel::from(rects)));
+                audit.borrow_mut().trace_dependents(&sheet, active);
+                let cells = audit.borrow().dependents.clone();
+                let count = cells.len();
+                ACTIVE_AUDIT_CELLS.with(|c| *c.borrow_mut() = (cells, false));
+                let vp = crate::viewport_from_app(&app, &sheet, None);
+                let zoom = crate::grid_zoom(&app);
+                sync_overlays(
+                    &app,
+                    &sheet,
+                    vp,
+                    crate::selection_from_app(&app).range(),
+                    zoom,
+                );
                 app.set_status_left(SharedString::from(format!("Traced {count} dependent(s)")));
             }
         });
@@ -395,6 +467,7 @@ pub(crate) fn register_parity_actions(
         parity.on_clear_audit(move || {
             if let Some(app) = app_ref.upgrade() {
                 audit.borrow_mut().clear_traces();
+                ACTIVE_AUDIT_CELLS.with(|c| c.borrow_mut().0.clear());
                 app.global::<crate::SheetsParityState>()
                     .set_audit_highlights(ModelRc::new(VecModel::<AuditHighlightRect>::default()));
                 app.set_status_left("Cleared formula audit".into());

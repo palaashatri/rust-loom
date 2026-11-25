@@ -434,7 +434,12 @@ pub fn remove_duplicates(
         return 0;
     }
     let mut seen = BTreeSet::<Vec<String>>::new();
-    let mut kept_rows = Vec::<Vec<Option<String>>>::new();
+    type RowSnapshot = Vec<(
+        Option<crate::Cell>,
+        Option<crate::style::CellStyle>,
+        Option<crate::CellAlignment>,
+    )>;
+    let mut kept_rows = Vec::<RowSnapshot>::new();
     let mut removed = 0usize;
     for r in start_row..=range.end.row {
         let key: Vec<String> = key_cols
@@ -447,8 +452,19 @@ pub fn remove_duplicates(
             })
             .collect();
         if seen.insert(key) {
-            let row_vals = (range.start.col..=range.end.col)
-                .map(|c| sheet.raw(CellRef { row: r, col: c }).map(str::to_string))
+            let row_vals: Vec<(
+                Option<crate::Cell>,
+                Option<crate::style::CellStyle>,
+                Option<crate::CellAlignment>,
+            )> = (range.start.col..=range.end.col)
+                .map(|c| {
+                    let cell = CellRef { row: r, col: c };
+                    (
+                        sheet.cells.get(&cell).cloned(),
+                        sheet.styles.get(&cell).copied(),
+                        sheet.alignments.get(&cell).copied(),
+                    )
+                })
                 .collect();
             kept_rows.push(row_vals);
         } else {
@@ -461,10 +477,28 @@ pub fn remove_duplicates(
     for (idx, r) in (start_row..=range.end.row).enumerate() {
         for (c_off, c) in (range.start.col..=range.end.col).enumerate() {
             let cell = CellRef { row: r, col: c };
-            if let Some(Some(val)) = kept_rows.get(idx).and_then(|row| row.get(c_off)) {
-                sheet.set_raw(cell, val);
+            if let Some((cell_val, style, align)) =
+                kept_rows.get(idx).and_then(|row| row.get(c_off))
+            {
+                if let Some(cv) = cell_val {
+                    sheet.cells.insert(cell, cv.clone());
+                } else {
+                    sheet.cells.remove(&cell);
+                }
+                if let Some(st) = style {
+                    sheet.styles.insert(cell, *st);
+                } else {
+                    sheet.styles.remove(&cell);
+                }
+                if let Some(al) = align {
+                    sheet.alignments.insert(cell, *al);
+                } else {
+                    sheet.alignments.remove(&cell);
+                }
             } else {
                 sheet.cells.remove(&cell);
+                sheet.styles.remove(&cell);
+                sheet.alignments.remove(&cell);
             }
         }
     }
@@ -486,21 +520,43 @@ pub fn multi_level_sort(
     if start_row >= range.end.row || keys.is_empty() {
         return;
     }
-    let mut rows: Vec<Vec<Option<String>>> = (start_row..=range.end.row)
+    type RowSnapshot = Vec<(
+        Option<crate::Cell>,
+        Option<crate::style::CellStyle>,
+        Option<crate::CellAlignment>,
+    )>;
+    let mut rows: Vec<RowSnapshot> = (start_row..=range.end.row)
         .map(|r| {
             (range.start.col..=range.end.col)
-                .map(|c| sheet.raw(CellRef { row: r, col: c }).map(str::to_string))
+                .map(|c| {
+                    let cell = CellRef { row: r, col: c };
+                    (
+                        sheet.cells.get(&cell).cloned(),
+                        sheet.styles.get(&cell).copied(),
+                        sheet.alignments.get(&cell).copied(),
+                    )
+                })
                 .collect()
         })
         .collect();
     rows.sort_by(|a, b| {
         for &(col, asc) in keys {
             let idx = (col.saturating_sub(range.start.col)) as usize;
-            let sa = a.get(idx).and_then(|v| v.as_deref()).unwrap_or("");
-            let sb = b.get(idx).and_then(|v| v.as_deref()).unwrap_or("");
-            let ord = match (sa.parse::<f64>(), sb.parse::<f64>()) {
-                (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
-                _ => sa.cmp(sb),
+            let sa = a
+                .get(idx)
+                .and_then(|(c, _, _)| c.as_ref().map(|c| c.raw.as_str()))
+                .unwrap_or("");
+            let sb = b
+                .get(idx)
+                .and_then(|(c, _, _)| c.as_ref().map(|c| c.raw.as_str()))
+                .unwrap_or("");
+            let fa = sa.trim().parse::<f64>().ok().filter(|n| n.is_finite());
+            let fb = sb.trim().parse::<f64>().ok().filter(|n| n.is_finite());
+            let ord = match (fa, fb) {
+                (Some(na), Some(nb)) => na.total_cmp(&nb),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => sa.cmp(sb),
             };
             if ord != std::cmp::Ordering::Equal {
                 return if asc { ord } else { ord.reverse() };
@@ -511,10 +567,26 @@ pub fn multi_level_sort(
     for (r_off, r) in (start_row..=range.end.row).enumerate() {
         for (c_off, c) in (range.start.col..=range.end.col).enumerate() {
             let cell = CellRef { row: r, col: c };
-            if let Some(Some(val)) = rows.get(r_off).and_then(|row| row.get(c_off)) {
-                sheet.set_raw(cell, val);
+            if let Some((cell_val, style, align)) = rows.get(r_off).and_then(|row| row.get(c_off)) {
+                if let Some(cv) = cell_val {
+                    sheet.cells.insert(cell, cv.clone());
+                } else {
+                    sheet.cells.remove(&cell);
+                }
+                if let Some(st) = style {
+                    sheet.styles.insert(cell, *st);
+                } else {
+                    sheet.styles.remove(&cell);
+                }
+                if let Some(al) = align {
+                    sheet.alignments.insert(cell, *al);
+                } else {
+                    sheet.alignments.remove(&cell);
+                }
             } else {
                 sheet.cells.remove(&cell);
+                sheet.styles.remove(&cell);
+                sheet.alignments.remove(&cell);
             }
         }
     }

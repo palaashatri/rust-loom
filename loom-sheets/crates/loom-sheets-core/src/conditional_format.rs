@@ -110,7 +110,7 @@ fn parse_numeric(raw: &str) -> Option<f64> {
 }
 
 /// Data bar conditional formatting rule for a numeric range.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DataBarRule {
     pub range: CellRange,
     pub color: u32,
@@ -127,7 +127,7 @@ impl DataBarRule {
 }
 
 /// 2-color scale conditional formatting rule for a numeric range.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ColorScaleRule {
     pub range: CellRange,
     pub min_color: u32,

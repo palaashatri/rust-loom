@@ -432,11 +432,14 @@ pub(crate) fn grid_geometry_fit(
     // unscaled pixels (see `viewport_from_app`).
     let default_col_width = fit_col_width * zoom;
     let default_row_height = GRID_ROW_HEIGHT * zoom;
-    let scaled_cols: BTreeMap<u32, f32> = sheet
+    let mut scaled_cols: BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
+    for &col in &sheet.hidden_cols {
+        scaled_cols.insert(col, 0.0);
+    }
     let scaled_rows = scaled_row_heights(sheet, zoom);
     let mat_cols = materialized_cols(sheet, viewport);
     let mat_rows = materialized_rows(sheet, viewport);
@@ -450,7 +453,7 @@ pub(crate) fn grid_geometry_fit(
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
-    let content_width = if sheet.col_widths.is_empty() {
+    let content_width = if scaled_cols.is_empty() {
         dimensions.cols as f32 * default_col_width
     } else {
         dimension_extent(dimensions.cols, default_col_width, &scaled_cols)
