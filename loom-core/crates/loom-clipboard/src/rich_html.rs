@@ -14,14 +14,15 @@ pub fn runs_to_html(text: &str, runs: &[StyleRun]) -> String {
     for run in sorted {
         let start = run.start.min(text.len());
         let end = run.end.min(text.len());
+        if end <= start {
+            continue;
+        }
         if start > cursor {
             out.push_str(&escape_html(&text[cursor..start]));
         }
-        if end > start {
-            let chunk = escape_html(&text[start..end]);
-            out.push_str(&wrap_style(&chunk, &run.style));
-            cursor = end;
-        }
+        let chunk = escape_html(&text[start..end]);
+        out.push_str(&wrap_style(&chunk, &run.style));
+        cursor = end;
     }
     if cursor < text.len() {
         out.push_str(&escape_html(&text[cursor..]));
@@ -75,6 +76,7 @@ pub fn html_to_runs(html: &str) -> (String, Vec<StyleRun>) {
         );
         let after_lt = &rest[lt + 1..];
         let Some(gt) = after_lt.find('>') else {
+            rest = &rest[lt..];
             break;
         };
         let tag = after_lt[..gt].trim().to_ascii_lowercase();
@@ -170,5 +172,22 @@ mod tests {
         assert_eq!(parsed[0].end, 11);
         assert_eq!(parsed[0].style.weight, FontWeight::Bold);
         assert!(parsed[0].style.italic);
+    }
+
+    #[test]
+    fn empty_run_and_incomplete_tag_do_not_duplicate_text() {
+        let empty_run = StyleRun {
+            start: 2,
+            end: 2,
+            style: CharacterStyle {
+                weight: FontWeight::Bold,
+                ..Default::default()
+            },
+        };
+        assert_eq!(runs_to_html("abcd", &[empty_run]), "abcd");
+
+        let (plain, runs) = html_to_runs("A<");
+        assert_eq!(plain, "A<");
+        assert!(runs.is_empty());
     }
 }
