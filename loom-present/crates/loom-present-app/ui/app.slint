@@ -2,7 +2,7 @@ import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor, ThumbRows,
-    PresentStatusBar, PresentToolbarOverflow
+    PresentStatusBar, PresentToolbarOverflow, SlideSorterGrid, ElementInk
 } from "present_components.slint";
 import { PresentActionToolbar, PresentToolbarMenu } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
@@ -46,11 +46,8 @@ export component PresentApp inherits Window {
     preferred-height: 800px;
     background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
 
-    // User-requested state survives widths where the inspector is unavailable.
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
-    // The user's request is the effective state at every width: a compact
-    // window docks the inspector instead of silently discarding the request.
     out property <bool> inspector-visible: root.show-inspector;
     in-out property <bool> show-navigator: true;
     in-out property <bool> view-menu-open: false;
@@ -74,7 +71,6 @@ export component PresentApp inherits Window {
     in-out property <int> inspector-focus-tick: 0;
     in-out property <int> strip-focus-tick: 0;
     property <int> focus-zoom-tick: 0;
-    /// Escape in the View or Zoom menu: close it and focus the item that opened it.
     function dismiss-view-menus() {
         let was-zoom = root.zoom-menu-open;
         root.view-menu-open = false;
@@ -110,7 +106,6 @@ export component PresentApp inherits Window {
     in property <string> slide-count-text: "1 slide";
     in property <[string]> slide-titles: [];
     in property <[ThumbRows]> slide-thumbs: [];
-    /// First slide and slide count the strip draws; set by the controller.
     in-out property <int> strip-first: 0;
     in-out property <int> strip-count: 24;
     in property <int> active-slide-index: 0;
@@ -176,13 +171,11 @@ export component PresentApp inherits Window {
         }
     }
 
-    /// A new active slide takes keyboard focus, unless a menu or dialog has it.
     public function focus-slide-after-change() {
         if (!root.palette-open && !root.theme-chooser-open && !root.save-changes-open && !root.view-menu-open && !root.zoom-menu-open && !root.toolbar-overflow-open && root.local-menu-open-index < 0 && !FindReplaceState.open && !PrintPreviewState.open && !StartHubState.open && !WelcomeGuideState.open) {
             root.focus-editor();
         }
     }
-    /// F6 walks the regions (slide, toolbar, inspector, strip); Shift+F6 walks back.
     public function cycle-region(start: int, backwards: bool) {
         let inspector = root.inspector-visible && !root.is-preview-mode;
         let strip = root.show-navigator && !root.is-preview-mode;
@@ -784,6 +777,17 @@ export component PresentApp inherits Window {
         if (!root.save-changes-open) {
             if (root.theme-chooser-open) { root.theme-refocus-tick += 1; } else { root.focus-editor(); }
         }
+    }
+
+    if ElementInk.slide-sorter-open : SlideSorterGrid {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        slides: root.slide-thumbs;
+        active-index: max(0, ElementInk.active-slide-number - 1);
+        select-slide(idx) => { root.select-slide(idx); ElementInk.slide-sorter-open = false; }
+        close-sorter => { ElementInk.slide-sorter-open = false; }
     }
 
     if root.is-preview-mode : TouchArea {

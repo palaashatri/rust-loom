@@ -4,6 +4,13 @@ import { ThumbRows, MiniSlide } from "present_components.slint";
 import { PresenterToolBar } from "presenter_overlay.slint";
 export { ThumbRows, ObjectPart, ObjectParts, ElementInk } from "present_components.slint";
 
+export struct PresenterStrokeDot {
+    x: float,
+    y: float,
+    color: color,
+    size: length,
+}
+
 // The presenter's own window: notes, what comes next, and a clock. It is a
 // separate window so it can sit on a second display while the slideshow fills
 // the audience screen; on one display it is simply a rehearsal view.
@@ -35,8 +42,7 @@ export component PresenterWindow inherits Window {
 
     in-out property <int> active-tool: 0;
     in property <string> jump-buffer: "";
-    in property <[float]> stroke-xs: [];
-    in property <[float]> stroke-ys: [];
+    in property <[PresenterStrokeDot]> stroke-dots: [];
     in property <bool> has-laser: false;
     in property <float> laser-x: 0;
     in property <float> laser-y: 0;
@@ -166,13 +172,13 @@ export component PresenterWindow inherits Window {
                                 rows: root.current-rows;
                                 description: "Current slide: " + root.slide-title;
                             }
-                            for sx[i] in root.stroke-xs : Rectangle {
-                                x: sx * parent.width - 2px;
-                                y: (root.stroke-ys.length > i ? root.stroke-ys[i] : 0) * parent.height - 2px;
-                                width: 4px;
-                                height: 4px;
-                                border-radius: 2px;
-                                background: Theme.palette().accent;
+                            for dot in root.stroke-dots : Rectangle {
+                                x: dot.x * parent.width - dot.size / 2;
+                                y: dot.y * parent.height - dot.size / 2;
+                                width: dot.size;
+                                height: dot.size;
+                                border-radius: dot.size / 2;
+                                background: dot.color;
                             }
                             if root.has-laser : Rectangle {
                                 x: root.laser-x * parent.width - 4px;

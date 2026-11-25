@@ -74,6 +74,42 @@ struct Presenter {
     _ticker: Timer,
     slide_count: Rc<std::cell::Cell<usize>>,
     active_slide: Rc<std::cell::Cell<usize>>,
+    tools: Rc<RefCell<crate::presenter_tools::PresenterToolState>>,
+}
+
+fn sync_annotations(
+    win: &PresenterWindow,
+    st: &crate::presenter_tools::PresenterToolState,
+    slide_idx: usize,
+) {
+    let mut dots = Vec::new();
+    if let Some(overlay) = st.overlays.get(&slide_idx) {
+        for stroke in &overlay.strokes {
+            let color = match stroke.tool {
+                loom_present_core::AnnotationDrawingTool::Highlighter => {
+                    slint::Color::from_argb_u8(115, 250, 204, 21)
+                }
+                _ => slint::Color::from_argb_u8(255, 239, 68, 68),
+            };
+            let size = stroke.width.max(2.0);
+            for &(px, py) in &stroke.points {
+                dots.push(crate::PresenterStrokeDot {
+                    x: px,
+                    y: py,
+                    color,
+                    size,
+                });
+            }
+        }
+    }
+    win.set_stroke_dots(slint::ModelRc::new(slint::VecModel::from(dots)));
+    if let Some((lx, ly)) = st.laser_pos {
+        win.set_has_laser(true);
+        win.set_laser_x(lx);
+        win.set_laser_y(ly);
+    } else {
+        win.set_has_laser(false);
+    }
 }
 
 thread_local! {
@@ -140,6 +176,7 @@ pub(crate) fn sync(session: &PresentationSession) {
         window.set_next_title(
             next.map_or_else(SharedString::new, |slide| slide.title.as_str().into()),
         );
+        sync_annotations(window, &presenter.tools.borrow(), index);
     });
 }
 
@@ -245,9 +282,7 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         window.on_clear_annotations(move || {
             tools.borrow_mut().clear_slide(active_slide.get());
             if let Some(win) = w.upgrade() {
-                win.set_stroke_xs(slint::ModelRc::default());
-                win.set_stroke_ys(slint::ModelRc::default());
-                win.set_has_laser(false);
+                sync_annotations(&win, &tools.borrow(), active_slide.get());
             }
         });
     }
@@ -255,47 +290,25 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         let tools = tools.clone();
         let active_slide = active_slide.clone();
         let w = window.as_weak();
-        let active_sync = Rc::clone(&active_slide);
-        let sync_strokes =
-            move |win: &PresenterWindow, st: &crate::presenter_tools::PresenterToolState| {
-                let mut xs = Vec::new();
-                let mut ys = Vec::new();
-                if let Some(overlay) = st.overlays.get(&active_sync.get()) {
-                    for stroke in &overlay.strokes {
-                        for &(px, py) in &stroke.points {
-                            xs.push(px);
-                            ys.push(py);
-                        }
-                    }
-                }
-                win.set_stroke_xs(slint::ModelRc::new(slint::VecModel::from(xs)));
-                win.set_stroke_ys(slint::ModelRc::new(slint::VecModel::from(ys)));
-                if let Some((lx, ly)) = st.laser_pos {
-                    win.set_has_laser(true);
-                    win.set_laser_x(lx);
-                    win.set_laser_y(ly);
-                } else {
-                    win.set_has_laser(false);
-                }
-            };
         let tools_b = tools.clone();
         let active_b = active_slide.clone();
         let w_b = w.clone();
-        let sync_b = sync_strokes.clone();
         window.on_stroke_begin(move |fx, fy| {
             let mut st = tools_b.borrow_mut();
-            st.begin_stroke(active_b.get(), fx, fy);
+            let idx = active_b.get();
+            st.begin_stroke(idx, fx, fy);
             if let Some(win) = w_b.upgrade() {
-                sync_b(&win, &st);
+                sync_annotations(&win, &st, idx);
             }
         });
         let tools_m = tools.clone();
         let active_m = active_slide.clone();
         window.on_stroke_move(move |fx, fy| {
             let mut st = tools_m.borrow_mut();
-            st.extend_stroke(active_m.get(), fx, fy);
+            let idx = active_m.get();
+            st.extend_stroke(idx, fx, fy);
             if let Some(win) = w.upgrade() {
-                sync_strokes(&win, &st);
+                sync_annotations(&win, &st, idx);
             }
         });
     }
@@ -336,6 +349,7 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         _ticker: ticker,
         slide_count,
         active_slide,
+        tools,
     })
 }
 

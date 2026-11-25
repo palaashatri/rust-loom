@@ -45,6 +45,7 @@ export component PresentSlideCanvas inherits Rectangle {
     /// A thumbnail: the slide's own 1 px frame is the only frame around it, so it
     /// casts no shadow of its own.
     in property <bool> miniature: false;
+    in property <int> slide-number: ElementInk.active-slide-number;
     /// Editor zoom: 1.0 fits the pane, smaller values shrink the slide.
     in property <float> zoom: 1.0;
     in property <[float]> snap-guides-x: [];
@@ -460,7 +461,7 @@ export component PresentSlideCanvas inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; }
             if ElementInk.show-slide-number : Text {
-                text: "" + ElementInk.active-slide-number;
+                text: "" + root.slide-number;
                 font-size: Theme.type.caption;
                 color: DocumentInk.muted;
                 vertical-alignment: center;

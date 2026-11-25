@@ -908,6 +908,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             app.set_element_rotation_text("—".into());
         }
         element_style_ui::publish_document(app, &session);
+        element_style_ui::parity_ui::publish_slide_meta(app, &session);
         app.set_transition_index(match session.transition_for(&slide.id) {
             TransitionKind::None => 0,
             TransitionKind::Dissolve => 1,

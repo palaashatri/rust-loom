@@ -15,16 +15,22 @@ use slint::ComponentHandle;
 
 use crate::{refresh, set_status, ElementInk, GuiState, PresentApp};
 
+pub(crate) fn publish_slide_meta(app: &PresentApp, session: &PresentationSession) {
+    let ink = app.global::<ElementInk>();
+    if let Some(slide) = session.document.active_slide() {
+        ink.set_build_count(slide.animations.len() as i32);
+        ink.set_slide_hidden(slide.hidden);
+    }
+    ink.set_slide_footer_text(session.document.footer_text.as_str().into());
+    ink.set_show_slide_number(session.document.show_slide_number);
+    ink.set_active_slide_number((session.document.active_index + 1) as i32);
+}
+
 pub(crate) fn publish_selection_effects(app: &PresentApp, session: &PresentationSession) {
     let ink = app.global::<ElementInk>();
     let Some(slide) = session.document.active_slide() else {
         return;
     };
-    ink.set_build_count(slide.animations.len() as i32);
-    ink.set_slide_hidden(slide.hidden);
-    ink.set_slide_footer_text(session.document.footer_text.as_str().into());
-    ink.set_show_slide_number(session.document.show_slide_number);
-    ink.set_active_slide_number((session.document.active_index + 1) as i32);
     let selected: Vec<&SlideElement> = slide
         .elements
         .iter()
@@ -83,6 +89,12 @@ fn mutate_selected_effects(
 }
 
 pub(crate) fn handle_arrange_parity(app: &PresentApp, state: &Rc<GuiState>, action: &str) -> bool {
+    if !matches!(
+        action,
+        "group" | "ungroup" | "toggle-lock" | "flip-h" | "flip-v"
+    ) {
+        return false;
+    }
     let mut session = state.session.borrow_mut();
     let ids: Vec<String> = session.selected_elements.to_vec();
     if ids.is_empty() {
@@ -154,6 +166,11 @@ pub(crate) fn handle_arrange_parity(app: &PresentApp, state: &Rc<GuiState>, acti
 pub(crate) fn toggle_list_style(app: &PresentApp, state: &Rc<GuiState>, style: ListStyle) {
     let mut session = state.session.borrow_mut();
     let ids = session.selected_elements.clone();
+    if ids.is_empty() {
+        return;
+    }
+    session.checkpoint();
+    let mut changed = false;
     if let Some(slide) = session.document.active_slide_mut() {
         for el in &mut slide.elements {
             if ids.contains(&el.id) && !el.locked {
@@ -165,12 +182,20 @@ pub(crate) fn toggle_list_style(app: &PresentApp, state: &Rc<GuiState>, style: L
                         style
                     };
                 }
-                el.content = format_list_paragraphs(&paras);
+                let updated = format_list_paragraphs(&paras);
+                if updated != el.content {
+                    el.content = updated;
+                    changed = true;
+                }
             }
         }
     }
-    drop(session);
-    refresh(app, state);
+    if changed {
+        drop(session);
+        refresh(app, state);
+    } else {
+        session.cancel_checkpoint();
+    }
 }
 
 pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
@@ -267,6 +292,7 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                 let Some(el_id) = session.selected_elements.first().cloned() else {
                     return;
                 };
+                session.checkpoint();
                 let phase = match phase_idx {
                     1 => AnimationPhase::Action,
                     2 => AnimationPhase::BuildOut,
@@ -277,12 +303,18 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
                     2 => BuildTrigger::AfterPrevious,
                     _ => BuildTrigger::OnClick,
                 };
+                let mut changed = false;
                 if let Some(slide) = session.document.active_slide_mut() {
                     add_animation(slide, el_id, AnimationEffect::FadeIn, phase, trigger, 350);
+                    changed = true;
                 }
-                drop(session);
-                refresh(&app, &state);
-                set_status(&app, "Added build animation");
+                if changed {
+                    drop(session);
+                    refresh(&app, &state);
+                    set_status(&app, "Added build animation");
+                } else {
+                    session.cancel_checkpoint();
+                }
             }
         });
     }
@@ -292,15 +324,22 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         ink.on_remove_last_build(move || {
             if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
+                session.checkpoint();
+                let mut changed = false;
                 if let Some(slide) = session.document.active_slide_mut() {
                     if !slide.animations.is_empty() {
                         let last = slide.animations.len() - 1;
                         remove_animation(slide, last);
+                        changed = true;
                     }
                 }
-                drop(session);
-                refresh(&app, &state);
-                set_status(&app, "Removed build animation");
+                if changed {
+                    drop(session);
+                    refresh(&app, &state);
+                    set_status(&app, "Removed build animation");
+                } else {
+                    session.cancel_checkpoint();
+                }
             }
         });
     }
@@ -328,21 +367,28 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         ink.on_toggle_slide_hidden(move || {
             if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
+                session.checkpoint();
                 let mut hidden = false;
+                let mut changed = false;
                 if let Some(slide) = session.document.active_slide_mut() {
                     slide.hidden = !slide.hidden;
                     hidden = slide.hidden;
+                    changed = true;
                 }
-                drop(session);
-                refresh(&app, &state);
-                set_status(
-                    &app,
-                    if hidden {
-                        "Slide hidden"
-                    } else {
-                        "Slide visible"
-                    },
-                );
+                if changed {
+                    drop(session);
+                    refresh(&app, &state);
+                    set_status(
+                        &app,
+                        if hidden {
+                            "Slide hidden"
+                        } else {
+                            "Slide visible"
+                        },
+                    );
+                } else {
+                    session.cancel_checkpoint();
+                }
             }
         });
     }
@@ -532,6 +578,15 @@ pub(crate) fn wire_p1_controls(app: &PresentApp, state: &Rc<GuiState>) {
                                 if ids.contains(&el.id) && !el.locked {
                                     el.style = style.clone();
                                     el.effects = effects.clone();
+                                    for run in &mut el.runs {
+                                        run.bold = style.bold;
+                                        run.italic = Some(style.italic);
+                                        run.underline = Some(style.underline);
+                                        run.strikethrough = Some(style.strikethrough);
+                                        run.font_family = style.font_family.clone();
+                                        run.font_size_pt = style.font_size_pt;
+                                        run.color = style.color.clone();
+                                    }
                                 }
                             }
                         }
