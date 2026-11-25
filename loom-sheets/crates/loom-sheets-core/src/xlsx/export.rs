@@ -79,6 +79,10 @@ pub fn export_xlsx_sheets_with_warnings(
     let mut sheet_parts: Vec<(String, String)> = Vec::new();
     let mut all_dxfs: Vec<String> = Vec::new();
     let mut next_table_id = 1usize;
+    let mut used_table_names: BTreeSet<String> = sheets
+        .iter()
+        .flat_map(|s| s.named_ranges.keys().map(|k| k.to_ascii_lowercase()))
+        .collect();
 
     for (index, sheet) in sheets.iter().enumerate() {
         let number = index + 1;
@@ -87,7 +91,7 @@ pub fn export_xlsx_sheets_with_warnings(
         all_dxfs.extend(sheet_dxfs);
         let start_rid = if has_drawing { 2 } else { 1 };
         let (table_parts_xml, table_files, table_rels) =
-            render_table_parts(sheet, start_rid, next_table_id);
+            render_table_parts(sheet, start_rid, next_table_id, &mut used_table_names)?;
         next_table_id += sheet.tables.len();
 
         let worksheet = render_worksheet(
@@ -102,7 +106,7 @@ pub fn export_xlsx_sheets_with_warnings(
                 table_parts_xml,
             },
             &mut strings,
-        );
+        )?;
         sheet_parts.push((format!("xl/worksheets/sheet{number}.xml"), worksheet));
         for (path, xml) in table_files {
             add(&path, xml.into_bytes())?;
