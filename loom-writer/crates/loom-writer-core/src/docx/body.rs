@@ -24,7 +24,7 @@ use crate::{
 pub(super) struct Body {
     pub xml: String,
     /// Numbered list runs in order, each with its `ListMarkerStyle`.
-    pub numbered_lists: Vec<loom_text::ListMarkerStyle>,
+    pub numbered_lists: Vec<super::numbering::NumberedListDef>,
     /// The chart parts embedded in the body.
     pub charts: Vec<(usize, String)>,
     /// The pictures embedded in the body, in order.
@@ -158,7 +158,7 @@ pub(super) fn build(
         xml.push_str("<w:background w:color=\"000000\"/>");
     }
     xml.push_str("<w:body>");
-    let mut numbered_lists: Vec<loom_text::ListMarkerStyle> = Vec::new();
+    let mut numbered_lists: Vec<super::numbering::NumberedListDef> = Vec::new();
     let mut previous_numbered_marker: Option<loom_text::ListMarkerStyle> = None;
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut images: Vec<BodyImage> = Vec::new();
@@ -234,8 +234,22 @@ pub(super) fn build(
                 Some(super::numbering::bullet_num_id(block.style.list_marker))
             }
             Some(ListKind::Numbered) => {
-                if previous_numbered_marker != Some(block.style.list_marker) {
-                    numbered_lists.push(block.style.list_marker);
+                let level = block.effective_list_level();
+                if level > 0 && previous_numbered_marker.is_some() {
+                    if let Some(current_def) = numbered_lists.last_mut() {
+                        if block.style.list_marker != current_def.base
+                            && !current_def.level_overrides.iter().any(|(l, _)| *l == level)
+                        {
+                            current_def
+                                .level_overrides
+                                .push((level, block.style.list_marker));
+                        }
+                    }
+                } else if previous_numbered_marker != Some(block.style.list_marker) {
+                    numbered_lists.push(super::numbering::NumberedListDef {
+                        base: block.style.list_marker,
+                        level_overrides: Vec::new(),
+                    });
                 }
                 Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
             }
@@ -243,8 +257,11 @@ pub(super) fn build(
         };
         // A numbered run goes on through its deeper items, so Word keeps the
         // top-level count as Writer does. A top-level bullet, a different
-        // ordered marker style, or any other block ends the run.
+        // top-level ordered marker style, or any other block ends the run.
         previous_numbered_marker = match list {
+            Some(ListKind::Numbered) if block.effective_list_level() > 0 => {
+                previous_numbered_marker.or(Some(block.style.list_marker))
+            }
             Some(ListKind::Numbered) => Some(block.style.list_marker),
             Some(ListKind::Bullet) if block.effective_list_level() > 0 => previous_numbered_marker,
             _ => None,
