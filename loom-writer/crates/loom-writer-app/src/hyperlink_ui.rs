@@ -23,8 +23,10 @@ fn active_block_and_range(doc: &WriterDocument) -> Option<(u64, Range<usize>)> {
             let local_end = sel_end.saturating_sub(offset).min(len);
             let range = if local_start < local_end {
                 local_start..local_end
+            } else if let Some(existing) = doc.hyperlinks.at(block.id, local_start) {
+                existing.start..existing.end
             } else {
-                0..len
+                local_start..local_start
             };
             return Some((block.id, range));
         }
@@ -127,5 +129,30 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
                 g.set_hyperlink_open(false);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_writer_core::RichBlock;
+
+    #[test]
+    fn active_block_and_range_uses_selection_or_existing_link_at_caret() {
+        let mut doc = WriterDocument::new("h1", "Hyperlinks");
+        doc.blocks = vec![RichBlock::new(1, "paragraph", "Click here now")];
+        doc.selection.anchor = 6;
+        doc.selection.focus = 10;
+        assert_eq!(active_block_and_range(&doc), Some((1, 6..10)));
+
+        doc.set_hyperlink(1, 6..10, "https://example.com", None)
+            .unwrap();
+        doc.selection.anchor = 8;
+        doc.selection.focus = 8;
+        assert_eq!(active_block_and_range(&doc), Some((1, 6..10)));
+
+        doc.selection.anchor = 1;
+        doc.selection.focus = 1;
+        assert_eq!(active_block_and_range(&doc), Some((1, 1..1)));
     }
 }

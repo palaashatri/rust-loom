@@ -190,7 +190,11 @@ pub(crate) fn pointer_pressed(app: &WriterApp, state: &GuiState, x: f32, y: f32)
                         doc.image_wrap(block_id)
                             .map_or(0.0, |w| match w.horizontal_align {
                                 loom_objects::WrapHorizontalAlign::OffsetPt(ox) => ox,
-                                _ => 0.0,
+                                loom_objects::WrapHorizontalAlign::Center
+                                | loom_objects::WrapHorizontalAlign::Right => {
+                                    rect.x / zoom.max(0.1)
+                                }
+                                loom_objects::WrapHorizontalAlign::Left => 0.0,
                             });
                     let cur_y = block.image.as_ref().map_or(0.0, |i| i.wrap_y_offset_pt);
                     MOVE_DRAG.with(|slot| {
@@ -337,9 +341,13 @@ pub(crate) fn pointer_released(app: &WriterApp, state: &GuiState) -> bool {
             || (md.cur_offset.1 - md.orig_offset.1).abs() >= SAME_PT;
         if moved {
             let mut next = state.current.borrow().clone();
-            if next.set_image_wrap_offset(md.id, md.cur_offset.0, md.cur_offset.1)
-                && apply_with_history(app, state, next, HistoryKind::DocumentAction)
-            {
+            let x_changed = (md.cur_offset.0 - md.orig_offset.0).abs() >= SAME_PT;
+            let updated = if x_changed {
+                next.set_image_wrap_offset(md.id, md.cur_offset.0, md.cur_offset.1)
+            } else {
+                next.set_image_wrap_y_offset(md.id, md.cur_offset.1)
+            };
+            if updated && apply_with_history(app, state, next, HistoryKind::DocumentAction) {
                 app.set_status_left(
                     format!(
                         "Picture moved to ({:.0}, {:.0}) pt",

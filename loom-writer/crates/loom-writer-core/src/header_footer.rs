@@ -121,8 +121,6 @@ pub struct HeaderFooterConfig {
     pub different_first_page: bool,
     /// Optional diagonal watermark text rendered on every page.
     pub watermark_text: String,
-    /// Whether the first paragraph uses a drop cap.
-    pub drop_cap_enabled: bool,
 }
 
 /// Which repeated page region a header/footer line occupies.
@@ -318,19 +316,40 @@ impl HeaderFooterConfig {
         if (self.different_first_page && page_num == 1) || text.is_empty() {
             return None;
         }
+        fn current_utc_date_iso() -> String {
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let z = (secs / 86_400) as i64 + 719_468;
+            let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+            let doe = (z - era * 146_097) as u64;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let y = yoe as i64 + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = if m <= 2 { y + 1 } else { y };
+            format!("{y:04}-{m:02}-{d:02}")
+        }
+
         let page_str = self.page_number_format.format(page_num);
         let total_str = total_pages.to_string();
+        let date_str = current_utc_date_iso();
         Some(
             text.replace("{page}", &page_str)
                 .replace("{PAGE}", &page_str)
                 .replace("{total}", &total_str)
                 .replace("{NUMPAGES}", &total_str)
-                .replace("{date}", "2026-11-25")
-                .replace("{DATE}", "2026-11-25"),
+                .replace("{date}", &date_str)
+                .replace("{DATE}", &date_str),
         )
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.write_content_json().len() > 32_768 {
+            return Err("header/footer settings exceed the 32768-byte limit");
+        }
         if self.header_text.len() > MAX_HEADER_FOOTER_TEXT_BYTES {
             return Err("header text exceeds the 2048-byte limit");
         }
@@ -390,9 +409,6 @@ impl HeaderFooterConfig {
                 pkg_json::escape(&self.watermark_text)
             ));
         }
-        if self.drop_cap_enabled {
-            s.push_str(",\"drop_cap_enabled\":true");
-        }
         s.push('}');
         s
     }
@@ -431,7 +447,7 @@ impl HeaderFooterConfig {
                     config.watermark_text = string_value(value, "watermark_text")?;
                 }
                 "drop_cap_enabled" => {
-                    config.drop_cap_enabled = bool_value(value, "drop_cap_enabled")?;
+                    let _ = bool_value(value, "drop_cap_enabled")?;
                 }
                 _ => {
                     return Err(WriterError::Invalid(format!(

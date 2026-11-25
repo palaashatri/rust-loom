@@ -146,6 +146,12 @@ export component WriterDocumentEditor inherits Rectangle {
         zoom: root.page-zoom;
     }
 
+    Rectangle {
+        x: 0px;
+        y: WriterFormatState.show-ruler ? 20px : 0px;
+        width: root.width;
+        height: max(1px, root.height - (WriterFormatState.show-ruler ? 20px : 0px));
+
     if WriterFormatState.watermark-text != "" : Text {
         x: 0px;
         y: 0px;
@@ -443,6 +449,7 @@ export component WriterDocumentEditor inherits Rectangle {
                 root.pointer-moved(self.mouse-x, self.mouse-y);
             }
         }
+    }
     }
 
     changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }

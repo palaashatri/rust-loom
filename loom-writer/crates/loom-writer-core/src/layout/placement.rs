@@ -54,6 +54,12 @@ impl Placer {
         }
     }
 
+    pub(super) fn flush_pending_break(&mut self) {
+        if std::mem::take(&mut self.break_pending) && self.has_content() {
+            self.next_page();
+        }
+    }
+
     pub(super) fn place_floating_image(
         &mut self,
         block_index: usize,
@@ -163,16 +169,14 @@ impl Placer {
                     height,
                     self.usable_width,
                 );
+                let mut pushed_y = 0.0f32;
                 if let Some(y) = push_below {
                     if y > self.used {
                         self.used = y;
+                        pushed_y = y;
                     }
                 }
-                let x_off = if line.x_offset_pt != 0.0 {
-                    line.x_offset_pt
-                } else {
-                    excl_x
-                };
+                let x_off = excl_x;
                 self.lines.push(FlowLine {
                     block_index: segment.block_index,
                     start: line.start,
@@ -181,7 +185,7 @@ impl Placer {
                     page: self.page,
                     bounds: PageRect {
                         x: x_off,
-                        y: 0.0,
+                        y: pushed_y,
                         width: segment.fixed_width.unwrap_or(line.advance_pt),
                         height,
                     },

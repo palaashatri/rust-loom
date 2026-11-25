@@ -17,6 +17,8 @@ export component HyperlinkDialog inherits Rectangle {
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: Theme.palette().border;
+    forward-focus: url-input;
+    init => { url-input.focus(); }
 
     VerticalLayout {
         spacing: 10px;
@@ -35,7 +37,7 @@ export component HyperlinkDialog inherits Rectangle {
             border-width: 1px;
             border-color: Theme.palette().border;
             background: Theme.palette().surface-sunken;
-            TextInput {
+            url-input := TextInput {
                 x: 8px;
                 width: parent.width - 16px;
                 height: parent.height;

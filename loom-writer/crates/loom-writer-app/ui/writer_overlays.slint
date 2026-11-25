@@ -89,7 +89,8 @@ export component WriterOverlays inherits Rectangle {
         || root.docx-import-warning-open || root.docx-export-report-open
         || DocxSaveWarningState.dialog-open || WriterHeaderFooterState.dialog-open
         || WriterFootnoteState.dialog-open || WriterFormatState.color-dialog-open
-        || PictureAlt.open || WriterReviewState.pdf-export-open;
+        || PictureAlt.open || WriterReviewState.pdf-export-open
+        || WriterFormatState.hyperlink-open;
 
     public function focus-palette() {
         palette-host.grab-focus();

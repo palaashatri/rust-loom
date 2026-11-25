@@ -397,12 +397,14 @@ fn schedule_menu_action(
 // all dispatch through the same `CommandId`; `registry.invoke` enforces honest
 // enablement and all palette filtering goes through `registry.search`.
 
-/// Build the canonical Writer command catalog.
-///
-/// Every entry carries an undo label, description, category, order and default
-/// shortcut so palette grouping, search ranking and shortcut display stay aligned.
 fn writer_command_catalog() -> Vec<CommandSpec> {
     let mut catalog = vec![
+        CommandSpec::new("view.ruler", "Toggle Horizontal Ruler")
+            .with_category("view")
+            .with_order(235),
+        CommandSpec::new("insert.toc", "Insert Table of Contents")
+            .with_category("insert")
+            .with_order(246),
         // File — order 10..50
         CommandSpec::new("file.new", "New Document")
             .with_undo_label("New Document")
@@ -1233,9 +1235,6 @@ enum PendingReplacement {
 }
 
 fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool {
-    // Selection is view state persisted for convenience, but moving a caret
-    // must not turn a clean document into a dirty one. Comparing the content
-    // fields in place avoids copying or serialising either document.
     left.id == right.id
         && left.title == right.title
         && left.page == right.page
@@ -1243,6 +1242,7 @@ fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool
         && left.comments == right.comments
         && left.footnotes == right.footnotes
         && left.tracked_changes == right.tracked_changes
+        && left.hyperlinks == right.hyperlinks
         && left.blocks == right.blocks
 }
 

@@ -171,19 +171,13 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
         g.on_step_y_offset(move |delta| {
             if let Some(app) = app_ref.upgrade() {
                 mutate_selected_wrap(&app, &state, |doc, id| {
-                    let cur_x = doc
-                        .image_wrap(id)
-                        .map_or(0.0, |w| match w.horizontal_align {
-                            WrapHorizontalAlign::OffsetPt(x) => x,
-                            _ => 0.0,
-                        });
                     let cur_y = doc
                         .blocks
                         .iter()
                         .find(|b| b.id == id)
                         .and_then(|b| b.image.as_ref())
                         .map_or(0.0, |i| i.wrap_y_offset_pt);
-                    doc.set_image_wrap_offset(id, cur_x, (cur_y + delta).max(0.0))
+                    doc.set_image_wrap_y_offset(id, (cur_y + delta).max(0.0))
                 });
             }
         });

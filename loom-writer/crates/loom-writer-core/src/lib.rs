@@ -551,11 +551,10 @@ impl WriterDocument {
         if !self.footnotes.is_empty() {
             footnotes::rebase_after_block_rebuild(&mut self.footnotes, &old_blocks, &self.blocks);
         }
+        self.hyperlinks
+            .rebase_after_block_replace(&old_blocks, &self.blocks);
     }
 
-    /// Rebuild the blocks from plain text and return the old ones; comment
-    /// anchors are left for the caller to rebase. A table block that `edit`
-    /// touches stays one table block (see `tables::map_tables_through_edit`).
     pub(crate) fn rebuild_blocks(
         &mut self,
         plain_text: &str,

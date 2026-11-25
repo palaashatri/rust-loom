@@ -154,7 +154,7 @@ pub(crate) fn retained_bytes(before: &WriterDocument, after: &WriterDocument) ->
             comments,
             footnotes,
             tracked_changes,
-            hyperlinks: _,
+            hyperlinks,
             blocks,
             selection: _,
         } = document;
@@ -164,6 +164,8 @@ pub(crate) fn retained_bytes(before: &WriterDocument, after: &WriterDocument) ->
             header_footer.header_text.capacity(),
             header_footer.footer_text.capacity(),
             header_footer.alignment.capacity(),
+            header_footer.watermark_text.capacity(),
+            hyperlinks.retained_bytes(),
             vec_bytes(blocks),
             vec_bytes(comments),
             vec_bytes(footnotes),

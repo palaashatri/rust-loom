@@ -118,18 +118,38 @@ fn apply_to_document(doc: &mut WriterDocument, captured: &CapturedWriterStyle) -
             block.style.direction = captured.direction;
             let local_start = sel_start.saturating_sub(offset).min(len);
             let local_end = sel_end.saturating_sub(offset).min(len);
-            let (start, end) = if local_start < local_end {
+            let (start, end) = if sel_start == sel_end {
+                (0, len)
+            } else if local_start < local_end {
                 (local_start, local_end)
             } else {
-                (0, len)
+                offset = end + 1;
+                continue;
             };
-            block.runs.retain(|r| r.end <= start || r.start >= end);
-            block.runs.push(loom_text::StyleRun {
+            let mut next_runs = Vec::with_capacity(block.runs.len() + 2);
+            for r in &block.runs {
+                if r.end <= start || r.start >= end {
+                    next_runs.push(r.clone());
+                } else {
+                    if r.start < start {
+                        let mut left = r.clone();
+                        left.end = start;
+                        next_runs.push(left);
+                    }
+                    if r.end > end {
+                        let mut right = r.clone();
+                        right.start = end;
+                        next_runs.push(right);
+                    }
+                }
+            }
+            next_runs.push(loom_text::StyleRun {
                 start,
                 end,
                 style: captured.character.clone(),
             });
-            block.runs.sort_by_key(|r| r.start);
+            next_runs.sort_by_key(|r| r.start);
+            block.runs = next_runs;
             changed = true;
         }
         offset = end + 1;

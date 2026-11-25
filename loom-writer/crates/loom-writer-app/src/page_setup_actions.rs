@@ -29,7 +29,6 @@ pub(crate) fn project(app: &WriterApp, document: &WriterDocument) {
     fmt.set_margin_left_px(page.margin_left_pt);
     fmt.set_margin_right_px(page.margin_right_pt);
     fmt.set_watermark_text(document.header_footer.watermark_text.as_str().into());
-    fmt.set_drop_cap_enabled(document.header_footer.drop_cap_enabled);
 }
 
 pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
@@ -70,18 +69,10 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
             };
             let mut next = state_wm.current.borrow().clone();
             next.header_footer.watermark_text = text.to_string();
-            let _ = apply_with_history(&app, &state_wm, next, HistoryKind::DocumentAction);
-        });
-    let state_dc = Rc::clone(state);
-    let app_dc = app.as_weak();
-    app.global::<crate::WriterFormatState>()
-        .on_toggle_drop_cap(move || {
-            let Some(app) = app_dc.upgrade() else {
+            if next.header_footer.validate().is_err() {
                 return;
-            };
-            let mut next = state_dc.current.borrow().clone();
-            next.header_footer.drop_cap_enabled = !next.header_footer.drop_cap_enabled;
-            let _ = apply_with_history(&app, &state_dc, next, HistoryKind::DocumentAction);
+            }
+            let _ = apply_with_history(&app, &state_wm, next, HistoryKind::DocumentAction);
         });
 }
 
