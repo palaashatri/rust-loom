@@ -375,8 +375,8 @@ export component SheetChoiceRow inherits Rectangle {
             min-height: 28px;
             border-radius: Theme.tokens.metrics.radius-small;
             background: self.active ? Theme.palette().surface-raised : transparent;
-            border-width: self.active ? 1px : 0px;
-            border-color: self.active ? Theme.palette().border : transparent;
+            border-width: choice-focus.has-focus ? 2px : (self.active ? 1px : 0px);
+            border-color: choice-focus.has-focus ? Theme.palette().focus : (self.active ? Theme.palette().border : transparent);
             accessible-role: AccessibleRole.button;
             accessible-label: root.choice-names.length > self.k ? root.choice-names[self.k] : root.choices[self.k];
             // The chosen option is announced as well as painted, so a screen-reader
@@ -394,7 +394,7 @@ export component SheetChoiceRow inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            FocusScope {
+            choice-focus := FocusScope {
                 key-pressed(event) => {
                     if (event.text == Key.Return || event.text == " ") {
                         root.chosen(parent.k);
@@ -406,7 +406,10 @@ export component SheetChoiceRow inherits Rectangle {
 
             TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.chosen(parent.k); }
+                clicked => {
+                    choice-focus.focus();
+                    root.chosen(parent.k);
+                }
             }
         }
     }

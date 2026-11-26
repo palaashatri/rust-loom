@@ -150,35 +150,33 @@ export component PresentFormatSection inherits VerticalLayout {
             padding: 2px;
             spacing: 2px;
             alignment: Theme.rtl ? end : start;
-            for slot in 4 : VerticalLayout {
+            for slot in 4 : Rectangle {
                 property <int> k: Theme.rtl ? 3 - slot : slot;
-                if k == 0 : LoomIconButton {
-                    icon: "bold";
-                    selected: ElementInk.bold && !ElementInk.bold-mixed;
-                    label: ElementInk.bold-mixed ? "Bold, mixed" : ElementInk.bold ? "Bold, on" : "Bold, off";
-                    tooltip: "Bold";
-                    clicked => { ElementInk.requested("bold", 0); }
+                width: btn.preferred-width;
+                height: btn.preferred-height;
+                btn := LoomIconButton {
+                    icon: parent.k == 0 ? "bold" : parent.k == 1 ? "italic" : parent.k == 2 ? "underline" : "strikethrough";
+                    selected: parent.k == 0 ? (ElementInk.bold && !ElementInk.bold-mixed)
+                        : parent.k == 1 ? (ElementInk.italic && !ElementInk.italic-mixed)
+                        : parent.k == 2 ? (ElementInk.underline && !ElementInk.underline-mixed)
+                        : (ElementInk.strikethrough && !ElementInk.strikethrough-mixed);
+                    label: parent.k == 0 ? (ElementInk.bold-mixed ? "Bold, mixed" : ElementInk.bold ? "Bold, on" : "Bold, off")
+                        : parent.k == 1 ? (ElementInk.italic-mixed ? "Italic, mixed" : ElementInk.italic ? "Italic, on" : "Italic, off")
+                        : parent.k == 2 ? (ElementInk.underline-mixed ? "Underline, mixed" : ElementInk.underline ? "Underline, on" : "Underline, off")
+                        : (ElementInk.strikethrough-mixed ? "Strikethrough, mixed" : ElementInk.strikethrough ? "Strikethrough, on" : "Strikethrough, off");
+                    tooltip: parent.k == 0 ? "Bold" : parent.k == 1 ? "Italic" : parent.k == 2 ? "Underline" : "Strikethrough";
+                    clicked => { ElementInk.requested(parent.k == 0 ? "bold" : parent.k == 1 ? "italic" : parent.k == 2 ? "underline" : "strikethrough", 0); }
                 }
-                if k == 1 : LoomIconButton {
-                    icon: "italic";
-                    selected: ElementInk.italic && !ElementInk.italic-mixed;
-                    label: ElementInk.italic-mixed ? "Italic, mixed" : ElementInk.italic ? "Italic, on" : "Italic, off";
-                    tooltip: "Italic";
-                    clicked => { ElementInk.requested("italic", 0); }
-                }
-                if k == 2 : LoomIconButton {
-                    icon: "underline";
-                    selected: ElementInk.underline && !ElementInk.underline-mixed;
-                    label: ElementInk.underline-mixed ? "Underline, mixed" : ElementInk.underline ? "Underline, on" : "Underline, off";
-                    tooltip: "Underline";
-                    clicked => { ElementInk.requested("underline", 0); }
-                }
-                if k == 3 : LoomIconButton {
-                    icon: "strikethrough";
-                    selected: ElementInk.strikethrough && !ElementInk.strikethrough-mixed;
-                    label: ElementInk.strikethrough-mixed ? "Strikethrough, mixed" : ElementInk.strikethrough ? "Strikethrough, on" : "Strikethrough, off";
-                    tooltip: "Strikethrough";
-                    clicked => { ElementInk.requested("strikethrough", 0); }
+                if (k == 0 && ElementInk.bold-mixed)
+                    || (k == 1 && ElementInk.italic-mixed)
+                    || (k == 2 && ElementInk.underline-mixed)
+                    || (k == 3 && ElementInk.strikethrough-mixed) : Rectangle {
+                    x: parent.width - 6px;
+                    y: 4px;
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.palette().accent;
                 }
             }
         }

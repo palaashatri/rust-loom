@@ -57,6 +57,9 @@ pub(super) fn commit_sheet_metadata_edit(
 }
 
 pub(crate) fn open_find_replace(app: &SheetsApp, replace_mode: bool) {
+    if app.global::<crate::PrintPreviewState>().get_open() {
+        return;
+    }
     let dt = app.global::<DataToolsState>();
     dt.set_find_replace_mode(replace_mode);
     dt.set_find_open(true);

@@ -794,9 +794,7 @@ fn project_inner(
                                 }),
                             );
                             row.table_cell = true;
-                            // The style's own text colour (white on a dark
-                            // header fill), not the page ink, unless high-contrast
-                            // theme is active (which uses dark ink on white).
+                            // Style's own text colour, or dark ink in high-contrast.
                             if let Some(hex) = cell_text_color {
                                 row.has_color = true;
                                 row.color = slint::Color::from_argb_encoded(parse_hex_color(hex));
@@ -810,6 +808,7 @@ fn project_inner(
                                     reference.block_id == block.id
                                         && table_text_map.cell_at(reference.offset) == Some((r, c))
                                 });
+                            let table_ink_rgba = if high_contrast { [0, 0, 0, 255] } else { doc.page.appearance.auto_ink_rgba() };
                             let glyph_result = if has_footnote_reference {
                                 Some(set_shaped_block_glyphs_with_footnotes(
                                     &mut row,
@@ -823,7 +822,7 @@ fn project_inner(
                                         font_size: loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                                         pixels_per_point,
                                         clip: raster_clip,
-                                        default_ink_rgba: doc.page.appearance.auto_ink_rgba(),
+                                        default_ink_rgba: table_ink_rgba,
                                     },
                                 ))
                             } else if raster_device_scale.is_some() {
@@ -834,7 +833,7 @@ fn project_inner(
                                     loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                                     pixels_per_point,
                                     raster_clip,
-                                    doc.page.appearance.auto_ink_rgba(),
+                                    table_ink_rgba,
                                 ))
                             } else {
                                 None
