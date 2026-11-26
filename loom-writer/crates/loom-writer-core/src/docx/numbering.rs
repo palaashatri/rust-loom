@@ -335,13 +335,70 @@ pub(super) fn resolve_style_num_pr(
                         .and_then(|p| {
                             super::import::extract_attribute_value(&snippet[p..], "w:val")
                         })
-                        .map_or(0, |v| crate::list_levels::parse_list_level(&v));
+                        .map(|v| crate::list_levels::parse_list_level(&v))
+                        .or_else(|| {
+                            resolve_abstract_level_for_pstyle(archive, &num_id, &current_id)
+                        })
+                        .unwrap_or(0);
                     return Some((num_id, ilvl));
                 }
             }
         }
         let based_pos = block.find("<w:basedOn")?;
         current_id = super::import::extract_attribute_value(&block[based_pos..], "w:val")?;
+    }
+    None
+}
+
+fn find_tag_block_by_attr<'a>(
+    xml: &'a str,
+    open_prefix: &str,
+    close_tag: &str,
+    attr_name: &str,
+    attr_val: &str,
+) -> Option<&'a str> {
+    let mut cursor = 0usize;
+    while let Some(rel) = xml[cursor..].find(open_prefix) {
+        let start = cursor + rel;
+        let end = xml[start..]
+            .find(close_tag)
+            .map_or(xml.len(), |e| start + e + close_tag.len());
+        let block = &xml[start..end];
+        if super::import::extract_attribute_value(block, attr_name).as_deref() == Some(attr_val) {
+            return Some(block);
+        }
+        cursor = end;
+    }
+    None
+}
+
+fn resolve_abstract_level_for_pstyle(
+    archive: &PackageArchive,
+    num_id: &str,
+    style_id: &str,
+) -> Option<u8> {
+    let numbering_xml = std::str::from_utf8(archive.get("word/numbering.xml")?).ok()?;
+    let num_block =
+        find_tag_block_by_attr(numbering_xml, "<w:num ", "</w:num>", "w:numId", num_id)?;
+    let abs_pos = num_block.find("<w:abstractNumId")?;
+    let abs_id = super::import::extract_attribute_value(&num_block[abs_pos..], "w:val")?;
+    let abs_block = find_tag_block_by_attr(
+        numbering_xml,
+        "<w:abstractNum ",
+        "</w:abstractNum>",
+        "w:abstractNumId",
+        &abs_id,
+    )?;
+    for lvl in 0..=crate::list_levels::MAX_LIST_LEVEL {
+        if let Some(lvl_block) = find_lvl_block(abs_block, lvl) {
+            if let Some(ps_pos) = lvl_block.find("<w:pStyle") {
+                if super::import::extract_attribute_value(&lvl_block[ps_pos..], "w:val").as_deref()
+                    == Some(style_id)
+                {
+                    return Some(lvl);
+                }
+            }
+        }
     }
     None
 }
