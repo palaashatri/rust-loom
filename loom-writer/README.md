@@ -15,7 +15,7 @@ Evidence tags used below:
 | Feature | Preview |
 |---|---|
 | **Start Hub & Recents** | ![Loom Writer Start Hub](docs/screenshots/start-hub.png) |
-| **18-Template Chooser** (including Blank Black, Report, Letter, CV, Newsletter) | ![Loom Writer Template Chooser](docs/screenshots/template-chooser.png) |
+| **Template Chooser** (Blank, Executive Report, Business Letter, CV, Newsletter) | ![Loom Writer Template Chooser](docs/screenshots/template-chooser.png) |
 | **Interactive Welcome Guide** | ![Loom Writer Welcome Guide](docs/screenshots/welcome-guide.png) |
 | **Typography, Font Picker & Format Inspector** | ![Loom Writer Typography and Font Picker](docs/screenshots/typography-and-font-picker.png) |
 | **Bulleted & Numbered Lists** (disc/circle/square/dash & `1.`/`a.`/`A.`/`i.`/`I.`) | ![Loom Writer Lists and Styles](docs/screenshots/lists-and-styles.png) |

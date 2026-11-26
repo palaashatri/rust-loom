@@ -2,7 +2,7 @@
 
 Loom Sheets is a local-first spreadsheet application. It edits multi-sheet workbooks with formulas and charts on your own computer. Nothing is uploaded and no account is needed. Native workbooks are open `.loomtable` packages; it also imports and exports CSV and XLSX.
 
-**Platforms verified (2026-11-24):** macOS (`aarch64-apple-darwin`), Linux (`aarch64-unknown-linux-gnu` X11/Xvfb), and Windows (`x86_64-pc-windows-msvc` running live on Windows 11 ARM64).
+**Platforms verified:** macOS (`aarch64-apple-darwin`, verified 2026-11-24); Linux (`aarch64-unknown-linux-gnu` X11/Xvfb) and Windows (`x86_64-pc-windows-msvc` running live on Windows 11 ARM64) reflect earlier baseline verifications per [docs/workflow/current.md](../docs/workflow/current.md).
 
 **Status: `ACCEPTANCE_BLOCKED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Gate 2 human visual sign-off).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-24 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#pr-28-audit-remediation--macos-visualfunctional-parity-audit--2026-11-24). This README lists what has evidence behind it and its disclosed boundaries.
 
