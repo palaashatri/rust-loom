@@ -16,7 +16,8 @@ pub(super) const FIRST_NUMBERED_NUM_ID: usize = 6;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct NumberedListDef {
     pub(super) base: ListMarkerStyle,
-    pub(super) level_overrides: Vec<(u8, ListMarkerStyle)>,
+    pub(super) level_overrides: Vec<(u8, ListMarkerStyle, u32)>,
+    pub(super) start_override: Option<(u8, u32)>,
 }
 
 fn ordered_num_fmt(marker: ListMarkerStyle) -> Option<&'static str> {
@@ -123,14 +124,27 @@ pub(super) fn numbering_xml(numbered_lists: &[NumberedListDef]) -> String {
             "<w:num w:numId=\"{num_id}\"><w:abstractNumId w:val=\"{abs_id}\"/>\
              <w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride>"
         ));
-        for &(lvl, marker) in &def.level_overrides {
+        for &(lvl, marker, start) in &def.level_overrides {
             if let Some(fmt) = ordered_num_fmt(marker) {
+                let start_override = if start > 1 {
+                    format!("<w:startOverride w:val=\"{start}\"/>")
+                } else {
+                    String::new()
+                };
                 out.push_str(&format!(
-                    "<w:lvlOverride w:ilvl=\"{lvl}\"><w:lvl w:ilvl=\"{lvl}\"><w:start w:val=\"1\"/>\
+                    "<w:lvlOverride w:ilvl=\"{lvl}\">{start_override}\
+                     <w:lvl w:ilvl=\"{lvl}\"><w:start w:val=\"{start}\"/>\
                      <w:numFmt w:val=\"{fmt}\"/><w:lvlText w:val=\"%{}.\"/><w:lvlJc w:val=\"left\"/>\
                      <w:pPr><w:ind w:left=\"{}\" w:hanging=\"360\"/></w:pPr></w:lvl></w:lvlOverride>",
                     u32::from(lvl) + 1,
                     720 * (u32::from(lvl) + 1)
+                ));
+            }
+        }
+        if let Some((lvl, start)) = def.start_override {
+            if start > 1 && !def.level_overrides.iter().any(|(l, _, _)| *l == lvl) {
+                out.push_str(&format!(
+                    "<w:lvlOverride w:ilvl=\"{lvl}\"><w:startOverride w:val=\"{start}\"/></w:lvlOverride>"
                 ));
             }
         }
@@ -275,4 +289,59 @@ pub(super) fn resolve_num_id_list_style(
     } else {
         Some(("list-numbered", ListMarkerStyle::Default))
     }
+}
+
+/// Resolves `<w:numPr>` inherited from a paragraph style (`word/styles.xml`),
+/// following `<w:basedOn>` chains up to 16 hops.
+pub(super) fn resolve_style_num_pr(
+    archive: &PackageArchive,
+    style_id: &str,
+) -> Option<(String, u8)> {
+    let styles_bytes = archive.get("word/styles.xml")?;
+    let styles_xml = std::str::from_utf8(styles_bytes).ok()?;
+    let mut current_id = style_id.to_string();
+    for _ in 0..16 {
+        let mut cursor = 0usize;
+        let mut matched_block: Option<&str> = None;
+        while let Some(rel) = styles_xml[cursor..].find("<w:style ") {
+            let start = cursor + rel;
+            let end = styles_xml[start..]
+                .find("</w:style>")
+                .map_or(styles_xml.len(), |e| start + e + "</w:style>".len());
+            let block = &styles_xml[start..end];
+            if super::import::extract_attribute_value(block, "w:styleId").as_deref()
+                == Some(current_id.as_str())
+            {
+                matched_block = Some(block);
+                break;
+            }
+            cursor = end;
+        }
+        let block = matched_block?;
+        if let Some(num_start) = block.find("<w:numPr") {
+            let num_end = block[num_start..]
+                .find("</w:numPr>")
+                .map_or(block.len(), |e| num_start + e);
+            let snippet = &block[num_start..num_end];
+            if let Some(id_pos) = snippet.find("<w:numId") {
+                if let Some(num_id) =
+                    super::import::extract_attribute_value(&snippet[id_pos..], "w:val")
+                {
+                    if num_id == "0" {
+                        return None;
+                    }
+                    let ilvl = snippet
+                        .find("<w:ilvl")
+                        .and_then(|p| {
+                            super::import::extract_attribute_value(&snippet[p..], "w:val")
+                        })
+                        .map_or(0, |v| crate::list_levels::parse_list_level(&v));
+                    return Some((num_id, ilvl));
+                }
+            }
+        }
+        let based_pos = block.find("<w:basedOn")?;
+        current_id = super::import::extract_attribute_value(&block[based_pos..], "w:val")?;
+    }
+    None
 }
