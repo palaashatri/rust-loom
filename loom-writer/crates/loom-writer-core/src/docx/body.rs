@@ -237,6 +237,10 @@ pub(super) fn build(
                 Some(super::numbering::bullet_num_id(block.style.list_marker))
             }
             Some(ListKind::Numbered) => {
+                if previous_numbered_marker.is_none() {
+                    active_top_idx = None;
+                    active_child_run = None;
+                }
                 let level = block.effective_list_level();
                 let ordinal = list_numbers.get(index).copied().unwrap_or(1) as u32;
                 if level == 0 || active_top_idx.is_none() {
@@ -247,7 +251,7 @@ pub(super) fn build(
                         numbered_lists.push(super::numbering::NumberedListDef {
                             base: block.style.list_marker,
                             level_overrides: Vec::new(),
-                            start_override: None,
+                            start_override: (ordinal > 1).then_some((0, ordinal)),
                         });
                         active_top_idx = Some(numbered_lists.len() - 1);
                     }

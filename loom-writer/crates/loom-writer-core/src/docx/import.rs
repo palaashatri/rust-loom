@@ -1373,7 +1373,8 @@ fn parse_paragraph(
         false,
     )?;
     let mut paragraph_style = paragraph_style;
-    let direct_num_pr = paragraph_properties
+    let direct_ilvl = num_pr_level(p_xml).map(|value| crate::list_levels::parse_list_level(&value));
+    let direct_num_id = paragraph_properties
         .current_xml
         .find("<w:numPr")
         .and_then(|num_start| {
@@ -1381,15 +1382,19 @@ fn parse_paragraph(
                 .find("</w:numPr>")
                 .unwrap_or(paragraph_properties.current_xml.len() - num_start);
             let num_snippet = &paragraph_properties.current_xml[num_start..num_start + num_end];
-            let ilvl =
-                num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
             let num_id_pos = num_snippet.find("<w:numId")?;
-            let num_id_val = extract_attribute_value(&num_snippet[num_id_pos..], "w:val")?;
-            Some((num_id_val, ilvl))
+            extract_attribute_value(&num_snippet[num_id_pos..], "w:val")
         });
-    let resolved_num_pr = match &direct_num_pr {
-        Some((id, _)) if id == "0" => None,
-        Some((id, ilvl)) => Some((id.clone(), *ilvl)),
+    let resolved_num_pr = match direct_num_id.as_deref() {
+        Some("0") => {
+            if crate::list_levels::is_list_kind(&kind) {
+                kind = "paragraph".to_string();
+            }
+            paragraph_style.list_marker = loom_text::ListMarkerStyle::Default;
+            paragraph_style.list_level = 0;
+            None
+        }
+        Some(num_id) => Some((num_id.to_string(), direct_ilvl.unwrap_or(0))),
         None => paragraph_properties
             .current_xml
             .find("<w:pStyle")
@@ -1398,7 +1403,8 @@ fn parse_paragraph(
             })
             .and_then(|style_id| {
                 archive.and_then(|arch| super::numbering::resolve_style_num_pr(arch, &style_id))
-            }),
+            })
+            .map(|(num_id, style_ilvl)| (num_id, direct_ilvl.unwrap_or(style_ilvl))),
     };
     if let Some((num_id_val, ilvl)) = resolved_num_pr {
         if let Some((resolved_kind, marker)) =
@@ -1411,9 +1417,10 @@ fn parse_paragraph(
     }
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
-    if crate::list_levels::is_list_kind(&kind) && direct_num_pr.is_some() {
-        paragraph_style.list_level =
-            num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
+    if crate::list_levels::is_list_kind(&kind) {
+        if let Some(ilvl) = direct_ilvl {
+            paragraph_style.list_level = ilvl;
+        }
     }
 
     let mut text = String::new();
