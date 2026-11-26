@@ -120,9 +120,13 @@ pub(super) fn numbering_xml(numbered_lists: &[NumberedListDef]) -> String {
     for (index, def) in numbered_lists.iter().enumerate() {
         let num_id = FIRST_NUMBERED_NUM_ID + index;
         let abs_id = numbered_abstract_num_id(def.base);
+        let top_start = def
+            .start_override
+            .and_then(|(lvl, s)| (lvl == 0).then_some(s))
+            .unwrap_or(1);
         out.push_str(&format!(
             "<w:num w:numId=\"{num_id}\"><w:abstractNumId w:val=\"{abs_id}\"/>\
-             <w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride>"
+             <w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"{top_start}\"/></w:lvlOverride>"
         ));
         for &(lvl, marker, start) in &def.level_overrides {
             if let Some(fmt) = ordered_num_fmt(marker) {
@@ -142,7 +146,7 @@ pub(super) fn numbering_xml(numbered_lists: &[NumberedListDef]) -> String {
             }
         }
         if let Some((lvl, start)) = def.start_override {
-            if start > 1 && !def.level_overrides.iter().any(|(l, _, _)| *l == lvl) {
+            if lvl > 0 && start > 1 && !def.level_overrides.iter().any(|(l, _, _)| *l == lvl) {
                 out.push_str(&format!(
                     "<w:lvlOverride w:ilvl=\"{lvl}\"><w:startOverride w:val=\"{start}\"/></w:lvlOverride>"
                 ));
