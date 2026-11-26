@@ -148,7 +148,7 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
     } else {
         content.lines().collect()
     };
-    for (idx, line) in lines.iter().enumerate() {
+    for line in &lines {
         let trimmed = line.trim_start_matches("  ");
         let lvl = ((line.len() - trimmed.len()) / 2).min(4);
         let (ppr_inner, body_text) = if let Some(rest) = trimmed.strip_prefix("• ") {
@@ -162,9 +162,8 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
         } else {
             ("", *line)
         };
-        let _ = idx;
         if ppr_inner.is_empty() {
-            xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\"/>"));
+            xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\" lvl=\"{lvl}\"/>"));
         } else {
             xml.push_str(&format!(
                 "<a:p><a:pPr algn=\"{algn}\" lvl=\"{lvl}\">{ppr_inner}</a:pPr>"
