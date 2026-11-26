@@ -3840,7 +3840,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         }
     }
     // A choice from any surface refreshes the menu check marks.
-    appearance::on_change(|app| app.invoke_view_state_changed());
+    let s_theme = state.clone();
+    appearance::on_change(move |app| {
+        apply_document(app, &s_theme.current.borrow());
+        app.invoke_view_state_changed();
+    });
     window_chrome::on_change(|app| app.invoke_view_state_changed());
     let app_ref = app.as_weak();
     let registry_for_menu = state.registry.clone();
