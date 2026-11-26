@@ -1373,27 +1373,43 @@ fn parse_paragraph(
         false,
     )?;
     let mut paragraph_style = paragraph_style;
-    if let Some(num_start) = paragraph_properties.current_xml.find("<w:numPr") {
-        let num_end = paragraph_properties.current_xml[num_start..]
-            .find("</w:numPr>")
-            .unwrap_or(paragraph_properties.current_xml.len() - num_start);
-        let num_snippet = &paragraph_properties.current_xml[num_start..num_start + num_end];
-        let ilvl =
-            num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
-        if let Some(num_id_pos) = num_snippet.find("<w:numId") {
-            if let Some(num_id_val) = extract_attribute_value(&num_snippet[num_id_pos..], "w:val") {
-                if let Some((resolved_kind, marker)) =
-                    super::numbering::resolve_num_id_list_style(archive, &num_id_val, ilvl)
-                {
-                    kind = resolved_kind.to_string();
-                    paragraph_style.list_marker = marker;
-                }
-            }
+    let direct_num_pr = paragraph_properties
+        .current_xml
+        .find("<w:numPr")
+        .and_then(|num_start| {
+            let num_end = paragraph_properties.current_xml[num_start..]
+                .find("</w:numPr>")
+                .unwrap_or(paragraph_properties.current_xml.len() - num_start);
+            let num_snippet = &paragraph_properties.current_xml[num_start..num_start + num_end];
+            let ilvl =
+                num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
+            let num_id_pos = num_snippet.find("<w:numId")?;
+            let num_id_val = extract_attribute_value(&num_snippet[num_id_pos..], "w:val")?;
+            (num_id_val != "0").then_some((num_id_val, ilvl))
+        });
+    let resolved_num_pr = if direct_num_pr.is_some() {
+        direct_num_pr.clone()
+    } else if let Some(pstyle_pos) = paragraph_properties.current_xml.find("<w:pStyle") {
+        extract_attribute_value(&paragraph_properties.current_xml[pstyle_pos..], "w:val").and_then(
+            |style_id| {
+                archive.and_then(|arch| super::numbering::resolve_style_num_pr(arch, &style_id))
+            },
+        )
+    } else {
+        None
+    };
+    if let Some((num_id_val, ilvl)) = resolved_num_pr {
+        if let Some((resolved_kind, marker)) =
+            super::numbering::resolve_num_id_list_style(archive, &num_id_val, ilvl)
+        {
+            kind = resolved_kind.to_string();
+            paragraph_style.list_marker = marker;
+            paragraph_style.list_level = ilvl.min(crate::list_levels::MAX_LIST_LEVEL);
         }
     }
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
-    if crate::list_levels::is_list_kind(&kind) {
+    if crate::list_levels::is_list_kind(&kind) && direct_num_pr.is_some() {
         paragraph_style.list_level =
             num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
     }
