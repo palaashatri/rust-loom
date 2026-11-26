@@ -272,6 +272,47 @@ pub(super) fn render_data_validations(sheet: &Sheet) -> Result<String, String> {
     ))
 }
 
+const MAX_TABLE_NAME_LEN: usize = 255;
+
+fn is_excel_cell_reference(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    if matches!(upper.as_str(), "R" | "C" | "RC") {
+        return true;
+    }
+    if let Some(rest) = upper.strip_prefix('R') {
+        if let Some((r_digits, c_part)) = rest.split_once('C') {
+            if (r_digits.is_empty() || r_digits.bytes().all(|b| b.is_ascii_digit()))
+                && (c_part.is_empty() || c_part.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return true;
+            }
+        } else if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+            return true;
+        }
+    }
+    if let Some(rest) = upper.strip_prefix('C') {
+        if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+            return true;
+        }
+    }
+    let letters_end = upper
+        .bytes()
+        .take_while(|b| b.is_ascii_alphabetic())
+        .count();
+    if (1..=3).contains(&letters_end) && letters_end < upper.len() {
+        let (col_part, row_part) = upper.split_at(letters_end);
+        if (1..=7).contains(&row_part.len()) && row_part.bytes().all(|b| b.is_ascii_digit()) {
+            let col_idx = col_part
+                .bytes()
+                .fold(0u32, |acc, b| acc * 26 + u32::from(b - b'A') + 1);
+            if let Ok(row_idx) = row_part.parse::<u32>() {
+                return (1..=16_384).contains(&col_idx) && (1..=1_048_576).contains(&row_idx);
+            }
+        }
+    }
+    false
+}
+
 fn allocate_unique_table_name(raw: &str, used_names: &mut BTreeSet<String>) -> String {
     let mut base: String = raw
         .chars()
@@ -283,13 +324,19 @@ fn allocate_unique_table_name(raw: &str, used_names: &mut BTreeSet<String>) -> S
             }
         })
         .collect();
-    if base.is_empty() || base.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+    if base.is_empty()
+        || base.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+        || is_excel_cell_reference(&base)
+    {
         base.insert_str(0, "Table_");
     }
+    base.truncate(MAX_TABLE_NAME_LEN);
     let mut candidate = base.clone();
     let mut suffix = 2usize;
     while !used_names.insert(candidate.to_ascii_lowercase()) {
-        candidate = format!("{base}_{suffix}");
+        let suffix_str = format!("_{suffix}");
+        let max_base = MAX_TABLE_NAME_LEN.saturating_sub(suffix_str.len());
+        candidate = format!("{}{}", &base[..base.len().min(max_base)], suffix_str);
         suffix += 1;
     }
     candidate
@@ -353,6 +400,10 @@ fn render_table_xml(
     let mut seen_captions: BTreeSet<String> = BTreeSet::new();
     let mut explicit_captions: Vec<Option<String>> = Vec::with_capacity(table.cols as usize);
     for c in 0..table.cols {
+        if header_row_count == 0 {
+            explicit_captions.push(None);
+            continue;
+        }
         let header_cell = crate::CellRef {
             row: table.start_row,
             col: table.start_col + c,
