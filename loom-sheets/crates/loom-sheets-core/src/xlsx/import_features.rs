@@ -155,7 +155,10 @@ pub(super) fn parse_worksheet_features(
     }
 
     // 3. conditional_rules
-    for cf_tag in elements(sheet_xml, "conditionalFormatting") {
+    const MAX_IMPORTED_CONDITIONAL_RULES: usize = 4096;
+    let mut imported_cf_rules: Vec<(u32, usize, CellConditionalRule)> = Vec::new();
+    let mut cf_seq = 0usize;
+    'cf_outer: for cf_tag in elements(sheet_xml, "conditionalFormatting") {
         let Some(sqref) = attr(cf_tag.attrs, "sqref") else {
             continue;
         };
@@ -166,6 +169,9 @@ pub(super) fn parse_worksheet_features(
         for rule_tag in elements(cf_tag.body, "cfRule") {
             let rule_type = attr(rule_tag.attrs, "type").unwrap_or_default();
             let op_attr = attr(rule_tag.attrs, "operator").unwrap_or_default();
+            let priority = attr(rule_tag.attrs, "priority")
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(u32::MAX);
             let dxf_id = attr(rule_tag.attrs, "dxfId").and_then(|s| s.parse::<usize>().ok());
             let (fill, text_color) = dxf_id
                 .and_then(|id| dxfs.get(id).copied())
@@ -190,16 +196,29 @@ pub(super) fn parse_worksheet_features(
                 (op, formula)
             };
             for &range in &ranges {
-                sheet.conditional_rules.push(CellConditionalRule {
-                    range,
-                    operator,
-                    value: value.clone(),
-                    fill,
-                    text_color,
-                });
+                if imported_cf_rules.len() >= MAX_IMPORTED_CONDITIONAL_RULES {
+                    break 'cf_outer;
+                }
+                imported_cf_rules.push((
+                    priority,
+                    cf_seq,
+                    CellConditionalRule {
+                        range,
+                        operator,
+                        value: value.clone(),
+                        fill,
+                        text_color,
+                    },
+                ));
+                cf_seq += 1;
             }
         }
     }
+    imported_cf_rules
+        .sort_by_key(|(priority, seq, _)| (std::cmp::Reverse(*priority), std::cmp::Reverse(*seq)));
+    sheet
+        .conditional_rules
+        .extend(imported_cf_rules.into_iter().map(|(_, _, rule)| rule));
 
     // 4. validations
     for dv_tag in elements(sheet_xml, "dataValidation") {

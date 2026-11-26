@@ -1373,7 +1373,7 @@ fn parse_paragraph(
     }
 
     // The live paragraph properties exclude the nested previous pPr in pPrChange.
-    let kind = super::paragraph_style_import::paragraph_kind_from_docx(
+    let mut kind = super::paragraph_style_import::paragraph_kind_from_docx(
         &paragraph_properties.current_xml,
         archive,
         false,
@@ -1388,9 +1388,10 @@ fn parse_paragraph(
             num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
         if let Some(num_id_pos) = num_snippet.find("<w:numId") {
             if let Some(num_id_val) = extract_attribute_value(&num_snippet[num_id_pos..], "w:val") {
-                if let Some((_, marker)) =
+                if let Some((resolved_kind, marker)) =
                     super::numbering::resolve_num_id_list_style(archive, &num_id_val, ilvl)
                 {
+                    kind = resolved_kind.to_string();
                     paragraph_style.list_marker = marker;
                 }
             }

@@ -235,23 +235,60 @@ pub(super) fn build(
             }
             Some(ListKind::Numbered) => {
                 let level = block.effective_list_level();
-                if level > 0 && previous_numbered_marker.is_some() {
-                    if let Some(current_def) = numbered_lists.last_mut() {
-                        if block.style.list_marker != current_def.base
-                            && !current_def.level_overrides.iter().any(|(l, _)| *l == level)
+                if level > 0 && previous_numbered_marker.is_some() && !numbered_lists.is_empty() {
+                    let last_idx = numbered_lists.len() - 1;
+                    let base = numbered_lists[last_idx].base;
+                    if block.style.list_marker == loom_text::ListMarkerStyle::Default
+                        && base != loom_text::ListMarkerStyle::Default
+                    {
+                        numbered_lists.push(super::numbering::NumberedListDef {
+                            base: loom_text::ListMarkerStyle::Default,
+                            level_overrides: Vec::new(),
+                        });
+                        Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
+                    } else if block.style.list_marker == base {
+                        if numbered_lists[last_idx]
+                            .level_overrides
+                            .iter()
+                            .any(|(l, _)| *l == level)
                         {
-                            current_def
-                                .level_overrides
-                                .push((level, block.style.list_marker));
+                            numbered_lists.push(super::numbering::NumberedListDef {
+                                base,
+                                level_overrides: Vec::new(),
+                            });
+                            Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
+                        } else {
+                            Some(super::numbering::FIRST_NUMBERED_NUM_ID + last_idx)
                         }
+                    } else if let Some((_, existing)) = numbered_lists[last_idx]
+                        .level_overrides
+                        .iter()
+                        .find(|(l, _)| *l == level)
+                    {
+                        if *existing == block.style.list_marker {
+                            Some(super::numbering::FIRST_NUMBERED_NUM_ID + last_idx)
+                        } else {
+                            numbered_lists.push(super::numbering::NumberedListDef {
+                                base,
+                                level_overrides: vec![(level, block.style.list_marker)],
+                            });
+                            Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
+                        }
+                    } else {
+                        numbered_lists[last_idx]
+                            .level_overrides
+                            .push((level, block.style.list_marker));
+                        Some(super::numbering::FIRST_NUMBERED_NUM_ID + last_idx)
                     }
-                } else if previous_numbered_marker != Some(block.style.list_marker) {
-                    numbered_lists.push(super::numbering::NumberedListDef {
-                        base: block.style.list_marker,
-                        level_overrides: Vec::new(),
-                    });
+                } else {
+                    if previous_numbered_marker != Some(block.style.list_marker) {
+                        numbered_lists.push(super::numbering::NumberedListDef {
+                            base: block.style.list_marker,
+                            level_overrides: Vec::new(),
+                        });
+                    }
+                    Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
                 }
-                Some(super::numbering::FIRST_NUMBERED_NUM_ID + numbered_lists.len() - 1)
             }
             None => None,
         };
