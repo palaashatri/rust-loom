@@ -58,10 +58,20 @@ pub fn set_locked(slide: &mut Slide, ids: &[String], locked: bool) -> usize {
 /// Toggles `flip_h` (when `horizontal` is true) or `flip_v` (when false) on `ids`,
 /// skipping locked elements. Returns the number of elements flipped.
 pub fn flip_elements(slide: &mut Slide, ids: &[String], horizontal: bool) -> usize {
+    let locked_groups: HashSet<String> = slide
+        .elements
+        .iter()
+        .filter(|el| el.locked)
+        .filter_map(|el| el.group_id.clone())
+        .collect();
     let id_set: HashSet<&str> = ids.iter().map(String::as_str).collect();
     let mut count = 0;
     for el in &mut slide.elements {
-        if id_set.contains(el.id.as_str()) && !el.locked {
+        let in_locked_group = el
+            .group_id
+            .as_deref()
+            .is_some_and(|gid| locked_groups.contains(gid));
+        if id_set.contains(el.id.as_str()) && !el.locked && !in_locked_group {
             if horizontal {
                 el.flip_h = !el.flip_h;
             } else {

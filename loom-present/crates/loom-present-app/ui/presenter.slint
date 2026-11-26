@@ -51,7 +51,9 @@ export component PresenterWindow inherits Window {
     keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) { root.close-presenter(); }
-            else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == " " || event.text == Key.Return) { root.next-slide(); }
+            else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == " ") { root.next-slide(); }
+            else if (event.text == Key.Return) { root.commit-jump(); }
+            else if (event.text == "0" || event.text == "1" || event.text == "2" || event.text == "3" || event.text == "4" || event.text == "5" || event.text == "6" || event.text == "7" || event.text == "8" || event.text == "9") { root.jump-digit(event.text); }
             else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.previous-slide(); }
             return accept;
         }

@@ -49,7 +49,7 @@ impl std::error::Error for HyperlinkError {}
 /// Bare host/path strings without a scheme are normalized with `https://`.
 pub fn normalize_safe_url(raw: &str) -> Result<String, HyperlinkError> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
         return Err(HyperlinkError::EmptyUrl);
     }
 
@@ -76,6 +76,13 @@ fn split_scheme(input: &str) -> Option<(&str, &str)> {
         return None;
     }
     let after_colon = &input[colon + 1..];
+    if after_colon
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
     let rest = after_colon.strip_prefix("//").unwrap_or(after_colon);
     Some((scheme, rest))
 }
@@ -93,11 +100,12 @@ impl Hyperlink {
     /// Creates an email hyperlink, stripping any leading `mailto:` prefix.
     pub fn email(address: &str, tooltip: Option<String>) -> Result<Self, HyperlinkError> {
         let trimmed = address.trim();
-        let addr = trimmed
-            .strip_prefix("mailto:")
-            .or_else(|| trimmed.strip_prefix("MAILTO:"))
-            .unwrap_or(trimmed)
-            .trim();
+        let stripped = if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("mailto:") {
+            &trimmed[7..]
+        } else {
+            trimmed
+        };
+        let addr = stripped.trim();
         if addr.is_empty() {
             return Err(HyperlinkError::EmptyUrl);
         }

@@ -234,8 +234,13 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
     }
     {
         let tools = tools.clone();
+        let app = app.as_weak();
         window.on_clear_annotations(move || {
-            tools.borrow_mut().clear_slide(0);
+            let idx = app
+                .upgrade()
+                .map(|a| a.get_active_slide_index().max(0) as usize)
+                .unwrap_or(0);
+            tools.borrow_mut().clear_slide(idx);
         });
     }
     {
@@ -259,6 +264,8 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
                 if let Some(a) = app.upgrade() {
                     a.invoke_select_slide(target as i32);
                 }
+            } else if let Some(a) = app.upgrade() {
+                a.invoke_next_slide();
             }
             if let Some(win) = w.upgrade() {
                 win.set_jump_buffer("".into());

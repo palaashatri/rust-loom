@@ -64,6 +64,11 @@ export component StyleEffectsPanel inherits VerticalLayout {
         dec => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); }
         inc => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); }
     }
+    LoomButton {
+        label: "Cycle Stroke Dash";
+        variant: "secondary";
+        clicked => { root.cycle-stroke-dash(); }
+    }
 
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
