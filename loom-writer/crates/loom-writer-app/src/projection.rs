@@ -808,7 +808,11 @@ fn project_inner(
                                     reference.block_id == block.id
                                         && table_text_map.cell_at(reference.offset) == Some((r, c))
                                 });
-                            let table_ink_rgba = if high_contrast { [0, 0, 0, 255] } else { doc.page.appearance.auto_ink_rgba() };
+                            let ink = if high_contrast {
+                                [0, 0, 0, 255]
+                            } else {
+                                doc.page.appearance.auto_ink_rgba()
+                            };
                             let glyph_result = if has_footnote_reference {
                                 Some(set_shaped_block_glyphs_with_footnotes(
                                     &mut row,
@@ -822,7 +826,7 @@ fn project_inner(
                                         font_size: loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                                         pixels_per_point,
                                         clip: raster_clip,
-                                        default_ink_rgba: table_ink_rgba,
+                                        default_ink_rgba: ink,
                                     },
                                 ))
                             } else if raster_device_scale.is_some() {
@@ -833,7 +837,7 @@ fn project_inner(
                                     loom_writer_core::TABLE_CELL_BASE_FONT_SIZE_PT,
                                     pixels_per_point,
                                     raster_clip,
-                                    table_ink_rgba,
+                                    ink,
                                 ))
                             } else {
                                 None
