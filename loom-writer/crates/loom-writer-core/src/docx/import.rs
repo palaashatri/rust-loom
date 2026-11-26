@@ -1385,18 +1385,20 @@ fn parse_paragraph(
                 num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
             let num_id_pos = num_snippet.find("<w:numId")?;
             let num_id_val = extract_attribute_value(&num_snippet[num_id_pos..], "w:val")?;
-            (num_id_val != "0").then_some((num_id_val, ilvl))
+            Some((num_id_val, ilvl))
         });
-    let resolved_num_pr = if direct_num_pr.is_some() {
-        direct_num_pr.clone()
-    } else if let Some(pstyle_pos) = paragraph_properties.current_xml.find("<w:pStyle") {
-        extract_attribute_value(&paragraph_properties.current_xml[pstyle_pos..], "w:val").and_then(
-            |style_id| {
+    let resolved_num_pr = match &direct_num_pr {
+        Some((id, _)) if id == "0" => None,
+        Some((id, ilvl)) => Some((id.clone(), *ilvl)),
+        None => paragraph_properties
+            .current_xml
+            .find("<w:pStyle")
+            .and_then(|pstyle_pos| {
+                extract_attribute_value(&paragraph_properties.current_xml[pstyle_pos..], "w:val")
+            })
+            .and_then(|style_id| {
                 archive.and_then(|arch| super::numbering::resolve_style_num_pr(arch, &style_id))
-            },
-        )
-    } else {
-        None
+            }),
     };
     if let Some((num_id_val, ilvl)) = resolved_num_pr {
         if let Some((resolved_kind, marker)) =
