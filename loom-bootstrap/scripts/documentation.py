@@ -52,12 +52,17 @@ def read_documentation(
     roles = {role: Path(path) for role, path in ROLE_PATHS.items()}
     documents = config.get("documents", {})
     archives = documents.get("archives", [])
+    qa_records = documents.get("qa_records", [])
     exceptions = documents.get("exceptions", [])
     index = documents.get("index")
     if index != "docs/README.md":
         errors.append("documentation index must be docs/README.md")
     names = [*ROLE_PATHS.values(), "docs/README.md"]
-    for group, values in (("archives", archives), ("exceptions", exceptions)):
+    for group, values in (
+        ("archives", archives),
+        ("qa_records", qa_records),
+        ("exceptions", exceptions),
+    ):
         if not isinstance(values, list) or not all(isinstance(p, str) for p in values):
             errors.append(f"documentation {group} must be an explicit path list")
             continue
@@ -68,6 +73,8 @@ def read_documentation(
                 errors.append(f"unsafe documentation path: {value}")
             elif group == "archives" and not value.startswith("docs/archive/"):
                 errors.append(f"archive outside docs/archive: {value}")
+            elif group == "qa_records" and not value.startswith("docs/qa/"):
+                errors.append(f"QA record outside docs/qa: {value}")
             elif group == "exceptions" and path not in EXCEPTIONS:
                 errors.append(f"unapproved documentation exception: {value}")
             else:

@@ -18,7 +18,8 @@ class GovernanceTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         manifest = tomllib.loads((ROOT / "loom-bootstrap/contracts/documentation.toml").read_text())
         names = [*manifest["roles"].values(), manifest["documents"]["index"],
-                 *manifest["documents"]["archives"], "README.md",
+                 *manifest["documents"]["archives"],
+                 *manifest["documents"].get("qa_records", []), "README.md",
                  "loom-bootstrap/contracts/documentation.toml",
                  "loom-bootstrap/contracts/workflow.toml",
                  "loom-bootstrap/scripts/documentation.py",
@@ -229,21 +230,18 @@ class GovernanceTests(unittest.TestCase):
                      "| 1 | Sheets | ACCEPTED | IN_PROGRESS |")
         self.rejects("Sheets product status must remain ACCEPTANCE_BLOCKED during office-v1")
 
-    def test_office_v1_allows_accepted_sheets_when_workflow_and_table_agree(self):
-        self.use_office_v1_fixture()
-        self.replace("loom-bootstrap/contracts/workflow.toml",
-                     'sheets = "IN_PROGRESS"', 'sheets = "ACCEPTED"')
-        self.replace("current_truth", "| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
-                     "| 1 | Sheets | ACCEPTED | ACCEPTED |")
-        self.set_sheets_capability_status("ACCEPTED")
-        result = self.run_audit()
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_office_v1_rejects_mismatched_accepted_sheets_promotion(self):
-        self.use_office_v1_fixture()
-        self.replace("loom-bootstrap/contracts/workflow.toml",
-                     'sheets = "IN_PROGRESS"', 'sheets = "ACCEPTED"')
-        self.rejects("Sheets product status must remain ACCEPTED during office-v1")
+    def test_office_v1_rejects_promoting_active_apps_to_accepted(self):
+        for order, app, label in ((1, "sheets", "Sheets"), (2, "writer", "Writer"), (3, "present", "Present")):
+            with self.subTest(app=app):
+                self.use_office_v1_fixture()
+                self.replace("loom-bootstrap/contracts/workflow.toml",
+                             f'{app} = "IN_PROGRESS"', f'{app} = "ACCEPTED"')
+                self.replace("current_truth",
+                             f"| {order} | {label} | ACCEPTANCE_BLOCKED | IN_PROGRESS |",
+                             f"| {order} | {label} | ACCEPTED | ACCEPTED |")
+                if app == "sheets":
+                    self.set_sheets_capability_status("ACCEPTED")
+                self.rejects(f"{app} status must be IN_PROGRESS in office-v1 phase")
 
     def test_office_v1_keeps_photo_as_the_next_application(self):
         self.use_office_v1_fixture()
@@ -454,6 +452,12 @@ class GovernanceTests(unittest.TestCase):
         path.write_text("The application README stays here.")
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_undeclared_readme_under_docs_is_rejected(self):
+        path = self.root / "docs/qa/undocumented/README.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Undeclared QA record.")
+        self.rejects("Markdown path is not declared in documentation.toml: docs/qa/undocumented/README.md")
 
     def test_local_markdown_caches_are_outside_repository_documentation_scan(self):
         local_markdown = {

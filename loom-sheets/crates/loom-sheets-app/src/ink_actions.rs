@@ -7,7 +7,7 @@
 use super::*;
 use loom_sheets_core::style::CellStyle;
 use loom_ui::color_palette::{
-    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, OFFICE_SWATCHES,
+    color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, LOOM_SWATCHES,
 };
 use slint::Model;
 
@@ -31,11 +31,11 @@ pub(crate) fn slot_for(color: Option<u32>) -> i32 {
 }
 
 fn ensure_swatches_populated(ink: &CellInk<'_>) {
-    if ink.get_swatches().row_count() == OFFICE_SWATCHES.len() {
+    if ink.get_swatches().row_count() == LOOM_SWATCHES.len() {
         return;
     }
     ink.set_swatches(ModelRc::new(VecModel::from(
-        OFFICE_SWATCHES
+        LOOM_SWATCHES
             .iter()
             .map(|swatch| LoomColorSwatch {
                 name: SharedString::from(swatch.name),

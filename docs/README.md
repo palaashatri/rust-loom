@@ -30,5 +30,8 @@ Open only the named section needed to establish an original finding, owner grant
 | [Continuation, Oct04–25](archive/continuation-2026-10-04-to-25.md) | Performance/feature history, owner v1 scope, acceptance claims and their explicit retractions |
 | [Verification, Oct18–20](archive/verification-2026-10-18-to-20.md) | Scoped Writer/Sheets/Present repair results, failures and review gaps |
 | [Writer checkpoints, Oct25–27](archive/writer-checkpoints-2026-10.md) | M1–M3 work, partial checks, recovery/history follow-ups and time-limited display permissions |
+| [Linux QA, Nov 01](qa/linux-2026-11-01/README.md) | Dated Linux desktop QA run record |
+| [Linux QA, Nov 06](qa/linux-2026-11-06/README.md) | Dated Linux desktop QA run record |
+| [Linux QA, Nov 07](qa/linux-2026-11-07/README.md) | Dated Linux desktop QA run record |
 
 Migration evidence is in `.work/docs-split-20261027/`: the pre-split source snapshot, exact line-range hashes, final file hashes, caller/link checks and focused governance outputs. Ignored evidence is not a second authority.

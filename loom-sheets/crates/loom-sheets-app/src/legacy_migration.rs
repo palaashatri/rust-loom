@@ -97,7 +97,7 @@ pub(super) fn scan_legacy(directory: &Path) -> Result<LegacyManifest, String> {
                 super::recovery_policy::MAX_RECOVERY_DIRECTORY_ENTRIES
             ));
         }
-        if LOCK_FILES.contains(&name.as_str()) {
+        if LOCK_FILES.contains(&name.as_str()) || name == "settings.toml" {
             continue;
         }
         let metadata = fs::symlink_metadata(entry.path())

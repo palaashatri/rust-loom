@@ -4,8 +4,9 @@
 //! CI to exercise the formula engine without a display.
 
 use loom_sheets_core::{
-    evaluate, export_workbook_sheet_pdf, from_csv, sheet_from_json, to_csv, workbook_from_json,
-    CalculationCache, CellRange, CellRef, Sheet, SheetModel,
+    evaluate, export_workbook_sheet_pdf, export_xlsx_sheets_with_warnings, from_csv,
+    sheet_from_json, to_csv, workbook_from_json, CalculationCache, CellRange, CellRef, Sheet,
+    SheetModel,
 };
 use std::collections::BTreeMap;
 
@@ -22,6 +23,7 @@ fn print_usage() {
     eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
     eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
     eprintln!("  to-pdf <csv-or-loomsheet> <output.pdf> (exports active sheet as paginated PDF)");
+    eprintln!("  to-xlsx <csv-or-loomsheet> <output.xlsx> (exports workbook as XLSX)");
     eprintln!("  create <file.loomsheet> <name>");
     eprintln!("  recalc <csv-file> <cell> <raw-value>");
     eprintln!("  sort <csv-file> <range> <column-offset> <asc|desc>");
@@ -47,6 +49,10 @@ fn run() -> Result<(), String> {
         "to-pdf" => cmd_topdf(
             args.get(2).ok_or("to-pdf requires <input-file>")?,
             args.get(3).ok_or("to-pdf requires <output.pdf>")?,
+        ),
+        "to-xlsx" => cmd_toxlsx(
+            args.get(2).ok_or("to-xlsx requires <input-file>")?,
+            args.get(3).ok_or("to-xlsx requires <output.xlsx>")?,
         ),
         "create" => cmd_create(
             args.get(2).ok_or("create requires <file.loomsheet>")?,
@@ -238,6 +244,17 @@ fn cmd_topdf(path: &str, out: &str) -> Result<(), String> {
     let (sheets, active) = load_workbook_for_pdf(path)?;
     let pdf = export_workbook_sheet_pdf(&sheets, active);
     std::fs::write(out, pdf).map_err(|e| e.to_string())?;
+    println!("wrote {out}");
+    Ok(())
+}
+
+fn cmd_toxlsx(path: &str, out: &str) -> Result<(), String> {
+    let (sheets, _) = load_workbook_for_pdf(path)?;
+    let (bytes, warnings) = export_xlsx_sheets_with_warnings(&sheets)?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
+    std::fs::write(out, bytes).map_err(|e| e.to_string())?;
     println!("wrote {out}");
     Ok(())
 }

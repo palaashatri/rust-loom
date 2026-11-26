@@ -2,13 +2,15 @@ use super::*;
 use crate::{welcome_guide, WelcomeGuideState};
 
 #[test]
-fn welcome_guide_opens_and_closes_cleanly() {
+fn welcome_guide_opens_progresses_and_closes_cleanly() {
     set_platform();
     let app = PresentApp::new().expect("create PresentApp");
     assert!(!app.global::<WelcomeGuideState>().get_open());
     welcome_guide::open(&app);
     assert!(app.global::<WelcomeGuideState>().get_open());
     assert_eq!(app.global::<WelcomeGuideState>().get_step(), 0);
+    app.global::<WelcomeGuideState>().set_step(1);
+    assert_eq!(app.global::<WelcomeGuideState>().get_step(), 1);
     app.global::<WelcomeGuideState>().set_step(3);
     assert_eq!(app.global::<WelcomeGuideState>().get_step(), 3);
     app.global::<WelcomeGuideState>().set_open(false);

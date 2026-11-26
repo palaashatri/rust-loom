@@ -23,8 +23,8 @@ use crate::{
 /// The body part plus what the numbering part needs to know about it.
 pub(super) struct Body {
     pub xml: String,
-    /// How many separate numbered lists the body contains.
-    pub numbered_lists: usize,
+    /// Numbered list runs in order, each with its `ListMarkerStyle`.
+    pub numbered_lists: Vec<super::numbering::NumberedListDef>,
     /// The chart parts embedded in the body.
     pub charts: Vec<(usize, String)>,
     /// The pictures embedded in the body, in order.
@@ -158,8 +158,11 @@ pub(super) fn build(
         xml.push_str("<w:background w:color=\"000000\"/>");
     }
     xml.push_str("<w:body>");
-    let mut numbered_lists = 0usize;
-    let mut previous_numbered = false;
+    let mut numbered_lists: Vec<super::numbering::NumberedListDef> = Vec::new();
+    let mut previous_numbered_marker: Option<loom_text::ListMarkerStyle> = None;
+    let mut active_top_idx: Option<usize> = None;
+    let mut active_child_run: Option<(u8, loom_text::ListMarkerStyle, usize)> = None;
+    let list_numbers = doc.list_item_numbers();
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut images: Vec<BodyImage> = Vec::new();
     let paragraph_format_ids: Vec<u64> = doc
@@ -188,7 +191,7 @@ pub(super) fn build(
             if index + 1 == doc.blocks.len() || followed_by_table {
                 xml.push_str("<w:p/>");
             }
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         if let Some(image) = block.image.as_ref().filter(|_| block.is_image()) {
@@ -204,7 +207,7 @@ pub(super) fn build(
                 mime: image.format.mime(),
                 bytes: image.bytes.clone(),
             });
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         if block.kind == crate::CHART_BLOCK_KIND {
@@ -215,7 +218,7 @@ pub(super) fn build(
                     .map_err(|error| format!("chart {}: {error}", chart.id))?;
                 charts.push((chart_idx, chart_xml));
                 xml.push_str(&chart_xml_paragraph(&rid, chart_idx, block));
-                previous_numbered = false;
+                previous_numbered_marker = None;
                 continue;
             }
         }
@@ -225,27 +228,122 @@ pub(super) fn build(
                 && revision.anchor.block_id == block.id
         }) {
             xml.push_str(&deleted_paragraph_mark_xml(block, revision));
-            previous_numbered = false;
+            previous_numbered_marker = None;
             continue;
         }
         let list = ListKind::of(block.kind.as_str());
         let num_id = match list {
-            Some(ListKind::Bullet) => Some(1),
+            Some(ListKind::Bullet) => {
+                Some(super::numbering::bullet_num_id(block.style.list_marker))
+            }
             Some(ListKind::Numbered) => {
-                if !previous_numbered {
-                    numbered_lists += 1;
+                if previous_numbered_marker.is_none() {
+                    active_top_idx = None;
+                    active_child_run = None;
                 }
-                Some(1 + numbered_lists)
+                let level = block.effective_list_level();
+                let ordinal = list_numbers.get(index).copied().unwrap_or(1) as u32;
+                if level == 0 || active_top_idx.is_none() {
+                    active_child_run = None;
+                    if previous_numbered_marker != Some(block.style.list_marker)
+                        || active_top_idx.is_none()
+                    {
+                        numbered_lists.push(super::numbering::NumberedListDef {
+                            base: block.style.list_marker,
+                            level_overrides: Vec::new(),
+                            start_override: (ordinal > 1).then_some((0, ordinal)),
+                        });
+                        active_top_idx = Some(numbered_lists.len() - 1);
+                    }
+                    active_top_idx.map(|idx| super::numbering::FIRST_NUMBERED_NUM_ID + idx)
+                } else if let Some(top_idx) = active_top_idx {
+                    if ordinal > 1
+                        && active_child_run
+                            .is_some_and(|(l, m, _)| l == level && m == block.style.list_marker)
+                    {
+                        let child_idx = active_child_run.unwrap().2;
+                        Some(super::numbering::FIRST_NUMBERED_NUM_ID + child_idx)
+                    } else {
+                        let base = numbered_lists[top_idx].base;
+                        let chosen_idx = if block.style.list_marker
+                            == loom_text::ListMarkerStyle::Default
+                            && base != loom_text::ListMarkerStyle::Default
+                        {
+                            numbered_lists.push(super::numbering::NumberedListDef {
+                                base: loom_text::ListMarkerStyle::Default,
+                                level_overrides: Vec::new(),
+                                start_override: Some((level, ordinal)),
+                            });
+                            numbered_lists.len() - 1
+                        } else if block.style.list_marker == base {
+                            if numbered_lists[top_idx]
+                                .level_overrides
+                                .iter()
+                                .any(|(l, _, _)| *l == level)
+                                || (ordinal > 1 && active_child_run.is_some())
+                            {
+                                numbered_lists.push(super::numbering::NumberedListDef {
+                                    base,
+                                    level_overrides: Vec::new(),
+                                    start_override: Some((level, ordinal)),
+                                });
+                                numbered_lists.len() - 1
+                            } else {
+                                top_idx
+                            }
+                        } else if let Some((_, existing, start)) = numbered_lists[top_idx]
+                            .level_overrides
+                            .iter()
+                            .find(|(l, _, _)| *l == level)
+                        {
+                            if *existing == block.style.list_marker && *start == 1 && ordinal == 1 {
+                                top_idx
+                            } else {
+                                numbered_lists.push(super::numbering::NumberedListDef {
+                                    base,
+                                    level_overrides: vec![(
+                                        level,
+                                        block.style.list_marker,
+                                        ordinal,
+                                    )],
+                                    start_override: None,
+                                });
+                                numbered_lists.len() - 1
+                            }
+                        } else if ordinal == 1 {
+                            numbered_lists[top_idx].level_overrides.push((
+                                level,
+                                block.style.list_marker,
+                                1,
+                            ));
+                            top_idx
+                        } else {
+                            numbered_lists.push(super::numbering::NumberedListDef {
+                                base,
+                                level_overrides: vec![(level, block.style.list_marker, ordinal)],
+                                start_override: None,
+                            });
+                            numbered_lists.len() - 1
+                        };
+                        active_child_run = Some((level, block.style.list_marker, chosen_idx));
+                        Some(super::numbering::FIRST_NUMBERED_NUM_ID + chosen_idx)
+                    }
+                } else {
+                    None
+                }
             }
             None => None,
         };
         // A numbered run goes on through its deeper items, so Word keeps the
-        // top-level count as Writer does. A top-level bullet or any other block
-        // ends the run.
-        previous_numbered = match list {
-            Some(ListKind::Numbered) => true,
-            Some(ListKind::Bullet) => previous_numbered && block.effective_list_level() > 0,
-            None => false,
+        // top-level count as Writer does. A top-level bullet, a different
+        // top-level ordered marker style, or any other block ends the run.
+        previous_numbered_marker = match list {
+            Some(ListKind::Numbered) if block.effective_list_level() > 0 => {
+                previous_numbered_marker.or(Some(block.style.list_marker))
+            }
+            Some(ListKind::Numbered) => Some(block.style.list_marker),
+            Some(ListKind::Bullet) if block.effective_list_level() > 0 => previous_numbered_marker,
+            _ => None,
         };
         xml.push_str("<w:p>");
         let paragraph_marks =

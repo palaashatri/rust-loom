@@ -123,13 +123,7 @@ else:
         if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
             fail("office-v1 existing foundation consumer list changed")
         for app in APPS:
-            if app in ("sheets", "present"):
-                if workflow.get("application_status", {}).get(app) not in (
-                    "IN_PROGRESS",
-                    "ACCEPTED",
-                ):
-                    fail(f"{app} status must be IN_PROGRESS or ACCEPTED in office-v1 phase")
-            elif app == "writer":
+            if app in ("sheets", "writer", "present"):
                 if workflow.get("application_status", {}).get(app) != "IN_PROGRESS":
                     fail(f"{app} status must be IN_PROGRESS in office-v1 phase")
             elif workflow.get("application_status", {}).get(app) != "LOCKED":
@@ -205,8 +199,8 @@ for directory, child_directories, filenames in os.walk(ROOT):
             fail(f"nested agent authority is forbidden: {path.relative_to(ROOT)}")
             continue
         is_markdown = path.suffix.lower() in {".md", ".markdown"}
-        is_readme = path.name.lower().startswith("readme.")
         relative = path.relative_to(ROOT)
+        is_readme = path.name.lower().startswith("readme.") and relative.parts[0] != "docs"
         if is_markdown and not is_readme and relative not in permitted_markdown:
             fail(f"Markdown path is not declared in documentation.toml: {relative}")
 
@@ -344,13 +338,7 @@ if phase in ("audit-repair", "office-v1"):
         fail("docs/workflow/current.md current truth must contain exactly one ordered live application status table")
     for name, quality, schedule in rows:
         expected_schedule = workflow.get("application_status", {}).get(name.lower())
-        expected_quality = (
-            "ACCEPTED"
-            if phase == "office-v1"
-            and name.lower() in ("sheets", "present")
-            and expected_schedule == "ACCEPTED"
-            else "ACCEPTANCE_BLOCKED"
-        )
+        expected_quality = "ACCEPTANCE_BLOCKED"
         if quality != expected_quality:
             fail(f"{name} product status must remain {expected_quality} {table_status_context}")
         if schedule != expected_schedule:

@@ -26,4 +26,9 @@ archives = [
   "docs/archive/windows-ui-2026-09-30.md",
   "docs/archive/writer-checkpoints-2026-10.md",
 ]
+qa_records = [
+  "docs/qa/linux-2026-11-01/README.md",
+  "docs/qa/linux-2026-11-06/README.md",
+  "docs/qa/linux-2026-11-07/README.md",
+]
 exceptions = [".agents/skills/linux-desktop-input/SKILL.md"]

@@ -37,9 +37,16 @@ pub(crate) struct ExportOperation {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ExportOutputSummary {
-    Csv { sheet_name: String },
-    Xlsx { sheet_count: usize },
-    Pdf { sheet_name: String },
+    Csv {
+        sheet_name: String,
+    },
+    Xlsx {
+        sheet_count: usize,
+        warnings: Vec<String>,
+    },
+    Pdf {
+        sheet_name: String,
+    },
 }
 
 pub(crate) struct ExportCompletion {
@@ -260,14 +267,32 @@ pub(super) fn handle_completion(
                 operation.path.display()
             ),
         ),
-        Ok(ExportOutputSummary::Xlsx { sheet_count }) if operation.format == ExportFormat::Xlsx => {
+        Ok(ExportOutputSummary::Xlsx {
+            sheet_count,
+            warnings,
+        }) if operation.format == ExportFormat::Xlsx => {
+            let warning_note = if warnings.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " ({} export {}: {})",
+                    warnings.len(),
+                    if warnings.len() == 1 {
+                        "warning"
+                    } else {
+                        "warnings"
+                    },
+                    warnings.join("; ")
+                )
+            };
             (
                 true,
                 format!(
-                    "Exported Excel from {source_context} · {} {} (formulas kept) to {}",
+                    "Exported Excel from {source_context} · {} {} (formulas kept) to {}{}",
                     sheet_count,
                     if sheet_count == 1 { "sheet" } else { "sheets" },
-                    operation.path.display()
+                    operation.path.display(),
+                    warning_note
                 ),
             )
         }

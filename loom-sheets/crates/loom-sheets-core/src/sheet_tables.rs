@@ -1,4 +1,4 @@
-//! Numbers-style multi-table freeform canvas model for a worksheet.
+//! Loom Sheets multi-table freeform canvas model for a worksheet.
 //!
 //! A single [`Sheet`](crate::Sheet) can host multiple independent, named
 //! [`SheetTable`] regions positioned anywhere on the sheet grid. Each table
@@ -95,7 +95,7 @@ fn default_one() -> u32 {
 }
 
 impl SheetTable {
-    /// Construct a table with sensible Numbers-style defaults.
+    /// Construct a table with sensible Loom Sheets defaults.
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,

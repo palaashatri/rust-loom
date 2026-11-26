@@ -70,14 +70,11 @@ pub use row_order::RowOrder;
 pub use sheet_tables::{SheetTable, TableStylePreset};
 pub use style::{BorderPreset, CellAlignment, CellBorders, CellStyle};
 pub use xlsx::{
-    export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxChartType, XlsxImport,
-    XlsxImportWarning,
+    export_xlsx_sheets, export_xlsx_sheets_with_warnings, extract_xlsx_sheets, import_xlsx_sheets,
+    XlsxChartType, XlsxExportWarning, XlsxImport, XlsxImportWarning,
 };
 
-/// Default width of a worksheet column in the desktop editor, in pixels.
-///
-/// Keeping this value in the core model gives the headless engine and the
-/// Slint editor one source of truth for their initial grid geometry.
+/// Default column width in pixels (shared by core and UI).
 pub const DEFAULT_COL_WIDTH: f32 = 80.0;
 /// Default height of a worksheet row in the desktop editor, in pixels.
 pub const DEFAULT_ROW_HEIGHT: f32 = 24.0;

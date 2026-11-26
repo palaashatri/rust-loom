@@ -1367,17 +1367,60 @@ fn parse_paragraph(
     }
 
     // The live paragraph properties exclude the nested previous pPr in pPrChange.
-    let kind = super::paragraph_style_import::paragraph_kind_from_docx(
+    let mut kind = super::paragraph_style_import::paragraph_kind_from_docx(
         &paragraph_properties.current_xml,
         archive,
         false,
     )?;
     let mut paragraph_style = paragraph_style;
+    let direct_ilvl = num_pr_level(p_xml).map(|value| crate::list_levels::parse_list_level(&value));
+    let direct_num_id = paragraph_properties
+        .current_xml
+        .find("<w:numPr")
+        .and_then(|num_start| {
+            let num_end = paragraph_properties.current_xml[num_start..]
+                .find("</w:numPr>")
+                .unwrap_or(paragraph_properties.current_xml.len() - num_start);
+            let num_snippet = &paragraph_properties.current_xml[num_start..num_start + num_end];
+            let num_id_pos = num_snippet.find("<w:numId")?;
+            extract_attribute_value(&num_snippet[num_id_pos..], "w:val")
+        });
+    let resolved_num_pr = match direct_num_id.as_deref() {
+        Some("0") => {
+            if crate::list_levels::is_list_kind(&kind) {
+                kind = "paragraph".to_string();
+            }
+            paragraph_style.list_marker = loom_text::ListMarkerStyle::Default;
+            paragraph_style.list_level = 0;
+            None
+        }
+        Some(num_id) => Some((num_id.to_string(), direct_ilvl.unwrap_or(0))),
+        None => paragraph_properties
+            .current_xml
+            .find("<w:pStyle")
+            .and_then(|pstyle_pos| {
+                extract_attribute_value(&paragraph_properties.current_xml[pstyle_pos..], "w:val")
+            })
+            .and_then(|style_id| {
+                archive.and_then(|arch| super::numbering::resolve_style_num_pr(arch, &style_id))
+            })
+            .map(|(num_id, style_ilvl)| (num_id, direct_ilvl.unwrap_or(style_ilvl))),
+    };
+    if let Some((num_id_val, ilvl)) = resolved_num_pr {
+        if let Some((resolved_kind, marker)) =
+            super::numbering::resolve_num_id_list_style(archive, &num_id_val, ilvl)
+        {
+            kind = resolved_kind.to_string();
+            paragraph_style.list_marker = marker;
+            paragraph_style.list_level = ilvl.min(crate::list_levels::MAX_LIST_LEVEL);
+        }
+    }
 
     // A list item's nesting is the numbering level Word stores as `w:ilvl`.
     if crate::list_levels::is_list_kind(&kind) {
-        paragraph_style.list_level =
-            num_pr_level(p_xml).map_or(0, |value| crate::list_levels::parse_list_level(&value));
+        if let Some(ilvl) = direct_ilvl {
+            paragraph_style.list_level = ilvl;
+        }
     }
 
     let mut text = String::new();
@@ -1650,41 +1693,5 @@ pub(super) fn resolve_num_id_list_kind(
     archive: Option<&PackageArchive>,
     num_id: &str,
 ) -> Option<&'static str> {
-    if let Some(num_xml) = archive
-        .and_then(|a| a.get("word/numbering.xml"))
-        .and_then(|b| std::str::from_utf8(b).ok())
-    {
-        let num_tag = format!("<w:num w:numId=\"{num_id}\"");
-        if let Some(num_pos) = num_xml.find(&num_tag) {
-            let num_rest = &num_xml[num_pos..];
-            let num_end = num_rest.find("</w:num>").unwrap_or(num_rest.len());
-            let num_block = &num_rest[..num_end];
-            if let Some(abs_pos) = num_block.find("<w:abstractNumId") {
-                if let Some(abs_id) = extract_attribute_value(&num_block[abs_pos..], "w:val") {
-                    let abs_tag = format!("<w:abstractNum w:abstractNumId=\"{abs_id}\"");
-                    if let Some(abs_start) = num_xml.find(&abs_tag) {
-                        let abs_rest = &num_xml[abs_start..];
-                        let abs_end = abs_rest.find("</w:abstractNum>").unwrap_or(abs_rest.len());
-                        let abs_block = &abs_rest[..abs_end];
-                        if let Some(fmt_pos) = abs_block.find("<w:numFmt") {
-                            if let Some(fmt_val) =
-                                extract_attribute_value(&abs_block[fmt_pos..], "w:val")
-                            {
-                                return match fmt_val.to_ascii_lowercase().as_str() {
-                                    "none" => None,
-                                    "bullet" => Some("list-bulleted"),
-                                    _ => Some("list-numbered"),
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if num_id == "1" {
-        Some("list-bulleted")
-    } else {
-        Some("list-numbered")
-    }
+    super::numbering::resolve_num_id_list_style(archive, num_id, 0).map(|(kind, _)| kind)
 }

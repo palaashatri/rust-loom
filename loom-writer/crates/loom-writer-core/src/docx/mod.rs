@@ -13,6 +13,7 @@ mod footnotes;
 mod header_footer;
 pub mod import;
 mod inline_style;
+mod numbering;
 mod package;
 mod paragraph_style_import;
 mod xml;
@@ -93,7 +94,7 @@ pub fn export_docx(doc: &WriterDocument) -> Result<DocxExport, ArchiveError> {
     )?;
     add(
         "word/numbering.xml",
-        package::numbering(body.numbered_lists),
+        numbering::numbering_xml(&body.numbered_lists),
     )?;
     add(
         "word/settings.xml",
@@ -170,6 +171,8 @@ fn validate_inline_color(color: &str) -> Result<(), ArchiveError> {
 mod footnotes_tests;
 #[cfg(test)]
 mod inline_styles_tests;
+#[cfg(test)]
+mod list_marker_tests;
 #[cfg(test)]
 mod revision_tests;
 #[cfg(test)]

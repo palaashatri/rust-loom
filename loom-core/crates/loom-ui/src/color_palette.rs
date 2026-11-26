@@ -17,7 +17,7 @@ const fn swatch(name: &'static str, hex: &'static str, rgb: u32) -> PaletteSwatc
 }
 
 /// Canonical 6-row by 8-column office palette (48 swatches total).
-pub const OFFICE_SWATCHES: [PaletteSwatch; 48] = [
+pub const LOOM_SWATCHES: [PaletteSwatch; 48] = [
     // Row 0: Neutrals
     swatch("Black", "#000000", 0x000000),
     swatch("Charcoal", "#262626", 0x262626),
@@ -94,9 +94,9 @@ pub fn format_hex_rgba(rgb: u32) -> String {
     format!("#{:06X}FF", rgb & 0x00FF_FFFF)
 }
 
-/// Returns the canonical swatch name when `rgb` matches an entry in [`OFFICE_SWATCHES`].
+/// Returns the canonical swatch name when `rgb` matches an entry in [`LOOM_SWATCHES`].
 pub fn swatch_name_for_rgb(rgb: u32) -> Option<&'static str> {
-    OFFICE_SWATCHES
+    LOOM_SWATCHES
         .iter()
         .find(|swatch| swatch.rgb == rgb)
         .map(|swatch| swatch.name)
@@ -117,14 +117,14 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn office_swatches_has_48_unique_valid_entries_in_6x8_grid() {
-        assert_eq!(OFFICE_SWATCHES.len(), 48);
+    fn loom_swatches_has_48_unique_valid_entries_in_6x8_grid() {
+        assert_eq!(LOOM_SWATCHES.len(), 48);
 
         let mut names = HashSet::new();
         let mut hexes = HashSet::new();
         let mut rgbs = HashSet::new();
 
-        for swatch in OFFICE_SWATCHES {
+        for swatch in LOOM_SWATCHES {
             assert!(
                 names.insert(swatch.name),
                 "duplicate swatch name: {}",
@@ -146,22 +146,13 @@ mod tests {
         }
 
         // Spot-check row boundaries (0..=5 x 0..=7).
-        assert_eq!(OFFICE_SWATCHES[0], swatch("Black", "#000000", 0x000000));
-        assert_eq!(OFFICE_SWATCHES[7], swatch("White", "#FFFFFF", 0xFFFFFF));
-        assert_eq!(
-            OFFICE_SWATCHES[13],
-            swatch("Royal Blue", "#1565C0", 0x1565C0)
-        );
-        assert_eq!(OFFICE_SWATCHES[21], swatch("Navy", "#1E3A8A", 0x1E3A8A));
-        assert_eq!(OFFICE_SWATCHES[26], swatch("Gold", "#EAB308", 0xEAB308));
-        assert_eq!(
-            OFFICE_SWATCHES[32],
-            swatch("Coral Tint", "#FCA5A5", 0xFCA5A5)
-        );
-        assert_eq!(
-            OFFICE_SWATCHES[47],
-            swatch("Soft Rose", "#FCE7F3", 0xFCE7F3)
-        );
+        assert_eq!(LOOM_SWATCHES[0], swatch("Black", "#000000", 0x000000));
+        assert_eq!(LOOM_SWATCHES[7], swatch("White", "#FFFFFF", 0xFFFFFF));
+        assert_eq!(LOOM_SWATCHES[13], swatch("Royal Blue", "#1565C0", 0x1565C0));
+        assert_eq!(LOOM_SWATCHES[21], swatch("Navy", "#1E3A8A", 0x1E3A8A));
+        assert_eq!(LOOM_SWATCHES[26], swatch("Gold", "#EAB308", 0xEAB308));
+        assert_eq!(LOOM_SWATCHES[32], swatch("Coral Tint", "#FCA5A5", 0xFCA5A5));
+        assert_eq!(LOOM_SWATCHES[47], swatch("Soft Rose", "#FCE7F3", 0xFCE7F3));
     }
 
     #[test]

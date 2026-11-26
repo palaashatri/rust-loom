@@ -118,7 +118,7 @@ export component StartHubModal inherits Rectangle {
             TouchArea { }
 
             HorizontalLayout {
-                // Numbers-style left sidebar
+                // Loom Sheets left sidebar
                 Rectangle {
                     width: 210px;
                     background: Theme.palette().surface;
@@ -345,11 +345,6 @@ export component StartHubModal inherits Rectangle {
                                 label: "Blank Workbook";
                                 variant: "ghost";
                                 clicked => { StartHubState.close-hub(); }
-                            }
-                            LoomButton {
-                                label: "Open File…";
-                                variant: "secondary";
-                                clicked => { StartHubState.open-file(); }
                             }
                         }
 

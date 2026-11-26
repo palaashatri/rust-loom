@@ -224,12 +224,12 @@ pub fn template_catalog() -> Vec<TemplateDescriptor> {
             },
         },
         TemplateDescriptor {
-            id: "minimal-keynote",
-            name: "Minimal Keynote",
-            description: "Monochrome high-whitespace keynote",
+            id: "minimal-stage",
+            name: "Minimal Stage",
+            description: "Monochrome high-whitespace editorial stage",
             theme: SlideTheme {
-                id: "minimal-keynote".into(),
-                name: "Minimal Keynote".into(),
+                id: "minimal-stage".into(),
+                name: "Minimal Stage".into(),
                 background: "#FFFFFF".into(),
                 surface: "#F4F4F5".into(),
                 ink: "#09090B".into(),
@@ -310,7 +310,7 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
             | "editorial-portfolio"
             | "academic-lecture"
             | "workshop-deck"
-            | "minimal-keynote"
+            | "minimal-stage"
     ) {
         slide1.elements.push(make_elem(
             "accent-bar-1",

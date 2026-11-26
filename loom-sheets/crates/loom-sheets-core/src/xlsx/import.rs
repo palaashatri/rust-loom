@@ -295,6 +295,11 @@ fn extract_from_archive(archive: &PackageArchive) -> Result<Extracted, String> {
     if shared.rich {
         warnings.insert(XlsxImportWarning::RichTextRuns);
     }
+    let dxfs = archive
+        .get("xl/styles.xml")
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .map(super::import_features::parse_dxf_styles)
+        .unwrap_or_default();
     let mut sheets = Vec::with_capacity(parts.len());
     let mut calculated = Vec::with_capacity(parts.len());
     for part in &parts {
@@ -311,7 +316,31 @@ fn extract_from_archive(archive: &PackageArchive) -> Result<Extracted, String> {
             &mut warnings,
         ));
         import_drawings(&mut sheet, &part.xml, &part.path, archive)?;
+        super::import_features::parse_worksheet_features(&part.xml, &dxfs, &mut sheet);
+        super::import_features::parse_sheet_tables(archive, &part.path, &part.xml, &mut sheet);
         sheets.push(sheet);
+    }
+    if let Some(workbook_xml) = archive
+        .get("xl/workbook.xml")
+        .and_then(|b| std::str::from_utf8(b).ok())
+    {
+        let sheet_names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
+        super::import_features::parse_defined_names_into_sheets(
+            workbook_xml,
+            &mut sheets,
+            &sheet_names,
+        );
+    }
+    if sheets
+        .iter()
+        .any(|s| s.auto_filter.enabled && !s.auto_filter.column_filters.is_empty())
+    {
+        let workbook_values = crate::workbook::evaluate_workbook(&sheets);
+        for (sheet, values) in sheets.iter_mut().zip(workbook_values.iter()) {
+            if sheet.auto_filter.enabled && !sheet.auto_filter.column_filters.is_empty() {
+                crate::data_tools::recompute_hidden_rows(sheet, values);
+            }
+        }
     }
     let formula_count: usize = calculated.iter().map(Vec::len).sum();
     if formula_count <= MAX_FORMULAS_TO_COMPARE && formula_results_differ(&sheets, &calculated) {

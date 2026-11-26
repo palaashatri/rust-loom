@@ -82,3 +82,24 @@ fn recent_warned_pptx_open_keeps_document_until_import_confirmation() {
     crate::PRESENT_RECOVERY.with(|slot| *slot.borrow_mut() = prev_recovery);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn start_hub_template_creation_creates_expected_slides_and_theme() {
+    let (app, state) = crate::element_style_tests::fixture(vec![]);
+    crate::table_actions::wire(&app, &state);
+    crate::modal_wiring::wire(&app, &state);
+    start_hub::open(&app);
+    assert!(app.global::<StartHubState>().get_open());
+
+    app.global::<StartHubState>()
+        .invoke_open_template("minimal-stage".into());
+    assert!(!app.global::<StartHubState>().get_open());
+    let s = state.session.borrow();
+    assert_eq!(s.document.slides.len(), 2);
+    let accent = s.document.slides[0]
+        .elements
+        .iter()
+        .find(|e| e.id == "accent-bar-1")
+        .expect("Minimal Stage accent-bar-1");
+    assert_eq!(accent.style.fill.as_deref(), Some("#18181B"));
+}

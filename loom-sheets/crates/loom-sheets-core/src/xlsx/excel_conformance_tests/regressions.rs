@@ -317,3 +317,117 @@ fn valid_excel_formulas_loom_cannot_evaluate_stay_formulas() {
     // Genuinely broken syntax is still kept as text.
     assert!(!ws.contains("<f>SUM(</f>"), "{ws}");
 }
+
+#[test]
+fn named_ranges_merges_autofilter_cf_validations_tables_roundtrip_and_schema_order() {
+    use crate::conditional_format::{CellConditionalRule, ConditionalOperator};
+    use crate::data_tools::SheetValidation;
+    use crate::sheet_tables::SheetTable;
+    use crate::style::FillColor;
+    use crate::xlsx::{export_xlsx_sheets_with_warnings, import_xlsx_sheets};
+    use crate::{CellRange, CellRef, DataValidationRule, ValidationCriteria, Value};
+
+    let mut sheet = Sheet::new("Sales Data");
+    sheet.set_str("A1", "Item");
+    sheet.set_str("B1", "Amount");
+    sheet.set_str("A2", "Alpha");
+    sheet.set_str("B2", "20");
+    sheet.set_str("A3", "Beta");
+    sheet.set_str("B3", "22");
+    sheet.set_str("B4", "=SUM(Sales)");
+
+    let sales_range = CellRange::new(CellRef::parse("B2").unwrap(), CellRef::parse("B3").unwrap());
+    sheet.named_ranges.insert("Sales".to_string(), sales_range);
+    sheet.merged_ranges.push(CellRange::new(
+        CellRef::parse("A5").unwrap(),
+        CellRef::parse("B5").unwrap(),
+    ));
+    sheet.auto_filter.enabled = true;
+    sheet.auto_filter.header_row = 0;
+    sheet.conditional_rules.push(CellConditionalRule {
+        range: sales_range,
+        operator: ConditionalOperator::GreaterThan,
+        value: "20".to_string(),
+        fill: FillColor::Green,
+        text_color: None,
+    });
+    sheet.validations.push(SheetValidation {
+        range: sales_range,
+        rule: DataValidationRule::new(
+            ValidationCriteria::WholeNumberBetween(1, 100),
+            "Must be 1..100",
+        ),
+    });
+    sheet
+        .tables
+        .push(SheetTable::new("t1", "SalesTable", 0, 0, 4, 2));
+
+    let (bytes, warnings) = export_xlsx_sheets_with_warnings(&[sheet]).expect("export");
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+
+    let wb = part(&bytes, "xl/workbook.xml");
+    assert!(
+        wb.contains(
+            "<definedName name=\"Sales\" localSheetId=\"0\">'Sales Data'!$B$2:$B$3</definedName>"
+        ),
+        "{wb}"
+    );
+    let styles = part(&bytes, "xl/styles.xml");
+    assert!(styles.contains("<dxfs count=\"1\">"), "{styles}");
+    let ct = part(&bytes, "[Content_Types].xml");
+    assert!(ct.contains("/xl/tables/table1.xml"), "{ct}");
+
+    let ws = part(&bytes, "xl/worksheets/sheet1.xml");
+    let order = [
+        "<sheetViews>",
+        "<sheetFormatPr",
+        "<sheetData>",
+        "<autoFilter",
+        "<mergeCells",
+        "<conditionalFormatting",
+        "<dataValidations",
+        "<pageMargins",
+        "<tableParts",
+    ];
+    let mut last = 0;
+    for tag in order {
+        let pos = ws
+            .find(tag)
+            .unwrap_or_else(|| panic!("missing {tag} in {ws}"));
+        assert!(pos >= last, "out of order {tag} in {ws}");
+        last = pos;
+    }
+
+    let imported = import_xlsx_sheets(&bytes).expect("import");
+    let re = &imported.sheets[0];
+    let evaluated = crate::workbook::evaluate_workbook(&imported.sheets);
+    assert_eq!(
+        evaluated[0].get(&CellRef::parse("B4").unwrap()),
+        Some(&Value::Number(42.0))
+    );
+    assert_eq!(re.named_ranges.get("SALES"), Some(&sales_range));
+    assert_eq!(re.merged_ranges.len(), 1);
+    assert!(re.auto_filter.enabled);
+    assert_eq!(re.conditional_rules.len(), 1);
+    assert_eq!(re.validations.len(), 1);
+    assert_eq!(re.tables.len(), 1);
+}
+
+#[test]
+fn export_warnings_report_multi_table_canvas_loss() {
+    use crate::sheet_tables::SheetTable;
+    use crate::xlsx::export_xlsx_sheets_with_warnings;
+
+    let mut sheet = Sheet::new("Canvas");
+    sheet
+        .tables
+        .push(SheetTable::new("t1", "Table1", 0, 0, 3, 2));
+    sheet
+        .tables
+        .push(SheetTable::new("t2", "Table2", 5, 0, 3, 2));
+    let (_bytes, warnings) = export_xlsx_sheets_with_warnings(&[sheet]).expect("export");
+    assert!(
+        warnings.iter().any(|w| w.feature == "multi-table canvas"),
+        "expected multi-table canvas warning, got {warnings:?}"
+    );
+}

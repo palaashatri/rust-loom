@@ -429,6 +429,18 @@ fn legacy_migration_reports_unsupported_only_entries_at_startup_and_preserves_th
 }
 
 #[test]
+fn settings_toml_in_recovery_directory_does_not_pause_recovery() {
+    let fixture = RecoveryFixture::new();
+    let settings_path = fixture.path().join("settings.toml");
+    fs::write(&settings_path, "appearance = \"dark\"\n").expect("write settings.toml");
+
+    let recovery = CellEditRecovery::open_at(fixture.path())
+        .expect("settings.toml must be ignored by legacy recovery scan");
+    drop(recovery);
+    assert!(settings_path.exists(), "settings.toml must be preserved");
+}
+
+#[test]
 fn legacy_migration_waits_for_accepted_startup_replacement() {
     let fixture = RecoveryFixture::new();
     let old_package = package_with_recovery_content();
