@@ -193,12 +193,12 @@ export component PresentSlideCanvas inherits Rectangle {
                 width: self.render-width;
                 height: self.render-height;
                 opacity: ObjectParts.element-meta.length > idx ? ObjectParts.element-meta[idx].opacity : 1.0;
-                drop-shadow-blur: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? 8px : 0px;
-                drop-shadow-offset-x: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dx * 1px : 0px;
-                drop-shadow-offset-y: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dy * 1px : 0px;
+                drop-shadow-blur: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? 8 * parent.height / 562.5 : 0px;
+                drop-shadow-offset-x: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dx * parent.height / 562.5 : 0px;
+                drop-shadow-offset-y: ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].has-shadow ? ObjectParts.element-meta[idx].shadow-dy * parent.height / 562.5 : 0px;
                 drop-shadow-color: Theme.palette().shadow;
                 border-radius: root.element-types[idx] == 4 ? self.width / 2
-                    : (ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].corner-radius > 0 ? ObjectParts.element-meta[idx].corner-radius * 1px : Theme.tokens.metrics.radius-small);
+                    : (ObjectParts.element-meta.length > idx && ObjectParts.element-meta[idx].corner-radius > 0 ? ObjectParts.element-meta[idx].corner-radius * parent.height / 562.5 : Theme.tokens.metrics.radius-small);
                 border-width: root.editing-enabled && (element-focus.has-focus || (root.element-selected.length > idx && root.element-selected[idx])) ? 2px : 0px;
                 border-color: element-focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
                 background: root.element-types[idx] == 3 ? DocumentInk.shape-fill

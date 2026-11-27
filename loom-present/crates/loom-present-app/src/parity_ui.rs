@@ -407,7 +407,12 @@ pub(crate) fn select_prev_slide(app: &PresentApp, state: &Rc<GuiState>) {
         }
     };
     if let Some(target) = target {
-        state.session.borrow_mut().document.select_slide(target);
+        let mut session = state.session.borrow_mut();
+        session.end_table_text_edit();
+        if session.document.select_slide(target) {
+            session.clear_selection();
+        }
+        drop(session);
         state.selected_element.set(0);
         refresh(app, state);
     }
@@ -426,7 +431,12 @@ pub(crate) fn select_next_slide(app: &PresentApp, state: &Rc<GuiState>) {
         }
     };
     if let Some(target) = target {
-        state.session.borrow_mut().document.select_slide(target);
+        let mut session = state.session.borrow_mut();
+        session.end_table_text_edit();
+        if session.document.select_slide(target) {
+            session.clear_selection();
+        }
+        drop(session);
         state.selected_element.set(0);
         refresh(app, state);
     }
