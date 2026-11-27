@@ -395,7 +395,10 @@ export component WriterDocumentEditor inherits Rectangle {
             y: selection.y * root.page-zoom;
             width: mark-width;
             height: max(1px, selection.height * root.page-zoom);
-            background: selection.has-color ? selection.color
+            background: Theme.active-theme == "high-contrast" && selection.table-cell
+                ? Theme.palette().paper-ink
+                : selection.has-color ? selection.color
+                : Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink
                 : root.page-appearance == "black" ? #FFFFFF : #000000;
             visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
             accessible-role: none;
