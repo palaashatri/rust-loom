@@ -70,7 +70,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "table.unhide_rows",
     "table.hide_cols",
     "table.unhide_cols",
-    "table.freeze_at_selection",
+    "table.freeze_selection",
     "table.unfreeze",
     "format.painter_copy",
     "format.painter_lock",

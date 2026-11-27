@@ -647,12 +647,7 @@ fn parse_picture(p_xml: &str, id: u64, archive: &PackageArchive) -> Option<RichB
             image.height_pt = cy / 12_700.0;
         }
     }
-    if drawing.contains("<wp:anchor") {
-        image.wrap = Some(crate::image_wrap::parse_docx_anchor_wrap(
-            drawing,
-            extract_attribute_value,
-        ));
-    }
+    crate::image_wrap::apply_docx_anchor(&mut image, drawing, extract_attribute_value);
     let text = crate::images::picture_text(id as u32);
     let mut block = RichBlock::new(id, crate::IMAGE_BLOCK_KIND, &text);
     block.image = Some(image);
